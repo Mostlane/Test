@@ -20,10 +20,11 @@
     *{box-sizing:border-box;}
     html,body{
       margin:0;padding:0;
-      font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
       color:var(--text);
       background:transparent;
       background-size:180%;
+      font-size:15px;
     }
     .shell{max-width:1280px;margin:20px auto 32px;padding:0 14px;}
     .card{
@@ -39,31 +40,32 @@
       background:linear-gradient(90deg,#ffffff,#f3f4f6);
       flex-wrap:wrap;
     }
-    header.main-header h1{margin:0;font-size:20px;color:var(--ml-blue);}
-    .header-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+    header.main-header h1{margin:0;font-size:23px;color:var(--ml-blue);}
+    .header-left{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    .header-sub{font-size:13px;color:var(--muted);margin-top:2px;}
     .header-right{display:flex;gap:8px;flex-wrap:wrap;}
     .btn{
-      border-radius:999px;padding:8px 14px;font-size:13px;
+      border-radius:999px;padding:9px 15px;font-size:14px;
       border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;
       display:inline-flex;align-items:center;gap:6px;text-decoration:none;
       color:var(--text);font-weight:500;white-space:nowrap;
     }
     .btn.primary{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue);}
     .btn.orange{background:#ea7a23;color:#fff;border-color:#ea7a23;}
-    .btn.small{padding:5px 10px;font-size:12px;}
+    .btn.small{padding:6px 11px;font-size:13px;}
     .btn:disabled{opacity:.5;cursor:default;}
 
     /* ---- Status chips (Workever-style) ---- */
     .chips{display:flex;flex-wrap:wrap;gap:8px;padding:12px 18px 4px;}
     .schip{
-      border-radius:999px;padding:5px 6px 5px 12px;font-size:13px;font-weight:600;
+      border-radius:999px;padding:6px 7px 6px 13px;font-size:14px;font-weight:600;
       background:#fff;border:2px solid var(--c,#9ca3af);color:#1f2937;
       cursor:pointer;display:inline-flex;align-items:center;gap:7px;
       user-select:none;
     }
     .schip .n{
       font-weight:600;color:#6b7280;background:#f3f4f6;
-      border-radius:8px;padding:1px 7px;font-size:12px;
+      border-radius:8px;padding:1px 7px;font-size:13px;
       font-variant-numeric:tabular-nums;
     }
     .schip.active{background:var(--c,#9ca3af);color:#fff;}
@@ -78,28 +80,28 @@
       margin-top:8px;
     }
     .toolbar select,.toolbar input[type="text"]{
-      border-radius:8px;border:1px solid var(--border);padding:7px 10px;
-      font-size:13px;background:#fff;
+      border-radius:8px;border:1px solid var(--border);padding:8px 11px;
+      font-size:14px;background:#fff;
     }
     .toolbar .spacer{flex:1;}
     .toolbar input[type="text"]{min-width:200px;}
 
     /* ---- Table ---- */
     .table-wrapper{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
-    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:13px;background:#fff;}
+    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:14px;background:#fff;}
     thead th{
       text-align:left;padding:10px;background:#f3f4f6;color:#374151;
-      border-bottom:1px solid #e5e7eb;font-weight:600;white-space:nowrap;font-size:12px;
+      border-bottom:1px solid #e5e7eb;font-weight:600;white-space:nowrap;font-size:12.5px;
       text-transform:uppercase;letter-spacing:.02em;
     }
     tbody td{padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:top;}
     tbody tr:hover{background:#f8fafc;}
-    .ref{font-family:monospace;font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:6px;display:inline-block;}
-    .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;}
+    .ref{font-family:monospace;font-size:13px;background:#f3f4f6;padding:2px 6px;border-radius:6px;display:inline-block;}
+    .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;font-size:15px;}
     .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex:0 0 auto;}
-    .statusline{display:flex;align-items:center;font-size:12px;color:#4b5563;margin-top:3px;}
+    .statusline{display:flex;align-items:center;font-size:13px;color:#4b5563;margin-top:3px;}
     .muted{color:var(--muted);}
-    .small{font-size:11px;}
+    .small{font-size:12px;}
     .nowrap{white-space:nowrap;}
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
@@ -117,7 +119,7 @@
     .rowactions{display:flex;gap:4px;flex-wrap:wrap;}
     .viewlink{color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600;}
 
-    #statusBar{padding:10px 18px;font-size:12px;color:var(--muted);}
+    #statusBar{padding:10px 18px;font-size:13px;color:var(--muted);}
 
     /* ---- Mobile cards ---- */
     .job-cards{display:none;flex-direction:column;gap:8px;padding:10px 14px;}
@@ -126,8 +128,8 @@
       border:1px solid #e5e7eb;box-shadow:0 4px 10px rgba(15,23,42,0.08);
     }
     .mjob-top{display:flex;justify-content:space-between;gap:6px;align-items:center;margin-bottom:4px;}
-    .mjob-title{font-size:14px;font-weight:700;color:#1d4ed8;cursor:pointer;margin-bottom:2px;}
-    .mjob-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:11px;color:#4b5563;align-items:center;}
+    .mjob-title{font-size:16px;font-weight:700;color:#1d4ed8;cursor:pointer;margin-bottom:2px;}
+    .mjob-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:13px;color:#4b5563;align-items:center;}
     .mjob-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
 
     @media(max-width:820px){
@@ -204,23 +206,27 @@
   <div id="forbidden">🚫 You do not have permission to access SLA tools.</div>
   <div class="card" id="mainCard" style="display:none;">
     <header class="main-header">
-      <div>
-        <h1>Jobs</h1>
-        <div class="header-sub" id="userLabel">Live job board</div>
+      <div class="header-left">
+        <a class="ml-back" href="main.html" title="Back to Menu">‹ Back</a>
+        <div>
+          <h1>Jobs</h1>
+          <div class="header-sub" id="userLabel">Live job board</div>
+        </div>
       </div>
       <div class="header-right">
         <a href="sla-scheduler.html" class="btn">🗓️ Scheduler</a>
         <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
-        <a href="engineer-jobs.html" class="btn">📝 My Jobs</a>
+        <a href="engineer-jobs.html" class="btn" id="myJobsLink" style="display:none">📝 My Jobs</a>
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
         <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
         <a href="sla-data-tools.html" class="btn" id="dataToolsLink" style="display:none">🧰 Data</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
-        <a class="ml-back" data-role="home" href="main.html">← Menu</a>
       </div>
     </header>
     <script>
       // Archive search + data tools are SLA-admin only (server enforces too).
+      // "My Jobs" is the engineer's personal view — only show it to field
+      // users (engineers), not office/admins who already see the whole board.
       (function(){ try{
         var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
         var yes = v => String(v||"").toLowerCase() === "yes";
@@ -228,6 +234,15 @@
           document.getElementById("archiveLink").style.display = "";
           document.getElementById("dataToolsLink").style.display = "";
         }
+        var isField = (function(){
+          if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();
+          if (yes(p.FullAccess) || yes(p.SLAAdmin)) return false;
+          var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+          if (st === "office") return false;
+          if (st === "field") return true;
+          return yes(p.SLA) || yes(p.StoryMode);
+        })();
+        if (isField) document.getElementById("myJobsLink").style.display = "";
       }catch(e){} })();
     </script>
 
