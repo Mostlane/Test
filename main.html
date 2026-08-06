@@ -105,6 +105,28 @@ a.button {
   text-align: center;
 }
 
+/* ── Mobile tile reorder (long-press → wobble → drag → Done/background saves) ── */
+@keyframes mlWobble { 0%{transform:rotate(-1.3deg)} 50%{transform:rotate(1.3deg)} 100%{transform:rotate(-1.3deg)} }
+.menu-grid.reordering { touch-action: none; }
+.menu-grid.reordering a.button.visible { animation: mlWobble .3s ease-in-out infinite; }
+.menu-grid.reordering a.button.visible:hover { transform: none; }   /* hover lift off while arranging */
+.menu-grid.reordering a.button.dragging { animation: none; }
+a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
+.drop-ph { border-radius: 14px; background: rgba(255,255,255,0.10);
+  border: 2px dashed rgba(255,255,255,0.40); box-sizing: border-box; }
+#reorderBar {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 4000;
+  display: none; align-items: center; gap: 10px;
+  background: #0f172a; color: #fff; border-radius: 999px;
+  padding: 9px 10px 9px 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  font: 600 14px 'Segoe UI', system-ui, sans-serif; max-width: calc(100% - 24px);
+}
+#reorderBar.show { display: flex; }
+#reorderBar .rb-label { white-space: nowrap; }
+#reorderBar button { border: none; border-radius: 999px; cursor: pointer; font: inherit; }
+#reorderBar .done { background: #22c55e; color: #063; padding: 8px 18px; }
+#reorderBar .x { background: transparent; color: #cbd5e1; font-size: 17px; line-height: 1; padding: 6px 10px; }
+
 /* Office clock in/out bar (top of main, office devices only) */
 #officeClockBar { display:none; width:min(820px, calc(100% - 24px)); margin:0 auto 18px; }
 .oc-card { background:#fff; border:1px solid #d7dee6; border-left:5px solid #0066cc; border-radius:14px;
@@ -270,13 +292,20 @@ a.button {
 -->
     <a class="button visible" href="my-documents.html" id="MyDocs"><span class="emoji">📄</span> My Documents</a>
     <a class="button visible" href="personalise.html" id="Personalise"><span class="emoji">⚙️</span> Settings</a>
-    <a class="button visible" href="help.html"><span class="emoji">❓</span> Help</a>
+    <a class="button visible" id="Help" href="help.html"><span class="emoji">❓</span> Help</a>
 
     <!-- FIXED -->
-    <a class="button visible" href="javascript:void(0)" onclick="localStorage.removeItem('mostlaneToken'); sessionStorage.clear(); window.location.href='login.html';">
+    <a class="button visible" id="Logout" href="javascript:void(0)" onclick="localStorage.removeItem('mostlaneToken'); sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
     </a>
 
+  </div>
+
+  <!-- Mobile tile-arrange toolbar (shown while reordering) -->
+  <div id="reorderBar">
+    <span class="rb-label">↕ Drag tiles, then Done</span>
+    <button type="button" class="done">Done</button>
+    <button type="button" class="x" aria-label="Finish">✕</button>
   </div>
 
   <script>
@@ -402,11 +431,47 @@ const MAP = window.ML_PERM_MAP || {
           grid.insertBefore(back, grid.firstChild);
         } else if (!isStory && existing) existing.remove();
 
-        setTimeout(() => {
-          const buttons = [...document.querySelectorAll(".button.visible")];
-          buttons.forEach(b => b.classList.remove("full-width"));
-          if (buttons.length % 2 === 1) buttons[buttons.length - 1].classList.add("full-width");
-        }, 10);
+        setTimeout(layoutTiles, 10);
+      }
+
+      // ── Per-user tile order (saved in localStorage for instant paint, mirrored
+      //    to /prefs so it follows the user across devices) ─────────────────────
+      function readMenuOrder() {
+        try { const v = JSON.parse(localStorage.getItem("mlMenuOrder") || "[]"); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+      }
+      // Apply the saved order to the grid, then re-run the odd-tile full-width rule.
+      function layoutTiles() {
+        const grid = document.getElementById("menuGrid");
+        if (!grid) return;
+        const order = readMenuOrder();
+        if (order.length) {
+          const kids = [...grid.children].filter(c => c.classList && c.classList.contains("button"));
+          const rank = el => el.id === "backToMyDay" ? -1
+            : (order.indexOf(el.id) === -1 ? 9999 : order.indexOf(el.id));
+          kids.sort((a, b) => rank(a) - rank(b));   // stable → unknown ids keep their order at the end
+          kids.forEach(c => grid.appendChild(c));
+        }
+        const vis = [...grid.querySelectorAll(".button.visible")];
+        vis.forEach(b => b.classList.remove("full-width"));
+        if (vis.length % 2 === 1) vis[vis.length - 1].classList.add("full-width");
+      }
+      // Persist the current DOM order (skips the pinned Story tile).
+      function saveMenuOrder() {
+        const grid = document.getElementById("menuGrid");
+        if (!grid) return;
+        const order = [...grid.children]
+          .filter(c => c.id && c.classList.contains("button") && c.id !== "backToMyDay")
+          .map(c => c.id);
+        try { localStorage.setItem("mlMenuOrder", JSON.stringify(order)); } catch (e) {}
+        const token = localStorage.getItem("mostlaneToken");
+        if (token && window.MOSTLANE_API) {
+          fetch(window.MOSTLANE_API + "/prefs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+            body: JSON.stringify({ menuOrder: order })
+          }).catch(() => {});
+        }
       }
 
       // 1) INSTANT paint from the cached permission set (written at login and
@@ -429,6 +494,130 @@ const MAP = window.ML_PERM_MAP || {
           sessionStorage.setItem("mostlanePermissions", pj);
           localStorage.setItem("mostlanePermissions", pj);
         } catch (e) {}
+      })();
+
+      // Sync the saved tile order from the server (so it follows the user across
+      // devices), then re-lay-out if the server copy differs from this device.
+      (async () => {
+        const token = localStorage.getItem("mostlaneToken");
+        if (!token || !window.MOSTLANE_API) return;
+        try {
+          const d = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json();
+          const srv = d && d.ok && d.prefs && d.prefs.menuOrder;
+          if (Array.isArray(srv) && srv.length && JSON.stringify(srv) !== JSON.stringify(readMenuOrder())) {
+            localStorage.setItem("mlMenuOrder", JSON.stringify(srv));
+            layoutTiles();
+          }
+        } catch (e) {}
+      })();
+
+      // ── Long-press to rearrange the tiles (touch + mouse) ───────────────────
+      (function initTileReorder() {
+        const grid = document.getElementById("menuGrid");
+        const bar = document.getElementById("reorderBar");
+        if (!grid) return;
+        let editing = false, drag = null, holdTimer = null;
+        let startX = 0, startY = 0, lastX = 0, lastY = 0, scrollRAF = null, scrollVel = 0, suppressClick = false;
+
+        function enterEdit() {
+          if (editing) return;
+          editing = true;
+          grid.classList.add("reordering");
+          grid.querySelectorAll(".button.full-width").forEach(b => b.classList.remove("full-width"));
+          if (bar) bar.classList.add("show");
+          if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+        }
+        function exitEdit(save) {
+          if (!editing) return;
+          editing = false;
+          grid.classList.remove("reordering");
+          if (bar) bar.classList.remove("show");
+          if (save) saveMenuOrder();
+          layoutTiles();
+        }
+
+        function placePlaceholder(x, y) {
+          const tiles = [...grid.querySelectorAll(".button.visible")].filter(t => t !== drag.tile);
+          let before = null;
+          for (const t of tiles) {
+            const r = t.getBoundingClientRect();
+            if (y < r.top + r.height / 2 || (y < r.bottom && x < r.left + r.width / 2)) { before = t; break; }
+          }
+          if (before) grid.insertBefore(drag.ph, before); else grid.appendChild(drag.ph);
+        }
+        function autoScroll() {
+          if (!drag || !scrollVel) { scrollRAF = null; return; }
+          window.scrollBy(0, scrollVel); placePlaceholder(lastX, lastY);
+          scrollRAF = requestAnimationFrame(autoScroll);
+        }
+        function startDrag(tile, x, y) {
+          const rect = tile.getBoundingClientRect();
+          const ph = document.createElement("div");
+          ph.className = "drop-ph";
+          ph.style.height = rect.height + "px";
+          drag = { tile, ph, offX: x - rect.left, offY: y - rect.top };
+          tile.parentNode.insertBefore(ph, tile.nextSibling);
+          tile.classList.add("dragging");
+          Object.assign(tile.style, { position: "fixed", zIndex: "5000", width: rect.width + "px",
+            left: rect.left + "px", top: rect.top + "px", pointerEvents: "none", margin: "0" });
+          lastX = x; lastY = y;
+          window.addEventListener("pointermove", onMove, { passive: false });
+          window.addEventListener("pointerup", onUp, { once: true });
+        }
+        function onMove(e) {
+          if (!drag) return;
+          e.preventDefault();
+          lastX = e.clientX; lastY = e.clientY;
+          drag.tile.style.left = (lastX - drag.offX) + "px";
+          drag.tile.style.top = (lastY - drag.offY) + "px";
+          placePlaceholder(lastX, lastY);
+          const EDGE = 80, MAX = 26, vh = window.innerHeight; let v = 0;
+          if (lastY < EDGE) v = -MAX * (1 - lastY / EDGE);
+          else if (lastY > vh - EDGE) v = MAX * (1 - (vh - lastY) / EDGE);
+          scrollVel = v; if (v && !scrollRAF) scrollRAF = requestAnimationFrame(autoScroll);
+        }
+        function onUp() {
+          if (!drag) return;
+          window.removeEventListener("pointermove", onMove);
+          scrollVel = 0; if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
+          const { tile, ph } = drag;
+          ph.parentNode.insertBefore(tile, ph); ph.remove();
+          tile.classList.remove("dragging");
+          ["position", "zIndex", "width", "left", "top", "pointerEvents", "margin"].forEach(p => tile.style[p] = "");
+          drag = null; suppressClick = true;
+          saveMenuOrder();
+        }
+
+        grid.addEventListener("pointerdown", e => {
+          const tile = e.target.closest(".button");
+          if (!tile || tile.id === "backToMyDay") return;
+          if (editing) { e.preventDefault(); startDrag(tile, e.clientX, e.clientY); return; }
+          startX = e.clientX; startY = e.clientY;
+          holdTimer = setTimeout(() => {
+            holdTimer = null;
+            enterEdit();
+            startDrag(tile, startX, startY);
+          }, 450);
+        });
+        grid.addEventListener("pointermove", e => {
+          if (holdTimer && (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10)) {
+            clearTimeout(holdTimer); holdTimer = null;   // moved = it's a scroll, not a hold
+          }
+        });
+        window.addEventListener("pointerup", () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } });
+        grid.addEventListener("contextmenu", e => { if (editing || holdTimer) e.preventDefault(); });
+        // Block navigation on the tile that was just long-pressed / dragged.
+        grid.addEventListener("click", e => {
+          if (editing || suppressClick) { e.preventDefault(); e.stopPropagation(); suppressClick = false; }
+        }, true);
+        // Tap the background (not a tile / not the toolbar) to finish + save.
+        document.addEventListener("pointerdown", e => {
+          if (editing && !e.target.closest(".button") && !e.target.closest("#reorderBar")) exitEdit(true);
+        });
+        if (bar) {
+          bar.querySelector(".done").addEventListener("click", () => exitEdit(true));
+          bar.querySelector(".x").addEventListener("click", () => exitEdit(true));
+        }
       })();
 
     });

@@ -765,6 +765,20 @@ MAP object: KEY = element id, list = permission names (any-of; FullAccess
 sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
 Story users: STORY_ALLOWED set only + pinned "Back to My Day". Personalise
 tile gated by ThemeColour/ThemeBackground.
+- **Drag-to-reorder tiles (mobile, Aug 2026)** — iOS-home-screen style: a
+  **long-press** (~450ms) on any visible tile enters "arrange" mode (tiles wobble
+  via `.menu-grid.reordering`, a fixed `#reorderBar` "Drag tiles, then Done"
+  appears) and immediately grabs the held tile; drag reorders with a pointer-based
+  placeholder + edge auto-scroll (same engine as vehicles.html). **Done / the ✕ /
+  tapping the background** all save + exit. Order is the DOM order of tile element
+  **ids**, saved to localStorage **`mlMenuOrder`** (instant paint via `layoutTiles()`,
+  which also re-runs the odd-tile `full-width` rule) AND mirrored to **`/prefs`
+  `menuOrder`** so it follows the user across devices (GET on load reconciles
+  server→local). Every gated tile plus the always-on ones is movable — Help and
+  Logout were given ids (`Help`/`Logout`) so their positions persist; the pinned
+  Story "Back to My Day" (`backToMyDay`) is excluded (rank -1, always first). The
+  grid is desktop-hidden (sidebar), so this is inherently a mobile feature. No
+  worker change — `/prefs` already shallow-merges arbitrary keys (8KB cap).
 - **Consolidated tiles (Jul 2026)** — five standalone pages were nested behind
   parents to cut top-level clutter. A merged tile is visible to holders of
   EITHER the parent OR child permission (its MAP key list carries both), and
