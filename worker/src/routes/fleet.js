@@ -17,6 +17,7 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
+import { evalAlerts, answerWord } from "./vancheck.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -118,6 +119,7 @@ const DEFAULT_HANDOVER = {
     { id: "cab", label: "Cab interior", required: true },
     { id: "loadarea", label: "Load area", required: false },
   ],
+  alertUsers: [],   // who to push when an "Alert if" answer is given
 };
 async function handoverTemplate(env, tid) {
   try {
@@ -810,6 +812,7 @@ export async function handle(request, env, ctx, url, sess) {
         checkedAt: r.checked_at, safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
         defectCount: defects.length, note: r.note || "", mileage: items.mileage || "",
         answers, defectNotes: items.defectNotes || {}, slotPhotos: slot, photos,
+        alerts: items.alerts || [],
       });
     }
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
@@ -845,18 +848,28 @@ export async function handle(request, env, ctx, url, sess) {
     if (!(await canMoney(env, tid, sess))) return jr({ error: "Only a Full-Access admin can change the handover template." }, headers, 403);
     const b = await readJson(request);
     const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
-    const mkList = (arr, withReq) => {
+    // kind: "answer" items carry an optional Alert-if rule (failVal = its bad
+    // answer); "photo" items carry required. Defaults its alertOn to failVal.
+    const mkList = (arr, kind, failVal) => {
       const out = [], seen = new Set();
       for (const it of Array.isArray(arr) ? arr : []) {
         const label = String(it && it.label || "").trim().slice(0, 120); if (!label) continue;
         let id = slug(it && it.id) || slug(label) || ("item" + (out.length + 1));
         while (seen.has(id)) id = id + "_" + (out.length + 1);
         seen.add(id);
-        out.push(withReq ? { id, label, required: !(it && it.required === false) } : { id, label });
+        if (kind === "photo") { out.push({ id, label, required: !(it && it.required === false) }); continue; }
+        const o = { id, label };
+        if (it && it.alert) {
+          const on = it.alertOn;
+          o.alert = true;
+          o.alertOn = (on === "ok" || on === "present" || on === "defect" || on === "missing") ? on : failVal;
+        }
+        out.push(o);
       }
       return out;
     };
-    const tpl = { checklist: mkList(b.checklist, false), equipment: mkList(b.equipment, false), photoSlots: mkList(b.photoSlots, true) };
+    const alertUsers = (Array.isArray(b.alertUsers) ? b.alertUsers : []).map(u => String(u || "").trim()).filter(Boolean).slice(0, 50);
+    const tpl = { checklist: mkList(b.checklist, "answer", "defect"), equipment: mkList(b.equipment, "answer", "missing"), photoSlots: mkList(b.photoSlots, "photo"), alertUsers };
     if (!tpl.checklist.length && !tpl.equipment.length && !tpl.photoSlots.length)
       return jr({ error: "Add at least one item." }, headers, 400);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
@@ -918,11 +931,12 @@ export async function handle(request, env, ctx, url, sess) {
     }
     let signature = b.signature ? (await storeHandoverImg(env, userDir, id, "signature", b.signature, nRef) || "") : "";
     if (!signature) return jr({ error: "Signature required." }, headers, 400);
+    const alerts = evalAlerts(answers, tpl);   // "Alert if" rules on the template
     const items = {
       answers, defectNotes,
       conditionInterior: String(b.conditionInterior || "").slice(0, 1000),
       conditionExterior: String(b.conditionExterior || "").slice(0, 1000),
-      damage, slotPhotos, photos, signature, source: "portal",
+      damage, slotPhotos, photos, signature, source: "portal", alerts,
     };
     const now = new Date().toISOString();
     await env.DB.prepare(
@@ -932,7 +946,12 @@ export async function handle(request, env, ctx, url, sess) {
       title: "Van handover completed", body: `${row.username} completed the handover for ${row.reg}.`,
       url: "/vehicle-checks.html?reg=" + encodeURIComponent(row.reg), tag: "van-handover"
     }));
-    return jr({ ok: true, id }, headers);
+    if (alerts.length && (tpl.alertUsers || []).length && ctx && ctx.waitUntil) {
+      const body = `${row.username} — ${row.reg}: ` + alerts.map(a => `${a.label}: ${answerWord(a.answer)}`).join(", ");
+      const payload = { title: "⚠ Van handover alert", body, url: "/vehicle-checks.html?reg=" + encodeURIComponent(row.reg), tag: "handover-alert" };
+      ctx.waitUntil(Promise.all((tpl.alertUsers || []).map(u => sendToUser(env, tid, u, payload).catch(() => {}))));
+    }
+    return jr({ ok: true, id, alerts: alerts.length }, headers);
   }
 
   // ── Van handover: admin cancels a pending one (mistaken send) ─────────────
@@ -965,7 +984,7 @@ export async function handle(request, env, ctx, url, sess) {
         status: r.status, requestedBy: r.requested_by, requestedByName: names[r.requested_by] || r.requested_by,
         requestedAt: r.requested_at, completedAt: r.completed_at,
         mileage: r.mileage || "", safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive), note: r.note || "",
-        defectCount: defects.length,
+        defectCount: defects.length, alerts: items.alerts || [],
         answers, defectNotes: items.defectNotes || {},
         conditionInterior: items.conditionInterior || "", conditionExterior: items.conditionExterior || "",
         damage: items.damage || [], slotPhotos: items.slotPhotos || {}, photos: items.photos || [], signature: items.signature || "",

@@ -391,7 +391,21 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   empty by default; a missing item counts as an issue) and **photo slots**; all
   three ride in the app_config `vancheck:settings` JSON and are returned by
   /vancheck/config + /vancheck/settings. van-check.html shows the equipment
-  section only when items exist and merges its answers into the same answers map. **/vancheck/skip** (admin skips a driver's week → writes a
+  section only when items exist and merges its answers into the same answers map.
+  **"Alert if" rules + notifications:** checklist/equipment items carry an
+  optional `{alert:true, alertOn:"defect"|"missing"}`; `vancheck:settings` +
+  `handover:template:<tid>` also hold `alertUsers` (recipient usernames). The
+  template editors (van-check settings + handover template on van-checks.html)
+  are **structured rows** — label · ☑ Alert if · answer select — plus a recipient
+  picker (shared helpers). On submit, `evalAlerts(answers, tpl)` (exported from
+  vancheck.js, used by both van-check + handover submit) returns fired alerts
+  `[{id,label,answer}]`, **stored on the record** (items.alerts) and **pushed** to
+  alertUsers (sendToUser). A fired alert shows a ⚠ pill on the admin grid + the
+  vehicle Checks history + an alert banner in the detail. vehicle-checks.html adds
+  an **⚠ Issues** panel (every defect/missing across checks+handovers, alerts
+  highlighted, alerts-only toggle) + a **🔎 By question** filter (pick any item →
+  every answer over time: driver · date · answer). /fleet/vehicle-checks +
+  /fleet/handovers return `alerts`. **/vancheck/skip** (admin skips a driver's week → writes a
   "skipped" row into vehicle_checks with items.skipped/skippedBy, shows in the
   Vehicles weekly grid) + **/vancheck/unskip**. Attention gate honours
   vehicle-check suppression. **/vancheck/remind-now** (admin: Vehicles|

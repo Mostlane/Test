@@ -36,6 +36,17 @@
   .pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;}
   .pill.ok{background:#dcfce7;color:#166534;} .pill.bad{background:#fee2e2;color:#b91c1c;} .pill.info{background:#e0f2fe;color:#075985;} .pill.warn{background:#fef3c7;color:#92400e;}
   .empty{color:var(--muted);font-size:14px;padding:6px 2px;}
+  .pill.alert{background:#fee2e2;color:#b91c1c;}
+  .issfilter{margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .issfilter select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;max-width:100%;}
+  .tick{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#475569;}
+  .iss{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .iss .d{font-weight:700;white-space:nowrap;}
+  .iss .who{color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .iss .lab{flex:1;min-width:0;font-weight:600;}
+  .iss.alerted{background:#fff7f7;}
+  .qrow{display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line);font-size:13.5px;align-items:center;}
+  .qrow .d{color:var(--muted);white-space:nowrap;} .qrow .who{flex:1;min-width:0;}
 
   /* detail modal */
   .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:2000;padding:14px;}
@@ -77,6 +88,19 @@
       <h2>🚐 Weekly van checks <span class="ct" id="vcCount"></span></h2>
       <div id="vcList"><span class="empty">Loading…</span></div>
     </div>
+
+    <div class="panel">
+      <h2>⚠️ Issues <span class="ct" id="issCount"></span></h2>
+      <div class="issfilter"><label class="tick"><input type="checkbox" id="issAlertsOnly" onchange="renderIssues()"> Alerts only</label></div>
+      <div id="issList"><span class="empty">Loading…</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>🔎 By question</h2>
+      <div class="issfilter"><select id="qSel" onchange="renderByQuestion()"><option value="">Pick a question…</option></select></div>
+      <div id="qList"><span class="empty">Pick a question to see every answer over time.</span></div>
+    </div>
+
     <div class="status-line" id="statusLine"></div>
   </div>
 
@@ -114,7 +138,7 @@
       ]);
       HANDOVERS=(h&&h.handovers)||[]; HO_TPL=(h&&h.template)||HO_TPL;
       CHECKS=(c&&c.checks)||[];
-      renderHandovers(); renderChecks();
+      renderHandovers(); renderChecks(); renderIssues(); fillQuestionSelect(); renderByQuestion();
       $("statusLine").textContent="Loaded "+HANDOVERS.length+" handover(s), "+CHECKS.length+" van check(s).";
       if(OPEN && /^ho\d+$/.test(OPEN)){ const id=Number(OPEN.slice(2)); const ho=HANDOVERS.find(x=>x.id===id); if(ho) openHandover(ho); }
     }catch(e){ console.error(e); $("statusLine").textContent="Couldn't load."; $("hoList").innerHTML='<span class="empty">Couldn\'t load.</span>'; $("vcList").innerHTML=""; }
@@ -149,7 +173,8 @@
     const body=monthsHtml(groups, h=>{
       const safe = h.safeToDrive===false?'<span class="pill bad">Not safe</span>':'<span class="pill ok">Safe</span>';
       const dcount = h.defectCount?`<span class="pill warn">${h.defectCount} issue${h.defectCount===1?"":"s"}</span>`:"";
-      return `<div class="row" onclick="openHandover(${h.id})"><span class="d">${fmtDMY(h.completedAt||h.requestedAt)}</span><span class="who">${esc(h.name)}</span>${dcount}${safe}<span class="go">›</span></div>`;
+      const al = (h.alerts&&h.alerts.length)?`<span class="pill alert">⚠ ${h.alerts.length}</span>`:"";
+      return `<div class="row" onclick="openHandover(${h.id})"><span class="d">${fmtDMY(h.completedAt||h.requestedAt)}</span><span class="who">${esc(h.name)}</span>${al}${dcount}${safe}<span class="go">›</span></div>`;
     });
     $("hoList").innerHTML = (head||"") + (done.length?body:(pending.length?"":'<span class="empty">No handovers recorded yet.</span>'));
   }
@@ -159,9 +184,62 @@
     const groups=groupByMonth(CHECKS, c=>c.checkedAt);
     $("vcList").innerHTML = monthsHtml(groups, (c,i)=>{
       const safe = c.safeToDrive===false?'<span class="pill bad">Not safe</span>':'<span class="pill ok">Safe</span>';
-      const dcount = c.defectCount?`<span class="pill warn">${c.defectCount} defect${c.defectCount===1?"":"s"}</span>`:"";
-      return `<div class="row" onclick="openCheck(${i})"><span class="d">${fmtDMY(c.checkedAt)}</span><span class="who">${esc(c.name)}</span>${dcount}${safe}<span class="go">›</span></div>`;
+      const dcount = c.defectCount?`<span class="pill warn">${c.defectCount} issue${c.defectCount===1?"":"s"}</span>`:"";
+      const al = (c.alerts&&c.alerts.length)?`<span class="pill alert">⚠ ${c.alerts.length}</span>`:"";
+      return `<div class="row" onclick="openCheck(${i})"><span class="d">${fmtDMY(c.checkedAt)}</span><span class="who">${esc(c.name)}</span>${al}${dcount}${safe}<span class="go">›</span></div>`;
     });
+  }
+
+  // ── Issues log + by-question filter (aggregated from checks + handovers) ──
+  function answerWord(v){ return v==="defect"?"Defect":v==="missing"?"Missing":v==="present"?"Present":v==="ok"?"OK":esc(v); }
+  function labelMapFrom(tpl){ const m={}; [...(tpl.checklist||[]),...(tpl.equipment||[])].forEach(it=>m[it.id]=it.label); return m; }
+  // Every "issue" answer (defect/missing) across both sources, newest first.
+  function allIssues(){
+    const lblC=labelMapFrom(VC), lblH=labelMapFrom(HO_TPL);
+    const out=[];
+    for(const c of CHECKS){
+      const alertIds=new Set((c.alerts||[]).map(a=>a.id));
+      for(const id of Object.keys(c.answers||{})){ const v=c.answers[id];
+        if(v==="defect"||v==="missing") out.push({date:c.checkedAt,who:c.name,label:lblC[id]||id,answer:v,source:"Van check",alert:alertIds.has(id),note:(c.defectNotes||{})[id]||""}); }
+    }
+    for(const h of HANDOVERS){ if(h.status!=="done")continue;
+      const alertIds=new Set((h.alerts||[]).map(a=>a.id));
+      for(const id of Object.keys(h.answers||{})){ const v=h.answers[id];
+        if(v==="defect"||v==="missing") out.push({date:h.completedAt||h.requestedAt,who:h.name,label:lblH[id]||id,answer:v,source:"Handover",alert:alertIds.has(id),note:(h.defectNotes||{})[id]||""}); }
+    }
+    out.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+    return out;
+  }
+  function renderIssues(){
+    let iss=allIssues();
+    if($("issAlertsOnly").checked) iss=iss.filter(x=>x.alert);
+    $("issCount").textContent = iss.length?("("+iss.length+")"):"";
+    if(!iss.length){ $("issList").innerHTML='<span class="empty">No issues recorded. 🎉</span>'; return; }
+    $("issList").innerHTML=iss.map(x=>`<div class="iss ${x.alert?"alerted":""}">
+      <span class="d">${fmtDMY(x.date)}</span>
+      <span class="lab">${x.alert?"⚠ ":""}${esc(x.label)}<span class="pill ${x.answer==="missing"||x.answer==="defect"?"bad":"info"}" style="margin-left:6px">${answerWord(x.answer)}</span>${x.note?` <span class="who" style="font-weight:400">— ${esc(x.note)}</span>`:""}</span>
+      <span class="who" style="flex:none">${esc(x.who)} · ${esc(x.source)}</span>
+    </div>`).join("");
+  }
+  // Distinct questions (id → label) across both templates, for the filter.
+  function allQuestions(){
+    const m={}; [...(VC.checklist||[]),...(VC.equipment||[]),...(HO_TPL.checklist||[]),...(HO_TPL.equipment||[])].forEach(it=>{ if(it&&it.id&&!m[it.id]) m[it.id]=it.label; });
+    return Object.keys(m).map(id=>({id,label:m[id]})).sort((a,b)=>a.label.localeCompare(b.label));
+  }
+  function fillQuestionSelect(){
+    const qs=allQuestions();
+    $("qSel").innerHTML='<option value="">Pick a question…</option>'+qs.map(q=>`<option value="${esc(q.id)}">${esc(q.label)}</option>`).join("");
+  }
+  function renderByQuestion(){
+    const id=$("qSel").value;
+    if(!id){ $("qList").innerHTML='<span class="empty">Pick a question to see every answer over time.</span>'; return; }
+    const rows=[];
+    for(const c of CHECKS){ if(c.answers&&c.answers[id]!==undefined) rows.push({date:c.checkedAt,who:c.name,answer:c.answers[id],source:"Van check"}); }
+    for(const h of HANDOVERS){ if(h.status==="done"&&h.answers&&h.answers[id]!==undefined) rows.push({date:h.completedAt||h.requestedAt,who:h.name,answer:h.answers[id],source:"Handover"}); }
+    rows.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+    if(!rows.length){ $("qList").innerHTML='<span class="empty">No answers recorded for that item yet.</span>'; return; }
+    const bad=v=>v==="missing"||v==="defect";
+    $("qList").innerHTML=rows.map(r=>`<div class="qrow"><span class="who"><b>${esc(r.who)}</b></span><span class="d">${fmtDMY(r.date)}</span><span class="pill ${bad(r.answer)?"bad":"ok"}">${answerWord(r.answer)}</span></div>`).join("");
   }
 
   // ── Detail views ──
@@ -179,6 +257,10 @@
   }
   function showDetail(html){ $("detailModal").innerHTML=html; $("detailBackdrop").style.display="flex"; }
   function closeDetail(){ $("detailBackdrop").style.display="none"; }
+  function alertBanner(rec){
+    const a=rec&&rec.alerts; if(!a||!a.length) return "";
+    return `<div style="background:#fee2e2;color:#b91c1c;padding:10px 14px;font-size:13.5px;font-weight:600;">⚠ Alert: ${a.map(x=>esc(x.label)+" — "+(x.answer==="missing"?"Missing":x.answer==="defect"?"Defect":esc(x.answer))).join("; ")}</div>`;
+  }
 
   function openCheck(i){
     const c=CHECKS[i]; if(!c)return;
@@ -186,6 +268,7 @@
     const checks=Object.keys(c.answers||{}).map(id=>`<div class="chk"><span>${esc(labelFor(vcLabels,id))}</span><span>${answerChip(c.answers[id])}${c.defectNotes&&c.defectNotes[id]?` <span class="n">${esc(c.defectNotes[id])}</span>`:""}</span></div>`).join("");
     showDetail(`
       <div class="mhead"><h3>Van check · ${fmtDMY(c.checkedAt)}</h3><button class="btn small" onclick="closeDetail()">✕ Close</button></div>
+      ${alertBanner(c)}
       <div class="mbody">
         <div class="drow"><span class="k">Driver</span><span class="v">${esc(c.name)}</span></div>
         <div class="drow"><span class="k">Mileage</span><span class="v">${c.mileage?esc(c.mileage):"—"}</span></div>
@@ -220,6 +303,7 @@
     const slotKeys=Object.values(h.slotPhotos||{});
     showDetail(`
       <div class="mhead"><h3>Handover · ${fmtDMY(h.completedAt||h.requestedAt)}</h3><button class="btn small" onclick="closeDetail()">✕ Close</button></div>
+      ${alertBanner(h)}
       <div class="mbody">
         <div class="drow"><span class="k">Driver</span><span class="v">${esc(h.name)}</span></div>
         ${h.requestedByName?`<div class="drow"><span class="k">Sent by</span><span class="v">${esc(h.requestedByName)}</span></div>`:""}
@@ -240,7 +324,7 @@
   function closeLightbox(){ $("lightbox").style.display="none"; $("lightboxImg").src=""; }
   $("detailBackdrop").addEventListener("click",e=>{ if(e.target===$("detailBackdrop")) closeDetail(); });
 
-  Object.assign(window,{load,openCheck,openHandover,closeDetail,enlarge,closeLightbox});
+  Object.assign(window,{load,openCheck,openHandover,closeDetail,enlarge,closeLightbox,renderIssues,renderByQuestion});
   window.addEventListener("DOMContentLoaded",load);
   </script>
 </body>

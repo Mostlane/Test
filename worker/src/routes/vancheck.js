@@ -85,7 +85,36 @@ async function getSettings(db) {
   if (!Array.isArray(out.checklist) || !out.checklist.length) out.checklist = DEFAULT_CHECKLIST;
   if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
   if (!Array.isArray(out.equipment)) out.equipment = [];   // opt-in; empty = no equipment section
+  if (!Array.isArray(out.alertUsers)) out.alertUsers = []; // who to push when an "Alert if" answer is given
   return out;
+}
+// Normalise a checklist/equipment item, keeping an optional "Alert if" rule.
+// failVal = the answer that flags an issue for this list ("defect" / "missing").
+function normAlertItem(i, failVal) {
+  const id = String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30);
+  const label = String(i.label || "").trim();
+  const out = { id, label };
+  if (i && i.alert) {
+    const on = i.alertOn;
+    out.alert = true;
+    out.alertOn = (on === "ok" || on === "present" || on === "defect" || on === "missing") ? on : failVal;
+  }
+  return out;
+}
+// Given the answers + a settings/template object, return the fired alerts
+// [{id,label,answer}] (item has alert=true and the answer matches alertOn).
+export function evalAlerts(answers, tpl) {
+  const out = [];
+  for (const it of [...(tpl.checklist || []), ...(tpl.equipment || [])]) {
+    if (it && it.alert && it.alertOn && answers[it.id] === it.alertOn) {
+      out.push({ id: it.id, label: it.label, answer: answers[it.id] });
+    }
+  }
+  return out;
+}
+// Human word for an answer value (for the push body).
+export function answerWord(v) {
+  return v === "defect" ? "Defect" : v === "missing" ? "Missing" : v === "present" ? "Present" : v === "ok" ? "OK" : String(v || "");
 }
 // This week's deadline instant: Monday `week` + (dueDow-1) days at dueTime UK.
 function deadlineFor(week, s) {
@@ -105,7 +134,7 @@ function shapeCheck(r) {
     note: r.note || "", answers, defectNotes: items.defectNotes || {},
     photos: items.photos || [], slotPhotos: items.slotPhotos || {},
     mileage: items.mileage || "", source: items.source || "story",
-    defectCount: defects.length,
+    defectCount: defects.length, alerts: items.alerts || [],
     skipped: !!items.skipped, skippedBy: items.skippedBy || "",
   };
 }
@@ -138,9 +167,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (b.dueDow !== undefined) s.dueDow = Math.min(7, Math.max(1, Number(b.dueDow) || 5));
     if (b.dueTime !== undefined && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime)) s.dueTime = b.dueTime;
     if (Array.isArray(b.checklist)) {
-      const list = b.checklist
-        .map(i => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim() }))
-        .filter(i => i.label);
+      const list = b.checklist.map(i => normAlertItem(i, "defect")).filter(i => i.label);
       if (list.length) s.checklist = list;
     }
     if (Array.isArray(b.photoSlots)) {
@@ -151,10 +178,10 @@ export async function handle(request, env, ctx, url, sess) {
     }
     // Equipment on board — opt-in Present/Missing items; an empty list clears it.
     if (Array.isArray(b.equipment)) {
-      s.equipment = b.equipment
-        .map(i => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim() }))
-        .filter(i => i.label);
+      s.equipment = b.equipment.map(i => normAlertItem(i, "missing")).filter(i => i.label);
     }
+    // Who gets pushed when an item's "Alert if" answer is given.
+    if (Array.isArray(b.alertUsers)) s.alertUsers = b.alertUsers.map(u => String(u || "").trim()).filter(Boolean).slice(0, 50);
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(db.tenantId, SETTINGS_KEY, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
@@ -219,9 +246,12 @@ export async function handle(request, env, ctx, url, sess) {
       if (key) photoKeys.push(key);
     }
 
+    // "Alert if" rules → store fired alerts on the record + push the chosen users.
+    const alerts = evalAlerts(answers, s2);
     const items = JSON.stringify({
       answers, defectNotes, photos: photoKeys, slotPhotos,
       mileage: String(b.mileage || "").trim(), source: "portal",
+      alerts,
     });
     const now = new Date().toISOString();
     await db.prepare(`
@@ -231,7 +261,13 @@ export async function handle(request, env, ctx, url, sess) {
         vehicle=excluded.vehicle, checked_at=excluded.checked_at,
         safe_to_drive=excluded.safe_to_drive, items=excluded.items, note=excluded.note
     `).bind(db.tenantId, me, week, vehicle, now, b.safeToDrive === false ? 0 : 1, items, String(b.note || "").trim()).run();
-    return json({ ok: true, week, photos: photoKeys.length }, {}, env, request);
+    if (alerts.length && (s2.alertUsers || []).length) {
+      const who = (`${sess.user.first_name || ""} ${sess.user.last_name || ""}`.trim()) || me;
+      const body = `${who} — ${vehicle}: ` + alerts.map(a => `${a.label}: ${answerWord(a.answer)}`).join(", ");
+      const payload = { title: "⚠ Van check alert", body, url: "/van-checks.html", tag: "vancheck-alert" };
+      ctx && ctx.waitUntil && ctx.waitUntil(Promise.all((s2.alertUsers || []).map(u => sendToUser(env, tenantId, u, payload).catch(() => {}))));
+    }
+    return json({ ok: true, week, photos: photoKeys.length, alerts: alerts.length }, {}, env, request);
   }
 
   // ── Weekly grid (office) ────────────────────────────────────────────────────
