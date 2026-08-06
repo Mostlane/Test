@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=2"></script>
+  <title>Mostlane • CCTV Wall</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+  :root{ --bg:#0b1220; --card:#111a2e; --line:#22304d; --ink:#e8eefc; --muted:#8ea0c4; --brand:#2563eb; --ok:#22c55e; --bad:#ef4444; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;min-height:100%;}
+  header.page{background:#0f172a;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:50;border-bottom:1px solid var(--line);}
+  header.page h1{font-size:17px;margin:0;font-weight:600;flex:0 0 auto;}
+  a.ml-back{text-decoration:none;font-size:15px;color:#cbd5e1;}
+  .head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto;}
+  .btn{appearance:none;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);color:#fff;border-radius:8px;padding:7px 11px;font-size:13.5px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;}
+  .btn:hover{background:rgba(255,255,255,.18);}
+  .btn.primary{background:var(--brand);border-color:var(--brand);}
+  .btn.danger{color:#fecaca;border-color:#7f1d1d;background:rgba(127,29,29,.35);}
+  .btn.small{padding:5px 9px;font-size:12.5px;}
+  select,input[type=text],input[type=number],input[type=url],textarea{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#0e1830;color:var(--ink);}
+  select{background:#0e1830;color:#fff;}
+
+  .locbar{display:flex;gap:8px;align-items:center;padding:8px 14px;background:#0d1526;border-bottom:1px solid var(--line);overflow-x:auto;}
+  .loctab{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .loctab.on{background:var(--brand);border-color:var(--brand);color:#fff;}
+
+  .wall{flex:1;display:grid;gap:6px;padding:6px;grid-auto-rows:1fr;min-height:0;}
+  .wall[data-cols="1"]{grid-template-columns:1fr;}
+  .wall[data-cols="2"]{grid-template-columns:repeat(2,1fr);}
+  .wall[data-cols="3"]{grid-template-columns:repeat(3,1fr);}
+  .wall[data-cols="4"]{grid-template-columns:repeat(4,1fr);}
+  @media(max-width:760px){ .wall[data-cols="3"],.wall[data-cols="4"]{grid-template-columns:repeat(2,1fr);} }
+  @media(max-width:480px){ .wall{grid-template-columns:1fr!important;} }
+
+  .tile{position:relative;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden;min-height:150px;display:flex;align-items:center;justify-content:center;}
+  .tile video,.tile img,.tile iframe{width:100%;height:100%;object-fit:contain;background:#000;border:0;display:block;}
+  .tile .lab{position:absolute;left:0;bottom:0;right:0;padding:6px 9px;font-size:12.5px;font-weight:700;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.75));display:flex;align-items:center;gap:7px;pointer-events:none;}
+  .tile .live{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto;}
+  .tile.ok .live{background:var(--ok);box-shadow:0 0 0 3px rgba(34,197,94,.25);}
+  .tile.err .live{background:var(--bad);}
+  .tile .tctl{position:absolute;top:6px;right:6px;display:flex;gap:5px;opacity:0;transition:.15s;}
+  .tile:hover .tctl{opacity:1;}
+  .tctl button{width:30px;height:30px;border-radius:7px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.55);color:#fff;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;}
+  .tctl button:hover{background:rgba(0,0,0,.8);}
+  .tile .msg{color:#9fb0d0;font-size:13px;text-align:center;padding:14px;line-height:1.5;}
+  .tile .msg b{color:#e8eefc;}
+  .tile.fs{position:fixed;inset:0;z-index:200;border-radius:0;}
+
+  .empty{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .empty .box{max-width:560px;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 24px;}
+  .empty h2{margin:0 0 8px;font-size:20px;}
+  .empty p{color:var(--muted);font-size:14.5px;line-height:1.6;margin:8px 0;}
+
+  .banner{background:#1a2540;border:1px solid var(--line);border-left:3px solid #f59e0b;color:#dbe4fa;font-size:13px;line-height:1.55;padding:10px 14px;margin:6px;border-radius:8px;}
+  .banner b{color:#fff;}
+  .banner a{color:#93c5fd;}
+  .banner .x{float:right;cursor:pointer;color:var(--muted);font-weight:700;padding-left:10px;}
+
+  /* modal */
+  .scrim{position:fixed;inset:0;background:rgba(3,7,18,.72);display:none;align-items:center;justify-content:center;z-index:300;padding:16px;}
+  .scrim.on{display:flex;}
+  .modal{width:100%;max-width:520px;max-height:92vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;}
+  .modal h3{margin:0 0 4px;font-size:18px;}
+  .modal .sub{color:var(--muted);font-size:13px;margin:0 0 16px;}
+  .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:13px;}
+  .fld label{font-size:12.5px;font-weight:700;color:#b7c5e6;}
+  .fld .hint{font-size:12px;color:var(--muted);line-height:1.5;}
+  .fld input,.fld select,.fld textarea{width:100%;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px;flex-wrap:wrap;}
+  .typehelp{font-size:12px;color:var(--muted);background:#0e1830;border:1px solid var(--line);border-radius:8px;padding:9px 11px;line-height:1.55;margin-bottom:13px;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;border:1px solid var(--line);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:500;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html">← Menu</a>
+    <h1>📹 CCTV Wall</h1>
+    <div class="head-actions">
+      <select id="layoutSel" title="Grid layout">
+        <option value="auto">Auto grid</option>
+        <option value="1">1 × 1</option>
+        <option value="2">2 × 2</option>
+        <option value="3">3 × 3</option>
+        <option value="4">4 × 4</option>
+      </select>
+      <button class="btn small" id="refreshAll" title="Reload all feeds">🔄 Reload</button>
+      <button class="btn small" id="fsAll" title="Fullscreen the wall">⛶ Fullscreen</button>
+      <button class="btn small" id="manageBtn">⚙️ Cameras</button>
+      <button class="btn primary small" id="addBtn">＋ Add camera</button>
+    </div>
+  </header>
+
+  <div class="locbar" id="locbar" style="display:none"></div>
+
+  <div class="banner" id="infoBanner" style="display:none">
+    <span class="x" onclick="dismissBanner()">✕</span>
+    <b>Heads-up on Ring &amp; app-only cameras.</b> A web page can only show feeds a browser can open
+    directly — an <b>HLS (.m3u8)</b> stream, an <b>MJPEG</b> stream, a <b>snapshot JPEG</b> URL, or an
+    <b>embeddable web player</b>. Ring cameras and vendor-app-only cloud cameras don't expose those, so
+    they can't stream here without a small always-on "bridge" (e.g. go2rtc). If a camera gives you a
+    snapshot URL you can still add it as a near-live snapshot tile. Ask me to add a bridge later for true
+    live Ring/cloud feeds.
+  </div>
+
+  <div id="wall" class="wall" data-cols="2"></div>
+  <div id="empty" class="empty" style="display:none">
+    <div class="box">
+      <h2>Build your camera wall</h2>
+      <p>Add the cameras you want to watch, group them by location, and they'll tile into a split screen.
+         Your list is saved on this device — use <b>⚙️ Cameras → Export</b> to copy it to another device.</p>
+      <p><button class="btn primary" onclick="openAdd()">＋ Add your first camera</button></p>
+    </div>
+  </div>
+
+  <!-- Add / edit camera modal -->
+  <div class="scrim" id="camScrim">
+    <div class="modal">
+      <h3 id="camTitle">Add camera</h3>
+      <p class="sub">Enter the direct feed URL your camera or NVR exposes.</p>
+
+      <div class="fld">
+        <label>Camera name</label>
+        <input type="text" id="fName" placeholder="e.g. Yard – East gate" maxlength="60"/>
+      </div>
+      <div class="row2">
+        <div class="fld">
+          <label>Location / group</label>
+          <input type="text" id="fLoc" list="locList" placeholder="e.g. Head office" maxlength="40"/>
+          <datalist id="locList"></datalist>
+        </div>
+        <div class="fld">
+          <label>Feed type</label>
+          <select id="fType">
+            <option value="hls">HLS stream (.m3u8)</option>
+            <option value="mjpeg">MJPEG stream</option>
+            <option value="snapshot">Snapshot JPEG (polling)</option>
+            <option value="embed">Embed / web player (iframe)</option>
+            <option value="video">Direct video (mp4/webm)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="typehelp" id="typeHelp"></div>
+
+      <div class="fld">
+        <label>Feed URL</label>
+        <input type="url" id="fUrl" placeholder="https://…"/>
+        <span class="hint">Must be reachable from wherever you open this page (internet-facing, DDNS, or same network).</span>
+      </div>
+      <div class="fld" id="intWrap" style="display:none">
+        <label>Snapshot refresh (seconds)</label>
+        <input type="number" id="fInt" min="1" max="60" value="2" style="max-width:120px"/>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn danger small" id="delCam" style="display:none;margin-right:auto">🗑 Delete</button>
+        <button class="btn small" onclick="closeCam()">Cancel</button>
+        <button class="btn primary small" id="saveCam">Save camera</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage / export modal -->
+  <div class="scrim" id="mgScrim">
+    <div class="modal">
+      <h3>Manage cameras</h3>
+      <p class="sub">Reorder, edit or move your camera list between devices.</p>
+      <div id="mgList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
+      <div class="fld">
+        <label>Backup / restore (paste to move to another device)</label>
+        <textarea id="mgJson" rows="4" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn small" id="mgCopy">📋 Copy</button>
+        <button class="btn small" id="mgImport">⬇ Import from box</button>
+        <button class="btn primary small" onclick="closeMg()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+/* ---------- storage ---------- */
+const LS_KEY = "mostlaneCCTV";
+let STATE = load();
+function load(){
+  try{ const s = JSON.parse(localStorage.getItem(LS_KEY)||"{}");
+    return { cameras: Array.isArray(s.cameras)?s.cameras:[], layout: s.layout||"auto", activeLoc: s.activeLoc||"__all", bannerSeen: !!s.bannerSeen };
+  }catch(e){ return { cameras:[], layout:"auto", activeLoc:"__all", bannerSeen:false }; }
+}
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(STATE)); }
+function uid(){ return "c"+Math.abs(Date.now()^(performance.now()*1000|0)).toString(36)+(STATE.cameras.length); }
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+function toast(m){ const t=$("#toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none",2200); }
+function locations(){ const s=[...new Set(STATE.cameras.map(c=>c.loc).filter(Boolean))]; return s.sort((a,b)=>a.localeCompare(b)); }
+function activeCams(){ return STATE.activeLoc==="__all" ? STATE.cameras : STATE.cameras.filter(c=>c.loc===STATE.activeLoc); }
+
+/* ---------- HLS loader (lazy, CDN + native fallback) ---------- */
+let hlsLoading=null;
+function ensureHls(){
+  if(window.Hls) return Promise.resolve(true);
+  if(hlsLoading) return hlsLoading;
+  hlsLoading = new Promise(res=>{
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js";
+    s.onload=()=>res(!!window.Hls); s.onerror=()=>res(false);
+    document.head.appendChild(s);
+  });
+  return hlsLoading;
+}
+
+/* ---------- tile builder ---------- */
+const players = new Map(); // id -> {hls?, timer?}
+function teardown(){ for(const p of players.values()){ try{p.hls&&p.hls.destroy();}catch(e){} try{p.timer&&clearInterval(p.timer);}catch(e){} } players.clear(); }
+
+function bust(url){ return url + (url.includes("?")?"&":"?") + "_t=" + Date.now(); }
+
+function makeTile(cam){
+  const tile=document.createElement("div"); tile.className="tile"; tile.dataset.id=cam.id;
+  const lab=document.createElement("div"); lab.className="lab";
+  lab.innerHTML='<span class="live"></span><span>'+esc(cam.name||"Camera")+(cam.loc?' · <span style="opacity:.75">'+esc(cam.loc)+'</span>':'')+'</span>';
+  const ctl=document.createElement("div"); ctl.className="tctl";
+  ctl.innerHTML='<button title="Reload" data-a="reload">🔄</button><button title="Fullscreen" data-a="fs">⛶</button><button title="Edit" data-a="edit">✏️</button>';
+  ctl.addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b)return; const a=b.dataset.a;
+    if(a==="reload") startFeed(cam,tile);
+    else if(a==="fs") toggleTileFs(tile);
+    else if(a==="edit") openEdit(cam.id);
+  });
+  tile.appendChild(lab); tile.appendChild(ctl);
+  startFeed(cam,tile);
+  return tile;
+}
+
+function setStatus(tile,ok){ tile.classList.toggle("ok",ok===true); tile.classList.toggle("err",ok===false); }
+function clearMedia(tile){ tile.querySelectorAll("video,img,iframe,.msg").forEach(n=>n.remove()); const p=players.get(tile.dataset.id); if(p){ try{p.hls&&p.hls.destroy();}catch(e){} try{p.timer&&clearInterval(p.timer);}catch(e){} players.delete(tile.dataset.id);} }
+function showMsg(tile,html){ clearMedia(tile); const d=document.createElement("div"); d.className="msg"; d.innerHTML=html; tile.appendChild(d); }
+
+async function startFeed(cam,tile){
+  clearMedia(tile); setStatus(tile,null);
+  if(!cam.url){ showMsg(tile,"No URL set. <b>Edit</b> this camera."); setStatus(tile,false); return; }
+  try{
+    if(cam.type==="hls") return feedHls(cam,tile);
+    if(cam.type==="mjpeg"||cam.type==="snapshot") return feedImg(cam,tile);
+    if(cam.type==="embed") return feedEmbed(cam,tile);
+    if(cam.type==="video") return feedVideo(cam,tile);
+  }catch(e){ showMsg(tile,"Couldn't start feed.<br><span style='opacity:.7'>"+esc(String(e.message||e))+"</span>"); setStatus(tile,false); }
+}
+
+async function feedHls(cam,tile){
+  const v=document.createElement("video"); v.muted=true; v.autoplay=true; v.playsInline=true; v.controls=false;
+  tile.insertBefore(v,tile.firstChild);
+  v.addEventListener("playing",()=>setStatus(tile,true));
+  v.addEventListener("error",()=>{ setStatus(tile,false); });
+  if(v.canPlayType("application/vnd.apple.mpegurl")){ // Safari/iOS native
+    v.src=cam.url; v.play().catch(()=>{}); return;
+  }
+  const ok=await ensureHls();
+  if(ok && window.Hls.isSupported()){
+    const hls=new window.Hls({liveDurationInfinity:true,lowLatencyMode:true});
+    players.set(cam.id,{hls});
+    hls.on(window.Hls.Events.ERROR,(_,d)=>{ if(d.fatal){ setStatus(tile,false); showMsg(tile,"Stream error — check the URL is reachable and is an <b>.m3u8</b> HLS feed."); } });
+    hls.loadSource(cam.url); hls.attachMedia(v); v.play().catch(()=>{});
+  }else{
+    showMsg(tile,"This browser can't play HLS and the player failed to load (offline?). Try an <b>MJPEG</b> or <b>snapshot</b> feed.");
+    setStatus(tile,false);
+  }
+}
+function feedImg(cam,tile){
+  const img=document.createElement("img"); tile.insertBefore(img,tile.firstChild);
+  img.onload=()=>setStatus(tile,true);
+  img.onerror=()=>{ setStatus(tile,false); showMsg(tile,"Image feed didn't load — check the URL opens in a browser tab."); };
+  if(cam.type==="mjpeg"){ img.src=cam.url; } // MJPEG streams continuously
+  else{ // snapshot polling
+    const iv=Math.max(1,Math.min(60,cam.interval||2))*1000;
+    const tick=()=>{ img.src=bust(cam.url); };
+    tick(); const timer=setInterval(tick,iv); players.set(cam.id,{timer});
+  }
+}
+function feedVideo(cam,tile){
+  const v=document.createElement("video"); v.muted=true; v.autoplay=true; v.loop=true; v.playsInline=true; v.controls=false; v.src=cam.url;
+  tile.insertBefore(v,tile.firstChild);
+  v.addEventListener("playing",()=>setStatus(tile,true));
+  v.addEventListener("error",()=>{ setStatus(tile,false); showMsg(tile,"Video didn't load — check the URL and format (mp4/webm)."); });
+  v.play().catch(()=>{});
+}
+function feedEmbed(cam,tile){
+  const f=document.createElement("iframe"); f.src=cam.url; f.allow="autoplay; fullscreen; encrypted-media"; f.allowFullscreen=true;
+  f.onload=()=>setStatus(tile,true); f.onerror=()=>setStatus(tile,false);
+  tile.insertBefore(f,tile.firstChild);
+  setStatus(tile,true); // iframe load events are unreliable cross-origin
+}
+
+/* ---------- fullscreen ---------- */
+function toggleTileFs(tile){
+  if(document.fullscreenElement===tile){ document.exitFullscreen&&document.exitFullscreen(); return; }
+  if(tile.requestFullscreen){ tile.requestFullscreen().catch(()=>tile.classList.toggle("fs")); }
+  else tile.classList.toggle("fs");
+}
+
+/* ---------- render ---------- */
+function computeCols(n){
+  if(STATE.layout!=="auto") return parseInt(STATE.layout,10);
+  if(n<=1) return 1; if(n<=4) return 2; if(n<=9) return 3; return 4;
+}
+function render(){
+  teardown();
+  const wall=$("#wall"); wall.innerHTML="";
+  const cams=activeCams();
+  const has=STATE.cameras.length>0;
+  $("#empty").style.display = has?"none":"flex";
+  wall.style.display = has?"grid":"none";
+  $("#infoBanner").style.display = (!STATE.bannerSeen)?"block":"none";
+
+  // location tabs
+  const locs=locations();
+  const lb=$("#locbar");
+  if(locs.length>=1){
+    lb.style.display="flex"; lb.innerHTML="";
+    const mk=(key,label)=>{ const b=document.createElement("button"); b.className="loctab"+(STATE.activeLoc===key?" on":""); b.textContent=label; b.onclick=()=>{ STATE.activeLoc=key; save(); render(); }; lb.appendChild(b); };
+    mk("__all","All ("+STATE.cameras.length+")");
+    locs.forEach(l=>mk(l,l+" ("+STATE.cameras.filter(c=>c.loc===l).length+")"));
+    const un=STATE.cameras.filter(c=>!c.loc).length; if(un) mk("","Ungrouped ("+un+")");
+  } else lb.style.display="none";
+
+  wall.dataset.cols = computeCols(cams.length);
+  cams.forEach(cam=>wall.appendChild(makeTile(cam)));
+  $("#layoutSel").value=STATE.layout;
+}
+
+/* ---------- add/edit modal ---------- */
+const TYPE_HELP={
+  hls:"Best for live NVRs. Many recorders (or go2rtc/Frigate) publish an <b>.m3u8</b> URL. Plays live in the browser.",
+  mjpeg:"A never-ending JPEG stream (common on older IP cams, e.g. <code>/video.mjpg</code>). Low-lag, works in an &lt;img&gt;.",
+  snapshot:"A single still-image URL (e.g. <code>/snapshot.jpg</code> or <code>/cgi-bin/…</code>). We re-fetch it every few seconds for a near-live view — lightest option.",
+  embed:"A vendor web-player page you can put in an iframe. Only works if the camera's site allows embedding (many block it).",
+  video:"A direct MP4/WebM link — useful for testing or a static loop."
+};
+let editingId=null;
+function openAdd(){ editingId=null; fill({type:"hls",interval:2}); $("#camTitle").textContent="Add camera"; $("#delCam").style.display="none"; openCam(); }
+function openEdit(id){ const c=STATE.cameras.find(x=>x.id===id); if(!c)return; editingId=id; fill(c); $("#camTitle").textContent="Edit camera"; $("#delCam").style.display="inline-flex"; openCam(); }
+function fill(c){
+  $("#fName").value=c.name||""; $("#fLoc").value=c.loc||""; $("#fType").value=c.type||"hls";
+  $("#fUrl").value=c.url||""; $("#fInt").value=c.interval||2;
+  refreshLocList(); syncType();
+}
+function syncType(){ const t=$("#fType").value; $("#typeHelp").innerHTML=TYPE_HELP[t]||""; $("#intWrap").style.display=(t==="snapshot")?"flex":"none"; }
+function refreshLocList(){ $("#locList").innerHTML=locations().map(l=>'<option value="'+esc(l)+'">').join(""); }
+function openCam(){ $("#camScrim").classList.add("on"); }
+function closeCam(){ $("#camScrim").classList.remove("on"); }
+function saveCamera(){
+  const name=$("#fName").value.trim(), url=$("#fUrl").value.trim();
+  if(!name){ toast("Give the camera a name"); return; }
+  if(!url){ toast("Add the feed URL"); return; }
+  const cam={ id: editingId||uid(), name, loc:$("#fLoc").value.trim(), type:$("#fType").value, url, interval:parseInt($("#fInt").value,10)||2 };
+  if(editingId){ const i=STATE.cameras.findIndex(c=>c.id===editingId); STATE.cameras[i]=cam; }
+  else STATE.cameras.push(cam);
+  save(); closeCam(); render(); toast(editingId?"Camera updated":"Camera added");
+}
+function delCamera(){ if(!editingId)return; STATE.cameras=STATE.cameras.filter(c=>c.id!==editingId); save(); closeCam(); render(); toast("Camera removed"); }
+
+/* ---------- manage / export ---------- */
+function openMg(){ renderMg(); $("#mgJson").value=JSON.stringify(STATE.cameras,null,0); $("#mgScrim").classList.add("on"); }
+function closeMg(){ $("#mgScrim").classList.remove("on"); }
+function renderMg(){
+  const box=$("#mgList");
+  if(!STATE.cameras.length){ box.innerHTML='<div style="color:var(--muted);font-size:13px">No cameras yet.</div>'; return; }
+  box.innerHTML="";
+  STATE.cameras.forEach((c,i)=>{
+    const row=document.createElement("div"); row.style.cssText="display:flex;align-items:center;gap:8px;background:#0e1830;border:1px solid var(--line);border-radius:8px;padding:7px 9px;";
+    row.innerHTML='<span style="flex:1;min-width:0;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>'+esc(c.name)+'</b> <span style="color:var(--muted)">· '+esc(c.type)+(c.loc?' · '+esc(c.loc):'')+'</span></span>';
+    const up=btn("↑"),dn=btn("↓"),ed=btn("✏️"),rm=btn("🗑");
+    up.onclick=()=>{ if(i>0){ [STATE.cameras[i-1],STATE.cameras[i]]=[STATE.cameras[i],STATE.cameras[i-1]]; save(); renderMg(); render(); } };
+    dn.onclick=()=>{ if(i<STATE.cameras.length-1){ [STATE.cameras[i+1],STATE.cameras[i]]=[STATE.cameras[i],STATE.cameras[i+1]]; save(); renderMg(); render(); } };
+    ed.onclick=()=>{ closeMg(); openEdit(c.id); };
+    rm.onclick=()=>{ STATE.cameras=STATE.cameras.filter(x=>x.id!==c.id); save(); renderMg(); render(); };
+    [up,dn,ed,rm].forEach(b=>row.appendChild(b));
+    box.appendChild(row);
+  });
+  function btn(t){ const b=document.createElement("button"); b.className="btn small"; b.textContent=t; b.style.padding="4px 8px"; return b; }
+}
+function importJson(){
+  try{
+    const arr=JSON.parse($("#mgJson").value);
+    if(!Array.isArray(arr)) throw new Error("Expected a list");
+    STATE.cameras=arr.map(c=>({ id:c.id||uid(), name:String(c.name||"Camera"), loc:String(c.loc||""), type:c.type||"hls", url:String(c.url||""), interval:parseInt(c.interval,10)||2 }));
+    save(); renderMg(); render(); toast("Imported "+STATE.cameras.length+" cameras");
+  }catch(e){ toast("Import failed: "+e.message); }
+}
+
+function esc(s){ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function dismissBanner(){ STATE.bannerSeen=true; save(); $("#infoBanner").style.display="none"; }
+
+/* ---------- wire ---------- */
+$("#addBtn").onclick=openAdd;
+$("#manageBtn").onclick=openMg;
+$("#saveCam").onclick=saveCamera;
+$("#delCam").onclick=delCamera;
+$("#fType").onchange=syncType;
+$("#layoutSel").onchange=e=>{ STATE.layout=e.target.value; save(); render(); };
+$("#refreshAll").onclick=()=>{ render(); toast("Reloading feeds"); };
+$("#fsAll").onclick=()=>{ const el=document.documentElement; if(document.fullscreenElement){ document.exitFullscreen(); } else el.requestFullscreen&&el.requestFullscreen().catch(()=>{}); };
+$("#mgCopy").onclick=()=>{ const t=$("#mgJson"); t.select(); try{ navigator.clipboard.writeText(t.value); toast("Copied"); }catch(e){ document.execCommand("copy"); toast("Copied"); } };
+$("#mgImport").onclick=importJson;
+document.querySelectorAll(".scrim").forEach(s=>s.addEventListener("click",e=>{ if(e.target===s) s.classList.remove("on"); }));
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closeCam(); closeMg(); const t=document.querySelector(".tile.fs"); if(t)t.classList.remove("fs"); } });
+
+render();
+</script>
+</body>
+</html>
