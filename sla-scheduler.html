@@ -47,14 +47,27 @@
       border:1px dashed #94a3b8;border-radius:12px;background:#f8fafc;
       padding:8px 10px;margin-bottom:10px;
     }
-    .tray h3{margin:0 0 6px;font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:.03em;}
+    .tray-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    .tray h3{margin:0;font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:7px;}
+    .tray-badge{font-size:11px;font-weight:700;color:#9a3412;background:#ffedd5;border:1px solid #fdba74;border-radius:999px;padding:1px 8px;letter-spacing:0;}
+    .tray-tools{display:flex;gap:6px;align-items:center;}
+    .btn.tiny{padding:3px 9px;font-size:11px;line-height:1.4;}
+    #trayToggle{min-width:30px;justify-content:center;}
+    .tray-hint{font-size:11px;color:#94a3b8;margin:4px 0 6px;}
     .tray-jobs{display:flex;flex-wrap:wrap;gap:6px;}
+    .tray-jobs.scroll{max-height:120px;overflow-y:auto;padding:2px;align-content:flex-start;
+      border:1px solid #e2e8f0;border-radius:8px;background:#fff;}
+    .tray-jobs.collapsed{display:none;}
     .tray-job{
       background:#fff7ed;border:1px solid #fb923c;border-radius:8px;
-      padding:5px 9px;font-size:12px;cursor:grab;touch-action:none;user-select:none;
-      max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      padding:5px 8px 5px 9px;font-size:12px;cursor:grab;touch-action:none;user-select:none;
+      max-width:260px;display:inline-flex;align-items:center;gap:6px;
     }
+    .tray-job .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .tray-job b{color:#9a3412;}
+    .tray-x{flex:0 0 auto;color:#9a3412;opacity:.55;font-weight:700;cursor:pointer;
+      font-size:13px;line-height:1;padding:0 2px;border-radius:4px;}
+    .tray-x:hover{opacity:1;background:rgba(154,52,18,.12);}
     .tray-empty{font-size:12px;color:#94a3b8;padding:2px;}
 
     .scheduler-wrapper{overflow-x:auto;border-radius:12px;border:1px solid var(--border);background:#f9fafb;position:relative;}
@@ -150,13 +163,15 @@
 <div class="shell">
   <div class="card">
     <header>
-      <div>
-        <h1>SLA Scheduler</h1>
-        <div id="userLabel"></div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <a class="ml-back" href="sla-main.html" title="Back to Jobs">‹ Back</a>
+        <div>
+          <h1>SLA Scheduler</h1>
+          <div id="userLabel"></div>
+        </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" id="openMapBtn">🗺️ Map view</button>
-        <a class="ml-back" data-role="up" href="sla-main.html">← Jobs</a>
       </div>
     </header>
 
@@ -182,7 +197,14 @@
     </div>
 
     <div class="tray" id="trayBox">
-      <h3>Needs scheduling — drag onto an engineer's day</h3>
+      <div class="tray-head">
+        <h3>Needs scheduling <span id="trayCount" class="tray-badge" style="display:none"></span></h3>
+        <div class="tray-tools">
+          <button class="btn tiny" id="trayReinstate" style="display:none" title="Show any you've hidden">↩ Reinstate all</button>
+          <button class="btn tiny" id="trayToggle" title="Collapse / expand">▾</button>
+        </div>
+      </div>
+      <div class="tray-hint" id="trayHint">Drag a job onto an engineer's day. Tap ✕ to hide one from this list.</div>
       <div class="tray-jobs" id="trayJobs"><span class="tray-empty">Nothing waiting 🎉</span></div>
     </div>
 
@@ -383,24 +405,66 @@ function render(){
   renderTray();
 }
 
+// Jobs the user has hidden from the "needs scheduling" suggestion list
+// (client-side declutter only — the job itself is untouched). Persisted so
+// the tray stays tidy across reloads; "Reinstate all" clears it.
+const TRAY_HIDE_KEY = "slaTrayHidden";
+const TRAY_SCROLL_AFTER = 8;   // once more than this are waiting, cap + scroll
+function trayHidden(){ try{ return new Set(JSON.parse(localStorage.getItem(TRAY_HIDE_KEY) || "[]")); }catch{ return new Set(); } }
+function saveTrayHidden(set){ try{ localStorage.setItem(TRAY_HIDE_KEY, JSON.stringify([...set])); }catch{} }
+
 function renderTray(){
   const host = $("trayJobs");
   host.innerHTML = "";
   // Jobs with no schedule OR no engineer belong in the tray.
   const waiting = jobs.filter(j => !j.scheduledAt || !j.assignedEngineers.length);
+  const waitingIds = new Set(waiting.map(j => String(j.id)));
+
+  // Prune hidden ids that are no longer waiting, so a job that leaves and
+  // later returns to the tray shows again on its own.
+  let hidden = trayHidden();
+  const pruned = new Set([...hidden].filter(id => waitingIds.has(String(id))));
+  if(pruned.size !== hidden.size){ hidden = pruned; saveTrayHidden(hidden); }
+
+  const visible = waiting.filter(j => !hidden.has(String(j.id)));
+  const hiddenCount = waiting.length - visible.length;
+
+  // Header count + reinstate button
+  const badge = $("trayCount");
+  if(waiting.length){ badge.style.display = ""; badge.textContent = String(visible.length) + (hiddenCount ? ` (+${hiddenCount} hidden)` : ""); }
+  else badge.style.display = "none";
+  $("trayReinstate").style.display = hiddenCount ? "" : "none";
+
+  host.classList.toggle("scroll", visible.length > TRAY_SCROLL_AFTER);
+
   if(!waiting.length){
+    host.classList.remove("scroll");
     host.innerHTML = `<span class="tray-empty">Nothing waiting 🎉</span>`;
     return;
   }
+  if(!visible.length){
+    host.innerHTML = `<span class="tray-empty">All ${waiting.length} hidden — tap “Reinstate all” to show them.</span>`;
+    return;
+  }
   const escX = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  waiting.forEach(job => {
+  visible.forEach(job => {
     const el = document.createElement("div");
     el.className = "tray-job";
     el.dataset.jobId = job.id;
-    el.innerHTML = `<b>${escX(job.ref || job.id)}</b> ${escX(job.title || "")}`;
+    el.innerHTML = `<span class="lbl"><b>${escX(job.ref || job.id)}</b> ${escX(job.title || "")}</span>` +
+                   `<span class="tray-x" title="Hide from this list">✕</span>`;
     el.title = (job.ref ? job.ref + " · " : "") + job.title + (job.site ? " · " + job.site : "");
     attachPointerDrag(el, job, true);
     el.addEventListener("click", () => { if(!dragState.moved) openJobModal(job.id); });
+    const x = el.querySelector(".tray-x");
+    // Swallow drag/pointer so hiding never starts a drag or opens the job.
+    ["pointerdown","mousedown","touchstart"].forEach(ev =>
+      x.addEventListener(ev, e => { e.stopPropagation(); }, {passive:false}));
+    x.addEventListener("click", e => {
+      e.stopPropagation();
+      const h = trayHidden(); h.add(String(job.id)); saveTrayHidden(h);
+      renderTray();
+    });
     host.appendChild(el);
   });
 }
@@ -985,6 +1049,16 @@ async function init(){
   });
 
   $("engineerFilter").addEventListener("change", e => { engineerFilter = e.target.value; render(); });
+
+  // Needs-scheduling tray: reinstate hidden jobs + collapse/expand.
+  $("trayReinstate").addEventListener("click", () => { saveTrayHidden(new Set()); renderTray(); });
+  $("trayToggle").addEventListener("click", () => {
+    const box = $("trayJobs");
+    const collapsed = box.classList.toggle("collapsed");
+    $("trayHint") && ($("trayHint").style.display = collapsed ? "none" : "");
+    $("trayToggle").textContent = collapsed ? "▸" : "▾";
+  });
+
   $("openMapBtn").addEventListener("click", openMap);
   $("closeMapBtn").addEventListener("click", closeMap);
   document.querySelectorAll(".map-chip").forEach(chip => {

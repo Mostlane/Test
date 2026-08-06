@@ -207,6 +207,22 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   chips/filters/bulk-mark, job-view.html status chips (custom chips carry their
   own `--cc` colour), and the sla-jobedit.js status dropdown — all load them
   from GET /sla/categories. job-view/sla-main/sla-scheduler use `sla-jobedit.js?v=7`.
+  **UI polish (Aug 2026 layout pass):** sla-main.html base font bumped + set to
+  "Segoe UI" (was 13px/system-ui — "too small"), back button moved to the header
+  TOP-LEFT (grouped with the title in `.header-left`, no `data-role` so it stays
+  visible on desktop alongside the sidebar — the vehicles.html standard), and the
+  "📝 My Jobs" button is now gated to FIELD USERS only (engineers) via the
+  mlFieldUser logic (office/admins already see the whole board; SLA-only engineers
+  are redirected to route.html by the gate anyway). sla-scheduler.html
+  **"Needs scheduling" tray** was decluttered: header shows a live count badge,
+  each chip has a ✕ to HIDE it from the suggestion list (persisted client-side in
+  localStorage `slaTrayHidden`, pruned to still-waiting ids on render), a
+  **↩ Reinstate all** button (shown only when some are hidden) clears the set, a
+  ▾/▸ toggle collapses the tray, and the chip area becomes scrollable
+  (max-height) once >8 are waiting. Its back button was also moved top-left.
+  The standard back-button markup portal-wide is
+  `<a class="ml-back" href="…" title="Back">‹ Back</a>` placed FIRST in the header
+  (no `data-role` → visible on desktop).
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference
