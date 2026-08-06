@@ -420,6 +420,32 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
 - `stats.js` — /stats D1 aggregates + R2 storage totals (stats.html).
+- `cctv.js` — **CCTV Wall DVR snapshot proxy** (page **cctv.html**, 📹 tile +
+  sidebar, Full-Access `__fullOnly`). A browser on the HTTPS portal can't load a
+  DVR JPEG directly — mixed content (HTTPS page → HTTP DVR) AND Annke/Hikvision
+  snapshots need **digest** auth an `<img>` can't do — so the worker fetches the
+  snapshot server-side and streams it back over HTTPS, hiding the DVR login.
+  Config in app_config `cctv:sites` = `[{id,name,host,port,https,user,pass,
+  vendor,path,cameras:[{id,name,ch}]}]` (passwords stored server-side, NEVER
+  returned to the client). Routes: **GET /cctv/sites** (Full-Access; per-camera
+  **signed** snapshot URL via filesign, 24h), **POST /cctv/site** (upsert;
+  validates port against the CF-fetch allowlist 80/8080/8880/2052/2082/2086/2095
+  + HTTPS variants; auto-gens N cameras — Hik ch = n01, Dahua ch = n), **POST
+  /cctv/site/delete**, **POST /cctv/test** (live-fetch first camera), and **GET
+  /cctv/snapshot?key=&exp=&sig=** (PUBLIC_ROUTES, sig-verified, does the digest
+  handshake — includes a self-contained MD5 since WebCrypto has none — and
+  returns image/jpeg no-store). Vendor paths: hik
+  `/ISAPI/Streaming/channels/{ch}/picture`, dahua `/cgi-bin/snapshot.cgi?channel={ch}`,
+  or a custom `{ch}` template. Front-end cctv.html: split-screen grid (auto/
+  1×1…4×4), location tabs per site, per-tile reload/fullscreen, whole-wall
+  fullscreen, DVR-sites admin modal (add/edit/test/delete, view-only-user
+  guidance, port-forward note), plus a manual "other feed" path (HLS via lazy
+  hls.js/native, MJPEG, snapshot-poll, iframe embed, direct video) kept in
+  localStorage. **Ring/cloud-app cameras deliberately NOT supported** (no
+  browser-openable feed without an always-on bridge — documented in-page).
+  **Reachability requirement:** each DVR must be internet-reachable and forwarded
+  to a CF-fetch-allowed port (8080 easiest), HTTP preferred (worker→DVR is
+  server-side; a DVR self-signed HTTPS cert would fail the worker's cert check).
 - `menu-config` (in portal.js) — /menu-config: Full-Access shared list of
   hidden menu tiles (main.html reads it). Also **/notify/suppress**,
   **/notify/suppress/remove**, **/notify/overview** (notification-centre.html:

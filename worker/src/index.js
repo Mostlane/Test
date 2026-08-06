@@ -40,6 +40,7 @@ import * as push from "./routes/push.js";          // DONE  (web push subscripti
 import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timesheets + self-employed invoices)
 import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer messages — Inbox)
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
+import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -92,6 +93,7 @@ const ROUTES = [
   ["*", "/theme",      theme.handle],    // per-user colour theme + background
   ["*", "/hs/",        hs.handle],       // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
+  ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
@@ -241,6 +243,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/ts/invoice-file"],
   // SiteLog scan intake — HMAC-signed with PORTAL_BRIDGE_SECRET, verified in-handler.
   ["POST", "/ledger/scan"],
+  // DVR camera snapshots loaded by <img> tags — signed URL, verified in-handler.
+  ["GET", "/cctv/snapshot"],
 ];
 
 function isPublic(method, pathname) {
