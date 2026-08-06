@@ -24,7 +24,8 @@
       color:var(--text);
       background:transparent;
       background-size:180%;
-      font-size:15px;
+      font-size:16px;
+      line-height:1.45;
     }
     .shell{max-width:1280px;margin:20px auto 32px;padding:0 14px;}
     .card{
@@ -88,20 +89,21 @@
 
     /* ---- Table ---- */
     .table-wrapper{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
-    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:14px;background:#fff;}
+    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:15px;background:#fff;}
     thead th{
-      text-align:left;padding:10px;background:#f3f4f6;color:#374151;
-      border-bottom:1px solid #e5e7eb;font-weight:600;white-space:nowrap;font-size:12.5px;
+      text-align:left;padding:11px 12px;background:#f3f4f6;color:#374151;
+      border-bottom:1px solid #e5e7eb;font-weight:600;white-space:nowrap;font-size:13px;
       text-transform:uppercase;letter-spacing:.02em;
     }
-    tbody td{padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:top;}
+    tbody td{padding:13px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top;line-height:1.45;}
+    .sitename{font-weight:600;color:#0f172a;}
     tbody tr:hover{background:#f8fafc;}
-    .ref{font-family:monospace;font-size:13px;background:#f3f4f6;padding:2px 6px;border-radius:6px;display:inline-block;}
-    .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;font-size:15px;}
+    .ref{font-family:monospace;font-size:13.5px;background:#f3f4f6;padding:2px 7px;border-radius:6px;display:inline-block;}
+    .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;font-size:16px;}
     .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex:0 0 auto;}
-    .statusline{display:flex;align-items:center;font-size:13px;color:#4b5563;margin-top:3px;}
+    .statusline{display:flex;align-items:center;font-size:14px;color:#4b5563;margin-top:4px;}
     .muted{color:var(--muted);}
-    .small{font-size:12px;}
+    .small{font-size:13px;}
     .nowrap{white-space:nowrap;}
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
@@ -712,7 +714,7 @@ function render(){
       </td>
       <td class="nowrap">${prShort(j.priority)}</td>
       <td>
-        <div>${name || site}</div>
+        <div class="sitename">${name || site}</div>
         <div class="small muted">${addr}</div>
       </td>
       <td class="nowrap small">
