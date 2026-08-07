@@ -505,7 +505,8 @@
         eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
         paint: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
         help: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.6 2.6c-.8.3-.9 1-.9 1.6"/><path d="M12 17h.01"/>',
-        chart: '<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/>'
+        chart: '<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/>',
+        user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>'
       };
       function svg(name) { return '<svg viewBox="0 0 24 24">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -542,6 +543,7 @@
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
           { label: "My Documents", href: "my-documents.html", icon: "forms", always: true, match: ["my-documents.html"] },
+          { label: "You", href: "you.html", icon: "user", always: true, match: ["you.html"] },
           { label: "Settings", href: "personalise.html", icon: "paint", always: true, match: ["personalise.html", "theme.html"] },
           { label: "Help & guides", href: "help.html", icon: "help", always: true },
           { label: "View as user…", launch: "viewas", icon: "eye", ownerOnly: true }
