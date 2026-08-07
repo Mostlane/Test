@@ -45,17 +45,19 @@
     ".mlc-head h3{margin:0;font-size:15px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
     ".mlc-hbtn{background:rgba(255,255,255,.16);border:none;color:#fff;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;flex:none;display:flex;align-items:center;justify-content:center;}" +
     ".mlc-body{flex:1;overflow-y:auto;background:#f3f5f8;}" +
-    ".mlc-thread{display:flex;flex-direction:column;gap:8px;padding:12px 12px 16px;}" +
-    ".mlc-row{display:block;}.mlc-row.me{text-align:right;}.mlc-row.them{text-align:left;}" +
-    ".mlc-msg{display:inline-block;max-width:78%;text-align:left;vertical-align:top;}" +
-    ".mlc-bub{padding:8px 11px;border-radius:14px;font-size:14px;line-height:1.35;overflow-wrap:break-word;word-break:normal;white-space:pre-wrap;box-shadow:0 1px 1px rgba(0,0,0,.06);}" +
+    ".mlc-thread{display:flex;flex-direction:column;gap:8px;padding:12px 12px 16px;align-items:flex-start;}" +
+    ".mlc-row{max-width:82%;display:flex;flex-direction:column;min-width:0;}" +
+    ".mlc-row.me{align-self:flex-end;align-items:flex-end;}" +
+    ".mlc-row.them{align-self:flex-start;align-items:flex-start;}" +
+    ".mlc-line{display:flex;align-items:center;gap:5px;max-width:100%;min-width:0;}" +
+    ".mlc-row.me .mlc-line{flex-direction:row-reverse;}" +
+    ".mlc-bub{min-width:0;padding:8px 11px;border-radius:14px;font-size:14px;line-height:1.35;overflow-wrap:break-word;word-break:normal;white-space:pre-wrap;box-shadow:0 1px 1px rgba(0,0,0,.06);}" +
     ".mlc-row.me .mlc-bub{background:#1d4ed8;color:#fff;border-bottom-right-radius:5px;}" +
     ".mlc-row.them .mlc-bub{background:#fff;color:#0f172a;border-bottom-left-radius:5px;}" +
-    ".mlc-when{font-size:10.5px;color:#94a3b8;margin-top:3px;text-align:right;}" +
-    ".mlc-row.them .mlc-when{text-align:left;}" +
-    ".mlc-del{border:none;background:none;cursor:pointer;font-size:12px;opacity:.32;padding:0 4px;vertical-align:middle;line-height:1;}" +
+    ".mlc-when{font-size:10.5px;color:#94a3b8;margin-top:3px;}" +
+    ".mlc-del{border:none;background:none;cursor:pointer;font-size:12px;opacity:.32;padding:0 2px;line-height:1;flex:none;}" +
     ".mlc-del:hover{opacity:1;}" +
-    ".mlc-readmark{font-size:11px;color:#64748b;text-align:right;padding:0 2px 2px;font-weight:600;}" +
+    ".mlc-readmark{align-self:flex-end;font-size:11px;color:#64748b;padding:0 2px 2px;font-weight:600;}" +
     ".mlc-readmark.read{color:#1d4ed8;}" +
     ".mlc-typing{display:none;font-size:12.5px;color:#64748b;font-style:italic;padding:2px 14px 12px;}" +
     ".mlc-typing.on{display:block;}" +
@@ -201,8 +203,8 @@
       row.className = "mlc-row " + (m.mine ? "me" : "them");
       if (m.id) row.setAttribute("data-mid", m.id);
       var del = (IS_ADMIN && m.id) ? '<button class="mlc-del" data-del="' + m.id + '" title="Delete message">🗑</button>' : '';
-      var msg = '<div class="mlc-msg"><div class="mlc-bub">' + esc(m.body) + '</div><div class="mlc-when">' + esc(fmtWhen(m.at)) + '</div></div>';
-      row.innerHTML = m.mine ? (del + msg) : (msg + del);   // trash on the outer side
+      row.innerHTML = '<div class="mlc-line"><div class="mlc-bub">' + esc(m.body) + '</div>' + del + '</div>' +
+        '<div class="mlc-when">' + esc(fmtWhen(m.at)) + '</div>';
       host.appendChild(row);
     });
     scrollDown();
