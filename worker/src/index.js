@@ -39,6 +39,7 @@ import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
 import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timesheets + self-employed invoices)
 import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer messages — Inbox)
+import * as memos from "./routes/memos.js";        // DONE  (company memos: draft/send/sign, filed to My Documents)
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
@@ -65,6 +66,7 @@ const ROUTES = [
   ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
   ["*", "/push",       push.handle],      // web push subscriptions + test send
   ["*", "/messages",   messages.handle],  // office ↔ engineer messages (Inbox)
+  ["*", "/memos",      memos.handle],     // company memos (draft/send/sign)
   ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],

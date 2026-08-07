@@ -668,6 +668,27 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen);
 
+-- Company memos (routes/memos.js). A draft becomes 'sent' company-wide; each
+-- user must read + sign, which files a signed-acknowledgement PDF into their
+-- My Documents › Memos (R2 staffdocs/<tid>/user/<user>/Memos/). Self-migrating.
+CREATE TABLE IF NOT EXISTS memos (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  status     TEXT NOT NULL DEFAULT 'draft',   -- 'draft' | 'sent'
+  m_to       TEXT, m_from TEXT, m_cc TEXT, m_date TEXT, m_re TEXT,
+  body       TEXT,
+  created_by TEXT, created_at TEXT, sent_at TEXT
+);
+CREATE TABLE IF NOT EXISTS memo_acks (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  memo_id    INTEGER NOT NULL,
+  username   TEXT NOT NULL,
+  signed_at  TEXT,
+  doc_key    TEXT,                            -- the filed PDF in the signer's staff docs
+  sig_key    TEXT,                            -- the drawn signature PNG (admin record)
+  PRIMARY KEY (tenant_id, memo_id, username)
+);
+
 -- Per-user read position within a group conversation (routes/messages.js group chat).
 -- One row per (user, group, engineer-thread) — group_id is the chat_groups id (e.g. "office"),
 -- thread_key is the engineer whose Office thread it is. last_id = highest message id that user has read.

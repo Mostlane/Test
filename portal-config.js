@@ -1064,4 +1064,43 @@
       (document.body || document.documentElement).appendChild(s);
     } catch (e) {}
   })();
+
+  // ── Company memo gate ───────────────────────────────────────────────────────
+  // A sent company memo MUST be read and signed. If this user has an unsigned
+  // memo, show an UNAVOIDABLE, non-dismissible, non-snoozable overlay on every
+  // portal page (except the sign page itself) linking to memo-sign.html.
+  (function memoGate() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "memo-sign.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      nativeFetch(API + "/memos/pending", { headers: { Authorization: "Bearer " + token } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok || !d.memos || !d.memos.length) return;
+          if (document.getElementById("mlMemoGate")) return;
+          var m = d.memos[0];
+          var extra = d.memos.length > 1 ? "<p style='margin:8px 0 0;font-size:12.5px;color:#8aa0bd;'>You have " + d.memos.length + " memos to sign.</p>" : "";
+          var ov = document.createElement("div");
+          ov.id = "mlMemoGate";
+          ov.style.cssText = "position:fixed;inset:0;z-index:100050;background:rgba(3,12,28,.82);display:flex;align-items:center;justify-content:center;padding:22px;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;";
+          ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">' +
+            '<div style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:20px;"><div style="font-size:34px;">📢</div>' +
+            '<h2 style="margin:8px 0 0;font-size:19px;color:#fff;">Company memo</h2>' +
+            '<p style="margin:6px 0 0;font-size:13.5px;color:#cfe0f5;">There\'s a memo you must read and sign before you carry on.</p></div>' +
+            '<div style="padding:18px 20px 20px;">' +
+            '<div style="font-weight:700;color:#003366;font-size:15px;">Re: ' + esc(m.re || "Company memo") + '</div>' +
+            '<div style="color:#667085;font-size:13px;margin-top:2px;">From ' + esc(m.from || "the office") + '</div>' + extra +
+            '<a href="/memo-sign.html?id=' + m.id + '" style="display:block;text-align:center;margin-top:16px;background:#003366;color:#fff;text-decoration:none;border-radius:10px;padding:13px;font-weight:700;font-size:15px;">Read &amp; sign now</a>' +
+            '<p style="margin:10px 0 0;text-align:center;font-size:12px;color:#8a97a6;">This can\'t be dismissed — it must be signed.</p>' +
+            '</div></div>';
+          (document.body || document.documentElement).appendChild(ov);
+          try { document.documentElement.style.overflow = "hidden"; } catch (e) {}
+        }).catch(function () {});
+    } catch (e) {}
+  })();
 })();

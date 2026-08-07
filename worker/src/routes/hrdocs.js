@@ -20,7 +20,7 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 
-const DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Other"];
+const DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Memos", "Other"];
 
 function jr(obj, headers, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });
