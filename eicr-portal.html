@@ -354,12 +354,28 @@ async function openVersionsModal(code){
     host.querySelectorAll('.verdel').forEach(a=>a.onclick=async ev=>{ ev.preventDefault(); if(!confirm('Delete this previous version? (the current one is kept)'))return; await authFetch('/compliance/file-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:+a.dataset.id})}); modal.remove(); openVersionsModal(code); loadFromPortal(); });
   }catch(e){ modal.querySelector('#vlist').innerHTML='<p>Could not load.</p>'; }
 }
+/* Normalise any stored due date to UK day-first DD/MM/YYYY for display. Handles
+   ISO (YYYY-MM-DD, as the auto-advance stores it) and DD/MM/YY(YY) or DD-MM-YY
+   from the migrated data — so every cell reads the same way round. Unknown text
+   is left untouched. (Slashes + 4-digit year so it round-trips through the edit
+   save + the overdue calc, both of which parse DD/MM/YYYY.) */
+function fmtDue(s){
+  s = String(s == null ? '' : s).trim();
+  if (!s) return '';
+  let d, m, y, mm;
+  if ((mm = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/.exec(s))) { y=+mm[1]; m=+mm[2]; d=+mm[3]; }        // ISO YYYY-MM-DD
+  else if ((mm = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(s))) { d=+mm[1]; m=+mm[2]; y=+mm[3]; if (y<100) y+=2000; } // DD/MM/YY(YY)
+  else return s;
+  if (!(m>=1 && m<=12 && d>=1 && d<=31)) return s;
+  const p = n => String(n).padStart(2,'0');
+  return `${p(d)}/${p(m)}/${y}`;
+}
 /* HTML for a date cell, with a 📄 link appended when a cert is on file. */
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
   const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
   const link = has ? ` <a class="cert-link" href="#" data-code="${code}" data-type="${t}" title="Open certificate">📄</a>` : '';
-  return `${val || ''}${link}`;
+  return `${fmtDue(val)}${link}`;
 }
 
 /* ===== Helpers ===== */
