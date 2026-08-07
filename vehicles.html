@@ -99,7 +99,7 @@
     <a class="ml-back" href="main.html" title="Back">‹ Back</a>
     <h1>🚐 Vehicles</h1>
     <div class="head-actions">
-      <a class="btn small" href="van-checks.html">Van Checks</a>
+      <a class="btn small" id="vanChecksBtn" href="van-checks.html" style="position:relative;">Van Checks</a>
       <a class="btn small" id="fuelLink" href="fuel-cards.html">⛽ Fuel Cards</a>
       <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
@@ -701,6 +701,36 @@
   document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);
+
+  // Red badge on the "Van Checks" button = outstanding weekly checks (same count
+  // as the Vehicles menu tile). Clears once the van-checks page has been opened
+  // for this week (per-user seen marker; mirrors main.html's tile logic).
+  async function badgeVanChecks(){
+    try{
+      const [d, pr] = await Promise.all([
+        aFetch("/vancheck/attention").then(r=>r.json()).catch(()=>null),
+        aFetch("/prefs").then(r=>r.json()).catch(()=>null)
+      ]);
+      if(!d || !d.ok) return;
+      const prefs = (pr && pr.ok && pr.prefs) || {};
+      const localSeen = localStorage.getItem("mostlaneVcSeen") || "";
+      const seenWk = String(localSeen) > String(prefs.vcSeen||"") ? localSeen : (prefs.vcSeen||"");
+      const missingN = (d.missing && seenWk !== d.week) ? d.missing.length : 0;
+      const n = (d.mineDue?1:0) + missingN;
+      const btn = $("vanChecksBtn"); if(!btn) return;
+      const old = btn.querySelector(".vc-badge"); if(old) old.remove();
+      if(n>0){
+        const b=document.createElement("span");
+        b.className="vc-badge";
+        b.textContent = n>9 ? "9+" : n;
+        b.style.cssText="position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;padding:0 5px;"+
+          "background:#e11900;color:#fff;border-radius:999px;font:700 11px/20px system-ui,sans-serif;"+
+          "text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);";
+        btn.appendChild(b);
+      }
+    }catch(e){}
+  }
+  window.addEventListener("DOMContentLoaded", badgeVanChecks);
   </script>
 </body>
 </html>

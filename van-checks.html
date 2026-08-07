@@ -172,7 +172,21 @@
     } catch (e) { location.href = "/main.html"; return; }
     WEEK = mondayOf(new Date().toISOString().slice(0, 10));
     load();
+    markVanCheckSeen();   // viewing this page acknowledges this week's outstanding list → clears the badge
   })();
+
+  // Record (per user, cross-device via /prefs + a localStorage mirror) that
+  // this week's van-check list has been seen, so the red badge on the Vehicles
+  // tile / sidebar / "Van Checks" button clears until next week (or the count
+  // changes). Uses the SERVER's week string so the badge comparison matches.
+  function markVanCheckSeen() {
+    authFetch("/vancheck/attention").then(r => r.json()).then(d => {
+      if (!d || !d.ok || !d.week) return;
+      try { localStorage.setItem("mostlaneVcSeen", d.week); } catch (e) {}
+      authFetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vcSeen: d.week }) }).catch(() => {});
+    }).catch(() => {});
+  }
 
   g("remindBtn").onclick = async () => {
     if (!confirm("Send a van-check reminder now to everyone who hasn't done this week's check?")) return;

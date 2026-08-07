@@ -720,6 +720,16 @@ NOT EXISTS + ALTER on read) — no manual SQL needed.
   /holiday/all (pending + staff cancellations). "Seen" markers are per-USER
   via /prefs (server), mirrored in localStorage (newer timestamp wins) — so
   dealing with something on one device clears it on all devices.
+- **Van-check badge drill-down (Aug 2026)**: the Vehicles tile / sidebar badge
+  (`/vancheck/attention`: driver's own `mineDue` + admin `missing.length`) is now
+  MIRRORED onto the **"Van Checks" button inside vehicles.html** (`#vanChecksBtn`,
+  same count). The admin "missing this week" portion clears once they open
+  **van-checks.html** for the week — a per-user seen marker **`vcSeen`** (=/prefs
+  the server's `week` string + localStorage `mostlaneVcSeen` mirror, newer wins),
+  applied in main.html (tile + note), portal-config.js (sidebar) and vehicles.html
+  (button); van-checks.html writes it on load. The driver's own `mineDue` is NOT
+  cleared by viewing (it clears when they submit their check). Week-scoped, so it
+  re-appears next week. No worker change (/prefs merges arbitrary keys).
 - **Attention gate** (main.html): phones get a BLOCKING overlay listing
   outstanding items (no dismiss button); desktop gets a dismissible corner
   panel (sessionStorage sig). "💤 Remind me later" = 4h snooze, max 2 per
