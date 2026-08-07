@@ -181,7 +181,8 @@ export async function handle(request, env, ctx, url, sess) {
     const beforeId = payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
-    ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
+    ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
+    if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
   }
 
@@ -191,7 +192,8 @@ export async function handle(request, env, ctx, url, sess) {
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
-    ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
+    ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
+    if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
 
@@ -485,7 +487,11 @@ export async function handle(request, env, ctx, url, sess) {
     // are normalised the same way so "John Thorn" matches "john.thorn".
     const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
-    let jobs = (await listJobs(env, tenantId)).filter(j => assignedList(j).some(a => normId(a) === engineer));
+    const all = await listJobs(env, tenantId);
+    let jobs = all.filter(j => assignedList(j).some(a => normId(a) === engineer));
+    // Hide jobs whose release time hasn't arrived / whose turn in the queue
+    // hasn't come — the engineer simply doesn't see them yet.
+    jobs = jobs.filter(j => releaseVisibleNow(j, all));
     if (date) {
       jobs = jobs.filter(j => {
         if (!j.scheduledAt) return false;
@@ -593,11 +599,13 @@ export async function handle(request, env, ctx, url, sess) {
       assignedEngineers: Array.isArray(body.assignedEngineers)
         ? body.assignedEngineers.filter(Boolean)
         : (body.assignedTo !== undefined ? (body.assignedTo ? [body.assignedTo] : []) : undefined),
+      release: body.release,
       changedBy: body.changedBy || "scheduler"
     };
     const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch);
-    if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+    if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
+    if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
@@ -884,7 +892,23 @@ export async function handle(request, env, ctx, url, sess) {
       }
 
       const updated = await patchJob(env, tenantId, id, body);
-      if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+      // Release-aware notify: announce a gated job when it first becomes visible;
+      // only push "newly added engineer" for an already-announced job.
+      if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
+      if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+      // Stacked queue: when a job is finished, the engineer's NEXT same-day
+      // "after previous" job unlocks — announce it (fires its assignment push).
+      if (updated && jobIsFinished(updated) && !jobIsFinished(before || {})) {
+        ctx?.waitUntil((async () => {
+          const all = await listJobs(env, tenantId);
+          const engs = assignedList(updated).map(normId);
+          for (const o of all) {
+            if (o.releaseNotified || o.release?.mode !== "afterPrev") continue;
+            if (!assignedList(o).some(a => engs.includes(normId(a)))) continue;
+            await reconcileRelease(env, tenantId, o, all).catch(() => {});
+          }
+        })());
+      }
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
       if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       // Tell every office/admin when a job has just been parked pending approval.
@@ -1198,6 +1222,130 @@ function assignedList(job) {
   return job.assignedTo ? [job.assignedTo] : [];
 }
 
+/* ================= JOB RELEASE (visibility scheduling) =================
+   A job can carry a `release` object controlling WHEN its assigned engineers
+   first see it (and get the assignment push):
+     { mode:'now' }        – default: visible immediately (same as no release)
+     { mode:'at', at:ISO }  – visible from an exact instant (custom date/time)
+     { mode:'dayBefore' }   – visible from 17:00 Europe/London the day before the
+                              scheduled day (recomputed live so it tracks reschedules)
+     { mode:'afterPrev' }   – visible once every EARLIER same-day job for that
+                              engineer is finished (the "stacked / drip" queue)
+   `job.releaseNotified` flips true the first time the job is both visible AND
+   has an engineer, when the assignment push fires. */
+function londonOffsetMs(utcMs) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/London", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(new Date(utcMs)).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
+  const hh = p.hour === "24" ? 0 : Number(p.hour);
+  return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hh, Number(p.minute), Number(p.second)) - utcMs;
+}
+function londonInstant(y, mo, d, h, mi) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
+  return guess - londonOffsetMs(guess);   // one correction is exact except across the DST second
+}
+function londonFivePmDayBefore(schedISO) {
+  const s = Date.parse(schedISO); if (!Number.isFinite(s)) return null;
+  const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(s)).split("-").map(Number);
+  const prev = new Date(Date.UTC(y, m - 1, d)); prev.setUTCDate(prev.getUTCDate() - 1);
+  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), 17, 0);
+}
+// The instant a time-based release becomes visible (ms), or null for now/afterPrev.
+function releaseInstant(job) {
+  const r = job && job.release;
+  if (!r || !r.mode || r.mode === "now") return null;
+  if (r.mode === "at") { const t = Date.parse(r.at); return Number.isFinite(t) ? t : null; }
+  if (r.mode === "dayBefore") return job.scheduledAt ? londonFivePmDayBefore(job.scheduledAt) : null;
+  return null;
+}
+const RELEASE_DONE = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+function jobIsFinished(job) { return RELEASE_DONE.has(String(job.status || "").toLowerCase()); }
+function sameSchedDay(a, b) {
+  if (!a.scheduledAt || !b.scheduledAt) return false;
+  return new Date(a.scheduledAt).toISOString().slice(0, 10) === new Date(b.scheduledAt).toISOString().slice(0, 10);
+}
+// afterPrev: is there an earlier same-day job for any of these engineers still open?
+function hasEarlierOpenJob(job, engineers, allJobs) {
+  if (!job.scheduledAt) return false;
+  const engSet = new Set(engineers.map(normId));
+  const myStart = Date.parse(job.scheduledAt);
+  return allJobs.some(o => o.id !== job.id && sameSchedDay(o, job)
+    && Date.parse(o.scheduledAt) < myStart
+    && assignedList(o).some(a => engSet.has(normId(a)))
+    && !jobIsFinished(o));
+}
+// Is the job visible to its engineers right now? (allJobs only needed for afterPrev)
+function releaseVisibleNow(job, allJobs) {
+  const r = job && job.release;
+  if (!r || !r.mode || r.mode === "now") return true;
+  if (r.mode === "at" || r.mode === "dayBefore") { const t = releaseInstant(job); return t == null || t <= Date.now(); }
+  if (r.mode === "afterPrev") return !hasEarlierOpenJob(job, assignedList(job), allJobs || []);
+  return true;
+}
+function releaseGatedNow(job) {
+  const r = job && job.release;
+  if (!r || !r.mode || r.mode === "now") return false;
+  return true;   // any explicit non-'now' release is gated until reconcile clears it
+}
+function releaseLabel(job) {
+  const r = job && job.release; if (!r || !r.mode || r.mode === "now") return "";
+  if (r.mode === "afterPrev") return "Shown after the previous job that day is done";
+  const t = releaseInstant(job);
+  if (t == null) return "Scheduled release";
+  const when = new Date(t).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
+  return (t <= Date.now() ? "Released " : "Hidden until ") + when;
+}
+
+// Resolve SLA engineer ids (names / dotted forms) → canonical portal usernames.
+async function engUsernameMap(env, tid) {
+  const map = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      map[normId(u.username)] = u.username;
+      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      if (full) map[normId(full)] = u.username;
+    }
+  } catch {}
+  return map;
+}
+// Fire the "new job" push to a specific set of engineer ids.
+async function pushJobToEngineers(env, tid, job, engineerIds) {
+  if (!engineerIds.length) return;
+  const map = await engUsernameMap(env, tid);
+  const ref = job.helpdeskRef || job.id;
+  const site = job.siteName || job.siteCode || "";
+  const body = `${ref}${site ? " — " + site : ""}${job.priority ? " · " + job.priority : ""}. Tap to view.`;
+  for (const eng of engineerIds) {
+    const username = map[normId(eng)] || eng;
+    await sendToUser(env, tid, username, {
+      title: "New job assigned to you", body,
+      url: "/engineer-jobs.html?job=" + encodeURIComponent(job.id), tag: "sla-job:" + job.id
+    });
+  }
+}
+// First-time announcement: if the job is visible + has engineers + hasn't been
+// announced, push ALL its engineers and mark it notified (persisting the flag).
+async function reconcileRelease(env, tid, job, allJobs) {
+  if (!job || job.releaseNotified) return false;
+  const engs = assignedList(job);
+  if (!engs.length) return false;
+  if (!releaseVisibleNow(job, allJobs || await listJobs(env, tid))) return false;
+  await pushJobToEngineers(env, tid, job, engs);
+  job.releaseNotified = true;
+  await saveJob(env, tid, job);
+  return true;
+}
+// Cron sweep: announce any timed job whose release has now passed, and re-check
+// afterPrev queues (fallback in case a completion happened while offline).
+export async function sweepJobReleases(env, tid = 1) {
+  const jobs = await listJobs(env, tid);
+  for (const j of jobs) {
+    if (j.releaseNotified || !assignedList(j).length) continue;
+    const r = j.release; if (!r || !r.mode || r.mode === "now") continue;
+    await reconcileRelease(env, tid, j, jobs).catch(() => {});
+  }
+}
+
 // Push every engineer NEWLY added to a job (added since `before`), so editing a
 // job for other reasons doesn't re-notify. SLA stores engineer ids as names or
 // dotted forms; resolve each to the canonical portal username the push
@@ -1350,6 +1498,13 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
     scheduledAt,
     scheduledEnd,
+    // Visibility scheduling (carried across re-saves). A changed release re-arms
+    // the announcement push; releaseNotified tracks whether it has fired.
+    release: (body.release !== undefined
+      ? (body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || undefined } : undefined)
+      : existing?.release),
+    releaseNotified: (body.release !== undefined && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null))
+      ? false : (existing?.releaseNotified || false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -1381,6 +1536,14 @@ async function patchJob(env, tenantId, id, patch) {
   } else if (patch.assignedTo !== undefined) {
     job.assignedTo = patch.assignedTo;
     job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
+  }
+  // Visibility scheduling: when it becomes visible to the engineer. Changing the
+  // release re-arms `releaseNotified` so the assignment push fires at the new time.
+  if (patch.release !== undefined) {
+    const prev = job.release ? JSON.stringify(job.release) : "";
+    if (!patch.release || !patch.release.mode || patch.release.mode === "now") job.release = undefined;
+    else job.release = { mode: patch.release.mode, at: patch.release.at || undefined };
+    if ((job.release ? JSON.stringify(job.release) : "") !== prev) job.releaseNotified = false;
   }
   // Every job gets a finish time. If the start moves and no explicit end came
   // with it, slide the end to keep the same duration (default 1 hour).
@@ -1707,7 +1870,14 @@ function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
   const state = (job.status === "Closed Jobs" || job.status === "Complete")
     ? "OK" : (Date.now() > target ? "BREACHED" : "OK");
-  return { ...job, sla: { state, now: new Date().toISOString() } };
+  // Release info for the office board (engineers never receive hidden jobs, so
+  // this only surfaces on the admin views): mode, computed instant, label.
+  let releaseView;
+  if (job.release && job.release.mode && job.release.mode !== "now") {
+    const t = releaseInstant(job);
+    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job) };
+  }
+  return { ...job, releaseView, sla: { state, now: new Date().toISOString() } };
 }
 
 /* ================= CONFIG (D1) ================= */

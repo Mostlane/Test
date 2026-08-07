@@ -157,6 +157,9 @@ export default {
     // close sessions a scan-out ended, and feed project scans into the
     // engineer timesheet. Idempotent; fails soft when SiteLog is unset/down.
     ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
+    // Announce jobs whose scheduled release time has now passed (fires the
+    // assignment push at release, and re-checks the stacked "after previous" queue).
+    ctx.waitUntil(sla.sweepJobReleases(env, 1).catch(e => console.error("scheduled job-release sweep:", e)));
   },
 };
 

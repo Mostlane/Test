@@ -6,7 +6,7 @@
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=7"></script>
+  <script src="sla-jobedit.js?v=8"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -107,6 +107,7 @@
     .nowrap{white-space:nowrap;}
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
+    .rel-badge{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#8a5a00;background:#fff6e5;border:1px solid #f0d9a6;border-radius:999px;padding:1px 8px;vertical-align:middle;}
     .arch-tag{display:inline-block;font-size:10px;font-weight:700;color:#475569;background:#eef2f7;border:1px solid #d7dee7;border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;}
     tr.archrow{background:#fafbfc;} tr.archrow td{color:#475569;}
     .archrow .jobdesc{cursor:pointer;}
@@ -710,7 +711,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}</div>
+        <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}</div>
       </td>
       <td class="nowrap">${prShort(j.priority)}</td>
       <td>

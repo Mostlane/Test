@@ -106,6 +106,14 @@
   .mlje-chk{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#334155;margin-top:10px;cursor:pointer;}
   .mlje-chk input{width:auto;}
   .mlje-hint{font-size:12px;color:#64748b;margin-top:4px;}
+  .mlje-visbtn{border:1px solid #cbd5e1;border-radius:8px;padding:9px 12px;font:600 13.5px inherit;cursor:pointer;background:#f1f6ff;color:#003b82;text-align:left;width:100%;margin-top:2px;}
+  .mlje-visbtn.set{background:#e6f6ec;color:#0a6b33;border-color:#b6e3c6;}
+  .mlje-vispanel{border:1px solid #cbd5e1;border-radius:8px;padding:6px 10px;margin-top:6px;background:#fff;}
+  .mlje-visopt{display:flex;align-items:flex-start;gap:9px;padding:8px 2px;border-top:1px solid #eef2f7;margin:0;cursor:pointer;font-weight:500;}
+  .mlje-visopt:first-child{border-top:none;}
+  .mlje-visopt input{width:auto;margin:3px 0 0;flex:0 0 auto;transform:scale(1.15);}
+  .mlje-visopt span{display:flex;flex-direction:column;}
+  .mlje-visopt small{color:#64748b;font-size:12px;font-weight:400;margin-top:1px;}
   .mlje-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px;}
   .mlje-btn{border:1px solid #cbd5e1;border-radius:999px;padding:9px 16px;font-size:14px;cursor:pointer;background:#f8fafc;color:#0f172a;}
   .mlje-btn.primary{background:#003b82;color:#fff;border-color:#003b82;}
@@ -152,6 +160,16 @@
           <input id="mljeSchedEnd" type="time" step="300" aria-label="Finish time">
         </div>
         <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (15&nbsp;min / 1&nbsp;day steps). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
+
+        <label style="margin-top:12px;">When the engineer sees this job</label>
+        <button type="button" id="mljeVisBtn" class="mlje-visbtn">👁 Visible now ▾</button>
+        <div id="mljeVisPanel" class="mlje-vispanel" style="display:none;">
+          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="now" checked> <span><b>Visible now</b><small>The engineer sees it straight away (default).</small></span></label>
+          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="dayBefore"> <span><b>5pm the day before</b><small>Hidden until 17:00 the evening before the scheduled day.</small></span></label>
+          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="at"> <span><b>At a set date &amp; time…</b><small>You choose exactly when it appears.</small></span></label>
+          <input type="datetime-local" id="mljeVisAt" style="display:none;margin:4px 0 4px 30px;width:calc(100% - 30px);">
+          <label class="mlje-visopt"><input type="radio" name="mljeVis" value="afterPrev"> <span><b>After the previous job that day</b><small>Stacks the day: this appears once the engineer finishes their earlier job. Set this on each queued job to drip them out one-by-one.</small></span></label>
+        </div>
       </div>
 
       <div class="mlje-site">
@@ -227,8 +245,28 @@
     $("mljeSchedClear").addEventListener("click", () => {
       $("mljeSchedDate").value = ""; $("mljeSchedStart").value = ""; $("mljeSchedEnd").value = "";
     });
+    // Visibility ("release") control: toggle the panel, show the datetime box only
+    // for "At a set time", and reflect the chosen mode on the button.
+    $("mljeVisBtn").addEventListener("click", () => {
+      const p = $("mljeVisPanel"); p.style.display = p.style.display === "none" ? "block" : "none";
+    });
+    back.querySelectorAll('input[name="mljeVis"]').forEach(r => r.addEventListener("change", () => {
+      $("mljeVisAt").style.display = (visMode() === "at") ? "block" : "none";
+      updateVisBtn();
+    }));
+    $("mljeVisAt").addEventListener("change", updateVisBtn);
     document.addEventListener("keydown", e => { if (e.key === "Escape" && $("mljeBack").classList.contains("show")) close(); });
     wheelify(back);
+  }
+  function visMode() { const c = document.querySelector('input[name="mljeVis"]:checked'); return c ? c.value : "now"; }
+  function updateVisBtn() {
+    const m = visMode(), btn = $("mljeVisBtn");
+    let label = "👁 Visible now";
+    if (m === "dayBefore") label = "🕔 5pm the day before";
+    else if (m === "afterPrev") label = "⛓ After the previous job that day";
+    else if (m === "at") { const v = $("mljeVisAt").value; label = v ? "🕒 " + new Date(v).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "🕒 At a set time…"; }
+    btn.textContent = label + " ▾";
+    btn.classList.toggle("set", m !== "now");
   }
 
   /* ---- mouse-wheel stepping on date/time boxes ----
@@ -395,6 +433,15 @@
     const tgt = job.targetAt ? new Date(job.targetAt) : null;
     $("mljeDueHint").textContent = (tgt && !isNaN(tgt))
       ? ` · SLA due by ${pd(tgt)} ${p2(tgt.getHours())}:${p2(tgt.getMinutes())}` : "";
+    // Visibility ("release") control — reflect the job's current setting.
+    const rel = job.release || {};
+    const relMode = (rel.mode && rel.mode !== "now") ? rel.mode : "now";
+    const relRadio = document.querySelector('input[name="mljeVis"][value="' + relMode + '"]');
+    if (relRadio) relRadio.checked = true;
+    $("mljeVisAt").value = (relMode === "at" && rel.at) ? toLocalInput(rel.at) : "";
+    $("mljeVisAt").style.display = (relMode === "at") ? "block" : "none";
+    $("mljeVisPanel").style.display = "none";
+    updateVisBtn();
     $("mljeEngineers").innerHTML = '<span class="mlje-hint">Loading engineers…</span>';
     $("mljeSiteName").value = job.siteName || "";
     $("mljeSiteAddr").value = job.address || "";
@@ -514,9 +561,17 @@
     }
     const assignedEngineers = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
 
+    // Visibility ("release"): null = visible now, else the chosen mode.
+    let release = null;
+    const vm = visMode();
+    if (vm === "at") { const v = $("mljeVisAt").value; release = v ? { mode: "at", at: new Date(v).toISOString() } : null; }
+    else if (vm === "dayBefore") release = { mode: "dayBefore" };
+    else if (vm === "afterPrev") release = { mode: "afterPrev" };
+
     // Patch the job with every edited detail.
     const raisedLocal = $("mljeRaised").value;
     const payload = {
+      release: release,
       helpdeskRef: $("mljeRef").value.trim() || undefined,
       description: $("mljeDesc").value.trim() || undefined,
       priority: $("mljePriority").value,
