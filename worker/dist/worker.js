@@ -11794,6 +11794,14 @@ async function isFull3(env, tid, me) {
     return false;
   }
 }
+function importTokenOK(request, env) {
+  const secret = (env.COMPLIANCE_IMPORT_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+  if (!secret) return false;
+  const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  let diff = tok.length === secret.length ? 0 : 1;
+  for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+  return diff === 0;
+}
 async function handle24(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -11812,9 +11820,18 @@ async function handle24(request, env, ctx, url, sess) {
       "Cache-Control": "private, max-age=3600"
     } });
   }
-  if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
-  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
-  const me = sess.user.username;
+  const viaToken = !sess && importTokenOK(request, env);
+  if (!sess && !viaToken) {
+    try {
+      sess = await requireSession(env, request);
+    } catch {
+      sess = null;
+    }
+  }
+  if (!sess && !viaToken) return jr6({ error: "Not authenticated" }, headers, 401);
+  const tid = sess ? sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request) : await resolveTenantId(env, request);
+  const me = sess ? sess.user.username : "import-bot";
+  const canWrite = viaToken || await isFull3(env, tid, me);
   await ensure5(env);
   if (sub === "/has" && method === "GET") {
     const source = q.get("source") || "";
@@ -11858,7 +11875,7 @@ async function handle24(request, env, ctx, url, sess) {
     return jr6({ ok: true, url: await signedFileUrl(env, url.origin, "/compliance/file", row.r2_key) }, headers);
   }
   if (sub === "/file" && method === "POST") {
-    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
     let form;
     try {
       form = await request.formData();
@@ -11885,7 +11902,7 @@ async function handle24(request, env, ctx, url, sess) {
     return jr6({ ok: true, id: res.meta ? res.meta.last_row_id : null, key, code, type }, headers, 201);
   }
   if (sub === "/file-delete" && method === "POST") {
-    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const id = parseInt(b.id, 10);
     if (!id) return jr6({ error: "id required" }, headers, 400);
@@ -12175,7 +12192,12 @@ var PUBLIC_ROUTES = [
   // SiteLog scan intake — HMAC-signed with PORTAL_BRIDGE_SECRET, verified in-handler.
   ["POST", "/ledger/scan"],
   // Compliance certificates streamed inline — signed URL, verified in-handler.
-  ["GET", "/compliance/file"]
+  ["GET", "/compliance/file"],
+  // Compliance batch import (SharePoint→R2 extractor) — COMPLIANCE_IMPORT_TOKEN
+  // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
+  // (The handler re-resolves a real session for logged-in admins on these too.)
+  ["GET", "/compliance/has"],
+  ["POST", "/compliance/file"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

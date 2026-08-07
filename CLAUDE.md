@@ -514,13 +514,28 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   /compliance/index once on load (non-blocking) and shows a 📄 link on each date
   cell that has a cert → opens /compliance/file-url in a new tab (via a local
   `authFetch()` with the Bearer token; visible to all viewers, edit still gated).
-  **Phase B (blocked on Microsoft Graph app-registration, Sites.Read.All):** a
-  server-side extractor walks the TSC Compliance tree (driveId
-  `b!NpDXAs0EE0OL71TDQZYd-bdykHFlnd9FjsgSt11fwgt0jcCyS10IR5OEI-3NYzYC`), pulls
-  the store `code` from each folder name (`<code> <name>`, e.g. "9688 Southampton
-  Above Bar") + the `type` from its subfolder ("5 Year"/"PAT"/"EM"…), and POSTs
-  each cert to /compliance/file. The connector can't bulk-transfer (1MB/file cap
-  + rate limits) — needs the Graph app registration.
+  **Phase B extractor — BUILT (`tools/compliance-extractor/extract.mjs`,
+  dependency-free Node 18+):** walks the TSC Compliance tree via Microsoft Graph
+  (driveId `b!NpDXAs0EE0OL71TDQZYd-bdykHFlnd9FjsgSt11fwgt0jcCyS10IR5OEI-3NYzYC`,
+  ROOT_PATH "Mostlane Construction/TSC Compliance") and streams each cert to POST
+  /compliance/file. **Careful about the real folder variance** (confirmed live):
+  mostly `group/<code> name/TYPE/files`, but also **type-first** top-level folders
+  (PFS/EV Maintenance/PV Maintenance → store subfolders often with **NO code**),
+  filenames that carry their own `code~TYPE~DD-MM-YY` (and whose code can DISAGREE
+  with the folder), and a special "Lakeside Head Office". So it classifies by
+  MEANING across the whole path + filename (type = deepest known-type folder else
+  from the filename; code = first coded folder else filename), **quarantines
+  anything with no confident code** to `out/unmatched.csv` instead of guessing,
+  and flags folder-vs-filename code clashes to `out/mismatches.csv`. Runs
+  **dry-run by default** (classify + CSV reports, download nothing) → review →
+  `--commit`. Idempotent (server de-dupes on the SharePoint item id via `source`;
+  script pre-checks /compliance/has). Auths to the portal with a machine-to-machine
+  **COMPLIANCE_IMPORT_TOKEN** (worker secret; POST /compliance/file + GET
+  /compliance/has are PUBLIC_ROUTES that verify it in-handler, timing-safe, same
+  shape as /sla/inbound — a logged-in admin session still works too). `--selftest`
+  asserts the classifier offline (no creds). Needs an Azure app registration
+  (Graph application perm Sites.Read.All, admin-consented) — the M365 connector
+  can't bulk-transfer (1MB/file cap + rate limits). See the tool's README.md.
 - `menu-config` (in portal.js) — /menu-config: Full-Access shared list of
   hidden menu tiles (main.html reads it). Also **/notify/suppress**,
   **/notify/suppress/remove**, **/notify/overview** (notification-centre.html:
@@ -1008,7 +1023,10 @@ is kept as documentation of the hot pages.)
 
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
-SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN** (secrets); EMAIL_FROM, R2_PUBLIC_BASE,
+SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
+**COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
+extractor; POST /compliance/file + GET /compliance/has verify it in-handler)
+(secrets); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB
