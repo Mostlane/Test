@@ -1122,7 +1122,16 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
      service intervals + mileage from van checks, repair docs, drag order,
      driver assignment history, fleet report + van timesheets all in-portal.
      Import from the old worker is a one-tap button. Still open: vehicles-fuel
-     data, and EICR/compliance (eicr-portal*.html on old mostlane-pos KV).
+     data. **EICR/compliance (Aug 2026 tidy):** compliance.html rebuilt in the
+     portal look; **eicr-portal.html** ("Southern Co-op") tidied — portal header
+     + `ml-back`, Segoe UI, decluttered/labelled filter rows (Due · Store type ·
+     Compliance) with actions split into a utility bar, sticky Store-Code column,
+     **removed the service-worker-killer** (it was unregistering the portal's SW
+     → killed offline/push on that device) and **replaced the hard-coded "2025"
+     edit PIN with permission-based editing** (`Compliance`|`FullAccess`; Edit
+     hidden for everyone else). Data STILL lives on the old mostlane-pos KV worker
+     (client-side fetch/update/delete) — moving it into portal D1 is the open
+     next step. Stray eicr-portal-{final,fixed,updated}.html deleted.
    - Van-check walkaround already replaced the Jotform one (vancheck.js).
 3. Help: embed a real PO screenshot when Jamie sends one; deeper SLA
    job-view guide on request; keep guides in sync with new features.
