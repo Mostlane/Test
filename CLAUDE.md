@@ -758,6 +758,16 @@ recipient), /messages/read {with}, /messages/typing {to}. **Admin moderation
 (FullAccess only): POST /messages/delete {id}** (remove one message) +
 **POST /messages/thread-delete {with}** (wipe a whole conversation) — surfaced
 in the office widget as a 🗑 on each message + a 🗑 in the thread header.
+**Delete is a SOFT-delete** (messages.deleted/deleted_by/deleted_at columns,
+self-migrating): hidden from every everyday view (all reads carry
+`COALESCE(deleted,0)=0`) but the row is KEPT so the owner-only Chat History can
+still show it. **Chat History (OWNER ONLY, env.OWNER_USERNAME "Jamie Line"):
+GET /messages/history?user=<u>** returns that person's every conversation
+(1:1 + group threads keyed to them) grouped, INCLUDING deleted messages tagged
+who/when removed. Page **chat-history.html** (owner-gated client + server; linked
+from users-admin.html "🕵️ Chat history", shown only to the owner) — pick a
+person → collapsible per-conversation cards, deleted lines struck-through in red
+with "deleted by X"; message-body text search.
 - **Group chat ("Office")** — config in app_config `chat_groups` (defaults to one
   group `{id:"office", name:"Office", members:["Joanna","Tanya","Megan","Chloe"]}`;
   `loadGroups` resolves member names → canonical usernames via the users table by
@@ -797,11 +807,18 @@ earlier inline-block bubble stacked one char per line on iOS Safari).
 
 ## Activity log (audit trail)
 Server middleware records every state-changing request automatically (covers
-all current AND future pages); portal-config beacons page views. Viewer
+all current AND future pages); portal-config beacons page views. Middleware also
+captures the **`ref`** column = the portal page the action was fired from (from
+the Referer, lazily ALTER'd onto audit_log) and a richer `detail` (curated body
+fields incl. reg/description/date/amount/cost/priority/category/site/litres/
+mileage… — never message bodies/secrets, joined with " · "). Viewer
 **activity-log.html** (FullAccess): person/period/actions-vs-views filters,
-text search, friendly names (~50 endpoints in its FRIENDLY map — add new
-endpoints there), failed actions flagged red. Linked from Users Admin +
-Device Management top bar — deliberately NO menu tile. 12-month retention.
+text search, **big FRIENDLY map (~130 endpoints — fleet/vancheck/office/costing/
+messages/push/… ; add new endpoints there so nothing shows a raw "POST /…")**,
+each action shows a plain-English label **+ "on <Page>"** (from `ref`) and a
+humanised detail line (`niceDetail`/`DKEY`: `reg=`→"Vehicle", `cost=`→"£"…).
+Failed actions flagged red. Linked from Users Admin + Device Management top bar —
+deliberately NO menu tile. 12-month retention.
 
 ## Personalisation
 personalise.html (🎨 tile + sidebar; theme.html is now only a redirect — the

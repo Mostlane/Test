@@ -38,6 +38,11 @@ async function ensure(env) {
   // read position for group threads lives in group_reads (the flat `seen` flag
   // can't model many readers).
   try { await env.DB.prepare("ALTER TABLE messages ADD COLUMN thread_key TEXT").run(); } catch {}
+  // Soft-delete: admin "delete" hides a message from everyone but keeps the row
+  // so the owner-only Chat History can still show it (with who removed it, when).
+  try { await env.DB.prepare("ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE messages ADD COLUMN deleted_by TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE messages ADD COLUMN deleted_at TEXT").run(); } catch {}
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS group_reads (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     user TEXT NOT NULL,
@@ -48,6 +53,9 @@ async function ensure(env) {
   )`).run();
   READY = true;
 }
+// Everyday reads hide soft-deleted rows; only Chat History sees them.
+const LIVE = "COALESCE(deleted,0)=0";
+function isOwner(env, me) { return lc(me) === lc(env.OWNER_USERNAME || "Jamie Line"); }
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(r) { try { return await r.json(); } catch { return {}; } }
@@ -89,8 +97,8 @@ async function groupUnreadCount(env, tid, me) {
   for (const g of groups) {
     const member = isMember(g, me);
     const rows = member
-      ? (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(from_user)!=lower(?)").bind(tid, "@" + g.id, me).all()).results || []
-      : (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND lower(from_user)!=lower(?)").bind(tid, "@" + g.id, me, me).all()).results || [];
+      ? (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(from_user)!=lower(?) AND COALESCE(deleted,0)=0").bind(tid, "@" + g.id, me).all()).results || []
+      : (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND lower(from_user)!=lower(?) AND COALESCE(deleted,0)=0").bind(tid, "@" + g.id, me, me).all()).results || [];
     if (!rows.length) continue;
     const reads = (await env.DB.prepare("SELECT thread_key, last_id FROM group_reads WHERE tenant_id=? AND lower(user)=lower(?) AND group_id=?").bind(tid, me, g.id).all()).results || [];
     const readMap = {}; reads.forEach((rr) => { readMap[lc(rr.thread_key)] = rr.last_id; });
@@ -106,8 +114,8 @@ async function groupThreads(env, tid, me) {
   for (const g of groups) {
     const member = isMember(g, me);
     const rows = member
-      ? (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? ORDER BY id DESC LIMIT 800").bind(tid, "@" + g.id).all()).results || []
-      : (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) ORDER BY id DESC LIMIT 200").bind(tid, "@" + g.id, me).all()).results || [];
+      ? (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 800").bind(tid, "@" + g.id).all()).results || []
+      : (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 200").bind(tid, "@" + g.id, me).all()).results || [];
     if (!rows.length) continue;
     const reads = (await env.DB.prepare("SELECT thread_key, last_id FROM group_reads WHERE tenant_id=? AND lower(user)=lower(?) AND group_id=?").bind(tid, me, g.id).all()).results || [];
     const readMap = {}; reads.forEach((rr) => { readMap[lc(rr.thread_key)] = rr.last_id; });
@@ -136,7 +144,7 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /messages/unread — total unread (1:1 + group threads), for the badge.
   if (sub === "/unread" && method === "GET") {
     const r = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0"
+      "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0 AND COALESCE(deleted,0)=0"
     ).bind(tid, me).first();
     const gUnread = await groupUnreadCount(env, tid, me);
     return jr({ ok: true, unread: ((r && r.n) || 0) + gUnread }, headers);
@@ -151,7 +159,7 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /messages or /messages/threads — my conversations, newest first.
   if ((sub === "/" || sub === "/threads") && method === "GET") {
     const { results } = await env.DB.prepare(
-      "SELECT from_user, to_user, body, at, seen FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?)) ORDER BY id DESC LIMIT 500"
+      "SELECT from_user, to_user, body, at, seen FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?)) AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 500"
     ).bind(tid, me, me).all();
     const byOther = {};
     for (const m of results || []) {
@@ -179,7 +187,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!member && lc(key) !== lc(me)) return jr({ error: "forbidden" }, headers, 403);
     const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
     const { results } = await env.DB.prepare(
-      "SELECT id, from_user, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?)" + (since ? " AND id>?" : "") + " ORDER BY id ASC LIMIT 500"
+      "SELECT id, from_user, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND COALESCE(deleted,0)=0" + (since ? " AND id>?" : "") + " ORDER BY id ASC LIMIT 500"
     ).bind(...(since ? [tid, "@" + g.id, key, since] : [tid, "@" + g.id, key])).all();
     const maxId = (results || []).reduce((mx, m) => Math.max(mx, m.id), 0);
     if (maxId) ctx?.waitUntil(env.DB.prepare(
@@ -198,7 +206,7 @@ export async function handle(request, env, ctx, url, sess) {
     const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
     const pair = "((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))";
     const { results } = await env.DB.prepare(
-      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND " + pair + (since ? " AND id > ?" : "") + " ORDER BY id ASC LIMIT 500"
+      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND " + pair + " AND COALESCE(deleted,0)=0" + (since ? " AND id > ?" : "") + " ORDER BY id ASC LIMIT 500"
     ).bind(...(since ? [tid, me, other, other, me, since] : [tid, me, other, other, me])).all();
     ctx?.waitUntil(env.DB.prepare(
       "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
@@ -270,19 +278,22 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ── Admin moderation (Full Access only) ────────────────────────────────────
-  // POST /messages/delete { id } — remove a single message from any chat.
+  // POST /messages/delete { id } — hide a single message from every chat. It is
+  // SOFT-deleted (kept in the row) so the owner-only Chat History can still show
+  // it, marked "removed by <admin>".
   if (sub === "/delete" && method === "POST") {
     const p = await permissionsFor(env, tid, me).catch(() => ({}));
     if (p.FullAccess !== "Yes") return jr({ error: "Admins only" }, headers, 403);
     const b = await readJson(request);
     const id = parseInt(b.id, 10);
     if (!id) return jr({ error: "id required" }, headers, 400);
-    await env.DB.prepare("DELETE FROM messages WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    await env.DB.prepare("UPDATE messages SET deleted=1, deleted_by=?, deleted_at=? WHERE tenant_id=? AND id=? AND COALESCE(deleted,0)=0")
+      .bind(me, new Date().toISOString(), tid, id).run();
     return jr({ ok: true }, headers);
   }
 
-  // POST /messages/thread-delete { with } — remove a whole conversation between
-  // me and <with>. (The office widget only exposes the admin's own chats.)
+  // POST /messages/thread-delete { with } — hide a whole conversation between me
+  // and <with>. Soft-delete, same as above (owner Chat History still sees it).
   if (sub === "/thread-delete" && method === "POST") {
     const p = await permissionsFor(env, tid, me).catch(() => ({}));
     if (p.FullAccess !== "Yes") return jr({ error: "Admins only" }, headers, 403);
@@ -290,9 +301,49 @@ export async function handle(request, env, ctx, url, sess) {
     const other = String(b.with || "").trim();
     if (!other) return jr({ error: "with required" }, headers, 400);
     await env.DB.prepare(
-      "DELETE FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))"
-    ).bind(tid, me, other, other, me).run();
+      "UPDATE messages SET deleted=1, deleted_by=?, deleted_at=? WHERE tenant_id=? AND COALESCE(deleted,0)=0 AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))"
+    ).bind(me, new Date().toISOString(), tid, me, other, other, me).run();
     return jr({ ok: true }, headers);
+  }
+
+  // ── Chat History (OWNER ONLY) ──────────────────────────────────────────────
+  // The portal owner can read ANY user's full message history — every 1:1 and
+  // group conversation they took part in, INCLUDING soft-deleted messages
+  // (marked with who removed them). Locked to env.OWNER_USERNAME ("Jamie Line").
+  if (sub === "/history" && method === "GET") {
+    if (!isOwner(env, me)) return jr({ error: "Owner only" }, headers, 403);
+    const u = String(url.searchParams.get("user") || "").trim();
+    if (!u) return jr({ error: "user required" }, headers, 400);
+    const groups = await loadGroups(env, tid);
+    const grpName = {}; groups.forEach((g) => { grpName[lc(g.id)] = g.name; });
+    // Every message the user wrote or received: 1:1 (either side) + group
+    // messages in a thread that is theirs (thread_key) or that they wrote.
+    const { results } = await env.DB.prepare(
+      "SELECT id, from_user, to_user, body, at, thread_key, deleted, deleted_by, deleted_at FROM messages " +
+      "WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?) OR (to_user LIKE '@%' AND lower(thread_key)=lower(?))) " +
+      "ORDER BY id ASC LIMIT 5000"
+    ).bind(tid, u, u, u).all();
+    const convs = {};
+    for (const m of results || []) {
+      let ck, title, kind;
+      if (String(m.to_user || "").startsWith("@")) {
+        const gid = m.to_user.slice(1); kind = "group";
+        ck = "g:" + lc(gid) + ":" + lc(m.thread_key || "");
+        title = (grpName[lc(gid)] || gid) + " · " + (m.thread_key || "");
+      } else {
+        const other = lc(m.from_user) === lc(u) ? m.to_user : m.from_user;
+        kind = "direct"; ck = "d:" + lc(other); title = other;
+      }
+      if (!convs[ck]) convs[ck] = { kind, title, key: m.thread_key || "", messages: [], at: m.at };
+      convs[ck].messages.push({
+        id: m.id, from: m.from_user, to: m.to_user, body: m.body, at: m.at,
+        mine: lc(m.from_user) === lc(u),
+        deleted: !!m.deleted, deletedBy: m.deleted_by || null, deletedAt: m.deleted_at || null,
+      });
+      convs[ck].at = m.at;
+    }
+    const conversations = Object.values(convs).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    return jr({ ok: true, user: u, conversations }, headers);
   }
 
   // POST /messages/read { with } — mark a thread's incoming messages read.

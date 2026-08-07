@@ -200,8 +200,11 @@ export async function handle(request, env, ctx, url, sess) {
     if (q.get("user")) { conds.push("username = ?"); binds.push(q.get("user")); }
     if (q.get("type") === "view") conds.push("method = 'VIEW'");
     if (q.get("type") === "action") conds.push("method != 'VIEW'");
+    // The `ref` column is added lazily by the action middleware; make sure it
+    // exists before we SELECT it (harmless if already present).
+    try { await db.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run(); } catch { /* already there */ }
     const { results } = await db.prepare(
-      "SELECT username, method, path, detail, status, at FROM audit_log WHERE " + conds.join(" AND ") +
+      "SELECT username, method, path, detail, status, at, ref FROM audit_log WHERE " + conds.join(" AND ") +
       " ORDER BY id DESC LIMIT 1000"
     ).bind(...binds).all();
     return json({ ok: true, log: results || [] }, {}, env, request);
