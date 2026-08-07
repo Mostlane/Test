@@ -443,8 +443,14 @@ const MAP = window.ML_PERM_MAP || {
 
       // ── Per-user tile order (saved in localStorage for instant paint, mirrored
       //    to /prefs so it follows the user across devices) ─────────────────────
+      // The localStorage key is scoped to the USERNAME so two people sharing a
+      // phone/browser (or "View As") never inherit each other's layout.
+      function orderUser() { return (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "guest").toLowerCase(); }
+      function orderKey() { return "mlMenuOrder:" + orderUser(); }
+      // One-time cleanup of the old device-wide key that used to leak across users.
+      try { localStorage.removeItem("mlMenuOrder"); } catch (e) {}
       function readMenuOrder() {
-        try { const v = JSON.parse(localStorage.getItem("mlMenuOrder") || "[]"); return Array.isArray(v) ? v : []; }
+        try { const v = JSON.parse(localStorage.getItem(orderKey()) || "[]"); return Array.isArray(v) ? v : []; }
         catch (e) { return []; }
       }
       // Apply the saved order to the grid, then re-run the odd-tile full-width rule.
@@ -470,7 +476,7 @@ const MAP = window.ML_PERM_MAP || {
         const order = [...grid.children]
           .filter(c => c.id && c.classList.contains("button") && c.id !== "backToMyDay")
           .map(c => c.id);
-        try { localStorage.setItem("mlMenuOrder", JSON.stringify(order)); } catch (e) {}
+        try { localStorage.setItem(orderKey(), JSON.stringify(order)); } catch (e) {}
         const token = localStorage.getItem("mostlaneToken");
         if (token && window.MOSTLANE_API) {
           fetch(window.MOSTLANE_API + "/prefs", {
@@ -512,7 +518,7 @@ const MAP = window.ML_PERM_MAP || {
           const d = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json();
           const srv = d && d.ok && d.prefs && d.prefs.menuOrder;
           if (Array.isArray(srv) && srv.length && JSON.stringify(srv) !== JSON.stringify(readMenuOrder())) {
-            localStorage.setItem("mlMenuOrder", JSON.stringify(srv));
+            localStorage.setItem(orderKey(), JSON.stringify(srv));
             layoutTiles();
           }
         } catch (e) {}
