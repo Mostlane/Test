@@ -291,12 +291,14 @@ export async function handle(request, env, ctx, url, sess) {
       const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
       if (site) matched++;
       else if (createSites && r.name) {
+        // `sites.client` is NOT NULL — use the compliance category (Southern
+        // Co-op estate) so the auto-created site is valid and grouped sensibly.
         try {
           await env.DB.prepare(
-            "INSERT INTO sites (tenant_id, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,1,0,?,?)"
-          ).bind(tid, code, String(r.name).slice(0, 200), String(r.postcode || "").slice(0, 20), "{}", at).run();
+            "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
+          ).bind(tid, String(r.category || "Southern Co-op").slice(0, 120), code, String(r.name).slice(0, 200), String(r.postcode || "").slice(0, 20), "{}", at).run();
           sitesCreated++;
-        } catch {}
+        } catch (e) { /* skip a store we can't create a site for */ }
       }
     }
     return jr({ ok: true, imported, matched, sitesCreated }, headers);
