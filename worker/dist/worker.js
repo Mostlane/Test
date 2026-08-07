@@ -11767,7 +11767,42 @@ async function ensure5(env) {
     await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_compfiles_src ON compliance_files(tenant_id, source)").run();
   } catch {
   }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS compliance_stores (
+    tenant_id  INTEGER NOT NULL DEFAULT 1,
+    code       TEXT NOT NULL,          -- = sites.site_number
+    category   TEXT,                   -- Retail | ELS | ELS Private | Cobra | Wenzels | \u2026
+    name       TEXT,                   -- fallback only (canonical = sites.site_name)
+    postcode   TEXT,                   -- fallback only
+    due        TEXT,                   -- JSON { fiveYear:"YYYY-MM-DD", pat:\u2026, em:\u2026, pv:\u2026, ev:\u2026, forecourt:\u2026, pump:\u2026 }
+    active     INTEGER DEFAULT 1,
+    updated_at TEXT,
+    PRIMARY KEY (tenant_id, code)
+  )`).run();
   READY4 = true;
+}
+var DUE_YEARS = { fiveYear: 5 };
+function addYears(dateStr, n) {
+  const d = new Date(dateStr);
+  if (isNaN(d)) return null;
+  d.setUTCFullYear(d.getUTCFullYear() + n);
+  return d.toISOString().slice(0, 10);
+}
+async function bumpDue(env, tid, code, type, dateStr) {
+  if (!dateStr) return;
+  const next = addYears(dateStr, DUE_YEARS[type] || 1);
+  if (!next) return;
+  const at = (/* @__PURE__ */ new Date()).toISOString();
+  const row = await env.DB.prepare("SELECT due FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
+  let due = {};
+  if (row && row.due) {
+    try {
+      due = JSON.parse(row.due) || {};
+    } catch {
+    }
+  }
+  due[type] = next;
+  if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND code=?").bind(JSON.stringify(due), at, tid, code).run();
+  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, code, due, active, updated_at) VALUES (?,?,?,1,?)").bind(tid, code, JSON.stringify(due), at).run();
 }
 function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -11864,6 +11899,9 @@ async function handle24(request, env, ctx, url, sess) {
         url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key)
       });
     }
+    for (const t of Object.keys(byType)) byType[t].forEach((f, i) => {
+      f.current = i === 0;
+    });
     return jr6({ ok: true, code, files: byType }, headers);
   }
   if (sub === "/file-url" && method === "GET") {
@@ -11896,9 +11934,16 @@ async function handle24(request, env, ctx, url, sess) {
     const at = (/* @__PURE__ */ new Date()).toISOString();
     const key = `compliance/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
+    const docDate = String(form.get("date") || "") || null;
     const res = await env.DB.prepare(
       "INSERT INTO compliance_files (tenant_id, code, type, year, r2_key, filename, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
-    ).bind(tid, code, type, year, key, fname, file.size || null, String(form.get("date") || "") || null, source, at).run();
+    ).bind(tid, code, type, year, key, fname, file.size || null, docDate, source, at).run();
+    if (form.get("bump") && docDate) {
+      try {
+        await bumpDue(env, tid, code, type, docDate);
+      } catch {
+      }
+    }
     return jr6({ ok: true, id: res.meta ? res.meta.last_row_id : null, key, code, type }, headers, 201);
   }
   if (sub === "/file-delete" && method === "POST") {
@@ -11914,6 +11959,122 @@ async function handle24(request, env, ctx, url, sess) {
       }
     }
     await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    return jr6({ ok: true }, headers);
+  }
+  if (sub === "/stores" && method === "GET") {
+    const { results } = await env.DB.prepare(
+      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active,
+              s.site_name AS sname, s.postcode AS spost
+         FROM compliance_stores cs
+         LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND s.site_number = cs.code
+        WHERE cs.tenant_id = ?`
+    ).bind(tid).all();
+    const idx = {};
+    const fi = await env.DB.prepare("SELECT code, type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? GROUP BY code, type").bind(tid).all();
+    for (const r of fi.results || []) {
+      (idx[r.code] = idx[r.code] || {})[r.type] = r.n;
+    }
+    const stores = (results || []).map((r) => {
+      let due = {};
+      if (r.due) {
+        try {
+          due = JSON.parse(r.due) || {};
+        } catch {
+        }
+      }
+      return {
+        code: r.code,
+        name: r.sname || r.cname || "",
+        postcode: r.spost || r.cpost || "",
+        category: r.category || "",
+        hasSite: !!r.sname,
+        active: r.active == null ? 1 : r.active,
+        due,
+        files: idx[r.code] || {}
+      };
+    });
+    return jr6({ ok: true, stores, count: stores.length }, headers);
+  }
+  if (sub === "/stores/import" && method === "POST") {
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const rows = Array.isArray(b.stores) ? b.stores : [];
+    if (!rows.length) return jr6({ error: "stores[] required" }, headers, 400);
+    const createSites = !!b.createSites;
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    let imported = 0, matched = 0, sitesCreated = 0;
+    for (const r of rows) {
+      const code = pad4(r.code);
+      if (!code || code === "0000") continue;
+      const due = r.due && typeof r.due === "object" ? r.due : {};
+      const dueClean = {};
+      for (const [k, v] of Object.entries(due)) {
+        const t = canonType(k);
+        const s = String(v || "").trim();
+        if (s) dueClean[t] = s;
+      }
+      await env.DB.prepare(
+        `INSERT INTO compliance_stores (tenant_id, code, category, name, postcode, due, active, updated_at)
+         VALUES (?,?,?,?,?,?,1,?)
+         ON CONFLICT(tenant_id, code) DO UPDATE SET
+           category=COALESCE(excluded.category, compliance_stores.category),
+           name=COALESCE(excluded.name, compliance_stores.name),
+           postcode=COALESCE(excluded.postcode, compliance_stores.postcode),
+           due=excluded.due, updated_at=excluded.updated_at`
+      ).bind(tid, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), at).run();
+      imported++;
+      const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
+      if (site) matched++;
+      else if (createSites && r.name) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO sites (tenant_id, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,1,0,?,?)"
+          ).bind(tid, code, String(r.name).slice(0, 200), String(r.postcode || "").slice(0, 20), "{}", at).run();
+          sitesCreated++;
+        } catch {
+        }
+      }
+    }
+    return jr6({ ok: true, imported, matched, sitesCreated }, headers);
+  }
+  if (sub === "/store" && method === "POST") {
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const row = await env.DB.prepare("SELECT due, category, name, postcode FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
+    let due = {};
+    if (row && row.due) {
+      try {
+        due = JSON.parse(row.due) || {};
+      } catch {
+      }
+    }
+    if (b.due && typeof b.due === "object") {
+      for (const [k, v] of Object.entries(b.due)) {
+        const t = canonType(k);
+        const s = String(v == null ? "" : v).trim();
+        if (s) due[t] = s;
+        else delete due[t];
+      }
+    }
+    const category = b.category != null ? String(b.category).slice(0, 60) : row ? row.category : null;
+    const name = b.name != null ? String(b.name).slice(0, 200) : row ? row.name : null;
+    const postcode = b.postcode != null ? String(b.postcode).slice(0, 20) : row ? row.postcode : null;
+    await env.DB.prepare(
+      `INSERT INTO compliance_stores (tenant_id, code, category, name, postcode, due, active, updated_at)
+       VALUES (?,?,?,?,?,?,1,?)
+       ON CONFLICT(tenant_id, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, updated_at=excluded.updated_at`
+    ).bind(tid, code, category, name, postcode, JSON.stringify(due), at).run();
+    return jr6({ ok: true, code, due }, headers);
+  }
+  if (sub === "/store-delete" && method === "POST") {
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).run();
     return jr6({ ok: true }, headers);
   }
   if (sub === "/summary" && method === "GET") {
