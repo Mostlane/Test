@@ -11829,6 +11829,11 @@ async function isFull3(env, tid, me) {
     return false;
   }
 }
+var CLIENT_MAP = { "retail": "retail", "els": "els", "els private": "els_private", "cobra": "cobra", "wenzel's": "wenzels", "wenzels": "wenzels" };
+function complianceClient(cat) {
+  const k = String(cat || "").toLowerCase().trim();
+  return CLIENT_MAP[k] || k.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "general";
+}
 function importTokenOK(request, env) {
   const secret = (env.COMPLIANCE_IMPORT_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
   if (!secret) return false;
@@ -12026,10 +12031,14 @@ async function handle24(request, env, ctx, url, sess) {
       const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
       if (site) matched++;
       else if (createSites && r.name) {
+        const client = complianceClient(r.category);
+        const name = String(r.name).slice(0, 200);
+        const postcode = String(r.postcode || "").slice(0, 20);
+        const data = JSON.stringify({ client, siteNumber: code, siteName: name, postcode, active: true });
         try {
           await env.DB.prepare(
             "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
-          ).bind(tid, String(r.category || "Southern Co-op").slice(0, 120), code, String(r.name).slice(0, 200), String(r.postcode || "").slice(0, 20), "{}", at).run();
+          ).bind(tid, client, code, name, postcode, data, at).run();
           sitesCreated++;
         } catch (e) {
         }
