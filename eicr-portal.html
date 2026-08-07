@@ -75,6 +75,8 @@
       display:inline-block; padding:6px 10px; border-radius:6px; background:#0071CE; color:#fff;
       text-decoration:none; font-weight:bold; border:0; cursor:pointer;
     }
+    .cert-link{ text-decoration:none; margin-left:4px; cursor:pointer; font-size:15px; }
+    .cert-link:hover{ opacity:.7; }
     [contenteditable="true"]{ background:#fff6d1; }
 
     .info { font-size:12px; color:#374151; display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:6px 0 10px; }
@@ -235,6 +237,45 @@ let editMode = false;
 let activeStoreType = 'ALL';
 const activeCategories = new Set();
 
+/* Compliance certificate index (store code → { type: 1 }) — populated from the
+   portal's own /compliance store (SharePoint certs migrated into R2). Drives the
+   📄 links on each date cell. Column key → canonical compliance type. */
+let complianceIndex = {};
+const CERT_TYPE = { fiveYear:'fiveYear', pat:'pat', em:'em', pv:'pv', ev:'ev', pump:'pump' };
+function mlToken(){ try { return localStorage.getItem('mostlaneToken') || ''; } catch(e){ return ''; } }
+function authFetch(path, opts){
+  opts = opts || {};
+  const h = Object.assign({}, opts.headers || {});
+  const t = mlToken(); if (t) h['Authorization'] = 'Bearer ' + t;
+  return fetch((window.MOSTLANE_API || '') + path, Object.assign({}, opts, { headers:h }));
+}
+async function loadComplianceIndex(){
+  try {
+    const r = await authFetch('/compliance/index');
+    if (!r.ok) return;
+    const j = await r.json();
+    complianceIndex = (j && j.map) ? j.map : {};
+    // re-render so cells pick up their 📄 links (data may already be shown)
+    if (allData.length) applyFilters();
+  } catch(e){ /* certs are non-critical — table still works without them */ }
+}
+async function openCert(code, type){
+  try {
+    const r = await authFetch('/compliance/file-url?code=' + encodeURIComponent(code) + '&type=' + encodeURIComponent(type));
+    const j = await r.json();
+    if (j && j.url) window.open(j.url, '_blank');
+    else alert('No certificate on file for this one yet.');
+  } catch(e){ alert('Could not open the certificate.'); }
+}
+function pad4(v){ return String(v==null?'':v).replace(/\D/g,'').padStart(4,'0'); }
+/* HTML for a date cell, with a 📄 link appended when a cert is on file. */
+function dateCell(code, colKey, val){
+  const t = CERT_TYPE[colKey];
+  const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
+  const link = has ? ` <a class="cert-link" href="#" data-code="${code}" data-type="${t}" title="Open certificate">📄</a>` : '';
+  return `${val || ''}${link}`;
+}
+
 /* ===== Helpers ===== */
 function bust(url){
   const u = new URL(url);
@@ -320,8 +361,8 @@ function renderTable(d){
     tr.innerHTML = `
       <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
       <td>${e.postcode}</td><td>${getStatus(e)}</td>
-      <td>${e.fiveYear || ''}</td><td>${e.pat || ''}</td><td>${e.em || ''}</td>
-      <td>${e.pv || ''}</td><td>${e.ev || ''}</td><td>${e.pump || ''}</td>
+      <td>${dateCell(e.storeCode,'fiveYear',e.fiveYear)}</td><td>${dateCell(e.storeCode,'pat',e.pat)}</td><td>${dateCell(e.storeCode,'em',e.em)}</td>
+      <td>${dateCell(e.storeCode,'pv',e.pv)}</td><td>${dateCell(e.storeCode,'ev',e.ev)}</td><td>${dateCell(e.storeCode,'pump',e.pump)}</td>
       <td>${e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank">Open</a>` : ''}</td>
     `;
     frag.appendChild(tr);
@@ -908,8 +949,17 @@ document.addEventListener('DOMContentLoaded', () => {
   addBtn.onclick = openAddSiteModal;
   delBtn.onclick = openDeleteSiteModal;
 
-  // initial fetch
+  // 📄 certificate links (event-delegated so it survives re-renders)
+  document.getElementById('tableBody').addEventListener('click', (ev)=>{
+    const a = ev.target.closest('.cert-link');
+    if (!a || editMode) return;
+    ev.preventDefault();
+    openCert(a.dataset.code, a.dataset.type);
+  });
+
+  // initial fetch + certificate index (parallel; certs are non-blocking)
   fetchAllProgressive();
+  loadComplianceIndex();
 });
   </script>
 </body>

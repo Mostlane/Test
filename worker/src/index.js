@@ -41,6 +41,7 @@ import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timeshee
 import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer messages — Inbox)
 import * as memos from "./routes/memos.js";        // DONE  (company memos: draft/send/sign, filed to My Documents)
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
+import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -80,6 +81,7 @@ const ROUTES = [
   ["*", "/ledger",     costing.handle],  // labour ledger (reconciled time)
   ["*", "/costing",    costing.handle],  // per-site labour cost roll-up
   ["*", "/exceptions", costing.handle],  // needs-a-human-eye list
+  ["*", "/compliance", compliance.handle], // Southern Co-op compliance certs (R2 + D1)
   ["*", "/settings",   portal.handle],
   ["*", "/oncall",     portal.handle],
   ["*", "/daily-logs", portal.handle],
@@ -272,6 +274,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/ts/invoice-file"],
   // SiteLog scan intake — HMAC-signed with PORTAL_BRIDGE_SECRET, verified in-handler.
   ["POST", "/ledger/scan"],
+  // Compliance certificates streamed inline — signed URL, verified in-handler.
+  ["GET", "/compliance/file"],
 ];
 
 function isPublic(method, pathname) {

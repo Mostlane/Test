@@ -709,3 +709,25 @@ CREATE TABLE IF NOT EXISTS message_typing (
   at        TEXT NOT NULL,
   PRIMARY KEY (tenant_id, from_user, to_user)
 );
+
+-- Compliance certificates (routes/compliance.js). Southern Co-op certs migrated
+-- off SharePoint's "TSC Compliance" tree into R2 (JOB_FILES under
+-- compliance/<code>/<type>/<year>/…), indexed here and keyed by store CODE +
+-- canonical compliance TYPE (fiveYear|pat|em|pv|ev|forecourt|pump|other).
+-- `source` = the SharePoint item id/webUrl, uniquely indexed so re-running the
+-- extractor never double-imports. Self-migrating (CREATE IF NOT EXISTS).
+CREATE TABLE IF NOT EXISTS compliance_files (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id   INTEGER NOT NULL DEFAULT 1,
+  code        TEXT NOT NULL,           -- store code (4 digits)
+  type        TEXT NOT NULL,           -- canonical compliance type
+  year        TEXT,                    -- e.g. "2025" (if known)
+  r2_key      TEXT NOT NULL,
+  filename    TEXT,
+  size        INTEGER,
+  doc_date    TEXT,                    -- certificate date (if parsed)
+  source      TEXT,                    -- SharePoint item id / webUrl — dedupe re-runs
+  uploaded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_compfiles_code ON compliance_files(tenant_id, code, type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_compfiles_src ON compliance_files(tenant_id, source);
