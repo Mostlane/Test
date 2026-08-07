@@ -11,7 +11,7 @@
 
 import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
-import { permissionsFor } from "../lib/auth.js";
+import { permissionsFor, requireSession } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 
 let READY = false;
@@ -57,6 +57,17 @@ function canonType(t) {
 
 async function isFull(env, tid, me) { try { const p = await permissionsFor(env, tid, me); return p.FullAccess === "Yes" || p.Compliance === "Yes"; } catch { return false; } }
 
+// Machine-to-machine import token (for the SharePoint→R2 batch extractor, which
+// can't hold a portal session). Timing-safe compare, same shape as /sla/inbound.
+function importTokenOK(request, env) {
+  const secret = (env.COMPLIANCE_IMPORT_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+  if (!secret) return false;
+  const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  let diff = tok.length === secret.length ? 0 : 1;
+  for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+  return diff === 0;
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -78,9 +89,18 @@ export async function handle(request, env, ctx, url, sess) {
     }});
   }
 
-  if (!sess) return jr({ error: "Not authenticated" }, headers, 401);
-  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
-  const me = sess.user.username;
+  // The batch extractor authenticates with COMPLIANCE_IMPORT_TOKEN instead of a
+  // session — it may only touch the ingest/dedupe routes (/file POST, /has),
+  // which are declared public so the token (not a session) reaches here. On
+  // those public routes `sess` arrives null even for a logged-in admin, so we
+  // re-resolve a real session from the Authorization header when there's no
+  // import token — that keeps the admin manual-upload path working too.
+  const viaToken = !sess && importTokenOK(request, env);
+  if (!sess && !viaToken) { try { sess = await requireSession(env, request); } catch { sess = null; } }
+  if (!sess && !viaToken) return jr({ error: "Not authenticated" }, headers, 401);
+  const tid = sess ? (sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request)) : await resolveTenantId(env, request);
+  const me = sess ? sess.user.username : "import-bot";
+  const canWrite = viaToken || (await isFull(env, tid, me));
   await ensure(env);
 
   // ── Dedupe check: has this SharePoint item already been ingested? ───────────
@@ -129,7 +149,7 @@ export async function handle(request, env, ctx, url, sess) {
   // ── Ingest a certificate (the extractor + manual upload) ────────────────────
   // multipart: file + code, type, year?, date?, filename?, source?
   if (sub === "/file" && method === "POST") {
-    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
     let form; try { form = await request.formData(); } catch { return jr({ error: "multipart required" }, headers, 400); }
     const file = form.get("file");
     const code = pad4(form.get("code"));
@@ -153,7 +173,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Delete a certificate (admin) ────────────────────────────────────────────
   if (sub === "/file-delete" && method === "POST") {
-    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const id = parseInt(b.id, 10);
     if (!id) return jr({ error: "id required" }, headers, 400);

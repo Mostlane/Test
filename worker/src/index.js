@@ -276,6 +276,11 @@ const PUBLIC_ROUTES = [
   ["POST", "/ledger/scan"],
   // Compliance certificates streamed inline — signed URL, verified in-handler.
   ["GET", "/compliance/file"],
+  // Compliance batch import (SharePoint→R2 extractor) — COMPLIANCE_IMPORT_TOKEN
+  // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
+  // (The handler re-resolves a real session for logged-in admins on these too.)
+  ["GET", "/compliance/has"],
+  ["POST", "/compliance/file"],
 ];
 
 function isPublic(method, pathname) {
