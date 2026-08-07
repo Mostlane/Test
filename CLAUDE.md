@@ -343,7 +343,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   `needsConfirm` (no silent save — show a labelled confirm button instead):
   Quote / On Hold (details pack), In Progress (risk assessment), and **Complete**
   (requires ≥1 photo + a completion note ≥ `MIN_COMPLETE_NOTE` chars for EVERY
-  engineer, not just Story Mode; Story also needs a signature). Cross-job guard:
+  engineer, not just Story Mode; Story also needs a signature). **RA override:**
+  a discreet `#raSkipBtn` ("skip") in the RA panel shown **only to FullAccess**
+  (`isFullAccess()`, not SLAAdmin) starts the job without the assessment —
+  records `riskAssessment.skipped` with their name; the job view shows "⚠️ Skipped
+  (Full-Access override)". Also: a small "👤 You" button lives in the sla-main.html
+  header (you.html has no dedicated tile/sidebar item). Cross-job guard:
   moving a job to **Travelling / In Progress / Complete** is blocked while ANOTHER
   of the engineer's jobs is unfinished (`jobBlockReason`: still In Progress/
   Travelling, or On Hold/Quote without its pack) — it alerts naming that job and
