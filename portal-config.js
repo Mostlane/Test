@@ -1060,7 +1060,7 @@
       if (st === "field") return;                           // field engineers use the field Inbox
       if (document.querySelector('script[data-mlchat]') || document.getElementById("mlchat-launch")) return;
       var s = document.createElement("script");
-      s.src = "/chat-widget.js?v=1";
+      s.src = "/chat-widget.js?v=2";
       s.async = true; s.setAttribute("data-mlchat", "1");
       (document.body || document.documentElement).appendChild(s);
     } catch (e) {}
