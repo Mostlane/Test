@@ -77,6 +77,14 @@
     }
     .cert-link{ text-decoration:none; margin-left:4px; cursor:pointer; font-size:15px; }
     .cert-link:hover{ opacity:.7; }
+    .doc-btn{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:13px; }
+    .doc-btn:hover{ background:#f1f5f9; }
+    tr.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; background:#eaf4ff !important; }
+    .ver-current{ font-weight:700; } .ver-old{ color:#64748b; }
+    .modal .typegrid{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 12px; }
+    .modal .typegrid button{ border:1px solid #cbd5e1; background:#fff; border-radius:20px; padding:6px 12px; cursor:pointer; font-size:13px; }
+    .modal .typegrid button.on{ background:#0071CE; color:#fff; border-color:#0071CE; }
+    .drop-note{ font-size:12px; color:#64748b; margin:4px 0 0; }
     [contenteditable="true"]{ background:#fff6d1; }
 
     .info { font-size:12px; color:#374151; display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:6px 0 10px; }
@@ -152,6 +160,7 @@
       <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
       <button class="bubble" id="summaryBtn">％ Summary</button>
       <button class="bubble" id="clearBtn">✕ Clear filters</button>
+      <button class="bubble" id="migrateBtn" style="display:none;">⤵ Import from old system</button>
     </div>
 
     <!-- Due-date filters -->
@@ -197,7 +206,7 @@
         <thead>
           <tr>
             <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
-            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV</th><th>Pump</th><th>SharePoint</th>
+            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV</th><th>Pump</th><th>Docs</th>
           </tr>
         </thead>
         <tbody id="tableBody"><tr><td colspan="12" class="loading">Loading data…</td></tr></tbody>
@@ -241,7 +250,10 @@ const activeCategories = new Set();
    portal's own /compliance store (SharePoint certs migrated into R2). Drives the
    📄 links on each date cell. Column key → canonical compliance type. */
 let complianceIndex = {};
+let storeFiles = {};   // code -> { type: [ {url,current,date,filename}, … ] } (lazy-loaded)
 const CERT_TYPE = { fiveYear:'fiveYear', pat:'pat', em:'em', pv:'pv', ev:'ev', pump:'pump' };
+const TYPE_LABEL = { fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV', forecourt:'Forecourt', pump:'Pump', other:'Other' };
+const ALL_TYPES = ['fiveYear','pat','em','pv','ev','forecourt','pump','other'];
 function mlToken(){ try { return localStorage.getItem('mostlaneToken') || ''; } catch(e){ return ''; } }
 function authFetch(path, opts){
   opts = opts || {};
@@ -268,6 +280,80 @@ async function openCert(code, type){
   } catch(e){ alert('Could not open the certificate.'); }
 }
 function pad4(v){ return String(v==null?'':v).replace(/\D/g,'').padStart(4,'0'); }
+
+/* Types this store tracks (has a due date) first, then the rest — so the picker
+   defaults to "what compliances we have for that site". */
+function typesForStore(code){
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const has = ['fiveYear','pat','em','pv','ev','pump'].filter(t=> rec[t]);
+  return [...has, ...ALL_TYPES.filter(t=>!has.includes(t))];
+}
+
+/* Drop / choose a file → pick the compliance type + optional date → upload. */
+function openUploadModal(code, file){
+  if(!canEditCompliance()) return alert("You don't have permission to add compliance documents.");
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const order = typesForStore(code);
+  let sel = order[0] || 'fiveYear';
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content">
+    <h2>Add document</h2>
+    <p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p>
+    <label>Compliance type</label>
+    <div class="typegrid" id="ug"></div>
+    <div class="row">
+      <div><label>File</label><input type="file" id="uf"></div>
+      <div><label>Certificate date (optional)</label><input type="date" id="ud"></div>
+    </div>
+    <p class="drop-note">The newest document becomes the current one; older ones are kept as previous versions (never deleted). A dated certificate updates the next-due date automatically.</p>
+    <div class="actions">
+      <button class="btn" id="udo">Upload</button>
+      <button class="btn" style="background:#ccc;color:#000;" id="uc">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  const grid=modal.querySelector('#ug');
+  order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); }; grid.appendChild(b); });
+  const fileInput=modal.querySelector('#uf');
+  if(file){ try{ const dt=new DataTransfer(); dt.items.add(file); fileInput.files=dt.files; }catch(e){} }
+  modal.querySelector('#uc').onclick=()=>modal.remove();
+  modal.querySelector('#udo').onclick=async()=>{
+    const f=fileInput.files&&fileInput.files[0]; if(!f) return alert('Choose a file first.');
+    const btn=modal.querySelector('#udo'); btn.disabled=true; btn.textContent='Uploading…';
+    const form=new FormData();
+    form.append('file',f); form.append('code',code); form.append('type',sel);
+    const d=modal.querySelector('#ud').value; if(d) form.append('date',d);
+    form.append('bump','1'); form.append('filename',f.name);
+    try{
+      const r=await authFetch('/compliance/file',{method:'POST',body:form});
+      const out=await r.json().catch(()=>({}));
+      if(!r.ok||!out.ok){ btn.disabled=false; btn.textContent='Upload'; return alert('Upload failed: '+(out.error||r.status)); }
+      modal.remove();
+      loadFromPortal();
+    }catch(e){ btn.disabled=false; btn.textContent='Upload'; alert('Upload failed.'); }
+  };
+}
+
+/* View every document for a store — grouped by type, current + previous versions. */
+async function openVersionsModal(code){
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content"><h2>Documents</h2><p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p><div id="vlist">Loading…</div><div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#vc').onclick=()=>modal.remove();
+  modal.querySelector('#vadd').onclick=()=>{ modal.remove(); openUploadModal(code); };
+  try{
+    const r=await authFetch('/compliance/files?code='+encodeURIComponent(code));
+    const j=await r.json(); const files=j.files||{};
+    const host=modal.querySelector('#vlist');
+    const types=Object.keys(files);
+    if(!types.length){ host.innerHTML='<p>No documents yet.</p>'; return; }
+    host.innerHTML=types.map(t=>{
+      const rows=files[t].map(f=>`<div style="padding:2px 0">${f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>'} · <a href="${f.url}" target="_blank">${f.filename||'file'}</a>${f.date?(' · '+String(f.date).slice(0,10)):''}${(canEditCompliance()&&!f.current)?` · <a href="#" class="verdel" data-id="${f.id}">delete</a>`:''}</div>`).join('');
+      return `<div style="margin-bottom:10px"><b>${TYPE_LABEL[t]||t}</b>${rows}</div>`;
+    }).join('');
+    host.querySelectorAll('.verdel').forEach(a=>a.onclick=async ev=>{ ev.preventDefault(); if(!confirm('Delete this previous version? (the current one is kept)'))return; await authFetch('/compliance/file-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:+a.dataset.id})}); modal.remove(); openVersionsModal(code); loadFromPortal(); });
+  }catch(e){ modal.querySelector('#vlist').innerHTML='<p>Could not load.</p>'; }
+}
 /* HTML for a date cell, with a 📄 link appended when a cert is on file. */
 function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
@@ -358,12 +444,15 @@ function renderTable(d){
     if (!e.storeCode || !e.siteName) return;
     const tr = document.createElement('tr');
     tr.dataset.code = e.storeCode;
+    const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
+    const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
+      + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '');
     tr.innerHTML = `
       <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
       <td>${e.postcode}</td><td>${getStatus(e)}</td>
       <td>${dateCell(e.storeCode,'fiveYear',e.fiveYear)}</td><td>${dateCell(e.storeCode,'pat',e.pat)}</td><td>${dateCell(e.storeCode,'em',e.em)}</td>
       <td>${dateCell(e.storeCode,'pv',e.pv)}</td><td>${dateCell(e.storeCode,'ev',e.ev)}</td><td>${dateCell(e.storeCode,'pump',e.pump)}</td>
-      <td>${e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank">Open</a>` : ''}</td>
+      <td class="docs-cell">${docsCell}</td>
     `;
     frag.appendChild(tr);
   });
@@ -462,6 +551,83 @@ async function fetchAllProgressive(){
   }
 }
 
+/* ============ Portal-native load (single source: /compliance/stores) ========
+   The chart now reads from the portal. Each row's name/postcode come from the
+   canonical `sites` home; category + due dates from the compliance overlay; and
+   `files` says which types already have a document (drives the 📄 links). */
+async function loadFromPortal(){
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '<tr><td colspan="12" class="loading">Loading…</td></tr>';
+  let stores = [];
+  try{
+    const r = await authFetch('/compliance/stores');
+    const j = await r.json();
+    stores = j.stores || [];
+  }catch(e){
+    console.error('loadFromPortal', e);
+    tb.innerHTML = '<tr><td colspan="12" class="error">Could not load compliance data.</td></tr>';
+    return;
+  }
+  complianceIndex = {};
+  storeFiles = {};
+  allData = stores.map(s => {
+    const code = pad4(s.code);
+    complianceIndex[code] = s.files || {};
+    const d = s.due || {};
+    return {
+      storeCode: code,
+      siteName: s.name || '',
+      postcode: s.postcode || '',
+      storeType: s.category || '',
+      hasSite: !!s.hasSite,
+      fiveYear: d.fiveYear || '', pat: d.pat || '', em: d.em || '',
+      pv: d.pv || '', ev: d.ev || '', pump: d.pump || '',
+      sharePoint: ''
+    };
+  });
+  if (!allData.length){
+    tb.innerHTML = '<tr><td colspan="12" class="loading">No stores yet. Use “⤵ Import from old system” to bring them in.</td></tr>';
+    return;
+  }
+  applyFilters();
+}
+
+/* One-time migration: read the old mostlane-pos store list BROWSER-SIDE (it's
+   still CORS-reachable here) and post it into the portal. Missing sites are
+   created so the chart and Sites share one home. After this, mostlane-pos is
+   retired — the chart reads only from the portal. */
+async function migrateFromOld(){
+  if (!canEditCompliance()) return;
+  if (!confirm("Import all stores + due dates from the OLD system into the portal?\n\nMissing stores will be added to Sites so everything shares one home. Safe to run more than once.")) return;
+  const btn = document.getElementById('migrateBtn');
+  if (btn){ btn.disabled = true; btn.textContent = 'Importing…'; }
+  let all = [];
+  for (const s of SOURCES){
+    const chunk = await fetchOneSource(s).catch(()=>[]);
+    all = all.concat(chunk);
+  }
+  const stores = all.filter(r => r.storeCode).map(r => ({
+    code: r.storeCode, name: r.siteName, postcode: r.postcode, category: r.storeType,
+    due: { fiveYear: r.fiveYear, pat: r.pat, em: r.em, pv: r.pv, ev: r.ev, pump: r.pump }
+  }));
+  let imported = 0, matched = 0, sitesCreated = 0;
+  for (let i = 0; i < stores.length; i += 200){
+    const batch = stores.slice(i, i + 200);
+    try{
+      const r = await authFetch('/compliance/stores/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stores: batch, createSites: true })
+      });
+      const j = await r.json();
+      imported += j.imported || 0; matched += j.matched || 0; sitesCreated += j.sitesCreated || 0;
+    }catch(e){ console.error('import batch', e); }
+    if (btn) btn.textContent = `Importing… ${Math.min(i+200, stores.length)}/${stores.length}`;
+  }
+  if (btn){ btn.disabled = false; btn.textContent = '⤵ Import from old system'; }
+  alert(`Imported ${imported} stores.\nMatched ${matched} existing sites, created ${sitesCreated} new ones.`);
+  loadFromPortal();
+}
+
 /* ============ Edit / Save / Add / Delete ============ */
 function enableEditing(state){
   const editableCols = ["5 Year","PAT","EM","PV","EV","Pump"];
@@ -505,55 +671,41 @@ function normaliseTypeLabel(label) {
     .replace(/_+/g, "_");             // collapse
 }
 
-/* ✅ UPDATED: send payload that the Worker expects (NO _compliance suffix) */
+/* Save the edited due dates to the portal (compliance_stores overlay on the
+   canonical site) — replaces the old mostlane-pos KV write. */
 async function saveEditInstant(row){
-  const storeCode = row.children[0].textContent.trim();
-  const rawStoreType = row.children[2].textContent.trim();
-  const storeType = normaliseTypeLabel(rawStoreType); // e.g. "retail", "els_private"
-
+  const code = row.children[0].textContent.trim();
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
-
-  const editableHeaders = ["5 Year","5_Year","PAT","EM","PV","EV","Pump","PUMP","SharePoint","SharePointURL","sharePointURL"];
-  const fields = {};
-  editableHeaders.forEach(h => {
-    if (h in record) {
-      const canon = KEY_CANONICAL[h] || h;
-      fields[canon] = record[h];
-    }
-  });
-
-  const payload = {
-    updates: [{
-      storeType,
-      branchCode: storeCode.padStart(4,"0"),
-      fields
-    }]
+  const due = {
+    fiveYear: record["5 Year"] || "",
+    pat: record["PAT"] || "",
+    em:  record["EM"]  || "",
+    pv:  record["PV"]  || "",
+    ev:  record["EV"]  || "",
+    pump: record["Pump"] || ""
   };
 
   row.style.opacity = "0.6";
   row.style.background = "#eaf6ff";
   try {
-    const res = await fetch(CLOUDFLARE_UPDATE, {
+    const res = await authFetch("/compliance/store", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-      body: JSON.stringify(payload)
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, due })
     });
-    const text = await res.text();
-    let out = {};
-    try { out = JSON.parse(text); } catch {}
-
+    const out = await res.json().catch(()=>({}));
     if (res.ok && out.ok === true) {
-      row.style.background = "#d7ffd9"; // green
+      row.style.background = "#d7ffd9";
       const banner = document.getElementById('saveBanner');
       if (banner) banner.style.display = 'block';
     } else {
-      row.style.background = "#ffecec"; // red
-      console.warn("Update not OK:", text);
+      row.style.background = "#ffecec";
+      console.warn("Save not OK:", out);
     }
   } catch (e) {
-    console.error("Update error:", e);
+    console.error("Save error:", e);
     row.style.background = "#ffecec";
   } finally {
     row.style.opacity = "1";
@@ -612,33 +764,30 @@ function openAddSiteModal(){
     if (!/^\d{4}$/.test(code)) return alert("Store Code must be 4 digits.");
     if (!name) return alert("Site Name is required.");
 
-    const payload = {
-      updates: [{
-        storeType: type,
-        branchCode: code,
-        fields: {
-          "Store Name": name,
-          "Postcode": modal.querySelector('#add_postcode').value || '',
-          "5_Year":  modal.querySelector('#add_five').value || '',
-          "PAT":     modal.querySelector('#add_pat').value || '',
-          "EM":      modal.querySelector('#add_em').value || '',
-          "PV":      modal.querySelector('#add_pv').value || '',
-          "EV":      modal.querySelector('#add_ev').value || '',
-          "PUMP":    modal.querySelector('#add_pump').value || '',
-          "sharePointURL": modal.querySelector('#add_sp').value || ''
-        }
-      }]
+    const store = {
+      code,
+      name,
+      postcode: modal.querySelector('#add_postcode').value || '',
+      category: typeRaw,
+      due: {
+        fiveYear: modal.querySelector('#add_five').value || '',
+        pat: modal.querySelector('#add_pat').value || '',
+        em:  modal.querySelector('#add_em').value || '',
+        pv:  modal.querySelector('#add_pv').value || '',
+        ev:  modal.querySelector('#add_ev').value || '',
+        pump: modal.querySelector('#add_pump').value || ''
+      }
     };
-
     try{
-      await fetch(CLOUDFLARE_UPDATE, {
+      const res = await authFetch("/compliance/stores/import", {
         method: "POST",
-        headers: { "Content-Type":"application/json", "Cache-Control":"no-store" },
-        body: JSON.stringify(payload)
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ stores: [store], createSites: true })
       });
+      const out = await res.json().catch(()=>({}));
       modal.remove();
-      alert("✅ Site added.");
-      fetchAllProgressive();
+      alert(out.ok ? ("✅ Site added." + (out.sitesCreated ? " (added to Sites too)" : "")) : "❌ Failed to add site.");
+      loadFromPortal();
     }catch(e){
       console.error(e);
       alert("❌ Failed to add site.");
@@ -681,18 +830,18 @@ function openDeleteSiteModal(){
     if (!/^\d{4}$/.test(code)) return alert("Store Code must be 4 digits.");
 
     try{
-      const res = await fetch(CLOUDFLARE_DELETE, {
+      const res = await authFetch("/compliance/store-delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Cache-Control":"no-store" },
-        body: JSON.stringify({ storeType: type, branchCode: code })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
       });
       await res.json().catch(()=>({}));
       modal.remove();
-      alert("🗑️ Site deleted (if it existed).");
-      fetchAllProgressive();
+      alert("🗑️ Removed from the compliance chart (documents kept).");
+      loadFromPortal();
     }catch(e){
       console.error(e);
-      alert("❌ Failed to delete site.");
+      alert("❌ Failed to remove.");
     }
   };
 }
@@ -864,7 +1013,9 @@ function exportExcel(){
 /* ============ Wiring UI ============ */
 document.addEventListener('DOMContentLoaded', () => {
   // Buttons
-  document.getElementById('reloadBtn').onclick = fetchAllProgressive;
+  document.getElementById('reloadBtn').onclick = loadFromPortal;
+  const migrateBtn = document.getElementById('migrateBtn');
+  if (canEditCompliance()) { migrateBtn.style.display = ''; migrateBtn.onclick = migrateFromOld; }
   document.getElementById('overdueBtn').onclick = ()=> {
     document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
     document.getElementById('overdueBtn').classList.add('active');
@@ -949,18 +1100,32 @@ document.addEventListener('DOMContentLoaded', () => {
   addBtn.onclick = openAddSiteModal;
   delBtn.onclick = openDeleteSiteModal;
 
-  // 📄 certificate links (event-delegated so it survives re-renders)
-  document.getElementById('tableBody').addEventListener('click', (ev)=>{
-    const a = ev.target.closest('.cert-link');
-    if (!a || editMode) return;
-    ev.preventDefault();
-    openCert(a.dataset.code, a.dataset.type);
+  const tb = document.getElementById('tableBody');
+  // 📄 certificate links + 📎 upload / 🗂 view (event-delegated, survives re-render)
+  tb.addEventListener('click', (ev)=>{
+    const cert = ev.target.closest('.cert-link');
+    if (cert && !editMode){ ev.preventDefault(); openCert(cert.dataset.code, cert.dataset.type); return; }
+    const up = ev.target.closest('.doc-btn.up');
+    if (up){ ev.preventDefault(); pickAndUpload(up.dataset.code); return; }
+    const view = ev.target.closest('.doc-btn.view');
+    if (view){ ev.preventDefault(); openVersionsModal(view.dataset.code); return; }
   });
 
-  // initial fetch + certificate index (parallel; certs are non-blocking)
-  fetchAllProgressive();
-  loadComplianceIndex();
+  // Drag a file onto any store row → upload against that site.
+  tb.addEventListener('dragover', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')){ ev.preventDefault(); tr.classList.add('drop-hot'); } });
+  tb.addEventListener('dragleave', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && !tr.contains(ev.relatedTarget)) tr.classList.remove('drop-hot'); });
+  tb.addEventListener('drop', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
+
+  // initial load (portal is the single source now)
+  loadFromPortal();
 });
+
+/* Hidden file input helper for the 📎 button (mobile-friendly). */
+function pickAndUpload(code){
+  const inp=document.createElement('input'); inp.type='file'; inp.style.display='none';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) openUploadModal(code, f); inp.remove(); };
+  document.body.appendChild(inp); inp.click();
+}
   </script>
 </body>
 </html>

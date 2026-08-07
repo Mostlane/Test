@@ -536,6 +536,32 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   asserts the classifier offline (no creds). Needs an Azure app registration
   (Graph application perm Sites.Read.All, admin-consented) — the M365 connector
   can't bulk-transfer (1MB/file cap + rate limits). See the tool's README.md.
+  **Unified chart + drag-drop + versioning (ONE site home):** the compliance
+  chart is now portal-native. Store list, category and per-type due dates live in
+  D1 **compliance_stores** (PK tenant+code, `code` = **sites.site_number** — the
+  one canonical site home, no duplicate list; name/postcode are fallbacks, the
+  live values resolve from `sites`). Routes: **GET /compliance/stores** (the whole
+  chart — each row joins `sites` for name/postcode, merges category + due dates +
+  which types already have a doc), **POST /compliance/stores/import** (one-time
+  migration: eicr-portal reads the old mostlane-pos list BROWSER-SIDE and posts it
+  here; upserts the overlay and with `createSites:true` creates any missing `sites`
+  row so chart+Sites share one home; returns imported/matched/sitesCreated), **POST
+  /compliance/store** (edit category/due — replaces the mostlane-pos KV write),
+  **POST /compliance/store-delete** (removes the chart row, keeps documents).
+  **eicr-portal.html** loads from /compliance/stores (mostlane-pos kept only behind
+  the admin "⤵ Import from old system" button), edits due dates via
+  /compliance/store, and supports **drag-and-drop upload**: drop a file on a store
+  row (or the 📎 button) → modal picks the compliance **type** (defaulting to the
+  types that store tracks) + optional cert date → POST /compliance/file with
+  **bump=1**, which **auto-advances that type's next-due date** (5y for EICR/5-Year,
+  1y otherwise; the historical backfill omits bump so it can't stomp live dates).
+  **Versioning:** every upload is kept — GET /compliance/files flags the newest per
+  type `current`, older ones previous (never deleted); the 🗂 button opens a
+  per-store documents modal (admins can delete a *previous* version). **In-job:**
+  **site-folder.html**'s **Compliance** tab reads /compliance/files?code= (grouped
+  by type, current/previous, full-access upload), so Site documents from a job
+  shows every cert. mostlane-pos is retired (migration is one-tap); chart, Sites,
+  job costing and site documents all reference the one site by `site_number`.
 - `menu-config` (in portal.js) — /menu-config: Full-Access shared list of
   hidden menu tiles (main.html reads it). Also **/notify/suppress**,
   **/notify/suppress/remove**, **/notify/overview** (notification-centre.html:
@@ -802,7 +828,9 @@ status-capture time; +`sitelog_visit_id` links a segment materialised from a
 SiteLog visit), **sitelog_scans** (optional pushed scans), **site_miles**
 (round-trip miles per site), **compliance_files** (Southern Co-op compliance
 certs migrated off SharePoint; keyed by store code + canonical type, files in R2
-JOB_FILES `compliance/<code>/<type>/<year>/…`). app_config also
+JOB_FILES `compliance/<code>/<type>/<year>/…`), **compliance_stores** (the
+compliance overlay on a site — category + per-type due dates, keyed by
+code=sites.site_number). app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
 `fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>`,
 `fleet:maintcats:<tid>` (vehicle-maintenance categories [{name,colour}]), the
