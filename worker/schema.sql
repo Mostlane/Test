@@ -731,3 +731,19 @@ CREATE TABLE IF NOT EXISTS compliance_files (
 );
 CREATE INDEX IF NOT EXISTS idx_compfiles_code ON compliance_files(tenant_id, code, type);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_compfiles_src ON compliance_files(tenant_id, source);
+
+-- Compliance store overlay (routes/compliance.js): the compliance category +
+-- per-type due dates for a site. Keyed by code = sites.site_number so the chart
+-- and Sites share one home (name/postcode are fallbacks; live values come from
+-- sites). Self-migrating.
+CREATE TABLE IF NOT EXISTS compliance_stores (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  code       TEXT NOT NULL,           -- = sites.site_number
+  category   TEXT,                    -- Retail | ELS | ELS Private | Cobra | Wenzels | …
+  name       TEXT,                    -- fallback only
+  postcode   TEXT,                    -- fallback only
+  due        TEXT,                    -- JSON { fiveYear, pat, em, pv, ev, forecourt, pump } → YYYY-MM-DD
+  active     INTEGER DEFAULT 1,
+  updated_at TEXT,
+  PRIMARY KEY (tenant_id, code)
+);

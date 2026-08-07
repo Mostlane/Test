@@ -160,6 +160,7 @@ function selectTab(t){
   renderTabs();
   if(t === "Previous Jobs") return renderJobs();
   if(t === "Site Photos") return renderPhotos();
+  if(t === "Compliance") return renderCompliance();
   return renderDocs(t);
 }
 
@@ -251,6 +252,58 @@ async function renderDocs(area){
     list.appendChild(row);
   });
   c.appendChild(list);
+}
+
+/* ---- Compliance (typed, versioned — the portal compliance store) ---- */
+const COMP_TYPES = { fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV', forecourt:'Forecourt', pump:'Pump', other:'Other' };
+async function renderCompliance(){
+  const c = $("content"); c.innerHTML = `<div class="empty">Loading compliance…</div>`;
+  let files = {};
+  try{ files = (await authFetch("/compliance/files?code=" + encodeURIComponent(siteCode)).then(r=>r.json())).files || {}; }
+  catch(e){ c.innerHTML = `<div class="empty">Couldn't load compliance documents.</div>`; return; }
+  if(activeTab !== "Compliance") return;
+  c.innerHTML = "";
+  if(full) c.appendChild(compUploadBar());
+  const types = Object.keys(files);
+  if(!types.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No compliance documents on file for this site yet."; c.appendChild(e); return; }
+  types.forEach(t => {
+    const h = document.createElement("div"); h.style.cssText = "font-weight:700;margin:12px 4px 4px"; h.textContent = COMP_TYPES[t] || t;
+    c.appendChild(h);
+    const list = document.createElement("div"); list.className = "doclist";
+    files[t].forEach(f => {
+      const row = document.createElement("div"); row.className = "docrow";
+      const badge = f.current ? `<span style="color:#0a7d34;font-weight:700">● current</span>` : `<span class="muted">previous</span>`;
+      row.innerHTML = `
+        <span class="ic">${fileIcon(f.filename || "")}</span>
+        <div class="nm">${esc(f.filename || "document")}<div class="meta">${badge}${f.date ? " · " + esc(fmt(f.date)) : ""}</div></div>
+        <a class="btn small" href="${f.url}" target="_blank" rel="noopener">Open</a>`;
+      list.appendChild(row);
+    });
+    c.appendChild(list);
+  });
+}
+function compUploadBar(){
+  const bar = document.createElement("div"); bar.className = "uploadbar";
+  const sel = document.createElement("select"); sel.className = "btn small"; sel.style.cssText = "background:#fff;color:#111";
+  Object.entries(COMP_TYPES).forEach(([k,v]) => { const o=document.createElement("option"); o.value=k; o.textContent=v; sel.appendChild(o); });
+  const label = document.createElement("label"); label.className = "btn primary small"; label.textContent = "⬆️ Add compliance doc";
+  const input = document.createElement("input"); input.type = "file"; input.hidden = true; label.appendChild(input);
+  const status = document.createElement("span"); status.className = "muted"; status.style.fontSize = "12px";
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0]; if(!file) return;
+    label.style.pointerEvents = "none"; label.textContent = "Uploading…";
+    try{
+      const form = new FormData();
+      form.append("file", file, file.name); form.append("code", siteCode); form.append("type", sel.value);
+      form.append("bump", "1"); form.append("filename", file.name);
+      const r = await authFetch("/compliance/file", { method:"POST", body: form }).then(r=>r.json());
+      status.textContent = r.ok ? "✓ added" : ("✗ " + (r.error || "failed"));
+    }catch(e){ status.textContent = "✗ failed"; }
+    label.style.pointerEvents = ""; label.textContent = "⬆️ Add compliance doc"; input.value = "";
+    renderCompliance();
+  });
+  bar.appendChild(sel); bar.appendChild(label); bar.appendChild(status);
+  return bar;
 }
 
 function uploadBar(area, accept, cameraHint){
