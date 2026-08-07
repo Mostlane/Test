@@ -43,7 +43,7 @@ SESSION_TTL_HOURS = "2160"                       # 90-day logins
 APP_BASE_URL = "https://mostlane-portal.com"
 EMAIL_FROM = "Mostlane <no-reply@mostlane-portal.com>"
 R2_PUBLIC_BASE = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev"
-VAPID_PUBLIC = "BEZn7zi4zksuL2fy_OjgrllkbT0aM6gyQfHNO-br5cZ3LvSLadaP5RqUbjJiIqUX7LmlziVzLJRbrFRsj5EC-Jw"
+VAPID_PUBLIC = "BM9Vxq5c-jVzT_ScDk0BDhfJUw6o8g_LHLKK0t4MjTbga_ByxzejZkVQNU0DVBBVF3a-Yb5Ac94bRfFFPnN7BgY"
 PUSH_CONTACT = "mailto:no-reply@mostlane-portal.com"
 
 # ── SECRETS — set in the dashboard, NEVER here ──────────────────────

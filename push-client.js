@@ -26,6 +26,32 @@
     } catch { return null; }
   }
   async function currentSub() { const r = await reg(); return r ? await r.pushManager.getSubscription() : null; }
+  // Raw ArrayBuffer (a subscription's applicationServerKey) → base64url, so we
+  // can compare the key a device subscribed with against the server's current one.
+  function abToB64u(buf) {
+    const b = new Uint8Array(buf); let s = "";
+    for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function subKey(sub) { try { return sub.options && sub.options.applicationServerKey ? abToB64u(sub.options.applicationServerKey) : ""; } catch { return ""; } }
+  async function serverKey() { try { const j = await (await aFetch("/push/public-key")).json(); return (j && j.key) || ""; } catch { return ""; } }
+
+  // Auto-heal after a VAPID key rotation: if this device is already subscribed
+  // but with a DIFFERENT key than the server now uses, silently re-subscribe so
+  // pushes resume with no user action. Only runs when permission is already
+  // granted (never prompts). Called on load by every page that includes this.
+  async function syncKey() {
+    try {
+      if (!supported || (isIOS() && !isStandalone()) || Notification.permission !== "granted") return;
+      const r = await reg(); if (!r) return;
+      const sub = await r.pushManager.getSubscription(); if (!sub) return;
+      const want = await serverKey(); if (!want) return;
+      if (subKey(sub) === want) return;                 // already on the current key
+      await sub.unsubscribe().catch(() => {});
+      const fresh = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(want) });
+      await aFetch("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: fresh.toJSON(), ua: navigator.userAgent }) }).catch(() => {});
+    } catch (e) {}
+  }
 
   // Returns { supported, needsInstall, denied, on }.
   async function state() {
@@ -47,6 +73,9 @@
     try { keyResp = await (await aFetch("/push/public-key")).json(); } catch { return { ok: false, error: "no-server" }; }
     if (!keyResp || !keyResp.key) return { ok: false, error: "not-configured" };
     let sub = await r.pushManager.getSubscription();
+    // If an existing subscription is bound to a different (old) key, drop it so
+    // we re-subscribe with the current one — otherwise sends would keep failing.
+    if (sub && subKey(sub) !== keyResp.key) { await sub.unsubscribe().catch(() => {}); sub = null; }
     if (!sub) sub = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(keyResp.key) });
     try {
       const res = await (await aFetch("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub.toJSON(), ua: navigator.userAgent }) })).json();
@@ -69,5 +98,7 @@
     catch { return { ok: false, error: "failed" }; }
   }
 
-  window.MostlanePush = { supported, isIOS, isStandalone, state, enable, disable, test };
+  window.MostlanePush = { supported, isIOS, isStandalone, state, enable, disable, test, syncKey };
+  // Silently migrate this device to the current VAPID key if it drifted (rotation).
+  try { syncKey(); } catch (e) {}
 })();
