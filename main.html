@@ -618,7 +618,7 @@ const MAP = window.ML_PERM_MAP || {
             holdTimer = null;
             enterEdit();
             startDrag(tile, startX, startY);
-          }, 450);
+          }, 700);   // longer hold so a slow tap doesn't accidentally enter arrange mode
         });
         grid.addEventListener("pointermove", e => {
           if (holdTimer && (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10)) {
