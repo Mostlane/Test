@@ -608,6 +608,7 @@
       <div class="field-label" style="margin-top:8px;">Notes (optional)</div>
       <textarea id="ra_note" placeholder="Anything noteworthy about site conditions…"></textarea>
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:700;color:#92500a;"><input type="checkbox" id="ra_safe"> I've assessed the site and it's safe to proceed</label>
+      <button type="button" id="raSkipBtn" title="Full-Access override" style="display:none;margin-top:12px;background:none;border:1px dashed #d7ccb4;color:#b6a37e;font-size:11px;padding:5px 9px;border-radius:7px;cursor:pointer;">skip</button>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;">
       <button class="btn primary" id="saveBtn" style="display:none">Save Update</button>
@@ -1088,6 +1089,11 @@ function renderCapture(){
   if(job.riskAssessment){
     any = true;
     const r = job.riskAssessment;
+    if(r.skipped){
+      body.appendChild(captureSection("🦺 Risk assessment" + (r.by ? ` — ${r.by}` : ""), [
+        kvRow("Status", "⚠️ Skipped (Full-Access override)")
+      ]));
+    } else {
     const ticks = [["Safe access", r.safeAccess],["PPE", r.ppe],["Isolation", r.isolation],
                    ["Height controlled", r.height],["Others protected", r.othersAtRisk],["Hazmat considered", r.hazardous]]
       .map(([label, ok]) => `${ok ? "✅" : "▫️"} ${label}`).join("   ");
@@ -1096,6 +1102,7 @@ function renderCapture(){
       kvRow("Safe to proceed", r.safeToProceed ? "Yes" : "No"),
       kvRow("Notes", r.note)
     ]));
+    }
   }
   if(job.hold){
     any = true;
@@ -1152,6 +1159,14 @@ function isStoryMode(){
     return p.StoryMode === "Yes";
   } catch { return false; }
 }
+// FULL-ACCESS ONLY (not SLAAdmin) — gates the discreet risk-assessment override.
+function isFullAccess(){
+  try {
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    return p.FullAccess === "Yes";
+  } catch { return false; }
+}
+let raSkip = false;   // set true when a Full-Access admin uses the RA override
 // Story Mode "one job at a time": find any OTHER job assigned to this engineer
 // that's currently Travelling / In Progress.
 async function findOtherActiveJob(currentJobId, engineer){
@@ -1168,6 +1183,8 @@ function syncPanels(){
   if($("quotePanel")) $("quotePanel").style.display = (s === "Quote") ? "block" : "none";
   if($("raPanel"))    $("raPanel").style.display    = (s === "In Progress") ? "block" : "none";
   if($("holdPanel"))  $("holdPanel").style.display  = (s === "On Hold") ? "block" : "none";
+  // Discreet Full-Access override on the risk assessment.
+  if($("raSkipBtn"))  $("raSkipBtn").style.display  = (s === "In Progress" && isFullAccess()) ? "inline-block" : "none";
 }
 
 /* ---------- Tap-to-change status chips (auto-save) ---------- */
@@ -1445,16 +1462,22 @@ async function saveUpdate(){
     }
   }
 
-  // Starting work (In Progress) needs the completed risk assessment.
+  // Starting work (In Progress) needs the completed risk assessment — unless a
+  // Full-Access admin uses the override (recorded as skipped, with their name).
   let riskAssessment;
   if(status === "In Progress"){
-    riskAssessment = collectRA();
-    if(!riskAssessment.safeToProceed){
-      $("raPanel").style.display = "block";
-      $("statusBar").textContent = "⚠️ Complete the risk assessment and tick 'safe to proceed' before starting work.";
-      return;
+    if(raSkip && isFullAccess()){
+      riskAssessment = { skipped:true, safeToProceed:true, by:user, at:new Date().toISOString() };
+    } else {
+      riskAssessment = collectRA();
+      if(!riskAssessment.safeToProceed){
+        $("raPanel").style.display = "block";
+        $("statusBar").textContent = "⚠️ Complete the risk assessment and tick 'safe to proceed' before starting work.";
+        return;
+      }
     }
   }
+  raSkip = false;   // one-shot — never persists to the next save
 
   // Marking a job Complete needs evidence — a proper completion note AND at
   // least one photo (Story Mode also needs a customer signature). Applies to
@@ -1594,6 +1617,14 @@ function isOfficeAdmin(){
 }
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
+  // Full-Access override: skip the risk assessment and start the job. Discreet,
+  // FullAccess-only (the button is hidden for everyone else). Recorded as skipped.
+  if($("raSkipBtn")) $("raSkipBtn").addEventListener("click", () => {
+    if(!isFullAccess()) return;
+    if(!confirm("Full-Access override: start this job WITHOUT a risk assessment?\n\nThis is recorded against your name.")) return;
+    raSkip = true;
+    saveUpdate();
+  });
   // Back button: return to wherever they came from (dashboard, scheduler,
   // My Jobs, archive, site photos…). Falls back to the href when there's no
   // in-app history to go back to (e.g. opened fresh from a push notification).
