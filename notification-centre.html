@@ -25,6 +25,13 @@
   .btn.small{padding:6px 10px;font-size:13px;}
   .empty{color:var(--muted);font-size:14px;padding:6px 0;}
   select{font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;}
+  #memoCard input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  .mm-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line);}
+  .mm-row:first-child{border-top:none;}
+  .mm-tag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;}
+  .mm-tag.draft{background:#eef1f4;color:#64748b;} .mm-tag.sent{background:#e2edff;color:#1a4f8f;}
+  .mm-who{font-size:13px;color:var(--muted);}
+  .mm-sub{margin-top:8px;padding:10px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;font-size:13px;}
   .pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;}
   .muteform{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:50;}
@@ -47,6 +54,29 @@
       <button class="btn" id="pushTest" style="display:none;">Send test notification</button>
     </div>
     <p id="pushHint" class="sub" style="margin:10px 0 0;"></p>
+  </div>
+
+  <div class="card" id="memoCard" style="display:none;">
+    <h2>📢 Company memos</h2>
+    <p class="sub">Write a memo, save it as a draft, then send it to everyone. A sent memo <b>can't be snoozed</b> — each person must read it and sign to confirm, and a signed copy is filed in their <b>My Documents › Memos</b>.</p>
+    <div style="display:grid;gap:8px;max-width:620px;">
+      <div style="display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:center;">
+        <label style="font-weight:700;font-size:13px;">To</label><input id="mm_to" placeholder="e.g. All Labour">
+        <label style="font-weight:700;font-size:13px;">From</label><input id="mm_from" placeholder="Your name">
+        <label style="font-weight:700;font-size:13px;">Cc</label><input id="mm_cc" placeholder="Optional">
+        <label style="font-weight:700;font-size:13px;">Date</label><input id="mm_date" placeholder="e.g. 15th May 2026">
+        <label style="font-weight:700;font-size:13px;">Re</label><input id="mm_re" placeholder="Subject — shown in the alert">
+      </div>
+      <textarea id="mm_body" rows="9" placeholder="Type the memo here. Blank lines separate paragraphs." style="width:100%;padding:11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="btn primary" id="mmSave">Save draft</button>
+        <button class="btn" id="mmSend" style="background:#0a7d33;color:#fff;">Send to everyone…</button>
+        <button class="btn" id="mmClear" style="display:none;">New / clear</button>
+        <span class="sub" id="mmEditing" style="margin:0;"></span>
+      </div>
+    </div>
+    <h3 style="font-size:14px;margin:18px 0 6px;">Drafts &amp; sent</h3>
+    <div id="mmList"><div class="empty">Loading…</div></div>
   </div>
 
   <div class="card">
@@ -304,12 +334,95 @@ async function initPush(){
   await refreshPushUI();
 }
 
+// ── Company memos ──────────────────────────────────────────────────────────
+let MM_EDIT = 0, MM_ME = "";
+function mmFields(){ return { id: MM_EDIT || undefined, to:g("mm_to").value.trim(), from:g("mm_from").value.trim(), cc:g("mm_cc").value.trim(), date:g("mm_date").value.trim(), re:g("mm_re").value.trim(), body:g("mm_body").value }; }
+function mmSetForm(m){
+  MM_EDIT = m ? m.id : 0;
+  g("mm_to").value = m ? (m.to||"") : "All Labour";
+  g("mm_from").value = m ? (m.from||"") : MM_ME;
+  g("mm_cc").value = m ? (m.cc||"") : "";
+  g("mm_date").value = m ? (m.date||"") : new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});
+  g("mm_re").value = m ? (m.re||"") : "";
+  g("mm_body").value = m ? (m.body||"") : "";
+  g("mmEditing").textContent = m ? ("Editing draft #"+m.id) : "";
+  g("mmClear").style.display = m ? "" : "none";
+  if(m) g("memoCard").scrollIntoView({behavior:"smooth"});
+}
+async function mmSave(sendAfter){
+  const f = mmFields();
+  if(!f.re || !f.body.trim()){ toast("Add a subject (Re) and a body first"); return; }
+  const r = await (await authFetch("/memos/save", { method:"POST", body: JSON.stringify(f) })).json();
+  if(!r.ok){ toast(r.error||"Couldn't save"); return null; }
+  MM_EDIT = r.id;
+  if(!sendAfter){ toast("Draft saved"); await mmLoad(); }
+  return r.id;
+}
+async function mmSend(){
+  let id = MM_EDIT;
+  if(!g("mm_re").value.trim() || !g("mm_body").value.trim()){ toast("Add a subject and body first"); return; }
+  // Save latest edits first, then send.
+  id = await mmSave(true);
+  if(!id) return;
+  if(!confirm("Send this memo to everyone now?\n\nIt will pop up for every user and can't be dismissed until they sign to confirm they've read it.")) return;
+  const r = await (await authFetch("/memos/send", { method:"POST", body: JSON.stringify({ id }) })).json();
+  if(!r.ok){ toast(r.error||"Couldn't send"); return; }
+  toast("Sent to "+ (r.recipients||"all") +" people");
+  mmSetForm(null);
+  await mmLoad();
+}
+async function mmDelete(id){
+  if(!confirm("Delete this memo? Signed copies already filed in people's documents stay put.")) return;
+  const r = await (await authFetch("/memos/delete", { method:"POST", body: JSON.stringify({ id }) })).json();
+  if(r.ok){ toast("Deleted"); if(MM_EDIT===id) mmSetForm(null); await mmLoad(); } else toast(r.error||"Failed");
+}
+async function mmShowWho(id, host){
+  host.innerHTML = "Loading…";
+  const r = await (await authFetch("/memos/status?id="+id)).json();
+  if(!r.ok){ host.textContent = r.error||"Failed"; return; }
+  const sList = r.signed.map(s => esc(s.name)+" ✓").join(", ") || "—";
+  const uList = r.unsigned.map(u => esc(u.name)).join(", ") || "everyone ✓";
+  host.innerHTML = "<b>Signed ("+r.signed.length+"):</b> "+sList+"<br><b>Not yet ("+r.unsigned.length+"):</b> "+uList;
+}
+async function mmLoad(){
+  const host = g("mmList");
+  try{
+    const r = await (await authFetch("/memos/list")).json();
+    if(!r.ok) throw 0;
+    if(!r.memos.length){ host.innerHTML = '<div class="empty">No memos yet.</div>'; return; }
+    host.innerHTML = r.memos.map(m => {
+      const tag = m.status==="sent" ? '<span class="mm-tag sent">Sent</span>' : '<span class="mm-tag draft">Draft</span>';
+      const who = m.status==="sent" ? '<span class="mm-who">'+m.signed+'/'+m.total+' signed</span>' : "";
+      const btns = m.status==="sent"
+        ? '<button class="btn" data-who="'+m.id+'">Who signed</button>'
+        : '<button class="btn" data-edit="'+m.id+'">Edit</button><button class="btn" style="background:#0a7d33;color:#fff;" data-send="'+m.id+'">Send</button>';
+      return '<div class="mm-row">'+tag+'<b style="flex:1;min-width:120px;">'+esc(m.re||"(no subject)")+'</b>'+who+btns+'<button class="btn" data-del="'+m.id+'" title="Delete">🗑</button><div class="mm-sub" data-sub="'+m.id+'" style="display:none;flex-basis:100%;"></div></div>';
+    }).join("");
+    host.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{ const m=r.memos.find(x=>x.id==b.dataset.edit); mmSetForm(m); });
+    host.querySelectorAll("[data-send]").forEach(b=>b.onclick=async()=>{ const m=r.memos.find(x=>x.id==b.dataset.send); mmSetForm(m); await mmSend(); });
+    host.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>mmDelete(+b.dataset.del));
+    host.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{ const sub=host.querySelector('[data-sub="'+b.dataset.who+'"]'); if(sub.style.display==="none"){ sub.style.display="block"; mmShowWho(+b.dataset.who, sub); } else sub.style.display="none"; });
+  }catch(e){ host.innerHTML = '<div class="empty">Couldn\'t load memos.</div>'; }
+}
+function initMemos(user){
+  MM_ME = user || "";
+  g("memoCard").style.display = "";
+  g("mmSave").onclick = ()=>mmSave(false);
+  g("mmSend").onclick = mmSend;
+  g("mmClear").onclick = ()=>mmSetForm(null);
+  mmSetForm(null);
+  mmLoad();
+}
+
 (async function(){
   // Full-access only.
+  let meUser = "";
   try{
     const me = await (await authFetch("/auth/me")).json();
     if(!me.ok || me.user.FullAccess !== "Yes"){ alert("This page needs Full access."); location.href="main.html"; return; }
+    meUser = ((me.user.FirstName||"")+" "+(me.user.LastName||"")).trim() || me.user.Username || "";
   }catch{ location.href="main.html"; return; }
+  initMemos(meUser);
   initMuteForm();
   await initPush();
   await loadUsers();

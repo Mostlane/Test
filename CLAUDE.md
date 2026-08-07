@@ -828,6 +828,30 @@ list. `since`-based delta polling keeps it cheap. Bubble layout is flex-column
 (`.mlc-row` / `.mlc-line`) — matches inbox.html's proven mobile pattern (an
 earlier inline-block bubble stacked one char per line on iOS Safari).
 
+## Company memos (routes/memos.js + notification-centre.html + memo-sign.html)
+Admin (FullAccess) writes a memo in the classic **To/From/Cc/Date/Re + body**
+format (matches Jamie's example), **saves DRAFTS**, then **sends company-wide**.
+Managed entirely from **notification-centre.html** ("📢 Company memos" card:
+compose, drafts & sent list, per-memo "Who signed"). A sent memo:
+- **pushes every active user** (web push, url→memo-sign.html);
+- shows an **UNAVOIDABLE, non-dismissible, non-snoozable blocking overlay**
+  (`memoGate` in portal-config.js, on every page except the sign page + auth
+  pages — `GET /memos/pending`) linking to **memo-sign.html**;
+- **memo-sign.html** renders the memo, requires an "I have read & understood"
+  tick **plus a drawn signature**, then `POST /memos/ack` files a
+  signed-acknowledgement **PDF into the signer's My Documents › "Memos"**
+  (R2 `staffdocs/<tid>/user/<user>/Memos/`, via lib/pdf.js — text-only, the
+  drawn signature PNG is stored alongside at `memos/<tid>/<id>/<user>.png` as the
+  admin record). The **author is auto-acknowledged** on send (not gated, counts
+  as signed, no PDF filed for them).
+Tables **memos** (draft/sent + the header fields + body) and **memo_acks**
+(tenant/memo/user PK; signed_at, doc_key, sig_key) — self-migrating. Routes
+(FullAccess unless noted): POST /memos/save (draft upsert), /memos/send,
+/memos/delete, GET /memos/list (+signed/total), GET /memos/status?id= (who
+signed / who hasn't); **any session**: GET /memos/pending, GET /memos/one?id=,
+POST /memos/ack. "Memos" is a default staff-doc category (hrdocs). memo-sign.html
+is in the _headers no-cache list.
+
 ## Activity log (audit trail)
 Server middleware records every state-changing request automatically (covers
 all current AND future pages); portal-config beacons page views. Middleware also

@@ -1614,8 +1614,8 @@ async function handle5(request, env, ctx, url, sess) {
   }
   if (path === "/holiday/debug-users" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
-    const activeUsers = await getActiveUsers();
-    return json3({ activeUsersCount: activeUsers.length, activeUsers: activeUsers.slice(0, 10) });
+    const activeUsers2 = await getActiveUsers();
+    return json3({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
   }
   return text("Not Found", 404);
 }
@@ -5986,8 +5986,8 @@ async function handle9(request, env, ctx, url, sess) {
     const siteNumber = form && String(form.get("siteNumber") || "").trim();
     const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
     if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName2 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName2}`;
+    const safeName3 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName3}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
     const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
     return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
@@ -6905,10 +6905,10 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure4 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure4(u.username);
+    const ensure5 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
+    for (const u of permUsers || []) ensure5(u.username);
     for (const r of results || []) {
-      const e = ensure4(r.username);
+      const e = ensure5(r.username);
       if (isOpenRow(r)) {
         e.open = true;
         continue;
@@ -7864,7 +7864,7 @@ function classifyAssetBucket(key) {
 }
 
 // src/routes/hrdocs.js
-var DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Other"];
+var DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Memos", "Other"];
 function jr2(obj, headers, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });
 }
@@ -8045,11 +8045,11 @@ async function handle19(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
-  const isFull2 = perms.FullAccess === "Yes";
+  const isFull3 = perms.FullAccess === "Yes";
   const path = url.pathname;
   if (path === "/privacy/export" && request.method === "GET") {
     const who = (url.searchParams.get("u") || sess.user.username).trim();
-    if (who !== sess.user.username && !isFull2) return error("Forbidden", 403, env, request);
+    if (who !== sess.user.username && !isFull3) return error("Forbidden", 403, env, request);
     const data = {};
     for (const [table, col] of EXPORT_TABLES) {
       const rows = await safeSelect(env, tenantId, table, col, who);
@@ -8064,7 +8064,7 @@ async function handle19(request, env, ctx, url, sess) {
     }, {}, env, request);
   }
   if (path === "/privacy/erase" && request.method === "POST") {
-    if (!isFull2) return error("Only a Full-access user can erase an account.", 403, env, request);
+    if (!isFull3) return error("Only a Full-access user can erase an account.", 403, env, request);
     const body = await request.json().catch(() => ({}));
     const who = (body.username || "").trim();
     if (!who) return error("username required", 400, env, request);
@@ -9924,12 +9924,304 @@ async function handle21(request, env, ctx, url, sess) {
   return jr4({ error: "Not found: " + sub }, headers, 404);
 }
 
+// src/routes/memos.js
+var READY3 = false;
+async function ensure3(env) {
+  if (READY3) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft',   -- 'draft' | 'sent'
+    m_to TEXT, m_from TEXT, m_cc TEXT, m_date TEXT, m_re TEXT,
+    body TEXT,
+    created_by TEXT, created_at TEXT, sent_at TEXT
+  )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memo_acks (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    memo_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    signed_at TEXT,
+    doc_key TEXT,
+    sig_key TEXT,
+    PRIMARY KEY (tenant_id, memo_id, username)
+  )`).run();
+  READY3 = true;
+}
+function jr5(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+async function readJson6(r) {
+  try {
+    return await r.json();
+  } catch {
+    return {};
+  }
+}
+var lc2 = (s) => String(s || "").toLowerCase();
+var safeName2 = (s) => String(s || "memo").replace(/[^\w.\-]+/g, "_").slice(0, 60);
+async function isFull2(env, tid, me) {
+  try {
+    const p = await permissionsFor(env, tid, me);
+    return p.FullAccess === "Yes";
+  } catch {
+    return false;
+  }
+}
+async function activeUsers(env, tid) {
+  const { results } = await env.DB.prepare(
+    "SELECT username, first_name, last_name FROM users WHERE tenant_id=? AND lower(COALESCE(status,'active')) NOT IN ('inactive','archived','left','disabled','pending')"
+  ).bind(tid).all();
+  return results || [];
+}
+function fullName(u) {
+  return ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+}
+function fmtWhen(iso) {
+  try {
+    const d = new Date(iso);
+    const day = d.getUTCDate(), mon = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.getUTCMonth()];
+    const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${day} ${mon} ${d.getUTCFullYear()}, ${hh}:${mm}`;
+  } catch {
+    return iso;
+  }
+}
+function wrap(str, size, maxW) {
+  const words = String(str || "").split(/\s+/), lines = [];
+  let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (textWidth(t, size) > maxW && cur) {
+      lines.push(cur);
+      cur = w;
+    } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [""];
+}
+function buildMemoPdf(memo, signerName, signedAtISO) {
+  const doc = new PdfDoc();
+  const L = 56, R = 539, W2 = R - L;
+  let y = 70;
+  doc.text(L, y, "MEMO", { size: 26, bold: true });
+  y += 10;
+  doc.hr(L, y, R, { w: 1.2 });
+  y += 28;
+  const row = (label, val) => {
+    doc.text(L, y, label, { size: 11, bold: true });
+    for (const ln of wrap(val || "", 11, W2 - 70)) {
+      doc.text(L + 70, y, ln, { size: 11 });
+      y += 16;
+    }
+    y += 3;
+  };
+  row("To:", memo.m_to);
+  row("From:", memo.m_from);
+  if (memo.m_cc) row("Cc:", memo.m_cc);
+  row("Date:", memo.m_date);
+  row("Re:", memo.m_re);
+  y += 4;
+  doc.hr(L, y, R, { grey: true });
+  y += 22;
+  for (const para of String(memo.body || "").split(/\n/)) {
+    if (!para.trim()) {
+      y += 10;
+      continue;
+    }
+    for (const ln of wrap(para, 11, W2)) {
+      if (y > 770) {
+        doc.newPage();
+        y = 60;
+      }
+      doc.text(L, y, ln, { size: 11 });
+      y += 16;
+    }
+    y += 8;
+  }
+  y += 14;
+  if (y > 740) {
+    doc.newPage();
+    y = 60;
+  }
+  doc.hr(L, y, R, { grey: true });
+  y += 22;
+  doc.text(L, y, "Acknowledgement", { size: 12, bold: true });
+  y += 18;
+  for (const ln of wrap("I confirm that I have read and understood the content of this memo.", 11, W2)) {
+    doc.text(L, y, ln, { size: 11 });
+    y += 16;
+  }
+  y += 6;
+  doc.text(L, y, "Signed: " + signerName, { size: 11, bold: true });
+  y += 16;
+  doc.text(L, y, "Date: " + fmtWhen(signedAtISO), { size: 11 });
+  y += 16;
+  doc.text(L, y, "Signed electronically via the Mostlane Portal. Drawn signature held on file.", { size: 8.5, grey: true });
+  return doc.bytes();
+}
+async function handle22(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
+  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const me = sess.user.username;
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/memos(?=\/|$)/, "") || "/";
+  await ensure3(env);
+  const needFull = async () => {
+    if (!await isFull2(env, tid, me)) {
+      return jr5({ error: "Admins only" }, headers, 403);
+    }
+    return null;
+  };
+  if (sub === "/save" && method === "POST") {
+    const bad = await needFull();
+    if (bad) return bad;
+    const b = await readJson6(request);
+    const fields = [b.to, b.from, b.cc, b.date, b.re, b.body].map((v) => String(v == null ? "" : v));
+    const id = parseInt(b.id, 10) || 0;
+    if (id) {
+      const row = await env.DB.prepare("SELECT status FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).first();
+      if (!row) return jr5({ error: "Not found" }, headers, 404);
+      if (row.status === "sent") return jr5({ error: "Already sent \u2014 can't edit" }, headers, 409);
+      await env.DB.prepare("UPDATE memos SET m_to=?, m_from=?, m_cc=?, m_date=?, m_re=?, body=? WHERE tenant_id=? AND id=?").bind(...fields, tid, id).run();
+      return jr5({ ok: true, id }, headers);
+    }
+    const res = await env.DB.prepare(
+      "INSERT INTO memos (tenant_id, status, m_to, m_from, m_cc, m_date, m_re, body, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, "draft", ...fields, me, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return jr5({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
+  }
+  if (sub === "/send" && method === "POST") {
+    const bad = await needFull();
+    if (bad) return bad;
+    const b = await readJson6(request);
+    const id = parseInt(b.id, 10);
+    if (!id) return jr5({ error: "id required" }, headers, 400);
+    const memo = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!memo) return jr5({ error: "Not found" }, headers, 404);
+    if (memo.status === "sent") return jr5({ error: "Already sent" }, headers, 409);
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE memos SET status='sent', sent_at=? WHERE tenant_id=? AND id=?").bind(at, tid, id).run();
+    const author = memo.created_by || me;
+    await env.DB.prepare(
+      "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, memo_id, username) DO NOTHING"
+    ).bind(tid, id, author, at, null, null).run();
+    const users = await activeUsers(env, tid);
+    users.forEach((u) => {
+      if (lc2(u.username) === lc2(author)) return;
+      ctx?.waitUntil(sendToUser(env, tid, u.username, {
+        title: "\u{1F4E2} New company memo",
+        body: (memo.m_re || "Please read and sign").slice(0, 120),
+        url: "/memo-sign.html?id=" + id,
+        tag: "memo:" + id
+      }));
+    });
+    return jr5({ ok: true, id, recipients: users.length }, headers);
+  }
+  if (sub === "/delete" && method === "POST") {
+    const bad = await needFull();
+    if (bad) return bad;
+    const b = await readJson6(request);
+    const id = parseInt(b.id, 10);
+    if (!id) return jr5({ error: "id required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    await env.DB.prepare("DELETE FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).run();
+    return jr5({ ok: true }, headers);
+  }
+  if (sub === "/list" && method === "GET") {
+    const bad = await needFull();
+    if (bad) return bad;
+    const { results } = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? ORDER BY id DESC").bind(tid).all();
+    const total = (await activeUsers(env, tid)).length;
+    const memos = [];
+    for (const m of results || []) {
+      let signed = 0;
+      if (m.status === "sent") {
+        const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, m.id).first();
+        signed = c && c.n || 0;
+      }
+      memos.push({ id: m.id, status: m.status, to: m.m_to, from: m.m_from, cc: m.m_cc, date: m.m_date, re: m.m_re, body: m.body, created_at: m.created_at, sent_at: m.sent_at, signed, total });
+    }
+    return jr5({ ok: true, memos }, headers);
+  }
+  if (sub === "/status" && method === "GET") {
+    const bad = await needFull();
+    if (bad) return bad;
+    const id = parseInt(url.searchParams.get("id"), 10);
+    if (!id) return jr5({ error: "id required" }, headers, 400);
+    const memo = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!memo) return jr5({ error: "Not found" }, headers, 404);
+    const acks = (await env.DB.prepare("SELECT username, signed_at FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).all()).results || [];
+    const ackMap = {};
+    acks.forEach((a) => {
+      ackMap[lc2(a.username)] = a.signed_at;
+    });
+    const users = await activeUsers(env, tid);
+    const signed = [], unsigned = [];
+    users.forEach((u) => {
+      if (ackMap[lc2(u.username)]) signed.push({ username: u.username, name: fullName(u), at: ackMap[lc2(u.username)] });
+      else unsigned.push({ username: u.username, name: fullName(u) });
+    });
+    signed.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    return jr5({ ok: true, memo: { id: memo.id, re: memo.m_re, from: memo.m_from, sent_at: memo.sent_at }, signed, unsigned }, headers);
+  }
+  if (sub === "/pending" && method === "GET") {
+    const { results } = await env.DB.prepare(
+      "SELECT m.id, m.m_re, m.m_from, m.sent_at FROM memos m WHERE m.tenant_id=? AND m.status='sent' AND NOT EXISTS (SELECT 1 FROM memo_acks a WHERE a.tenant_id=m.tenant_id AND a.memo_id=m.id AND lower(a.username)=lower(?)) ORDER BY m.id ASC"
+    ).bind(tid, me).all();
+    return jr5({ ok: true, memos: (results || []).map((m) => ({ id: m.id, re: m.m_re, from: m.m_from, at: m.sent_at })) }, headers);
+  }
+  if (sub === "/one" && method === "GET") {
+    const id = parseInt(url.searchParams.get("id"), 10);
+    if (!id) return jr5({ error: "id required" }, headers, 400);
+    const m = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=? AND status='sent'").bind(tid, id).first();
+    if (!m) return jr5({ error: "Not found" }, headers, 404);
+    const a = await env.DB.prepare("SELECT signed_at FROM memo_acks WHERE tenant_id=? AND memo_id=? AND lower(username)=lower(?)").bind(tid, id, me).first();
+    return jr5({ ok: true, memo: { id: m.id, to: m.m_to, from: m.m_from, cc: m.m_cc, date: m.m_date, re: m.m_re, body: m.body, sent_at: m.sent_at }, signed: !!(a && a.signed_at) }, headers);
+  }
+  if (sub === "/ack" && method === "POST") {
+    const b = await readJson6(request);
+    const id = parseInt(b.id, 10);
+    if (!id) return jr5({ error: "id required" }, headers, 400);
+    const memo = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=? AND status='sent'").bind(tid, id).first();
+    if (!memo) return jr5({ error: "Memo not found" }, headers, 404);
+    const existing = await env.DB.prepare("SELECT signed_at FROM memo_acks WHERE tenant_id=? AND memo_id=? AND lower(username)=lower(?)").bind(tid, id, me).first();
+    if (existing && existing.signed_at) return jr5({ ok: true, already: true }, headers);
+    const urow = await env.DB.prepare("SELECT first_name, last_name FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, me).first();
+    const signerName = urow ? ((urow.first_name || "") + " " + (urow.last_name || "")).trim() || me : me;
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const ts = Date.now();
+    let sigKey = null;
+    try {
+      const dataUrl = String(b.signature || "");
+      const mm = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
+      if (mm) {
+        const bin = Uint8Array.from(atob(mm[2]), (c) => c.charCodeAt(0));
+        sigKey = `memos/${tid}/${id}/${safeName2(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
+        await env.JOB_FILES.put(sigKey, bin, { httpMetadata: { contentType: "image/" + mm[1] } });
+      }
+    } catch {
+    }
+    const pdf = buildMemoPdf(memo, signerName, at);
+    const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName2(memo.m_re || "memo")}.pdf`;
+    await env.JOB_FILES.put(docKey, pdf, {
+      httpMetadata: { contentType: "application/pdf" },
+      customMetadata: { name: "Memo \u2014 " + (memo.m_re || "Company memo"), by: "Signed acknowledgement" }
+    });
+    await env.DB.prepare(
+      "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, memo_id, username) DO UPDATE SET signed_at=excluded.signed_at, doc_key=excluded.doc_key, sig_key=excluded.sig_key"
+    ).bind(tid, id, me, at, docKey, sigKey).run();
+    return jr5({ ok: true, signed_at: at }, headers);
+  }
+  return jr5({ error: "Not found: " + sub }, headers, 404);
+}
+
 // src/routes/costing.js
 var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -9939,7 +10231,7 @@ async function handle22(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const perms = await permissionsFor(env, tid, me);
   const admin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.TimesheetAdmin === "Yes";
-  await ensure3(env);
+  await ensure4(env);
   if (path === "/sites/register" && method === "GET") {
     const reg = await loadRegister(env, tid);
     return json({ ok: true, sites: reg.list, aliases: reg.aliases, ignored: reg.ignored }, {}, env, request);
@@ -10543,7 +10835,7 @@ async function scanIntake(request, env) {
     const site = String(b.site || b.siteName || "").trim();
     const dir = b.direction === "out" ? "out" : "in";
     if (!username || !site) return new Response(JSON.stringify({ ok: false, error: "username and site required" }), { status: 400, headers: { "Content-Type": "application/json" } });
-    await ensure3(env);
+    await ensure4(env);
     await env.DB.prepare(
       "INSERT INTO sitelog_scans (tenant_id, username, site, direction, at, source) VALUES (?,?,?,?,?,?)"
     ).bind(
@@ -10991,7 +11283,7 @@ function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
 async function reconcileSitelogSessions(env, tid, opts) {
   const o = opts || {};
   if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
-  await ensure3(env);
+  await ensure4(env);
   const now = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
   const to = londonDate3(now.toISOString());
   const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
@@ -11127,7 +11419,7 @@ async function ratesMap(env, tid) {
   }
   return out;
 }
-async function ensure3(env) {
+async function ensure4(env) {
   try {
     await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
   } catch {
@@ -11283,6 +11575,8 @@ var ROUTES = [
   // web push subscriptions + test send
   ["*", "/messages", handle21],
   // office ↔ engineer messages (Inbox)
+  ["*", "/memos", handle22],
+  // company memos (draft/send/sign)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
   ["*", "/get-sites", handle9],
@@ -11294,13 +11588,13 @@ var ROUTES = [
   ["*", "/import-sites", handle9],
   ["*", "/sites", handle9],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle22],
+  ["*", "/sites/register", handle23],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle22],
+  ["*", "/ledger", handle23],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle22],
+  ["*", "/costing", handle23],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle22],
+  ["*", "/exceptions", handle23],
   // needs-a-human-eye list
   ["*", "/settings", handle10],
   ["*", "/oncall", handle10],
