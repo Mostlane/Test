@@ -112,6 +112,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   stripped so nothing doubles. Standalone sub-apps under /fsm and /vehicles
   keep their own copy (they don't load portal-config.js).
 - View As (owner only, OWNER="Jamie Line"), Story Mode "⚡ My Day" button.
+  The purple "Viewing as…" return bar (fixed bottom:0) now **lifts the field
+  app's `.tabbar` above itself** (addBar measures its height, sets the tabbar's
+  `bottom`) so Route/Jobs/Inbox/You stay tappable while impersonating. The
+  field app's **engineer-jobs.html also has a top-left header back** (`.eng-back`
+  → route.html; its own class since `.ml-back` is force-hidden there) so there's
+  always an escape the bottom bar can't block.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256

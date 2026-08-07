@@ -433,7 +433,17 @@
           };
           bar.appendChild(lbl); bar.appendChild(btn);
           document.body.appendChild(bar);
-          document.body.style.paddingBottom = "56px";
+          // The field app (route/jobs/inbox/you) has its own fixed bottom tab bar
+          // at bottom:0 — the purple bar would sit ON TOP and hide it. Lift the
+          // tab bar to just above the purple bar so both stay usable while viewing.
+          var barH = bar.offsetHeight || 52;
+          var tb = document.querySelector(".tabbar");
+          if (tb) {
+            tb.style.bottom = barH + "px";
+            document.body.style.paddingBottom = (barH + (tb.offsetHeight || 56)) + "px";
+          } else {
+            document.body.style.paddingBottom = barH + "px";
+          }
         };
         if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addBar);
         else addBar();
