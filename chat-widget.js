@@ -280,7 +280,16 @@
   }
 
   // ── New conversation (pick any user) ────────────────────────────────────────
-  var USERS = null;
+  var USERS = null, PICK_GROUPS = null;
+  // Groups the current user can *compose* to: only the ones they are NOT a
+  // member of (i.e. engineers compose "Office"; office staff — who ARE the
+  // members — reply within the engineer threads shown in their list instead).
+  // During View-As this is the impersonated user, so an engineer's Office shows.
+  function composableGroups() {
+    return (PICK_GROUPS || []).filter(function (g) {
+      return !(g.members || []).some(function (m) { return String(m).toLowerCase() === String(ME).toLowerCase(); });
+    });
+  }
   function showNew() {
     view = "new"; curWith = "";
     stopFastPoll();
@@ -294,8 +303,12 @@
       '<div id="mlc-ulist"><div class="mlc-empty">Loading people…</div></div>';
     $("mlc-usearch").oninput = function () { renderUsers(this.value); };
     if (USERS) { renderUsers(""); return; }
-    authFetch("/users").then(function (r) { return r.json(); }).then(function (d) {
-      USERS = ((d && (d.Users || d.users)) || []).filter(function (u) {
+    Promise.all([
+      authFetch("/messages/groups").then(function (r) { return r.json(); }).catch(function () { return {}; }),
+      authFetch("/users").then(function (r) { return r.json(); }).catch(function () { return {}; })
+    ]).then(function (res) {
+      PICK_GROUPS = (res[0] && res[0].groups) || [];
+      USERS = ((res[1] && (res[1].Users || res[1].users)) || []).filter(function (u) {
         return u.Username && String(u.Username).toLowerCase() !== String(ME).toLowerCase()
           && (!u.Status || u.Status === "Active");
       }).map(function (u) { return { name: u.Username, full: ((u.FirstName || "") + " " + (u.LastName || "")).trim() }; });
@@ -305,15 +318,25 @@
   function renderUsers(q) {
     var l = $("mlc-ulist"); if (!l) return;
     q = (q || "").toLowerCase();
+    var groups = composableGroups().filter(function (g) { return !q || String(g.name).toLowerCase().indexOf(q) > -1; });
     var list = (USERS || []).filter(function (u) { return !q || u.name.toLowerCase().indexOf(q) > -1 || (u.full && u.full.toLowerCase().indexOf(q) > -1); });
-    if (!list.length) { l.innerHTML = '<div class="mlc-empty">No matches.</div>'; return; }
-    l.innerHTML = list.map(function (u) {
+    if (!groups.length && !list.length) { l.innerHTML = '<div class="mlc-empty">No matches.</div>'; return; }
+    var html = groups.map(function (g) {
+      return '<div class="mlc-item" data-group="' + esc(g.id) + '" data-name="' + esc(g.name) + '"><div class="mlc-av grp">👥</div>' +
+        '<div class="mlc-it-bd"><div class="mlc-it-name">' + esc(g.name) + '</div>' +
+        '<div class="mlc-it-last">Group · ' + esc((g.members || []).length) + ' people</div></div></div>';
+    }).join("");
+    html += list.map(function (u) {
       var initial = (u.full || u.name).charAt(0).toUpperCase();
       return '<div class="mlc-item" data-with="' + esc(u.name) + '"><div class="mlc-av">' + esc(initial) + '</div>' +
         '<div class="mlc-it-bd"><div class="mlc-it-name">' + esc(u.full || u.name) + '</div>' +
         (u.full ? '<div class="mlc-it-last">' + esc(u.name) + '</div>' : '') + '</div></div>';
     }).join("");
-    [].forEach.call(l.querySelectorAll(".mlc-item"), function (el) {
+    l.innerHTML = html;
+    [].forEach.call(l.querySelectorAll("[data-group]"), function (el) {
+      el.onclick = function () { openGroup(el.getAttribute("data-group"), ME, el.getAttribute("data-name")); };
+    });
+    [].forEach.call(l.querySelectorAll("[data-with]"), function (el) {
       el.onclick = function () { openThread(el.getAttribute("data-with")); };
     });
   }
