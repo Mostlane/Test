@@ -6136,8 +6136,8 @@ async function handle9(request, env, ctx, url, sess) {
     const siteNumber = form && String(form.get("siteNumber") || "").trim();
     const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
     if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName3 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName3}`;
+    const safeName4 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName4}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
     const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
     return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
@@ -7055,10 +7055,10 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure5 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure5(u.username);
+    const ensure6 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
+    for (const u of permUsers || []) ensure6(u.username);
     for (const r of results || []) {
-      const e = ensure5(r.username);
+      const e = ensure6(r.username);
       if (isOpenRow(r)) {
         e.open = true;
         continue;
@@ -8195,11 +8195,11 @@ async function handle19(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
-  const isFull3 = perms.FullAccess === "Yes";
+  const isFull4 = perms.FullAccess === "Yes";
   const path = url.pathname;
   if (path === "/privacy/export" && request.method === "GET") {
     const who = (url.searchParams.get("u") || sess.user.username).trim();
-    if (who !== sess.user.username && !isFull3) return error("Forbidden", 403, env, request);
+    if (who !== sess.user.username && !isFull4) return error("Forbidden", 403, env, request);
     const data = {};
     for (const [table, col] of EXPORT_TABLES) {
       const rows = await safeSelect(env, tenantId, table, col, who);
@@ -8214,7 +8214,7 @@ async function handle19(request, env, ctx, url, sess) {
     }, {}, env, request);
   }
   if (path === "/privacy/erase" && request.method === "POST") {
-    if (!isFull3) return error("Only a Full-access user can erase an account.", 403, env, request);
+    if (!isFull4) return error("Only a Full-access user can erase an account.", 403, env, request);
     const body = await request.json().catch(() => ({}));
     const who = (body.username || "").trim();
     if (!who) return error("username required", 400, env, request);
@@ -11742,6 +11742,176 @@ function timingSafeEq(a, b) {
   return r === 0;
 }
 
+// src/routes/compliance.js
+var READY4 = false;
+async function ensure5(env) {
+  if (READY4) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS compliance_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    code TEXT NOT NULL,          -- store code (4 digits)
+    type TEXT NOT NULL,          -- canonical: fiveYear|pat|em|pv|ev|forecourt|pump|other
+    year TEXT,                   -- e.g. "2025" (if known)
+    r2_key TEXT NOT NULL,
+    filename TEXT,
+    size INTEGER,
+    doc_date TEXT,               -- certificate date (if parsed)
+    source TEXT,                 -- SharePoint item id / webUrl \u2014 used to de-dupe re-runs
+    uploaded_at TEXT
+  )`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_compfiles_code ON compliance_files(tenant_id, code, type)").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_compfiles_src ON compliance_files(tenant_id, source)").run();
+  } catch {
+  }
+  READY4 = true;
+}
+function jr6(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
+var pad4 = (v) => String(v ?? "").replace(/\D/g, "").padStart(4, "0");
+function canonType(t) {
+  const s = String(t || "").toLowerCase();
+  if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
+  if (/\bpat\b/.test(s)) return "pat";
+  if (/emergency|\bem\b|em\s*light/.test(s)) return "em";
+  if (/forecourt|\bpfs\b|petrol|fuel/.test(s)) return "forecourt";
+  if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
+  if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
+  if (/pump|sump/.test(s)) return "pump";
+  const k = s.replace(/[^a-z0-9]+/g, "");
+  return k ? k.slice(0, 20) : "other";
+}
+async function isFull3(env, tid, me) {
+  try {
+    const p = await permissionsFor(env, tid, me);
+    return p.FullAccess === "Yes" || p.Compliance === "Yes";
+  } catch {
+    return false;
+  }
+}
+async function handle24(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/compliance(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  if (sub === "/file" && method === "GET" && q.get("key")) {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("compliance/")) return jr6({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr6({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) return jr6({ error: "Not authenticated" }, headers, 401);
+  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const me = sess.user.username;
+  await ensure5(env);
+  if (sub === "/has" && method === "GET") {
+    const source = q.get("source") || "";
+    if (!source) return jr6({ error: "source required" }, headers, 400);
+    const row = await env.DB.prepare("SELECT id FROM compliance_files WHERE tenant_id=? AND source=?").bind(tid, source).first();
+    return jr6({ ok: true, exists: !!row, id: row ? row.id : null }, headers);
+  }
+  if (sub === "/index" && method === "GET") {
+    const { results } = await env.DB.prepare("SELECT DISTINCT code, type FROM compliance_files WHERE tenant_id=?").bind(tid).all();
+    const map = {};
+    for (const r of results || []) {
+      (map[r.code] = map[r.code] || {})[r.type] = 1;
+    }
+    return jr6({ ok: true, map, stores: Object.keys(map).length }, headers);
+  }
+  if (sub === "/files" && method === "GET") {
+    const code = pad4(q.get("code"));
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT id, type, year, r2_key, filename, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+    ).bind(tid, code).all();
+    const byType = {};
+    for (const r of results || []) {
+      (byType[r.type] = byType[r.type] || []).push({
+        id: r.id,
+        year: r.year,
+        filename: r.filename,
+        size: r.size,
+        date: r.doc_date || r.uploaded_at,
+        url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key)
+      });
+    }
+    return jr6({ ok: true, code, files: byType }, headers);
+  }
+  if (sub === "/file-url" && method === "GET") {
+    const code = pad4(q.get("code")), type = canonType(q.get("type"));
+    const row = await env.DB.prepare(
+      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
+    ).bind(tid, code, type).first();
+    if (!row) return jr6({ error: "No file" }, headers, 404);
+    return jr6({ ok: true, url: await signedFileUrl(env, url.origin, "/compliance/file", row.r2_key) }, headers);
+  }
+  if (sub === "/file" && method === "POST") {
+    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jr6({ error: "multipart required" }, headers, 400);
+    }
+    const file = form.get("file");
+    const code = pad4(form.get("code"));
+    const type = canonType(form.get("type"));
+    if (!file || typeof file === "string" || !code) return jr6({ error: "file and code required" }, headers, 400);
+    const source = String(form.get("source") || "").slice(0, 400) || null;
+    if (source) {
+      const dup = await env.DB.prepare("SELECT id, r2_key FROM compliance_files WHERE tenant_id=? AND source=?").bind(tid, source).first();
+      if (dup) return jr6({ ok: true, duplicate: true, id: dup.id }, headers);
+    }
+    const year = String(form.get("year") || "").replace(/[^0-9]/g, "").slice(0, 4) || null;
+    const fname = safeName3(form.get("filename") || file.name || type + ".pdf");
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const key = `compliance/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
+    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
+    const res = await env.DB.prepare(
+      "INSERT INTO compliance_files (tenant_id, code, type, year, r2_key, filename, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, code, type, year, key, fname, file.size || null, String(form.get("date") || "") || null, source, at).run();
+    return jr6({ ok: true, id: res.meta ? res.meta.last_row_id : null, key, code, type }, headers, 201);
+  }
+  if (sub === "/file-delete" && method === "POST") {
+    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const id = parseInt(b.id, 10);
+    if (!id) return jr6({ error: "id required" }, headers, 400);
+    const row = await env.DB.prepare("SELECT r2_key FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (row) {
+      try {
+        await env.JOB_FILES.delete(row.r2_key);
+      } catch {
+      }
+    }
+    await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    return jr6({ ok: true }, headers);
+  }
+  if (sub === "/summary" && method === "GET") {
+    const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM compliance_files WHERE tenant_id=?").bind(tid).first())?.n || 0;
+    const { results } = await env.DB.prepare("SELECT type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? GROUP BY type").bind(tid).all();
+    const byType = {};
+    (results || []).forEach((r) => {
+      byType[r.type] = r.n;
+    });
+    const stores = (await env.DB.prepare("SELECT COUNT(DISTINCT code) AS n FROM compliance_files WHERE tenant_id=?").bind(tid).first())?.n || 0;
+    return jr6({ ok: true, total, stores, byType }, headers);
+  }
+  return jr6({ error: "Not found: " + sub }, headers, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -11794,6 +11964,8 @@ var ROUTES = [
   // per-site labour cost roll-up
   ["*", "/exceptions", handle23],
   // needs-a-human-eye list
+  ["*", "/compliance", handle24],
+  // Southern Co-op compliance certs (R2 + D1)
   ["*", "/settings", handle10],
   ["*", "/oncall", handle10],
   ["*", "/daily-logs", handle10],
@@ -12001,7 +12173,9 @@ var PUBLIC_ROUTES = [
   // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.
   ["GET", "/ts/invoice-file"],
   // SiteLog scan intake — HMAC-signed with PORTAL_BRIDGE_SECRET, verified in-handler.
-  ["POST", "/ledger/scan"]
+  ["POST", "/ledger/scan"],
+  // Compliance certificates streamed inline — signed URL, verified in-handler.
+  ["GET", "/compliance/file"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

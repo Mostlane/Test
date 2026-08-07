@@ -495,6 +495,32 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
 - `stats.js` — /stats D1 aggregates + R2 storage totals (stats.html).
+- `compliance.js` — **Southern Co-op compliance certificates in R2+D1** (the
+  SharePoint "TSC Compliance" tree migrated into the portal). Table
+  **compliance_files** (self-migrating; keyed by store `code` 4-digit +
+  canonical `type` — `canonType()` maps labels→`fiveYear|pat|em|pv|ev|forecourt|
+  pump|other`; `source` = SharePoint item id, UNIQUE-indexed so re-runs never
+  double-import). Files live in R2 JOB_FILES under
+  `compliance/<code>/<type>/<year|_>/<ts>-<name>`. Routes (gate
+  `Compliance|FullAccess` unless noted): **GET /compliance/index** (compact
+  `{code:{type:1}}` map — drives the 📄 links), **GET /compliance/files?code=**
+  (one store, grouped by type, signed URLs), **GET /compliance/file-url?code=&
+  type=** (latest cert's signed URL), **GET /compliance/has?source=** (dedupe
+  check for the extractor), **POST /compliance/file** (multipart ingest:
+  file+code+type+year?+date?+source? — the Graph extractor + manual upload;
+  dedupes by source), **POST /compliance/file-delete** {id}, **GET
+  /compliance/summary**. **GET /compliance/file** (PUBLIC_ROUTES, sig-verified,
+  streams inline from R2). Front-end: **eicr-portal.html** fetches
+  /compliance/index once on load (non-blocking) and shows a 📄 link on each date
+  cell that has a cert → opens /compliance/file-url in a new tab (via a local
+  `authFetch()` with the Bearer token; visible to all viewers, edit still gated).
+  **Phase B (blocked on Microsoft Graph app-registration, Sites.Read.All):** a
+  server-side extractor walks the TSC Compliance tree (driveId
+  `b!NpDXAs0EE0OL71TDQZYd-bdykHFlnd9FjsgSt11fwgt0jcCyS10IR5OEI-3NYzYC`), pulls
+  the store `code` from each folder name (`<code> <name>`, e.g. "9688 Southampton
+  Above Bar") + the `type` from its subfolder ("5 Year"/"PAT"/"EM"…), and POSTs
+  each cert to /compliance/file. The connector can't bulk-transfer (1MB/file cap
+  + rate limits) — needs the Graph app registration.
 - `menu-config` (in portal.js) — /menu-config: Full-Access shared list of
   hidden menu tiles (main.html reads it). Also **/notify/suppress**,
   **/notify/suppress/remove**, **/notify/overview** (notification-centre.html:
@@ -759,7 +785,9 @@ MPG + running cost), **van_timesheets**, **sla_jobs_archive**
 PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`), **job_time_segments** (SLA
 status-capture time; +`sitelog_visit_id` links a segment materialised from a
 SiteLog visit), **sitelog_scans** (optional pushed scans), **site_miles**
-(round-trip miles per site). app_config also
+(round-trip miles per site), **compliance_files** (Southern Co-op compliance
+certs migrated off SharePoint; keyed by store code + canonical type, files in R2
+JOB_FILES `compliance/<code>/<type>/<year>/…`). app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
 `fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>`,
 `fleet:maintcats:<tid>` (vehicle-maintenance categories [{name,colour}]), the
