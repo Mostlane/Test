@@ -66,6 +66,8 @@
     ".mlc-item{display:flex;align-items:center;gap:11px;padding:12px 14px;border-bottom:1px solid #eef1f5;cursor:pointer;background:#fff;}" +
     ".mlc-item:hover{background:#f8fafc;}" +
     ".mlc-av{width:38px;height:38px;border-radius:50%;background:#dbe4f0;color:#1A4F8F;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center;flex:none;}" +
+    ".mlc-av.grp{background:#e0e7ff;}" +
+    ".mlc-from{font-size:11px;font-weight:700;color:#1a4f8f;margin-bottom:2px;}" +
     ".mlc-it-bd{flex:1;min-width:0;}.mlc-it-name{font-weight:650;font-size:14px;color:#0f172a;display:flex;align-items:center;gap:6px;}" +
     ".mlc-it-last{font-size:12.5px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
     ".mlc-it-when{font-size:11px;color:#9aa4b2;flex:none;}" +
@@ -116,8 +118,12 @@
   }
 
   // ── State ─────────────────────────────────────────────────────────────────
-  var open = false, view = "list", curWith = "", lastId = 0, sending = false;
+  var open = false, view = "list", curWith = "", curGroup = "", curKey = "", lastId = 0, sending = false;
   var readUpTo = 0, myLastId = 0, lastTypingPing = 0;
+  function threadPath(since) {
+    if (curGroup) return "/messages/thread?group=" + encodeURIComponent(curGroup) + "&key=" + encodeURIComponent(curKey) + (since ? "&since=" + since : "");
+    return "/messages/thread?with=" + encodeURIComponent(curWith) + (since ? "&since=" + since : "");
+  }
   var slowTimer = null, fastTimer = null;
   var $ = function (id) { return document.getElementById(id); };
   // Read receipts are shown to ADMINS only (Full Access) — engineers/end users
@@ -160,35 +166,41 @@
       }
       body.innerHTML = threads.map(function (t) {
         var initial = (t.with || "?").trim().charAt(0).toUpperCase();
-        return '<div class="mlc-item" data-with="' + esc(t.with) + '">' +
-          '<div class="mlc-av">' + esc(initial) + '</div>' +
+        var attrs = t.isGroup ? ('data-group="' + esc(t.group) + '" data-key="' + esc(t.key) + '" data-label="' + esc(t.with) + '"') : ('data-with="' + esc(t.with) + '"');
+        return '<div class="mlc-item" ' + attrs + '>' +
+          '<div class="mlc-av' + (t.isGroup ? ' grp' : '') + '">' + (t.isGroup ? '👥' : esc(initial)) + '</div>' +
           '<div class="mlc-it-bd"><div class="mlc-it-name">' + esc(t.with) +
           (t.unread ? '<span class="mlc-udot">' + (t.unread > 9 ? "9+" : t.unread) + '</span>' : '') + '</div>' +
           '<div class="mlc-it-last">' + esc(t.last || "") + '</div></div>' +
           '<div class="mlc-it-when">' + esc(fmtWhen(t.at)) + '</div></div>';
       }).join("");
       [].forEach.call(body.querySelectorAll(".mlc-item"), function (el) {
-        el.onclick = function () { openThread(el.getAttribute("data-with")); };
+        el.onclick = function () {
+          if (el.getAttribute("data-group")) openGroup(el.getAttribute("data-group"), el.getAttribute("data-key"), el.getAttribute("data-label"));
+          else openThread(el.getAttribute("data-with"));
+        };
       });
     }).catch(function () {});
   }
 
-  function openThread(withUser) {
-    view = "thread"; curWith = withUser; lastId = 0; readUpTo = 0; myLastId = 0;
-    $("mlc-title").textContent = withUser;
+  function openThread(withUser) { curGroup = ""; curKey = ""; curWith = withUser; _openConvo(withUser, false); }
+  function openGroup(group, key, label) { curGroup = group; curKey = key; curWith = ""; _openConvo(label || "Group", true); }
+  function _openConvo(title, isGroup) {
+    view = "thread"; lastId = 0; readUpTo = 0; myLastId = 0;
+    $("mlc-title").textContent = title;
     $("mlc-back").style.display = "";
     $("mlc-new").style.display = "none";
-    $("mlc-delchat").style.display = IS_ADMIN ? "" : "none";
+    $("mlc-delchat").style.display = (IS_ADMIN && !isGroup) ? "" : "none";   // whole-chat delete is 1:1 only
     $("mlc-foot").style.display = "flex";
     $("mlc-body").innerHTML = '<div class="mlc-empty">Loading…</div>';
-    authFetch("/messages/thread?with=" + encodeURIComponent(withUser)).then(function (r) { return r.json(); })
+    authFetch(threadPath(0)).then(function (r) { return r.json(); })
       .then(function (d) {
-        if (view !== "thread" || curWith !== withUser) return;
+        if (view !== "thread") return;
         var msgs = (d && d.messages) || [];
         $("mlc-body").innerHTML = '<div class="mlc-thread" id="mlc-thread"></div>' +
-          '<div class="mlc-typing" id="mlc-typing">' + esc(withUser) + ' is typing<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>';
+          '<div class="mlc-typing" id="mlc-typing">' + esc(title) + ' is typing<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>';
         renderMessages(msgs, true);
-        applyThreadMeta(d);
+        if (!isGroup) applyThreadMeta(d);
         setTimeout(function () { $("mlc-input").focus(); }, 30);
         refreshBadge();
         startFastPoll();
@@ -203,7 +215,8 @@
       row.className = "mlc-row " + (m.mine ? "me" : "them");
       if (m.id) row.setAttribute("data-mid", m.id);
       var del = (IS_ADMIN && m.id) ? '<button class="mlc-del" data-del="' + m.id + '" title="Delete message">🗑</button>' : '';
-      row.innerHTML = '<div class="mlc-line"><div class="mlc-bub">' + esc(m.body) + '</div>' + del + '</div>' +
+      var fromLbl = (curGroup && !m.mine) ? '<div class="mlc-from">' + esc(m.from || "") + '</div>' : '';
+      row.innerHTML = '<div class="mlc-line"><div class="mlc-bub">' + fromLbl + esc(m.body) + '</div>' + del + '</div>' +
         '<div class="mlc-when">' + esc(fmtWhen(m.at)) + '</div>';
       host.appendChild(row);
     });
@@ -231,20 +244,19 @@
     mark.classList.toggle("read", read);
   }
   function pollThreadDelta() {
-    if (view !== "thread" || !curWith) return;
-    authFetch("/messages/thread?with=" + encodeURIComponent(curWith) + "&since=" + lastId)
+    if (view !== "thread" || (!curWith && !curGroup)) return;
+    authFetch(threadPath(lastId))
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (view !== "thread") return;
         var msgs = (d && d.messages) || [];
-        if (msgs.length) refreshBadge();
-        if (msgs.length) renderMessages(msgs, false);
-        applyThreadMeta(d);
+        if (msgs.length) { renderMessages(msgs, false); refreshBadge(); }
+        if (!curGroup) applyThreadMeta(d);
       }).catch(function () {});
   }
-  // Tell the server I'm typing (throttled to once / 2.5s while typing).
+  // Tell the server I'm typing (throttled to once / 2.5s while typing). 1:1 only.
   function pingTyping() {
-    if (view !== "thread" || !curWith) return;
+    if (view !== "thread" || !curWith || curGroup) return;
     var now = Date.now();
     if (now - lastTypingPing < 2500) return;
     lastTypingPing = now;
@@ -253,13 +265,14 @@
 
   function send() {
     var inp = $("mlc-input"); var body = inp.value.trim();
-    if (!body || !curWith || sending) return;
+    if (!body || (!curWith && !curGroup) || sending) return;
     sending = true; $("mlc-sendbtn").disabled = true;
     var op = opId();
     // optimistic echo
     renderMessages([{ mine: true, body: body, at: new Date().toISOString() }], false);
     inp.value = ""; inp.style.height = "auto";
-    authFetch("/messages/send", { method: "POST", body: JSON.stringify({ to: curWith, body: body, opId: op }) })
+    var payload = curGroup ? { group: curGroup, key: curKey, body: body, opId: op } : { to: curWith, body: body, opId: op };
+    authFetch("/messages/send", { method: "POST", body: JSON.stringify(payload) })
       .then(function (r) { return r.json(); })
       .then(function (d) { if (d && d.id) { if (d.id > lastId) lastId = d.id; myLastId = d.id; if (IS_ADMIN) updateReceipt(); } })
       .catch(function () {})

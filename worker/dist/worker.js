@@ -9610,6 +9610,18 @@ async function ensure2(env) {
     at TEXT NOT NULL,
     PRIMARY KEY (tenant_id, from_user, to_user)
   )`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE messages ADD COLUMN thread_key TEXT").run();
+  } catch {
+  }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS group_reads (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    user TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    thread_key TEXT NOT NULL,
+    last_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tenant_id, user, group_id, thread_key)
+  )`).run();
   READY2 = true;
 }
 function jr4(o, h, s = 200) {
@@ -9623,6 +9635,79 @@ async function readJson5(r) {
   }
 }
 var lc = (s) => String(s || "").toLowerCase();
+var GROUPS_KEY = "chat_groups";
+var DEFAULT_GROUPS = [{ id: "office", name: "Office", members: ["Joanna", "Tanya", "Megan", "Chloe"] }];
+var _grpCache = { at: 0, tid: null, groups: null };
+async function loadGroups(env, tid) {
+  if (_grpCache.groups && _grpCache.tid === tid && Date.now() - _grpCache.at < 12e4) return _grpCache.groups;
+  let cfg = DEFAULT_GROUPS;
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, GROUPS_KEY).first();
+    const g = row ? JSON.parse(row.value) : null;
+    if (Array.isArray(g) && g.length) cfg = g;
+  } catch {
+  }
+  const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+  const byName = {};
+  (users || []).forEach((u) => {
+    byName[lc(u.username)] = u.username;
+    if (u.first_name && !byName[lc(u.first_name)]) byName[lc(u.first_name)] = u.username;
+    const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+    if (full && !byName[lc(full)]) byName[lc(full)] = u.username;
+  });
+  const groups = cfg.map((g) => ({ id: g.id, name: g.name, members: (g.members || []).map((m) => byName[lc(m)] || m) }));
+  _grpCache = { at: Date.now(), tid, groups };
+  return groups;
+}
+function groupById(groups, id) {
+  return groups.find((g) => lc(g.id) === lc(id)) || null;
+}
+function isMember(group, user) {
+  return !!(group && (group.members || []).some((m) => lc(m) === lc(user)));
+}
+async function groupUnreadCount(env, tid, me) {
+  const groups = await loadGroups(env, tid);
+  let n = 0;
+  for (const g of groups) {
+    const member = isMember(g, me);
+    const rows = member ? (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(from_user)!=lower(?)").bind(tid, "@" + g.id, me).all()).results || [] : (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND lower(from_user)!=lower(?)").bind(tid, "@" + g.id, me, me).all()).results || [];
+    if (!rows.length) continue;
+    const reads = (await env.DB.prepare("SELECT thread_key, last_id FROM group_reads WHERE tenant_id=? AND lower(user)=lower(?) AND group_id=?").bind(tid, me, g.id).all()).results || [];
+    const readMap = {};
+    reads.forEach((rr) => {
+      readMap[lc(rr.thread_key)] = rr.last_id;
+    });
+    rows.forEach((m) => {
+      if (m.id > (readMap[lc(m.thread_key || "")] || 0)) n++;
+    });
+  }
+  return n;
+}
+async function groupThreads(env, tid, me) {
+  const groups = await loadGroups(env, tid);
+  const out = [];
+  for (const g of groups) {
+    const member = isMember(g, me);
+    const rows = member ? (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? ORDER BY id DESC LIMIT 800").bind(tid, "@" + g.id).all()).results || [] : (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) ORDER BY id DESC LIMIT 200").bind(tid, "@" + g.id, me).all()).results || [];
+    if (!rows.length) continue;
+    const reads = (await env.DB.prepare("SELECT thread_key, last_id FROM group_reads WHERE tenant_id=? AND lower(user)=lower(?) AND group_id=?").bind(tid, me, g.id).all()).results || [];
+    const readMap = {};
+    reads.forEach((rr) => {
+      readMap[lc(rr.thread_key)] = rr.last_id;
+    });
+    const byKey = {};
+    for (const m of rows) {
+      const k = lc(m.thread_key || "");
+      if (!k) continue;
+      if (!byKey[k]) byKey[k] = { key: m.thread_key, last: m.body, at: m.at, unread: 0 };
+      if (m.id > (readMap[k] || 0) && lc(m.from_user) !== lc(me)) byKey[k].unread++;
+    }
+    Object.values(byKey).forEach((t) => {
+      out.push({ isGroup: true, group: g.id, key: t.key, with: member ? g.name + " \xB7 " + t.key : g.name, last: t.last, at: t.at, unread: t.unread });
+    });
+  }
+  return out;
+}
 async function handle21(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
@@ -9635,7 +9720,12 @@ async function handle21(request, env, ctx, url, sess) {
     const r = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0"
     ).bind(tid, me).first();
-    return jr4({ ok: true, unread: r && r.n || 0 }, headers);
+    const gUnread = await groupUnreadCount(env, tid, me);
+    return jr4({ ok: true, unread: (r && r.n || 0) + gUnread }, headers);
+  }
+  if (sub === "/groups" && method === "GET") {
+    const groups = await loadGroups(env, tid);
+    return jr4({ ok: true, groups: groups.map((g) => ({ id: g.id, name: g.name, members: g.members })) }, headers);
   }
   if ((sub === "/" || sub === "/threads") && method === "GET") {
     const { results } = await env.DB.prepare(
@@ -9648,8 +9738,29 @@ async function handle21(request, env, ctx, url, sess) {
       if (!byOther[key]) byOther[key] = { with: other, last: m.body, at: m.at, unread: 0 };
       if (lc(m.to_user) === lc(me) && !m.seen) byOther[key].unread++;
     }
-    const threads = Object.values(byOther).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const gThreads = await groupThreads(env, tid, me);
+    const threads = Object.values(byOther).concat(gThreads).sort((a, b) => String(b.at).localeCompare(String(a.at)));
     return jr4({ ok: true, threads }, headers);
+  }
+  if (sub === "/thread" && method === "GET" && url.searchParams.get("group")) {
+    const groups = await loadGroups(env, tid);
+    const g = groupById(groups, (url.searchParams.get("group") || "").trim());
+    if (!g) return jr4({ error: "unknown group" }, headers, 400);
+    const member = isMember(g, me);
+    let key = (url.searchParams.get("key") || "").trim();
+    if (!member) key = me;
+    if (!key) return jr4({ error: "key required" }, headers, 400);
+    if (!member && lc(key) !== lc(me)) return jr4({ error: "forbidden" }, headers, 403);
+    const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
+    const { results } = await env.DB.prepare(
+      "SELECT id, from_user, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?)" + (since ? " AND id>?" : "") + " ORDER BY id ASC LIMIT 500"
+    ).bind(...since ? [tid, "@" + g.id, key, since] : [tid, "@" + g.id, key]).all();
+    const maxId = (results || []).reduce((mx, m) => Math.max(mx, m.id), 0);
+    if (maxId) ctx?.waitUntil(env.DB.prepare(
+      "INSERT INTO group_reads (tenant_id,user,group_id,thread_key,last_id) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,user,group_id,thread_key) DO UPDATE SET last_id=MAX(last_id,excluded.last_id)"
+    ).bind(tid, lc(me), g.id, lc(key), maxId).run());
+    const messages = (results || []).map((m) => ({ id: m.id, mine: lc(m.from_user) === lc(me), from: m.from_user, body: m.body, at: m.at }));
+    return jr4({ ok: true, isGroup: true, group: g.id, key, name: g.name, members: g.members, messages }, headers);
   }
   if (sub === "/thread" && method === "GET") {
     const other = (url.searchParams.get("with") || "").trim();
@@ -9680,8 +9791,34 @@ async function handle21(request, env, ctx, url, sess) {
   }
   if (sub === "/send" && method === "POST") {
     const b = await readJson5(request);
-    const to = String(b.to || "").trim();
     const body = String(b.body || "").trim().slice(0, 2e3);
+    const groupId = String(b.group || "").trim();
+    if (groupId) {
+      if (!body) return jr4({ error: "body required" }, headers, 400);
+      if (!await firstTime(env, tid, b.opId, "msg")) return jr4({ ok: true, duplicate: true }, headers);
+      const groups = await loadGroups(env, tid);
+      const g = groupById(groups, groupId);
+      if (!g) return jr4({ error: "unknown group" }, headers, 400);
+      const member = isMember(g, me);
+      let key = String(b.key || "").trim();
+      if (!member) key = me;
+      else if (!key) return jr4({ error: "key required" }, headers, 400);
+      const at2 = (/* @__PURE__ */ new Date()).toISOString();
+      const res2 = await env.DB.prepare(
+        "INSERT INTO messages (tenant_id, from_user, to_user, body, at, seen, thread_key) VALUES (?,?,?,?,?,0,?)"
+      ).bind(tid, me, "@" + g.id, body, at2, key).run();
+      const newId = res2.meta ? res2.meta.last_row_id : null;
+      if (newId) ctx?.waitUntil(env.DB.prepare(
+        "INSERT INTO group_reads (tenant_id,user,group_id,thread_key,last_id) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,user,group_id,thread_key) DO UPDATE SET last_id=MAX(last_id,excluded.last_id)"
+      ).bind(tid, lc(me), g.id, lc(key), newId).run());
+      const recips = new Set(g.members);
+      recips.add(key);
+      recips.forEach((rcpt) => {
+        if (lc(rcpt) !== lc(me)) ctx?.waitUntil(sendToUser(env, tid, rcpt, { title: g.name + " chat", body: (me + ": " + body).slice(0, 120), url: "/inbox.html", tag: "grp:" + g.id + ":" + lc(key) }));
+      });
+      return jr4({ ok: true, id: newId, at: at2, group: g.id, key }, headers, 201);
+    }
+    const to = String(b.to || "").trim();
     if (!to || !body) return jr4({ error: "to and body required" }, headers, 400);
     if (!await firstTime(env, tid, b.opId, "msg")) return jr4({ ok: true, duplicate: true }, headers);
     const row = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, to).first();

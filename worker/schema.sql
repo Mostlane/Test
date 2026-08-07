@@ -653,15 +653,28 @@ CREATE TABLE IF NOT EXISTS sitelog_scans (
 
 -- Office ↔ engineer direct messages (routes/messages.js). Self-migrating.
 CREATE TABLE IF NOT EXISTS messages (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  tenant_id INTEGER NOT NULL DEFAULT 1,
-  from_user TEXT NOT NULL,
-  to_user   TEXT NOT NULL,
-  body      TEXT NOT NULL,
-  at        TEXT NOT NULL,
-  seen      INTEGER NOT NULL DEFAULT 0    -- 0 until the recipient opens the thread
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  from_user  TEXT NOT NULL,
+  to_user    TEXT NOT NULL,               -- "@<groupId>" for a group message (e.g. "@office")
+  body       TEXT NOT NULL,
+  at         TEXT NOT NULL,
+  seen       INTEGER NOT NULL DEFAULT 0,   -- 0 until the recipient opens the thread (1:1 only)
+  thread_key TEXT                          -- group messages: which per-engineer conversation (the engineer's username)
 );
 CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen);
+
+-- Per-user read position within a group conversation (routes/messages.js group chat).
+-- One row per (user, group, engineer-thread) — group_id is the chat_groups id (e.g. "office"),
+-- thread_key is the engineer whose Office thread it is. last_id = highest message id that user has read.
+CREATE TABLE IF NOT EXISTS group_reads (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  user       TEXT NOT NULL,
+  group_id   TEXT NOT NULL,
+  thread_key TEXT NOT NULL,
+  last_id    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, user, group_id, thread_key)
+);
 
 -- Transient "X is typing to Y" markers (one row per direction, upserted).
 CREATE TABLE IF NOT EXISTS message_typing (
