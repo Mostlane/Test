@@ -1040,9 +1040,10 @@
     } catch (e) { console.error("[portal-nav]", e); }
   })();
 
-  // ── Office live-chat widget ────────────────────────────────────────────────
-  // Inject the floating chat launcher for OFFICE users on portal pages. Field
-  // engineers and Story users are excluded — they use the field app's Inbox tab.
+  // ── Live-chat widget ───────────────────────────────────────────────────────
+  // Inject the floating chat launcher on portal pages. Field engineers get it
+  // too now (they reach chat via main.html + the bubble, no Inbox tab) — but the
+  // field-app pages themselves are skipped so the bubble never covers the tabbar.
   (function chatWidget() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
@@ -1055,9 +1056,7 @@
       var p = {};
       try { p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
       var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
-      if (yes(p.StoryMode)) return;                         // guided users use the field Inbox
-      var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
-      if (st === "field") return;                           // field engineers use the field Inbox
+      if (yes(p.StoryMode)) return;                         // guided My Day users stay out of the bubble
       if (document.querySelector('script[data-mlchat]') || document.getElementById("mlchat-launch")) return;
       var s = document.createElement("script");
       s.src = "/chat-widget.js?v=3";

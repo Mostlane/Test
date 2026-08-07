@@ -114,10 +114,24 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
 - View As (owner only, OWNER="Jamie Line"), Story Mode "⚡ My Day" button.
   The purple "Viewing as…" return bar (fixed bottom:0) now **lifts the field
   app's `.tabbar` above itself** (addBar measures its height, sets the tabbar's
-  `bottom`) so Route/Jobs/Inbox/You stay tappable while impersonating. The
+  `bottom`) so the tabs stay tappable while impersonating. The
   field app's **engineer-jobs.html also has a top-left header back** (`.eng-back`
   → route.html; its own class since `.ml-back` is force-hidden there) so there's
   always an escape the bottom bar can't block.
+- **Field-app bottom tabbar (Aug 2026 rework)** — the four tabs on route.html /
+  engineer-jobs.html / inbox.html / you.html are now **Route · Jobs · PO · Menu**
+  (were Route/Jobs/Inbox/You). **PO** (`#tabPO`) resolves to the engineer's
+  personal PO link via GET /po-config (falls back to po.html); **Menu** →
+  main.html (field users use the full office tile menu — everything they can open
+  is a permitted tile there, so the old you.html permission-launcher is no longer
+  linked, though the file remains). **Chat moved to the bubble**: the live-chat
+  widget (chat-widget.js) is now injected for FIELD users too (portal-config
+  chatWidget no longer skips staffType field — only the field-app pages + Story
+  users are skipped), so engineers chat via the 💬 bubble on main.html and other
+  portal pages instead of a dedicated Inbox tab. Field-user landing on login is
+  still route.html. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
+  now a **collapsible** (default collapsed, tap the banner; per-device state in
+  localStorage `mlUnschedOpen`).
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
