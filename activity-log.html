@@ -26,7 +26,8 @@
     .kind.view { background:#eef1f4; color:#667085; }
     .kind.fail { background:#fdeaea; color:#b00020; }
     .what { color:#16202e; margin-top:2px; }
-    .det { color:#8a97a6; font-size:12px; margin-top:2px; word-break:break-word; }
+    .onpage { color:#5b6b7c; font-weight:600; font-size:13px; }
+    .det { color:#6b7889; font-size:13px; margin-top:2px; word-break:break-word; }
     @media (max-width:640px){ .row { flex-direction:column; gap:4px; } .row .when { width:auto; } }
   </style>
 </head>
@@ -149,7 +150,107 @@
       [/^POST \/device\/allowed/,         "📱 Changed a device allowance"],
       [/^POST \/settings/,                "⚙️ Changed portal settings"],
       [/^POST \/sitelog/,                 "🛰️ SiteLog admin action"],
+      // Vehicles / Fleet
+      [/^POST \/fleet\/vehicle-doc/,      "📎 Uploaded a vehicle document"],
+      [/^POST \/fleet\/vehicle-photo-cover/, "🖼️ Set a vehicle's cover photo"],
+      [/^POST \/fleet\/vehicle-photo-delete/, "🗑️ Removed a vehicle photo"],
+      [/^POST \/fleet\/vehicle-photo/,    "📷 Uploaded a vehicle photo"],
+      [/^POST \/fleet\/vehicle-delete/,   "🗑️ Deleted a vehicle"],
+      [/^POST \/fleet\/vehicle\b/,        "🚐 Saved a vehicle"],
+      [/^POST \/fleet\/vehicles-import/,  "⤵️ Imported vehicles from the old system"],
+      [/^POST \/fleet\/finance/,          "💷 Updated a vehicle's financials"],
+      [/^POST \/fleet\/maintenance-delete/, "🗑️ Deleted a maintenance record"],
+      [/^POST \/fleet\/maintenance\b/,    "🔧 Added/updated a maintenance record"],
+      [/^POST \/fleet\/maint-categories/, "🏷️ Changed maintenance categories"],
+      [/^POST \/fleet\/fuel\/entry-delete/, "🗑️ Deleted a fuel entry"],
+      [/^POST \/fleet\/fuel\/entry/,      "⛽ Logged a fuel fill-up"],
+      [/^POST \/fleet\/assign/,           "👤 Assigned a driver to a van"],
+      [/^POST \/fleet\/order/,            "↕️ Reordered the vehicle list"],
+      [/^POST \/fleet\/vehicle-order/,    "↕️ Reordered the vehicle list"],
+      [/^POST \/fleet\/pool-alloc/,       "🚚 Allocated a pool van"],
+      [/^POST \/fleet\/paycfg/,           "⚙️ Changed van-pay settings"],
+      [/^POST \/fleet\/timesheet/,        "🚐 Saved a van timesheet"],
+      [/^POST \/fleet\/handover\/template/, "🤝 Edited the handover template"],
+      [/^POST \/fleet\/handover\/request/, "🤝 Sent a van handover"],
+      [/^POST \/fleet\/handover\/submit/, "✍️ Completed a van handover"],
+      [/^POST \/fleet\/handover\/cancel/, "🚫 Cancelled a van handover"],
+      [/^POST \/fleet\/report-delete/,    "🗑️ Deleted a fleet report"],
+      [/^POST \/fleet\/report/,           "📊 Saved a fleet report"],
+      [/^POST \/fleet\/drivers/,          "👤 Updated report driver names"],
+      [/^POST \/fleet/,                   "🚐 Vehicles action"],
+      // Weekly van checks
+      [/^POST \/vancheck\/skip/,          "⏭️ Skipped a driver's van check"],
+      [/^POST \/vancheck\/unskip/,        "↩️ Un-skipped a van check"],
+      [/^POST \/vancheck\/remind-now/,    "🔔 Sent van-check reminders"],
+      [/^POST \/vancheck\/settings/,      "⚙️ Changed van-check settings"],
+      [/^POST \/vancheck\/submit/,        "🚐 Submitted a weekly van check"],
+      [/^POST \/vancheck/,                "🚐 Van-check action"],
+      // Office clock / timesheets
+      [/^POST \/office\/confirm-finish/,  "✅ Finished an equipment confirmation round"],
+      [/^POST \/office\/clock/,           "🕐 Office clock action"],
+      [/^POST \/office/,                  "🕐 Office timesheet action"],
+      // Equipment confirmations
+      [/^POST \/asset\/confirm\/request/, "📋 Started an equipment confirmation round"],
+      [/^POST \/asset\/confirm\/respond/, "✅ Responded to an equipment check"],
+      [/^POST \/asset\/confirm/,          "📋 Equipment confirmation action"],
+      // Job costing / sites register
+      [/^POST \/costing\/fin\/valuation\/delete/, "🗑️ Deleted a project valuation"],
+      [/^POST \/costing\/fin\/valuation/, "💷 Added a project valuation"],
+      [/^POST \/costing\/fin/,            "💷 Updated project financials"],
+      [/^POST \/costing\/eng-alias/,      "🔗 Linked an engineer name"],
+      [/^POST \/costing\/prefs/,          "📌 Changed job-costing view"],
+      [/^POST \/costing/,                 "📈 Job-costing action"],
+      [/^POST \/sites\/register\/add/,    "📍 Added a site to the register"],
+      [/^POST \/sites\/register\/update/, "📍 Updated a register site"],
+      [/^POST \/sites\/register\/merge/,  "🔗 Merged a site"],
+      [/^POST \/sites\/register/,         "📍 Site register action"],
+      // Messaging (bodies are never shown here)
+      [/^POST \/messages\/thread-delete/, "🗑️ Removed a whole chat"],
+      [/^POST \/messages\/delete/,        "🗑️ Removed a chat message"],
+      [/^POST \/messages\/send/,          "💬 Sent a message"],
+      // Timesheets (extra)
+      [/^POST \/ts\//,                    "⏱️ Timesheet action"],
+      // Notifications admin
+      [/^POST \/notify\/suppress\/remove/,"🔔 Un-muted a notification"],
+      [/^POST \/notify\/suppress/,        "🔕 Muted a notification"],
+      // Push
+      [/^POST \/push\/subscribe/,         "🔔 Turned on notifications (a device)"],
+      [/^POST \/push\/unsubscribe/,       "🔕 Turned off notifications (a device)"],
+      [/^POST \/push\/test/,              "🔔 Sent a test notification"],
+      // H&S
+      [/^POST \/hs-plan-config/,          "🦺 Opened the H&S planner"],
+      [/^POST \/po-config/,               "🧾 Opened the PO system"],
+      // Privacy
+      [/^POST \/privacy\/erase/,          "🧹 Erased a user's personal data (GDPR)"],
+      [/^POST \/privacy\/export/,         "📤 Exported a user's data (GDPR)"],
     ];
+    // Friendly labels for the captured body fields, so "reg=AB12CDE · cost=200"
+    // reads as "Vehicle AB12CDE · £200".
+    const DKEY = {
+      id: "#", reg: "Vehicle", description: "Note", note: "Note", title: "Title",
+      date: "Date", amount: "£", cost: "£", price: "£", value: "£", priority: "Priority",
+      status: "Status", type: "Type", category: "Category", cat: "Category", site: "Site",
+      siteName: "Site", week: "Week", litres: "Litres", mileage: "Mileage", miles: "Miles",
+      name: "Name", label: "Name", to: "To", toUser: "To", username: "User", Username: "User",
+      u: "User", start: "From", end: "To", action: "", page: "", make: "Make", model: "Model",
+      colour: "Colour", vin: "VIN", role: "Role", reason: "Reason", keyID: "Key",
+      assetId: "Item", assetID: "Item",
+    };
+    function niceDetail(det) {
+      if (!det) return "";
+      if (det === "(file upload)") return "📎 with a file attached";
+      return det.split(" · ").map(part => {
+        const i = part.indexOf("=");
+        if (i < 0) return part;
+        const k = part.slice(0, i), v = part.slice(i + 1);
+        if (!(k in DKEY)) return k + ": " + v;
+        const lbl = DKEY[k];
+        if (lbl === "") return v;                       // action/page — value only
+        if (lbl === "£") return "£" + v;
+        if (lbl === "#") return "#" + v;
+        return lbl + " " + v;
+      }).filter(Boolean).join(" · ");
+    }
     const PAGE_NAMES = {
       "main.html": "the Menu", "holiday.html": "Holiday", "holiday-admin.html": "Holiday Admin",
       "my-assets.html": "Plant & Equipment", "assets-admin.html": "All Assets", "shared-assets.html": "Shared Assets",
@@ -159,7 +260,17 @@
       "vehicles.html": "Vehicles", "office-my-hours.html": "My Hours", "office-timesheet.html": "Office Timesheet",
       "my-day.html": "My Day", "sla-menu.html": "the SLA Menu", "sla-main.html": "the SLA Board",
       "sitelog.html": "SiteLog", "projects.html": "Projects", "forms.html": "Forms", "compliance.html": "Compliance",
+      "vehicle-maintenance.html": "Vehicle Maintenance", "vehicle-checks.html": "Vehicle Checks",
+      "van-check.html": "Weekly Van Check", "van-handover.html": "Van Handover", "van-checks.html": "Van Checks Admin",
+      "fuel-cards.html": "Fuel Cards", "van-timesheet.html": "Van Timesheet", "fleet-report.html": "Fleet Report",
+      "job-costing.html": "Job Costing", "sites-register.html": "Site Register", "sitelog-links.html": "People Links",
+      "engineer-timesheet.html": "My Timesheet", "timesheets-admin.html": "Engineer Timesheets",
+      "assets-admin.html": "All Assets", "my-assets.html": "Plant & Equipment", "job-view.html": "a Job",
+      "sla-scheduler.html": "the SLA Scheduler", "job-archive.html": "the Job Archive", "sla-data-tools.html": "SLA Data Tools",
+      "route.html": "the Field App", "engineer-jobs.html": "the Field App", "inbox.html": "Messages",
+      "notification-centre.html": "Notification Centre", "my-documents.html": "My Documents", "stats.html": "Stats",
     };
+    const pageName = file => PAGE_NAMES[file] || (file ? file.replace(/\.html$/, "") : "");
     function describe(r) {
       if (r.method === "VIEW") {
         const page = r.path.slice(1);
@@ -186,7 +297,7 @@
     function render() {
       const q = g("fSearch").value.trim().toLowerCase();
       const rows = LOG.filter(r => !q ||
-        (describe(r) + " " + r.path + " " + (r.detail || "") + " " + r.username + " " + nameOf(r.username)).toLowerCase().includes(q));
+        (describe(r) + " " + r.path + " " + (r.detail || "") + " " + niceDetail(r.detail) + " " + pageName(r.ref) + " " + r.username + " " + nameOf(r.username)).toLowerCase().includes(q));
       g("countLbl").textContent = rows.length ? rows.length + (rows.length === 1000 ? "+ events (newest 1000)" : " event" + (rows.length === 1 ? "" : "s")) : "";
       if (!rows.length) { g("list").innerHTML = "<div class='row muted'>Nothing recorded for these filters.</div>"; return; }
       g("list").innerHTML = rows.map(r => {
@@ -195,12 +306,15 @@
         const kind = r.method === "VIEW"
           ? '<span class="kind view">viewed</span>'
           : failed ? '<span class="kind fail">failed (' + r.status + ")</span>" : '<span class="kind action">action</span>';
+        const det = r.method === "VIEW" ? "" : niceDetail(r.detail);
+        // Where it happened — from the referring page (actions only; a VIEW already names the page).
+        const on = (r.method !== "VIEW" && r.ref) ? pageName(r.ref) : "";
         return `<div class="row">
           <div class="when">${esc(when)}</div>
           <div style="flex:1;">
             <span class="who">${esc(nameOf(r.username) || r.username)}</span> ${kind}
-            <div class="what">${esc(describe(r))}</div>
-            ${r.detail ? `<div class="det">${esc(r.detail)}</div>` : ""}
+            <div class="what">${esc(describe(r))}${on ? ` <span class="onpage">on ${esc(on)}</span>` : ""}</div>
+            ${det ? `<div class="det">${esc(det)}</div>` : ""}
           </div>
         </div>`;
       }).join("");

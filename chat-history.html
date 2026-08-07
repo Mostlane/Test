@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat History — Mostlane Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:900px; margin:16px auto 40px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    .bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .bar select, .bar input { padding:9px 10px; border:1px solid #ccd5dd; border-radius:9px; font-size:14px; font-family:inherit; background:#fff; }
+    .bar select { min-width:180px; } .bar input { flex:1; min-width:140px; }
+    .conv { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); margin-bottom:12px; overflow:hidden; }
+    .conv > summary { list-style:none; cursor:pointer; padding:12px 14px; display:flex; align-items:center; gap:10px; font-weight:700; color:#003366; }
+    .conv > summary::-webkit-details-marker { display:none; }
+    .conv > summary .tag { font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; background:#e2edff; color:#1a4f8f; }
+    .conv > summary .tag.grp { background:#eadcff; color:#5b2ea6; }
+    .conv > summary .cnt { margin-left:auto; font-weight:600; font-size:12px; color:#8a97a6; }
+    .msgs { padding:6px 14px 14px; }
+    .m { padding:8px 0; border-top:1px solid #f0f3f7; }
+    .m:first-child { border-top:none; }
+    .m .mh { font-size:12px; color:#667085; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+    .m .mh b { color:#16202e; font-size:13px; }
+    .m .mb { margin-top:2px; white-space:pre-wrap; word-break:break-word; }
+    .m.mine .mb { color:#003366; }
+    .m.del { background:#fff6f6; margin:0 -14px; padding:8px 14px; }
+    .m.del .mb { text-decoration:line-through; color:#b00020; opacity:.75; }
+    .delmark { font-size:11px; font-weight:700; color:#b00020; background:#fdeaea; padding:1px 8px; border-radius:999px; }
+    .empty { padding:20px 14px; color:#667085; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <h1>🕵️ Chat History</h1>
+    <a class="ml-back" data-role="up" href="users-admin.html">← Users Admin</a>
+  </header>
+
+  <div class="wrap">
+    <p class="muted" style="margin:0 0 12px;">Owner-only. Every message a person has sent or received — direct chats and the Office group —
+      <b>including messages an admin has deleted</b> (shown crossed-out with who removed them).</p>
+    <div class="bar">
+      <select id="fUser"><option value="">Choose a person…</option></select>
+      <input id="fSearch" placeholder="Filter messages…">
+      <span class="muted" id="countLbl"></span>
+    </div>
+    <div id="out"><div class="empty">Pick a person above to see their chat history.</div></div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    const OWNER = "Jamie Line";
+    let USERS = [], CONVS = [];
+    const nameOf = uname => { const u = USERS.find(x => x.Username === uname); return u ? ((u.FirstName || "") + " " + (u.LastName || "")).trim() : (uname || ""); };
+    const when = at => at ? new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "";
+
+    (async () => {
+      // Owner-only gate (the API also enforces this server-side).
+      try {
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || me.user.Username !== OWNER) { alert("This page is for the portal owner only."); location.href = "main.html"; return; }
+      } catch (e) { location.href = "main.html"; return; }
+      try {
+        const d = await authFetch("/users").then(r => r.json());
+        USERS = (d.Users || []).filter(u => u.Username);
+        g("fUser").innerHTML = '<option value="">Choose a person…</option>' + USERS.map(u =>
+          `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("");
+      } catch (e) {}
+    })();
+
+    async function loadUser(u) {
+      if (!u) { CONVS = []; g("out").innerHTML = '<div class="empty">Pick a person above to see their chat history.</div>'; g("countLbl").textContent = ""; return; }
+      g("out").innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const d = await authFetch("/messages/history?user=" + encodeURIComponent(u)).then(r => r.json());
+        if (!d.ok) throw new Error(d.error || "Failed");
+        CONVS = d.conversations || [];
+        render();
+      } catch (e) { g("out").innerHTML = '<div class="empty">Couldn\'t load — is the latest portal API deployed?</div>'; }
+    }
+
+    function render() {
+      const q = g("fSearch").value.trim().toLowerCase();
+      let total = 0, shownConvs = 0;
+      const html = CONVS.map(c => {
+        const msgs = (c.messages || []).filter(m => !q || (m.body || "").toLowerCase().includes(q) || (m.from || "").toLowerCase().includes(q));
+        if (!msgs.length) return "";
+        shownConvs++; total += msgs.length;
+        const delN = msgs.filter(m => m.deleted).length;
+        const rows = msgs.map(m => {
+          const who = m.mine ? "→ " + nameOf(m.from) : nameOf(m.from) || m.from;
+          return `<div class="m ${m.mine ? "mine" : ""} ${m.deleted ? "del" : ""}">
+            <div class="mh"><b>${esc(nameOf(m.from) || m.from)}</b><span>${esc(when(m.at))}</span>
+              ${m.deleted ? `<span class="delmark">deleted by ${esc(nameOf(m.deletedBy) || m.deletedBy || "?")}${m.deletedAt ? " · " + esc(when(m.deletedAt)) : ""}</span>` : ""}</div>
+            <div class="mb">${esc(m.body)}</div></div>`;
+        }).join("");
+        const tag = c.kind === "group" ? '<span class="tag grp">👥 group</span>' : '<span class="tag">direct</span>';
+        return `<details class="conv" open><summary>${tag}<span>${esc(c.title)}</span>
+            <span class="cnt">${msgs.length} message${msgs.length === 1 ? "" : "s"}${delN ? " · " + delN + " deleted" : ""}</span></summary>
+          <div class="msgs">${rows}</div></details>`;
+      }).join("");
+      g("countLbl").textContent = total ? total + " message" + (total === 1 ? "" : "s") + " · " + shownConvs + " chat" + (shownConvs === 1 ? "" : "s") : "";
+      g("out").innerHTML = html || '<div class="empty">No messages for this person' + (q ? " matching that filter" : "") + '.</div>';
+    }
+
+    g("fUser").addEventListener("change", e => loadUser(e.target.value));
+    g("fSearch").addEventListener("input", render);
+  </script>
+</body>
+</html>

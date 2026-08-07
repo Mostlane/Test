@@ -6413,8 +6413,12 @@ async function handle10(request, env, ctx, url, sess) {
     }
     if (q.get("type") === "view") conds.push("method = 'VIEW'");
     if (q.get("type") === "action") conds.push("method != 'VIEW'");
+    try {
+      await db.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run();
+    } catch {
+    }
     const { results } = await db.prepare(
-      "SELECT username, method, path, detail, status, at FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+      "SELECT username, method, path, detail, status, at, ref FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
     ).bind(...binds).all();
     return json({ ok: true, log: results || [] }, {}, env, request);
   }
@@ -9614,6 +9618,18 @@ async function ensure2(env) {
     await env.DB.prepare("ALTER TABLE messages ADD COLUMN thread_key TEXT").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE messages ADD COLUMN deleted_by TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE messages ADD COLUMN deleted_at TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS group_reads (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     user TEXT NOT NULL,
@@ -9623,6 +9639,9 @@ async function ensure2(env) {
     PRIMARY KEY (tenant_id, user, group_id, thread_key)
   )`).run();
   READY2 = true;
+}
+function isOwner(env, me) {
+  return lc(me) === lc(env.OWNER_USERNAME || "Jamie Line");
 }
 function jr4(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -9670,7 +9689,7 @@ async function groupUnreadCount(env, tid, me) {
   let n = 0;
   for (const g of groups) {
     const member = isMember(g, me);
-    const rows = member ? (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(from_user)!=lower(?)").bind(tid, "@" + g.id, me).all()).results || [] : (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND lower(from_user)!=lower(?)").bind(tid, "@" + g.id, me, me).all()).results || [];
+    const rows = member ? (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(from_user)!=lower(?) AND COALESCE(deleted,0)=0").bind(tid, "@" + g.id, me).all()).results || [] : (await env.DB.prepare("SELECT id, thread_key FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND lower(from_user)!=lower(?) AND COALESCE(deleted,0)=0").bind(tid, "@" + g.id, me, me).all()).results || [];
     if (!rows.length) continue;
     const reads = (await env.DB.prepare("SELECT thread_key, last_id FROM group_reads WHERE tenant_id=? AND lower(user)=lower(?) AND group_id=?").bind(tid, me, g.id).all()).results || [];
     const readMap = {};
@@ -9688,7 +9707,7 @@ async function groupThreads(env, tid, me) {
   const out = [];
   for (const g of groups) {
     const member = isMember(g, me);
-    const rows = member ? (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? ORDER BY id DESC LIMIT 800").bind(tid, "@" + g.id).all()).results || [] : (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) ORDER BY id DESC LIMIT 200").bind(tid, "@" + g.id, me).all()).results || [];
+    const rows = member ? (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 800").bind(tid, "@" + g.id).all()).results || [] : (await env.DB.prepare("SELECT id, from_user, thread_key, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 200").bind(tid, "@" + g.id, me).all()).results || [];
     if (!rows.length) continue;
     const reads = (await env.DB.prepare("SELECT thread_key, last_id FROM group_reads WHERE tenant_id=? AND lower(user)=lower(?) AND group_id=?").bind(tid, me, g.id).all()).results || [];
     const readMap = {};
@@ -9718,7 +9737,7 @@ async function handle21(request, env, ctx, url, sess) {
   await ensure2(env);
   if (sub === "/unread" && method === "GET") {
     const r = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0"
+      "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0 AND COALESCE(deleted,0)=0"
     ).bind(tid, me).first();
     const gUnread = await groupUnreadCount(env, tid, me);
     return jr4({ ok: true, unread: (r && r.n || 0) + gUnread }, headers);
@@ -9729,7 +9748,7 @@ async function handle21(request, env, ctx, url, sess) {
   }
   if ((sub === "/" || sub === "/threads") && method === "GET") {
     const { results } = await env.DB.prepare(
-      "SELECT from_user, to_user, body, at, seen FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?)) ORDER BY id DESC LIMIT 500"
+      "SELECT from_user, to_user, body, at, seen FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?)) AND COALESCE(deleted,0)=0 ORDER BY id DESC LIMIT 500"
     ).bind(tid, me, me).all();
     const byOther = {};
     for (const m of results || []) {
@@ -9753,7 +9772,7 @@ async function handle21(request, env, ctx, url, sess) {
     if (!member && lc(key) !== lc(me)) return jr4({ error: "forbidden" }, headers, 403);
     const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
     const { results } = await env.DB.prepare(
-      "SELECT id, from_user, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?)" + (since ? " AND id>?" : "") + " ORDER BY id ASC LIMIT 500"
+      "SELECT id, from_user, body, at FROM messages WHERE tenant_id=? AND to_user=? AND lower(thread_key)=lower(?) AND COALESCE(deleted,0)=0" + (since ? " AND id>?" : "") + " ORDER BY id ASC LIMIT 500"
     ).bind(...since ? [tid, "@" + g.id, key, since] : [tid, "@" + g.id, key]).all();
     const maxId = (results || []).reduce((mx, m) => Math.max(mx, m.id), 0);
     if (maxId) ctx?.waitUntil(env.DB.prepare(
@@ -9768,7 +9787,7 @@ async function handle21(request, env, ctx, url, sess) {
     const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
     const pair = "((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))";
     const { results } = await env.DB.prepare(
-      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND " + pair + (since ? " AND id > ?" : "") + " ORDER BY id ASC LIMIT 500"
+      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND " + pair + " AND COALESCE(deleted,0)=0" + (since ? " AND id > ?" : "") + " ORDER BY id ASC LIMIT 500"
     ).bind(...since ? [tid, me, other, other, me, since] : [tid, me, other, other, me]).all();
     ctx?.waitUntil(env.DB.prepare(
       "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
@@ -9836,7 +9855,7 @@ async function handle21(request, env, ctx, url, sess) {
     const b = await readJson5(request);
     const id = parseInt(b.id, 10);
     if (!id) return jr4({ error: "id required" }, headers, 400);
-    await env.DB.prepare("DELETE FROM messages WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    await env.DB.prepare("UPDATE messages SET deleted=1, deleted_by=?, deleted_at=? WHERE tenant_id=? AND id=? AND COALESCE(deleted,0)=0").bind(me, (/* @__PURE__ */ new Date()).toISOString(), tid, id).run();
     return jr4({ ok: true }, headers);
   }
   if (sub === "/thread-delete" && method === "POST") {
@@ -9846,9 +9865,52 @@ async function handle21(request, env, ctx, url, sess) {
     const other = String(b.with || "").trim();
     if (!other) return jr4({ error: "with required" }, headers, 400);
     await env.DB.prepare(
-      "DELETE FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))"
-    ).bind(tid, me, other, other, me).run();
+      "UPDATE messages SET deleted=1, deleted_by=?, deleted_at=? WHERE tenant_id=? AND COALESCE(deleted,0)=0 AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))"
+    ).bind(me, (/* @__PURE__ */ new Date()).toISOString(), tid, me, other, other, me).run();
     return jr4({ ok: true }, headers);
+  }
+  if (sub === "/history" && method === "GET") {
+    if (!isOwner(env, me)) return jr4({ error: "Owner only" }, headers, 403);
+    const u = String(url.searchParams.get("user") || "").trim();
+    if (!u) return jr4({ error: "user required" }, headers, 400);
+    const groups = await loadGroups(env, tid);
+    const grpName = {};
+    groups.forEach((g) => {
+      grpName[lc(g.id)] = g.name;
+    });
+    const { results } = await env.DB.prepare(
+      "SELECT id, from_user, to_user, body, at, thread_key, deleted, deleted_by, deleted_at FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?) OR (to_user LIKE '@%' AND lower(thread_key)=lower(?))) ORDER BY id ASC LIMIT 5000"
+    ).bind(tid, u, u, u).all();
+    const convs = {};
+    for (const m of results || []) {
+      let ck, title, kind;
+      if (String(m.to_user || "").startsWith("@")) {
+        const gid = m.to_user.slice(1);
+        kind = "group";
+        ck = "g:" + lc(gid) + ":" + lc(m.thread_key || "");
+        title = (grpName[lc(gid)] || gid) + " \xB7 " + (m.thread_key || "");
+      } else {
+        const other = lc(m.from_user) === lc(u) ? m.to_user : m.from_user;
+        kind = "direct";
+        ck = "d:" + lc(other);
+        title = other;
+      }
+      if (!convs[ck]) convs[ck] = { kind, title, key: m.thread_key || "", messages: [], at: m.at };
+      convs[ck].messages.push({
+        id: m.id,
+        from: m.from_user,
+        to: m.to_user,
+        body: m.body,
+        at: m.at,
+        mine: lc(m.from_user) === lc(u),
+        deleted: !!m.deleted,
+        deletedBy: m.deleted_by || null,
+        deletedAt: m.deleted_at || null
+      });
+      convs[ck].at = m.at;
+    }
+    const conversations = Object.values(convs).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    return jr4({ ok: true, user: u, conversations }, headers);
   }
   if (sub === "/read" && method === "POST") {
     const b = await readJson5(request);
@@ -11318,6 +11380,15 @@ var AUDIT_SKIP = [
   "/upload-asset-thumb"
   // background thumbnail backfill, not a user action
 ];
+var AUDIT_MIGRATED = false;
+async function ensureAuditCols(env) {
+  if (AUDIT_MIGRATED) return;
+  try {
+    await env.DB.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run();
+  } catch {
+  }
+  AUDIT_MIGRATED = true;
+}
 function auditAction(env, ctx, sess, request, url, status, clone) {
   try {
     if (!sess) return;
@@ -11325,7 +11396,15 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
     if (!AUDIT_METHODS.includes(m)) return;
     const p = url.pathname;
     if (AUDIT_SKIP.some((s) => p === s || p.startsWith(s + "/"))) return;
+    let ref = "";
+    try {
+      const rf = request.headers.get("Referer") || request.headers.get("Referrer") || "";
+      const mfile = rf && new URL(rf).pathname.match(/[^/]+\.html$/);
+      if (mfile) ref = mfile[0];
+    } catch {
+    }
     ctx.waitUntil((async () => {
+      await ensureAuditCols(env);
       let detail = "";
       try {
         const ct = clone && clone.headers.get("Content-Type") || "";
@@ -11348,9 +11427,33 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
             "status",
             "type",
             "action",
-            "page"
+            "page",
+            "reg",
+            "description",
+            "title",
+            "date",
+            "amount",
+            "cost",
+            "price",
+            "priority",
+            "category",
+            "cat",
+            "site",
+            "siteName",
+            "week",
+            "litres",
+            "mileage",
+            "miles",
+            "value",
+            "note",
+            "reason",
+            "role",
+            "make",
+            "model",
+            "colour",
+            "vin"
           ];
-          detail = KEYS.filter((k) => b && b[k] !== void 0 && b[k] !== null && typeof b[k] !== "object").map((k) => k + "=" + String(b[k]).slice(0, 40)).join(" ").slice(0, 300);
+          detail = KEYS.filter((k) => b && b[k] !== void 0 && b[k] !== null && typeof b[k] !== "object" && String(b[k]) !== "").map((k) => k + "=" + String(b[k]).slice(0, 60)).join(" \xB7 ").slice(0, 400);
         } else if (ct.includes("multipart")) {
           detail = "(file upload)";
         }
@@ -11358,8 +11461,8 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
       }
       const qs = url.search ? decodeURIComponent(url.search).slice(0, 120) : "";
       const res = await env.DB.prepare(
-        "INSERT INTO audit_log (username, tenant_id, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
-      ).bind(sess.user.username, sess.tenantId, m, p + qs, detail, status, (/* @__PURE__ */ new Date()).toISOString()).run();
+        "INSERT INTO audit_log (username, tenant_id, method, path, detail, status, at, ref) VALUES (?,?,?,?,?,?,?,?)"
+      ).bind(sess.user.username, sess.tenantId, m, p + qs, detail, status, (/* @__PURE__ */ new Date()).toISOString(), ref).run();
       const rowId = res.meta ? res.meta.last_row_id : 0;
       if (rowId && rowId % 500 === 0) {
         const cutoff = new Date(Date.now() - 365 * 864e5).toISOString();

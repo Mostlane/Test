@@ -123,6 +123,7 @@
       <a class="btn grey" id="devicesLink" href="device-admin.html" style="display:none;text-decoration:none;" title="Manage which devices each user can log in on">🔐 Devices</a>
       <a class="btn grey" href="notify-log.html" style="text-decoration:none;" title="Who was shown which notifications, when">🔔 Notification log</a>
       <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
+      <a class="btn grey" id="chatHistLink" href="chat-history.html" style="display:none;text-decoration:none;" title="Owner only: read any person's full chat history, including deleted messages">🕵️ Chat history</a>
     </div>
     <script>
       // Device-lock management now lives behind Users Admin. Show the shortcut
@@ -131,6 +132,9 @@
         var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
         var yes = v => String(v||"").toLowerCase() === "yes";
         if (yes(p.FullAccess) || yes(p.DeviceAdmin)) document.getElementById("devicesLink").style.display = "";
+        // Chat history is owner-only (the API enforces it too).
+        var meU = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+        if (meU === "Jamie Line") document.getElementById("chatHistLink").style.display = "";
       }catch(e){} })();
     </script>
 

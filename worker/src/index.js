@@ -172,6 +172,15 @@ const AUDIT_SKIP = [
   "/auth/refresh",        // token rotation, not a user action
   "/upload-asset-thumb",  // background thumbnail backfill, not a user action
 ];
+// One-time migration: give audit_log a `ref` column (the page an action came
+// from). Guarded so it runs at most once per isolate.
+let AUDIT_MIGRATED = false;
+async function ensureAuditCols(env) {
+  if (AUDIT_MIGRATED) return;
+  try { await env.DB.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run(); } catch { /* already there */ }
+  AUDIT_MIGRATED = true;
+}
+
 function auditAction(env, ctx, sess, request, url, status, clone) {
   try {
     if (!sess) return;
@@ -179,24 +188,38 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
     if (!AUDIT_METHODS.includes(m)) return;
     const p = url.pathname;
     if (AUDIT_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    // Which portal page the action was fired from (so the log can say "on
+    // Vehicles"). Taken from the Referer; falls back to blank for API-only calls.
+    let ref = "";
+    try {
+      const rf = request.headers.get("Referer") || request.headers.get("Referrer") || "";
+      const mfile = rf && new URL(rf).pathname.match(/[^/]+\.html$/);
+      if (mfile) ref = mfile[0];
+    } catch { /* no/invalid referer */ }
     ctx.waitUntil((async () => {
+      await ensureAuditCols(env);
       let detail = "";
       try {
         const ct = (clone && clone.headers.get("Content-Type")) || "";
         if (clone && ct.includes("application/json")) {
           const b = await clone.json();
+          // Human-meaningful fields to surface ("what did they add/change") —
+          // never message bodies or secrets. Longer text is trimmed.
           const KEYS = ["id", "assetId", "assetID", "username", "u", "to", "toUser", "keyID",
-            "label", "name", "Username", "start", "end", "status", "type", "action", "page"];
-          detail = KEYS.filter(k => b && b[k] !== undefined && b[k] !== null && typeof b[k] !== "object")
-            .map(k => k + "=" + String(b[k]).slice(0, 40)).join(" ").slice(0, 300);
+            "label", "name", "Username", "start", "end", "status", "type", "action", "page",
+            "reg", "description", "title", "date", "amount", "cost", "price", "priority",
+            "category", "cat", "site", "siteName", "week", "litres", "mileage", "miles",
+            "value", "note", "reason", "role", "make", "model", "colour", "vin"];
+          detail = KEYS.filter(k => b && b[k] !== undefined && b[k] !== null && typeof b[k] !== "object" && String(b[k]) !== "")
+            .map(k => k + "=" + String(b[k]).slice(0, 60)).join(" · ").slice(0, 400);
         } else if (ct.includes("multipart")) {
           detail = "(file upload)";
         }
       } catch { /* body unreadable — log without detail */ }
       const qs = url.search ? decodeURIComponent(url.search).slice(0, 120) : "";
       const res = await env.DB.prepare(
-        "INSERT INTO audit_log (username, tenant_id, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
-      ).bind(sess.user.username, sess.tenantId, m, p + qs, detail, status, new Date().toISOString()).run();
+        "INSERT INTO audit_log (username, tenant_id, method, path, detail, status, at, ref) VALUES (?,?,?,?,?,?,?,?)"
+      ).bind(sess.user.username, sess.tenantId, m, p + qs, detail, status, new Date().toISOString(), ref).run();
       // Occasional pruning: keep 12 months (all tenants; time-based, tenant-agnostic).
       const rowId = res.meta ? res.meta.last_row_id : 0;
       if (rowId && rowId % 500 === 0) {

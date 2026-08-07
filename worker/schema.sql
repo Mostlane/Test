@@ -540,7 +540,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
   path     TEXT NOT NULL,            -- endpoint (+ query) or /page.html for views
   detail   TEXT,                     -- key fields extracted from the payload
   status   INTEGER,                  -- HTTP outcome of the action
-  at       TEXT NOT NULL
+  at       TEXT NOT NULL,
+  ref      TEXT                      -- the portal page the action was fired from (Referer .html); added lazily by the middleware
 );
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username, id);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
@@ -660,7 +661,10 @@ CREATE TABLE IF NOT EXISTS messages (
   body       TEXT NOT NULL,
   at         TEXT NOT NULL,
   seen       INTEGER NOT NULL DEFAULT 0,   -- 0 until the recipient opens the thread (1:1 only)
-  thread_key TEXT                          -- group messages: which per-engineer conversation (the engineer's username)
+  thread_key TEXT,                         -- group messages: which per-engineer conversation (the engineer's username)
+  deleted    INTEGER NOT NULL DEFAULT 0,   -- admin soft-delete: 1 = hidden from everyone, kept for owner Chat History
+  deleted_by TEXT,                         -- who removed it
+  deleted_at TEXT                          -- when it was removed (ISO)
 );
 CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen);
 
