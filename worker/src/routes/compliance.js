@@ -94,6 +94,14 @@ function canonType(t) {
 
 async function isFull(env, tid, me) { try { const p = await permissionsFor(env, tid, me); return p.FullAccess === "Yes" || p.Compliance === "Yes"; } catch { return false; } }
 
+// Map a compliance category label to the portal's canonical lowercase client id
+// (matches how sites are already stored: retail/els/els_private/cobra/wenzels).
+const CLIENT_MAP = { "retail":"retail", "els":"els", "els private":"els_private", "cobra":"cobra", "wenzel's":"wenzels", "wenzels":"wenzels" };
+function complianceClient(cat) {
+  const k = String(cat || "").toLowerCase().trim();
+  return CLIENT_MAP[k] || k.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "general";
+}
+
 // Machine-to-machine import token (for the SharePoint→R2 batch extractor, which
 // can't hold a portal session). Timing-safe compare, same shape as /sla/inbound.
 function importTokenOK(request, env) {
@@ -291,12 +299,18 @@ export async function handle(request, env, ctx, url, sess) {
       const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
       if (site) matched++;
       else if (createSites && r.name) {
-        // `sites.client` is NOT NULL — use the compliance category (Southern
-        // Co-op estate) so the auto-created site is valid and grouped sensibly.
+        // `sites.client` is NOT NULL. Map the compliance category to the portal's
+        // canonical lowercase client id, and — crucially — write the full site
+        // object into `data`, because /get-sites (and sites.html) render ONLY from
+        // that JSON blob; a columns-only row shows up blank.
+        const client = complianceClient(r.category);
+        const name = String(r.name).slice(0, 200);
+        const postcode = String(r.postcode || "").slice(0, 20);
+        const data = JSON.stringify({ client, siteNumber: code, siteName: name, postcode, active: true });
         try {
           await env.DB.prepare(
             "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
-          ).bind(tid, String(r.category || "Southern Co-op").slice(0, 120), code, String(r.name).slice(0, 200), String(r.postcode || "").slice(0, 20), "{}", at).run();
+          ).bind(tid, client, code, name, postcode, data, at).run();
           sitesCreated++;
         } catch (e) { /* skip a store we can't create a site for */ }
       }
