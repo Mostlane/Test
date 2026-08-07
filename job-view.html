@@ -523,6 +523,12 @@
     </div>
   </div>
 
+  <!-- MATERIALS (POs raised against this job) — office/admin only -->
+  <div class="card" id="poCard" style="display:none;">
+    <h2 class="section-title">🧾 Materials — purchase orders</h2>
+    <div id="poCostBody"><div class="sub">Loading…</div></div>
+  </div>
+
   <!-- SITE DETAILS -->
   <div class="card" id="siteCard" style="display:none;">
     <h2 class="section-title">Site</h2>
@@ -890,8 +896,47 @@ function renderJob(){
   }
 
   fillPoButton();
+  loadJobPOs();
 
   startCountdownLoop();
+}
+
+/* Materials cost: the POs raised against THIS job (office/admin only). Reads
+   live from the PO system via the portal, so it reflects the true material
+   spend and updates automatically as each PO is priced. */
+async function loadJobPOs(){
+  const card = $("poCard"); if(!card || !job) return;
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  // Money view — office/admin only (FullAccess or SLA admin).
+  let admin = false;
+  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
+  if(!admin){ card.style.display = "none"; return; }
+  try{
+    const t = localStorage.getItem("mostlaneToken");
+    const d = await fetch(window.MOSTLANE_API + "/costing/job-pos?jobId=" + encodeURIComponent(job.id), { headers: t ? { "Authorization": "Bearer " + t } : {} }).then(r => r.json());
+    if(!d || !d.ok){ card.style.display = "none"; return; }
+    if(!d.count){ card.style.display = "none"; return; }   // no POs on this job → hide the card
+    const money = n => "£" + (Number(n)||0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const rows = d.pos.map(p => {
+      const cat = p.category === "subcontractor" ? ("Subcontractor" + (p.trade ? " · " + esc(p.trade) : "")) : "Materials";
+      const cost = p.cost == null ? '<span class="sub" style="color:#b45309;">awaiting price</span>' : ("<b>" + money(p.cost) + "</b>");
+      return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #eef1f5;">' +
+        '<div><div>' + (esc(p.supplier) || '<span class="sub">(no supplier)</span>') + '</div>' +
+        '<div class="sub">' + cat + (p.date ? ' · ' + esc(p.date) : '') + '</div></div>' +
+        '<div style="text-align:right;white-space:nowrap;">' + cost + '</div></div>';
+    }).join("");
+    const split = [];
+    if(d.materials) split.push("Materials " + money(d.materials));
+    if(d.subcontractor) split.push("Subcontractor " + money(d.subcontractor));
+    $("poCostBody").innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
+      '<div style="font-size:22px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
+      '<div class="sub">' + d.count + ' PO' + (d.count === 1 ? '' : 's') +
+      (d.unpriced ? ' · <span style="color:#b45309;font-weight:700;">' + d.unpriced + ' awaiting price</span>' : '') + '</div></div>' +
+      (split.length ? '<div class="sub" style="margin-top:2px;">' + split.join(' · ') + '</div>' : '') +
+      rows;
+    card.style.display = "";
+  }catch(e){ card.style.display = "none"; }
 }
 
 function startCountdownLoop(){
