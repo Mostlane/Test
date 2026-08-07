@@ -10,6 +10,7 @@ import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { sendToUser } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
+import { permissionsFor } from "../lib/auth.js";
 
 let READY = false;
 async function ensure(env) {
@@ -124,6 +125,32 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(tid, me, toUser, body, at).run();
     ctx?.waitUntil(sendToUser(env, tid, toUser, { title: "Message from " + me, body: body.slice(0, 120), url: "/inbox.html", tag: "msg:" + lc(me) }));
     return jr({ ok: true, id: res.meta ? res.meta.last_row_id : null, at, to: toUser }, headers, 201);
+  }
+
+  // ── Admin moderation (Full Access only) ────────────────────────────────────
+  // POST /messages/delete { id } — remove a single message from any chat.
+  if (sub === "/delete" && method === "POST") {
+    const p = await permissionsFor(env, tid, me).catch(() => ({}));
+    if (p.FullAccess !== "Yes") return jr({ error: "Admins only" }, headers, 403);
+    const b = await readJson(request);
+    const id = parseInt(b.id, 10);
+    if (!id) return jr({ error: "id required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM messages WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    return jr({ ok: true }, headers);
+  }
+
+  // POST /messages/thread-delete { with } — remove a whole conversation between
+  // me and <with>. (The office widget only exposes the admin's own chats.)
+  if (sub === "/thread-delete" && method === "POST") {
+    const p = await permissionsFor(env, tid, me).catch(() => ({}));
+    if (p.FullAccess !== "Yes") return jr({ error: "Admins only" }, headers, 403);
+    const b = await readJson(request);
+    const other = String(b.with || "").trim();
+    if (!other) return jr({ error: "with required" }, headers, 400);
+    await env.DB.prepare(
+      "DELETE FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))"
+    ).bind(tid, me, other, other, me).run();
+    return jr({ ok: true }, headers);
   }
 
   // POST /messages/read { with } — mark a thread's incoming messages read.

@@ -752,7 +752,10 @@ NOT EXISTS + ALTER on read) — no manual SQL needed.
 Endpoints: GET /messages/unread, /messages/threads, /messages/thread?with=&since=
 (returns messages + **typing** [other typed <6s] + **readUpTo** [highest id of MY
 msgs they've read]), POST /messages/send {to,body,opId} (fires web push to the
-recipient), /messages/read {with}, /messages/typing {to}. **Two front-ends, one
+recipient), /messages/read {with}, /messages/typing {to}. **Admin moderation
+(FullAccess only): POST /messages/delete {id}** (remove one message) +
+**POST /messages/thread-delete {with}** (wipe a whole conversation) — surfaced
+in the office widget as a 🗑 on each message + a 🗑 in the thread header. **Two front-ends, one
 backend:**
 - **Engineers** — the field app's **inbox.html** "Messages" tab (bottom nav).
   "✉️ Message the office" opens a thread with the owner. Thread modal now **live-
