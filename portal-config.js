@@ -302,7 +302,7 @@
     if (FU_SKIP.indexOf(fuPage) === -1 && mlFieldUserLocal()) {
       var fixBacks = function () {
         var links = document.querySelectorAll('[data-role="home"]');
-        for (var i = 0; i < links.length; i++) { links[i].setAttribute("href", "/you.html"); }
+        for (var i = 0; i < links.length; i++) { links[i].setAttribute("href", "/main.html"); }
       };
       if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fixBacks);
       else fixBacks();

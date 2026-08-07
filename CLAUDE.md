@@ -124,7 +124,16 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   personal PO link via GET /po-config (falls back to po.html); **Menu** →
   main.html (field users use the full office tile menu — everything they can open
   is a permitted tile there, so the old you.html permission-launcher is no longer
-  linked, though the file remains). **Chat moved to the bubble**: the live-chat
+  linked, though the file remains). **Field-user "home" = main.html**:
+  portal-config's back-button repoint (`data-role="home"`, for field users on
+  non-field-app pages) now targets **/main.html** (was /you.html). **Van Check
+  tile** (`#VanCheck`, main.html) is shown ONLY to field users (kept out of the
+  MAP so admins/office don't see it; gated in applyGate by staffType field / the
+  SLA-Story heuristic) so they can do a check anytime — the reg auto-fills from
+  their assigned van as before. **van-check.html Back → main.html for field
+  users** (never vehicles.html): the page carries its own inline guard (runs on
+  load + a 600ms re-assert) so it's the final word over any cached portal-config.
+  **Chat moved to the bubble**: the live-chat
   widget (chat-widget.js) is now injected for FIELD users too (portal-config
   chatWidget no longer skips staffType field — only the field-app pages + Story
   users are skipped), so engineers chat via the 💬 bubble on main.html and other

@@ -58,6 +58,25 @@
     <a class="ml-back" data-role="home" href="/vehicles.html" style="text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Check</h1>
   </header>
+  <script>
+    // Back button: FIELD users always return to main.html (their home) — never
+    // vehicles.html. Office/admins keep the default (vehicles.html). This runs on
+    // load AND after a beat so it is the final word over portal-config's repoint.
+    (function () {
+      try {
+        var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {};
+        var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
+        var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        var isField = !yes(p.FullAccess) && !yes(p.SLAAdmin) &&
+          (st === "field" || (st !== "office" && (yes(p.SLA) || yes(p.StoryMode))));
+        if (!isField) return;
+        var fix = function () { var a = document.querySelector('.ml-back[data-role="home"]'); if (a) a.setAttribute("href", "/main.html"); };
+        fix();
+        document.addEventListener("DOMContentLoaded", fix);
+        setTimeout(fix, 600);
+      } catch (e) {}
+    })();
+  </script>
   <div class="wrap">
     <div class="due" id="dueBox" style="display:none;"></div>
 
