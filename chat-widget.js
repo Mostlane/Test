@@ -46,12 +46,15 @@
     ".mlc-hbtn{background:rgba(255,255,255,.16);border:none;color:#fff;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;flex:none;display:flex;align-items:center;justify-content:center;}" +
     ".mlc-body{flex:1;overflow-y:auto;background:#f3f5f8;}" +
     ".mlc-thread{display:flex;flex-direction:column;gap:8px;padding:12px 12px 16px;}" +
-    ".mlc-row{display:flex;}.mlc-row.me{justify-content:flex-end;}" +
-    ".mlc-bub{max-width:76%;padding:8px 11px;border-radius:14px;font-size:14px;line-height:1.35;word-wrap:break-word;white-space:pre-wrap;box-shadow:0 1px 1px rgba(0,0,0,.06);}" +
+    ".mlc-row{display:block;}.mlc-row.me{text-align:right;}.mlc-row.them{text-align:left;}" +
+    ".mlc-msg{display:inline-block;max-width:78%;text-align:left;vertical-align:top;}" +
+    ".mlc-bub{padding:8px 11px;border-radius:14px;font-size:14px;line-height:1.35;overflow-wrap:break-word;word-break:normal;white-space:pre-wrap;box-shadow:0 1px 1px rgba(0,0,0,.06);}" +
     ".mlc-row.me .mlc-bub{background:#1d4ed8;color:#fff;border-bottom-right-radius:5px;}" +
     ".mlc-row.them .mlc-bub{background:#fff;color:#0f172a;border-bottom-left-radius:5px;}" +
     ".mlc-when{font-size:10.5px;color:#94a3b8;margin-top:3px;text-align:right;}" +
     ".mlc-row.them .mlc-when{text-align:left;}" +
+    ".mlc-del{border:none;background:none;cursor:pointer;font-size:12px;opacity:.32;padding:0 4px;vertical-align:middle;line-height:1;}" +
+    ".mlc-del:hover{opacity:1;}" +
     ".mlc-readmark{font-size:11px;color:#64748b;text-align:right;padding:0 2px 2px;font-weight:600;}" +
     ".mlc-readmark.read{color:#1d4ed8;}" +
     ".mlc-typing{display:none;font-size:12.5px;color:#64748b;font-style:italic;padding:2px 14px 12px;}" +
@@ -85,6 +88,7 @@
     '<div class="mlc-head">' +
       '<button class="mlc-hbtn" id="mlc-back" style="display:none;">‹</button>' +
       '<h3 id="mlc-title">Messages</h3>' +
+      '<button class="mlc-hbtn" id="mlc-delchat" title="Delete this whole chat" style="display:none;">🗑</button>' +
       '<button class="mlc-hbtn" id="mlc-new" title="New conversation">✎</button>' +
       '<button class="mlc-hbtn" id="mlc-close" title="Close">✕</button>' +
     '</div>' +
@@ -139,6 +143,7 @@
     $("mlc-title").textContent = "Messages";
     $("mlc-back").style.display = "none";
     $("mlc-new").style.display = "";
+    $("mlc-delchat").style.display = "none";
     $("mlc-foot").style.display = "none";
     loadThreads();
   }
@@ -171,6 +176,7 @@
     $("mlc-title").textContent = withUser;
     $("mlc-back").style.display = "";
     $("mlc-new").style.display = "none";
+    $("mlc-delchat").style.display = IS_ADMIN ? "" : "none";
     $("mlc-foot").style.display = "flex";
     $("mlc-body").innerHTML = '<div class="mlc-empty">Loading…</div>';
     authFetch("/messages/thread?with=" + encodeURIComponent(withUser)).then(function (r) { return r.json(); })
@@ -193,7 +199,10 @@
       if (m.id) { if (m.id <= lastId) return; lastId = m.id; if (m.mine) myLastId = m.id; }
       var row = document.createElement("div");
       row.className = "mlc-row " + (m.mine ? "me" : "them");
-      row.innerHTML = '<div><div class="mlc-bub">' + esc(m.body) + '</div><div class="mlc-when">' + esc(fmtWhen(m.at)) + '</div></div>';
+      if (m.id) row.setAttribute("data-mid", m.id);
+      var del = (IS_ADMIN && m.id) ? '<button class="mlc-del" data-del="' + m.id + '" title="Delete message">🗑</button>' : '';
+      var msg = '<div class="mlc-msg"><div class="mlc-bub">' + esc(m.body) + '</div><div class="mlc-when">' + esc(fmtWhen(m.at)) + '</div></div>';
+      row.innerHTML = m.mine ? (del + msg) : (msg + del);   // trash on the outer side
       host.appendChild(row);
     });
     scrollDown();
@@ -263,6 +272,7 @@
     $("mlc-title").textContent = "New message";
     $("mlc-back").style.display = "";
     $("mlc-new").style.display = "none";
+    $("mlc-delchat").style.display = "none";
     $("mlc-foot").style.display = "none";
     $("mlc-body").innerHTML =
       '<div class="mlc-search"><input id="mlc-usearch" placeholder="Search people…" autocomplete="off"></div>' +
@@ -316,6 +326,24 @@
     $("mlc-back").onclick = showList;
     $("mlc-new").onclick = showNew;
     $("mlc-sendbtn").onclick = send;
+    // Admin: delete the whole conversation.
+    $("mlc-delchat").onclick = function () {
+      if (!IS_ADMIN || !curWith) return;
+      if (!confirm("Delete the entire conversation with " + curWith + "? This can't be undone.")) return;
+      authFetch("/messages/thread-delete", { method: "POST", body: JSON.stringify({ with: curWith }) })
+        .then(function (r) { return r.json(); })
+        .then(function () { showList(); refreshBadge(); }).catch(function () {});
+    };
+    // Admin: delete a single message (delegated — works for polled-in rows too).
+    $("mlc-body").addEventListener("click", function (e) {
+      var d = e.target.closest ? e.target.closest(".mlc-del") : null;
+      if (!d || !IS_ADMIN) return;
+      var id = d.getAttribute("data-del");
+      if (!id || !confirm("Delete this message?")) return;
+      authFetch("/messages/delete", { method: "POST", body: JSON.stringify({ id: parseInt(id, 10) }) })
+        .then(function (r) { return r.json(); })
+        .then(function () { var row = d.closest(".mlc-row"); if (row) row.remove(); }).catch(function () {});
+    });
     var inp = $("mlc-input");
     inp.addEventListener("input", function () { this.style.height = "auto"; this.style.height = Math.min(96, this.scrollHeight) + "px"; pingTyping(); });
     inp.addEventListener("keydown", function (e) {

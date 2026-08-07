@@ -9693,6 +9693,26 @@ async function handle21(request, env, ctx, url, sess) {
     ctx?.waitUntil(sendToUser(env, tid, toUser, { title: "Message from " + me, body: body.slice(0, 120), url: "/inbox.html", tag: "msg:" + lc(me) }));
     return jr4({ ok: true, id: res.meta ? res.meta.last_row_id : null, at, to: toUser }, headers, 201);
   }
+  if (sub === "/delete" && method === "POST") {
+    const p = await permissionsFor(env, tid, me).catch(() => ({}));
+    if (p.FullAccess !== "Yes") return jr4({ error: "Admins only" }, headers, 403);
+    const b = await readJson5(request);
+    const id = parseInt(b.id, 10);
+    if (!id) return jr4({ error: "id required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM messages WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    return jr4({ ok: true }, headers);
+  }
+  if (sub === "/thread-delete" && method === "POST") {
+    const p = await permissionsFor(env, tid, me).catch(() => ({}));
+    if (p.FullAccess !== "Yes") return jr4({ error: "Admins only" }, headers, 403);
+    const b = await readJson5(request);
+    const other = String(b.with || "").trim();
+    if (!other) return jr4({ error: "with required" }, headers, 400);
+    await env.DB.prepare(
+      "DELETE FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))"
+    ).bind(tid, me, other, other, me).run();
+    return jr4({ ok: true }, headers);
+  }
   if (sub === "/read" && method === "POST") {
     const b = await readJson5(request);
     const other = String(b.with || "").trim();
