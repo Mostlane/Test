@@ -24,6 +24,14 @@
     a{color:var(--accent)}
     .shell{padding:0}
     header.main-header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 2px 4px;background:transparent;border:0;position:static}
+    .head-left{display:flex;align-items:center;gap:10px;min-width:0}
+    /* Header back button — a top-left escape that the bottom tab bar (blocked by
+       the purple View-As banner) can't always provide. .ml-back is hidden here,
+       so this uses its own class. */
+    .eng-back{display:inline-flex;align-items:center;gap:6px;text-decoration:none;flex:none;
+      font:650 14px/1 'Segoe UI',system-ui,sans-serif;padding:9px 13px;border-radius:999px;
+      background:var(--card);border:1px solid var(--line);color:var(--ink);box-shadow:0 1px 2px rgba(16,32,58,.06)}
+    .eng-back:active{transform:translateY(1px)}
     header h1{margin:0;font-size:25px;letter-spacing:-.02em;color:var(--ink)}
     header .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
     .btn{border-radius:12px;padding:0 14px;min-height:42px;font-size:14px;border:1px solid var(--line);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;color:var(--ink);font-weight:650;white-space:nowrap;font-family:inherit;-webkit-user-select:none;user-select:none;touch-action:manipulation}
@@ -84,9 +92,12 @@
 <div class="shell">
   <div class="card">
     <header class="main-header">
-      <div>
-        <h1>My jobs</h1>
-        <div class="sub" id="userLabel">Engineer</div>
+      <div class="head-left">
+        <a class="eng-back" href="route.html" title="Back">‹ Back</a>
+        <div>
+          <h1>My jobs</h1>
+          <div class="sub" id="userLabel">Engineer</div>
+        </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <a class="btn" id="adminDashBtn" href="sla-main.html" style="display:none;">📋 Dashboard</a>
