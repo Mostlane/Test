@@ -908,11 +908,16 @@ const MAP = window.ML_PERM_MAP || {
       // Weekly van check: drivers (vehicle allocated) are chased until this
       // week's check is in; office (FullAccess) sees who's missing after the
       // deadline. Clears automatically when the check is submitted.
-      jobs.push(fetch(window.MOSTLANE_API + "/vancheck/attention", H)
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
+      jobs.push(Promise.all([fetch(window.MOSTLANE_API + "/vancheck/attention", H).then(function (r) { return r.json(); }), prefsP])
+        .then(function (res) {
+          var d = res[0];
           if (!d || !d.ok) return;
-          var n = (d.mineDue ? 1 : 0) + (d.missing ? d.missing.length : 0);
+          // Admin "missing this week" count clears once they've opened the van
+          // checks page for this week (per-user seen marker). The driver's own
+          // "mineDue" is NOT cleared this way — it clears when they submit.
+          var seenWk = later(localStorage.getItem("mostlaneVcSeen"), res[1].vcSeen);
+          var missingN = (d.missing && seenWk !== d.week) ? d.missing.length : 0;
+          var n = (d.mineDue ? 1 : 0) + missingN;
           dot("Vehicles", n);
           if (d.mineDue) {
             var dueTxt = new Date(d.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" });
@@ -922,10 +927,10 @@ const MAP = window.ML_PERM_MAP || {
               text: d.overdue ? "It was due by " + dueTxt + " — do it now." : "Complete your walkaround check by " + dueTxt + "."
             });
           }
-          if (d.missing && d.missing.length && d.overdue) {
+          if (missingN && d.overdue) {
             notes.push({
-              n: d.missing.length, icon: "🚐", href: "van-checks.html",
-              title: d.missing.length + " van check" + (d.missing.length === 1 ? "" : "s") + " missing this week",
+              n: missingN, icon: "🚐", href: "van-checks.html",
+              title: missingN + " van check" + (missingN === 1 ? "" : "s") + " missing this week",
               text: d.missing.join(", ") + " — deadline has passed."
             });
           }

@@ -886,8 +886,17 @@
         }).catch(function () { return {}; });
       }
       function updateBadges() {
-        fetchAuthed("/vancheck/attention").then(function (d) {
-          if (d && d.ok) setNavBadge("vehicles.html", (d.mineDue ? 1 : 0) + ((d.missing && d.overdue) ? d.missing.length : 0));
+        Promise.all([
+          fetchAuthed("/vancheck/attention"),
+          fetchAuthed("/prefs").catch(function () { return {}; })
+        ]).then(function (r) {
+          var d = r[0]; if (!(d && d.ok)) return;
+          var prefs = (r[1] && r[1].ok && r[1].prefs) || {};
+          // Admin "missing" count clears once this week's van-check page is seen.
+          var localSeen = localStorage.getItem("mostlaneVcSeen") || "";
+          var seenWk = String(localSeen) > String(prefs.vcSeen || "") ? localSeen : (prefs.vcSeen || "");
+          var missingN = (d.missing && d.overdue && seenWk !== d.week) ? d.missing.length : 0;
+          setNavBadge("vehicles.html", (d.mineDue ? 1 : 0) + missingN);
         }).catch(function () {});
         Promise.all([
           fetchAuthed("/asset/transfers/pending-count").catch(function () { return null; }),
