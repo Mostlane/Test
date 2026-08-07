@@ -795,7 +795,15 @@ async function loadUnscheduled(){
     const box = $("unschedBox");
     if(!open.length){ box.style.display = "none"; box.innerHTML = ""; return; }
     box.style.display = "block";
-    box.innerHTML = `<div class="day-banner"><span>📌 Assigned — not booked in</span><span class="d-count">${open.length} job${open.length===1?"":"s"}</span></div>`;
+    // Collapsible: these have no date so they'd otherwise clutter the day view —
+    // start collapsed, tap the banner to reveal. State remembered per device.
+    const startOpen = localStorage.getItem("mlUnschedOpen") === "1";
+    box.innerHTML = `<div class="day-banner unsched-toggle" id="unschedToggle" role="button" tabindex="0" style="cursor:pointer;">
+        <span class="unsched-caret" style="display:inline-block;transition:transform .15s;transform:rotate(${startOpen?90:0}deg);">▸</span>
+        <span>📌 Assigned — not booked in</span>
+        <span class="d-count">${open.length} job${open.length===1?"":"s"}</span></div>
+      <div id="unschedItems" style="display:${startOpen?"block":"none"};"></div>`;
+    const items = $("unschedItems");
     for(const job of open){
       const target = job.targetAt || job.sla?.targetAt;
       const slaInfo = computeSlaCountdown(target);
@@ -803,8 +811,17 @@ async function loadUnscheduled(){
       card.className = "job-card " + stripClass(job.status, slaInfo.status);
       card.dataset.jobId = job.id;
       card.innerHTML = jobCardInner(job, slaInfo, target);
-      box.appendChild(card);
+      items.appendChild(card);
     }
+    const tgl = $("unschedToggle"), caret = tgl.querySelector(".unsched-caret");
+    const toggle = () => {
+      const nowOpen = items.style.display === "none";
+      items.style.display = nowOpen ? "block" : "none";
+      caret.style.transform = "rotate(" + (nowOpen ? 90 : 0) + "deg)";
+      try{ localStorage.setItem("mlUnschedOpen", nowOpen ? "1" : "0"); }catch(e){}
+    };
+    tgl.addEventListener("click", toggle);
+    tgl.addEventListener("keydown", (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(); } });
     startCountdownLoop();
   }catch(e){}
 }
@@ -937,11 +954,20 @@ function init(){
 
 window.addEventListener("DOMContentLoaded", init);
 </script>
-<nav class="tabbar">
-  <a href="route.html"><span class="ic">🧭</span>Route</a>
-  <a href="engineer-jobs.html" class="on"><span class="ic">📋</span>Jobs</a>
-  <a href="inbox.html"><span class="ic">📨</span>Inbox</a>
-  <a href="you.html"><span class="ic">👤</span>You</a>
-</nav>
+  <nav class="tabbar">
+    <a href="route.html"><span class="ic">🧭</span>Route</a>
+    <a href="engineer-jobs.html" class="on"><span class="ic">📋</span>Jobs</a>
+    <a href="po.html" id="tabPO"><span class="ic">🧾</span>PO</a>
+    <a href="main.html"><span class="ic">▦</span>Menu</a>
+  </nav>
+  <script>
+  (function(){ try{
+    var API=window.MOSTLANE_API||""; var t=localStorage.getItem("mostlaneToken")||"";
+    var a=document.getElementById("tabPO"); if(!a||!t) return;
+    fetch(API+"/po-config",{headers:{Authorization:"Bearer "+t},cache:"no-store"})
+      .then(function(r){return r.json();}).then(function(c){ if(c&&c.ok&&c.url){ a.href=c.url; } })
+      .catch(function(){});
+  }catch(e){} })();
+  </script>
 </body>
 </html>
