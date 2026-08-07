@@ -11805,9 +11805,11 @@ var index_default = {
   //                 (Hourly so the dynamic chase tracks whatever due-time is set;
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
-    ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
+    if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
+      ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
+      ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
+    }
   }
 };
 var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];

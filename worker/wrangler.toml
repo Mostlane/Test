@@ -13,7 +13,10 @@ compatibility_date = "2025-01-01"
 # Keep the van-check reminder cron (hourly; self-gates to Mon 07:00 + the
 # pre-deadline chase). Declaring it here restores it automatically on deploy.
 [triggers]
-crons = ["0 * * * *"]
+# Every 5 minutes so timed job releases + the 5pm-day-before nudge are punctual.
+# The heavier hourly work (van-check reminders, SiteLog reconcile) is gated to the
+# top of the hour inside scheduled() so its cadence is unchanged.
+crons = ["*/5 * * * *"]
 
 # ── D1 databases ────────────────────────────────────────────────────
 [[d1_databases]]
