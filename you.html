@@ -119,6 +119,14 @@
   $("avatar").textContent=initials(name);
   try{ var veh=localStorage.getItem("mostlaneVehicle")||sessionStorage.getItem("mostlaneVehicle")||""; if(veh) $("role").textContent="Engineer · Van "+veh; }catch(e){}
 
+  // Office/admins can open this personal screen too, but the field-only bits
+  // (location logging, the "Engineer" role label) aren't forced on them.
+  var isFieldUser = (typeof window.mlIsFieldUser === "function") ? window.mlIsFieldUser() : true;
+  if(!isFieldUser){
+    var lc=$("locCard"); if(lc) lc.style.display="none";
+    if($("role") && !((localStorage.getItem("mostlaneVehicle")||sessionStorage.getItem("mostlaneVehicle")||""))) $("role").textContent="";
+  }
+
   // ---- Day timer: how long they've been on shift today (live) ----
   var SLA_API="https://mostlane-sla.jamie-def.workers.dev";   // portal-config bridge attaches the token
   function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
