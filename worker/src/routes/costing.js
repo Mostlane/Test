@@ -257,6 +257,36 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, prefs }, {}, env, request);
   }
 
+  // ── Per-job materials cost: the POs raised against ONE job (live from PO_DB) ──
+  // Powers the "Materials (POs)" panel on job-view — true reflection of the job's
+  // material spend, updating automatically as each PO is priced. Office/admin only.
+  if (path === "/costing/job-pos" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const jobId = q.get("jobId") || q.get("job") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const rows = await jobPoRows(env, jobId);
+    let total = 0, unpriced = 0, materials = 0, subcontractor = 0;
+    const pos = rows.map(r => {
+      const v = (r.cost_ex_vat != null && r.cost_ex_vat !== "") ? Number(r.cost_ex_vat) : null;
+      const priced = v != null && isFinite(v);
+      if (priced) {
+        total += v;
+        if (String(r.cost_category || "").toLowerCase() === "subcontractor") subcontractor += v; else materials += v;
+      } else unpriced++;
+      return {
+        supplier: r.supplier || "", category: r.cost_category || "", trade: r.trade || "",
+        cost: priced ? Math.round(v * 100) / 100 : null,
+        incident: r.incident_no || r.job_ref || "", by: r.engineer_name || "", date: r.d || ""
+      };
+    });
+    const round = n => Math.round(n * 100) / 100;
+    return json({
+      ok: true, jobId, poBound: !!env.PO_DB, count: pos.length,
+      total: round(total), materials: round(materials), subcontractor: round(subcontractor),
+      unpriced, pos
+    }, {}, env, request);
+  }
+
   // Engineer name aliases (map an alternate name → the canonical portal person),
   // so e.g. the PO system's "JT" folds into "John Thorn" everywhere in costing.
   if (path === "/costing/eng-aliases" && method === "GET") {
@@ -1113,9 +1143,23 @@ async function poRows(env, from, to) {
   if (!env.PO_DB) return [];
   try {
     const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, substr(issued_at,1,10) AS d " +
+      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, job_id, job_ref, substr(issued_at,1,10) AS d " +
       "FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
     ).bind(from, to).all();
+    return results || [];
+  } catch { return []; }
+}
+
+// Every PO raised against a specific job (all dates), for per-job materials cost.
+// job_id is the stable key the PO worker stamps from the job's "Raise PO" link.
+async function jobPoRows(env, jobId) {
+  if (!env.PO_DB || !jobId) return [];
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, " +
+      "substr(COALESCE(issued_at,cost_entered_at),1,10) AS d " +
+      "FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
+    ).bind(String(jobId)).all();
     return results || [];
   } catch { return []; }
 }

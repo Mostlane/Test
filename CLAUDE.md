@@ -357,6 +357,13 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
   /office/timesheet), `email.js` lib (Resend templates).
+- **Per-job PO materials cost** (job-view.html "🧾 Materials — purchase orders"
+  card, **office/admin only** — FullAccess|SLAAdmin): reads live from the PO
+  system via **GET /costing/job-pos?jobId=** (costing.js `jobPoRows`), which sums
+  `po_log.cost_ex_vat` for rows with matching **`job_id`** (the stable key the PO
+  worker stamps from a job's "Raise PO" link — `#mlpo` payload). Returns total +
+  materials/subcontractor split (`cost_category`, `trade`) + unpriced count + the
+  PO list; updates automatically as each PO is priced (nothing stored on the job).
 - `costing.js` — **Master site register + labour ledger + job costing +
   project valuations** (see the dedicated "Job costing & SiteLog↔Portal
   integration" section below). Routes: /sites/register(+/add,/update,/merge,
