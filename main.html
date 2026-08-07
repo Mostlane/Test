@@ -618,11 +618,12 @@ const MAP = window.ML_PERM_MAP || {
             holdTimer = null;
             enterEdit();
             startDrag(tile, startX, startY);
-          }, 700);   // longer hold so a slow tap doesn't accidentally enter arrange mode
+          }, 2500);   // long, deliberate hold (2.5s) so a slow tap never accidentally enters arrange mode
         });
         grid.addEventListener("pointermove", e => {
-          if (holdTimer && (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10)) {
-            clearTimeout(holdTimer); holdTimer = null;   // moved = it's a scroll, not a hold
+          if (holdTimer && (Math.abs(e.clientX - startX) > 18 || Math.abs(e.clientY - startY) > 18)) {
+            clearTimeout(holdTimer); holdTimer = null;   // real movement = scroll, not a hold
+            // (18px tolerance: a finger drifts a little over a 2.5s hold; a scroll moves far)
           }
         });
         window.addEventListener("pointerup", () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } });

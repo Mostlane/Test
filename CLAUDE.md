@@ -766,7 +766,7 @@ sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
 Story users: STORY_ALLOWED set only + pinned "Back to My Day". Personalise
 tile gated by ThemeColour/ThemeBackground.
 - **Drag-to-reorder tiles (mobile, Aug 2026)** — iOS-home-screen style: a
-  **long-press** (~700ms — deliberately slow so a lingering tap doesn't trigger it)
+  **long-press** (~2.5s — deliberately long so slow taps never trigger it)
   on any visible tile enters "arrange" mode (tiles wobble
   via `.menu-grid.reordering`, a fixed `#reorderBar` "Drag tiles, then Done"
   appears) and immediately grabs the held tile; drag reorders with a pointer-based
