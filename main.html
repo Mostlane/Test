@@ -262,6 +262,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button" href="engineer-timesheet.html" id="EngTimesheet"><span class="emoji">⏱️</span> My Timesheet</a>
     <a class="button" href="timesheets-admin.html" id="EngTsAdmin"><span class="emoji">🧾</span> Engineer Timesheets</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
+    <a class="button" href="van-check.html" id="VanCheck"><span class="emoji">🚐</span> Van Check</a>
     <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
     <a class="button" href="holiday-admin.html" id="HolidayAdmin"><span class="emoji">🗂️</span> Holiday Admin</a>
     <a class="button" href="engineers-hours-menu.html" id="EngineersHoursMenu"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
@@ -415,6 +416,15 @@ const MAP = window.ML_PERM_MAP || {
         // Merged tiles: point each at the page THIS user can actually open, so a
         // holder of only the "child" permission still reaches it in one tap (and
         // never lands on a page their permission would block). First match wins.
+        // Van Check tile — shown ONLY to field users (not in MAP so admins/office
+        // don't get it). They open it whenever they like; the reg auto-fills from
+        // their assigned van, and its Back returns to main.html (guarded on the page).
+        const stx = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        const isFieldUser = !fullAccess && String(user.SLAAdmin || "").toLowerCase() !== "yes"
+          && (stx === "field" || (stx !== "office" && (String(user.SLA || "").toLowerCase() === "yes" || isStory)));
+        const vc = document.getElementById("VanCheck");
+        if (vc) vc.classList.toggle("visible", isFieldUser);
+
         const has = k => fullAccess || String(user[k] || "").toLowerCase() === "yes";
         const setHref = (id, choices) => {
           const btn = document.getElementById(id);
