@@ -152,14 +152,17 @@ export default {
   //                 (Hourly so the dynamic chase tracks whatever due-time is set;
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(sendWeeklyReminders(env).catch(e => console.error("scheduled van-check reminder:", e)));
-    // P4: pull recent SiteLog visits and reconcile them into SLA sessions —
-    // close sessions a scan-out ended, and feed project scans into the
-    // engineer timesheet. Idempotent; fails soft when SiteLog is unset/down.
-    ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
-    // Announce jobs whose scheduled release time has now passed (fires the
-    // assignment push at release, and re-checks the stacked "after previous" queue).
+    // The cron fires every 5 minutes. The release sweep runs EVERY tick so timed
+    // job releases + the 5pm-day-before nudge push within ~5 min; the heavier
+    // hourly work is gated to the top of the hour to keep its old cadence.
     ctx.waitUntil(sla.sweepJobReleases(env, 1).catch(e => console.error("scheduled job-release sweep:", e)));
+    if (new Date().getUTCMinutes() < 5) {
+      ctx.waitUntil(sendWeeklyReminders(env).catch(e => console.error("scheduled van-check reminder:", e)));
+      // P4: pull recent SiteLog visits and reconcile them into SLA sessions —
+      // close sessions a scan-out ended, and feed project scans into the
+      // engineer timesheet. Idempotent; fails soft when SiteLog is unset/down.
+      ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
+    }
   },
 };
 

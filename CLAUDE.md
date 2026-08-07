@@ -47,7 +47,7 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   git-connected to **Mostlane/Test**, **root directory `worker/`** — every push
   to `main` rebuilds and deploys from `worker/src/` (entry `src/index.js`, per
   `worker/wrangler.toml`: name/main/compat_date, D1 `DB`+`PO_DB`, R2
-  `JOB_FILES`+`ASSET_BUCKET`, `[triggers] crons=["0 * * * *"]`, non-secret
+  `JOB_FILES`+`ASSET_BUCKET`, `[triggers] crons=["*/5 * * * *"]`, non-secret
   `[vars]`; **secrets stay in the dashboard, never in git**). So the normal flow
   is now: edit `worker/src/`, commit, `merge --no-ff` into `main`, push — done,
   no paste. **Still rebuild the committed `dist/worker.js`+`dist/worker.min.js`**
@@ -1034,10 +1034,12 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   **dynamic chase within 2h BEFORE the portal deadline** (deadlineFor = the
   van-check settings dueDow/dueTime; never after — already missed). Self-gates
   on London time, deduped per week per slot (app_config `vancheck:reminded:<tid>`
-  = ["mon:<week>","chase:<week>"]), so BST/GMT-safe and retry-safe. **Needs an
-  HOURLY Cron Trigger** (dashboard → Settings → Triggers): `0 * * * *` — hourly
-  so the chase tracks whatever due-time is set. New scheduled jobs hang off the
-  same handler.
+  = ["mon:<week>","chase:<week>"]), so BST/GMT-safe and retry-safe. **Cron Trigger
+  is now `*/5 * * * *`** (every 5 min — wrangler.toml `[triggers]`) so **timed job
+  releases + the 5pm-day-before nudge push punctually**; `scheduled()` runs
+  `sla.sweepJobReleases` every tick but **gates the hourly work (van-check
+  reminders, SiteLog reconcile) to `minute < 5`** so their cadence is unchanged.
+  New scheduled jobs hang off the same handler.
 
 ## Satellite systems
 1. **PO system** — single-file worker (own D1 `mostlane-po`; legacy KV
