@@ -55,6 +55,7 @@
     .bub.them{background:var(--card);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:5px}
     .bub.me{background:var(--accent);color:#fff;align-self:flex-end;border-bottom-right-radius:5px}
     .bub .tm{display:block;font-size:10px;opacity:.65;margin-top:3px}
+    .th-typing{font-size:12.5px;color:var(--muted);font-style:italic;padding:0 16px 10px}
     .reply{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card)}
     .reply input{flex:1;border:1px solid var(--line);border-radius:999px;padding:11px 15px;font:inherit;font-size:15px;background:var(--bg);color:var(--ink)}
     .reply button{border:0;background:var(--accent);color:#fff;border-radius:50%;width:44px;height:44px;font-size:18px;cursor:pointer;flex:0 0 auto}
@@ -73,6 +74,7 @@
   <div class="modal" id="threadModal"><div class="sheet">
     <div class="sh-h"><b id="thName">Thread</b><button class="x" id="thClose">✕</button></div>
     <div class="thread" id="thBody"></div>
+    <div class="th-typing" id="thTyping" style="display:none"></div>
     <form class="reply" id="thReply"><input id="thInput" placeholder="Type a message…" autocomplete="off"><button type="submit">➤</button></form>
   </div></div>
 
@@ -201,21 +203,38 @@
     }catch(err){ toast("⚠ "+err.message); }
   }
 
-  // ---- message thread ----
-  var curThread=null;
+  // ---- message thread (live: polls for new lines + typing while open) ----
+  var curThread=null, thLastId=0, thPoll=null, thTypePing=0;
+  function bubHtml(m){ return '<div class="bub '+(m.mine?"me":"them")+'">'+esc(m.body)+'<span class="tm">'+esc(fmtWhen(m.at))+'</span></div>'; }
   async function openThread(withUser){
-    curThread=withUser; $("thName").textContent=withUser; $("thBody").innerHTML='<div class="empty">Loading…</div>'; $("threadModal").classList.add("show");
+    curThread=withUser; thLastId=0; $("thName").textContent=withUser; $("thBody").innerHTML='<div class="empty">Loading…</div>'; $("thTyping").style.display="none"; $("threadModal").classList.add("show");
     try{
       var r=await afetch(API+"/messages/thread?with="+encodeURIComponent(withUser)); var j=await r.json();
       var msgs=(j&&j.messages)||[];
-      $("thBody").innerHTML=msgs.length?msgs.map(function(m){ return '<div class="bub '+(m.mine?"me":"them")+'">'+esc(m.body)+'<span class="tm">'+esc(fmtWhen(m.at))+'</span></div>'; }).join(""):'<div class="empty">No messages yet — say hello.</div>';
+      msgs.forEach(function(m){ if(m.id) thLastId=Math.max(thLastId,m.id); });
+      $("thBody").innerHTML=msgs.length?msgs.map(bubHtml).join(""):'<div class="empty">No messages yet — say hello.</div>';
       $("thBody").scrollTop=$("thBody").scrollHeight;
+      applyTyping(j);
       // mark thread read locally
       threads.forEach(function(t){ if(String(t.with).toLowerCase()===String(withUser).toLowerCase()) t.unread=0; });
       renderFilters();
+      startThreadPoll();
     }catch(err){ $("thBody").innerHTML='<div class="empty">Couldn\'t load this thread.</div>'; }
   }
-  $("thClose").onclick=function(){ $("threadModal").classList.remove("show"); renderList(); };
+  function applyTyping(j){ var t=$("thTyping"); if(!t) return; if(j&&j.typing){ t.textContent=curThread+" is typing…"; t.style.display="block"; $("thBody").scrollTop=$("thBody").scrollHeight; } else t.style.display="none"; }
+  function startThreadPoll(){ stopThreadPoll(); thPoll=setInterval(function(){
+    if(!curThread) return;
+    afetch(API+"/messages/thread?with="+encodeURIComponent(curThread)+"&since="+thLastId).then(function(r){return r.json();}).then(function(j){
+      var msgs=(j&&j.messages)||[];
+      msgs.forEach(function(m){ if(m.id) thLastId=Math.max(thLastId,m.id); $("thBody").insertAdjacentHTML("beforeend",bubHtml(m)); });
+      if(msgs.length) $("thBody").scrollTop=$("thBody").scrollHeight;
+      applyTyping(j);
+    }).catch(function(){});
+  },3000); }
+  function stopThreadPoll(){ if(thPoll){ clearInterval(thPoll); thPoll=null; } }
+  function pingTyping(){ if(!curThread) return; var now=Date.now(); if(now-thTypePing<2500) return; thTypePing=now; afetch(API+"/messages/typing",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({to:curThread})}).catch(function(){}); }
+  $("thInput").addEventListener("input", pingTyping);
+  $("thClose").onclick=function(){ stopThreadPoll(); curThread=null; $("threadModal").classList.remove("show"); renderList(); };
   $("thReply").onsubmit=async function(e){
     e.preventDefault(); var body=$("thInput").value.trim(); if(!body||!curThread) return;
     $("thInput").value="";
@@ -224,6 +243,7 @@
     try{
       var r=await afetch(API+"/messages/send",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({to:curThread,body:body,opId:opId()})});
       if(!r.ok) throw new Error("send failed");
+      var jj=await r.json(); if(jj&&jj.id) thLastId=Math.max(thLastId,jj.id);
     }catch(err){ toast("Message will send when you're back online"); }
   };
 

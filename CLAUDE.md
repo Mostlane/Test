@@ -746,6 +746,30 @@ NOT EXISTS + ALTER on read) — no manual SQL needed.
   /notify/log → viewer notify-log.html (FullAccess, linked from Users Admin)
   — proof against "mine never showed that".
 
+## Messaging (office ↔ engineer, routes/messages.js)
+1:1 direct messages. Tables **messages** (id/from/to/body/at/seen) +
+**message_typing** (upserted "X typing to Y" markers) — self-migrating.
+Endpoints: GET /messages/unread, /messages/threads, /messages/thread?with=&since=
+(returns messages + **typing** [other typed <6s] + **readUpTo** [highest id of MY
+msgs they've read]), POST /messages/send {to,body,opId} (fires web push to the
+recipient), /messages/read {with}, /messages/typing {to}. **Two front-ends, one
+backend:**
+- **Engineers** — the field app's **inbox.html** "Messages" tab (bottom nav).
+  "✉️ Message the office" opens a thread with the owner. Thread modal now **live-
+  polls** (3s) for new lines + shows "…is typing"; pings /messages/typing on input.
+  **No read receipts shown to engineers** (by design).
+- **Office** — a floating **live-chat widget** (**chat-widget.js**), injected
+  portal-wide by portal-config.js for office users (skips field/Story users and
+  the field-app pages). Bottom-right launcher with an unread **red badge**;
+  panel = conversation list ↔ thread ↔ **✎ new** (pick any user). Live via
+  polling (open thread every 3s, badge/list every 15s); typing indicator + ping.
+  **Read receipts ("✓✓ Read" / "✓ Sent") are shown to ADMINS (FullAccess) only**
+  — `IS_ADMIN` gates their display; engineers/end users never see them. Web push
+  still delivers an OS notification + the badge when the widget is shut.
+"Live chat" = short polling (feels instant while open) + web push when closed;
+no WebSockets/Durable Objects. chat-widget.js is `?v=1` + in the _headers no-cache
+list. `since`-based delta polling keeps it cheap.
+
 ## Activity log (audit trail)
 Server middleware records every state-changing request automatically (covers
 all current AND future pages); portal-config beacons page views. Viewer

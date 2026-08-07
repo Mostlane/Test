@@ -1039,4 +1039,30 @@
       }
     } catch (e) { console.error("[portal-nav]", e); }
   })();
+
+  // ── Office live-chat widget ────────────────────────────────────────────────
+  // Inject the floating chat launcher for OFFICE users on portal pages. Field
+  // engineers and Story users are excluded — they use the field app's Inbox tab.
+  (function chatWidget() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
+        "route.html", "engineer-jobs.html", "inbox.html", "you.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var p = {};
+      try { p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+      var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
+      if (yes(p.StoryMode)) return;                         // guided users use the field Inbox
+      var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+      if (st === "field") return;                           // field engineers use the field Inbox
+      if (document.querySelector('script[data-mlchat]') || document.getElementById("mlchat-launch")) return;
+      var s = document.createElement("script");
+      s.src = "/chat-widget.js?v=1";
+      s.async = true; s.setAttribute("data-mlchat", "1");
+      (document.body || document.documentElement).appendChild(s);
+    } catch (e) {}
+  })();
 })();
