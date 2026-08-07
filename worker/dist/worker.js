@@ -9603,6 +9603,13 @@ async function ensure2(env) {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen)").run();
   } catch {
   }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS message_typing (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    from_user TEXT NOT NULL,
+    to_user TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, from_user, to_user)
+  )`).run();
   READY2 = true;
 }
 function jr4(o, h, s = 200) {
@@ -9647,14 +9654,29 @@ async function handle21(request, env, ctx, url, sess) {
   if (sub === "/thread" && method === "GET") {
     const other = (url.searchParams.get("with") || "").trim();
     if (!other) return jr4({ error: "with required" }, headers, 400);
+    const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
+    const pair = "((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))";
     const { results } = await env.DB.prepare(
-      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?))) ORDER BY id ASC LIMIT 500"
-    ).bind(tid, me, other, other, me).all();
+      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND " + pair + (since ? " AND id > ?" : "") + " ORDER BY id ASC LIMIT 500"
+    ).bind(...since ? [tid, me, other, other, me, since] : [tid, me, other, other, me]).all();
     ctx?.waitUntil(env.DB.prepare(
       "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
     ).bind(tid, me, other).run());
     const messages = (results || []).map((m) => ({ id: m.id, mine: lc(m.from_user) === lc(me), from: m.from_user, body: m.body, at: m.at }));
-    return jr4({ ok: true, with: other, messages }, headers);
+    const tRow = await env.DB.prepare("SELECT at FROM message_typing WHERE tenant_id=? AND from_user=? AND to_user=?").bind(tid, lc(other), lc(me)).first();
+    const typing = !!(tRow && Date.now() - Date.parse(tRow.at) < 6e3);
+    const rRow = await env.DB.prepare("SELECT MAX(id) AS m FROM messages WHERE tenant_id=? AND lower(from_user)=lower(?) AND lower(to_user)=lower(?) AND seen=1").bind(tid, me, other).first();
+    const readUpTo = rRow && rRow.m || 0;
+    return jr4({ ok: true, with: other, messages, typing, readUpTo }, headers);
+  }
+  if (sub === "/typing" && method === "POST") {
+    const b = await readJson5(request);
+    const to = lc(String(b.to || "").trim());
+    if (!to) return jr4({ error: "to required" }, headers, 400);
+    await env.DB.prepare(
+      "INSERT INTO message_typing (tenant_id, from_user, to_user, at) VALUES (?,?,?,?) ON CONFLICT(tenant_id, from_user, to_user) DO UPDATE SET at=excluded.at"
+    ).bind(tid, lc(me), to, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return jr4({ ok: true }, headers);
   }
   if (sub === "/send" && method === "POST") {
     const b = await readJson5(request);

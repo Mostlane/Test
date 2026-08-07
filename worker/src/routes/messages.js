@@ -24,6 +24,14 @@ async function ensure(env) {
     seen INTEGER NOT NULL DEFAULT 0
   )`).run();
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen)").run(); } catch {}
+  // Transient "X is typing to Y" markers (one row per direction, upserted).
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS message_typing (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    from_user TEXT NOT NULL,
+    to_user TEXT NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, from_user, to_user)
+  )`).run();
   READY = true;
 }
 
@@ -64,18 +72,39 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true, threads }, headers);
   }
 
-  // GET /messages/thread?with=<user> — a full conversation; marks incoming read.
+  // GET /messages/thread?with=<user>[&since=<id>] — a conversation; marks incoming
+  // read. `since` returns only messages newer than that id, so the live-chat
+  // widget can poll cheaply for just the new lines.
   if (sub === "/thread" && method === "GET") {
     const other = (url.searchParams.get("with") || "").trim();
     if (!other) return jr({ error: "with required" }, headers, 400);
+    const since = parseInt(url.searchParams.get("since") || "0", 10) || 0;
+    const pair = "((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?)))";
     const { results } = await env.DB.prepare(
-      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?))) ORDER BY id ASC LIMIT 500"
-    ).bind(tid, me, other, other, me).all();
+      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND " + pair + (since ? " AND id > ?" : "") + " ORDER BY id ASC LIMIT 500"
+    ).bind(...(since ? [tid, me, other, other, me, since] : [tid, me, other, other, me])).all();
     ctx?.waitUntil(env.DB.prepare(
       "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
     ).bind(tid, me, other).run());
     const messages = (results || []).map((m) => ({ id: m.id, mine: lc(m.from_user) === lc(me), from: m.from_user, body: m.body, at: m.at }));
-    return jr({ ok: true, with: other, messages }, headers);
+    // Live extras: is the other person typing to me (last 6s), and how far have
+    // they read MY messages (highest seen id) — the widget shows read receipts.
+    const tRow = await env.DB.prepare("SELECT at FROM message_typing WHERE tenant_id=? AND from_user=? AND to_user=?").bind(tid, lc(other), lc(me)).first();
+    const typing = !!(tRow && (Date.now() - Date.parse(tRow.at) < 6000));
+    const rRow = await env.DB.prepare("SELECT MAX(id) AS m FROM messages WHERE tenant_id=? AND lower(from_user)=lower(?) AND lower(to_user)=lower(?) AND seen=1").bind(tid, me, other).first();
+    const readUpTo = (rRow && rRow.m) || 0;
+    return jr({ ok: true, with: other, messages, typing, readUpTo }, headers);
+  }
+
+  // POST /messages/typing { to } — I'm typing to <to> (upsert a 6s marker).
+  if (sub === "/typing" && method === "POST") {
+    const b = await readJson(request);
+    const to = lc(String(b.to || "").trim());
+    if (!to) return jr({ error: "to required" }, headers, 400);
+    await env.DB.prepare(
+      "INSERT INTO message_typing (tenant_id, from_user, to_user, at) VALUES (?,?,?,?) ON CONFLICT(tenant_id, from_user, to_user) DO UPDATE SET at=excluded.at"
+    ).bind(tid, lc(me), to, new Date().toISOString()).run();
+    return jr({ ok: true }, headers);
   }
 
   // POST /messages/send { to, body }

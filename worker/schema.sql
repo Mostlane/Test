@@ -650,3 +650,24 @@ CREATE TABLE IF NOT EXISTS sitelog_scans (
   at        TEXT NOT NULL,               -- ISO time of the scan
   source    TEXT                         -- 'sitelog'
 );
+
+-- Office ↔ engineer direct messages (routes/messages.js). Self-migrating.
+CREATE TABLE IF NOT EXISTS messages (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  from_user TEXT NOT NULL,
+  to_user   TEXT NOT NULL,
+  body      TEXT NOT NULL,
+  at        TEXT NOT NULL,
+  seen      INTEGER NOT NULL DEFAULT 0    -- 0 until the recipient opens the thread
+);
+CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen);
+
+-- Transient "X is typing to Y" markers (one row per direction, upserted).
+CREATE TABLE IF NOT EXISTS message_typing (
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  from_user TEXT NOT NULL,
+  to_user   TEXT NOT NULL,
+  at        TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, from_user, to_user)
+);

@@ -5,6 +5,8 @@
 # a full re-download.
 /portal-config.js
   Cache-Control: no-cache
+/chat-widget.js
+  Cache-Control: no-cache
 /auth.js
   Cache-Control: no-cache
 /device-auth.js
