@@ -55,6 +55,7 @@
     .bub.them{background:var(--card);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:5px}
     .bub.me{background:var(--accent);color:#fff;align-self:flex-end;border-bottom-right-radius:5px}
     .bub .tm{display:block;font-size:10px;opacity:.65;margin-top:3px}
+    .bub .bfrom{display:block;font-size:11px;font-weight:700;color:var(--accent);margin-bottom:2px}
     .th-typing{font-size:12.5px;color:var(--muted);font-style:italic;padding:0 16px 10px}
     .reply{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card)}
     .reply input{flex:1;border:1px solid var(--line);border-radius:999px;padding:11px 15px;font:inherit;font-size:15px;background:var(--bg);color:var(--ink)}
@@ -76,6 +77,12 @@
     <div class="thread" id="thBody"></div>
     <div class="th-typing" id="thTyping" style="display:none"></div>
     <form class="reply" id="thReply"><input id="thInput" placeholder="Type a message…" autocomplete="off"><button type="submit">➤</button></form>
+  </div></div>
+
+  <div class="modal" id="pickModal"><div class="sheet">
+    <div class="sh-h"><b>New message</b><button class="x" id="pickClose">✕</button></div>
+    <div style="padding:10px 14px;background:var(--card);border-bottom:1px solid var(--line)"><input id="pickSearch" placeholder="Search people…" autocomplete="off" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;background:var(--bg);color:var(--ink)"></div>
+    <div class="thread" id="pickList" style="padding:0;gap:0"></div>
   </div></div>
 
   <nav class="tabbar">
@@ -165,10 +172,11 @@
       html+='<div class="eyebrow">Messages</div><div class="card">';
       if(threads.length){
         threads.forEach(function(t){
-          html+='<a class="item" data-thread="'+esc(t.with)+'"><div class="ic msg">💬</div><div class="bd"><div class="ti">'+(t.unread?'<span class="dot"></span>':'')+esc(t.with)+'</div><div class="mt">'+esc(t.last||"")+'</div><div class="when">'+esc(fmtWhen(t.at))+'</div></div></a>';
+          var attrs=t.isGroup?('data-group="'+esc(t.group)+'" data-key="'+esc(t.key)+'" data-label="'+esc(t.with)+'"'):('data-thread="'+esc(t.with)+'"');
+          html+='<a class="item" '+attrs+'><div class="ic msg">'+(t.isGroup?'👥':'💬')+'</div><div class="bd"><div class="ti">'+(t.unread?'<span class="dot"></span>':'')+esc(t.with)+'</div><div class="mt">'+esc(t.last||"")+'</div><div class="when">'+esc(fmtWhen(t.at))+'</div></div></a>';
         });
       }
-      html+='<div style="padding:12px 15px"><button class="btn line compose" id="composeBtn">✉️ Message the office</button></div></div>';
+      html+='<div style="padding:12px 15px"><button class="btn line compose" id="composeBtn">✉️ New message</button></div></div>';
     }
     if(filter==="all" && !unread().all && !threads.length && !openJobs().length){ html='<div class="empty">📭 You\'re all caught up.</div>'; }
     host.innerHTML=html;
@@ -177,7 +185,8 @@
 
   function wireList(){
     [].forEach.call(document.querySelectorAll("[data-thread]"),function(el){ el.onclick=function(){ openThread(el.dataset.thread); }; });
-    var cb=$("composeBtn"); if(cb) cb.onclick=function(){ openThread(OWNER); };
+    [].forEach.call(document.querySelectorAll("[data-group]"),function(el){ el.onclick=function(){ openGroup(el.dataset.group, el.dataset.key, el.dataset.label); }; });
+    var cb=$("composeBtn"); if(cb) cb.onclick=openPicker;
     [].forEach.call(document.querySelectorAll("[data-approve]"),function(el){ el.onclick=function(){ decideHold(el.dataset.approve,"approve"); }; });
     [].forEach.call(document.querySelectorAll("[data-reject]"),function(el){ el.onclick=function(){ decideHold(el.dataset.reject,"reject"); }; });
     [].forEach.call(document.querySelectorAll("[data-resolve]"),function(el){ el.onclick=function(){ resolveFlag(el.dataset.resolve); }; });
@@ -204,27 +213,37 @@
   }
 
   // ---- message thread (live: polls for new lines + typing while open) ----
-  var curThread=null, thLastId=0, thPoll=null, thTypePing=0;
-  function bubHtml(m){ return '<div class="bub '+(m.mine?"me":"them")+'">'+esc(m.body)+'<span class="tm">'+esc(fmtWhen(m.at))+'</span></div>'; }
-  async function openThread(withUser){
-    curThread=withUser; thLastId=0; $("thName").textContent=withUser; $("thBody").innerHTML='<div class="empty">Loading…</div>'; $("thTyping").style.display="none"; $("threadModal").classList.add("show");
+  // Supports 1:1 (curThread) and group threads (curGroup + curKey, e.g. "Office").
+  var curThread=null, curGroup="", curKey="", thLastId=0, thPoll=null, thTypePing=0;
+  function threadPath(since){
+    if(curGroup) return "/messages/thread?group="+encodeURIComponent(curGroup)+"&key="+encodeURIComponent(curKey)+(since?"&since="+since:"");
+    return "/messages/thread?with="+encodeURIComponent(curThread)+(since?"&since="+since:"");
+  }
+  function bubHtml(m){
+    var from=(curGroup && !m.mine && m.from)?'<span class="bfrom">'+esc(m.from)+'</span>':'';
+    return '<div class="bub '+(m.mine?"me":"them")+'">'+from+esc(m.body)+'<span class="tm">'+esc(fmtWhen(m.at))+'</span></div>';
+  }
+  function openThread(withUser){ curGroup=""; curKey=""; curThread=withUser; _openConvo(withUser); }
+  function openGroup(group,key,label){ curGroup=group; curKey=key||""; curThread=null; _openConvo(label||"Group"); }
+  async function _openConvo(title){
+    thLastId=0; $("thName").textContent=title; $("thBody").innerHTML='<div class="empty">Loading…</div>'; $("thTyping").style.display="none"; $("threadModal").classList.add("show");
     try{
-      var r=await afetch(API+"/messages/thread?with="+encodeURIComponent(withUser)); var j=await r.json();
+      var r=await afetch(API+threadPath(0)); var j=await r.json();
       var msgs=(j&&j.messages)||[];
       msgs.forEach(function(m){ if(m.id) thLastId=Math.max(thLastId,m.id); });
       $("thBody").innerHTML=msgs.length?msgs.map(bubHtml).join(""):'<div class="empty">No messages yet — say hello.</div>';
       $("thBody").scrollTop=$("thBody").scrollHeight;
       applyTyping(j);
       // mark thread read locally
-      threads.forEach(function(t){ if(String(t.with).toLowerCase()===String(withUser).toLowerCase()) t.unread=0; });
+      threads.forEach(function(t){ var same = curGroup ? (t.isGroup && t.group===curGroup && String(t.key||"").toLowerCase()===String(curKey).toLowerCase()) : (!t.isGroup && String(t.with).toLowerCase()===String(curThread).toLowerCase()); if(same) t.unread=0; });
       renderFilters();
       startThreadPoll();
     }catch(err){ $("thBody").innerHTML='<div class="empty">Couldn\'t load this thread.</div>'; }
   }
-  function applyTyping(j){ var t=$("thTyping"); if(!t) return; if(j&&j.typing){ t.textContent=curThread+" is typing…"; t.style.display="block"; $("thBody").scrollTop=$("thBody").scrollHeight; } else t.style.display="none"; }
+  function applyTyping(j){ var t=$("thTyping"); if(!t) return; if(!curGroup && j&&j.typing){ t.textContent=curThread+" is typing…"; t.style.display="block"; $("thBody").scrollTop=$("thBody").scrollHeight; } else t.style.display="none"; }
   function startThreadPoll(){ stopThreadPoll(); thPoll=setInterval(function(){
-    if(!curThread) return;
-    afetch(API+"/messages/thread?with="+encodeURIComponent(curThread)+"&since="+thLastId).then(function(r){return r.json();}).then(function(j){
+    if(!curThread && !curGroup) return;
+    afetch(API+threadPath(thLastId)).then(function(r){return r.json();}).then(function(j){
       var msgs=(j&&j.messages)||[];
       msgs.forEach(function(m){ if(m.id) thLastId=Math.max(thLastId,m.id); $("thBody").insertAdjacentHTML("beforeend",bubHtml(m)); });
       if(msgs.length) $("thBody").scrollTop=$("thBody").scrollHeight;
@@ -232,20 +251,54 @@
     }).catch(function(){});
   },3000); }
   function stopThreadPoll(){ if(thPoll){ clearInterval(thPoll); thPoll=null; } }
-  function pingTyping(){ if(!curThread) return; var now=Date.now(); if(now-thTypePing<2500) return; thTypePing=now; afetch(API+"/messages/typing",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({to:curThread})}).catch(function(){}); }
+  function pingTyping(){ if(!curThread||curGroup) return; var now=Date.now(); if(now-thTypePing<2500) return; thTypePing=now; afetch(API+"/messages/typing",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({to:curThread})}).catch(function(){}); }
   $("thInput").addEventListener("input", pingTyping);
-  $("thClose").onclick=function(){ stopThreadPoll(); curThread=null; $("threadModal").classList.remove("show"); renderList(); };
+  $("thClose").onclick=function(){ stopThreadPoll(); curThread=null; curGroup=""; curKey=""; $("threadModal").classList.remove("show"); renderList(); };
   $("thReply").onsubmit=async function(e){
-    e.preventDefault(); var body=$("thInput").value.trim(); if(!body||!curThread) return;
+    e.preventDefault(); var body=$("thInput").value.trim(); if(!body||(!curThread&&!curGroup)) return;
     $("thInput").value="";
     var b='<div class="bub me">'+esc(body)+'<span class="tm">now</span></div>';
     $("thBody").insertAdjacentHTML("beforeend",b); $("thBody").scrollTop=$("thBody").scrollHeight;
     try{
-      var r=await afetch(API+"/messages/send",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({to:curThread,body:body,opId:opId()})});
+      var payload=curGroup?{group:curGroup,key:curKey,body:body,opId:opId()}:{to:curThread,body:body,opId:opId()};
+      var r=await afetch(API+"/messages/send",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)});
       if(!r.ok) throw new Error("send failed");
       var jj=await r.json(); if(jj&&jj.id) thLastId=Math.max(thLastId,jj.id);
     }catch(err){ toast("Message will send when you're back online"); }
   };
+
+  // ---- new-message picker: all people + the "Office" group pinned at top ----
+  var PICK_USERS=null, PICK_GROUPS=null;
+  async function openPicker(){
+    $("pickSearch").value=""; $("pickList").innerHTML='<div class="empty">Loading…</div>'; $("pickModal").classList.add("show");
+    if(!PICK_USERS){
+      try{
+        var res=await Promise.all([
+          afetch(API+"/messages/groups").then(function(r){return r.json();}).catch(function(){return{};}),
+          afetch(API+"/users").then(function(r){return r.json();}).catch(function(){return{};})
+        ]);
+        PICK_GROUPS=(res[0]&&res[0].groups)||[];
+        PICK_USERS=(((res[1]&&(res[1].Users||res[1].users))||[]).filter(function(u){return u.Username && String(u.Username).toLowerCase()!==String(me()).toLowerCase() && (!u.Status||u.Status==="Active");}).map(function(u){return {name:u.Username, full:((u.FirstName||"")+" "+(u.LastName||"")).trim()};}));
+      }catch(e){ PICK_USERS=[]; PICK_GROUPS=[]; }
+    }
+    renderPick("");
+  }
+  function renderPick(q){
+    q=(q||"").toLowerCase();
+    var html="";
+    (PICK_GROUPS||[]).forEach(function(g){
+      if(q && g.name.toLowerCase().indexOf(q)<0) return;
+      html+='<a class="item" data-pg="'+esc(g.id)+'" data-pgn="'+esc(g.name)+'"><div class="ic msg">👥</div><div class="bd"><div class="ti">'+esc(g.name)+'</div><div class="mt">Group · '+esc((g.members||[]).length)+' people</div></div></a>';
+    });
+    (PICK_USERS||[]).filter(function(u){return !q||u.name.toLowerCase().indexOf(q)>-1||(u.full&&u.full.toLowerCase().indexOf(q)>-1);}).forEach(function(u){
+      html+='<a class="item" data-pu="'+esc(u.name)+'"><div class="ic msg">👤</div><div class="bd"><div class="ti">'+esc(u.full||u.name)+'</div>'+(u.full?'<div class="mt">'+esc(u.name)+'</div>':'')+'</div></a>';
+    });
+    $("pickList").innerHTML=html||'<div class="empty">No matches.</div>';
+    [].forEach.call($("pickList").querySelectorAll("[data-pu]"),function(el){ el.onclick=function(){ $("pickModal").classList.remove("show"); openThread(el.getAttribute("data-pu")); }; });
+    [].forEach.call($("pickList").querySelectorAll("[data-pg]"),function(el){ el.onclick=function(){ $("pickModal").classList.remove("show"); openGroup(el.getAttribute("data-pg"), me(), el.getAttribute("data-pgn")); }; });
+  }
+  $("pickSearch").addEventListener("input",function(){ renderPick(this.value); });
+  $("pickClose").onclick=function(){ $("pickModal").classList.remove("show"); };
 
   $("markAll").onclick=async function(){
     var toMark=threads.filter(function(t){return t.unread;});

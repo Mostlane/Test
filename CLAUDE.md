@@ -747,31 +747,53 @@ NOT EXISTS + ALTER on read) — no manual SQL needed.
   — proof against "mine never showed that".
 
 ## Messaging (office ↔ engineer, routes/messages.js)
-1:1 direct messages. Tables **messages** (id/from/to/body/at/seen) +
-**message_typing** (upserted "X typing to Y" markers) — self-migrating.
+1:1 direct messages **+ an "Office" group chat**. Tables **messages**
+(id/from/to/body/at/seen/**thread_key**) + **message_typing** (upserted "X typing
+to Y" markers) + **group_reads** (per-user read position in a group thread) —
+self-migrating (`thread_key` added by ALTER; group_reads CREATE IF NOT EXISTS).
 Endpoints: GET /messages/unread, /messages/threads, /messages/thread?with=&since=
 (returns messages + **typing** [other typed <6s] + **readUpTo** [highest id of MY
 msgs they've read]), POST /messages/send {to,body,opId} (fires web push to the
 recipient), /messages/read {with}, /messages/typing {to}. **Admin moderation
 (FullAccess only): POST /messages/delete {id}** (remove one message) +
 **POST /messages/thread-delete {with}** (wipe a whole conversation) — surfaced
-in the office widget as a 🗑 on each message + a 🗑 in the thread header. **Two front-ends, one
-backend:**
+in the office widget as a 🗑 on each message + a 🗑 in the thread header.
+- **Group chat ("Office")** — config in app_config `chat_groups` (defaults to one
+  group `{id:"office", name:"Office", members:["Joanna","Tanya","Megan","Chloe"]}`;
+  `loadGroups` resolves member names → canonical usernames via the users table by
+  username / first_name / "first last", 2-min cache). Model = **per-engineer
+  thread**: each engineer has their OWN Office conversation; all group members see
+  it and any can reply. Storage reuses `messages` with `to_user="@office"` +
+  **thread_key = the engineer's username** (the reply from a member carries the
+  same key). Per-user unread via `group_reads` (last_id read, ON CONFLICT MAX).
+  Endpoints: **GET /messages/groups** (groups the caller can see), **GET
+  /messages/thread?group=<id>&key=<engineer>** (visibility: a group member sees
+  every thread, an engineer sees only key===me; returns isGroup/group/key/name/
+  members + messages tagged `from`), **POST /messages/send {group,key,body}**
+  (member ⇒ key required; engineer ⇒ key forced to self; pushes every member +
+  the engineer, minus the sender). /unread and /threads fold group unread/threads
+  in. **Read receipts are NOT shown in group threads** (member label shown instead).
 - **Engineers** — the field app's **inbox.html** "Messages" tab (bottom nav).
-  "✉️ Message the office" opens a thread with the owner. Thread modal now **live-
-  polls** (3s) for new lines + shows "…is typing"; pings /messages/typing on input.
-  **No read receipts shown to engineers** (by design).
+  Compose is **"✉️ New message"** → a picker (`openPicker`): **"Office" pinned at
+  the top (👥)** then a searchable list of all users; sending to Office is the
+  per-engineer group thread above. Thread modal **live-polls** (3s) for new lines
+  + shows "…is typing"; group lines carry the sender's name. **No read receipts
+  shown to engineers** (by design).
 - **Office** — a floating **live-chat widget** (**chat-widget.js**), injected
   portal-wide by portal-config.js for office users (skips field/Story users and
   the field-app pages). Bottom-right launcher with an unread **red badge**;
-  panel = conversation list ↔ thread ↔ **✎ new** (pick any user). Live via
-  polling (open thread every 3s, badge/list every 15s); typing indicator + ping.
+  panel = conversation list (Office group threads shown with 👥) ↔ thread ↔
+  **✎ new** (pick any user). Live via polling (open thread every 3s, badge/list
+  every 15s); typing indicator + ping.
   **Read receipts ("✓✓ Read" / "✓ Sent") are shown to ADMINS (FullAccess) only**
-  — `IS_ADMIN` gates their display; engineers/end users never see them. Web push
-  still delivers an OS notification + the badge when the widget is shut.
+  — `IS_ADMIN` gates their display; engineers/end users never see them (and
+  group threads never show them). Web push still delivers an OS notification +
+  the badge when the widget is shut.
 "Live chat" = short polling (feels instant while open) + web push when closed;
-no WebSockets/Durable Objects. chat-widget.js is `?v=1` + in the _headers no-cache
-list. `since`-based delta polling keeps it cheap.
+no WebSockets/Durable Objects. chat-widget.js is `?v=2` + in the _headers no-cache
+list. `since`-based delta polling keeps it cheap. Bubble layout is flex-column
+(`.mlc-row` / `.mlc-line`) — matches inbox.html's proven mobile pattern (an
+earlier inline-block bubble stacked one char per line on iOS Safari).
 
 ## Activity log (audit trail)
 Server middleware records every state-changing request automatically (covers
