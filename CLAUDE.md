@@ -315,6 +315,24 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   everything in one save: ref, description, priority, status, raised,
   **schedule (date · start · finish, Clear = unschedule) + assigned engineers
   (multi-tick)**, full site, note — one PATCH /sla/jobs/{id}. Exposes
+  **Release / visibility scheduling (`job.release`)**: a "👁 When the engineer
+  sees this job" control in the editor sets `job.release = {mode, at?}` —
+  `now` (default, visible immediately), `at` (custom date/time, client sends an
+  absolute ISO), `dayBefore` (17:00 **Europe/London** the evening before the
+  scheduled day, computed live server-side so it tracks reschedules), or
+  `afterPrev` (the **stacked queue**: hidden until every EARLIER same-day job for
+  that engineer is finished — set it on each queued job to drip them out one by
+  one). Enforced server-side in sla.js: **GET /sla/jobs/for-engineer filters out
+  jobs that aren't released yet** (`releaseVisibleNow`), so engineers simply don't
+  see them. **The assignment push fires WHEN the job becomes visible, not at
+  assignment** — `releaseNotified` flips true on first announcement:
+  `reconcileRelease` pushes all assigned engineers when a gated job is visible;
+  the **hourly cron** (`sla.sweepJobReleases`) announces timed jobs whose release
+  has passed; and completing a job **announces the engineer's next `afterPrev`
+  job** (its assignment push fires as it unlocks). `notifyNewlyAssigned` now only
+  handles adding an engineer to an ALREADY-announced job. The office board
+  (sla-main) shows a 🕒/⛓ badge on gated jobs (from `decorate.releaseView`);
+  engineers never receive them. Editor is `sla-jobedit.js?v=8`.
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).
