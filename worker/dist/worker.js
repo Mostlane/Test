@@ -11566,7 +11566,7 @@ async function poRows(env, from, to) {
   if (!env.PO_DB) return [];
   try {
     const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, job_id, job_ref, substr(issued_at,1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
+      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, trade, substr(issued_at,1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
     ).bind(from, to).all();
     return results || [];
   } catch {

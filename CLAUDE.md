@@ -364,6 +364,15 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   worker stamps from a job's "Raise PO" link — `#mlpo` payload). Returns total +
   materials/subcontractor split (`cost_category`, `trade`) + unpriced count + the
   PO list; updates automatically as each PO is priced (nothing stored on the job).
+  Net figure = `cost_ex_vat` (VAT reclaimable); `cost_ex_vat IS NULL` = raised
+  but not yet priced (counted as unpriced, NOT zero); `cost_category` NULL →
+  materials. **SCHEMA NOTE:** the PO worker adds `job_id`/`job_ref` to `po_log`,
+  but as of this write those columns are **not yet live** on the `mostlane-po` D1
+  — SQLite fails a whole SELECT on an unknown column, so `jobPoRows` (which filters
+  on `job_id`) degrades to `[]` until the column exists, then lights up on its own;
+  and `poRows` (the site rollup) must NEVER reference job_id/job_ref (it doesn't
+  need them) or it would silently zero ALL PO spend. Match on `job_id` only, never
+  `job_ref` (display-only, reusable).
 - `costing.js` — **Master site register + labour ledger + job costing +
   project valuations** (see the dedicated "Job costing & SiteLog↔Portal
   integration" section below). Routes: /sites/register(+/add,/update,/merge,
