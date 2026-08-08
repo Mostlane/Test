@@ -888,11 +888,18 @@ function renderJob(){
   syncPanels();
   if(isStoryMode() && $("storyModeBanner")) $("storyModeBanner").style.display = "block";
 
+  // Signature: prefer the server's, but fall back to a device-saved capture that
+  // hasn't synced yet — so a signature taken with no signal is never lost across
+  // a reload, and keeps trying to upload.
+  const localSig = readSigLocal(job.id);
   if(job.signature && job.signature.signedBy){
-    const escX = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-    $("signatureStatus").innerHTML =
-      `✔ Signed by <strong>${escX(job.signature.signedBy)}</strong>` +
-      (job.signature.signedAt ? ` on ${fmtDateTimeLong(new Date(job.signature.signedAt))}` : "");
+    // Server has it — the local copy is now redundant; drop it so it can't linger.
+    if(localSig && !localSig.pending) localStorage.removeItem(sigLocalKey(job.id));
+    showSignedStatus({ signedBy: job.signature.signedBy, signedAt: job.signature.signedAt, pending: false });
+  } else if(localSig && localSig.signedBy){
+    job.signature = { signedBy: localSig.signedBy, signedAt: localSig.signedAt };  // keep the Complete gate satisfied
+    showSignedStatus(localSig);
+    if(localSig.pending) flushSignature(job.id);
   }
 
   fillPoButton();
@@ -1660,6 +1667,16 @@ function isOfficeAdmin(){
     return p.FullAccess === "Yes" || p.SLAAdmin === "Yes";
   }catch{ return false; }
 }
+// A field engineer never gets the office-only "Edit details" editor, even if
+// they hold an SLA-admin grant for scheduling — it's an office control.
+function isFieldUser(){
+  try{
+    const st = (sessionStorage.getItem("mostlaneStaffType") || localStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+    if(st) return st === "field";
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    return String(p.StaffType || "").toLowerCase() === "field";
+  }catch{ return false; }
+}
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
   // Full-Access override: skip the risk assessment and start the job. Discreet,
@@ -1693,7 +1710,7 @@ function init(){
   $("noteInput").addEventListener("input", updateSaveButton);
   // Office admins can edit ANY job detail — including the full site address —
   // from the job view, the same editor used on the dashboard and scheduler.
-  if(isOfficeAdmin()){
+  if(isOfficeAdmin() && !isFieldUser()){
     $("editJobBtn").style.display = "inline-flex";
     $("editJobBtn").addEventListener("click", () => {
       if(job && window.MLJobEdit) window.MLJobEdit.open(job, { onSaved: async () => { await loadJob(); } });
@@ -1824,48 +1841,62 @@ function initSignatureCanvas(){
   canvas.onpointerup = () => drawing = false;
 }
 
+/* ── Signature persistence (local-first, so a capture is NEVER lost) ─────────
+   A captured signature is written to the device immediately (survives leaving
+   the page + no signal), the UI + Complete-gate update at once, and the upload
+   to the server retries in the background until it lands. On reload the local
+   copy is restored if the server hasn't got it yet. */
+function sigLocalKey(id){ return "mlSig:" + id; }
+function readSigLocal(id){ try{ return JSON.parse(localStorage.getItem(sigLocalKey(id)) || "null"); }catch(e){ return null; } }
+function writeSigLocal(id, rec){ try{ localStorage.setItem(sigLocalKey(id), JSON.stringify(rec)); }catch(e){} }
+function sigEsc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function showSignedStatus(rec){
+  const note = rec.pending ? `<div class="muted" id="sigSyncNote" style="font-size:12px;margin-top:2px;">saved on this device — syncing…</div>`
+                           : `<div class="muted" id="sigSyncNote" style="font-size:12px;margin-top:2px;">saved ✓</div>`;
+  $("signatureStatus").innerHTML =
+    `✔ Signed by <strong>${sigEsc(rec.signedBy)}</strong>` +
+    (rec.signedAt ? ` on ${fmtDateTimeLong(new Date(rec.signedAt))}` : "") + note;
+}
+let sigFlushTimer = null;
+async function flushSignature(id){
+  const rec = readSigLocal(id);
+  if(!rec || !rec.pending || !rec.img) return;
+  const note = $("sigSyncNote");
+  try{
+    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(id)}/signature`, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ signedBy: rec.signedBy, signedAt: rec.signedAt, signatureBase64: rec.img, opId: rec.opId })
+    });
+    if(!res.ok) throw new Error();
+    rec.pending = false; writeSigLocal(id, rec);
+    if(note) note.textContent = "saved ✓";
+  }catch(e){
+    if(note) note.textContent = "saved on this device — will sync when you're back online";
+    if(sigFlushTimer) clearTimeout(sigFlushTimer);
+    sigFlushTimer = setTimeout(() => flushSignature(id), 15000);
+  }
+}
+window.addEventListener("online", () => { if(job && job.id) flushSignature(job.id); });
+
 async function saveSignature(){
   const name = $("sigName").value.trim();
-  if(!name){
-    $("sigStatus").textContent = "❌ Name required.";
-    return;
-  }
-
+  if(!name){ $("sigStatus").textContent = "❌ Name required."; return; }
   const canvas = $("sigCanvas");
   const img = canvas.toDataURL("image/png");
+  if(img.length < 1000){ $("sigStatus").textContent = "❌ Signature required."; return; }
+  if(!job || !job.id){ $("sigStatus").textContent = "❌ Job not ready — try again."; return; }
 
-  if(img.length < 1000){
-    $("sigStatus").textContent = "❌ Signature required.";
-    return;
-  }
+  // 1) Save to the device INSTANTLY — this is the source of truth until it syncs,
+  //    so it survives navigating away (e.g. the "finish previous job" bounce) and
+  //    a total loss of signal.
+  const rec = { signedBy: name, signedAt: new Date().toISOString(), img, opId: job.id + "-sig-" + Date.now(), pending: true };
+  writeSigLocal(job.id, rec);
+  job.signature = { signedBy: name, signedAt: rec.signedAt };   // so the Complete gate sees it immediately
+  showSignedStatus(rec);
+  closeSignatureModal();
 
-  $("sigStatus").textContent = "Saving…";
-
-  try{
-    const payload = {
-      signedBy: name,
-      signedAt: new Date().toISOString(),
-      signatureBase64: img
-    };
-
-    const res = await fetch(
-      `${SLA_API}/jobs/${encodeURIComponent(job.id)}/signature`,
-      {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify(payload)
-      }
-    );
-
-    if(!res.ok) throw new Error();
-
-    if(job) job.signature = { signedBy: name, signedAt: payload.signedAt };  // so the Complete gate sees it
-    $("signatureStatus").innerHTML =
-      `✔ Signed by <strong>${name}</strong> on ${fmtDateTimeLong(new Date())}`;
-    closeSignatureModal();
-  }catch{
-    $("sigStatus").textContent = "❌ Failed to save signature.";
-  }
+  // 2) Upload in the background; retries on failure / when back online.
+  flushSignature(job.id);
 }
 
 </script>

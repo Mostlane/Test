@@ -353,6 +353,18 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   of the engineer's jobs is unfinished (`jobBlockReason`: still In Progress/
   Travelling, or On Hold/Quote without its pack) — it alerts naming that job and
   redirects straight into it to finish first.
+  **"✏️ Edit details" (the office job editor on job-view) is office-admin only**:
+  gated `isOfficeAdmin() && !isFieldUser()` — a FIELD engineer never gets it even
+  if they hold an SLAAdmin grant (it's an office control). isFieldUser reads
+  mostlaneStaffType / perms.StaffType.
+  **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
+  saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
+  BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,
+  then uploads in the background (`flushSignature`, retries on failure + on the
+  `online` event, deduped server-side by opId). On load, if the server job has no
+  signature but the device does, it's restored + re-flushed — so a signature taken
+  offline survives the "finish previous job" bounce and a reload. Server clears
+  the local copy once it has it.
   `sites.js` (get/add/update-site, customers, street-images, auto geofence
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
