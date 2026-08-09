@@ -5025,7 +5025,7 @@ async function handle8(request, env, ctx, url, sess) {
   if (subpath === "/site/jobs" && method === "GET") {
     const code = digitsOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
-    const canMoney2 = sess ? await isSlaAdmin(env, tenantId, sess) : false;
+    const canMoney2 = sess ? await isFullAccess(env, tenantId, sess) : false;
     const all = await listJobs(env, tenantId);
     const mine = all.filter((j) => siteMatches(j, code, name)).map(siteJobSummary).map((s) => ({ ...s, source: "live" }));
     let archived = [];

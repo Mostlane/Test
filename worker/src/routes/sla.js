@@ -954,10 +954,10 @@ export async function handle(request, env, ctx, url, sess) {
   if (subpath === "/site/jobs" && method === "GET") {
     const code = digitsOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
-    // Financial info (costs, invoices, values…) is admin-only. For everyone else
-    // it's stripped from the archived record on the SERVER, so it never reaches a
-    // field engineer's device.
-    const canMoney = sess ? await isSlaAdmin(env, tenantId, sess) : false;
+    // Financial info (costs, invoices, values…) is FULL-ACCESS only. For everyone
+    // else (incl. SLA admins) it's stripped from the archived record on the SERVER,
+    // so it never reaches the device.
+    const canMoney = sess ? await isFullAccess(env, tenantId, sess) : false;
     const all = await listJobs(env, tenantId);
     const mine = all.filter(j => siteMatches(j, code, name)).map(siteJobSummary).map(s => ({ ...s, source: "live" }));
     let archived = [];
