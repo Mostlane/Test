@@ -140,7 +140,11 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   portal pages instead of a dedicated Inbox tab. Field-user landing on login is
   still route.html. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
-  localStorage `mlUnschedOpen`).
+  localStorage `mlUnschedOpen`). Its week list runs **Mon–Sun** (startOfWeek is
+  Monday-based). The **🗺️ map overlay** (`openDayMap`) fetches all the engineer's
+  jobs once (`/jobs/for-engineer` no date) then a **Day/Week/Month/Year segmented
+  slider** (`#dayMapSeg`/`renderMapForRange`) pins whichever range: Day=today,
+  Week=Mon–Sun, Month=calendar month, Year=Jan 1→today; defaults to Day on open.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
