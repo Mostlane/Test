@@ -179,18 +179,18 @@
   <div class="card">
     <h1>Add Job</h1>
     <p class="sub">
-      Create a new SLA-tracked job. Priorities use the target hours you set in <b>SLA Settings</b>.
+      Manually create a job — just pick the <b>site</b>, describe it, and set <b>when</b> and <b>who</b>.
     </p>
 
     <!-- FORM -->
     <form id="jobForm" novalidate>
 
-      <!-- SITE TYPE + SITE -->
+      <!-- SITE -->
       <div class="row">
         <div class="col field-group">
-          <label for="siteType">Site Type</label>
+          <label for="siteType">Site type <span class="hint">(narrows the list)</span></label>
           <select id="siteType" name="siteType">
-            <option value="">All Sites</option>
+            <option value="">All sites</option>
             <option value="Retail">Retail</option>
             <option value="ELS">ELS</option>
             <option value="ELS Private">ELS Private</option>
@@ -198,109 +198,43 @@
             <option value="Wenzel’s">Wenzel’s</option>
             <option value="Projects">Projects</option>
           </select>
-          <div class="hint">Filter site list by client / store type.</div>
         </div>
         <div class="col field-group">
           <label for="siteSelect">Site</label>
           <select id="siteSelect" name="siteSelect">
             <option value="">Select site…</option>
           </select>
-          <div class="hint">Shown: Site Number + Name + Postcode.</div>
-        </div>
-      </div>
-            <!-- Site info -->
-      <div class="row">
-        <div class="col field-group">
-          <label for="siteCode">Site Code</label>
-          <input id="siteCode" name="siteCode" autocomplete="off" placeholder="e.g. SR01234">
-        </div>
-        <div class="col field-group">
-          <label for="siteName">Site Name</label>
-          <input id="siteName" name="siteName" autocomplete="off" placeholder="e.g. Co-op Portsmouth Elm Grove" required>
-        </div>
-      </div>
-
-      <div class="field-group">
-        <label for="address">Address</label>
-        <textarea id="address" name="address" placeholder="Street, town, postcode"></textarea>
-      </div>
-
-      <div class="row">
-        <div class="col field-group">
-          <label for="telephone">Telephone</label>
-          <input id="telephone" name="telephone" autocomplete="off" placeholder="Site contact number">
-        </div>
-        <div class="col field-group">
-          <label for="priority">
-            Priority
-            <span class="badge" id="priorityBadge">P4 – Low</span>
-          </label>
-          <select id="priority" name="priority" required>
-            <option value="Priority 1">P1 – Critical</option>
-            <option value="Priority 2">P2 – High</option>
-            <option value="Priority 3">P3 – Medium</option>
-            <option value="Priority 4" selected>P4 – Low</option>
-            <option value="Priority 5">P5 – Very Low</option>
-          </select>
         </div>
       </div>
 
       <!-- Job description -->
       <div class="field-group">
-        <label for="description">Job Description</label>
+        <label for="description">Description</label>
         <textarea id="description" name="description" required
-          placeholder="Clear description for the engineer – what’s wrong, what’s expected, any special access notes etc."></textarea>
-        <div class="hint">This is the main text engineers will see on <b>Job Detail</b>.</div>
+          placeholder="What’s the job? What needs doing, any access notes…"></textarea>
+        <div class="hint">This is the main text the engineer sees on the job.</div>
       </div>
 
-      <!-- Assignment / timing -->
+      <!-- Allocate: when + who -->
       <div class="row">
         <div class="col field-group">
-          <label for="assignedTo">Assigned To (engineer)</label>
+          <label for="scheduledAt">Allocate for <span class="hint">(date &amp; time)</span></label>
+          <input type="datetime-local" id="scheduledAt" name="scheduledAt">
+          <div class="hint">When the engineer should do it.</div>
+        </div>
+        <div class="col field-group">
+          <label for="assignedTo">Assign to</label>
           <select id="assignedTo" name="assignedTo">
             <option value="">Select engineer…</option>
           </select>
-          <div class="hint">All portal users (sorted alphabetically).</div>
-        </div>
-
-        <div class="col field-group">
-          <label for="status">Status</label>
-          <select id="status" name="status">
-            <option value="With Contractor - R" selected>With Contractor</option>
-            <option value="In Progress">In Progress</option>
-            <option value="On Hold">On Hold</option>
-            <option value="Completed">Completed</option>
-            <option value="Closed">Closed</option>
-          </select>
         </div>
       </div>
 
-      <div class="row">
-        <div class="col field-group">
-          <label for="raisedAt">Raised At</label>
-          <input type="datetime-local" id="raisedAt" name="raisedAt">
-          <div class="hint">Defaults to now if left blank.</div>
-        </div>
-        <div class="col field-group">
-          <label for="scheduledAt">Scheduled At</label>
-          <input type="datetime-local" id="scheduledAt" name="scheduledAt">
-          <div class="hint">Optional scheduled date/time for engineer.</div>
-        </div>
-      </div>
-
-      <!-- Originator -->
-      <div class="row">
-        <div class="col field-group">
-          <label for="originator">Raised By</label>
-          <input id="originator" name="originator" autocomplete="off" placeholder="Your name">
-        </div>
-        <div class="col field-group">
-          <label for="originatorEmail">Raised By Email</label>
-          <input id="originatorEmail" name="originatorEmail" autocomplete="off" placeholder="you@mostlane.com">
-        </div>
-      </div>
-
-      <!-- HIDDEN FIELDS FOR SITE METADATA -->
+      <!-- Site details captured from the picker (not shown) -->
+      <input type="hidden" id="siteCode" name="siteCode">
+      <input type="hidden" id="siteName" name="siteName">
+      <input type="hidden" id="address" name="address">
+      <input type="hidden" id="telephone" name="telephone">
       <input type="hidden" id="lat" name="lat">
       <input type="hidden" id="lon" name="lon">
       <input type="hidden" id="postcode" name="postcode">
@@ -361,16 +295,6 @@ function toIsoOrNull(value){
   return d.toISOString();
 }
 
-function updatePriorityBadge(){
-  const v = $("priority").value;
-  let label = "P4 – Low";
-  if(v === "Priority 1") label = "P1 – Critical";
-  else if(v === "Priority 2") label = "P2 – High";
-  else if(v === "Priority 3") label = "P3 – Medium";
-  else if(v === "Priority 4") label = "P4 – Low";
-  else if(v === "Priority 5") label = "P5 – Very Low";
-  $("priorityBadge").textContent = label;
-}
 
 /* ------------------------
    FETCH PORTAL USERS
@@ -541,12 +465,14 @@ async function handleSubmit(evt){
 
   const description = $("description").value.trim();
   const siteName = $("siteName").value.trim();
-  if(!description || !siteName){
-    statusEl.textContent = "Please enter at least Site Name and Job Description.";
+  if(!siteName || !description){
+    statusEl.textContent = "Please pick a site and enter a description.";
     statusEl.classList.add("err");
     return;
   }
 
+  // Site details ride along from the picker (hidden). Priority / status / raised
+  // time are left to the worker's defaults — irrelevant for a manual job.
   const payload = {
     siteCode: $("siteCode").value.trim() || undefined,
     siteName,
@@ -560,14 +486,10 @@ async function handleSubmit(evt){
     mileageFromHQ: $("mileageFromHQ").value ? Number($("mileageFromHQ").value) : undefined,
     sharepointURL: $("sharepointURL").value.trim() || undefined,
 
-    priority: $("priority").value,
     description,
     assignedTo: $("assignedTo").value.trim() || undefined,
-    status: $("status").value,
-    raisedAt: toIsoOrNull($("raisedAt").value),
     scheduledAt: toIsoOrNull($("scheduledAt").value),
-    originator: $("originator").value.trim() || getLoggedInUser() || undefined,
-    originatorEmail: $("originatorEmail").value.trim() || undefined
+    originator: getLoggedInUser() || undefined
   };
 
   statusEl.textContent = "Creating job…";
@@ -611,13 +533,6 @@ function hasSLAAdmin(){
 async function init(){
   // Raising jobs is an SLA-Admin action — send engineers back to their jobs.
   if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
-  const user = getLoggedInUser();
-  if(user) $("originator").value = user;
-
-  $("raisedAt").value = nowLocalValue();
-
-  $("priority").addEventListener("change", updatePriorityBadge);
-  updatePriorityBadge();
 
   $("jobForm").addEventListener("submit", handleSubmit);
   $("siteType").addEventListener("change", populateSites);
