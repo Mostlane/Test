@@ -804,7 +804,14 @@ IS fetchable server-side, so the portal calls it (via SITELOG_ADMIN_SECRET).
   candidates harvest. Front-end **sites-register.html**. **Coordinates→SiteLog:**
   /sites/register/add+update accept {lat,lng}, store in the site's data JSON, and
   push a geofence to SiteLog (`/bulk-add-sites`, radius 500); the page has lat/lng
-  fields + "📍 From postcode" (postcodes.io) + per-row "Set location".
+  fields + "📍 From postcode" (postcodes.io) + per-row "Set location". **Pin-drop
+  map (Aug 2026):** sites-register.html loads Leaflet (CARTO Voyager tiles) and a
+  shared `openPinMap()` modal — a "🗺️ Drop pin" button on the Add card + the per-row
+  "Set location" button both open a tap/drag map (postcode jump box) to place the
+  exact geofence point; on save it fills addLat/addLng (Add) or POSTs
+  /sites/register/update (existing). Adding a site with NO coords now warns
+  ("SiteLog won't recognise it for sign-ins") before proceeding, so a site rarely
+  reaches the register without a geofence. Only lat/lng present → geofence pushed.
 - **Labour reconciliation** (`job_time_segments` = SLA status capture, primary;
   `sitelog_scans` = optional pushed scans; buildDay clips scans to non-overlap).
   **Runaway-session clamp:** any segment (open OR "closed" only when the next job

@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Site Register</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; --amber:#b45309; --amberbg:#fef3c7; }
   *{box-sizing:border-box;}
@@ -41,7 +42,11 @@
   .toast.show{transform:translateX(-50%) translateY(0);}
   .backdrop{position:fixed;inset:0;background:rgba(9,16,30,.55);display:none;align-items:center;justify-content:center;padding:14px;z-index:40;}
   .modal{background:#fff;width:100%;max-width:440px;max-height:86vh;overflow:auto;border-radius:14px;padding:18px;}
-  @media(max-width:640px){ .row{gap:6px;} }
+  #pinMapEl{height:340px;width:100%;border-radius:12px;border:1px solid var(--line);margin:8px 0;background:#eef2f7;}
+  #pinMapEl .leaflet-pane,#pinMapEl .leaflet-top,#pinMapEl .leaflet-bottom{z-index:1;}
+  .pinbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .pincoords{font-size:12px;color:var(--muted);margin-top:6px;}
+  @media(max-width:640px){ .row{gap:6px;} #pinMapEl{height:300px;} }
   </style>
 </head>
 <body>
@@ -66,9 +71,10 @@
         <input class="txt" id="addLat" placeholder="Lat" style="width:96px">
         <input class="txt" id="addLng" placeholder="Lng" style="width:96px">
         <button class="btn small" id="addGeo">📍 From postcode</button>
+        <button class="btn small" id="addPin">🗺️ Drop pin</button>
         <button class="btn primary" id="addBtn">➕ Add</button>
       </div>
-      <div class="hint" style="margin-top:6px">📍 Coordinates are pushed to SiteLog as a geofence, so the scanner recognises the location on-site. Use “From postcode” to look them up, or paste lat/lng from Google Maps.</div>
+      <div class="hint" id="addLocHint" style="margin-top:6px">📍 A location is pushed to SiteLog as a 500 m geofence, so the scanner recognises the site for sign-ins. Tap <b>Drop pin</b> to place it exactly on the map, or <b>From postcode</b> for a quick lookup.</div>
     </div>
 
     <div class="card">
@@ -97,8 +103,24 @@
     <div style="margin-top:10px;text-align:right"><button class="btn" onclick="closeMerge()">Cancel</button></div>
   </div></div>
 
+  <div class="backdrop" id="pinBk"><div class="modal" style="max-width:520px">
+    <h3 style="margin:0 0 4px;font-size:16px">📍 Set location — <span id="pinTitle"></span></h3>
+    <div class="hint">Tap the map to drop the pin, or drag it to fine-tune. This is the exact spot SiteLog uses for on-site sign-ins.</div>
+    <div class="pinbar" style="margin-top:8px">
+      <input class="txt" id="pinPc" placeholder="Postcode to jump to…" style="flex:1;min-width:120px">
+      <button class="btn small" id="pinFind">🔎 Find</button>
+    </div>
+    <div id="pinMapEl"></div>
+    <div class="pincoords" id="pinCoords">No pin yet — tap the map.</div>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" id="pinCancel">Cancel</button>
+      <button class="btn primary" id="pinSave">✓ Use this location</button>
+    </div>
+  </div></div>
+
   <div class="toast" id="toast"></div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (function(){
   "use strict";
@@ -182,22 +204,16 @@
     if(b.dataset.loc){
       var lp=b.dataset.loc.split("|");
       var site=SITES.find(function(x){return x.client===lp[0]&&String(x.siteNumber)===lp[1];});
-      var cur=(site&&site.lat!=null)?(site.lat+","+site.lng):"";
-      var ans=prompt("Location for "+(site?site.name:"site")+"\nEnter lat,lng — or leave blank to look up from its postcode"+(site&&site.postcode?" ("+site.postcode+")":""),cur);
-      if(ans===null) return;
-      var lat,lng;
-      ans=ans.trim();
-      if(ans===""){
-        if(!site||!site.postcode){ toast("No postcode on file — enter lat,lng"); return; }
-        var g=await geocodePostcode(site.postcode);
-        if(!g){ toast("Couldn't find that postcode"); return; }
-        lat=g.lat; lng=g.lng;
-      } else {
-        var pp=ans.split(/[, ]+/); lat=parseFloat(pp[0]); lng=parseFloat(pp[1]);
-        if(!isFinite(lat)||!isFinite(lng)){ toast("Enter as: lat,lng"); return; }
-      }
-      var rl=await (await aFetch("/sites/register/update",{method:"POST",body:JSON.stringify({client:lp[0],siteNumber:lp[1],lat:lat,lng:lng})})).json();
-      if(rl.ok){ toast(rl.sitelogPushed?"Location saved · sent to SiteLog 📍":"Location saved"); load(); } else toast(rl.error||"Couldn't save");
+      openPinMap({
+        title:(site?site.name:"site"),
+        postcode:(site&&site.postcode)||"",
+        lat:(site&&site.lat!=null)?site.lat:null,
+        lng:(site&&site.lng!=null)?site.lng:null,
+        onSave:async function(lat,lng){
+          var rl=await (await aFetch("/sites/register/update",{method:"POST",body:JSON.stringify({client:lp[0],siteNumber:lp[1],lat:lat,lng:lng})})).json();
+          if(rl.ok){ toast(rl.sitelogPushed?"Location saved · sent to SiteLog 📍":"Location saved"); load(); } else toast(rl.error||"Couldn't save");
+        }
+      });
     }
     if(b.dataset.unmerge!==undefined && b.dataset.unmerge!==""){
       var r2=await (await aFetch("/sites/register/unmerge",{method:"POST",body:JSON.stringify({alias:b.dataset.unmerge})})).json();
@@ -225,19 +241,75 @@
       if(j&&j.status===200&&j.result&&j.result.latitude!=null) return {lat:j.result.latitude,lng:j.result.longitude}; }catch(e){}
     return null;
   }
+  // ---- Pin-drop map (shared by Add + Set location) ----
+  var pinMap=null, pinMarker=null, pinPos=null, pinOnSave=null, DEFAULT_VIEW=[51.27,-0.75];
+  function pinFmt(){ return pinPos ? ("📍 "+pinPos.lat.toFixed(6)+", "+pinPos.lng.toFixed(6)) : "No pin yet — tap the map."; }
+  function setPin(lat,lng,zoom){
+    pinPos={lat:lat,lng:lng};
+    if(!pinMarker){ pinMarker=L.marker([lat,lng],{draggable:true}).addTo(pinMap);
+      pinMarker.on("dragend",function(){ var p=pinMarker.getLatLng(); pinPos={lat:p.lat,lng:p.lng}; $("pinCoords").textContent=pinFmt(); });
+    } else pinMarker.setLatLng([lat,lng]);
+    if(zoom) pinMap.setView([lat,lng],zoom); else pinMap.panTo([lat,lng]);
+    $("pinCoords").textContent=pinFmt();
+  }
+  window.openPinMap=function(opts){
+    opts=opts||{}; pinOnSave=opts.onSave||null; pinPos=null;
+    $("pinTitle").textContent=opts.title||"site";
+    $("pinPc").value=opts.postcode||"";
+    $("pinBk").style.display="flex";
+    setTimeout(async function(){
+      if(!pinMap){
+        pinMap=L.map("pinMapEl");
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd",attribution:"© OpenStreetMap © CARTO"}).addTo(pinMap);
+        pinMap.on("click",function(e){ setPin(e.latlng.lat,e.latlng.lng); });
+      }
+      pinMap.invalidateSize();
+      if(pinMarker){ pinMap.removeLayer(pinMarker); pinMarker=null; }
+      if(opts.lat!=null && opts.lng!=null && isFinite(opts.lat) && isFinite(opts.lng)){
+        setPin(Number(opts.lat),Number(opts.lng),17);
+      } else if(opts.postcode){
+        var g=await geocodePostcode(opts.postcode);
+        if(g){ pinMap.setView([g.lat,g.lng],16); } else pinMap.setView(DEFAULT_VIEW,10);
+        $("pinCoords").textContent="Tap the map to drop the pin"+(g?" (centred on the postcode)":"");
+      } else { pinMap.setView(DEFAULT_VIEW,10); $("pinCoords").textContent="Tap the map to drop the pin."; }
+    },60);
+  };
+  function closePin(){ $("pinBk").style.display="none"; }
+  $("pinCancel").onclick=closePin;
+  $("pinBk").addEventListener("click",function(e){ if(e.target===this) closePin(); });
+  $("pinFind").onclick=async function(){
+    var pc=$("pinPc").value.trim(); if(!pc){ toast("Enter a postcode"); return; }
+    this.textContent="…"; var g=await geocodePostcode(pc); this.textContent="🔎 Find";
+    if(g){ setPin(g.lat,g.lng,16); } else toast("Couldn't find that postcode");
+  };
+  $("pinSave").onclick=function(){
+    if(!pinPos){ toast("Tap the map to drop a pin first"); return; }
+    if(pinOnSave) pinOnSave(pinPos.lat,pinPos.lng);
+    closePin();
+  };
+
   $("addGeo").onclick=async function(){
     var pc=$("addPc").value.trim(); if(!pc){ toast("Enter a postcode first"); return; }
     this.textContent="…"; var g=await geocodePostcode(pc); this.textContent="📍 From postcode";
     if(g){ $("addLat").value=g.lat; $("addLng").value=g.lng; toast("Found location"); } else toast("Couldn't find that postcode");
   };
+  $("addPin").onclick=function(){
+    var la=parseFloat($("addLat").value), ln=parseFloat($("addLng").value);
+    openPinMap({ title:($("addName").value.trim()||"new site"), postcode:$("addPc").value.trim(),
+      lat:isFinite(la)?la:null, lng:isFinite(ln)?ln:null,
+      onSave:function(lat,lng){ $("addLat").value=lat.toFixed(6); $("addLng").value=lng.toFixed(6); toast("Pin set 📍"); } });
+  };
   $("addBtn").onclick=async function(){
     var name=$("addName").value.trim(); if(!name){ toast("Type a site name"); return; }
-    var body={name:name,postcode:$("addPc").value.trim()};
     var la=$("addLat").value.trim(), ln=$("addLng").value.trim();
+    if(!(la&&ln)){
+      if(!confirm("No location set for “"+name+"”.\n\nSiteLog won't recognise this site for on-site sign-ins until it has a pin. Add it without a location anyway?\n\n(Tip: tap “🗺️ Drop pin” or “📍 From postcode” first.)")) return;
+    }
+    var body={name:name,postcode:$("addPc").value.trim()};
     if(la&&ln){ body.lat=la; body.lng=ln; }
     var r=await (await aFetch("/sites/register/add",{method:"POST",body:JSON.stringify(body)})).json();
     if(r.ok){ $("addName").value="";$("addPc").value="";$("addLat").value="";$("addLng").value="";
-      toast(r.sitelogPushed?"Site added · sent to SiteLog 📍":"Site added"); load(); } else toast(r.error||"Couldn't add");
+      toast(r.sitelogPushed?"Site added · sent to SiteLog 📍":"Site added (no location — set a pin so sign-ins work)"); load(); } else toast(r.error||"Couldn't add");
   };
 
   /* merge modal */
