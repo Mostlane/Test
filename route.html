@@ -210,7 +210,7 @@
     var n=jobs.length;
     s.innerHTML=''
       +'<div class="row-top"><div><div class="hello">'+greeting()+'</div><h1 class="big">Ready to start?</h1></div>'+av+'</div>'
-      +(vcState==="overdue"?'<div class="due">🚐 Your <b>weekly van check</b> is past its deadline — please do it before you start.</div>':(vcState==="due"?'<div class="due">🚐 Reminder: your <b>weekly van check</b> is still to do this week.</div>':''))
+      +(vcState==="overdue"?'<a href="van-check.html" class="due" style="display:block;text-decoration:none;color:inherit">🚐 Your <b>weekly van check</b> is past its deadline — please do it before you start. <b style="white-space:nowrap">Do it now ›</b></a>':(vcState==="due"?'<a href="van-check.html" class="due" style="display:block;text-decoration:none;color:inherit">🚐 Reminder: your <b>weekly van check</b> is still to do this week. <b style="white-space:nowrap">Do it now ›</b></a>':''))
       +'<div class="card"><div class="eyebrow" style="margin-top:0">Start of day</div>'
       +'<div class="miniline">'+(n?(n===1?'On site · <b>'+esc(jobName(jobs[0]))+'</b>':'<b>'+n+' jobs</b> booked today'):'No jobs booked yet today')+'</div>'
       +(vcState==="done"?'<div class="miniline">✅ Van check done this week</div>':'')
