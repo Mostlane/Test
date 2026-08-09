@@ -25,6 +25,8 @@
     .backline{font-size:15px;color:var(--muted);margin:0 0 2px -6px;cursor:pointer;background:0;border:0;padding:8px 10px;font:inherit;display:inline-flex;align-items:center;gap:4px;min-height:40px;-webkit-tap-highlight-color:transparent}
     h1.big{font-size:23px;margin:6px 0 4px;letter-spacing:-.02em}
     .sub{color:var(--muted);font-size:13px;margin-bottom:6px}
+    .works{background:var(--chip);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 12px;font-size:19px;line-height:1.4;font-weight:650;color:var(--ink);white-space:pre-wrap}
+    .works-l{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
     .metarow{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
     .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:5px 9px;border-radius:999px}
     .pill.urgent{background:var(--urgent);color:#fff}.pill.grey{background:var(--chip);color:var(--muted)}
@@ -244,7 +246,7 @@
     var niceRef=(!rref||rref===String(job.id)||/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rref))?"":rref;
     h+='<button class="backline" id="backBtn">← '+esc(niceRef||"Back")+'</button>';
     h+='<h1 class="big">'+esc(jobName())+'</h1>';
-    if(job.description) h+='<div class="sub">'+esc(job.description)+'</div>';
+    if(job.description) h+='<div class="works"><div class="works-l">The job</div>'+esc(job.description)+'</div>';
     h+='<div class="metarow">'+(urgent?'<span class="pill urgent">Urgent</span>':'')+'<span class="pill grey" id="curstatus">'+esc(job.status||"")+'</span></div>';
     h+='<div class="banner lock" id="lockBanner"><b>🔒 Risk assessment on arrival.</b> <span id="lockMsg"></span><div class="go" id="lockGo"></div></div>';
     if(address||phone||job.siteName){
