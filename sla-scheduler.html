@@ -943,9 +943,10 @@ function openMap(){
   }
   if(!map){
     map = L.map("jobsMap");
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap contributors"
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      maxZoom: 20,
+      subdomains: "abcd",
+      attribution: "© OpenStreetMap © CARTO"
     }).addTo(map);
     mapLayer = L.layerGroup().addTo(map);
   }
