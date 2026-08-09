@@ -10955,7 +10955,7 @@ async function handle23(request, env, ctx, url, sess) {
     }).sort((a, b) => b.grandTotal - a.grandTotal || b.totalMins - a.totalMins);
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter((s) => normName(s.site) === only);
-    return json({ ok: true, from, to, sites, sitelog: slSites != null }, {}, env, request);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null, sitelogReason: slSites != null ? "" : _slDiag }, {}, env, request);
   }
   if (path === "/exceptions" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
@@ -11360,21 +11360,44 @@ async function pushSiteToSiteLog2(env, name, lat, lng, client) {
     return false;
   }
 }
-async function fetchSitelogCosting(env, from, to) {
-  const secret = env.SITELOG_ADMIN_SECRET;
-  if (!secret) return null;
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+var _slDiag = "";
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
   try {
-    const res = await fetch(
-      base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
-      { headers: { "x-admin-secret": secret } }
-    );
-    if (!res.ok) return null;
-    const j = await res.json();
-    return j && j.ok && Array.isArray(j.sites) ? j.sites : null;
-  } catch {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function fetchSitelogCosting(env, from, to) {
+  _slDiag = "";
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) {
+    _slDiag = "secret-unset";
     return null;
   }
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const url = base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, { headers: { "x-admin-secret": secret } }, 8e3);
+      if (!res.ok) {
+        _slDiag = "http-" + res.status;
+        continue;
+      }
+      const j = await res.json();
+      if (j && j.ok && Array.isArray(j.sites)) {
+        _slDiag = "";
+        return j.sites;
+      }
+      _slDiag = "bad-response";
+      return null;
+    } catch (e) {
+      _slDiag = e && e.name === "AbortError" ? "timeout" : "unreachable";
+    }
+  }
+  return null;
 }
 async function fetchSitelogVisits(env, from, to) {
   const secret = env.SITELOG_ADMIN_SECRET;
@@ -11388,7 +11411,7 @@ async function fetchSitelogVisits(env, from, to) {
     for (let page = 0; page < 30; page++) {
       let u = base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
       if (before) u += "&before=" + encodeURIComponent(before);
-      const res = await fetch(u, { headers });
+      const res = await fetchWithTimeout(u, { headers }, 8e3);
       if (!res.ok) return got ? out : null;
       const j = await res.json();
       const rows = Array.isArray(j.visits) ? j.visits : [];

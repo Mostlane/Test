@@ -140,7 +140,7 @@
   function money(n){return "£"+(Math.round(n*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});}
 
   var days=28;
-  var lastSites=[], lastSitelog=true;
+  var lastSites=[], lastSitelog=true, lastSitelogReason="";
   var prefs={pinned:[],hidden:[],order:[]};
   function inArr(a,k){return a.indexOf(k)>=0;}
   function shortMoney(n){ n=Math.round(n); if(Math.abs(n)>=1000) return "£"+(n/1000).toFixed(n>=10000?0:1)+"k"; return "£"+n; }
@@ -347,9 +347,15 @@
     var hidden={}; prefs.hidden.forEach(function(k){hidden[k]=true;});
     var visible=lastSites.filter(function(s){return !hidden[s.key];});
     $("hidCount").textContent=prefs.hidden.length?("("+prefs.hidden.length+")"):"";
-    var banner=(lastSitelog===false)
-      ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
-      : '';
+    var banner='';
+    if(lastSitelog===false){
+      var why, tail;
+      if(lastSitelogReason==='secret-unset'){ why="SiteLog isn't connected"; tail="the SITELOG_ADMIN_SECRET needs re-adding on the mostlane-api worker (Cloudflare → Settings → Variables), then Deploy."; }
+      else if(lastSitelogReason==='timeout'){ why="SiteLog timed out"; tail="it was too slow to answer — reload to try again."; }
+      else if(/^http-/.test(lastSitelogReason)){ why="SiteLog returned an error ("+esc(lastSitelogReason.replace('http-',''))+")"; tail="if this persists the SiteLog worker may need re-pasting. Reload to try again."; }
+      else { why="SiteLog wasn't reachable"; tail="reload to try again."; }
+      banner='<div class="warnbar">⚠️ <b>'+why+'</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected — '+tail+'</div>';
+    }
     if(!visible.length){ $("costView").innerHTML=banner+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
     $("costView").innerHTML=banner+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
   }
@@ -375,7 +381,7 @@
     try{
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
-      lastSites=d.sites||[]; lastSitelog=d.sitelog;
+      lastSites=d.sites||[]; lastSitelog=d.sitelog; lastSitelogReason=d.sitelogReason||"";
       renderCost(); renderHidden();
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
   }
