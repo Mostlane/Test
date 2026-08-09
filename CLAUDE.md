@@ -243,7 +243,7 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   with a "where do the jobs go?" picker). Categories merge into the dashboard
   chips/filters/bulk-mark, job-view.html status chips (custom chips carry their
   own `--cc` colour), and the sla-jobedit.js status dropdown — all load them
-  from GET /sla/categories. job-view/sla-main/sla-scheduler use `sla-jobedit.js?v=7`.
+  from GET /sla/categories. job-view/sla-main/sla-scheduler use `sla-jobedit.js?v=9`.
   **UI polish (Aug 2026 layout pass):** sla-main.html base font bumped + set to
   "Segoe UI" (was 13px/system-ui — "too small"), back button moved to the header
   TOP-LEFT (grouped with the title in `.header-left`, no `data-role` so it stays
@@ -349,7 +349,7 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   job** (its assignment push fires as it unlocks). `notifyNewlyAssigned` now only
   handles adding an engineer to an ALREADY-announced job. The office board
   (sla-main) shows a 🕒/⛓ badge on gated jobs (from `decorate.releaseView`);
-  engineers never receive them. Editor is `sla-jobedit.js?v=8`.
+  engineers never receive them. Editor is `sla-jobedit.js?v=9`.
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).

@@ -202,6 +202,14 @@
         </div>
       </div>
 
+      <label style="margin-top:4px;">On-site requirements <small style="font-weight:400;color:#64748b;">(what the engineer must do to complete)</small></label>
+      <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-bottom:4px;">
+        <label class="mlje-chk"><input type="checkbox" id="mljeReqRA"> Risk assessment</label>
+        <label class="mlje-chk"><input type="checkbox" id="mljeReqSig"> Customer signature</label>
+        <label class="mlje-chk"><input type="checkbox" id="mljeReqPhoto"> Completion photo</label>
+        <label class="mlje-chk"><input type="checkbox" id="mljeReqNote"> Completion note</label>
+      </div>
+
       <label for="mljeNote">Add a note (goes in the job history)</label>
       <textarea id="mljeNote"></textarea>
     </div>
@@ -423,6 +431,13 @@
     $("mljeStatus").value = job.status || "Pending";
     loadCats().then(() => { buildStatusOptions(currentJob && currentJob.status); if (currentJob) $("mljeStatus").value = currentJob.status || "Pending"; });
     $("mljeRaised").value = toLocalInput(job.raisedAt);
+    // On-site requirements — reflect the job's flags (project-aware default when unset).
+    const isProjJob = /^p\d/i.test(String(job.siteCode || "")) || /project/i.test(String(job.storeType || job.client || ""));
+    const reqOf = k => (job[k] !== undefined ? !!job[k] : !isProjJob);
+    $("mljeReqRA").checked = reqOf("requiresRA");
+    $("mljeReqSig").checked = reqOf("requiresSignature");
+    $("mljeReqPhoto").checked = reqOf("requiresPhoto");
+    $("mljeReqNote").checked = reqOf("requiresNote");
     // Schedule (date · start · finish) — empty boxes mean "not scheduled".
     const sAt = job.scheduledAt ? new Date(job.scheduledAt) : null;
     const sEnd = job.scheduledEnd ? new Date(job.scheduledEnd) : null;
@@ -591,6 +606,10 @@
       scheduledEnd: scheduledAt === null ? null : (scheduledEnd || undefined),
       assignedEngineers: assignedEngineers,
       assignedTo: assignedEngineers[0] || "",
+      requiresRA: $("mljeReqRA").checked,
+      requiresSignature: $("mljeReqSig").checked,
+      requiresPhoto: $("mljeReqPhoto").checked,
+      requiresNote: $("mljeReqNote").checked,
       changedBy: currentUser()
     };
     try {
