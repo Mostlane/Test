@@ -5025,6 +5025,7 @@ async function handle8(request, env, ctx, url, sess) {
   if (subpath === "/site/jobs" && method === "GET") {
     const code = digitsOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
+    const canMoney2 = sess ? await isSlaAdmin(env, tenantId, sess) : false;
     const all = await listJobs(env, tenantId);
     const mine = all.filter((j) => siteMatches(j, code, name)).map(siteJobSummary).map((s) => ({ ...s, source: "live" }));
     let archived = [];
@@ -5040,6 +5041,7 @@ async function handle8(request, env, ctx, url, sess) {
             d = JSON.parse(r.data) || {};
           } catch {
           }
+          if (!canMoney2) d = stripFinancial(d);
           return {
             id: r.id,
             ref: r.ref || r.id,
@@ -5682,6 +5684,16 @@ function siteMatches(job, code, nameLower) {
   if (code && jc && jc === code) return true;
   if (!jc && nameLower && (job.siteName || "").trim().toLowerCase() === nameLower) return true;
   return false;
+}
+var MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
+function stripFinancial(d) {
+  const out = {};
+  for (const [k, v] of Object.entries(d || {})) {
+    if (MONEY_KEY.test(k)) continue;
+    if (v != null && typeof v !== "object" && /[£$€]/.test(String(v))) continue;
+    out[k] = v;
+  }
+  return out;
 }
 function siteJobSummary(j) {
   const events = Array.isArray(j.events) ? j.events : [];
