@@ -4949,7 +4949,7 @@ async function handle8(request, env, ctx, url, sess) {
         const target = body.status ? normalizeStatus(body.status, catNames) : before.status;
         if (!isAdmin && body.status && target !== before.status) {
           let missing = [];
-          if (target === "Complete") missing = completionMissing(before, body, await jobPhotoCount(env, id));
+          if (target === "Complete") missing = completionMissing(before, body, await jobPhotoCount(env, id, "After"));
           else if (target === "Quote") missing = quoteMissing(before, body, await jobPhotoCount(env, id));
           else if (target === "In Progress") missing = raMissing(body, before);
           else if (target === "On Hold") missing = holdMissing(body, before);
@@ -5146,10 +5146,12 @@ async function handle8(request, env, ctx, url, sess) {
 }
 var PHOTO_STAGES = ["Before", "During", "After"];
 var MIN_COMPLETE_NOTE = 15;
-async function jobPhotoCount(env, id) {
+async function jobPhotoCount(env, id, stage) {
   try {
-    const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
-    return (l.objects || []).length;
+    const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: stage ? ["customMetadata"] : void 0 });
+    const objs = l.objects || [];
+    if (stage) return objs.filter((o) => (o.customMetadata && o.customMetadata.stage) === stage).length;
+    return objs.length;
   } catch {
     return 0;
   }
@@ -5159,10 +5161,10 @@ function humanList(items) {
   if (a.length <= 1) return a.join("");
   return a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 }
-function completionMissing(job, patch, photoCount) {
+function completionMissing(job, patch, afterPhotoCount) {
   const miss = [];
   if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
-  if (photoCount < 1) miss.push("at least one photo");
+  if (afterPhotoCount < 1) miss.push("a completion photo (After)");
   if (!job.signature || !job.signature.fileKey) miss.push("the customer signature");
   return miss;
 }

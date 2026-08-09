@@ -342,8 +342,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   the save/validation code is untouched). Statuses that need something first are
   `needsConfirm` (no silent save — show a labelled confirm button instead):
   Quote / On Hold (details pack), In Progress (risk assessment), and **Complete**
-  (requires ≥1 photo + a completion note ≥ `MIN_COMPLETE_NOTE` chars for EVERY
-  engineer, not just Story Mode; Story also needs a signature). **RA override:**
+  (requires a completion **After** photo — the RA's "Before" work-area shot no
+  longer counts — a completion note ≥ `MIN_COMPLETE_NOTE` chars, and the
+  customer's signature, for EVERY engineer not just Story Mode). Enforced client-
+  side (engineer-job.html `outcomeMissing`, checks `photos.some(stage==="After")`)
+  AND server-side (sla.js `completionMissing` via `jobPhotoCount(env,id,"After")`,
+  non-admins only — admins can still override). **RA override:**
   a discreet `#raSkipBtn` ("skip") in the RA panel shown **only to FullAccess**
   (`isFullAccess()`, not SLAAdmin) starts the job without the assessment —
   records `riskAssessment.skipped` with their name; the job view shows "⚠️ Skipped
