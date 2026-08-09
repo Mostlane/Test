@@ -1568,9 +1568,21 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const requiresNote = body.requiresNote !== undefined ? !!body.requiresNote
     : (existing?.requiresNote !== undefined ? !!existing.requiresNote : !isProjJob);
 
+  // A project job's reference IS its project number (the site code, e.g. "P0002"),
+  // not the internal UUID. Use it for a new project job — and heal an old one whose
+  // ref defaulted to the UUID — unless an explicit reference was typed.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let helpdeskRef = body.reference || existing?.helpdeskRef || id;
+  if (isProjJob && !body.reference) {
+    const projNum = String(body.siteCode || existing?.siteCode || "").trim();
+    if (projNum && (!existing?.helpdeskRef || existing.helpdeskRef === id || UUID_RE.test(String(existing.helpdeskRef)))) {
+      helpdeskRef = projNum;
+    }
+  }
+
   const job = {
     id,
-    helpdeskRef: body.reference || existing?.helpdeskRef || id,
+    helpdeskRef,
     description: body.description || existing?.description || "",
     priority,
     raisedAt,
@@ -1673,6 +1685,11 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.priority !== undefined && patch.priority) job.priority = patch.priority;
   if (patch.description !== undefined && patch.description) job.description = patch.description;
   if (patch.helpdeskRef !== undefined && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
+  // A project job's reference is its project number — heal a UUID default.
+  if (jobIsProject(job) && job.siteCode) {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) job.helpdeskRef = job.siteCode;
+  }
   if (patch.raisedAt !== undefined && patch.raisedAt) job.raisedAt = patch.raisedAt;
   // The SLA target is raised-time + priority window — recompute it whenever
   // either of those is edited, so the countdown always reflects the truth.

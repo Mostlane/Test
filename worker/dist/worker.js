@@ -5579,9 +5579,17 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
   const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
   const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : !isProjJob;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let helpdeskRef = body.reference || existing?.helpdeskRef || id;
+  if (isProjJob && !body.reference) {
+    const projNum = String(body.siteCode || existing?.siteCode || "").trim();
+    if (projNum && (!existing?.helpdeskRef || existing.helpdeskRef === id || UUID_RE.test(String(existing.helpdeskRef)))) {
+      helpdeskRef = projNum;
+    }
+  }
   const job = {
     id,
-    helpdeskRef: body.reference || existing?.helpdeskRef || id,
+    helpdeskRef,
     description: body.description || existing?.description || "",
     priority,
     raisedAt,
@@ -5678,6 +5686,10 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.priority !== void 0 && patch.priority) job.priority = patch.priority;
   if (patch.description !== void 0 && patch.description) job.description = patch.description;
   if (patch.helpdeskRef !== void 0 && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
+  if (jobIsProject(job) && job.siteCode) {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) job.helpdeskRef = job.siteCode;
+  }
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
     const cfg = await getConfig(env, tenantId);
