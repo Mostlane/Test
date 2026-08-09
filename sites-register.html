@@ -66,15 +66,25 @@
     <div class="card">
       <h2>Add a site</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input class="txt" id="addName" placeholder="Site name" style="flex:2;min-width:180px">
+        <select class="txt" id="addClient" style="min-width:130px">
+          <option value="retail">Retail</option>
+          <option value="els">ELS</option>
+          <option value="els_private">ELS Private</option>
+          <option value="cobra">Cobra</option>
+          <option value="wenzels">Wenzel’s</option>
+          <option value="fbc">Fareham BC</option>
+          <option value="projects">Project</option>
+        </select>
+        <input class="txt" id="addNum" placeholder="Site / store number" style="width:150px">
+        <input class="txt" id="addName" placeholder="Site name" style="flex:2;min-width:170px">
         <input class="txt" id="addPc" placeholder="Postcode (optional)" style="flex:1;min-width:120px">
-        <input class="txt" id="addLat" placeholder="Lat" style="width:96px">
-        <input class="txt" id="addLng" placeholder="Lng" style="width:96px">
+        <input class="txt" id="addLat" placeholder="Lat" style="width:88px">
+        <input class="txt" id="addLng" placeholder="Lng" style="width:88px">
         <button class="btn small" id="addGeo">📍 From postcode</button>
         <button class="btn small" id="addPin">🗺️ Drop pin</button>
         <button class="btn primary" id="addBtn">➕ Add</button>
       </div>
-      <div class="hint" id="addLocHint" style="margin-top:6px">📍 A location is pushed to SiteLog as a 500 m geofence, so the scanner recognises the site for sign-ins. Tap <b>Drop pin</b> to place it exactly on the map, or <b>From postcode</b> for a quick lookup.</div>
+      <div class="hint" id="addLocHint" style="margin-top:6px">📍 Pick the <b>category</b> and enter the <b>site/store number</b> (Projects are auto-numbered). A location is pushed to SiteLog as a 500 m geofence — tap <b>Drop pin</b> to place it exactly, or <b>From postcode</b> for a quick lookup.</div>
     </div>
 
     <div class="card">
@@ -299,17 +309,31 @@
       lat:isFinite(la)?la:null, lng:isFinite(ln)?ln:null,
       onSave:function(lat,lng){ $("addLat").value=lat.toFixed(6); $("addLng").value=lng.toFixed(6); toast("Pin set 📍"); } });
   };
+  // Projects are auto-numbered by the worker, so hide the number box for them.
+  function syncAddNum(){ var p=$("addClient").value==="projects"; $("addNum").style.display=p?"none":""; if(p) $("addNum").value=""; }
+  $("addClient").onchange=syncAddNum; syncAddNum();
+
   $("addBtn").onclick=async function(){
+    var client=$("addClient").value, proj=(client==="projects");
     var name=$("addName").value.trim(); if(!name){ toast("Type a site name"); return; }
+    var num=$("addNum").value.trim();
+    if(!proj && !num){ toast("Enter the site / store number"); return; }
     var la=$("addLat").value.trim(), ln=$("addLng").value.trim();
     if(!(la&&ln)){
       if(!confirm("No location set for “"+name+"”.\n\nSiteLog won't recognise this site for on-site sign-ins until it has a pin. Add it without a location anyway?\n\n(Tip: tap “🗺️ Drop pin” or “📍 From postcode” first.)")) return;
     }
-    var body={name:name,postcode:$("addPc").value.trim()};
-    if(la&&ln){ body.lat=la; body.lng=ln; }
-    var r=await (await aFetch("/sites/register/add",{method:"POST",body:JSON.stringify(body)})).json();
-    if(r.ok){ $("addName").value="";$("addPc").value="";$("addLat").value="";$("addLng").value="";
-      toast(r.sitelogPushed?"Site added · sent to SiteLog 📍":"Site added (no location — set a pin so sign-ins work)"); load(); } else toast(r.error||"Couldn't add");
+    // Same canonical endpoint the Sites page uses: category + project numbering
+    // + SiteLog geofence + customer creation, so both pages behave identically.
+    var body={ siteName:name, postcode:$("addPc").value.trim() };
+    if(!proj) body.siteNumber=num;
+    if(la&&ln){ body.lat=parseFloat(la); body.lon=parseFloat(ln); }
+    var res=await aFetch("/add-site?category="+encodeURIComponent(client),{method:"POST",body:JSON.stringify(body)});
+    var r=await res.json().catch(function(){return{};});
+    if(res.ok && r.success!==false){
+      var pnum=r.site&&(r.site.jobNumber||r.site.siteNumber);
+      $("addName").value="";$("addPc").value="";$("addLat").value="";$("addLng").value="";$("addNum").value="";
+      toast(proj&&pnum?("Project added · "+pnum+((la&&ln)?" 📍":"")):("Site added"+((la&&ln)?" · sent to SiteLog 📍":" (no location — set a pin so sign-ins work)"))); load();
+    } else toast(r.error||"Couldn't add");
   };
 
   /* merge modal */

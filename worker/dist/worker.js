@@ -6183,15 +6183,18 @@ async function handle9(request, env, ctx, url, sess) {
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
     const site = await request.json().catch(() => ({}));
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
-    const siteNumber = String(site.siteNumber || "").trim();
-    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    if (!client) return error("client (category) required", 400, env, request);
     site.client = client;
+    if (path === "/add-site" && client === "projects") {
+      if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
+      if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
+    }
+    const siteNumber = String(site.siteNumber || "").trim();
+    if (!siteNumber) return error("siteNumber required", 400, env, request);
+    site.siteNumber = siteNumber;
     const oldNum = q.get("oldSiteNumber");
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
-    }
-    if (path === "/add-site" && client === "projects" && !site.jobNumber) {
-      site.jobNumber = await nextProjectNumber(env, tenantId);
     }
     await saveSite(env, tenantId, site);
     await ensureCustomer(env, tenantId, client);

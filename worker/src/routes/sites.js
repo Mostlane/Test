@@ -42,19 +42,25 @@ export async function handle(request, env, ctx, url, sess) {
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
     const site = await request.json().catch(() => ({}));
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
-    const siteNumber = String(site.siteNumber || "").trim();
-    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    if (!client) return error("client (category) required", 400, env, request);
     site.client = client;
+
+    // Projects auto-number: the project number (P0001…) doubles as the site
+    // number, so a project can be added without typing one. Do this BEFORE the
+    // required-number check so projects are exempt from it.
+    if (path === "/add-site" && client === "projects") {
+      if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
+      if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
+    }
+
+    const siteNumber = String(site.siteNumber || "").trim();
+    if (!siteNumber) return error("siteNumber required", 400, env, request);
+    site.siteNumber = siteNumber;
 
     // Renamed site number: drop the old row.
     const oldNum = q.get("oldSiteNumber");
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
-    }
-
-    // Projects get an auto job number if they don't have one.
-    if (path === "/add-site" && client === "projects" && !site.jobNumber) {
-      site.jobNumber = await nextProjectNumber(env, tenantId);
     }
 
     await saveSite(env, tenantId, site);

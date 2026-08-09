@@ -812,6 +812,16 @@ IS fetchable server-side, so the portal calls it (via SITELOG_ADMIN_SECRET).
   /sites/register/update (existing). Adding a site with NO coords now warns
   ("SiteLog won't recognise it for sign-ins") before proceeding, so a site rarely
   reaches the register without a geofence. Only lat/lng present → geofence pushed.
+  **Unified add (Aug 2026):** the register's "Add a site" now uses the SAME
+  canonical **`/add-site`** endpoint (sites.js) as the Sites page modal, not the
+  lightweight /sites/register/add — so it gets a **Category** dropdown (retail/els/
+  els_private/cobra/wenzels/fbc/projects) + a **Site/store number** field, project
+  auto-numbering, customer creation and the SiteLog push, identically from either
+  page. **Projects** are auto-numbered server-side: `/add-site` with client=projects
+  and no siteNumber assigns `nextProjectNumber()` ("P0001") and uses it as BOTH
+  job_number AND site_number (the number box is hidden for Projects on the register
+  add). Non-projects still require a typed site number. /sites/register/add is kept
+  only for the candidate quick-add (harvested names, client "general").
 - **Labour reconciliation** (`job_time_segments` = SLA status capture, primary;
   `sitelog_scans` = optional pushed scans; buildDay clips scans to non-overlap).
   **Runaway-session clamp:** any segment (open OR "closed" only when the next job
