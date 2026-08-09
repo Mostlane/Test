@@ -1528,8 +1528,12 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const catNames = (await getCategories(env, tenantId)).map(c => c.name);
   let status = normalizeStatus(body.status || existing?.status, catNames);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
-  const priority = body.priority || existing?.priority || "Priority 4";
-  const targetAt = computeSlaTarget(raisedAt, priority, cfg);
+  // Projects have NO priority level and NO SLA at all — for every user. Everything
+  // else keeps the priority-driven SLA target.
+  const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) ||
+    /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
+  const priority = isProjJob ? "" : (body.priority || existing?.priority || "Priority 4");
+  const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
 
   const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
     ? body.assignedEngineers.filter(Boolean)
@@ -1554,9 +1558,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // Per-job gates: whether this job needs a Risk Assessment and a customer
   // signature. Default OFF for projects (P-numbered site / projects client), ON
   // for everything else. An explicit value from the form/editor wins; an existing
-  // job's stored value is preserved when not re-specified.
-  const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) ||
-    /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
+  // job's stored value is preserved when not re-specified. (isProjJob computed above.)
   const requiresRA = body.requiresRA !== undefined ? !!body.requiresRA
     : (existing?.requiresRA !== undefined ? !!existing.requiresRA : !isProjJob);
   const requiresSignature = body.requiresSignature !== undefined ? !!body.requiresSignature
@@ -1678,6 +1680,8 @@ async function patchJob(env, tenantId, id, patch) {
     const cfg = await getConfig(env, tenantId);
     job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
   }
+  // Projects never carry a priority level or an SLA target, for any user.
+  if (jobIsProject(job)) { job.priority = ""; job.targetAt = null; }
   if (patch.quote !== undefined) job.quote = patch.quote;   // quote pack
   if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // pre-start RA
   if (patch.hold !== undefined) job.hold = patch.hold;      // on-hold pack (reason / needs / resume)

@@ -6,7 +6,7 @@
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=9"></script>
+  <script src="sla-jobedit.js?v=10"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -553,9 +553,12 @@ function fmtSched(job){
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
+// Projects carry no priority level and no SLA — blank both on the board.
+function isProjectJob(j){ return /^p\d/i.test(String((j&&j.siteCode)||"")) || /project/i.test(String((j&&(j.storeType||j.client))||"")); }
 function isClosed(j){ return ["Complete","Closed Jobs","Invoiced"].includes(j.status) || doneCatNames().includes(j.status); }
 
 function slaBadge(job){
+  if(isProjectJob(job)) return {text:"", cls:"sla-badge sla-none"};
   if(isClosed(job)) return {text:"", cls:"sla-badge sla-none"};
   const t = parseDate(job.targetAt);
   if(!t) return {text:"—", cls:"sla-badge sla-none"};
@@ -719,13 +722,13 @@ function render(){
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}</div>
       </td>
-      <td class="nowrap">${prShort(j.priority)}</td>
+      <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
       <td>
         <div class="sitename">${name || site}</div>
         <div class="small muted">${addr}</div>
       </td>
       <td class="nowrap small">
-        ${fmtShort(parseDate(j.targetAt))}
+        ${isProjectJob(j) ? "<span class='muted'>—</span>" : fmtShort(parseDate(j.targetAt))}
         ${sla.text ? `<div><span class="${sla.cls}">${sla.text}</span></div>` : ""}
       </td>
       <td class="nowrap small">${sched || "<span class='muted'>—</span>"}</td>
@@ -746,7 +749,7 @@ function render(){
     card.innerHTML = `
       <div class="mjob-top">
         ${ref ? `<span class="ref">${ref}</span> ` : ""}<span class="cam" data-cam="${esc(j.id)}"></span>
-        <span class="small nowrap">${prShort(j.priority)}</span>
+        <span class="small nowrap">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
