@@ -5238,9 +5238,12 @@ function signatureRequiredFor(job) {
 function photoRequiredFor(job) {
   return job && job.requiresPhoto !== void 0 ? !!job.requiresPhoto : !jobIsProject(job);
 }
+function noteRequiredFor(job) {
+  return job && job.requiresNote !== void 0 ? !!job.requiresNote : !jobIsProject(job);
+}
 function completionMissing(job, patch, afterPhotoCount) {
   const miss = [];
-  if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
+  if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
   if (photoRequiredFor(job) && afterPhotoCount < 1) miss.push("a completion photo (After)");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
@@ -5575,6 +5578,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : !isProjJob;
   const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
   const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
+  const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : !isProjJob;
   const job = {
     id,
     helpdeskRef: body.reference || existing?.helpdeskRef || id,
@@ -5601,6 +5605,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     requiresRA,
     requiresSignature,
     requiresPhoto,
+    requiresNote,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -5664,6 +5669,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresRA !== void 0) job.requiresRA = !!patch.requiresRA;
   if (patch.requiresSignature !== void 0) job.requiresSignature = !!patch.requiresSignature;
   if (patch.requiresPhoto !== void 0) job.requiresPhoto = !!patch.requiresPhoto;
+  if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }

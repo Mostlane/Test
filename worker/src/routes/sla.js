@@ -1167,13 +1167,16 @@ function signatureRequiredFor(job) {
 function photoRequiredFor(job) {
   return (job && job.requiresPhoto !== undefined) ? !!job.requiresPhoto : !jobIsProject(job);
 }
+function noteRequiredFor(job) {
+  return (job && job.requiresNote !== undefined) ? !!job.requiresNote : !jobIsProject(job);
+}
 
-// Complete = a real note + a completion (After) photo + the customer's signature
-// (photo & signature only when the job requires them — projects default to
-// neither). The completion note is always required.
+// Complete = a completion note + an (After) photo + the customer's signature —
+// each demanded only when the job requires it. Projects default to NONE (they
+// can complete with nothing); everything else requires all three.
 function completionMissing(job, patch, afterPhotoCount) {
   const miss = [];
-  if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
+  if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
   if (photoRequiredFor(job) && afterPhotoCount < 1) miss.push("a completion photo (After)");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
@@ -1560,6 +1563,8 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     : (existing?.requiresSignature !== undefined ? !!existing.requiresSignature : !isProjJob);
   const requiresPhoto = body.requiresPhoto !== undefined ? !!body.requiresPhoto
     : (existing?.requiresPhoto !== undefined ? !!existing.requiresPhoto : !isProjJob);
+  const requiresNote = body.requiresNote !== undefined ? !!body.requiresNote
+    : (existing?.requiresNote !== undefined ? !!existing.requiresNote : !isProjJob);
 
   const job = {
     id,
@@ -1582,7 +1587,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     lon: body.lon ?? existing?.lon ?? null,
     storeType: body.storeType || existing?.storeType || "",
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
-    requiresRA, requiresSignature, requiresPhoto,
+    requiresRA, requiresSignature, requiresPhoto, requiresNote,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -1655,6 +1660,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresRA !== undefined) job.requiresRA = !!patch.requiresRA;
   if (patch.requiresSignature !== undefined) job.requiresSignature = !!patch.requiresSignature;
   if (patch.requiresPhoto !== undefined) job.requiresPhoto = !!patch.requiresPhoto;
+  if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
