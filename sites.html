@@ -202,7 +202,7 @@
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <a class="ml-back" href="main.html" title="Back to Menu">‹ Back</a>
     <div class="title">Site Manager</div>
-    <a class="btn outline" href="sites-register.html">🗂️ Site register</a>
+    <button class="btn outline" id="btnTidy" type="button" style="display:none">🧹 Tidy &amp; merge</button>
     <a class="btn outline" href="job-costing.html">📊 Job costing</a>
   </div>
   <div class="controls">
@@ -397,6 +397,32 @@ Fob – Main Gate
         <button class="btn" id="btnLocate" type="button">Locate Postcode</button>
         <button class="btn" id="btnSave" type="button">Save Changes</button>
       </div>
+    </div>
+  </div>
+
+  <!-- TIDY & MERGE MODAL -->
+  <div class="modal" id="tidyModal">
+    <div class="modal-content">
+      <button class="close-btn" id="closeTidy">&times;</button>
+      <h3>🧹 Tidy &amp; merge sites</h3>
+      <p class="muted" style="margin-top:-4px;font-size:13px">Fold duplicate name variants into one site, and add sites that turned up in jobs / SiteLog / POs but were never formally added.</p>
+
+      <h4 style="margin:14px 0 6px">Names seen in the wild — not a site yet <span id="candCount" class="muted" style="font-weight:400"></span></h4>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Harvested from jobs, captured time, timesheets, SiteLog and the PO system.</div>
+      <div id="candList" class="muted">Loading…</div>
+
+      <h4 style="margin:18px 0 6px">Merged names (aliases)</h4>
+      <div id="aliasList" class="muted">—</div>
+    </div>
+  </div>
+
+  <!-- MERGE PICKER -->
+  <div class="modal" id="mergePickModal">
+    <div class="modal-content" style="max-width:460px">
+      <button class="close-btn" id="closeMergePick">&times;</button>
+      <h3 style="font-size:17px">Merge “<span id="mergeAliasName"></span>” into…</h3>
+      <input id="mergeSearch" type="text" placeholder="Find the real site…" style="width:100%;margin-bottom:8px">
+      <div id="mergePickList" style="max-height:320px;overflow:auto"></div>
     </div>
   </div>
 
@@ -1176,6 +1202,104 @@ btnRecalc.onclick = async () => {
     document.getElementById("lightboxImg").src = "";
   }
   document.addEventListener("keydown", e => { if(e.key === "Escape") closeLightbox(); });
+
+  /* ── Tidy & merge (folded in from the old Site Register) ──────────────── */
+  var TIDY_PERMS={}; try{ TIDY_PERMS=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){}
+  var TIDY_ADMIN = TIDY_PERMS.FullAccess==="Yes"||TIDY_PERMS.SLAAdmin==="Yes"||TIDY_PERMS.TimesheetAdmin==="Yes";
+  var TIDY_API=(window.MOSTLANE_API||"").replace(/\/$/,"");
+  function apiFetch(p,init){ init=init||{}; var h=new Headers(init.headers||{}); var t=localStorage.getItem("mostlaneToken"); if(t)h.set("Authorization","Bearer "+t); if(init.body&&!h.has("Content-Type"))h.set("Content-Type","application/json"); init.headers=h; return fetch(TIDY_API+p,init); }
+  function tesc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+
+  var tidyModalEl=document.getElementById("tidyModal");
+  var mergePickEl=document.getElementById("mergePickModal");
+  var CANDS=[], mergeAlias="";
+
+  function openTidy(){ tidyModalEl.classList.add("active"); loadCandidates(); loadAliases(); }
+  document.getElementById("closeTidy").onclick=function(){ tidyModalEl.classList.remove("active"); };
+  var btnTidyEl=document.getElementById("btnTidy");
+  if(btnTidyEl && TIDY_ADMIN){ btnTidyEl.style.display=""; btnTidyEl.onclick=openTidy; }
+
+  async function loadCandidates(){
+    var host=document.getElementById("candList"); host.textContent="Loading…";
+    try{
+      var j=await (await apiFetch("/sites/register/candidates")).json();
+      CANDS=(j&&j.candidates)||[];
+      document.getElementById("candCount").textContent=CANDS.length?("· "+CANDS.length):"· none";
+      if(!CANDS.length){ host.textContent="Nothing outstanding — every name seen in jobs / SiteLog / POs already matches a site. 🎉"; return; }
+      host.innerHTML=CANDS.map(function(c,i){
+        return '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eef0f3;flex-wrap:wrap">'+
+          '<div style="flex:1;min-width:120px"><b>'+tesc(c.name)+'</b> <span class="muted" style="font-size:12px">'+(c.sources||[]).map(tesc).join(", ")+'</span></div>'+
+          '<button class="btn" data-cadd="'+i+'">➕ Add</button>'+
+          '<button class="btn outline" data-cmerge="'+i+'">🔗 Merge</button>'+
+          '<button class="btn outline" data-cign="'+i+'">🚫 Ignore</button>'+
+        '</div>';
+      }).join("");
+    }catch(e){ host.textContent="Couldn't load candidates."; }
+  }
+
+  async function loadAliases(){
+    var host=document.getElementById("aliasList");
+    try{
+      var j=await (await apiFetch("/sites/register")).json();
+      var al=(j&&j.aliases)||{}, keys=Object.keys(al);
+      if(!keys.length){ host.textContent="No merges yet."; return; }
+      host.innerHTML=keys.map(function(k){ var a=al[k];
+        return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #eef0f3">'+
+          '<div style="flex:1"><b>'+tesc(a.label||k)+'</b> <span class="muted">→ '+tesc(ucClient(a.client))+" #"+tesc(a.siteNumber)+'</span></div>'+
+          '<button class="btn outline" data-unmerge="'+tesc(a.label||k)+'">Un-merge</button>'+
+        '</div>';
+      }).join("");
+    }catch(e){ host.textContent="Couldn't load aliases."; }
+  }
+
+  tidyModalEl.addEventListener("click", async function(e){
+    var b=e.target.closest("button"); if(!b) return;
+    if(b.dataset.cadd!==undefined){
+      var c=CANDS[+b.dataset.cadd];
+      tidyModalEl.classList.remove("active");
+      openEdit({ client: (filterEl.value && filterEl.value!=="all") ? filterEl.value : "retail", active:true, siteName:c.name });
+    }
+    if(b.dataset.cmerge!==undefined){ openMergePick(CANDS[+b.dataset.cmerge].name); }
+    if(b.dataset.cign!==undefined){
+      var cg=CANDS[+b.dataset.cign];
+      if(!confirm("Ignore “"+cg.name+"”? It won't be suggested again.")) return;
+      try{ await apiFetch("/sites/register/ignore",{method:"POST",body:JSON.stringify({name:cg.name})}); }catch(_){}
+      loadCandidates();
+    }
+    if(b.dataset.unmerge!==undefined && b.dataset.unmerge!==""){
+      try{ await apiFetch("/sites/register/unmerge",{method:"POST",body:JSON.stringify({alias:b.dataset.unmerge})}); }catch(_){}
+      loadAliases();
+    }
+  });
+
+  function openMergePick(name){
+    mergeAlias=name;
+    document.getElementById("mergeAliasName").textContent=name;
+    document.getElementById("mergeSearch").value="";
+    drawMergePick(""); mergePickEl.classList.add("active");
+  }
+  document.getElementById("closeMergePick").onclick=function(){ mergePickEl.classList.remove("active"); };
+  document.getElementById("mergeSearch").oninput=function(){ drawMergePick(this.value.trim().toLowerCase()); };
+  function drawMergePick(q){
+    var list=(ALL_SITES||[]).filter(function(s){
+      if(!q) return true;
+      return String(s.siteName||"").toLowerCase().includes(q) || String(s.siteNumber||"").toLowerCase().includes(q) || String(s.client||"").toLowerCase().includes(q);
+    }).slice(0,60);
+    document.getElementById("mergePickList").innerHTML=list.map(function(s){
+      return '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eef0f3">'+
+        '<div style="flex:1"><b>'+tesc(s.siteName||"(no name)")+'</b> <span class="muted">'+tesc(ucClient(s.client))+" · #"+tesc(s.siteNumber)+'</span></div>'+
+        '<button class="btn" data-pick="'+tesc(s.client)+'|'+tesc(s.siteNumber)+'">Merge here</button>'+
+      '</div>';
+    }).join("") || '<div class="muted">No match.</div>';
+  }
+  mergePickEl.addEventListener("click", async function(e){
+    var b=e.target.closest("button[data-pick]"); if(!b) return;
+    var p=b.dataset.pick.split("|");
+    try{ await apiFetch("/sites/register/merge",{method:"POST",body:JSON.stringify({alias:mergeAlias,client:p[0],siteNumber:p[1]})}); }catch(_){}
+    mergePickEl.classList.remove("active"); tidyModalEl.classList.remove("active");
+    alert("Merged “"+mergeAlias+"”.");
+    loadCandidates();
+  });
 
   // Init
   (async()=>{

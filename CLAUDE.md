@@ -801,7 +801,16 @@ IS fetchable server-side, so the portal calls it (via SITELOG_ADMIN_SECRET).
 - **Site register** (`sites` table + `app_config` `site_aliases`,
   `site_reg_ignore`, `site_reg_ext`): active/archive, **merge** (alias a name →
   a canonical site; resolveSite/resolveSiteCode use byNorm+byCode+aliases),
-  candidates harvest. Front-end **sites-register.html**. **Coordinates→SiteLog:**
+  candidates harvest. **Front-end (Aug 2026): folded into sites.html** — the
+  standalone sites-register.html is now a redirect to sites.html; its two unique
+  tools (Candidates + Merge/aliases) live behind the **"🧹 Tidy & merge"** button
+  in the Sites toolbar (gated FullAccess|SLAAdmin|TimesheetAdmin, same as the
+  register endpoints). Candidate **Add** opens the normal Sites edit modal
+  prefilled with the name (so you set category/number/pin properly), **Merge**
+  opens a canonical-site picker (POST /sites/register/merge), **Ignore** →
+  /sites/register/ignore; aliases list has **Un-merge**. Sites is now the ONE
+  site hub (directory + add + cleanup). sites.html reaches the register endpoints
+  via a local apiFetch() (MOSTLANE_API + Bearer). **Coordinates→SiteLog:**
   /sites/register/add+update accept {lat,lng}, store in the site's data JSON, and
   push a geofence to SiteLog (`/bulk-add-sites`, radius 500); the page has lat/lng
   fields + "📍 From postcode" (postcodes.io) + per-row "Set location". **Pin-drop
