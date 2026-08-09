@@ -156,7 +156,7 @@
         <label>Assigned engineers (tick all that will attend)</label>
         <div class="mlje-engs" id="mljeEngineers"><span class="mlje-hint">Loading engineers…</span></div>
         <label class="mlje-chk" style="margin-top:4px;"><input type="checkbox" id="mljeShowOffice"> Show office / admin staff too <small style="font-weight:400;color:#64748b;">(normally hidden — engineers only)</small></label>
-        <div class="mlje-hint" style="margin-top:4px;">Tick two or more and each engineer gets their <b>own independent job</b> (same reference with an -A / -B suffix) — separate status, risk assessment, photos and completion, so their days run on their own.</div>
+        <div class="mlje-hint" style="margin-top:4px;">Tick everyone attending. Two or more engineers share the one job.</div>
 
         <label for="mljeSchedDate">Scheduled date &amp; times</label>
         <div class="mlje-3">

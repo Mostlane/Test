@@ -191,9 +191,7 @@ export async function handle(request, env, ctx, url, sess) {
     const payload = await readJson(request);
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
-    let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
-    // 2+ engineers → one independent job per engineer (never the Zapier intake).
-    if (assignedList(job).length >= 2) job = await splitJobByEngineers(env, tenantId, job, payload.changedBy, ctx);
+    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
     if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
@@ -605,8 +603,7 @@ export async function handle(request, env, ctx, url, sess) {
       changedBy: body.changedBy || "scheduler"
     };
     const before = await getJob(env, tenantId, id);
-    let updated = await patchJob(env, tenantId, id, patch);
-    if (updated && assignedList(updated).length >= 2) updated = await splitJobByEngineers(env, tenantId, updated, patch.changedBy, ctx);
+    const updated = await patchJob(env, tenantId, id, patch);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
     if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
@@ -916,10 +913,7 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
 
-      let updated = await patchJob(env, tenantId, id, body);
-      // 2+ engineers → one independent job per engineer; `updated` becomes the
-      // primary (its own single-engineer job), each sibling notified inside.
-      if (updated && assignedList(updated).length >= 2) updated = await splitJobByEngineers(env, tenantId, updated, body.changedBy, ctx);
+      const updated = await patchJob(env, tenantId, id, body);
       // Release-aware notify: announce a gated job when it first becomes visible;
       // only push "newly added engineer" for an already-announced job.
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
