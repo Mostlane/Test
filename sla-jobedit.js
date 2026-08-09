@@ -155,6 +155,7 @@
         <h3>Schedule &amp; engineers</h3>
         <label>Assigned engineers (tick all that will attend)</label>
         <div class="mlje-engs" id="mljeEngineers"><span class="mlje-hint">Loading engineers…</span></div>
+        <div class="mlje-hint" style="margin-top:4px;">Tick two or more and each engineer gets their <b>own independent job</b> (same reference with an -A / -B suffix) — separate status, risk assessment, photos and completion, so their days run on their own.</div>
 
         <label for="mljeSchedDate">Scheduled date &amp; times</label>
         <div class="mlje-3">
