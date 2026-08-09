@@ -559,7 +559,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (only) sites = sites.filter(s => normName(s.site) === only);
     // sitelog: true = SiteLog costing folded in; false = SiteLog unreachable or
     // SITELOG_ADMIN_SECRET unset, so labour is SLA-only (front-end shows a note).
-    return json({ ok: true, from, to, sites, sitelog: slSites != null }, {}, env, request);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null, sitelogReason: slSites != null ? "" : _slDiag }, {}, env, request);
   }
 
   if (path === "/exceptions" && method === "GET") {
@@ -898,18 +898,34 @@ async function pushSiteToSiteLog(env, name, lat, lng, client) {
 // SiteLog's rates). Custom domain, so server-side fetch works (mostlane-api is
 // on *.workers.dev and CANNOT be fetched back — the flow is always portal→
 // SiteLog). Fails soft to null so costing degrades to SLA-only when SiteLog is
-// unreachable or SITELOG_ADMIN_SECRET isn't set.
+// unreachable or SITELOG_ADMIN_SECRET isn't set. Sets _slDiag with WHY it failed
+// (surfaced by /costing/summary as `sitelogReason`) so a persistent failure is
+// diagnosable — e.g. "secret-unset" after a worker reset vs a genuine timeout.
+let _slDiag = "";
+// A fetch that can't hang forever — a slow SiteLog would otherwise stall the whole
+// costing request and show the "unreachable" banner. 8s cap, retried once.
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+  finally { clearTimeout(t); }
+}
 async function fetchSitelogCosting(env, from, to) {
+  _slDiag = "";
   const secret = env.SITELOG_ADMIN_SECRET;
-  if (!secret) return null;
+  if (!secret) { _slDiag = "secret-unset"; return null; }
   const base = env.SITELOG_API || "https://api.site-log.co.uk";
-  try {
-    const res = await fetch(base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
-      { headers: { "x-admin-secret": secret } });
-    if (!res.ok) return null;
-    const j = await res.json();
-    return (j && j.ok && Array.isArray(j.sites)) ? j.sites : null;
-  } catch { return null; }
+  const url = base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, { headers: { "x-admin-secret": secret } }, 8000);
+      if (!res.ok) { _slDiag = "http-" + res.status; continue; }   // transient 5xx → retry once
+      const j = await res.json();
+      if (j && j.ok && Array.isArray(j.sites)) { _slDiag = ""; return j.sites; }
+      _slDiag = "bad-response"; return null;
+    } catch (e) { _slDiag = (e && e.name === "AbortError") ? "timeout" : "unreachable"; }
+  }
+  return null;
 }
 
 // Raw SiteLog visits (for the reconcile + the labour trend — needs check-in/out
@@ -927,7 +943,7 @@ async function fetchSitelogVisits(env, from, to) {
     for (let page = 0; page < 30; page++) {   // ≤15k visits
       let u = base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
       if (before) u += "&before=" + encodeURIComponent(before);
-      const res = await fetch(u, { headers });
+      const res = await fetchWithTimeout(u, { headers }, 8000);
       if (!res.ok) return got ? out : null;
       const j = await res.json();
       const rows = Array.isArray(j.visits) ? j.visits : [];
