@@ -366,18 +366,19 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   AND server-side (sla.js `completionMissing` via `jobPhotoCount(env,id,"After")`,
   non-admins only — admins can still override). **Per-job RA + signature gates
   (Aug 2026):** each job carries `requiresRA` + `requiresSignature` +
-  `requiresPhoto` — default OFF for PROJECTS (P-numbered site / projects client),
-  ON otherwise; an explicit value wins, preserved across re-saves; settable on
-  **add-job.html** ("On-site requirements" — three tick boxes that auto-default
-  off when a Project site is picked). When `requiresRA` is false the engineer page treats the RA as done
-  (no lock — `raRequired()` → `raDone=true`); the completion **photo**
-  (After) check is skipped when `requiresPhoto` is false and the **signature**
-  check when `requiresSignature` is false — both client (engineer-job.html
-  `photoRequired()`/`sigRequired()` in `outcomeMissing`) AND server (sla.js
-  `photoRequiredFor`/`signatureRequiredFor` in `completionMissing`/`quoteMissing`).
-  `jobIsProject` = `/^p\d/` siteCode or projects storeType/client. patchJob accepts
-  all three flags so the office can flip them later. The **completion note is
-  ALWAYS required**. The field app
+  `requiresPhoto` + `requiresNote` — default OFF for PROJECTS (P-numbered site /
+  projects client), ON otherwise; an explicit value wins, preserved across
+  re-saves; settable on **add-job.html** ("On-site requirements" — four tick boxes
+  that auto-default off when a Project site is picked). A project job can be
+  completed with NOTHING; everything else needs RA + note + photo + signature. When `requiresRA` is false the engineer page treats the RA as done
+  (no lock — `raRequired()` → `raDone=true`); the completion **note**,
+  **photo** (After) and **signature** checks are each skipped when the matching
+  flag is false — both client (engineer-job.html
+  `noteRequired()`/`photoRequired()`/`sigRequired()` in `outcomeMissing`) AND
+  server (sla.js `noteRequiredFor`/`photoRequiredFor`/`signatureRequiredFor` in
+  `completionMissing`/`quoteMissing`). `jobIsProject` = `/^p\d/` siteCode or
+  projects storeType/client. patchJob accepts all four flags so the office can flip
+  them later. The field app
   **defaults the photo
   stage to "After" once the RA is done** (In Progress/During is rarely used), so the
   completion photo lands in the right tab. **Admins can recategorise a photo's
