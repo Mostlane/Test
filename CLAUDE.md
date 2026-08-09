@@ -365,6 +365,16 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   signature but the device does, it's restored + re-flushed — so a signature taken
   offline survives the "finish previous job" bounce and a reload. Server clears
   the local copy once it has it.
+  **NB there are TWO job pages:** `job-view.html` = the OFFICE/admin view (opened
+  from sla-main / scheduler / site-folder / activity-log); **`engineer-job.html`
+  = the FIELD ENGINEER page** (opened from route.html / engineer-jobs.html /
+  inbox.html — the field app). The three behaviours above (office-only "✏️ Edit
+  details (office)" gate `isOfficeAdmin() && !isFieldUser()`; the Full-Access RA
+  skip `#raSkipBtn` in the RA modal, shown via `isFullAccess()` only; and
+  local-first signatures `mlSig:<jobId>` with background `flushSig` retry) exist
+  in **BOTH** pages — fix engineer-job.html too, it's the one engineers actually
+  use. engineer-job.html's RA is a modal opened by the amber "Open risk
+  assessment →" lock banner; the skip is a discreet dashed button at its foot.
   `sites.js` (get/add/update-site, customers, street-images, auto geofence
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,

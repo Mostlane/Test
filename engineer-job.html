@@ -127,6 +127,7 @@
     <div style="display:flex;gap:8px;margin-top:12px"><button class="btn line" style="flex:1" id="raCancel">Cancel</button><button class="btn primary" style="flex:2" id="raStart">Sign &amp; start work</button></div>
     <button class="btn danger wide" style="margin-top:10px" id="raReport">⚠ I can't proceed safely — tell the office</button>
     <div class="hint" style="text-align:center">Can't tick one? Don't start — report it and the office is alerted.</div>
+    <button type="button" id="raSkipBtn" style="display:none;margin-top:12px;width:100%;background:none;border:1px dashed #c9bfa8;color:#9a8b6b;font-size:12px;padding:8px 10px;border-radius:8px;cursor:pointer;">Full-Access override — start without a risk assessment</button>
   </div></div>
 
   <div class="modal" id="blockModal"><div class="sheet">
@@ -185,6 +186,11 @@
   var raDone=false, reported=false, signed=false, sigName="", raPicPending=false;
 
   function jfetch(path, opts){ return fetch(SLA_API+path, opts||{}); }
+  // Permission helpers (read the cached session).
+  function myPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||{}; }catch(e){ return {}; } }
+  function isFullAccess(){ return myPerms().FullAccess==="Yes"; }               // "all access" only
+  function isOfficeAdmin(){ var p=myPerms(); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }
+  function isFieldUser(){ var st=(sessionStorage.getItem("mostlaneStaffType")||localStorage.getItem("mostlaneStaffType")||"").toLowerCase(); if(st) return st==="field"; return String(myPerms().StaffType||"").toLowerCase()==="field"; }
   async function loadAll(){
     var jr = await jfetch("/jobs/"+encodeURIComponent(jobId)+"?t="+Date.now(), {cache:"no-store"});
     if(!jr.ok) throw new Error("Job load failed ("+jr.status+")");
@@ -196,6 +202,18 @@
     if(reported) raDone=false;
     signed = !!(job.signature && job.signature.fileKey);
     sigName = signed ? (job.signature.signedBy||"") : "";
+    // Restore a device-saved signature the server hasn't got yet (survives the
+    // "finish previous job" bounce + no signal); keep trying to upload it.
+    if(!signed){
+      var loc = readSigLocal();
+      if(loc && loc.signedBy){
+        signed=true; sigName=loc.signedBy;
+        job.signature={signedBy:loc.signedBy,signedAt:loc.signedAt,fileKey:"local"};
+        if(loc.pending) setTimeout(flushSig, 300);
+      }
+    } else {
+      var done = readSigLocal(); if(done && !done.pending){ try{ localStorage.removeItem(sigKey()); }catch(e){} }
+    }
     chosen = raDone ? "In Progress" : "Travelling";
   }
   async function loadPhotos(){
@@ -360,7 +378,9 @@
     }catch(e){}
   }
   function setupOfficeEdit(){
-    if(window.MLJobEdit && window.MLJobEdit.open){
+    // Office-only control — a field engineer never gets it, even with an SLAAdmin
+    // grant (it's an office job editor). Was previously shown to everyone.
+    if(window.MLJobEdit && window.MLJobEdit.open && isOfficeAdmin() && !isFieldUser()){
       $("editWrap").style.display="block";
       $("editBtn").onclick=function(){ window.MLJobEdit.open(job, function(){ location.reload(); }); };
     }
@@ -433,16 +453,33 @@
   var custPad=makeSigPad($("sigCanvas")), raPad=makeSigPad($("raCanvas"));
   function openSig(){ $("sigModal").classList.add("show"); setTimeout(custPad.size,50); }
   $("sigClear").onclick=function(){ custPad.clear(); };
-  $("sigSave").onclick=async function(){
+  // Signature is LOCAL-FIRST: written to the device the instant it's captured, so
+  // it survives leaving the job (the "finish previous job" bounce) and a total
+  // loss of signal; the upload retries in the background until it lands.
+  function sigKey(){ return "mlSig:"+jobId; }
+  function readSigLocal(){ try{ return JSON.parse(localStorage.getItem(sigKey())||"null"); }catch(e){ return null; } }
+  function writeSigLocal(rec){ try{ localStorage.setItem(sigKey(), JSON.stringify(rec)); }catch(e){} }
+  async function flushSig(){
+    var rec=readSigLocal(); if(!rec||!rec.pending||!rec.img) return;
+    try{
+      var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/signature",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signedBy:rec.signedBy,signedAt:rec.signedAt,signatureBase64:rec.img,opId:rec.opId})});
+      if(!r.ok) throw new Error();
+      rec.pending=false; writeSigLocal(rec);
+      var el=$("sigstate"); if(el) el.textContent="Signed by "+rec.signedBy;
+    }catch(e){ setTimeout(flushSig, 15000); }
+  }
+  window.addEventListener("online", flushSig);
+  $("sigSave").onclick=function(){
     var name=$("sigName").value.trim();
     if(!name){ $("sigName").classList.add("err"); toast("Enter the customer's name first"); return; }
     if(!custPad.has()){ custPad.el.classList.add("err"); toast("Ask the customer to sign in the box"); return; }
-    try{
-      var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/signature",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signedBy:name,signedAt:new Date().toISOString(),signatureBase64:custPad.dataURL(),opId:opId()})});
-      if(!r.ok) throw new Error("Signature save failed");
-      signed=true; sigName=name; job.signature={signedBy:name,signedAt:new Date().toISOString(),fileKey:"saved"};
-      $("sigstate").textContent="Signed by "+name; $("sigModal").classList.remove("show"); drawTimeline(); refresh(); toast("Sign-off saved");
-    }catch(err){ toast("⚠ "+err.message); }
+    // 1) Save to the device first — never lost, even with no signal.
+    var rec={ signedBy:name, signedAt:new Date().toISOString(), img:custPad.dataURL(), opId:opId(), pending:true };
+    writeSigLocal(rec);
+    signed=true; sigName=name; job.signature={signedBy:name,signedAt:rec.signedAt,fileKey:"local"};
+    $("sigstate").textContent="Signed by "+name; $("sigModal").classList.remove("show"); drawTimeline(); refresh(); toast("Sign-off saved");
+    // 2) Upload in the background; retries on failure / when back online.
+    flushSig();
   };
   $("sigName").addEventListener("input",function(){this.classList.remove("err");});
 
@@ -461,9 +498,25 @@
     hazRows().forEach(function(r){r.classList.remove("err");delete r.dataset.ans;[].forEach.call(r.querySelectorAll(".hb"),function(b){b.classList.remove("on");});});
     decls().forEach(function(d){d.classList.remove("on","shake");});
     $("raNotes").value="";$("raNotes").classList.remove("err");$("raName").value=getUser()||"";$("raName").classList.remove("err");raPad.clear();
+    if($("raSkipBtn")) $("raSkipBtn").style.display = isFullAccess() ? "block" : "none";   // discreet, all-access only
     $("raModal").classList.add("show");setTimeout(raPad.size,50);
   }
   $("raCancel").onclick=function(){ $("raModal").classList.remove("show"); };
+  // Full-Access override: start the job WITHOUT the risk assessment. Recorded as
+  // skipped against the person's name; the job view shows it was skipped.
+  if($("raSkipBtn")) $("raSkipBtn").onclick=async function(){
+    if(!isFullAccess()) return;
+    if(!confirm("Full-Access override: start this job WITHOUT a risk assessment?\n\nThis is recorded against your name.")) return;
+    var ra={ skipped:true, safe:true, name:getUser()||"", at:new Date().toISOString(),
+      declarations:{competent:true,publicSafeguarded:true,safeToProceed:true} };
+    try{
+      await patchJob({status:"In Progress",riskAssessment:ra});
+      raDone=true; reported=false; chosen="In Progress";
+      if(job){ job.riskAssessment=ra; job.status="In Progress"; }
+      $("raModal").classList.remove("show"); $("curstatus").textContent="In Progress";
+      drawStatus(); applyLock(); drawTimeline(); toast("Risk assessment skipped — work started");
+    }catch(err){ if(err.blocked){ $("raModal").classList.remove("show"); } else { toast("⚠ "+err.message); } }
+  };
   $("raName").addEventListener("input",function(){this.classList.remove("err");});
   $("raNotes").addEventListener("input",function(){this.classList.remove("err");});
   $("raStart").onclick=async function(){
