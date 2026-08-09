@@ -313,11 +313,17 @@ async function populateUsersDropdown() {
 
     sorted.forEach(u => {
       const uname = u.Username || "";
-      const full = `${u.FirstName} ${u.LastName}`.trim();
+      // Build the name from real parts only — a null first/last must never render
+      // as the literal "null null". Fall back to the username, then skip empties.
+      const name = [u.FirstName, u.LastName]
+        .map(x => (x == null ? "" : String(x)).trim())
+        .filter(Boolean).join(" ");
+      const label = name || uname;
+      if(!label) return;
 
       const opt = document.createElement("option");
       opt.value = uname;
-      opt.textContent = full;
+      opt.textContent = label;
       sel.appendChild(opt);
     });
 
