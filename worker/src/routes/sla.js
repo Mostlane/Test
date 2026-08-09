@@ -857,7 +857,7 @@ export async function handle(request, env, ctx, url, sess) {
 
         if (!isAdmin && body.status && target !== before.status) {
           let missing = [];
-          if (target === "Complete")      missing = completionMissing(before, body, await jobPhotoCount(env, id));
+          if (target === "Complete")      missing = completionMissing(before, body, await jobPhotoCount(env, id, "After"));
           else if (target === "Quote")    missing = quoteMissing(before, body, await jobPhotoCount(env, id));
           else if (target === "In Progress") missing = raMissing(body, before);
           else if (target === "On Hold")  missing = holdMissing(body, before);
@@ -1083,10 +1083,15 @@ const PHOTO_STAGES = ["Before", "During", "After"];
 const MIN_COMPLETE_NOTE = 15;
 
 // How many photos this job already has in R2.
-async function jobPhotoCount(env, id) {
+// Count a job's photos, optionally only those tagged with a given stage
+// (Before/During/After). Completion insists on an "After" photo — the RA's
+// "Before" work-area shot must not be the only picture on a finished job.
+async function jobPhotoCount(env, id, stage) {
   try {
-    const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
-    return (l.objects || []).length;
+    const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: stage ? ["customMetadata"] : undefined });
+    const objs = l.objects || [];
+    if (stage) return objs.filter(o => (o.customMetadata && o.customMetadata.stage) === stage).length;
+    return objs.length;
   } catch { return 0; }
 }
 
@@ -1097,11 +1102,11 @@ function humanList(items) {
   return a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 }
 
-// Complete = a real note + at least one photo + the customer's signature.
-function completionMissing(job, patch, photoCount) {
+// Complete = a real note + a completion (After) photo + the customer's signature.
+function completionMissing(job, patch, afterPhotoCount) {
   const miss = [];
   if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
-  if (photoCount < 1) miss.push("at least one photo");
+  if (afterPhotoCount < 1) miss.push("a completion photo (After)");
   if (!job.signature || !job.signature.fileKey) miss.push("the customer signature");
   return miss;
 }

@@ -311,7 +311,7 @@
   }
   function ntrim(id){var el=$(id);return el?String(el.value||"").trim():"";}
   function outcomeMissing(){
-    if(chosen==="Complete"){var m=[];if(($("note").value||"").trim().length<15)m.push("a completion note");if(photos.length<1)m.push("a photo");if(!signed)m.push("the customer's signature");return m;}
+    if(chosen==="Complete"){var m=[];if(($("note").value||"").trim().length<15)m.push("a completion note");if(!photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(!signed)m.push("the customer's signature");return m;}
     if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
     if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photos.length<1)m.push("a photo");if(!signed)m.push("the customer's signature");return m;}
     return null;
