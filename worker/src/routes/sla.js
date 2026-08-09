@@ -191,7 +191,9 @@ export async function handle(request, env, ctx, url, sess) {
     const payload = await readJson(request);
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
-    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    let job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    // 2+ engineers → one independent job per engineer (never the Zapier intake).
+    if (assignedList(job).length >= 2) job = await splitJobByEngineers(env, tenantId, job, payload.changedBy, ctx);
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
     if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
@@ -603,7 +605,8 @@ export async function handle(request, env, ctx, url, sess) {
       changedBy: body.changedBy || "scheduler"
     };
     const before = await getJob(env, tenantId, id);
-    const updated = await patchJob(env, tenantId, id, patch);
+    let updated = await patchJob(env, tenantId, id, patch);
+    if (updated && assignedList(updated).length >= 2) updated = await splitJobByEngineers(env, tenantId, updated, patch.changedBy, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
     if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
@@ -913,7 +916,10 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
 
-      const updated = await patchJob(env, tenantId, id, body);
+      let updated = await patchJob(env, tenantId, id, body);
+      // 2+ engineers → one independent job per engineer; `updated` becomes the
+      // primary (its own single-engineer job), each sibling notified inside.
+      if (updated && assignedList(updated).length >= 2) updated = await splitJobByEngineers(env, tenantId, updated, body.changedBy, ctx);
       // Release-aware notify: announce a gated job when it first becomes visible;
       // only push "newly added engineer" for an already-announced job.
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
@@ -1730,6 +1736,85 @@ async function patchJob(env, tenantId, id, patch) {
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
   return job;
+}
+
+/* ================= MULTI-ENGINEER SPLIT =================
+   A job worked by 2+ engineers becomes one INDEPENDENT job PER engineer, so each
+   runs their own day: separate status, risk assessment, photos, signature and
+   completion. Siblings share a base reference with an -A/-B/… suffix and a
+   `groupId`. Called ONLY from the office create / scheduler / edit paths — NEVER
+   the Zapier inbound intake (which is always single-engineer). Add-only and
+   idempotent: re-saving fills in engineers that don't yet have a job; it never
+   deletes a sibling (an engineer is dropped by deleting their own job). */
+function groupBaseRef(ref) { return String(ref || "").replace(/-[A-Z]$/, ""); }
+function nextGroupLetter(used) {
+  for (let i = 0; i < 26; i++) { const L = String.fromCharCode(65 + i); if (!used.has(L)) return L; }
+  return "Z";
+}
+async function splitJobByEngineers(env, tenantId, primary, changedBy, ctx) {
+  const engineers = assignedList(primary);
+  if (engineers.length < 2) return primary;   // nothing to split — no-op
+
+  const now = new Date().toISOString();
+  const groupId = primary.groupId || primary.id;
+  const base = groupBaseRef(primary.helpdeskRef || primary.id);
+
+  // Existing group members (the primary + any siblings already created), so a
+  // re-save only ADDS the engineers who don't yet have a job.
+  const all = await listJobs(env, tenantId);
+  const members = all.filter(j => (j.groupId && j.groupId === groupId) || j.id === primary.id);
+  const byEng = new Map();               // normId(engineer) -> existing job
+  const usedLetters = new Set();
+  for (const j of members) {
+    const e = assignedList(j)[0];
+    if (e) byEng.set(normId(e), j);
+    if (j.groupLabel) usedLetters.add(j.groupLabel);
+  }
+
+  // The primary becomes engineer[0]'s own job.
+  const first = engineers[0];
+  primary.assignedEngineers = [first];
+  primary.assignedTo = first;
+  primary.groupId = groupId;
+  primary.groupRef = base;
+  if (!primary.groupLabel) { primary.groupLabel = nextGroupLetter(usedLetters); usedLetters.add(primary.groupLabel); }
+  primary.helpdeskRef = `${base}-${primary.groupLabel}`;
+  primary.updatedAt = now;
+  await saveJob(env, tenantId, primary);
+  byEng.set(normId(first), primary);
+
+  // Each additional engineer gets their own independent job (created once).
+  const created = [];
+  for (let i = 1; i < engineers.length; i++) {
+    const eng = engineers[i];
+    if (byEng.has(normId(eng))) continue;      // already has a job in this group
+    const letter = nextGroupLetter(usedLetters); usedLetters.add(letter);
+    const sib = {
+      ...primary,
+      id: crypto.randomUUID(),
+      helpdeskRef: `${base}-${letter}`,
+      groupId, groupRef: base, groupLabel: letter,
+      assignedEngineers: [eng], assignedTo: eng,
+      // Fresh per-engineer state — this engineer starts their own day.
+      status: "Scheduled",
+      riskAssessment: undefined, signature: undefined, quote: undefined,
+      hold: undefined, order: undefined, raBlock: undefined, travelStartMileage: undefined,
+      releaseNotified: false,
+      events: [],
+      statusHistory: [{ status: "Scheduled", at: now, by: changedBy || "system" }],
+      closedAt: null,
+      createdAt: now, updatedAt: now
+    };
+    await saveJob(env, tenantId, sib);
+    byEng.set(normId(eng), sib);
+    created.push(sib);
+  }
+
+  // Announce each newly-created sibling to its own engineer (respecting release).
+  if (ctx && created.length) {
+    for (const sib of created) ctx.waitUntil(reconcileRelease(env, tenantId, sib).catch(() => {}));
+  }
+  return primary;
 }
 
 /* ================= SITE FOLDER ================= */

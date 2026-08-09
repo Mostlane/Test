@@ -253,7 +253,28 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   with a "where do the jobs go?" picker). Categories merge into the dashboard
   chips/filters/bulk-mark, job-view.html status chips (custom chips carry their
   own `--cc` colour), and the sla-jobedit.js status dropdown — all load them
-  from GET /sla/categories. job-view/sla-main/sla-scheduler use `sla-jobedit.js?v=9`.
+  from GET /sla/categories. job-view/sla-main/sla-scheduler use `sla-jobedit.js?v=12`.
+  **SLA board editor consolidation (Aug 2026):** the old inline "👤 Send" modal on
+  sla-main.html was REMOVED — it duplicated the shared full editor. Each job row now
+  has ONE edit entry, **✏️ Edit → `window.MLJobEdit` (sla-jobedit.js)**, which does
+  engineers + schedule + visibility + status/priority/site in one save. (The orphaned
+  inline `updateBackdrop` modal is left in the HTML but never opened.)
+  **Multi-engineer = one INDEPENDENT job per engineer (Aug 2026):** ticking 2+
+  engineers in MLJobEdit / the scheduler / add-job splits the job into one job PER
+  engineer so their days run independently (separate status, RA, photos, signature,
+  completion). Server: `splitJobByEngineers(env,tid,primary,changedBy,ctx)` runs from
+  the office write paths ONLY (POST /sla/jobs, PUT /sla/job/{id}, PATCH /sla/jobs/{id})
+  — **NEVER /sla/inbound** (Zapier is always single-engineer), and only when
+  `assignedList(job).length>=2`. Siblings share `groupId` + `groupRef` (base ref) +
+  `groupLabel` (A/B/C…); the reference becomes `<base>-A` / `-B` (project P0002 →
+  P0002-A / P0002-B). **Add-only + idempotent** (dedupes by groupId+engineer; re-saves
+  never duplicate; de-ticking never deletes — remove an engineer by deleting their own
+  job row). New siblings start fresh (status Scheduled, no RA/sig/quote/hold/order,
+  releaseNotified=false so their own assignment push fires via reconcileRelease). The
+  primary keeps engineer[0] + its progress. sla-main shows a `👥 A/2` `.grp-tag` badge
+  on grouped rows (count from allJobs by groupId). Time/costing was already per-engineer
+  (job_time_segments keyed to the acting user), so labour/PO aggregate correctly per
+  sibling. Editor is `sla-jobedit.js?v=12`.
   **UI polish (Aug 2026 layout pass):** sla-main.html base font bumped + set to
   "Segoe UI" (was 13px/system-ui — "too small"), back button moved to the header
   TOP-LEFT (grouped with the title in `.header-left`, no `data-role` so it stays
@@ -359,7 +380,7 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   job** (its assignment push fires as it unlocks). `notifyNewlyAssigned` now only
   handles adding an engineer to an ALREADY-announced job. The office board
   (sla-main) shows a 🕒/⛓ badge on gated jobs (from `decorate.releaseView`);
-  engineers never receive them. Editor is `sla-jobedit.js?v=9`.
+  engineers never receive them. Editor is `sla-jobedit.js?v=12`.
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).
