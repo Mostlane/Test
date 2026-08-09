@@ -75,7 +75,11 @@ async function bumpDue(env, tid, code, type, dateStr) {
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 const safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
-const pad4 = (v) => String(v ?? "").replace(/\D/g, "").padStart(4, "0");
+// A store's compliance code is a numeric store number (4-digit, zero-padded).
+// A code carrying a LETTER (e.g. a project "P0002") is NOT a Co-op store — return
+// "" so it never resolves onto a real store's certs (stripping the letter would
+// turn "P0002" into "0002"). An empty/no-digit code is also "" (not "0000").
+const pad4 = (v) => { const s = String(v ?? ""); if (/[a-z]/i.test(s)) return ""; const d = s.replace(/\D/g, ""); return d ? d.padStart(4, "0") : ""; };
 
 // Normalise any incoming type label (SharePoint subfolder or table key) to a
 // canonical compliance type.
