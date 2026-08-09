@@ -8,7 +8,7 @@
   <title>Job — Mostlane</title>
   <script src="auth.js"></script>
   <script src="/pwa.js"></script>
-  <script src="sla-jobedit.js?v=10"></script>
+  <script src="sla-jobedit.js?v=11"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -294,7 +294,10 @@
     [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
   }
   function drawStatus(){
-    $("statusGrid").innerHTML=STATUSES.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
+    // Projects have a slim status set — just Travelling · In Progress · Complete
+    // (no On Hold / Quote packs).
+    var list = STATUSES.filter(function(s){ return !(jobIsProject() && (s.n==="On Hold" || s.n==="Quote")); });
+    $("statusGrid").innerHTML=list.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
     [].forEach.call($("statusGrid").querySelectorAll(".sc"),function(el){ el.onclick=function(){ pick(el.dataset.n); }; });
   }
   function panelFor(kind){

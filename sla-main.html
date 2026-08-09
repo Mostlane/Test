@@ -6,7 +6,7 @@
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=10"></script>
+  <script src="sla-jobedit.js?v=11"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -362,7 +362,7 @@
         <label>Job</label>
         <div class="ref" id="updateRef">—</div>
       </div>
-      <div class="field">
+      <div class="field" id="updatePriorityField">
         <label for="updatePriority">Priority</label>
         <select id="updatePriority">
           <option value="Priority 1">P1 – Emergency</option>
@@ -1029,10 +1029,17 @@ async function openUpdate(jobId){
   currentUpdateId = jobId;
   $("updateTitle").textContent = `Update — ${job.helpdeskRef || job.id}`;
   $("updateRef").textContent = job.helpdeskRef || job.id;
+  // Projects have no priority and a slim status set.
+  const proj = isProjectJob(job);
+  $("updatePriorityField").style.display = proj ? "none" : "";
   $("updatePriority").value = job.priority || "Priority 4";
   const sel = $("updateStatus");
   sel.innerHTML = "";
-  ["Pending", ...STATUSES.map(s => s[0]).filter(s => s !== "Pending")].forEach(s => {
+  let statusList = proj
+    ? ["Scheduled","Travelling","In Progress","Complete"]
+    : ["Pending", ...STATUSES.map(s => s[0]).filter(s => s !== "Pending")];
+  if(job.status && !statusList.some(s => s.toLowerCase() === String(job.status).toLowerCase())) statusList.push(job.status);
+  statusList.forEach(s => {
     const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o);
   });
   sel.value = job.status || "Pending";
