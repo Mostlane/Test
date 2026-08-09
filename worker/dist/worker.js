@@ -11916,7 +11916,12 @@ function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
 var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
-var pad4 = (v) => String(v ?? "").replace(/\D/g, "").padStart(4, "0");
+var pad4 = (v) => {
+  const s = String(v ?? "");
+  if (/[a-z]/i.test(s)) return "";
+  const d = s.replace(/\D/g, "");
+  return d ? d.padStart(4, "0") : "";
+};
 function canonType(t) {
   const s = String(t || "").toLowerCase();
   if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
