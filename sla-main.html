@@ -338,6 +338,16 @@
       </div>
       <div class="small muted" style="margin:6px 0 8px;">Finish auto-sets to one hour after start — adjust if needed.</div>
       <div class="field">
+        <label>When the engineer sees this job</label>
+        <div id="asgVisOpts" style="display:flex;flex-direction:column;gap:7px;">
+          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="now" checked style="width:auto;margin-top:3px;"> <span><b>Visible now</b><br><span class="small muted">The engineer sees it straight away (default).</span></span></label>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="dayBefore" style="width:auto;margin-top:3px;"> <span><b>5pm the day before</b><br><span class="small muted">Hidden until 17:00 the evening before the scheduled day.</span></span></label>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="at" style="width:auto;margin-top:3px;"> <span><b>At a set date &amp; time…</b><br><span class="small muted">You choose exactly when it appears.</span></span></label>
+          <input type="datetime-local" id="asgVisAt" style="display:none;margin:0 0 2px 26px;width:calc(100% - 26px);">
+          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="afterPrev" style="width:auto;margin-top:3px;"> <span><b>After the previous job that day</b><br><span class="small muted">Appears once the engineer finishes their earlier job that day.</span></span></label>
+        </div>
+      </div>
+      <div class="field">
         <label for="assignNote">Note (optional)</label>
         <textarea id="assignNote" placeholder="e.g. Booked with site contact for the morning."></textarea>
       </div>
@@ -939,8 +949,17 @@ async function openAssign(jobId){
   } else {
     syncEndFromStart();
   }
+  // Visibility ("release") — reflect the job's current setting.
+  const rel = job.release || {};
+  const vmode = rel.mode || "now";
+  const vr = document.querySelector('input[name="asgVis"][value="'+vmode+'"]');
+  (vr || document.querySelector('input[name="asgVis"][value="now"]')).checked = true;
+  $("asgVisAt").value = (vmode === "at" && rel.at) ? isoToLocalInput(rel.at) : "";
+  $("asgVisAt").style.display = (vmode === "at") ? "" : "none";
   $("assignBackdrop").classList.add("show");
 }
+function isoToLocalInput(iso){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; const p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes()); }
+function assignVisMode(){ const c=document.querySelector('input[name="asgVis"]:checked'); return c?c.value:"now"; }
 function closeAssign(){ $("assignBackdrop").classList.remove("show"); currentAssignId = null; }
 
 async function saveAssign(){
@@ -956,6 +975,17 @@ async function saveAssign(){
   let end = new Date(`${date}T${eh}:${em}:00`);
   if(end <= start) end = new Date(start.getTime() + 3600000);
 
+  // Visibility ("release") — same options as the Edit modal.
+  const vmode = assignVisMode();
+  let release;
+  if(vmode === "at"){
+    const v = $("asgVisAt").value;
+    if(!v){ $("assignStatus").textContent = "Pick the date & time it should appear."; return; }
+    release = { mode:"at", at:new Date(v).toISOString() };
+  } else {
+    release = { mode: vmode };   // now / dayBefore / afterPrev
+  }
+
   $("assignStatus").textContent = "Sending…";
   try{
     const payload = {
@@ -964,6 +994,7 @@ async function saveAssign(){
       scheduledAt: start.toISOString(),
       scheduledEnd: end.toISOString(),
       status: "Scheduled",
+      release: release,
       note: $("assignNote").value.trim() || undefined,
       changedBy: getCurrentUser()
     };
@@ -1354,6 +1385,7 @@ function init(){
   $("assignClose").addEventListener("click", closeAssign);
   $("assignCancel").addEventListener("click", closeAssign);
   $("assignSave").addEventListener("click", saveAssign);
+  $("asgVisOpts").addEventListener("change", () => { $("asgVisAt").style.display = assignVisMode() === "at" ? "" : "none"; });
   $("updateSiteFilter").addEventListener("input", () => { if(sitesList) fillSiteSelect($("updateSiteFilter").value); });
   $("updateClose").addEventListener("click", closeUpdate);
   $("updateCancel").addEventListener("click", closeUpdate);
