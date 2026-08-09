@@ -673,10 +673,32 @@ export async function handle(request, env, ctx, url, sess) {
     // GET /sla/jobs/{id}/files  -> list photos (with their Before/During/After tag)
     if (parts[2] === "files" && method === "GET") {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
-      return jsonResponse({ files: listed.objects.map(o => ({
-        name: o.key.split("/").pop(), publicURL: r2Url(env, o.key),
-        stage: (o.customMetadata && o.customMetadata.stage) || ""
-      })) }, headers);
+      // Admin recategorisations live in job.photoStages (overrides the R2 tag set at
+      // upload) so a photo can be re-stamped without rewriting the R2 object.
+      let overrides = {};
+      try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; } catch {}
+      return jsonResponse({ files: listed.objects.map(o => {
+        const name = o.key.split("/").pop();
+        return { name, publicURL: r2Url(env, o.key),
+          stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || "" };
+      }) }, headers);
+    }
+
+    // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
+    // (Before/During/After). Stored as a job.photoStages override; no R2 rewrite.
+    if (parts[2] === "photo-stage" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const { filename, stage } = await readJson(request);
+      if (!filename) return jsonResponse({ error: "filename required" }, headers, 400);
+      const st = PHOTO_STAGES.includes(stage) ? stage : "";
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      job.photoStages = job.photoStages || {};
+      if (st) job.photoStages[filename] = st; else delete job.photoStages[filename];
+      job.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, filename, stage: st }, headers);
     }
 
     // POST /sla/jobs/{id}/signature  -> save signature PNG to R2 + attach to job
