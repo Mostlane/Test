@@ -808,13 +808,20 @@ function renderJob(){
     $("jobSub").textContent = " ";
     return;
   }
-  const ref = job.helpdeskRef || job.reference || job.id;
+  // A manual job with no typed reference has its helpdeskRef defaulted to the
+  // job's UUID id — that's a placeholder, not a real ticket. Treat it as "no
+  // reference" so the UUID never leaks into the Reference or Description slots
+  // (the leading "0" of a UUID was showing as "Reference: 0").
+  const rawRef = String(job.helpdeskRef || job.reference || "").trim();
+  const isUuidRef = !rawRef || rawRef === String(job.id) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawRef);
+  const ref = isUuidRef ? "" : rawRef;
   // Show the ticket number as the reference. New refs are "<ticket> - <site>"
   // (or "<ticket>-<site>"), so pull the leading ticket ("25878-Portsmouth…" →
   // "25878", "25886/1 - Gatwick Road" → "25886/1"). If there's no leading
   // ticket, show a short ref as-is; a fault sentence stuffed into the reference
   // (legacy jobs) has neither, so it stays hidden — the works is shown below.
-  const rt = String(ref || "").trim();
+  const rt = ref;
   const ticket = (rt.match(/^(\d[\d\/]*)/) || [])[1] || "";
   const shortRef = ticket || (rt.length <= 24 ? rt : "");
   const site = job.siteName || job.siteCode || job.address || job.location || "";
@@ -832,9 +839,9 @@ function renderJob(){
   // pick whichever field is the real fault text.
   const worksText = () => {
     const d = String(job.description || job.rawPayload?.description || "").trim();
-    const r = String(job.helpdeskRef || "").trim();
-    if (/^[0-9][0-9./-]*\s+-\s+\S/.test(r)) return d;   // clean ref → works is the description
-    return (r.length >= d.length) ? r : d;              // legacy → works is the longer field
+    if (!ref) return d;                                 // no real ref (manual job) → works is the description
+    if (/^[0-9][0-9./-]*\s+-\s+\S/.test(ref)) return d; // clean ref → works is the description
+    return (ref.length >= d.length) ? ref : d;          // legacy → works is the longer field
   };
   $("jobDesc").textContent = worksText() || "—";
 
