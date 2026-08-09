@@ -50,6 +50,10 @@
     #dayMapSeg{display:flex;gap:6px;padding:8px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb}
     .mapseg{flex:1;background:#fff;border:1px solid #cbd5e1;border-radius:20px;padding:8px 0;font-size:13px;font-weight:600;color:#334155;cursor:pointer}
     .mapseg.on{background:#003b82;border-color:#003b82;color:#fff}
+    #dayNav{display:none;align-items:center;justify-content:center;gap:14px;padding:8px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb}
+    #dayNav button{width:40px;height:40px;border-radius:12px;border:1px solid #cbd5e1;background:#fff;color:#003b82;font-size:22px;font-weight:700;line-height:1;cursor:pointer}
+    #dayNav button:active{transform:translateY(1px)}
+    #dayNavLabel{font-weight:700;color:#003b82;font-size:15px;min-width:170px;text-align:center}
     .day-banner{display:flex;align-items:baseline;gap:8px;padding:8px 2px;margin:16px 0 8px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
     .day-banner .d-count{font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)}
     .day-banner.today{color:var(--accent)}
@@ -165,9 +169,14 @@
   </div>
   <div id="dayMapSeg">
     <button type="button" class="mapseg on" data-r="day">Day</button>
-    <button type="button" class="mapseg" data-r="week">Week</button>
-    <button type="button" class="mapseg" data-r="month">Month</button>
+    <button type="button" class="mapseg" data-r="7">7 days</button>
+    <button type="button" class="mapseg" data-r="30">30 days</button>
     <button type="button" class="mapseg" data-r="year">Year</button>
+  </div>
+  <div id="dayNav">
+    <button type="button" id="dayPrev" aria-label="Previous day">‹</button>
+    <span id="dayNavLabel"></span>
+    <button type="button" id="dayNext" aria-label="Next day">›</button>
   </div>
   <div id="dayMap" style="flex:1;"></div>
   <div id="dayMapNote" style="font-size:11px;color:#6b7280;padding:4px 12px;background:#f9fafb;border-top:1px solid #e5e7eb;">Tap a pin to open the job.</div>
@@ -743,15 +752,23 @@ function escH(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;",
 let mapMode = "day";        // day | week | month | year — the pin range
 let allMineJobs = null;     // all the engineer's jobs, fetched once for the map
 
-// The date window for each mode (weeks are Mon–Sun, months calendar, year = YTD).
+let dayCursor = null;       // the single day shown in "Day" mode (scrollable)
+// Modes: day (one day, scroll ‹ ›) | 7 (last 7 days) | 30 (last 30 days) | year (YTD).
 function mapRange(mode){
   const now = new Date(); now.setHours(0,0,0,0);
-  if(mode === "week")  return [startOfWeek(now), endOfWeek(now)];
-  if(mode === "month") return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth()+1, 0)];
-  if(mode === "year")  return [new Date(now.getFullYear(), 0, 1), now];
-  return [now, now];       // day
+  if(mode === "7")    return [addDays(now, -6), now];
+  if(mode === "30")   return [addDays(now, -29), now];
+  if(mode === "year") return [new Date(now.getFullYear(), 0, 1), now];
+  const c = dayCursor || now;
+  return [c, c];           // day
 }
-const MAP_LABEL = { day:"today", week:"this week", month:"this month", year:"this year" };
+function mapLabel(mode){
+  if(mode === "7")    return "in the last 7 days";
+  if(mode === "30")   return "in the last 30 days";
+  if(mode === "year") return "this year";
+  const c = dayCursor || new Date();
+  return "on " + c.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" });
+}
 
 async function openDayMap(){
   $("dayMapOverlay").style.display = "flex";
@@ -773,6 +790,7 @@ async function openDayMap(){
       if(!Array.isArray(allMineJobs)) allMineJobs = [];
     }catch{ allMineJobs = []; }
   }
+  dayCursor = new Date(); dayCursor.setHours(0,0,0,0);   // Day starts on today
   mapMode = "day";          // always default to the day's jobs on open
   renderMapForRange(mapMode);
 }
@@ -780,6 +798,9 @@ async function openDayMap(){
 async function renderMapForRange(mode){
   mapMode = mode;
   [].forEach.call(document.querySelectorAll("#dayMapSeg .mapseg"), b => b.classList.toggle("on", b.dataset.r === mode));
+  // Day mode gets the ‹ date › scroller; the ranges don't.
+  const nav = $("dayNav"); if(nav) nav.style.display = (mode === "day") ? "flex" : "none";
+  if(mode === "day" && $("dayNavLabel")) $("dayNavLabel").textContent = (dayCursor || new Date()).toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short", year:"numeric" });
   if(!dayMap){ $("dayMapNote").textContent = "⚠️ Map couldn't load — check your connection and try again."; return; }
   const [from, to] = mapRange(mode);
   const fromISO = isoDate(from), toISO = isoDate(to);
@@ -788,7 +809,7 @@ async function renderMapForRange(mode){
     const d = isoDate(new Date(j.scheduledAt));   // local date, matches the range bounds
     return d >= fromISO && d <= toISO;
   });
-  const label = MAP_LABEL[mode] || "today";
+  const label = mapLabel(mode);
   $("dayMapNote").textContent = "Placing jobs by postcode…";
   await geocodePostcodes(list.map(jobPostcode));
   setTimeout(() => {
@@ -924,6 +945,10 @@ function init(){
   $("dayMapClose").addEventListener("click", () => { $("dayMapOverlay").style.display = "none"; });
   [].forEach.call(document.querySelectorAll("#dayMapSeg .mapseg"), b =>
     b.addEventListener("click", () => renderMapForRange(b.dataset.r)));
+  // ‹ › scroll through individual days (Day mode only).
+  const stepDay = (n) => { dayCursor = addDays(dayCursor || new Date(), n); dayCursor.setHours(0,0,0,0); renderMapForRange("day"); };
+  if($("dayPrev")) $("dayPrev").addEventListener("click", () => stepDay(-1));
+  if($("dayNext")) $("dayNext").addEventListener("click", () => stepDay(1));
   // Admin-only shortcuts to the SLA management areas — hidden for engineers
   // (SLA-only). The target pages also gate, so this is just clean navigation.
   if(hasSLAAdmin()){
