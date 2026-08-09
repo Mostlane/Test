@@ -347,7 +347,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   customer's signature, for EVERY engineer not just Story Mode). Enforced client-
   side (engineer-job.html `outcomeMissing`, checks `photos.some(stage==="After")`)
   AND server-side (sla.js `completionMissing` via `jobPhotoCount(env,id,"After")`,
-  non-admins only — admins can still override). **RA override:**
+  non-admins only — admins can still override). The field app **defaults the photo
+  stage to "After" once the RA is done** (In Progress/During is rarely used), so the
+  completion photo lands in the right tab. **Admins can recategorise a photo's
+  stage** (Before/During/After) from the photo lightbox — stored as a
+  `job.photoStages` override (no R2 rewrite); GET /files applies it, POST
+  `/sla/jobs/{id}/photo-stage` sets it (SLA-admin only). **RA override:**
   a discreet `#raSkipBtn` ("skip") in the RA panel shown **only to FullAccess**
   (`isFullAccess()`, not SLAAdmin) starts the job without the assessment —
   records `riskAssessment.skipped` with their name; the job view shows "⚠️ Skipped

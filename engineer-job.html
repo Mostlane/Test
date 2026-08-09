@@ -92,6 +92,11 @@
     .lightbox img{max-width:94%;max-height:80%;border-radius:8px}
     .lightbox .lx-close{position:absolute;top:16px;right:20px;color:#fff;font-size:30px;cursor:pointer;background:0;border:0}
     .lightbox .lx-nav{position:absolute;top:50%;transform:translateY(-50%);color:#fff;font-size:38px;cursor:pointer;background:0;border:0;padding:12px}
+    #lxStage{position:absolute;bottom:24px;left:0;right:0;display:none;justify-content:center;gap:8px;flex-wrap:wrap;padding:0 12px}
+    #lxStage.show{display:flex}
+    #lxStage .lbl{color:#cbd5e1;font-size:12px;align-self:center;margin-right:4px}
+    #lxStage button{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:20px;padding:7px 14px;font-size:13px;cursor:pointer}
+    #lxStage button.on{background:#2563eb;border-color:#2563eb;font-weight:600}
   </style>
 </head>
 <body>
@@ -138,7 +143,7 @@
     <div class="hint" style="text-align:center">You can only work one job at a time — wrap up the open one to move on.</div>
   </div></div>
 
-  <div class="lightbox" id="lightbox"><button class="lx-close" id="lxClose">✕</button><button class="lx-nav" id="lxPrev" style="left:6px">‹</button><img id="lxImg" alt=""><button class="lx-nav" id="lxNext" style="right:6px">›</button></div>
+  <div class="lightbox" id="lightbox"><button class="lx-close" id="lxClose">✕</button><button class="lx-nav" id="lxPrev" style="left:6px">‹</button><img id="lxImg" alt=""><button class="lx-nav" id="lxNext" style="right:6px">›</button><div id="lxStage"></div></div>
   <div class="toast" id="toast"></div>
 
 <script>
@@ -215,6 +220,10 @@
       var done = readSigLocal(); if(done && !done.pending){ try{ localStorage.removeItem(sigKey()); }catch(e){} }
     }
     chosen = raDone ? "In Progress" : "Travelling";
+    // Default the photo stage to "After" once the RA's done — the "During"/In
+    // Progress step is rarely used, and completion needs an After photo. Pre-RA the
+    // only photo is the RA's own "Before" shot (forced), so this doesn't affect it.
+    stage = raDone ? "After" : "During";
   }
   async function loadPhotos(){
     try{ var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?t="+Date.now(),{cache:"no-store"}); var j=await r.json(); photos=(j&&j.files)||[]; }catch(e){ photos=[]; }
@@ -242,7 +251,7 @@
       h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
     }
     h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
-    h+='<div class="seg" id="seg"><button data-s="Before">Before</button><button class="on" data-s="During">During</button><button data-s="After">After</button></div>';
+    h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
     h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" capture="environment" multiple style="display:none"></div>';
     h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">Set status</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
@@ -557,7 +566,27 @@
 
   var lxi=0;
   function openLightbox(i){ lxi=i; showLx(); $("lightbox").classList.add("show"); }
-  function showLx(){ if(!photos[lxi]) return; $("lxImg").src=photos[lxi].publicURL||""; }
+  function showLx(){
+    if(!photos[lxi]) return;
+    $("lxImg").src=photos[lxi].publicURL||"";
+    // Admins can recategorise a photo's stage right here (e.g. a shot filed under
+    // After that's really During). Engineers just view.
+    var bar=$("lxStage");
+    if(isOfficeAdmin()){
+      var p=photos[lxi], cur=p.stage||"";
+      bar.innerHTML='<span class="lbl">Stage:</span>'+["Before","During","After"].map(function(s){return '<button data-s="'+s+'" class="'+(s===cur?"on":"")+'">'+s+'</button>';}).join("");
+      [].forEach.call(bar.querySelectorAll("button"),function(btn){ btn.onclick=function(){ setPhotoStage(p.name, btn.dataset.s); }; });
+      bar.classList.add("show");
+    } else { bar.classList.remove("show"); bar.innerHTML=""; }
+  }
+  async function setPhotoStage(name, st){
+    try{
+      var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/photo-stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:name,stage:st})});
+      if(!r.ok) throw new Error();
+      var p=photos.find(function(x){return x.name===name;}); if(p) p.stage=st;
+      drawPhotos(); showLx(); refresh(); toast("Photo moved to "+st);
+    }catch(e){ toast("⚠ Couldn't move the photo"); }
+  }
   $("lxClose").onclick=function(){ $("lightbox").classList.remove("show"); };
   $("lxPrev").onclick=function(){ lxi=(lxi-1+photos.length)%photos.length; showLx(); };
   $("lxNext").onclick=function(){ lxi=(lxi+1)%photos.length; showLx(); };
