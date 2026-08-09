@@ -363,7 +363,11 @@ function jobCardInner(job, slaInfo, target){
 }
 
 function isoDate(d){
-  return d.toISOString().slice(0,10);
+  // LOCAL calendar date — NOT toISOString(), which is UTC. The week is built from
+  // local-midnight dates (startOfWeek), and in BST (UTC+1) toISOString() shifts
+  // each of those back a day, so the week read Sun–Sat and today vanished. Format
+  // the local Y-M-D directly so the week is a true Mon–Sun including today.
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
 }
 
 function startOfWeek(d){
@@ -781,7 +785,7 @@ async function renderMapForRange(mode){
   const fromISO = isoDate(from), toISO = isoDate(to);
   const list = (allMineJobs || []).filter(j => {
     if(!j.scheduledAt) return false;
-    const d = new Date(j.scheduledAt).toISOString().slice(0,10);
+    const d = isoDate(new Date(j.scheduledAt));   // local date, matches the range bounds
     return d >= fromISO && d <= toISO;
   });
   const label = MAP_LABEL[mode] || "today";
