@@ -227,6 +227,7 @@
           <select id="assignedTo" name="assignedTo">
             <option value="">Select engineer…</option>
           </select>
+          <label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px;color:#475569;margin-top:6px;cursor:pointer;"><input type="checkbox" id="showOfficeAssign" style="width:auto;"> Show office / admin staff too</label>
         </div>
       </div>
 
@@ -319,33 +320,42 @@ function toIsoOrNull(value){
 /* ------------------------
    FETCH PORTAL USERS
 ------------------------ */
+let allAssignUsers = [];
+function paintAssignUsers() {
+  const sel = $("assignedTo");
+  const keep = sel.value;
+  const showOffice = $("showOfficeAssign") && $("showOfficeAssign").checked;
+  const sorted = allAssignUsers.slice().sort(window.mlUserCmp);   // office first, then field, in the portal order
+  sel.innerHTML = `<option value="">Select engineer…</option>`;
+  sorted.forEach(u => {
+    const uname = u.Username || "";
+    // Office/admin staff are hidden unless the tick is on OR they're the one
+    // already picked — engineers are who jobs go to.
+    const isOffice = u.StaffType === "office";
+    if (isOffice && !showOffice && uname !== keep) return;
+    // Build the name from real parts only — a null first/last must never render
+    // as the literal "null null". Fall back to the username, then skip empties.
+    const name = [u.FirstName, u.LastName]
+      .map(x => (x == null ? "" : String(x)).trim())
+      .filter(Boolean).join(" ");
+    const label = (name || uname) + (isOffice ? " (office)" : "");
+    if(!label.trim()) return;
+    const opt = document.createElement("option");
+    opt.value = uname;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  });
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
 async function populateUsersDropdown() {
   const sel = $("assignedTo");
   sel.innerHTML = `<option value="">Loading users…</option>`;
 
   try {
     const res = await fetchJSON(USERS_API);
-    const users = res.Users || [];
-
-    const sorted = users.slice().sort(window.mlUserCmp);   // office first, then field, in the portal order
-
-    sel.innerHTML = `<option value="">Select engineer…</option>`;
-
-    sorted.forEach(u => {
-      const uname = u.Username || "";
-      // Build the name from real parts only — a null first/last must never render
-      // as the literal "null null". Fall back to the username, then skip empties.
-      const name = [u.FirstName, u.LastName]
-        .map(x => (x == null ? "" : String(x)).trim())
-        .filter(Boolean).join(" ");
-      const label = name || uname;
-      if(!label) return;
-
-      const opt = document.createElement("option");
-      opt.value = uname;
-      opt.textContent = label;
-      sel.appendChild(opt);
-    });
+    allAssignUsers = res.Users || [];
+    if ($("showOfficeAssign")) $("showOfficeAssign").addEventListener("change", paintAssignUsers);
+    paintAssignUsers();
 
   } catch (err) {
     console.error("User list failed:", err);

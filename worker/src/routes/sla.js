@@ -1060,8 +1060,11 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ areas, docs }, headers);
   }
 
-  // Upload a document (or a site photo) into an area. Any signed-in user.
+  // Upload a document (or a site photo) into an area — ADMINS ONLY (SLAAdmin |
+  // FullAccess). Engineers are read-only in site documents; they add photos
+  // through their jobs, which flow into Site Photos automatically.
   if (subpath === "/site/docs" && method === "POST") {
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Only office/admin can add site documents." }, headers, 403);
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);

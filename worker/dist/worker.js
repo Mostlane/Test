@@ -5157,6 +5157,7 @@ async function handle8(request, env, ctx, url, sess) {
     return jsonResponse({ areas, docs }, headers);
   }
   if (subpath === "/site/docs" && method === "POST") {
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Only office/admin can add site documents." }, headers, 403);
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
@@ -6321,7 +6322,7 @@ async function handle9(request, env, ctx, url, sess) {
     return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
   }
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
-    const site = await request.json().catch(() => ({}));
+    let site = await request.json().catch(() => ({}));
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
     if (!client) return error("client (category) required", 400, env, request);
     site.client = client;
@@ -6335,6 +6336,24 @@ async function handle9(request, env, ctx, url, sess) {
     const oldNum = q.get("oldSiteNumber");
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
+    }
+    if (path === "/update-site") {
+      const lookNum = String(oldNum || siteNumber).trim();
+      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
+      if (row) {
+        let cur = {};
+        try {
+          cur = JSON.parse(row.data) || {};
+        } catch {
+        }
+        const merged = { ...cur };
+        for (const [k, v] of Object.entries(site)) {
+          if (v !== void 0 && v !== null && v !== "") merged[k] = v;
+        }
+        merged.siteNumber = siteNumber;
+        merged.client = client;
+        site = merged;
+      }
     }
     await saveSite(env, tenantId, site);
     await ensureCustomer(env, tenantId, client);
