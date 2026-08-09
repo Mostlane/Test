@@ -5235,10 +5235,13 @@ function jobIsProject(job) {
 function signatureRequiredFor(job) {
   return job && job.requiresSignature !== void 0 ? !!job.requiresSignature : !jobIsProject(job);
 }
+function photoRequiredFor(job) {
+  return job && job.requiresPhoto !== void 0 ? !!job.requiresPhoto : !jobIsProject(job);
+}
 function completionMissing(job, patch, afterPhotoCount) {
   const miss = [];
   if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
-  if (afterPhotoCount < 1) miss.push("a completion photo (After)");
+  if (photoRequiredFor(job) && afterPhotoCount < 1) miss.push("a completion photo (After)");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
 }
@@ -5248,7 +5251,7 @@ function quoteMissing(job, patch, photoCount) {
   if (!String(q.description || "").trim()) miss.push("the works description");
   if (!String(q.reason || "").trim()) miss.push("why it needs quoting");
   if (!String(q.materials || "").trim()) miss.push("the materials");
-  if (photoCount < 1) miss.push("at least one photo");
+  if (photoRequiredFor(job) && photoCount < 1) miss.push("at least one photo");
   if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
 }
@@ -5571,6 +5574,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
   const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : !isProjJob;
   const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
+  const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
   const job = {
     id,
     helpdeskRef: body.reference || existing?.helpdeskRef || id,
@@ -5596,6 +5600,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
     requiresRA,
     requiresSignature,
+    requiresPhoto,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -5658,6 +5663,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
   if (patch.requiresRA !== void 0) job.requiresRA = !!patch.requiresRA;
   if (patch.requiresSignature !== void 0) job.requiresSignature = !!patch.requiresSignature;
+  if (patch.requiresPhoto !== void 0) job.requiresPhoto = !!patch.requiresPhoto;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }

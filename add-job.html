@@ -240,8 +240,11 @@
           <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin:0;cursor:pointer">
             <input type="checkbox" id="reqSig" style="width:auto"> Requires customer signature
           </label>
+          <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin:0;cursor:pointer">
+            <input type="checkbox" id="reqPhoto" style="width:auto"> Requires completion photo
+          </label>
         </div>
-        <div class="hint" id="reqHint">Projects default to neither — tick to require them on this job.</div>
+        <div class="hint" id="reqHint">Projects default to none — tick to require them on this job. (A completion note is always required.)</div>
       </div>
 
       <!-- Site details captured from the picker (not shown) -->
@@ -485,6 +488,7 @@ function applyReqDefaults(){
   const proj = isProjectContext();
   $("reqRA").checked = !proj;
   $("reqSig").checked = !proj;
+  $("reqPhoto").checked = !proj;
 }
 
 /* -----------------------------
@@ -527,6 +531,7 @@ async function handleSubmit(evt){
     scheduledAt: toIsoOrNull($("scheduledAt").value),
     requiresRA: $("reqRA").checked,
     requiresSignature: $("reqSig").checked,
+    requiresPhoto: $("reqPhoto").checked,
     originator: getLoggedInUser() || undefined
   };
 
@@ -578,6 +583,7 @@ async function init(){
   $("siteSelect").addEventListener("change", handleSiteChange);
   $("reqRA").addEventListener("change", function(){ reqTouched = true; });
   $("reqSig").addEventListener("change", function(){ reqTouched = true; });
+  $("reqPhoto").addEventListener("change", function(){ reqTouched = true; });
   applyReqDefaults();
 
   // Load sites
