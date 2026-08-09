@@ -652,7 +652,7 @@
           if (launch) { e.preventDefault(); doLaunch(launch.getAttribute("data-launch")); }
         });
         document.getElementById("pnavLogout").addEventListener("click", function () {
-          localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "/login.html";
+          localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html";
         });
         document.getElementById("pnavCollapse").addEventListener("click", function () {
           var c = document.documentElement.classList.toggle("pnav-collapsed");
@@ -767,7 +767,7 @@
           if (!blocking) o.addEventListener("click", function (e) { if (e.target === o) closeModal(); });
           var sb = document.getElementById("ocStartBtn"); if (sb) sb.onclick = doStart;
           var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
-          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "/login.html"; };
+          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html"; };
           var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
           var kb = document.getElementById("ocConfirmBtn"); if (kb) kb.onclick = doConfirmFinish;
         }

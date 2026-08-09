@@ -103,8 +103,19 @@ function showBlock(message) {
 // session) skips all device-lock checks. Session-scoped, so it ends when the
 // tab/browser closes — it does not permanently disable the device lock.
 function isMasterSession() {
-  try { return sessionStorage.getItem("mostlaneMasterLogin") === "1"; }
-  catch { return false; }
+  try {
+    if (sessionStorage.getItem("mostlaneMasterLogin") === "1") return true;
+    // A "View As" (owner impersonation) session also bypasses the device lock —
+    // it's still the owner's own device. The sessionStorage master flag above is
+    // wiped when iOS kills a backgrounded PWA, but the durable localStorage stash
+    // of the owner's real session survives; key off that so a resumed PWA keeps
+    // viewing instead of demanding a device registration for the impersonated
+    // user. The stash is set ONLY by the owner-locked /auth/impersonate flow and
+    // is cleared on return-to-self and on logout/login, so it can't linger.
+    var stash = localStorage.getItem("mostlaneViewAsReal");
+    if (stash) { try { if (JSON.parse(stash).token) return true; } catch (e) {} }
+    return false;
+  } catch (e) { return false; }
 }
 
 // ───────────────────────────────────────────────────────────────
