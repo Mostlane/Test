@@ -685,7 +685,7 @@ function cleanPostcode(site) {
 
   if (!r.ok || j.success === false) {
     console.error("Worker save error:", j);
-    throw new Error("Save failed");
+    throw new Error(j.error || `Save failed (HTTP ${r.status})`);
   }
 }
   // Filtering + render
@@ -1061,6 +1061,7 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
         delete currentEditing.fbcGateCodes;
         delete currentEditing.fbcWhat3Words;
       }
+      if (!isProjectSave && !currentEditing.siteNumber) return alert("Site Number required — enter a store/site number before saving.");
       if (!currentEditing.siteName) return alert("Site Name required");
       if (!currentEditing.postcode) return alert("Postcode required");
 
@@ -1071,7 +1072,7 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       statusEl.textContent = "Ready";
     }catch(e){
       console.error(e);
-      alert("Save failed");
+      alert(e.message || "Save failed");
       statusEl.textContent = "Ready";
     }
   };
