@@ -135,7 +135,7 @@
       <textarea id="mljeDesc"></textarea>
 
       <div class="mlje-2">
-        <div>
+        <div id="mljePriorityWrap">
           <label for="mljePriority">Priority</label>
           <select id="mljePriority"></select>
         </div>
@@ -433,6 +433,8 @@
     $("mljeRaised").value = toLocalInput(job.raisedAt);
     // On-site requirements — reflect the job's flags (project-aware default when unset).
     const isProjJob = /^p\d/i.test(String(job.siteCode || "")) || /project/i.test(String(job.storeType || job.client || ""));
+    // Projects have no priority level — hide the field entirely for them.
+    const pw = $("mljePriorityWrap"); if (pw) pw.style.display = isProjJob ? "none" : "";
     const reqOf = k => (job[k] !== undefined ? !!job[k] : !isProjJob);
     $("mljeReqRA").checked = reqOf("requiresRA");
     $("mljeReqSig").checked = reqOf("requiresSignature");

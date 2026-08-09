@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=9"></script>
+  <script src="sla-jobedit.js?v=10"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -487,7 +487,7 @@
         <div class="field-label">Reference</div>
         <div class="field-value"><span class="ref-badge" id="jobRef">—</span></div>
       </div>
-      <div class="col">
+      <div class="col" id="colPriority">
         <div class="field-label">Priority</div>
         <div class="field-value">
           <span class="priority-badge p4" id="jobPriority">P4</span>
@@ -505,7 +505,7 @@
         <div class="field-value" id="jobRaised">—</div>
       </div>
       <div class="col">
-        <div class="field-label">SLA Target / Countdown</div>
+        <div class="field-label" id="slaLabel">SLA Target / Countdown</div>
         <div class="pill-row">
           <span class="sla-badge sla-none" id="jobSlaBadge">—</span>
           <span class="status-pill" id="jobStatusPill">Status</span>
@@ -845,9 +845,12 @@ function renderJob(){
   };
   $("jobDesc").textContent = worksText() || "—";
 
+  // Projects have no priority level and no SLA — hide both for everyone.
+  const projJob = /^p\d/i.test(String(job.siteCode || "")) || /project/i.test(String(job.storeType || job.client || ""));
   const priorityRaw = (job.priority || "P4").toString().toUpperCase();
   $("jobPriority").textContent = priorityRaw;
   $("jobPriority").className = "priority-badge " + priorityRaw.toLowerCase();
+  $("colPriority").style.display = projJob ? "none" : "";
 
   const raised = parseDate(job.raisedAt || job.sla?.raisedAt);
   $("jobRaised").textContent = fmtDateTimeLong(raised);
@@ -858,6 +861,9 @@ function renderJob(){
   slaEl.textContent = slaInfo.text;
   slaEl.className = slaInfo.cls;
   slaEl.dataset.slaTarget = target || "";
+  // For projects, drop the SLA badge + relabel the field to just "Status".
+  slaEl.style.display = projJob ? "none" : "";
+  $("slaLabel").textContent = projJob ? "Status" : "SLA Target / Countdown";
 
   const st = job.status || "Pending";
   const pill = $("jobStatusPill");

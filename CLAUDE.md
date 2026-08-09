@@ -380,7 +380,14 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   projects client), ON otherwise; an explicit value wins, preserved across
   re-saves; settable on **add-job.html** ("On-site requirements" — four tick boxes
   that auto-default off when a Project site is picked). A project job can be
-  completed with NOTHING; everything else needs RA + note + photo + signature. When `requiresRA` is false the engineer page treats the RA as done
+  completed with NOTHING; everything else needs RA + note + photo + signature.
+  **Projects also have NO priority level and NO SLA at all, for every user:** the
+  worker stores `priority:""` + `targetAt:null` for project jobs (create + patch),
+  and the office views hide the fields for old jobs too — job-view.html
+  (`#colPriority` hidden, SLA badge hidden, label→"Status"), sla-main.html
+  (`isProjectJob` → blank priority cell + empty `slaBadge`) and sla-jobedit.js
+  (`#mljePriorityWrap` hidden). A blank priority never trips the P1 "Urgent" flag.
+  When `requiresRA` is false the engineer page treats the RA as done
   (no lock — `raRequired()` → `raDone=true`); the completion **note**,
   **photo** (After) and **signature** checks are each skipped when the matching
   flag is false — both client (engineer-job.html

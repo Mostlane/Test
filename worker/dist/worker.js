@@ -5560,8 +5560,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
   let status = normalizeStatus(body.status || existing?.status, catNames);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
-  const priority = body.priority || existing?.priority || "Priority 4";
-  const targetAt = computeSlaTarget(raisedAt, priority, cfg);
+  const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
+  const priority = isProjJob ? "" : body.priority || existing?.priority || "Priority 4";
+  const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
   const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
@@ -5574,7 +5575,6 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
       scheduledEnd = new Date(s + 36e5).toISOString();
     }
   }
-  const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
   const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : !isProjJob;
   const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
   const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
@@ -5682,6 +5682,10 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
     const cfg = await getConfig(env, tenantId);
     job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
+  }
+  if (jobIsProject(job)) {
+    job.priority = "";
+    job.targetAt = null;
   }
   if (patch.quote !== void 0) job.quote = patch.quote;
   if (patch.riskAssessment !== void 0) job.riskAssessment = patch.riskAssessment;
