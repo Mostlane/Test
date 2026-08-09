@@ -398,6 +398,15 @@
       if(r.status===409 && j.blockingJob){ showBlockModal(j.blockingJob, j.error); var be=new Error(j.error||"Finish your other job first"); be.blocked=true; throw be; }
       throw new Error(j.error||("Update failed ("+r.status+")"));
     }
+    // The server returns the full updated job — refresh the local copy's
+    // timeline-relevant fields and redraw Activity so a status change shows at
+    // once (previously the timeline only reflected the load-time snapshot).
+    if(j && j.id && job){
+      if(Array.isArray(j.statusHistory)) job.statusHistory=j.statusHistory;
+      if(Array.isArray(j.events)) job.events=j.events;
+      if(j.status) job.status=j.status;
+      try{ drawTimeline(); }catch(e){}
+    }
     return j;
   }
   var blockedBy=null;
