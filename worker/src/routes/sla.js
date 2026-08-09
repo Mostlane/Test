@@ -952,7 +952,7 @@ export async function handle(request, env, ctx, url, sess) {
   // Jobs previously raised at this site (basic sheet data), newest first —
   // LIVE jobs plus the imported ARCHIVE (historical) jobs for this store code.
   if (subpath === "/site/jobs" && method === "GET") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const code = storeCodeOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
     // Financial info (costs, invoices, values…) is FULL-ACCESS only. For everyone
     // else (incl. SLA admins) it's stripped from the archived record on the SERVER,
@@ -988,10 +988,11 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Every photo from every job at this site + any photos uploaded straight here.
   if (subpath === "/site/photos" && method === "GET") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const store = storeCodeOf(searchParams.get("siteCode"));
+    const siteKey = siteKeyOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
     const all = await listJobs(env, tenantId);
-    const jobsHere = all.filter(j => siteMatches(j, code, name));
+    const jobsHere = all.filter(j => siteMatches(j, store, name));
     const photos = [];
     for (const j of jobsHere) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/`, include: ["customMetadata"] });
@@ -1001,18 +1002,21 @@ export async function handle(request, env, ctx, url, sess) {
           by: (o.customMetadata && (o.customMetadata.by || o.customMetadata.uploadedBy)) || "", source: "job" });
       }
     }
-    if (code) {
-      const up = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/Site Photos/`, include: ["customMetadata"] });
+    if (siteKey) {
+      const up = await env.JOB_FILES.list({ prefix: `sitedocs/${siteKey}/Site Photos/`, include: ["customMetadata"] });
       for (const o of up.objects || []) {
         photos.push({ url: await fileUrl(env, url, o.key), key: o.key, name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null, by: o.customMetadata && o.customMetadata.by, source: "upload" });
       }
-      // Imported historical photos for this store (photos only — signatures and
-      // PDFs stay on the job in the Archive, not in the site gallery).
+    }
+    // Imported historical photos for this STORE (Co-op archive; photos only —
+    // signatures and PDFs stay on the job in the Archive). Only real store
+    // numbers have archive history, so projects never get a foreign store's shots.
+    if (store) {
       try {
         await ensureArchive(env, tenantId);
         await ensureArchiveFiles(env, tenantId);
-        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
+        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, store).all();
         const mos = (aj || []).map(r => r.id);
         for (let i = 0; i < mos.length && photos.length < 2000; i += 90) {
           const chunk = mos.slice(i, i + 90);
@@ -1033,7 +1037,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Document areas (Compliance + custom) and the files in each.
   if (subpath === "/site/docs" && method === "GET") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const code = siteKeyOf(searchParams.get("siteCode"));
     if (!code) return jsonResponse({ areas: await getSiteAreas(env, tenantId), docs: {} }, headers);
     const areas = await getSiteAreas(env, tenantId);
     const docs = {};
@@ -1052,7 +1056,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Upload a document (or a site photo) into an area. Any signed-in user.
   if (subpath === "/site/docs" && method === "POST") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
     const form = await request.formData();
@@ -1673,8 +1677,19 @@ async function patchJob(env, tenantId, id, patch) {
 
 // Site numbers arrive as "42", "0042" or "SR00042" — compare on the number.
 function digitsOf(s) { const m = String(s || "").match(/(\d+)/); return m ? String(Number(m[1])) : ""; }
+// A genuine STORE code (Co-op/retail store number) — used to match a site to its
+// live jobs and imported Co-op archive history. ONLY a pure-numeric site number
+// has one; projects ("P0002"), house-number names etc. return "" so they never
+// pull an unrelated store's jobs/photos. Number()-normalised to meet
+// archiveSiteCode() ("0148"->"148").
+function storeCodeOf(s) { const t = String(s || "").trim(); return /^\d+$/.test(t) ? String(Number(t)) : ""; }
+// A stable per-site KEY for R2 site storage (documents + uploaded site photos).
+// Numeric store numbers keep their normalised key (back-compat with existing
+// uploads); non-numeric sites (projects) get their OWN namespace instead of
+// colliding on a stripped digit.
+function siteKeyOf(s) { const t = String(s || "").trim(); return t ? (/^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "")) : ""; }
 function siteMatches(job, code, nameLower) {
-  const jc = digitsOf(job.siteCode);
+  const jc = storeCodeOf(job.siteCode);
   if (code && jc && jc === code) return true;
   if (!jc && nameLower && (job.siteName || "").trim().toLowerCase() === nameLower) return true;
   return false;

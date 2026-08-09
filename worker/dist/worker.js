@@ -5023,7 +5023,7 @@ async function handle8(request, env, ctx, url, sess) {
     }
   }
   if (subpath === "/site/jobs" && method === "GET") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const code = storeCodeOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
     const canMoney2 = sess ? await isFullAccess(env, tenantId, sess) : false;
     const all = await listJobs(env, tenantId);
@@ -5065,10 +5065,11 @@ async function handle8(request, env, ctx, url, sess) {
     return jsonResponse({ jobs }, headers);
   }
   if (subpath === "/site/photos" && method === "GET") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const store = storeCodeOf(searchParams.get("siteCode"));
+    const siteKey = siteKeyOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
     const all = await listJobs(env, tenantId);
-    const jobsHere = all.filter((j) => siteMatches(j, code, name));
+    const jobsHere = all.filter((j) => siteMatches(j, store, name));
     const photos = [];
     for (const j of jobsHere) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/`, include: ["customMetadata"] });
@@ -5085,8 +5086,8 @@ async function handle8(request, env, ctx, url, sess) {
         });
       }
     }
-    if (code) {
-      const up = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/Site Photos/`, include: ["customMetadata"] });
+    if (siteKey) {
+      const up = await env.JOB_FILES.list({ prefix: `sitedocs/${siteKey}/Site Photos/`, include: ["customMetadata"] });
       for (const o of up.objects || []) {
         photos.push({
           url: await fileUrl(env, url, o.key),
@@ -5097,10 +5098,12 @@ async function handle8(request, env, ctx, url, sess) {
           source: "upload"
         });
       }
+    }
+    if (store) {
       try {
         await ensureArchive(env, tenantId);
         await ensureArchiveFiles(env, tenantId);
-        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
+        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, store).all();
         const mos = (aj || []).map((r) => r.id);
         for (let i = 0; i < mos.length && photos.length < 2e3; i += 90) {
           const chunk = mos.slice(i, i + 90);
@@ -5127,7 +5130,7 @@ async function handle8(request, env, ctx, url, sess) {
     return jsonResponse({ photos }, headers);
   }
   if (subpath === "/site/docs" && method === "GET") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const code = siteKeyOf(searchParams.get("siteCode"));
     if (!code) return jsonResponse({ areas: await getSiteAreas(env, tenantId), docs: {} }, headers);
     const areas = await getSiteAreas(env, tenantId);
     const docs = {};
@@ -5145,7 +5148,7 @@ async function handle8(request, env, ctx, url, sess) {
     return jsonResponse({ areas, docs }, headers);
   }
   if (subpath === "/site/docs" && method === "POST") {
-    const code = digitsOf(searchParams.get("siteCode"));
+    const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
     const form = await request.formData();
@@ -5679,8 +5682,16 @@ function digitsOf(s) {
   const m = String(s || "").match(/(\d+)/);
   return m ? String(Number(m[1])) : "";
 }
+function storeCodeOf(s) {
+  const t = String(s || "").trim();
+  return /^\d+$/.test(t) ? String(Number(t)) : "";
+}
+function siteKeyOf(s) {
+  const t = String(s || "").trim();
+  return t ? /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+}
 function siteMatches(job, code, nameLower) {
-  const jc = digitsOf(job.siteCode);
+  const jc = storeCodeOf(job.siteCode);
   if (code && jc && jc === code) return true;
   if (!jc && nameLower && (job.siteName || "").trim().toLowerCase() === nameLower) return true;
   return false;
@@ -10824,12 +10835,12 @@ async function handle23(request, env, ctx, url, sess) {
     const slRate = {};
     const slSites = await fetchSitelogCosting(env, from, to);
     const slCovered = /* @__PURE__ */ new Set();
-    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
+    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     if (slSites) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
         const s = siteFor(resolved ? resolved.name : slSite.siteCode || "(no site)", resolved);
-        const sKey = siteKeyOf(resolved, slSite.siteCode);
+        const sKey = siteKeyOf2(resolved, slSite.siteCode);
         for (const p of slSite.people || []) {
           if (!p.costedVisits) continue;
           const portalUser = (p.portalUsername || "").trim();
@@ -10867,7 +10878,7 @@ async function handle23(request, env, ctx, url, sess) {
     for (const d of days) {
       for (const e of d.entries) {
         const s = siteFor(e.site, e.resolved);
-        const sKey = siteKeyOf(e.resolved, e.site);
+        const sKey = siteKeyOf2(e.resolved, e.site);
         const cu = canonEng(e.user);
         if (slCovered.has(sKey + "::" + normName(cu))) continue;
         const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
@@ -10919,7 +10930,7 @@ async function handle23(request, env, ctx, url, sess) {
         if (!v.check_in_at || !v.check_out_at) continue;
         const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
         const resolved = resolveSiteCode(reg, v.site_code);
-        const sKey = siteKeyOf(resolved, v.site_code);
+        const sKey = siteKeyOf2(resolved, v.site_code);
         const rt = slRate[sKey + "::" + normName(who)];
         if (!rt) continue;
         const site = bySite[sKey];

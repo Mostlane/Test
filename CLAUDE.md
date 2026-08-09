@@ -314,6 +314,15 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   then also returns that store's archive photos (kind='photo' only — signatures/
   PDFs stay on the job, not the site gallery). ~90% of jobs match a store; one-off
   customers with no store number stay in the Job Archive only.
+  **Site match keys (fix):** the site-folder lookups (/site/jobs, /site/photos,
+  /site/docs, siteMatches) must NOT use the lossy `digitsOf` on the `?site=` code —
+  that stripped a PROJECT number "P0002" to "2" and pulled Co-op store-2 history
+  onto a project. Use **`storeCodeOf(s)`** = pure-numeric only (`/^\d+$/` →
+  Number(); else "") for archive + cross-job matching (projects/house-name sites →
+  no store history), and **`siteKeyOf(s)`** = numeric normalised else sanitised
+  full code, for the R2 `sitedocs/<key>/…` storage prefix (projects get their own
+  namespace; numeric stores unchanged, back-compat). Live jobs' siteCode is always
+  a bare number, so `/^\d+$/` never regresses a real store.
   Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
   job-view) is the ONE-HIT editor — every Edit button opens it and it edits
   everything in one save: ref, description, priority, status, raised,
