@@ -954,6 +954,10 @@ export async function handle(request, env, ctx, url, sess) {
   if (subpath === "/site/jobs" && method === "GET") {
     const code = digitsOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
+    // Financial info (costs, invoices, values…) is admin-only. For everyone else
+    // it's stripped from the archived record on the SERVER, so it never reaches a
+    // field engineer's device.
+    const canMoney = sess ? await isSlaAdmin(env, tenantId, sess) : false;
     const all = await listJobs(env, tenantId);
     const mine = all.filter(j => siteMatches(j, code, name)).map(siteJobSummary).map(s => ({ ...s, source: "live" }));
     let archived = [];
@@ -965,6 +969,7 @@ export async function handle(request, env, ctx, url, sess) {
         ).bind(tenantId, code).all();
         archived = (results || []).map(r => {
           let d = {}; try { d = JSON.parse(r.data) || {}; } catch {}
+          if (!canMoney) d = stripFinancial(d);
           return {
             id: r.id, ref: r.ref || r.id,
             description: d.description || d.jobName || d.name || d["Job Name"] || d.Description || "",
@@ -1673,6 +1678,18 @@ function siteMatches(job, code, nameLower) {
   if (code && jc && jc === code) return true;
   if (!jc && nameLower && (job.siteName || "").trim().toLowerCase() === nameLower) return true;
   return false;
+}
+// Remove financial fields from an imported archive record for non-admins — by
+// key (cost/price/invoice/value/…) or by any value carrying a currency symbol.
+const MONEY_KEY = /(cost|price|invoic|value|total|charge|amount|labour|material|profit|margin|\bvat\b|\brate\b|paid|payable|sell|nett|\bnet\b|gross|quote|\bfee\b|balance|deposit|revenue|turnover|expense|£|\$)/i;
+function stripFinancial(d) {
+  const out = {};
+  for (const [k, v] of Object.entries(d || {})) {
+    if (MONEY_KEY.test(k)) continue;
+    if (v != null && typeof v !== "object" && /[£$€]/.test(String(v))) continue;
+    out[k] = v;
+  }
+  return out;
 }
 function siteJobSummary(j) {
   const events = Array.isArray(j.events) ? j.events : [];
