@@ -58,7 +58,7 @@
 
   <div class="card" id="memoCard" style="display:none;">
     <h2>📢 Company memos</h2>
-    <p class="sub">Write a memo, save it as a draft, then send it to everyone. A sent memo <b>can't be snoozed</b> — each person must read it and sign to confirm, and a signed copy is filed in their <b>My Documents › Memos</b>.</p>
+    <p class="sub">Write a memo, save it as a draft, then send it to <b>everyone</b> or to <b>selected people</b>. A sent memo <b>can't be snoozed</b> — each recipient must read it and sign to confirm, and a signed copy is filed in their <b>My Documents › Memos</b>. Use the 🗑 on any memo (draft or sent) to remove it.</p>
     <div style="display:grid;gap:8px;max-width:620px;">
       <div style="display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:center;">
         <label style="font-weight:700;font-size:13px;">To</label><input id="mm_to" placeholder="e.g. All Labour">
@@ -68,9 +68,19 @@
         <label style="font-weight:700;font-size:13px;">Re</label><input id="mm_re" placeholder="Subject — shown in the alert">
       </div>
       <textarea id="mm_body" rows="9" placeholder="Type the memo here. Blank lines separate paragraphs." style="width:100%;padding:11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;font-family:inherit;"></textarea>
+      <div style="border:1px solid #e5e7eb;border-radius:9px;padding:10px;background:#fbfcfe;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Send to</div>
+        <label style="display:inline-flex;gap:6px;align-items:center;margin-right:16px;cursor:pointer;"><input type="radio" name="mmAud" id="mmAudAll" value="all" checked> Everyone</label>
+        <label style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;"><input type="radio" name="mmAud" id="mmAudSome" value="some"> Choose people…</label>
+        <div id="mmPeople" style="display:none;margin-top:8px;">
+          <input id="mmPeopleSearch" placeholder="Filter names…" style="margin-bottom:6px;">
+          <div style="margin-bottom:6px;"><button type="button" class="btn small grey" id="mmPickAll">Select all</button> <button type="button" class="btn small grey" id="mmPickNone">Clear</button> <span class="sub" id="mmPickCount" style="margin:0;"></span></div>
+          <div id="mmPeopleList" style="max-height:200px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:6px;display:grid;gap:2px;">Loading people…</div>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <button class="btn primary" id="mmSave">Save draft</button>
-        <button class="btn" id="mmSend" style="background:#0a7d33;color:#fff;">Send to everyone…</button>
+        <button class="btn" id="mmSend" style="background:#0a7d33;color:#fff;">Send…</button>
         <button class="btn" id="mmClear" style="display:none;">New / clear</button>
         <span class="sub" id="mmEditing" style="margin:0;"></span>
       </div>
@@ -335,8 +345,29 @@ async function initPush(){
 }
 
 // ── Company memos ──────────────────────────────────────────────────────────
-let MM_EDIT = 0, MM_ME = "";
-function mmFields(){ return { id: MM_EDIT || undefined, to:g("mm_to").value.trim(), from:g("mm_from").value.trim(), cc:g("mm_cc").value.trim(), date:g("mm_date").value.trim(), re:g("mm_re").value.trim(), body:g("mm_body").value }; }
+let MM_EDIT = 0, MM_ME = "", MM_USERS = null, MM_SEL = new Set();
+function mmRecipients(){ return g("mmAudAll").checked ? null : [...MM_SEL]; }
+function mmFields(){ return { id: MM_EDIT || undefined, to:g("mm_to").value.trim(), from:g("mm_from").value.trim(), cc:g("mm_cc").value.trim(), date:g("mm_date").value.trim(), re:g("mm_re").value.trim(), body:g("mm_body").value, recipients: mmRecipients() }; }
+async function mmEnsurePeople(){
+  if(MM_USERS) return;
+  try{ const r = await (await authFetch("/users")).json(); MM_USERS = (r.Users||r.users||[]).filter(u=>u.Username); }
+  catch(e){ MM_USERS = []; }
+  if(window.mlOrderUsers){ try{ MM_USERS = window.mlOrderUsers(MM_USERS); }catch(e){} }
+}
+function mmPickCount(){ g("mmPickCount").textContent = MM_SEL.size ? (MM_SEL.size+" selected") : "none selected"; }
+function mmPeopleRender(){
+  const host = g("mmPeopleList"); const q = (g("mmPeopleSearch").value||"").toLowerCase();
+  if(!MM_USERS || !MM_USERS.length){ host.textContent = "Couldn't load people."; return; }
+  host.innerHTML = MM_USERS.filter(u=>{ const nm=((u.FirstName||"")+" "+(u.LastName||"")).trim()||u.Username; return !q || (nm+" "+u.Username).toLowerCase().includes(q); })
+    .map(u=>{ const nm=((u.FirstName||"")+" "+(u.LastName||"")).trim()||u.Username; const t=u.StaffType==="office"?"office":"field";
+      return '<label style="display:flex;gap:7px;align-items:center;padding:2px 4px;cursor:pointer;"><input type="checkbox" value="'+esc(u.Username)+'" '+(MM_SEL.has(u.Username)?'checked':'')+'> '+esc(nm)+' <span class="sub" style="margin:0;">('+t+')</span></label>'; }).join("");
+  host.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.onchange=()=>{ if(cb.checked) MM_SEL.add(cb.value); else MM_SEL.delete(cb.value); mmPickCount(); });
+  mmPickCount();
+}
+async function mmShowPeople(show){
+  g("mmPeople").style.display = show ? "" : "none";
+  if(show){ await mmEnsurePeople(); mmPeopleRender(); }
+}
 function mmSetForm(m){
   MM_EDIT = m ? m.id : 0;
   g("mm_to").value = m ? (m.to||"") : "All Labour";
@@ -345,6 +376,12 @@ function mmSetForm(m){
   g("mm_date").value = m ? (m.date||"") : new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});
   g("mm_re").value = m ? (m.re||"") : "";
   g("mm_body").value = m ? (m.body||"") : "";
+  // Audience: recipients array = targeted, null/absent = everyone.
+  const recs = (m && Array.isArray(m.recipients)) ? m.recipients : null;
+  MM_SEL = new Set(recs || []);
+  g("mmAudAll").checked = !recs; g("mmAudSome").checked = !!recs;
+  g("mmPeopleSearch").value = "";
+  mmShowPeople(!!recs);
   g("mmEditing").textContent = m ? ("Editing draft #"+m.id) : "";
   g("mmClear").style.display = m ? "" : "none";
   if(m) g("memoCard").scrollIntoView({behavior:"smooth"});
@@ -361,10 +398,13 @@ async function mmSave(sendAfter){
 async function mmSend(){
   let id = MM_EDIT;
   if(!g("mm_re").value.trim() || !g("mm_body").value.trim()){ toast("Add a subject and body first"); return; }
+  const recs = mmRecipients();
+  if(recs && !recs.length){ toast("Pick at least one person, or choose Everyone"); return; }
   // Save latest edits first, then send.
   id = await mmSave(true);
   if(!id) return;
-  if(!confirm("Send this memo to everyone now?\n\nIt will pop up for every user and can't be dismissed until they sign to confirm they've read it.")) return;
+  const who = recs ? (recs.length+" selected "+(recs.length===1?"person":"people")) : "everyone";
+  if(!confirm("Send this memo to "+who+" now?\n\nIt will pop up for them and can't be dismissed until they sign to confirm they've read it.")) return;
   const r = await (await authFetch("/memos/send", { method:"POST", body: JSON.stringify({ id }) })).json();
   if(!r.ok){ toast(r.error||"Couldn't send"); return; }
   toast("Sent to "+ (r.recipients||"all") +" people");
@@ -392,7 +432,9 @@ async function mmLoad(){
     if(!r.memos.length){ host.innerHTML = '<div class="empty">No memos yet.</div>'; return; }
     host.innerHTML = r.memos.map(m => {
       const tag = m.status==="sent" ? '<span class="mm-tag sent">Sent</span>' : '<span class="mm-tag draft">Draft</span>';
-      const who = m.status==="sent" ? '<span class="mm-who">'+m.signed+'/'+m.total+' signed</span>' : "";
+      const aud = Array.isArray(m.recipients) ? (m.recipients.length+' selected') : 'everyone';
+      const who = (m.status==="sent" ? '<span class="mm-who">'+m.signed+'/'+m.total+' signed</span> ' : '')
+        + '<span class="mm-who" title="Who this memo goes to">→ '+esc(aud)+'</span>';
       const btns = m.status==="sent"
         ? '<button class="btn" data-who="'+m.id+'">Who signed</button>'
         : '<button class="btn" data-edit="'+m.id+'">Edit</button><button class="btn" style="background:#0a7d33;color:#fff;" data-send="'+m.id+'">Send</button>';
@@ -410,6 +452,11 @@ function initMemos(user){
   g("mmSave").onclick = ()=>mmSave(false);
   g("mmSend").onclick = mmSend;
   g("mmClear").onclick = ()=>mmSetForm(null);
+  g("mmAudAll").onchange = ()=>mmShowPeople(false);
+  g("mmAudSome").onchange = ()=>mmShowPeople(true);
+  g("mmPeopleSearch").oninput = mmPeopleRender;
+  g("mmPickAll").onclick = async()=>{ await mmEnsurePeople(); MM_USERS.forEach(u=>MM_SEL.add(u.Username)); mmPeopleRender(); };
+  g("mmPickNone").onclick = ()=>{ MM_SEL.clear(); mmPeopleRender(); };
   mmSetForm(null);
   mmLoad();
 }

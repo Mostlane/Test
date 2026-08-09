@@ -10302,6 +10302,10 @@ async function ensure3(env) {
     body TEXT,
     created_by TEXT, created_at TEXT, sent_at TEXT
   )`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE memos ADD COLUMN recipients TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memo_acks (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     memo_id INTEGER NOT NULL,
@@ -10341,6 +10345,21 @@ async function activeUsers(env, tid) {
 }
 function fullName(u) {
   return ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+}
+function parseRecips(memo) {
+  try {
+    const a = JSON.parse(memo && memo.recipients ? memo.recipients : "null");
+    return Array.isArray(a) && a.length ? a.map(lc2) : null;
+  } catch {
+    return null;
+  }
+}
+async function recipientUsers(env, tid, memo) {
+  const all = await activeUsers(env, tid);
+  const set = parseRecips(memo);
+  if (!set) return all;
+  const want = new Set(set);
+  return all.filter((u) => want.has(lc2(u.username)));
 }
 function fmtWhen(iso) {
   try {
@@ -10444,17 +10463,18 @@ async function handle22(request, env, ctx, url, sess) {
     if (bad) return bad;
     const b = await readJson6(request);
     const fields = [b.to, b.from, b.cc, b.date, b.re, b.body].map((v) => String(v == null ? "" : v));
+    const recips = Array.isArray(b.recipients) && b.recipients.length ? JSON.stringify(b.recipients.map((x) => String(x)).filter(Boolean)) : null;
     const id = parseInt(b.id, 10) || 0;
     if (id) {
       const row = await env.DB.prepare("SELECT status FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).first();
       if (!row) return jr5({ error: "Not found" }, headers, 404);
       if (row.status === "sent") return jr5({ error: "Already sent \u2014 can't edit" }, headers, 409);
-      await env.DB.prepare("UPDATE memos SET m_to=?, m_from=?, m_cc=?, m_date=?, m_re=?, body=? WHERE tenant_id=? AND id=?").bind(...fields, tid, id).run();
+      await env.DB.prepare("UPDATE memos SET m_to=?, m_from=?, m_cc=?, m_date=?, m_re=?, body=?, recipients=? WHERE tenant_id=? AND id=?").bind(...fields, recips, tid, id).run();
       return jr5({ ok: true, id }, headers);
     }
     const res = await env.DB.prepare(
-      "INSERT INTO memos (tenant_id, status, m_to, m_from, m_cc, m_date, m_re, body, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
-    ).bind(tid, "draft", ...fields, me, (/* @__PURE__ */ new Date()).toISOString()).run();
+      "INSERT INTO memos (tenant_id, status, m_to, m_from, m_cc, m_date, m_re, body, recipients, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, "draft", ...fields, recips, me, (/* @__PURE__ */ new Date()).toISOString()).run();
     return jr5({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
   }
   if (sub === "/send" && method === "POST") {
@@ -10472,7 +10492,7 @@ async function handle22(request, env, ctx, url, sess) {
     await env.DB.prepare(
       "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, memo_id, username) DO NOTHING"
     ).bind(tid, id, author, at, null, null).run();
-    const users = await activeUsers(env, tid);
+    const users = await recipientUsers(env, tid, memo);
     users.forEach((u) => {
       if (lc2(u.username) === lc2(author)) return;
       ctx?.waitUntil(sendToUser(env, tid, u.username, {
@@ -10498,15 +10518,17 @@ async function handle22(request, env, ctx, url, sess) {
     const bad = await needFull();
     if (bad) return bad;
     const { results } = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? ORDER BY id DESC").bind(tid).all();
-    const total = (await activeUsers(env, tid)).length;
+    const allCount = (await activeUsers(env, tid)).length;
     const memos = [];
     for (const m of results || []) {
+      const recips = parseRecips(m);
+      const total = recips ? (await recipientUsers(env, tid, m)).length : allCount;
       let signed = 0;
       if (m.status === "sent") {
         const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, m.id).first();
         signed = c && c.n || 0;
       }
-      memos.push({ id: m.id, status: m.status, to: m.m_to, from: m.m_from, cc: m.m_cc, date: m.m_date, re: m.m_re, body: m.body, created_at: m.created_at, sent_at: m.sent_at, signed, total });
+      memos.push({ id: m.id, status: m.status, to: m.m_to, from: m.m_from, cc: m.m_cc, date: m.m_date, re: m.m_re, body: m.body, recipients: recips, created_at: m.created_at, sent_at: m.sent_at, signed, total });
     }
     return jr5({ ok: true, memos }, headers);
   }
@@ -10522,7 +10544,7 @@ async function handle22(request, env, ctx, url, sess) {
     acks.forEach((a) => {
       ackMap[lc2(a.username)] = a.signed_at;
     });
-    const users = await activeUsers(env, tid);
+    const users = await recipientUsers(env, tid, memo);
     const signed = [], unsigned = [];
     users.forEach((u) => {
       if (ackMap[lc2(u.username)]) signed.push({ username: u.username, name: fullName(u), at: ackMap[lc2(u.username)] });
@@ -10533,9 +10555,14 @@ async function handle22(request, env, ctx, url, sess) {
   }
   if (sub === "/pending" && method === "GET") {
     const { results } = await env.DB.prepare(
-      "SELECT m.id, m.m_re, m.m_from, m.sent_at FROM memos m WHERE m.tenant_id=? AND m.status='sent' AND NOT EXISTS (SELECT 1 FROM memo_acks a WHERE a.tenant_id=m.tenant_id AND a.memo_id=m.id AND lower(a.username)=lower(?)) ORDER BY m.id ASC"
+      "SELECT m.id, m.m_re, m.m_from, m.sent_at, m.recipients FROM memos m WHERE m.tenant_id=? AND m.status='sent' AND NOT EXISTS (SELECT 1 FROM memo_acks a WHERE a.tenant_id=m.tenant_id AND a.memo_id=m.id AND lower(a.username)=lower(?)) ORDER BY m.id ASC"
     ).bind(tid, me).all();
-    return jr5({ ok: true, memos: (results || []).map((m) => ({ id: m.id, re: m.m_re, from: m.m_from, at: m.sent_at })) }, headers);
+    const meLc = lc2(me);
+    const mine = (results || []).filter((m) => {
+      const r = parseRecips(m);
+      return !r || r.includes(meLc);
+    });
+    return jr5({ ok: true, memos: mine.map((m) => ({ id: m.id, re: m.m_re, from: m.m_from, at: m.sent_at })) }, headers);
   }
   if (sub === "/one" && method === "GET") {
     const id = parseInt(url.searchParams.get("id"), 10);
@@ -10551,6 +10578,8 @@ async function handle22(request, env, ctx, url, sess) {
     if (!id) return jr5({ error: "id required" }, headers, 400);
     const memo = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=? AND status='sent'").bind(tid, id).first();
     if (!memo) return jr5({ error: "Memo not found" }, headers, 404);
+    const rset = parseRecips(memo);
+    if (rset && !rset.includes(lc2(me))) return jr5({ error: "This memo wasn't sent to you" }, headers, 403);
     const existing = await env.DB.prepare("SELECT signed_at FROM memo_acks WHERE tenant_id=? AND memo_id=? AND lower(username)=lower(?)").bind(tid, id, me).first();
     if (existing && existing.signed_at) return jr5({ ok: true, already: true }, headers);
     const urow = await env.DB.prepare("SELECT first_name, last_name FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, me).first();

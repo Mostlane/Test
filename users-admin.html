@@ -36,6 +36,11 @@
     .pill { font-size:11px; padding:2px 8px; border-radius:999px; }
     .pill.active { background:#e3f6e8; color:#0c7d27; } .pill.disabled { background:#fde8ea; color:#b00020; }
     .pill.pending { background:#fff3cd; color:#7a5b00; }
+    .lvl { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; vertical-align:middle; letter-spacing:.02em; }
+    .lvl-field  { background:#e6f0ff; color:#1d4ed8; }
+    .lvl-office { background:#e7f7ee; color:#0c7d33; }
+    .lvl-admin  { background:#fff0e0; color:#b45309; }
+    .lvl-full   { background:#f3e8ff; color:#7c2d92; }
     .muted { color:#667085; font-size:12px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
     .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; }
@@ -160,6 +165,17 @@
     <div class="uhead">
       <span></span><span>User</span><span>Email</span><span>Type</span><span>Status</span><span>Access</span><span>Actions</span>
     </div>
+
+    <details id="levelLegend" style="margin:6px 0 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fbfcfe;padding:8px 12px;">
+      <summary style="cursor:pointer;font-weight:600;color:#334155;">What do the access levels mean?</summary>
+      <div style="margin-top:8px;display:grid;gap:8px;font-size:13px;color:#334155;">
+        <div><span class="lvl lvl-field">Field</span> An engineer out on jobs. Sees <b>their own</b> jobs, timesheet, van check and documents — no admin controls or other people's data.</div>
+        <div><span class="lvl lvl-office">Office</span> Office staff. Can use the boards and pages their ticked permissions allow (e.g. Sites, SLA, Holiday), but <b>can't manage</b> other users or system settings.</div>
+        <div><span class="lvl lvl-admin">Admin</span> Office staff who also hold one or more <b>admin</b> permissions (Users, SLA Admin, Holiday admin, Device admin, Timesheet admin, P&amp;E admin or Projects admin) — they manage that area for everyone.</div>
+        <div><span class="lvl lvl-full">Full access</span> The master switch — sees and controls <b>everything</b> (every permission is on). Reserved for owners/managers.</div>
+        <div class="muted" style="font-size:12px;">The badge shows a person's highest level. Change it per person with <b>Field/Office</b> (the Type toggle when editing) and the individual permission switches on the <b>Permissions</b> tab.</div>
+      </div>
+    </details>
 
     <div id="listWrap">
       <div class="zone">
@@ -500,11 +516,22 @@
       return n ? n + " area" + (n === 1 ? "" : "s") : "None";
     }
 
+    // Permissions that make someone an "Admin" (manage an area for everyone).
+    const ADMIN_PERMS = ["Users","DeviceAdmin","HolidayAdmin","AssetAdmin","ProjectsAdmin","TimesheetAdmin","SLAAdmin"];
+    // A person's headline access level (highest wins).
+    function levelOf(u) {
+      if (u.FullAccess === "Yes") return { label: "Full access", cls: "lvl-full" };
+      if (ADMIN_PERMS.some(p => u[p] === "Yes")) return { label: "Admin", cls: "lvl-admin" };
+      if (u.StaffType === "office") return { label: "Office", cls: "lvl-office" };
+      return { label: "Field", cls: "lvl-field" };
+    }
+
     function userRow(u) {
       const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
+      const lv = levelOf(u);
       return `<div class="urow" data-user="${esc(u.Username)}">
         <span class="grip" title="Drag to reorder">⠿</span>
-        <div class="ucell uname" data-label="User"><b>${esc(name)}</b><div class="muted">${esc(u.Username)}</div></div>
+        <div class="ucell uname" data-label="User"><b>${esc(name)}</b> <span class="lvl ${lv.cls}">${lv.label}</span><div class="muted">${esc(u.Username)}</div></div>
         <div class="ucell" data-label="Email">${esc(u.Email || "—")}</div>
         <div class="ucell" data-label="Type">${esc(u.EmploymentType || "—")}</div>
         <div class="ucell" data-label="Status"><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></div>
