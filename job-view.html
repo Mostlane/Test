@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=10"></script>
+  <script src="sla-jobedit.js?v=11"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -1301,11 +1301,17 @@ function isPackStatus(s){ return s === "Quote" || s === "On Hold" || s === "In P
 // completion evidence (Complete = photo + note).
 function needsConfirm(s){ return isPackStatus(s) || s === "Complete"; }
 
+// Projects have a slim status set — Scheduled · Travelling · In Progress ·
+// Complete (no On Hold/Quote/Order/custom categories).
+function jvIsProject(){ return job && (/^p\d/i.test(String(job.siteCode||"")) || /project/i.test(String(job.storeType||job.client||""))); }
+const PROJ_STATUSES = ["Scheduled","Travelling","In Progress","Complete"];
 function buildStatusChips(){
   const grid = $("statusGrid");
   if(!grid) return;
   grid.innerHTML = "";
+  const proj = jvIsProject(), cur = job && job.status;
   Array.from($("statusSelect").options).forEach(opt => {
+    if(proj && !PROJ_STATUSES.includes(opt.value) && opt.value !== cur) return;
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.status = opt.value;

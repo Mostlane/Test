@@ -78,7 +78,10 @@
   // Rebuild the status dropdown; always include the job's own status so an
   // orphaned/custom value still shows selected instead of silently blank.
   function buildStatusOptions(current) {
-    const list = STATUSES.slice();
+    // Projects have a slim status set — no On Hold / Quote / custom categories.
+    const proj = currentJob && (/^p\d/i.test(String(currentJob.siteCode || "")) ||
+      /project/i.test(String(currentJob.storeType || currentJob.client || "")));
+    const list = proj ? ["Scheduled", "Travelling", "In Progress", "Complete"] : STATUSES.slice();
     if (current && !list.some(s => s.toLowerCase() === String(current).toLowerCase())) list.push(current);
     const sel = $("mljeStatus");
     if (sel) sel.innerHTML = list.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
