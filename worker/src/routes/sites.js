@@ -40,7 +40,7 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
-    const site = await request.json().catch(() => ({}));
+    let site = await request.json().catch(() => ({}));
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
     if (!client) return error("client (category) required", 400, env, request);
     site.client = client;
@@ -61,6 +61,24 @@ export async function handle(request, env, ctx, url, sess) {
     const oldNum = q.get("oldSiteNumber");
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
+    }
+
+    // Update = MERGE into the existing record so a partial edit (e.g. just adding
+    // a phone number to a site from inside a job) never wipes the site's other
+    // fields. Look up by the old number first (a rename), else the current one.
+    if (path === "/update-site") {
+      const lookNum = String(oldNum || siteNumber).trim();
+      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+        .bind(db.tenantId, client, lookNum).first();
+      if (row) {
+        let cur = {}; try { cur = JSON.parse(row.data) || {}; } catch {}
+        const merged = { ...cur };
+        for (const [k, v] of Object.entries(site)) {
+          if (v !== undefined && v !== null && v !== "") merged[k] = v;
+        }
+        merged.siteNumber = siteNumber; merged.client = client;
+        site = merged;
+      }
     }
 
     await saveSite(env, tenantId, site);

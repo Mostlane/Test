@@ -262,7 +262,7 @@ async function renderPhotos(){
   }
   if(activeTab !== "Site Photos") return;
   c.innerHTML = "";
-  c.appendChild(uploadBar("Site Photos", "image/*", true));
+  if(admin) c.appendChild(uploadBar("Site Photos", "image/*", true));
   if(!photos.length){ const d=document.createElement("div"); d.className="empty"; d.textContent="No photos from jobs at this site yet."; c.appendChild(d); return; }
   const grid = document.createElement("div"); grid.className = "grid";
   photos.forEach(p => {
@@ -287,8 +287,8 @@ async function renderDocs(area){
   if(activeTab !== area) return;
   const files = (d.docs && d.docs[area]) || [];
   c.innerHTML = "";
-  c.appendChild(uploadBar(area, "*/*", false));
-  if(!files.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="Nothing here yet — drop in a document above."; c.appendChild(e); return; }
+  if(admin) c.appendChild(uploadBar(area, "*/*", false));
+  if(!files.length){ const e=document.createElement("div"); e.className="empty"; e.textContent = admin ? "Nothing here yet — drop in a document above." : "Nothing here yet."; c.appendChild(e); return; }
   const list = document.createElement("div"); list.className = "doclist";
   files.forEach(f => {
     const isImg = /\.(png|jpe?g|webp|gif)$/i.test(f.name || "");

@@ -155,6 +155,7 @@
         <h3>Schedule &amp; engineers</h3>
         <label>Assigned engineers (tick all that will attend)</label>
         <div class="mlje-engs" id="mljeEngineers"><span class="mlje-hint">Loading engineers…</span></div>
+        <label class="mlje-chk" style="margin-top:4px;"><input type="checkbox" id="mljeShowOffice"> Show office / admin staff too <small style="font-weight:400;color:#64748b;">(normally hidden — engineers only)</small></label>
         <div class="mlje-hint" style="margin-top:4px;">Tick two or more and each engineer gets their <b>own independent job</b> (same reference with an -A / -B suffix) — separate status, risk assessment, photos and completion, so their days run on their own.</div>
 
         <label for="mljeSchedDate">Scheduled date &amp; times</label>
@@ -355,7 +356,7 @@
         const d = await r.json();
         let list = (d.Users || d.users || []).filter(u => u.Username && (u.Status || "").toLowerCase() === "active");
         if (window.mlOrderUsers) list = window.mlOrderUsers(list);
-        engineers = list.map(u => ({ username: u.Username, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username }));
+        engineers = list.map(u => ({ username: u.Username, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username, staffType: (u.StaffType === "office" ? "office" : "field") }));
       } catch (e) { engineers = []; }
     }
     if (!customers) {
@@ -485,18 +486,30 @@
       ? job.assignedEngineers : (job.assignedTo ? [job.assignedTo] : []))
       .filter(Boolean).map(a => String(a).toLowerCase());
     const box = $("mljeEngineers");
-    box.innerHTML = "";
-    (engineers || []).forEach(e => {
-      const label = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = e.username;
-      input.checked = assigned.includes(e.username.toLowerCase());
-      label.appendChild(input);
-      label.appendChild(document.createTextNode(" " + e.name));
-      box.appendChild(label);
-    });
-    if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
+    // Office/admin staff are hidden by default (rarely assigned jobs) — shown
+    // only when the "Show office staff" tick is on OR they're already on this
+    // job. Re-painting preserves whatever is currently ticked.
+    function paintEngineers(showOffice) {
+      const nowChecked = new Set([...box.querySelectorAll("input:checked")].map(i => i.value.toLowerCase()));
+      const on = u => assigned.includes(u.toLowerCase()) || nowChecked.has(u.toLowerCase());
+      box.innerHTML = "";
+      (engineers || []).forEach(e => {
+        const isOffice = e.staffType === "office";
+        if (isOffice && !showOffice && !on(e.username)) return;
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = e.username;
+        input.checked = on(e.username);
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(" " + e.name + (isOffice ? " (office)" : "")));
+        box.appendChild(label);
+      });
+      if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
+    }
+    const showOfficeTog = $("mljeShowOffice");
+    if (showOfficeTog) { showOfficeTog.checked = false; showOfficeTog.onchange = () => paintEngineers(showOfficeTog.checked); }
+    paintEngineers(false);
     // Deleting is for SLA admins only (the server enforces this too). This
     // server-confirmed check only ever ADDS the button (e.g. first login on a
     // new device before the permission cache exists) — it never removes it,
@@ -529,7 +542,15 @@
     if ($("mljeSaveSite").checked && siteName) {
       try {
         msg.textContent = "Saving site…";
-        let client, existing = pickedSite;
+        let existing = pickedSite;
+        // The job already carries a site but the user didn't re-pick it from the
+        // dropdown — resolve it from the job's site code so ticking "save" UPDATES
+        // that site (adds the phone/address) instead of creating a duplicate.
+        if (!existing && currentJob.siteCode) {
+          const want = String(currentJob.siteCode).replace(/\D/g, "");
+          existing = (sites || []).find(s => String(s.rawNumber).replace(/\D/g, "") === want) || null;
+        }
+        let client;
         if (existing) {
           client = existing.client || "retail";
           siteCode = existing.code;
