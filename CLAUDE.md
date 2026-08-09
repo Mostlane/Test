@@ -610,9 +610,9 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   jobs + the imported ARCHIVE (historical) jobs for the store (GET /sla/site/jobs
   returns both, each tagged `source:live|archive`; archive carries its full imported
   record). Every job opens in a **read-only modal** (archive badged 🗄; live keeps an
-  "Open full job (edit)" link for FullAccess only). **Financial info is admin-only:**
-  the server strips money fields from each archived record for non-admins
-  (`stripFinancial` via `isSlaAdmin` in /sla/site/jobs — by key cost/price/invoice/…
+  "Open full job (edit)" link for FullAccess only). **Financial info is FullAccess-only:**
+  the server strips money fields from each archived record for anyone without FullAccess
+  (`stripFinancial` via `isFullAccess` in /sla/site/jobs — by key cost/price/invoice/…
   or any £/$ value), so a field engineer only ever sees description/notes/status/etc.,
   never costs/invoices.
 - `menu-config` (in portal.js) — /menu-config: Full-Access shared list of
