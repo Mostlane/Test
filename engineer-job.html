@@ -238,7 +238,11 @@
     var dirDest = (job.lat!=null&&job.lon!=null)? (job.lat+","+job.lon) : (address||job.siteName||"");
     var urgent = /priority\s*1/i.test(job.priority||"");
     var h='';
-    h+='<button class="backline" id="backBtn">← '+esc(job.helpdeskRef||job.id)+'</button>';
+    // A manual job with no typed reference has helpdeskRef defaulted to its UUID
+    // id — don't show that; fall back to a plain "Back".
+    var rref=String(job.helpdeskRef||"").trim();
+    var niceRef=(!rref||rref===String(job.id)||/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rref))?"":rref;
+    h+='<button class="backline" id="backBtn">← '+esc(niceRef||"Back")+'</button>';
     h+='<h1 class="big">'+esc(jobName())+'</h1>';
     if(job.description) h+='<div class="sub">'+esc(job.description)+'</div>';
     h+='<div class="metarow">'+(urgent?'<span class="pill urgent">Urgent</span>':'')+'<span class="pill grey" id="curstatus">'+esc(job.status||"")+'</span></div>';
