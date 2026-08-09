@@ -298,68 +298,6 @@
   </div>
 </div>
 
-<!-- ASSIGN / SCHEDULE MODAL -->
-<div class="modal-backdrop" id="assignBackdrop">
-  <div class="modal">
-    <header>
-      <h2 id="assignTitle">Send job to engineers</h2>
-      <button type="button" id="assignClose">&times;</button>
-    </header>
-    <div class="modal-body">
-      <div class="field">
-        <label>Job</label>
-        <div class="ref" id="assignRef">—</div>
-      </div>
-      <div class="field">
-        <label>Engineers — tick everyone attending</label>
-        <div id="assignChecks" class="engineer-checks">Loading…</div>
-      </div>
-      <div class="field">
-        <label for="assignDate">Date</label>
-        <input type="date" id="assignDate">
-      </div>
-      <div class="timerow">
-        <div>
-          <label>Start time</label>
-          <div class="wheelbox">
-            <div class="wheel" id="wStartH"></div>
-            <span class="wheelsep">:</span>
-            <div class="wheel" id="wStartM"></div>
-          </div>
-        </div>
-        <div>
-          <label>Finish time</label>
-          <div class="wheelbox">
-            <div class="wheel" id="wEndH"></div>
-            <span class="wheelsep">:</span>
-            <div class="wheel" id="wEndM"></div>
-          </div>
-        </div>
-      </div>
-      <div class="small muted" style="margin:6px 0 8px;">Finish auto-sets to one hour after start — adjust if needed.</div>
-      <div class="field">
-        <label>When the engineer sees this job</label>
-        <div id="asgVisOpts" style="display:flex;flex-direction:column;gap:7px;">
-          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="now" checked style="width:auto;margin-top:3px;"> <span><b>Visible now</b><br><span class="small muted">The engineer sees it straight away (default).</span></span></label>
-          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="dayBefore" style="width:auto;margin-top:3px;"> <span><b>5pm the day before</b><br><span class="small muted">Hidden until 17:00 the evening before the scheduled day.</span></span></label>
-          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="at" style="width:auto;margin-top:3px;"> <span><b>At a set date &amp; time…</b><br><span class="small muted">You choose exactly when it appears.</span></span></label>
-          <input type="datetime-local" id="asgVisAt" style="display:none;margin:0 0 2px 26px;width:calc(100% - 26px);">
-          <label style="display:flex;gap:8px;align-items:flex-start;font-weight:400;cursor:pointer;margin:0;"><input type="radio" name="asgVis" value="afterPrev" style="width:auto;margin-top:3px;"> <span><b>After the previous job that day</b><br><span class="small muted">Appears once the engineer finishes their earlier job that day.</span></span></label>
-        </div>
-      </div>
-      <div class="field">
-        <label for="assignNote">Note (optional)</label>
-        <textarea id="assignNote" placeholder="e.g. Booked with site contact for the morning."></textarea>
-      </div>
-    </div>
-    <div class="actions">
-      <button type="button" class="btn" id="assignCancel">Cancel</button>
-      <button type="button" class="btn primary" id="assignSave">Send job</button>
-    </div>
-    <div id="assignStatus" class="small muted" style="margin-top:4px;"></div>
-  </div>
-</div>
-
 <!-- UPDATE MODAL -->
 <div class="modal-backdrop" id="updateBackdrop">
   <div class="modal">
@@ -394,7 +332,7 @@
         <label for="updateNote">Note (goes in the job history)</label>
         <textarea id="updateNote"></textarea>
       </div>
-      <div class="small muted">To change engineers or times, use <b>Send</b> on the job row instead.</div>
+      <div class="small muted">To change engineers, times or visibility, use <b>✏️ Edit</b> on the job row.</div>
     </div>
     <div class="actions">
       <button type="button" class="btn" id="updateCancel">Cancel</button>
@@ -543,7 +481,7 @@ let cachedUsers = [];
 let activeStatus = "open";     // "open" = everything not complete/closed/invoiced
 let activePriority = "all";
 let selected = new Set();
-let currentAssignId = null, currentUpdateId = null, currentPdfJobId = null;
+let currentUpdateId = null, currentPdfJobId = null;
 let countdownTimerId = null;
 
 /* ============ helpers ============ */
@@ -745,8 +683,7 @@ function render(){
       <td class="small">${engNames || `<span class="noalloc">Not Allocated</span>`}</td>
       <td>
         <div class="rowactions">
-          <button class="btn small" data-action="assign">👤 Send</button>
-          <button class="btn small" data-action="update">✏️</button>
+          <button class="btn small" data-action="update">✏️ Edit</button>
           <button class="btn small" data-action="sheet">📄</button>
           <button class="btn small" data-action="view">View</button>
         </div>
@@ -769,8 +706,7 @@ function render(){
       </div>
       <div class="mjob-meta">${sched ? "🗓 " + sched : ""} ${engNames ? "· 👤 " + esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</div>
       <div class="mjob-actions">
-        <button class="btn small" data-action="assign">👤 Send</button>
-        <button class="btn small" data-action="update">✏️ Update</button>
+        <button class="btn small" data-action="update">✏️ Edit</button>
         <button class="btn small" data-action="sheet">📄 Sheet</button>
         <button class="btn small primary" data-action="view">Open</button>
       </div>`;
@@ -855,159 +791,6 @@ function startCountdown(){
       el.textContent = info.text; el.className = info.cls;
     });
   }, 30000);
-}
-
-/* ============ smooth time wheels ============ */
-function buildWheel(el, values, onSettle){
-  el.innerHTML = "";
-  const padTop = document.createElement("div"); padTop.className = "pad"; el.appendChild(padTop);
-  values.forEach(v => {
-    const d = document.createElement("div");
-    d.className = "item"; d.textContent = v; d.dataset.v = v;
-    d.onclick = () => el.scrollTo({top: [...el.querySelectorAll(".item")].indexOf(d) * 34, behavior:"smooth"});
-    el.appendChild(d);
-  });
-  const padBot = document.createElement("div"); padBot.className = "pad"; el.appendChild(padBot);
-  let t = null;
-  el.addEventListener("scroll", () => {
-    highlightWheel(el);
-    if(t) clearTimeout(t);
-    t = setTimeout(() => { highlightWheel(el); if(onSettle) onSettle(); }, 120);
-  }, {passive:true});
-}
-function wheelIndex(el){ return Math.round(el.scrollTop / 34); }
-function highlightWheel(el){
-  const idx = wheelIndex(el);
-  el.querySelectorAll(".item").forEach((it,i) => it.classList.toggle("sel", i === idx));
-}
-function setWheel(el, value){
-  const items = [...el.querySelectorAll(".item")];
-  let idx = items.findIndex(it => it.dataset.v === value);
-  if(idx < 0) idx = 0;
-  el.scrollTop = idx * 34;
-  highlightWheel(el);
-}
-function getWheel(el){
-  const items = [...el.querySelectorAll(".item")];
-  const it = items[Math.max(0, Math.min(items.length-1, wheelIndex(el)))];
-  return it ? it.dataset.v : "00";
-}
-const HOURS = Array.from({length:24}, (_,i) => String(i).padStart(2,"0"));
-const MINS  = Array.from({length:12}, (_,i) => String(i*5).padStart(2,"0"));
-let endTouched = false;
-
-function initWheels(){
-  buildWheel($("wStartH"), HOURS, syncEndFromStart);
-  buildWheel($("wStartM"), MINS,  syncEndFromStart);
-  buildWheel($("wEndH"),   HOURS, () => { endTouched = true; });
-  buildWheel($("wEndM"),   MINS,  () => { endTouched = true; });
-}
-function syncEndFromStart(){
-  if(endTouched) return;   // user set their own finish time — leave it alone
-  const h = Number(getWheel($("wStartH"))), m = Number(getWheel($("wStartM")));
-  const end = (h*60 + m + 60) % 1440;
-  setWheel($("wEndH"), String(Math.floor(end/60)).padStart(2,"0"));
-  setWheel($("wEndM"), String(end%60).padStart(2,"0"));
-}
-
-/* ============ assign modal ============ */
-async function openAssign(jobId){
-  const job = allJobs.find(j => j.id === jobId);
-  if(!job) return;
-  currentAssignId = jobId;
-  endTouched = false;
-  $("assignTitle").textContent = `Send job — ${job.helpdeskRef || job.id}`;
-  $("assignRef").textContent = job.helpdeskRef || job.id;
-  $("assignStatus").textContent = "";
-  $("assignNote").value = "";
-
-  await ensureUsers();
-  const box = $("assignChecks");
-  box.innerHTML = "";
-  const current = (job.assignedEngineers||[]).map(s => s.toLowerCase());
-  cachedUsers.forEach(u => {
-    const label = document.createElement("label");
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.value = u.username;
-    cb.checked = current.includes(u.username.toLowerCase());
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(" " + u.displayName));
-    box.appendChild(label);
-  });
-
-  const s = parseDate(job.scheduledAt) || new Date();
-  const yyyy = s.getFullYear(), mm = String(s.getMonth()+1).padStart(2,"0"), dd = String(s.getDate()).padStart(2,"0");
-  $("assignDate").value = `${yyyy}-${mm}-${dd}`;
-  const startM = Math.round(s.getMinutes()/5)*5 % 60;
-  setWheel($("wStartH"), String(s.getHours()).padStart(2,"0"));
-  setWheel($("wStartM"), String(startM).padStart(2,"0"));
-  const e = parseDate(job.scheduledEnd);
-  if(e){
-    endTouched = true;
-    setWheel($("wEndH"), String(e.getHours()).padStart(2,"0"));
-    setWheel($("wEndM"), String(Math.round(e.getMinutes()/5)*5 % 60).padStart(2,"0"));
-  } else {
-    syncEndFromStart();
-  }
-  // Visibility ("release") — reflect the job's current setting.
-  const rel = job.release || {};
-  const vmode = rel.mode || "now";
-  const vr = document.querySelector('input[name="asgVis"][value="'+vmode+'"]');
-  (vr || document.querySelector('input[name="asgVis"][value="now"]')).checked = true;
-  $("asgVisAt").value = (vmode === "at" && rel.at) ? isoToLocalInput(rel.at) : "";
-  $("asgVisAt").style.display = (vmode === "at") ? "" : "none";
-  $("assignBackdrop").classList.add("show");
-}
-function isoToLocalInput(iso){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; const p=n=>String(n).padStart(2,"0"); return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes()); }
-function assignVisMode(){ const c=document.querySelector('input[name="asgVis"]:checked'); return c?c.value:"now"; }
-function closeAssign(){ $("assignBackdrop").classList.remove("show"); currentAssignId = null; }
-
-async function saveAssign(){
-  if(!currentAssignId) return;
-  const engineers = [...document.querySelectorAll("#assignChecks input:checked")].map(c => c.value);
-  const date = $("assignDate").value;
-  if(!engineers.length){ $("assignStatus").textContent = "Tick at least one engineer."; return; }
-  if(!date){ $("assignStatus").textContent = "Pick a date."; return; }
-
-  const sh = getWheel($("wStartH")), sm = getWheel($("wStartM"));
-  const eh = getWheel($("wEndH")),   em = getWheel($("wEndM"));
-  const start = new Date(`${date}T${sh}:${sm}:00`);
-  let end = new Date(`${date}T${eh}:${em}:00`);
-  if(end <= start) end = new Date(start.getTime() + 3600000);
-
-  // Visibility ("release") — same options as the Edit modal.
-  const vmode = assignVisMode();
-  let release;
-  if(vmode === "at"){
-    const v = $("asgVisAt").value;
-    if(!v){ $("assignStatus").textContent = "Pick the date & time it should appear."; return; }
-    release = { mode:"at", at:new Date(v).toISOString() };
-  } else {
-    release = { mode: vmode };   // now / dayBefore / afterPrev
-  }
-
-  $("assignStatus").textContent = "Sending…";
-  try{
-    const payload = {
-      assignedEngineers: engineers,
-      assignedTo: engineers[0],
-      scheduledAt: start.toISOString(),
-      scheduledEnd: end.toISOString(),
-      status: "Scheduled",
-      release: release,
-      note: $("assignNote").value.trim() || undefined,
-      changedBy: getCurrentUser()
-    };
-    const res = await authFetch("/sla/jobs/" + encodeURIComponent(currentAssignId), {
-      method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload)
-    });
-    if(!res.ok) throw new Error("HTTP " + res.status);
-    $("assignStatus").textContent = "✅ Sent — job is now Scheduled.";
-    await loadJobs();
-    setTimeout(closeAssign, 500);
-  }catch(err){
-    $("assignStatus").textContent = "❌ " + err.message;
-  }
 }
 
 /* ============ sites (for correcting a job's site after creation) ============ */
@@ -1338,8 +1121,7 @@ function onAction(e){
   const row = e.target.closest("[data-job-id]");
   if(!row) return;
   const id = row.dataset.jobId;
-  if(a === "assign") openAssign(id);
-  else if(a === "update"){
+  if(a === "update"){
     const job = allJobs.find(j => j.id === id);
     if(job) window.MLJobEdit.open(job, { onSaved: () => loadJobs() });
   }
@@ -1348,7 +1130,6 @@ function onAction(e){
 }
 
 function init(){
-  initWheels();
   $("jobsTbody").addEventListener("click", onAction);
   $("jobCards").addEventListener("click", onAction);
   $("jobsTbody").addEventListener("change", e => {
@@ -1382,10 +1163,6 @@ function init(){
     activeStatus = "open"; activePriority = "all";
     $("priorityFilter").value = "all"; $("searchBox").value = ""; archiveMatches = []; render();
   });
-  $("assignClose").addEventListener("click", closeAssign);
-  $("assignCancel").addEventListener("click", closeAssign);
-  $("assignSave").addEventListener("click", saveAssign);
-  $("asgVisOpts").addEventListener("change", () => { $("asgVisAt").style.display = assignVisMode() === "at" ? "" : "none"; });
   $("updateSiteFilter").addEventListener("input", () => { if(sitesList) fillSiteSelect($("updateSiteFilter").value); });
   $("updateClose").addEventListener("click", closeUpdate);
   $("updateCancel").addEventListener("click", closeUpdate);
@@ -1393,7 +1170,7 @@ function init(){
   $("pdfTypeClose").addEventListener("click", closePdfModal);
   $("pdfClientBtn").addEventListener("click", () => openJobPdf("client"));
   $("pdfMostlaneBtn").addEventListener("click", () => openJobPdf("mostlane"));
-  ["assignBackdrop","updateBackdrop","pdfTypeBackdrop"].forEach(id => {
+  ["updateBackdrop","pdfTypeBackdrop"].forEach(id => {
     $(id).addEventListener("click", e => { if(e.target === $(id)) $(id).classList.remove("show"); });
   });
 }
