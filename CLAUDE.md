@@ -187,7 +187,11 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
 - `users.js` — users CRUD (+Password w/ ForceChange), PERMISSION_KEYS (incl.
   AssetAdmin, OfficeClock, OfficeTimesheet, ThemeColour, ThemeBackground,
   StoryMode, HSPlan, SiteLog), welcome/reset emails, /users N+1-fixed,
-  /users/reorder (StaffType/SortOrder), /hs-plan-config, /po-config.
+  /users/reorder (StaffType/SortOrder), /hs-plan-config, /po-config. **GET /users
+  is ACTIVE-ONLY by default** — `isActiveStatus` keeps blank/"Active", drops
+  "Disabled" (and any other status), so a disabled account disappears from every
+  picker/list portal-wide; **Users Admin passes `?all=1`** to still see + re-enable
+  them. (Login already blocks Disabled in auth.js.)
 - `devices.js` — check/register device, /device/admin-list, /device/allowed,
   /device/reset, owner exempt.
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,

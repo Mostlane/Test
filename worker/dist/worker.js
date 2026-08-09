@@ -584,8 +584,10 @@ async function handle2(request, env, ctx, url, sess) {
     ]);
     const permMap = {};
     for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
+    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
+    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus(u.status));
     const out = [];
-    for (const u of results || []) out.push(shapeUser2(u, permMap[u.username] || {}));
+    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
     out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
   }
@@ -773,6 +775,10 @@ var PERMISSION_KEYS = [
   "ThemeBackground"
   // personalisation: may change the menu background
 ];
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
 function shapeUser2(u, perms) {
   let profile = {};
   try {

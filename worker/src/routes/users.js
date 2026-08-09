@@ -135,8 +135,13 @@ export async function handle(request, env, ctx, url, sess) {
     ]);
     const permMap = {};
     for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
+    // By default only ACTIVE users are returned, so a disabled account vanishes
+    // from every picker/list portal-wide. Users Admin passes ?all=1 to still see
+    // (and re-enable) disabled accounts. Blank/legacy status counts as active.
+    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
+    const rows = includeAll ? (results || []) : (results || []).filter(u => isActiveStatus(u.status));
     const out = [];
-    for (const u of results || []) out.push(shapeUser(u, permMap[u.username] || {}));
+    for (const u of rows) out.push(shapeUser(u, permMap[u.username] || {}));
     out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
   }
@@ -320,6 +325,14 @@ const PERMISSION_KEYS = [
   "ThemeColour",     // personalisation: may pick a portal colour theme
   "ThemeBackground", // personalisation: may change the menu background
 ];
+
+// A user counts as "active" (visible in pickers/lists) unless explicitly
+// disabled. Blank/legacy status is treated as active so existing accounts are
+// never hidden; anything else (Disabled/Inactive/Archived/Left…) is excluded.
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
 
 function shapeUser(u, perms) {
   let profile = {};
