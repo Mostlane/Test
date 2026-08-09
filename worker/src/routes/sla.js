@@ -498,7 +498,14 @@ export async function handle(request, env, ctx, url, sess) {
         return new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
       });
     }
-    return jsonResponse(jobs.map(decorateJobWithLiveSla), headers);
+    // This endpoint is always "one engineer's own jobs", so serve THEIR status:
+    // on a shared (multi-engineer) job that's their own slice, else the shared
+    // status. Overwriting `status` means every list view (route, jobs, inbox,
+    // my-day) shows the right thing with no page change.
+    return jsonResponse(jobs.map(j => {
+      const ms = effStatus(j, engineer);
+      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms };
+    }), headers);
   }
 
   /* ===== Story Mode: daily shift (clock on / off) ===== */
@@ -832,8 +839,10 @@ export async function handle(request, env, ctx, url, sess) {
     // GET /sla/jobs/{id}
     if (method === "GET") {
       const job = await getJob(env, tenantId, id);
-      return job ? jsonResponse(decorateJobWithLiveSla(job), headers)
-                 : jsonResponse({ error: "Not found" }, headers, 404);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const d = decorateJobWithLiveSla(job);
+      if (sess) d.myStatus = effStatus(job, normId(sess.user.username));   // this viewer's own slice
+      return jsonResponse(d, headers);
     }
 
     // DELETE /sla/jobs/{id} — permanently remove a job + its stored files.
@@ -863,8 +872,10 @@ export async function handle(request, env, ctx, url, sess) {
       // Offline replay guard: if this exact op already landed, return the job
       // as-is instead of re-applying (no duplicate history/notifications).
       if (body.opId && !(await firstTime(env, tenantId, body.opId, "patch:" + id))) {
-        return before ? jsonResponse(decorateJobWithLiveSla(before), headers)
-                      : jsonResponse({ error: "Not found" }, headers, 404);
+        if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
+        const dR = decorateJobWithLiveSla(before);
+        if (sess) dR.myStatus = effStatus(before, normId(sess.user.username));
+        return jsonResponse(dR, headers);
       }
 
       // ── End-point enforcement (server is the authority) ─────────────────
@@ -875,9 +886,16 @@ export async function handle(request, env, ctx, url, sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
         const catNames = (await getCategories(env, tenantId)).map(c => c.name);
-        const target = body.status ? normalizeStatus(body.status, catNames) : before.status;
+        // On a shared (2+ engineer) job, a NON-admin engineer changes only their
+        // OWN status slice — so judge everything against THEIR status, and tell
+        // patchJob to route the change to their slice.
+        const engNorm = normId(sess.user.username);
+        const perEngineer = !isAdmin && isMultiEng(before) && assignedList(before).some(a => normId(a) === engNorm);
+        const beforeStatus = perEngineer ? effStatus(before, engNorm) : before.status;
+        if (perEngineer && body.status) body.__engActor = engNorm;
+        const target = body.status ? normalizeStatus(body.status, catNames) : beforeStatus;
 
-        if (!isAdmin && body.status && target !== before.status) {
+        if (!isAdmin && body.status && target !== beforeStatus) {
           let missing = [];
           if (target === "Complete")      missing = completionMissing(before, body, await jobPhotoCount(env, id, "After"));
           else if (target === "Quote")    missing = quoteMissing(before, body, await jobPhotoCount(env, id));
@@ -899,13 +917,13 @@ export async function handle(request, env, ctx, url, sess) {
         // clocks them on (if they never pressed "Start my day"), recording the
         // GPS that rides the status change. Idempotent — never overwrites an
         // existing clock-on. Only for engineers acting on their own jobs.
-        if (!isAdmin && body.status && target !== before.status) {
+        if (!isAdmin && body.status && target !== beforeStatus) {
           autoStart = { user: sess.user.username, gps: body.gps || null, date: body.localDate || null };
         }
 
         // On Hold needs approval. An engineer's hold is "pending"; an admin who
         // sets it themselves is self-approved.
-        if (body.status && target === "On Hold" && before.status !== "On Hold") {
+        if (body.status && target === "On Hold" && beforeStatus !== "On Hold") {
           body.hold = Object.assign({}, before.hold, body.hold);
           body.hold.approval = isAdmin
             ? { state: "approved", requestedBy: sess.user.username, by: sess.user.username, at: new Date().toISOString(), auto: true }
@@ -942,8 +960,10 @@ export async function handle(request, env, ctx, url, sess) {
           url: "/inbox.html", tag: "hold-approve:" + id
         }, updated.hold.approval.requestedBy));
       }
-      return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers)
-                     : jsonResponse({ error: "Not found" }, headers, 404);
+      if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
+      const dOut = decorateJobWithLiveSla(updated);
+      if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));   // actor's own slice, for the field app
+      return jsonResponse(dOut, headers);
     }
   }
 
@@ -1237,11 +1257,14 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some(a => normId(a) === uNorm)) continue;
+    // On a shared job, judge THIS engineer's own status — a co-worker being mid-job
+    // must never block them.
+    const st = effStatus(j, uNorm);
     if (j.raBlock && j.raBlock.state === "open")
       return { id: j.id, ref: j.helpdeskRef || j.id, why: "it's flagged 'can't proceed safely' — waiting for the office" };
-    if (j.status === "In Progress" || j.status === "Travelling")
-      return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${j.status}` };
-    if (j.status === "On Hold") {
+    if (st === "In Progress" || st === "Travelling")
+      return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${st}` };
+    if (st === "On Hold") {
       const ap = j.hold && j.hold.approval;
       if (!ap || ap.state !== "approved")
         return { id: j.id, ref: j.helpdeskRef || j.id, why: "its on-hold is waiting for an admin to approve" };
@@ -1301,6 +1324,46 @@ function assignedList(job) {
   return job.assignedTo ? [job.assignedTo] : [];
 }
 
+/* ===== Per-engineer status ("only status per engineer") =====
+   A job worked by 2+ engineers keeps ONE shared record (RA, photos, signature,
+   notes are all shared) but each engineer tracks their OWN status/day in
+   engStatus[normId] = {status, at, by}. Single-engineer jobs never use this —
+   they keep the plain top-level status, so the Zapier intake and every ordinary
+   job are unchanged. The board's top-level `status` is a rollup of the engineers'
+   statuses so filters/badges still work. */
+function isMultiEng(job) { return assignedList(job).length >= 2; }
+const DONE_STATES = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+// One engineer's status on a job (their own slice, else the shared status —
+// which also covers legacy jobs and an engineer not yet diverged).
+function effStatus(job, engNorm) {
+  if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
+  return job ? job.status : "Pending";
+}
+// Roll each engineer's status up into the single board status: Complete only when
+// EVERYONE is done; otherwise reflect the most-active engineer.
+function rollupStatus(job) {
+  const engs = assignedList(job).map(normId);
+  if (!engs.length) return job.status;
+  const sts = engs.map(e => effStatus(job, e));
+  if (sts.every(s => DONE_STATES.has(String(s).toLowerCase()))) return "Complete";
+  for (const rank of ["In Progress", "Travelling", "On Hold", "Quote", "Order", "Scheduled", "Pending"]) {
+    if (sts.some(s => s === rank)) return rank;
+  }
+  return sts.find(s => !DONE_STATES.has(String(s).toLowerCase())) || job.status;
+}
+// Make sure every assigned engineer on a multi-engineer job has a status slice.
+// Called whenever the roster changes: an engineer already on the job keeps the
+// shared status; a newcomer starts at "Scheduled" (they haven't started yet).
+function seedEngStatus(job, prevEngs, prevStatus, now) {
+  if (!isMultiEng(job)) return;
+  job.engStatus = job.engStatus || {};
+  const prev = new Set((prevEngs || []).map(normId));
+  for (const e of assignedList(job).map(normId)) {
+    if (job.engStatus[e]) continue;
+    job.engStatus[e] = { status: prev.has(e) ? (prevStatus || "Scheduled") : "Scheduled", at: now, by: "system" };
+  }
+}
+
 /* ================= JOB RELEASE (visibility scheduling) =================
    A job can carry a `release` object controlling WHEN its assigned engineers
    first see it (and get the assignment push):
@@ -1347,10 +1410,11 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   if (!job.scheduledAt) return false;
   const engSet = new Set(engineers.map(normId));
   const myStart = Date.parse(job.scheduledAt);
+  // "Open" is judged for OUR engineer on the earlier job (their own slice), so a
+  // co-worker still working an earlier shared job doesn't hold this one back.
   return allJobs.some(o => o.id !== job.id && sameSchedDay(o, job)
     && Date.parse(o.scheduledAt) < myStart
-    && assignedList(o).some(a => engSet.has(normId(a)))
-    && !jobIsFinished(o));
+    && assignedList(o).some(a => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 // Is the job visible to its engineers right now? (allJobs only needed for afterPrev)
 function releaseVisibleNow(job, allJobs) {
@@ -1638,6 +1702,8 @@ async function patchJob(env, tenantId, id, patch) {
   job.events ||= [];
 
   const hadEngineers = assignedList(job).length > 0;
+  const prevEngs = assignedList(job);            // roster before this patch
+  const prevStatus = job.status;
 
   if (patch.assignedEngineers !== undefined) {
     job.assignedEngineers = patch.assignedEngineers;
@@ -1645,6 +1711,11 @@ async function patchJob(env, tenantId, id, patch) {
   } else if (patch.assignedTo !== undefined) {
     job.assignedTo = patch.assignedTo;
     job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
+  }
+  // A job with 2+ engineers gives each their own status slice (see effStatus).
+  // Seed any missing ones when the roster changes.
+  if (patch.assignedEngineers !== undefined || patch.assignedTo !== undefined) {
+    seedEngStatus(job, prevEngs, prevStatus, now);
   }
   // Visibility scheduling: when it becomes visible to the engineer. Changing the
   // release re-arms `releaseNotified` so the assignment push fires at the new time.
@@ -1708,7 +1779,22 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.order !== undefined) job.order = patch.order;   // parts-order pack
   if (patch.travelStartMileage !== undefined) job.travelStartMileage = patch.travelStartMileage;  // per-job mileage
 
-  if (patch.status) {
+  if (patch.status && patch.__engActor && isMultiEng(job)) {
+    // An engineer changed THEIR status on a shared (multi-engineer) job: record it
+    // in their own slice and roll the board status up. Everything else stays shared.
+    const catNames = (await getCategories(env, tenantId)).map(c => c.name);
+    const s = normalizeStatus(patch.status, catNames);
+    job.engStatus = job.engStatus || {};
+    const prev = job.engStatus[patch.__engActor] && job.engStatus[patch.__engActor].status;
+    if (s !== prev) {
+      job.engStatus[patch.__engActor] = { status: s, at: now, by: patch.changedBy || patch.__engActor };
+      const entry = { status: s, at: now, by: patch.changedBy || "system", eng: patch.__engActor };
+      if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
+      job.statusHistory.push(entry);
+    }
+    job.status = rollupStatus(job);
+    if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
+  } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map(c => c.name);
     const s = normalizeStatus(patch.status, catNames);
     if (s !== job.status) {
@@ -1720,6 +1806,11 @@ async function patchJob(env, tenantId, id, patch) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+    }
+    // Office override on a multi-engineer job: keep every engineer's slice in step
+    // so the board rollup matches what the office set.
+    if (isMultiEng(job) && job.engStatus) {
+      for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
     }
   } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
     // Sending a job to someone IS scheduling it — flip Pending → Scheduled.

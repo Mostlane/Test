@@ -4636,7 +4636,10 @@ async function handle8(request, env, ctx, url, sess) {
         return new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
       });
     }
-    return jsonResponse(jobs.map(decorateJobWithLiveSla), headers);
+    return jsonResponse(jobs.map((j) => {
+      const ms = effStatus(j, engineer);
+      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms };
+    }), headers);
   }
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
@@ -4948,7 +4951,10 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (method === "GET") {
       const job = await getJob(env, tenantId, id);
-      return job ? jsonResponse(decorateJobWithLiveSla(job), headers) : jsonResponse({ error: "Not found" }, headers, 404);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const d = decorateJobWithLiveSla(job);
+      if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
+      return jsonResponse(d, headers);
     }
     if (method === "DELETE" && !parts[2]) {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -4969,15 +4975,22 @@ async function handle8(request, env, ctx, url, sess) {
       const before = await getJob(env, tenantId, id);
       const body = await readJson2(request);
       if (body.opId && !await firstTime(env, tenantId, body.opId, "patch:" + id)) {
-        return before ? jsonResponse(decorateJobWithLiveSla(before), headers) : jsonResponse({ error: "Not found" }, headers, 404);
+        if (!before) return jsonResponse({ error: "Not found" }, headers, 404);
+        const dR = decorateJobWithLiveSla(before);
+        if (sess) dR.myStatus = effStatus(before, normId(sess.user.username));
+        return jsonResponse(dR, headers);
       }
       let autoStart = null;
       if (before && sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
         const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
-        const target = body.status ? normalizeStatus(body.status, catNames) : before.status;
-        if (!isAdmin && body.status && target !== before.status) {
+        const engNorm = normId(sess.user.username);
+        const perEngineer = !isAdmin && isMultiEng(before) && assignedList(before).some((a) => normId(a) === engNorm);
+        const beforeStatus = perEngineer ? effStatus(before, engNorm) : before.status;
+        if (perEngineer && body.status) body.__engActor = engNorm;
+        const target = body.status ? normalizeStatus(body.status, catNames) : beforeStatus;
+        if (!isAdmin && body.status && target !== beforeStatus) {
           let missing = [];
           if (target === "Complete") missing = completionMissing(before, body, await jobPhotoCount(env, id, "After"));
           else if (target === "Quote") missing = quoteMissing(before, body, await jobPhotoCount(env, id));
@@ -4991,10 +5004,10 @@ async function handle8(request, env, ctx, url, sess) {
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first \u2014 ${blocker.why}.`, blockingJob: blocker }, headers, 409);
         }
-        if (!isAdmin && body.status && target !== before.status) {
+        if (!isAdmin && body.status && target !== beforeStatus) {
           autoStart = { user: sess.user.username, gps: body.gps || null, date: body.localDate || null };
         }
-        if (body.status && target === "On Hold" && before.status !== "On Hold") {
+        if (body.status && target === "On Hold" && beforeStatus !== "On Hold") {
           body.hold = Object.assign({}, before.hold, body.hold);
           body.hold.approval = isAdmin ? { state: "approved", requestedBy: sess.user.username, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString(), auto: true } : { state: "pending", requestedBy: sess.user.username, requestedAt: (/* @__PURE__ */ new Date()).toISOString() };
         }
@@ -5025,7 +5038,10 @@ async function handle8(request, env, ctx, url, sess) {
           tag: "hold-approve:" + id
         }, updated.hold.approval.requestedBy));
       }
-      return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
+      if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
+      const dOut = decorateJobWithLiveSla(updated);
+      if (sess) dOut.myStatus = effStatus(updated, normId(sess.user.username));
+      return jsonResponse(dOut, headers);
     }
   }
   if (subpath === "/site/jobs" && method === "GET") {
@@ -5290,11 +5306,12 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some((a) => normId(a) === uNorm)) continue;
+    const st = effStatus(j, uNorm);
     if (j.raBlock && j.raBlock.state === "open")
       return { id: j.id, ref: j.helpdeskRef || j.id, why: "it's flagged 'can't proceed safely' \u2014 waiting for the office" };
-    if (j.status === "In Progress" || j.status === "Travelling")
-      return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${j.status}` };
-    if (j.status === "On Hold") {
+    if (st === "In Progress" || st === "Travelling")
+      return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${st}` };
+    if (st === "On Hold") {
       const ap = j.hold && j.hold.approval;
       if (!ap || ap.state !== "approved")
         return { id: j.id, ref: j.helpdeskRef || j.id, why: "its on-hold is waiting for an admin to approve" };
@@ -5348,6 +5365,33 @@ function assignedList(job) {
   }
   return job.assignedTo ? [job.assignedTo] : [];
 }
+function isMultiEng(job) {
+  return assignedList(job).length >= 2;
+}
+var DONE_STATES = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
+function effStatus(job, engNorm) {
+  if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
+  return job ? job.status : "Pending";
+}
+function rollupStatus(job) {
+  const engs = assignedList(job).map(normId);
+  if (!engs.length) return job.status;
+  const sts = engs.map((e) => effStatus(job, e));
+  if (sts.every((s) => DONE_STATES.has(String(s).toLowerCase()))) return "Complete";
+  for (const rank of ["In Progress", "Travelling", "On Hold", "Quote", "Order", "Scheduled", "Pending"]) {
+    if (sts.some((s) => s === rank)) return rank;
+  }
+  return sts.find((s) => !DONE_STATES.has(String(s).toLowerCase())) || job.status;
+}
+function seedEngStatus(job, prevEngs, prevStatus, now) {
+  if (!isMultiEng(job)) return;
+  job.engStatus = job.engStatus || {};
+  const prev = new Set((prevEngs || []).map(normId));
+  for (const e of assignedList(job).map(normId)) {
+    if (job.engStatus[e]) continue;
+    job.engStatus[e] = { status: prev.has(e) ? prevStatus || "Scheduled" : "Scheduled", at: now, by: "system" };
+  }
+}
 function londonOffsetMs(utcMs) {
   const p = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/London", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utcMs)).reduce((a, x) => {
     a[x.type] = x.value;
@@ -5390,7 +5434,7 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   if (!job.scheduledAt) return false;
   const engSet = new Set(engineers.map(normId));
   const myStart = Date.parse(job.scheduledAt);
-  return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a))) && !jobIsFinished(o));
+  return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 function releaseVisibleNow(job, allJobs) {
   const r = job && job.release;
@@ -5645,12 +5689,17 @@ async function patchJob(env, tenantId, id, patch) {
   job.statusHistory ||= [];
   job.events ||= [];
   const hadEngineers = assignedList(job).length > 0;
+  const prevEngs = assignedList(job);
+  const prevStatus = job.status;
   if (patch.assignedEngineers !== void 0) {
     job.assignedEngineers = patch.assignedEngineers;
     job.assignedTo = patch.assignedEngineers[0] || "";
   } else if (patch.assignedTo !== void 0) {
     job.assignedTo = patch.assignedTo;
     job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
+  }
+  if (patch.assignedEngineers !== void 0 || patch.assignedTo !== void 0) {
+    seedEngStatus(job, prevEngs, prevStatus, now);
   }
   if (patch.release !== void 0) {
     const prev = job.release ? JSON.stringify(job.release) : "";
@@ -5705,7 +5754,20 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.hold !== void 0) job.hold = patch.hold;
   if (patch.order !== void 0) job.order = patch.order;
   if (patch.travelStartMileage !== void 0) job.travelStartMileage = patch.travelStartMileage;
-  if (patch.status) {
+  if (patch.status && patch.__engActor && isMultiEng(job)) {
+    const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
+    const s = normalizeStatus(patch.status, catNames);
+    job.engStatus = job.engStatus || {};
+    const prev = job.engStatus[patch.__engActor] && job.engStatus[patch.__engActor].status;
+    if (s !== prev) {
+      job.engStatus[patch.__engActor] = { status: s, at: now, by: patch.changedBy || patch.__engActor };
+      const entry = { status: s, at: now, by: patch.changedBy || "system", eng: patch.__engActor };
+      if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
+      job.statusHistory.push(entry);
+    }
+    job.status = rollupStatus(job);
+    if (String(job.status).toLowerCase() === "closed jobs" && !job.closedAt) job.closedAt = now;
+  } else if (patch.status) {
     const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
     const s = normalizeStatus(patch.status, catNames);
     if (s !== job.status) {
@@ -5714,6 +5776,9 @@ async function patchJob(env, tenantId, id, patch) {
       if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
       job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+    }
+    if (isMultiEng(job) && job.engStatus) {
+      for (const e of assignedList(job).map(normId)) job.engStatus[e] = { status: job.status, at: now, by: patch.changedBy || "office" };
     }
   } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
     job.status = "Scheduled";
