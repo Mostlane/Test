@@ -949,14 +949,36 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* ===== Site folder: per-site jobs, photos and documents ===== */
 
-  // Jobs previously raised at this site (basic sheet data), newest first.
+  // Jobs previously raised at this site (basic sheet data), newest first —
+  // LIVE jobs plus the imported ARCHIVE (historical) jobs for this store code.
   if (subpath === "/site/jobs" && method === "GET") {
     const code = digitsOf(searchParams.get("siteCode"));
     const name = (searchParams.get("siteName") || "").trim().toLowerCase();
     const all = await listJobs(env, tenantId);
-    const mine = all.filter(j => siteMatches(j, code, name)).map(siteJobSummary)
-      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    return jsonResponse({ jobs: mine }, headers);
+    const mine = all.filter(j => siteMatches(j, code, name)).map(siteJobSummary).map(s => ({ ...s, source: "live" }));
+    let archived = [];
+    if (code) {
+      try {
+        await ensureArchive(env, tenantId);
+        const { results } = await db.prepare(
+          "SELECT id, ref, status, created_at, completed_at, data FROM sla_jobs_archive WHERE tenant_id=? AND site_code=? ORDER BY COALESCE(completed_at,created_at) DESC LIMIT 500"
+        ).bind(tenantId, code).all();
+        archived = (results || []).map(r => {
+          let d = {}; try { d = JSON.parse(r.data) || {}; } catch {}
+          return {
+            id: r.id, ref: r.ref || r.id,
+            description: d.description || d.jobName || d.name || d["Job Name"] || d.Description || "",
+            status: r.status || "Archived", priority: d.priority || "",
+            date: r.completed_at || r.created_at || null,
+            raisedAt: r.created_at || null, closedAt: r.completed_at || null,
+            engineers: [], lastNote: "", signedBy: "",
+            source: "archive", data: d
+          };
+        });
+      } catch {}
+    }
+    const jobs = [...mine, ...archived].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    return jsonResponse({ jobs }, headers);
   }
 
   // Every photo from every job at this site + any photos uploaded straight here.

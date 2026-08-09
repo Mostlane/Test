@@ -39,6 +39,19 @@
     .jobrow .when{font-size:12px;color:var(--muted);}
     .jobrow .body{display:none;padding:0 13px 12px;font-size:13px;color:#334155;}
     .jobrow.open .body{display:block;}
+    .jobrow .head .archtag{font-size:10px;font-weight:800;letter-spacing:.04em;color:#7c3aed;background:#f3e8ff;border-radius:6px;padding:2px 6px;}
+    .jobmodal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;justify-content:center;z-index:10000;}
+    .jobmodal.show{display:flex;}
+    .jm-card{background:#fff;width:min(560px,100%);max-height:88vh;display:flex;flex-direction:column;border-radius:16px 16px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.3);}
+    @media(min-width:560px){.jobmodal{align-items:center;}.jm-card{border-radius:16px;}}
+    .jm-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e5e7eb;}
+    .jm-title{font-weight:700;font-size:16px;color:#0f2740;flex:1;min-width:0;}
+    .jm-x{background:#f1f5f9;border:0;border-radius:9px;width:34px;height:34px;font-size:16px;cursor:pointer;color:#334155;}
+    .jm-body{overflow:auto;padding:14px 16px;}
+    .jm-body .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:14px;}
+    .jm-body .kv b{flex:0 0 118px;color:#64748b;font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.03em;}
+    .jm-body .kv span{flex:1;color:#16202e;word-break:break-word;white-space:pre-wrap;}
+    .jm-ro{font-size:12px;color:#7c3aed;background:#f3e8ff;border-radius:8px;padding:6px 10px;margin-bottom:10px;display:inline-block;}
     .kv{display:flex;gap:8px;padding:3px 0;}
     .kv b{min-width:120px;color:#475569;font-weight:600;}
     .sheetimgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
@@ -85,6 +98,16 @@
 
 <div class="lb" id="lb"><button class="x" id="lbClose">✕</button><img id="lbImg" alt=""></div>
 
+<div class="jobmodal" id="jobModal">
+  <div class="jm-card">
+    <div class="jm-head">
+      <div class="jm-title" id="jmTitle">Job</div>
+      <button class="jm-x" id="jmClose">✕</button>
+    </div>
+    <div class="jm-body" id="jmBody"></div>
+  </div>
+</div>
+
 <script>
 const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
 const $ = id => document.getElementById(id);
@@ -117,6 +140,8 @@ function init(){
   $("backBtn").href = back || "sla-main.html";
   $("lbClose").addEventListener("click", () => $("lb").classList.remove("show"));
   $("lb").addEventListener("click", e => { if(e.target === $("lb")) $("lb").classList.remove("show"); });
+  $("jmClose").addEventListener("click", closeJobModal);
+  $("jobModal").addEventListener("click", e => { if(e.target === $("jobModal")) closeJobModal(); });
   loadAreas().then(renderTabs).then(() => selectTab("Previous Jobs"));
 }
 
@@ -175,6 +200,8 @@ async function renderJobs(){
   if(activeTab !== "Previous Jobs") return;
   if(!jobs.length){ c.innerHTML = `<div class="empty">No jobs recorded at this site yet.</div>`; return; }
   c.innerHTML = "";
+  const na = jobs.filter(j => j.source === "archive").length;
+  if(na){ const n=document.createElement("div"); n.className="empty"; n.style.cssText="text-align:left;padding:2px 2px 8px;color:#64748b;font-size:12px;"; n.textContent=`${jobs.length} jobs (${na} from the archive). Tap any to view.`; c.appendChild(n); }
   jobs.forEach(j => {
     const col = STATUS_COLOUR[j.status] || "#9ca3af";
     const row = document.createElement("div");
@@ -183,23 +210,47 @@ async function renderJobs(){
       <div class="head">
         <span class="dot" style="background:${col}"></span>
         <span class="ref">${esc(j.ref)}</span>
+        ${j.source === "archive" ? `<span class="archtag">🗄 ARCHIVE</span>` : ""}
         <span class="desc">${esc(j.description || "(no description)")}</span>
         <span class="when">${esc(fmt(j.date))} · ${esc(j.status)}</span>
-      </div>
-      <div class="body">
-        <div class="kv"><b>Reference</b><span>${esc(j.ref)}</span></div>
-        <div class="kv"><b>Status</b><span>${esc(j.status)}${j.priority ? " · " + esc(j.priority) : ""}</span></div>
-        <div class="kv"><b>Raised</b><span>${esc(fmt(j.raisedAt)) || "—"}</span></div>
-        ${j.closedAt ? `<div class="kv"><b>Completed</b><span>${esc(fmt(j.closedAt))}</span></div>` : ""}
-        <div class="kv"><b>Engineer(s)</b><span>${esc((j.engineers||[]).join(", ") || "—")}</span></div>
-        ${j.lastNote ? `<div class="kv"><b>Last note</b><span>${esc(j.lastNote)}</span></div>` : ""}
-        ${j.signedBy ? `<div class="kv"><b>Signed by</b><span>${esc(j.signedBy)}</span></div>` : ""}
-        <div style="margin-top:8px;"><a class="btn small primary" href="job-view.html?jobId=${encodeURIComponent(j.id)}">Open full job</a></div>
       </div>`;
-    row.querySelector(".head").addEventListener("click", () => row.classList.toggle("open"));
+    row.querySelector(".head").addEventListener("click", () => openJobModal(j));
     c.appendChild(row);
   });
 }
+
+/* Read-only job viewer — live jobs and archived (imported) jobs alike. */
+function prettyKey(k){ return String(k).replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/^\w/, c => c.toUpperCase()); }
+function jmRow(k, v){ return `<div class="kv"><b>${esc(k)}</b><span>${esc(v)}</span></div>`; }
+function openJobModal(j){
+  $("jmTitle").textContent = (j.ref || "Job") + (j.description ? " — " + j.description : "");
+  let h = `<div class="jm-ro">📖 Read-only${j.source === "archive" ? " · archived job" : ""}</div>`;
+  if(j.source === "archive" && j.data && typeof j.data === "object"){
+    h += jmRow("Reference", j.ref || "—");
+    h += jmRow("Status", j.status || "—");
+    if(j.date) h += jmRow("Date", fmt(j.date));
+    const skip = new Set(["ref","status","id","site_code","search","tenant_id"]);
+    for(const [k, v] of Object.entries(j.data)){
+      if(v == null || v === "" || typeof v === "object") continue;
+      if(skip.has(k)) continue;
+      h += jmRow(prettyKey(k), String(v));
+    }
+  } else {
+    h += jmRow("Reference", j.ref || "—");
+    h += jmRow("Status", j.status + (j.priority ? " · " + j.priority : ""));
+    if(j.raisedAt) h += jmRow("Raised", fmt(j.raisedAt));
+    if(j.closedAt) h += jmRow("Completed", fmt(j.closedAt));
+    if((j.engineers || []).length) h += jmRow("Engineer(s)", j.engineers.join(", "));
+    if(j.description) h += jmRow("Description", j.description);
+    if(j.lastNote) h += jmRow("Last note", j.lastNote);
+    if(j.signedBy) h += jmRow("Signed by", j.signedBy);
+    // Office/full-access users can still jump to the editable job.
+    if(full && j.id) h += `<div style="margin-top:12px;"><a class="btn small" href="job-view.html?jobId=${encodeURIComponent(j.id)}&back=${encodeURIComponent(location.pathname + location.search)}">Open full job (edit) →</a></div>`;
+  }
+  $("jmBody").innerHTML = h;
+  $("jobModal").classList.add("show");
+}
+function closeJobModal(){ $("jobModal").classList.remove("show"); }
 
 /* ---- Site Photos ---- */
 async function renderPhotos(){
