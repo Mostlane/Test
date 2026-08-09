@@ -364,7 +364,19 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   customer's signature, for EVERY engineer not just Story Mode). Enforced client-
   side (engineer-job.html `outcomeMissing`, checks `photos.some(stage==="After")`)
   AND server-side (sla.js `completionMissing` via `jobPhotoCount(env,id,"After")`,
-  non-admins only — admins can still override). The field app **defaults the photo
+  non-admins only — admins can still override). **Per-job RA + signature gates
+  (Aug 2026):** each job carries `requiresRA` + `requiresSignature` — default OFF
+  for PROJECTS (P-numbered site / projects client), ON otherwise; an explicit
+  value wins, preserved across re-saves; settable on **add-job.html** ("On-site
+  requirements" — two tick boxes that auto-default off when a Project site is
+  picked). When `requiresRA` is false the engineer page treats the RA as done
+  (no lock — `raRequired()` → `raDone=true`); the completion signature check is
+  skipped when `requiresSignature` is false, both client (engineer-job.html
+  `sigRequired()` in `outcomeMissing`) AND server (sla.js `signatureRequiredFor`
+  in `completionMissing`/`quoteMissing`). `jobIsProject` = `/^p\d/` siteCode or
+  projects storeType/client. patchJob accepts both flags so the office can flip
+  them later. Note/After-photo are still required regardless. The field app
+  **defaults the photo
   stage to "After" once the RA is done** (In Progress/During is rarely used), so the
   completion photo lands in the right tab. **Admins can recategorise a photo's
   stage** (Before/During/After) from the photo lightbox — stored as a

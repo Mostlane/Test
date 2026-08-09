@@ -230,6 +230,20 @@
         </div>
       </div>
 
+      <!-- On-site requirements -->
+      <div class="field-group">
+        <label>On-site requirements</label>
+        <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:2px">
+          <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin:0;cursor:pointer">
+            <input type="checkbox" id="reqRA" style="width:auto"> Requires risk assessment
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin:0;cursor:pointer">
+            <input type="checkbox" id="reqSig" style="width:auto"> Requires customer signature
+          </label>
+        </div>
+        <div class="hint" id="reqHint">Projects default to neither — tick to require them on this job.</div>
+      </div>
+
       <!-- Site details captured from the picker (not shown) -->
       <input type="hidden" id="siteCode" name="siteCode">
       <input type="hidden" id="siteName" name="siteName">
@@ -455,6 +469,22 @@ function handleSiteChange(){
   $("storeType").value = site.storeType || "";
   $("mileageFromHQ").value = site.mileageFromHQ ?? "";
   $("sharepointURL").value = site.sharepointURL || "";
+  applyReqDefaults();
+}
+
+// RA / signature default OFF for projects, ON otherwise — until the user
+// manually ticks one (then their choice sticks for this job).
+let reqTouched = false;
+function isProjectContext(){
+  if(String($("siteType").value||"").toLowerCase() === "projects") return true;
+  if(String($("storeType").value||"").toLowerCase() === "projects") return true;
+  return /^p\d/i.test(String($("siteCode").value||""));
+}
+function applyReqDefaults(){
+  if(reqTouched) return;
+  const proj = isProjectContext();
+  $("reqRA").checked = !proj;
+  $("reqSig").checked = !proj;
 }
 
 /* -----------------------------
@@ -495,6 +525,8 @@ async function handleSubmit(evt){
     description,
     assignedTo: $("assignedTo").value.trim() || undefined,
     scheduledAt: toIsoOrNull($("scheduledAt").value),
+    requiresRA: $("reqRA").checked,
+    requiresSignature: $("reqSig").checked,
     originator: getLoggedInUser() || undefined
   };
 
@@ -542,7 +574,11 @@ async function init(){
 
   $("jobForm").addEventListener("submit", handleSubmit);
   $("siteType").addEventListener("change", populateSites);
+  $("siteType").addEventListener("change", applyReqDefaults);
   $("siteSelect").addEventListener("change", handleSiteChange);
+  $("reqRA").addEventListener("change", function(){ reqTouched = true; });
+  $("reqSig").addEventListener("change", function(){ reqTouched = true; });
+  applyReqDefaults();
 
   // Load sites
   populateSites();
