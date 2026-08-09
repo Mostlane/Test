@@ -174,6 +174,16 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
 - MASTER_PASSWORD break-glass (audited "master", bypasses device lock,
   session-scoped). Device lock: devices table, owner exempt, per-user caps;
   /device/check-device fires on every page load (excluded from audit log).
+  **View As + device lock (fix):** while impersonating, the checked username is
+  the IMPERSONATED user (owner-exemption doesn't apply), so View As set
+  `sessionStorage.mostlaneMasterLogin` to bypass the lock. iOS wipes sessionStorage
+  on PWA kill but keeps localStorage, so a resumed PWA restored the impersonated
+  session yet lost the bypass → device-registration prompt → kicked to login.
+  Fix: `device-auth.js isMasterSession()` ALSO bypasses when the durable
+  localStorage `mostlaneViewAsReal` stash (set only by owner impersonation, the
+  return-bar's signal) is present. To stop a stale stash granting a later user the
+  bypass, it's cleared on logout (both portal-config logout buttons) AND on every
+  fresh login.html login.
 
 ## mostlane-api worker (worker/src/routes/)
 - `index.js` — route table (longest prefix wins), auth gate (public: login,

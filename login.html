@@ -225,6 +225,10 @@ if (!user || !user.Username) {
         // worker doesn't return one, so this is a no-op until cutover.
         if (result.token) { try { localStorage.setItem('mostlaneToken', result.token); } catch (e) {} }
 
+        // A fresh login is a brand-new session — never inherit a stale "View As"
+        // bypass stash from a previous user/session (it would skip the device lock).
+        try { localStorage.removeItem("mostlaneViewAsReal"); } catch (e) {}
+
         // Flag whether the user must change their password (admin reset / new user).
         window.__mostlaneMustChange = !!(result.mustChangePassword || user.MustChangePassword);
         // Master-password login → bypass the device lock for this session.
