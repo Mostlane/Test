@@ -259,22 +259,28 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   has ONE edit entry, **✏️ Edit → `window.MLJobEdit` (sla-jobedit.js)**, which does
   engineers + schedule + visibility + status/priority/site in one save. (The orphaned
   inline `updateBackdrop` modal is left in the HTML but never opened.)
-  **Multi-engineer = one INDEPENDENT job per engineer (Aug 2026):** ticking 2+
-  engineers in MLJobEdit / the scheduler / add-job splits the job into one job PER
-  engineer so their days run independently (separate status, RA, photos, signature,
-  completion). Server: `splitJobByEngineers(env,tid,primary,changedBy,ctx)` runs from
-  the office write paths ONLY (POST /sla/jobs, PUT /sla/job/{id}, PATCH /sla/jobs/{id})
-  — **NEVER /sla/inbound** (Zapier is always single-engineer), and only when
-  `assignedList(job).length>=2`. Siblings share `groupId` + `groupRef` (base ref) +
-  `groupLabel` (A/B/C…); the reference becomes `<base>-A` / `-B` (project P0002 →
-  P0002-A / P0002-B). **Add-only + idempotent** (dedupes by groupId+engineer; re-saves
-  never duplicate; de-ticking never deletes — remove an engineer by deleting their own
-  job row). New siblings start fresh (status Scheduled, no RA/sig/quote/hold/order,
-  releaseNotified=false so their own assignment push fires via reconcileRelease). The
-  primary keeps engineer[0] + its progress. sla-main shows a `👥 A/2` `.grp-tag` badge
-  on grouped rows (count from allJobs by groupId). Time/costing was already per-engineer
-  (job_time_segments keyed to the acting user), so labour/PO aggregate correctly per
-  sibling. Editor is `sla-jobedit.js?v=12`.
+  **Multi-engineer = ONE job, status per engineer ("only status per engineer", Aug 2026):**
+  a job worked by 2+ engineers stays a SINGLE job (no clutter) but each engineer runs
+  their own day. Everything is SHARED (RA, photos, signature, notes) EXCEPT status:
+  `job.engStatus[normId] = {status,at,by}` holds each engineer's own status; the
+  top-level `job.status` is a **rollup** (`rollupStatus`: Complete only when everyone's
+  done, else the most-active). Helpers in sla.js: `isMultiEng`, `effStatus(job,eng)`
+  (their slice else shared status — covers single-eng + legacy), `rollupStatus`,
+  `seedEngStatus` (on roster change: existing engineer keeps the shared status, a
+  newcomer starts "Scheduled"). PATCH routing: a NON-admin engineer on a multi-eng job
+  gets `body.__engActor=normId` and patchJob writes their slice + re-rolls `job.status`;
+  the gate/cross-job/On-Hold checks judge THEIR `effStatus` (a co-worker mid-job never
+  blocks them). Completion gates stay shared, so once one engineer supplies the RA/
+  signature/After-photo the next passes instantly. An OFFICE status change on a multi-eng
+  job sets every engineer's slice in step. Responses carry **`myStatus`** = the viewer's
+  own slice: GET /sla/jobs/{id} + the PATCH reply add it; **GET /sla/jobs/for-engineer
+  OVERWRITES `status` with the engineer's own** so route/engineer-jobs/inbox/my-day need
+  no change. engineer-job.html adopts `job.myStatus` on load + after a patch. job-view.html
+  (office) lists each engineer's status ("John — In Progress · Dave — Complete").
+  Single-engineer jobs + the Zapier intake are UNCHANGED (never multi-eng → normal path).
+  **NB the earlier "one independent job per engineer" split was REVERTED** (it cluttered
+  the board/site history); `splitJobByEngineers` is left dormant/unused in sla.js.
+  Editor is `sla-jobedit.js?v=13`.
   **UI polish (Aug 2026 layout pass):** sla-main.html base font bumped + set to
   "Segoe UI" (was 13px/system-ui — "too small"), back button moved to the header
   TOP-LEFT (grouped with the title in `.header-left`, no `data-role` so it stays

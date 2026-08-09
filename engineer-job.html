@@ -210,6 +210,10 @@
     var jr = await jfetch("/jobs/"+encodeURIComponent(jobId)+"?t="+Date.now(), {cache:"no-store"});
     if(!jr.ok) throw new Error("Job load failed ("+jr.status+")");
     job = await jr.json();
+    // On a shared (multi-engineer) job the server sends THIS engineer's own status
+    // as `myStatus`; everything on this page is about their day, so adopt it as the
+    // working status. Single-engineer jobs send it equal to the shared status.
+    if(job.myStatus) job.status = job.myStatus;
     try{ var cr=await jfetch("/categories?t="+Date.now(),{cache:"no-store"}); var cj=await cr.json(); cats=(cj&&cj.categories)||[]; }catch(e){ cats=[]; }
     await loadPhotos();
     raDone = !!(job.riskAssessment && job.riskAssessment.safe) || ["In Progress","Complete","On Hold","Quote","Order","Closed Jobs","Invoiced"].indexOf(job.status)>=0;
@@ -433,7 +437,9 @@
     if(j && j.id && job){
       if(Array.isArray(j.statusHistory)) job.statusHistory=j.statusHistory;
       if(Array.isArray(j.events)) job.events=j.events;
-      if(j.status) job.status=j.status;
+      // Adopt this engineer's own status (their slice on a shared job), not the
+      // rolled-up board status the response also carries.
+      if(j.myStatus||j.status) job.status=j.myStatus||j.status;
       try{ drawTimeline(); }catch(e){}
     }
     return j;

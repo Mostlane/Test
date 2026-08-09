@@ -872,7 +872,18 @@ function renderJob(){
 
   const engs = (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length)
     ? job.assignedEngineers : (job.assignedTo ? [job.assignedTo] : []);
-  $("jobAssigned").textContent = engs.length ? engs.join(", ") : "Unassigned";
+  // On a shared (multi-engineer) job, show EACH engineer's own status — they run
+  // their days independently, so "John — In Progress · Dave — Complete".
+  if (engs.length > 1 && job.engStatus) {
+    const jvEsc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const nrm = s => (s||"").toLowerCase().replace(/\s+/g,".").trim();
+    $("jobAssigned").innerHTML = engs.map(e => {
+      const st = (job.engStatus[nrm(e)] || {}).status || job.status || "";
+      return `${jvEsc(e)} — <b>${jvEsc(st)}</b>`;
+    }).join("<br>");
+  } else {
+    $("jobAssigned").textContent = engs.length ? engs.join(", ") : "Unassigned";
+  }
 
   renderSite();
   renderCapture();
