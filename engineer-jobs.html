@@ -46,6 +46,9 @@
     .older-btn{width:100%;min-height:44px;margin-bottom:14px;border-radius:12px;border:1px dashed color-mix(in srgb,var(--muted) 40%,var(--line));background:transparent;color:var(--muted);font-size:14px;font-weight:650;cursor:pointer;font-family:inherit;touch-action:manipulation}
     .hint{text-align:center;font-size:11px;color:var(--muted);margin:4px 0 12px}
     .day-group{margin-top:4px}
+    #dayMapSeg{display:flex;gap:6px;padding:8px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb}
+    .mapseg{flex:1;background:#fff;border:1px solid #cbd5e1;border-radius:20px;padding:8px 0;font-size:13px;font-weight:600;color:#334155;cursor:pointer}
+    .mapseg.on{background:#003b82;border-color:#003b82;color:#fff}
     .day-banner{display:flex;align-items:baseline;gap:8px;padding:8px 2px;margin:16px 0 8px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
     .day-banner .d-count{font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)}
     .day-banner.today{color:var(--accent)}
@@ -156,8 +159,14 @@
 
 <div id="dayMapOverlay" style="position:fixed;inset:0;background:#fff;z-index:8000;display:none;flex-direction:column;">
   <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
-    <h3 style="margin:0;font-size:16px;color:#003b82;flex:1;">🗺️ Today's jobs</h3>
+    <h3 style="margin:0;font-size:16px;color:#003b82;flex:1;">🗺️ Your jobs</h3>
     <button type="button" class="btn" id="dayMapClose">✕ Close</button>
+  </div>
+  <div id="dayMapSeg">
+    <button type="button" class="mapseg on" data-r="day">Day</button>
+    <button type="button" class="mapseg" data-r="week">Week</button>
+    <button type="button" class="mapseg" data-r="month">Month</button>
+    <button type="button" class="mapseg" data-r="year">Year</button>
   </div>
   <div id="dayMap" style="flex:1;"></div>
   <div id="dayMapNote" style="font-size:11px;color:#6b7280;padding:4px 12px;background:#f9fafb;border-top:1px solid #e5e7eb;">Tap a pin to open the job.</div>
@@ -726,6 +735,19 @@ const DAY_STATUS_COLOUR = {
   "In Progress":"#9333ea","On Hold":"#6b7280","Quote":"#dc2626","Order":"#0d9488"
 };
 function escH(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+let mapMode = "day";        // day | week | month | year — the pin range
+let allMineJobs = null;     // all the engineer's jobs, fetched once for the map
+
+// The date window for each mode (weeks are Mon–Sun, months calendar, year = YTD).
+function mapRange(mode){
+  const now = new Date(); now.setHours(0,0,0,0);
+  if(mode === "week")  return [startOfWeek(now), endOfWeek(now)];
+  if(mode === "month") return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth()+1, 0)];
+  if(mode === "year")  return [new Date(now.getFullYear(), 0, 1), now];
+  return [now, now];       // day
+}
+const MAP_LABEL = { day:"today", week:"this week", month:"this month", year:"this year" };
+
 async function openDayMap(){
   $("dayMapOverlay").style.display = "flex";
   if(typeof L === "undefined"){
@@ -737,16 +759,31 @@ async function openDayMap(){
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(dayMap);
     dayMapLayer = L.layerGroup().addTo(dayMap);
   }
-  const today = isoDate(new Date());
-  let list = dayJobsCache[today];
-  if(!list){
+  // Fetch ALL my jobs once (no date filter), then pin whichever range is selected.
+  if(!allMineJobs){
+    $("dayMapNote").textContent = "Loading your jobs…";
     try{
-      const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(getEngineer())}&date=${today}`, { cache:"no-store" });
-      list = await res.json();
-      if(!Array.isArray(list)) list = [];
-      dayJobsCache[today] = list;
-    }catch{ list = []; }
+      const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(getEngineer())}`, { cache:"no-store" });
+      allMineJobs = await res.json();
+      if(!Array.isArray(allMineJobs)) allMineJobs = [];
+    }catch{ allMineJobs = []; }
   }
+  mapMode = "day";          // always default to the day's jobs on open
+  renderMapForRange(mapMode);
+}
+
+async function renderMapForRange(mode){
+  mapMode = mode;
+  [].forEach.call(document.querySelectorAll("#dayMapSeg .mapseg"), b => b.classList.toggle("on", b.dataset.r === mode));
+  if(!dayMap){ $("dayMapNote").textContent = "⚠️ Map couldn't load — check your connection and try again."; return; }
+  const [from, to] = mapRange(mode);
+  const fromISO = isoDate(from), toISO = isoDate(to);
+  const list = (allMineJobs || []).filter(j => {
+    if(!j.scheduledAt) return false;
+    const d = new Date(j.scheduledAt).toISOString().slice(0,10);
+    return d >= fromISO && d <= toISO;
+  });
+  const label = MAP_LABEL[mode] || "today";
   $("dayMapNote").textContent = "Placing jobs by postcode…";
   await geocodePostcodes(list.map(jobPostcode));
   setTimeout(() => {
@@ -766,7 +803,7 @@ async function openDayMap(){
           <span style="display:inline-block;border-radius:999px;padding:1px 8px;color:#fff;font-size:11px;font-weight:600;background:${colour};margin-left:4px;">${escH(job.status||"")}</span><br>
           ${escH(job.description||"")}<br>
           <span style="color:#6b7280;">${escH(job.siteName||job.address||"")}</span><br>
-          ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}
+          ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}) + " " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}
           <a href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html" style="color:#1d4ed8;font-weight:600;">Open job →</a>
           ${dirUrl(job) ? ` · <a href="${dirUrl(job)}" target="_blank" rel="noopener" style="color:#1d4ed8;">Directions</a>` : ""}
         </div>`);
@@ -775,10 +812,10 @@ async function openDayMap(){
     });
     if(pts.length){
       dayMap.fitBounds(pts, { padding:[36,36], maxZoom:13 });
-      $("dayMapNote").textContent = `${pts.length} job(s) today` + (noLoc ? ` · ${noLoc} with no usable postcode` : "") + ". Tap a pin to open the job.";
+      $("dayMapNote").textContent = `${pts.length} job(s) ${label}` + (noLoc ? ` · ${noLoc} with no usable postcode` : "") + ". Tap a pin to open the job.";
     }else{
       dayMap.setView([51.27,-0.75], 9);
-      $("dayMapNote").textContent = list.length ? "Today's jobs have no usable postcodes." : "No jobs scheduled today.";
+      $("dayMapNote").textContent = list.length ? `Jobs ${label} have no usable postcodes.` : `No jobs scheduled ${label}.`;
     }
   }, 60);
 }
@@ -880,6 +917,8 @@ function init(){
 
   $("dayMapBtn").addEventListener("click", openDayMap);
   $("dayMapClose").addEventListener("click", () => { $("dayMapOverlay").style.display = "none"; });
+  [].forEach.call(document.querySelectorAll("#dayMapSeg .mapseg"), b =>
+    b.addEventListener("click", () => renderMapForRange(b.dataset.r)));
   // Admin-only shortcuts to the SLA management areas — hidden for engineers
   // (SLA-only). The target pages also gate, so this is just clean navigation.
   if(hasSLAAdmin()){
