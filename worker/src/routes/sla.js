@@ -1155,12 +1155,23 @@ function humanList(items) {
   return a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 }
 
-// Complete = a real note + a completion (After) photo + the customer's signature.
+// Whether a job needs a customer signature. Default OFF for projects, ON
+// otherwise; an explicit stored flag wins. Mirrors the client's sigRequired().
+function jobIsProject(job) {
+  return /^p\d/i.test(String((job && job.siteCode) || "")) ||
+         /project/i.test(String((job && (job.storeType || job.client)) || ""));
+}
+function signatureRequiredFor(job) {
+  return (job && job.requiresSignature !== undefined) ? !!job.requiresSignature : !jobIsProject(job);
+}
+
+// Complete = a real note + a completion (After) photo + the customer's signature
+// (signature only when the job requires one — projects default to no signature).
 function completionMissing(job, patch, afterPhotoCount) {
   const miss = [];
   if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
   if (afterPhotoCount < 1) miss.push("a completion photo (After)");
-  if (!job.signature || !job.signature.fileKey) miss.push("the customer signature");
+  if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
 }
 
@@ -1172,7 +1183,7 @@ function quoteMissing(job, patch, photoCount) {
   if (!String(q.reason || "").trim())      miss.push("why it needs quoting");
   if (!String(q.materials || "").trim())   miss.push("the materials");
   if (photoCount < 1) miss.push("at least one photo");
-  if (!job.signature || !job.signature.fileKey) miss.push("the customer signature");
+  if (signatureRequiredFor(job) && (!job.signature || !job.signature.fileKey)) miss.push("the customer signature");
   return miss;
 }
 
@@ -1533,6 +1544,17 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     }
   }
 
+  // Per-job gates: whether this job needs a Risk Assessment and a customer
+  // signature. Default OFF for projects (P-numbered site / projects client), ON
+  // for everything else. An explicit value from the form/editor wins; an existing
+  // job's stored value is preserved when not re-specified.
+  const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) ||
+    /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
+  const requiresRA = body.requiresRA !== undefined ? !!body.requiresRA
+    : (existing?.requiresRA !== undefined ? !!existing.requiresRA : !isProjJob);
+  const requiresSignature = body.requiresSignature !== undefined ? !!body.requiresSignature
+    : (existing?.requiresSignature !== undefined ? !!existing.requiresSignature : !isProjJob);
+
   const job = {
     id,
     helpdeskRef: body.reference || existing?.helpdeskRef || id,
@@ -1554,6 +1576,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     lon: body.lon ?? existing?.lon ?? null,
     storeType: body.storeType || existing?.storeType || "",
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
+    requiresRA, requiresSignature,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -1623,6 +1646,8 @@ async function patchJob(env, tenantId, id, patch) {
     if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 60000).toISOString();
   }
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
+  if (patch.requiresRA !== undefined) job.requiresRA = !!patch.requiresRA;
+  if (patch.requiresSignature !== undefined) job.requiresSignature = !!patch.requiresSignature;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {

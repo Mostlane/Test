@@ -199,6 +199,11 @@
   function isFullAccess(){ return myPerms().FullAccess==="Yes"; }               // "all access" only
   function isOfficeAdmin(){ var p=myPerms(); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }
   function isFieldUser(){ var st=(sessionStorage.getItem("mostlaneStaffType")||localStorage.getItem("mostlaneStaffType")||"").toLowerCase(); if(st) return st==="field"; return String(myPerms().StaffType||"").toLowerCase()==="field"; }
+  // Per-job gates. Projects default to no Risk Assessment and no customer
+  // signature; an explicit flag on the job wins. Everything else defaults to both.
+  function jobIsProject(){ return /^p\d/i.test(String((job&&job.siteCode)||"")) || /project/i.test(String((job&&(job.storeType||job.client))||"")); }
+  function raRequired(){ return (job&&job.requiresRA!==undefined)? !!job.requiresRA : !jobIsProject(); }
+  function sigRequired(){ return (job&&job.requiresSignature!==undefined)? !!job.requiresSignature : !jobIsProject(); }
   async function loadAll(){
     var jr = await jfetch("/jobs/"+encodeURIComponent(jobId)+"?t="+Date.now(), {cache:"no-store"});
     if(!jr.ok) throw new Error("Job load failed ("+jr.status+")");
@@ -208,6 +213,9 @@
     raDone = !!(job.riskAssessment && job.riskAssessment.safe) || ["In Progress","Complete","On Hold","Quote","Order","Closed Jobs","Invoiced"].indexOf(job.status)>=0;
     reported = !!(job.raBlock && job.raBlock.state==="open");
     if(reported) raDone=false;
+    // Jobs that don't require a Risk Assessment (projects by default) are never
+    // locked — treat the RA as already satisfied so work can start straight away.
+    if(!raRequired()){ raDone=true; reported=false; }
     signed = !!(job.signature && job.signature.fileKey);
     sigName = signed ? (job.signature.signedBy||"") : "";
     // Restore a device-saved signature the server hasn't got yet (survives the
@@ -327,9 +335,9 @@
   }
   function ntrim(id){var el=$(id);return el?String(el.value||"").trim():"";}
   function outcomeMissing(){
-    if(chosen==="Complete"){var m=[];if(($("note").value||"").trim().length<15)m.push("a completion note");if(!photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(!signed)m.push("the customer's signature");return m;}
+    if(chosen==="Complete"){var m=[];if(($("note").value||"").trim().length<15)m.push("a completion note");if(!photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
     if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
-    if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photos.length<1)m.push("a photo");if(!signed)m.push("the customer's signature");return m;}
+    if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photos.length<1)m.push("a photo");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
     return null;
   }
   function refresh(){
