@@ -419,9 +419,16 @@ const MAP = window.ML_PERM_MAP || {
         // Van Check tile — shown ONLY to field users (not in MAP so admins/office
         // don't get it). They open it whenever they like; the reg auto-fills from
         // their assigned van, and its Back returns to main.html (guarded on the page).
-        const stx = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
-        const isFieldUser = !fullAccess && String(user.SLAAdmin || "").toLowerCase() !== "yes"
-          && (stx === "field" || (stx !== "office" && (String(user.SLA || "").toLowerCase() === "yes" || isStory)));
+        // StaffType is the authoritative field/office flag from the server (it
+        // defaults to "field"); prefer it over the storage mirror, which a plain
+        // login doesn't always set — that's why field engineers were missing the
+        // tile. Persist it so the field-app pages' own guards can read it too.
+        const stx = String(user.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+        if (user.StaffType) { try { localStorage.setItem("mostlaneStaffType", user.StaffType); sessionStorage.setItem("mostlaneStaffType", user.StaffType); } catch (e) {} }
+        // Van Check tile: EVERY field user (engineer) gets it — they can do a
+        // check any time. Office/admin/Full-Access users don't (it's not in MAP).
+        const isFieldUser = !fullAccess && (stx === "field"
+          || (stx !== "office" && (String(user.SLA || "").toLowerCase() === "yes" || isStory)));
         const vc = document.getElementById("VanCheck");
         if (vc) vc.classList.toggle("visible", isFieldUser);
 
