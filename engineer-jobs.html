@@ -75,6 +75,7 @@
     .status-pill{border-radius:999px;padding:5px 11px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px;background:var(--chip);color:var(--muted)}
     .status-open{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent)}
     .status-overdue{background:color-mix(in srgb,var(--urgent) 13%,transparent);color:var(--urgent)}
+    .urgent-pill{background:color-mix(in srgb,var(--urgent) 13%,transparent);color:var(--urgent)}
     .status-complete{background:var(--chip);color:var(--muted)}
     .sla-badge{display:none !important}
     .job-actions{display:flex;gap:10px;margin-top:13px}
@@ -305,14 +306,10 @@ function computeSlaCountdown(targetISO){
   };
 }
 
-function statusClass(status, slaStatus){
+// Engineer status pill — plain status only, NO SLA overdue colouring.
+function statusClass(status){
   const s = (status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")){
-    return "status-pill status-complete";
-  }
-  if(slaStatus === "overdue" || slaStatus === "overdueSoon"){
-    return "status-pill status-overdue";
-  }
+  if(s.includes("complete") || s.includes("closed")) return "status-pill status-complete";
   return "status-pill status-open";
 }
 // Clean "Job name" = the store/site as "Street - Number"
@@ -333,13 +330,13 @@ function mlJobName(job){
 // Priority "Priority 2" / "P2" / 2 → p2 class + P2 label (defaults P4).
 function prioClass(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "p"+m[1] : "p4"; }
 function prioLabel(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "P"+m[1] : "P4"; }
-// Left-edge urgency stripe class for a card: done/overdue/soon/ok/none.
-function stripClass(status, slaStatus){
+// Engineer urgency is a plain Priority-1 flag — NO SLA-timing colouring.
+function isUrgentJob(job){ return /priority\s*1|p1/i.test(String((job && job.priority) || "")); }
+// Left-edge stripe: done greys out; a P1 job shows the red urgency stripe; else neutral.
+function stripClass(status, urgent){
   const s = (status || "").toLowerCase();
   if(s.includes("complete") || s.includes("closed") || s.includes("invoiced")) return "strip-done";
-  if(slaStatus === "overdue" || slaStatus === "overdueSoon") return "strip-bad";
-  if(slaStatus === "warn") return "strip-warn";
-  if(slaStatus === "none") return "strip-none";
+  if(urgent) return "strip-bad";
   return "strip-ok";
 }
 // Big card markup shared by the day timeline and the "not booked in" box.
@@ -363,7 +360,8 @@ function jobCardInner(job, slaInfo, target){
       <div class="job-site">${site}</div>
       ${addr ? `<div class="job-addr">${addr}</div>` : ""}
       <div class="job-meta">
-        <span class="${statusClass(job.status, slaInfo.status)}">${escH(job.status || "Open")}</span>
+        ${isUrgentJob(job) ? `<span class="status-pill urgent-pill">Urgent</span>` : ""}
+        <span class="${statusClass(job.status)}">${escH(job.status || "Open")}</span>
       </div>
       <div class="job-actions">
         ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
@@ -433,7 +431,7 @@ function renderDay(dateStr, jobs, mode){
     const slaInfo = computeSlaCountdown(target);
 
     const card = document.createElement("div");
-    card.className = "job-card " + stripClass(job.status, slaInfo.status);
+    card.className = "job-card " + stripClass(job.status, isUrgentJob(job));
     card.dataset.jobId = job.id;
     card.innerHTML = jobCardInner(job, slaInfo, target);
     group.appendChild(card);
@@ -547,14 +545,7 @@ function startCountdownLoop(){
       const info = computeSlaCountdown(iso);
       el.textContent = info.text;
       el.className = info.cls;
-      // keep the card's left urgency stripe in sync as the clock ticks
-      const card = el.closest(".job-card");
-      if(card){
-        const statusTxt = (card.querySelector(".status-pill")?.textContent || "").trim();
-        const strip = stripClass(statusTxt, info.status);
-        card.classList.remove("strip-ok","strip-warn","strip-bad","strip-done","strip-none");
-        card.classList.add(strip);
-      }
+      // (Engineer stripes are a static P1 flag, not an SLA clock — nothing to sync.)
     });
   };
   tick();
@@ -871,7 +862,7 @@ async function loadUnscheduled(){
       const target = job.targetAt || job.sla?.targetAt;
       const slaInfo = computeSlaCountdown(target);
       const card = document.createElement("div");
-      card.className = "job-card " + stripClass(job.status, slaInfo.status);
+      card.className = "job-card " + stripClass(job.status, isUrgentJob(job));
       card.dataset.jobId = job.id;
       card.innerHTML = jobCardInner(job, slaInfo, target);
       items.appendChild(card);
