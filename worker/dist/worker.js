@@ -9283,6 +9283,72 @@ async function handle20(request, env, ctx, url, sess) {
     await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).run();
     return jr3({ ok: true }, headers);
   }
+  if (sub === "/insights" && method === "GET") {
+    if (!await canMoney(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
+    await ensureVehTable(env);
+    await ensureMaintTable(env);
+    await ensureFuelTable(env);
+    const from = q.get("from") || "", to = q.get("to") || "";
+    const inRange = (d) => (!from || d && d >= from) && (!to || d && d <= to);
+    const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
+    const cats = await maintCats(env, tid);
+    const per = {};
+    const ensureV = (reg) => {
+      const k = dnReg(reg);
+      return per[k] || (per[k] = { reg, maint: 0, fuel: 0, litres: 0, byCat: {} });
+    };
+    const vrows = (await env.DB.prepare("SELECT reg FROM vehicles WHERE tenant_id=?").bind(tid).all()).results || [];
+    vrows.forEach((v) => {
+      if (v.reg) ensureV(v.reg);
+    });
+    const { results: mrows } = await env.DB.prepare("SELECT reg, date, allocs FROM vehicle_maintenance WHERE tenant_id=?").bind(tid).all();
+    for (const m of mrows || []) {
+      if (!m.reg || !inRange(m.date)) continue;
+      const v = ensureV(m.reg);
+      for (const a of parseJson(m.allocs, []) || []) {
+        const cat = a.cat || "Other", cost = Number(a.cost) || 0;
+        v.maint += cost;
+        const c = v.byCat[cat] || (v.byCat[cat] = { cost: 0, count: 0 });
+        c.cost += cost;
+        c.count += 1;
+      }
+    }
+    const { byCard } = await fuelCardMap(env, tid);
+    const userCurrent = {};
+    for (const c of Object.values(byCard)) userCurrent[c.username] = c.vehicle;
+    const intervals = await assignmentIntervals(env, tid);
+    const { results: frows } = await env.DB.prepare("SELECT card, username, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    for (const e of frows || []) {
+      if (!inRange(e.date)) continue;
+      const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+      if (!user) continue;
+      const reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      if (!reg) continue;
+      const v = ensureV(reg);
+      v.fuel += Number(e.cost) || 0;
+      v.litres += Number(e.litres) || 0;
+    }
+    const vehicles = Object.values(per).map((v) => {
+      const byCat = {};
+      for (const [cat, c] of Object.entries(v.byCat)) byCat[cat] = { cost: r2(c.cost), count: c.count };
+      return { reg: v.reg, maint: r2(v.maint), fuel: r2(v.fuel), litres: Math.round(v.litres * 10) / 10, total: r2(v.maint + v.fuel), byCat };
+    }).sort((a, b) => b.total - a.total);
+    const fleet = { maint: 0, fuel: 0, total: 0, byCat: {} };
+    for (const v of vehicles) {
+      fleet.maint += v.maint;
+      fleet.fuel += v.fuel;
+      fleet.total += v.total;
+      for (const [cat, c] of Object.entries(v.byCat)) {
+        const f = fleet.byCat[cat] || (fleet.byCat[cat] = { cost: 0, count: 0 });
+        f.cost = r2(f.cost + c.cost);
+        f.count += c.count;
+      }
+    }
+    fleet.maint = r2(fleet.maint);
+    fleet.fuel = r2(fleet.fuel);
+    fleet.total = r2(fleet.total);
+    return jr3({ ok: true, from, to, categories: cats, vehicles, fleet }, headers);
+  }
   if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" || sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats") {
     if (sub === "/finance" && method === "POST") {
       if (!await canMoney(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
