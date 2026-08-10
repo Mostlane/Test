@@ -9376,9 +9376,9 @@ async function handle20(request, env, ctx, url, sess) {
     const reg = q.get("reg") || "";
     if (!reg) return jr3({ error: "reg required" }, headers, 400);
     const { results } = await env.DB.prepare(
-      "SELECT id, reg, date, miles, note, by FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? ORDER BY date DESC, id DESC"
+      "SELECT id, reg, date, miles, note, by, source FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? ORDER BY date DESC, id DESC"
     ).bind(tid, dnReg(reg)).all();
-    const readings = (results || []).map((r) => ({ id: r.id, date: r.date || "", miles: r.miles, note: r.note || "", by: r.by || "" }));
+    const readings = (results || []).map((r) => ({ id: r.id, date: r.date || "", miles: r.miles, note: r.note || "", by: r.by || "", source: r.source || "manual" }));
     const mpg = await mpgForReg(env, tid, reg);
     return jr3({ ok: true, reg, readings, mpg }, headers);
   }
@@ -9393,15 +9393,15 @@ async function handle20(request, env, ctx, url, sess) {
     const id = parseInt(String(b.id || ""), 10);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     if (id && !isNaN(id)) {
-      await env.DB.prepare("UPDATE odometer_readings SET reg=?,date=?,miles=?,note=? WHERE tenant_id=? AND id=?").bind(reg, date, milesV, note, tid, id).run();
+      await env.DB.prepare("UPDATE odometer_readings SET reg=?,date=?,miles=?,note=?,source='manual' WHERE tenant_id=? AND id=?").bind(reg, date, milesV, note, tid, id).run();
       return jr3({ ok: true, id }, headers);
     }
     const ex = await env.DB.prepare("SELECT id FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND date=?").bind(tid, dnReg(reg), date).first();
     if (ex && ex.id) {
-      await env.DB.prepare("UPDATE odometer_readings SET miles=?,note=? WHERE tenant_id=? AND id=?").bind(milesV, note, tid, ex.id).run();
+      await env.DB.prepare("UPDATE odometer_readings SET miles=?,note=?,source='manual' WHERE tenant_id=? AND id=?").bind(milesV, note, tid, ex.id).run();
       return jr3({ ok: true, id: ex.id, updated: true }, headers);
     }
-    const res = await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, note, sess.user.username, now).run();
+    const res = await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at,source) VALUES (?,?,?,?,?,?,?, 'manual')").bind(tid, reg, date, milesV, note, sess.user.username, now).run();
     return jr3({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
   }
   if (sub === "/odometer/import" && method === "POST") {
@@ -9410,6 +9410,8 @@ async function handle20(request, env, ctx, url, sess) {
     const reg = String(b.reg || "").trim();
     const readings = Array.isArray(b.readings) ? b.readings : [];
     if (!reg || !readings.length) return jr3({ error: "reg + readings required" }, headers, 400);
+    const source = b.source === "manual" ? "manual" : "fuel";
+    const rank = ODO_RANK[source] || 1;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     let created = 0, updated = 0, skipped = 0;
     for (const rd of readings) {
@@ -9419,12 +9421,16 @@ async function handle20(request, env, ctx, url, sess) {
         skipped++;
         continue;
       }
-      const ex = await env.DB.prepare("SELECT id FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND date=?").bind(tid, dnReg(reg), date).first();
+      const ex = await env.DB.prepare("SELECT id, source FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND date=?").bind(tid, dnReg(reg), date).first();
       if (ex && ex.id) {
-        await env.DB.prepare("UPDATE odometer_readings SET miles=? WHERE tenant_id=? AND id=?").bind(milesV, tid, ex.id).run();
+        if (rank < (ODO_RANK[ex.source || "manual"] || 1)) {
+          skipped++;
+          continue;
+        }
+        await env.DB.prepare("UPDATE odometer_readings SET miles=?,source=? WHERE tenant_id=? AND id=?").bind(milesV, source, tid, ex.id).run();
         updated++;
       } else {
-        await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, "", sess.user.username, now).run();
+        await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at,source) VALUES (?,?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, "", sess.user.username, now, source).run();
         created++;
       }
     }
@@ -10058,10 +10064,11 @@ async function ensureMaintTable(env) {
 async function latestMileage(env, tid) {
   const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
   const out = {};
-  const consider = (k, mi, dateStr, at) => {
+  const consider = (k, mi, dateStr, at, source) => {
     if (!k || !mi || !dateStr) return;
+    const rank = ODO_RANK[source] || 1;
     const cur = out[k];
-    if (!cur || dateStr >= cur.date) out[k] = { miles: mi, at: at || dateStr, date: dateStr };
+    if (!cur || dateStr > cur.date || dateStr === cur.date && rank >= cur.rank) out[k] = { miles: mi, at: at || dateStr, date: dateStr, rank };
   };
   try {
     const { results } = await env.DB.prepare(
@@ -10073,14 +10080,14 @@ async function latestMileage(env, tid) {
         m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
       } catch {
       }
-      consider(dn(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10), r.checked_at);
+      consider(dn(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10), r.checked_at, "vancheck");
     }
   } catch {
   }
   try {
     await ensureOdoTable(env);
-    const { results } = await env.DB.prepare("SELECT reg, date, miles FROM odometer_readings WHERE tenant_id=? ORDER BY date ASC").bind(tid).all();
-    for (const r of results || []) consider(dn(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), r.date);
+    const { results } = await env.DB.prepare("SELECT reg, date, miles, source FROM odometer_readings WHERE tenant_id=? ORDER BY date ASC").bind(tid).all();
+    for (const r of results || []) consider(dn(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), r.date, r.source || "manual");
   } catch {
   }
   return out;
@@ -10093,7 +10100,12 @@ async function ensureOdoTable(env) {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_odo_reg ON odometer_readings(tenant_id,reg)").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE odometer_readings ADD COLUMN source TEXT").run();
+  } catch {
+  }
 }
+var ODO_RANK = { manual: 3, vancheck: 2, fuel: 1 };
 var dnReg = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
 async function vehiclePoRows(env, { reg, from, to } = {}) {
   if (!env.PO_DB) return [];
@@ -10214,9 +10226,10 @@ async function odoByVehicle(env, tid) {
   const byReg = {};
   const put = (k, mi, date, source) => {
     if (!k || !mi || !date) return;
+    const rank = ODO_RANK[source] || 1;
     const m = byReg[k] || (byReg[k] = {});
     const cur = m[date];
-    if (!cur || source === "manual" && cur.source === "vancheck" || source === cur.source && mi > cur.miles) m[date] = { miles: mi, source };
+    if (!cur || rank > cur.rank || rank === cur.rank && mi > cur.miles) m[date] = { miles: mi, rank };
   };
   try {
     const { results } = await env.DB.prepare(
@@ -10234,8 +10247,8 @@ async function odoByVehicle(env, tid) {
   }
   try {
     await ensureOdoTable(env);
-    const { results } = await env.DB.prepare("SELECT reg, date, miles FROM odometer_readings WHERE tenant_id=?").bind(tid).all();
-    for (const r of results || []) put(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), "manual");
+    const { results } = await env.DB.prepare("SELECT reg, date, miles, source FROM odometer_readings WHERE tenant_id=?").bind(tid).all();
+    for (const r of results || []) put(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), r.source || "manual");
   } catch {
   }
   const out = {};
@@ -10294,26 +10307,27 @@ async function mpgByVehicle(env, tid) {
 }
 async function odoSeries(env, tid, k) {
   const byDate = {};
+  const put = (d, mi, source) => {
+    if (!mi || !d) return;
+    const rank = ODO_RANK[source] || 1, cur = byDate[d];
+    if (!cur || rank > cur.rank || rank === cur.rank && mi > cur.miles) byDate[d] = { date: d, miles: mi, source, rank };
+  };
   try {
-    const { results } = await env.DB.prepare("SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND UPPER(REPLACE(vehicle,' ',''))=?").bind(tid, k).all();
+    const { results } = await env.DB.prepare("SELECT items, checked_at FROM vehicle_checks WHERE tenant_id=? AND UPPER(REPLACE(vehicle,' ',''))=?").bind(tid, k).all();
     for (const r of results || []) {
       let m = "";
       try {
         m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
       } catch {
       }
-      const mi = parseInt(m, 10), d = (r.checked_at || "").slice(0, 10);
-      if (mi && d && (!byDate[d] || mi > byDate[d].miles)) byDate[d] = { date: d, miles: mi, source: "vancheck" };
+      put((r.checked_at || "").slice(0, 10), parseInt(m, 10), "vancheck");
     }
   } catch {
   }
   try {
     await ensureOdoTable(env);
-    const { results } = await env.DB.prepare("SELECT date, miles FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, k).all();
-    for (const r of results || []) {
-      const mi = parseInt(r.miles, 10), d = (r.date || "").slice(0, 10);
-      if (mi && d && (!byDate[d] || mi > byDate[d].miles || byDate[d].source === "vancheck")) byDate[d] = { date: d, miles: mi, source: "manual" };
-    }
+    const { results } = await env.DB.prepare("SELECT date, miles, source FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, k).all();
+    for (const r of results || []) put((r.date || "").slice(0, 10), parseInt(r.miles, 10), r.source || "manual");
   } catch {
   }
   return Object.values(byDate).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);

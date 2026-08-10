@@ -513,9 +513,10 @@
       rd.map((r,i)=>{
         const older=rd[i+1];
         const gap=older?` <span style="color:var(--muted)">(+${(r.miles-older.miles).toLocaleString("en-GB")} mi)</span>`:"";
+        const src=r.source==="fuel"?` <span style="color:var(--muted);font-size:11px">· fuel</span>`:"";
         return `<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:13px">
           <span style="font-weight:700;white-space:nowrap">${esc(fmtDMY(r.date))}</span>
-          <span style="flex:1">${Number(r.miles).toLocaleString("en-GB")} mi${gap}</span>
+          <span style="flex:1">${Number(r.miles).toLocaleString("en-GB")} mi${gap}${src}</span>
           <button class="btn ghost small" onclick="delReading(${r.id})">✕</button></div>`;
       }).join("");
   }

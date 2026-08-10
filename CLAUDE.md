@@ -855,7 +855,22 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     **📏 Mileage** button in the vehicles.html deep-dive → modal (MPG headline +
     readings list w/ gap-miles + add/delete). NB per-interval MPG is noisy when
     readings don't align with fill dates — the **overall window MPG** is the
-    reliable figure.
+    reliable figure. **Span uses the CHRONOLOGICAL endpoints (first→last by
+    date), not raw min/max**, so one wild mid-history value (e.g. a "123456" test
+    mileage in a van check) can't blow up the distance.
+    - **Source priority (`source` col, self-migrating)**: each odo row is
+      `manual` (typed) or `fuel` (auto-pulled off a statement); van-check mileage
+      is `vancheck` at merge time. Rank **manual(3) > vancheck(2) > fuel(1)** —
+      on a same-date clash the higher rank wins (`ODO_RANK` in fleet.js, applied
+      in odoByVehicle/odoSeries/latestMileage). **POST /fleet/odometer/import**
+      takes `source` (default `fuel`) and **won't let a lower-ranked reading
+      clobber a better one**. **The fuel-statement CSV importer
+      (fuel-cards.html) also pulls the Odometer Reading column**: per-van
+      candidates are sanity-filtered client-side (positive, monotonic
+      non-decreasing, ≤500 mi/day, and the whole van dropped if the series is
+      degenerate — <2 points or <25 mi of movement, e.g. drivers typing "1") and
+      POSTed as `source:fuel`. Van checks stay the trusted primary; fuel odos are
+      a secondary gap-filler.
   - **Stats** foldable **Weekly / Monthly / 3-Monthly / Yearly** (`periodStats`):
     every average = total ÷ (real data span in days) × period days; a period
     LONGER than the real span is flagged **`projected`** in the response and
