@@ -101,6 +101,7 @@
     <div class="head-actions">
       <a class="btn small" id="vanChecksBtn" href="van-checks.html" style="position:relative;">Van Checks</a>
       <a class="btn small" id="fuelLink" href="fuel-cards.html">⛽ Fuel Cards</a>
+      <a class="btn small" id="insightsLink" href="vehicle-insights.html" style="display:none;">📊 Insights</a>
       <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
@@ -243,6 +244,8 @@
   // any Vehicles user, so its header button always shows).
   let IS_FULL=false;
   try{ const p=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); IS_FULL = p.FullAccess==="Yes"; }catch(e){}
+  // Fleet Insights (spend analysis) is Full-Access only.
+  if(IS_FULL){ const il=document.getElementById("insightsLink"); if(il) il.style.display=""; }
 
   /* ── Vehicle spec fields (AC, payload, dimensions, handsfree… + your own) ── */
   const SPEC_PRESETS=["Air con","Handsfree","Payload","Length","Height","Width","Load length","VIN","Euro / ULEZ","Colour"];
