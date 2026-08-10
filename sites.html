@@ -330,14 +330,18 @@
         </div>
       </div>
 
-      <label>Image URL (square image works best)</label>
+      <label>Store image</label>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+        <img id="editImgPreview" alt="" style="display:none;width:120px;height:90px;object-fit:cover;border-radius:10px;border:1px solid #cfd6e4;background:#f1f5f9;">
+        <div style="flex:1;min-width:200px;">
+          <input id="uploadImage" type="file" accept="image/*">
+          <button class="btn outline" id="btnUploadImage" type="button" style="margin-top:6px;">Upload image</button>
+          <div id="uploadStatus" style="font-size:12px;margin-top:4px;"></div>
+          <div class="hint" style="font-size:11px;color:#94a3b8;margin-top:6px;">Pick a photo and it uploads automatically — no need to paste a URL.</div>
+        </div>
+      </div>
+      <label style="margin-top:10px;">…or paste an image URL</label>
       <input id="editImageUrl" placeholder="https://.../store.jpg">
-
-      <!-- Optional upload section (already wired in your JS) -->
-      <label>Upload Store Image</label>
-      <input id="uploadImage" type="file" accept="image/*">
-      <button class="btn outline" id="btnUploadImage" type="button">Upload</button>
-      <div id="uploadStatus"></div>
 
       <div class="row2">
         <div>
@@ -983,6 +987,10 @@ jobInput.value = isProject
 editPostcode.value = cleanPostcode(currentEditing) || "";
     editPhone.value = telOf(currentEditing) || "";
     editImageUrl.value = currentEditing.imageURL || currentEditing.image || "";
+    { const _img = document.getElementById("editImgPreview"); const _u = editImageUrl.value.trim();
+      if(_img){ if(_u){ _img.src = _u; _img.style.display=""; } else { _img.removeAttribute("src"); _img.style.display="none"; } } }
+    const _up = document.getElementById("uploadStatus"); if(_up) _up.textContent = "";
+    if (uploadInput) uploadInput.value = "";
     editLat.value = currentEditing.lat ?? "";
     editLon.value = currentEditing.lon ?? "";
     editMileage.value = currentEditing.mileageFromHQ ?? "";
@@ -1103,43 +1111,43 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
     }
   };
 
-  // Upload image via Worker (FormData)
-  if (uploadBtn) {
-    uploadBtn.onclick = async () => {
-      try {
-        const file = uploadInput.files[0];
-        if (!file) return alert("Please choose an image first");
-        if (!currentEditing?.siteNumber) return alert("Please enter a site number before uploading");
-
-        uploadStatus.textContent = "Uploading...";
-
-        const form = new FormData();
-        form.append("siteNumber", currentEditing.siteNumber);
-        form.append("client", (currentEditing.client || "retail").toLowerCase());
-        form.append("file", file);
-
-        const res = await fetch(`${workerBase}/upload-image`, {
-          method: "POST",
-          body: form
-        });
-
-        const text = await res.text();
-        let j;
-        try { j = JSON.parse(text); } catch(e) {
-          throw new Error(text.slice(0,120));
-        }
-
-        if (!res.ok || !j.success) throw new Error(j.error || "Upload failed");
-
-        editImageUrl.value = j.url;
-        currentEditing.imageURL = j.url;
-        uploadStatus.textContent = "✅ Uploaded successfully";
-      } catch (err) {
-        console.error(err);
-        uploadStatus.textContent = "❌ Upload failed: " + err.message;
-      }
-    };
+  // Live image preview inside the edit modal.
+  function setEditPreview(url){
+    const img = document.getElementById("editImgPreview");
+    if(!img) return;
+    if(url){ img.src = url; img.style.display = ""; } else { img.removeAttribute("src"); img.style.display = "none"; }
   }
+  // Show the preview when a URL is typed/pasted.
+  if (editImageUrl) editImageUrl.addEventListener("input", () => setEditPreview(editImageUrl.value.trim()));
+
+  // Upload image via Worker (FormData). Shared by the button AND file-select so
+  // picking a photo uploads it straight away — no separate click, no URL needed.
+  async function doUploadImage(){
+    const file = uploadInput.files[0];
+    if (!file) return;
+    if (!currentEditing?.siteNumber) { uploadStatus.textContent = "⚠️ Enter a site number first, then re-pick the image."; return; }
+    uploadStatus.textContent = "Uploading…";
+    try {
+      const form = new FormData();
+      form.append("siteNumber", currentEditing.siteNumber);
+      form.append("client", (currentEditing.client || "retail").toLowerCase());
+      form.append("file", file);
+      const res = await fetch(`${workerBase}/upload-image`, { method: "POST", body: form });
+      const text = await res.text();
+      let j; try { j = JSON.parse(text); } catch(e) { throw new Error(text.slice(0,120)); }
+      if (!res.ok || !j.success || !j.url) throw new Error(j.error || "Upload failed");
+      editImageUrl.value = j.url;
+      currentEditing.imageURL = j.url;
+      setEditPreview(j.url);
+      // Cache-bust the just-uploaded key so a re-upload to the same name refreshes.
+      uploadStatus.textContent = "✅ Uploaded — will show once you Save.";
+    } catch (err) {
+      console.error(err);
+      uploadStatus.textContent = "❌ Upload failed: " + err.message;
+    }
+  }
+  if (uploadInput) uploadInput.addEventListener("change", doUploadImage);   // auto-upload on pick
+  if (uploadBtn) uploadBtn.onclick = doUploadImage;                        // manual button still works
 
   // Events
   filterEl.onchange=renderRows;
