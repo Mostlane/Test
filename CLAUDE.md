@@ -826,7 +826,17 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     and ~⅓ of rows are blank — resolve every row via its **Card Full Number**
     (each card → one van, seen from its other rows). Imported rows carry no
     matching `profile.fuelCard`, so they show per-VAN (MPG/running-cost/insights)
-    but not in the per-card entry list — by design.
+    but not in the per-card entry list — by design. **Self-service importer
+    (fuel-cards.html "⤵ Import statement", Full Access):** parses the fuel-card
+    CSV entirely in-browser, matches each row to a van and POSTs to /fleet/fuel/import.
+    Column detection is by header NAME (Shell layout, tolerant). Van resolution:
+    per-row direct match on Vehicle License Number / Fleet ID / Driver Name
+    (normalised vs the portal `vehicles` list) FIRST, else a **card→van majority
+    fallback** (each Card Full Number's ≥50%-majority van — recovers typo'd/blank
+    plates like N73KFO→HN73KFO without folding a lone coincidental hit). Rows that
+    match nothing (unknown plates, personal cards like Chloe/Megan) are listed and
+    SKIPPED. A Net/Gross toggle (default Net) + a per-van preview show before
+    committing; dedupe-by-ref means re-importing overlapping periods is safe.
   - **MPG** (`mpgByVehicle`, all-available-data): litres attributed to a vehicle
     via card→user→**assignment-at-date** (`vehicle_assignments`, fallback current
     `vehicle_assigned`) ÷ UK gallon (4.54609), miles = the van's van-check
