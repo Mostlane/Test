@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
+  <script src="/docviewer.js?v=5"></script>
   <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
   *{box-sizing:border-box}
@@ -227,6 +228,15 @@
 
   function setFilter(cat){ SELCAT=(SELCAT===cat)?"":cat; renderSummary(); renderList(); }
 
+  // Open a maintenance document in the in-app viewer (robust for every PDF type
+  // + images; scrolls/zooms on mobile) instead of a new browser tab. The signed
+  // /fleet/maintenance-doc URL is CORS-enabled so PDF.js can fetch it directly.
+  function openDoc(url,name){
+    if(!url) return;
+    if(window.MLDocViewer) window.MLDocViewer.open({ url, fetchUrl:url, name:name||"Document", downloadUrl:url });
+    else window.open(url,"_blank","noopener");
+  }
+
   function renderList(){
     $("listTitle").textContent=SELCAT?("Maintenance history — "+SELCAT):"Maintenance history";
     let recs=RECORDS.slice();
@@ -234,7 +244,7 @@
     if(!recs.length){ $("recList").innerHTML='<span class="empty">'+(SELCAT?("No "+esc(SELCAT)+" work recorded."):"No maintenance recorded yet. Use “Add maintenance”.")+'</span>'; return; }
     $("recList").innerHTML=recs.map(r=>{
       const badges=(r.allocs||[]).map(a=>`<span class="cbadge ${SELCAT&&a.cat!==SELCAT?"dim":""}" style="background:${esc(colourFor(a.cat))}">${esc(a.cat)} <em>${money(a.cost)}</em></span>`).join("");
-      const doc=r.docUrl?`<a class="btn ghost small" href="${esc(r.docUrl)}" target="_blank" rel="noopener">📄 ${esc(r.docName||"Document")}</a>`:"";
+      const doc=r.docUrl?`<button type="button" class="btn ghost small" data-url="${esc(r.docUrl)}" data-name="${esc(r.docName||"Document")}" onclick="openDoc(this.dataset.url,this.dataset.name)">📄 ${esc(r.docName||"Document")}</button>`:"";
       return `<div class="rec">
         <div class="top">
           <div style="min-width:0">
@@ -283,7 +293,7 @@
     const el=$("curDoc");
     if(EDIT_ID && CUR_DOC && CUR_DOC.docKey && !REMOVE_DOC){
       el.innerHTML=`<div class="doc"><div class="nm"><b>${esc(CUR_DOC.docName||"Document")}</b><span>Current document</span></div>
-        <a class="btn small" href="${esc(CUR_DOC.docUrl)}" target="_blank" rel="noopener">Open</a>
+        <button type="button" class="btn small" data-url="${esc(CUR_DOC.docUrl)}" data-name="${esc(CUR_DOC.docName||"Document")}" onclick="openDoc(this.dataset.url,this.dataset.name)">Open</button>
         <button type="button" class="btn danger small" onclick="removeCurDoc()">Remove</button></div>`;
     } else if(EDIT_ID && CUR_DOC && CUR_DOC.docKey && REMOVE_DOC){
       el.innerHTML='<div class="hint" style="margin-bottom:8px">Current document will be removed on save.</div>';
