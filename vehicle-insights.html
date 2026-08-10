@@ -36,6 +36,7 @@
   .barrow .name{font-weight:800;letter-spacing:.05em;font-size:13px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .track{background:#eef2f7;border-radius:7px;height:22px;overflow:hidden;display:flex;}
   .seg{height:100%;}
+  .track .seg + .seg{box-shadow:inset 1px 0 0 rgba(255,255,255,.65);}
   .seg.maint{background:var(--maint);} .seg.fuel{background:var(--fuel);}
   .barrow .amt{font-weight:700;font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px;}
@@ -121,6 +122,8 @@ const money0 = n => "£" + Math.round(Number(n)||0).toLocaleString("en-GB");
 
 let DATA = null;          // last /insights response
 let catColour = {};       // cat name -> colour
+// Distinct fallback colours when a category has no colour configured.
+const CAT_PALETTE = ["#2563eb","#16a34a","#f59e0b","#db2777","#7c3aed","#0891b2","#dc2626","#ca8a04","#4f46e5","#059669","#e11d48","#0d9488","#c026d3","#65a30d"];
 let focusReg = "";        // "" = all vehicles
 
 function isoDaysAgo(days){ const d = new Date(Date.now() - days*86400000); return d.toISOString().slice(0,10); }
@@ -144,7 +147,14 @@ async function load(){
     const r = await authFetch("/fleet/insights" + (qs.length ? "?" + qs.join("&") : "")).then(r=>r.json());
     if(!r.ok) throw new Error(r.error || "Failed");
     DATA = r;
-    catColour = {}; (r.categories||[]).forEach(c => catColour[c.name] = c.colour || "#64748b");
+    // Colour every category distinctly: use its configured colour if one is set,
+    // otherwise assign one from a palette — so the per-van bar's make-up is clear
+    // even when no colours were chosen in the maintenance settings.
+    catColour = {};
+    orderedCats().forEach((name, i) => {
+      const def = (r.categories||[]).find(c => c.name === name);
+      catColour[name] = (def && def.colour) ? def.colour : CAT_PALETTE[i % CAT_PALETTE.length];
+    });
     // vehicle dropdown
     const sel = $("vehSel"); const keep = sel.value;
     sel.innerHTML = '<option value="">All vehicles</option>' + r.vehicles.map(v => `<option value="${esc(v.reg)}">${esc(v.reg)}</option>`).join("");
