@@ -1016,16 +1016,22 @@ export async function handle(request, env, ctx, url, sess) {
     const photos = [];
     for (const j of jobsHere) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/`, include: ["customMetadata"] });
+      const thumbSet = new Set((listed.objects || []).filter(o => o.key.endsWith(".thumb")).map(o => o.key));
       for (const o of listed.objects || []) {
-        photos.push({ url: await fileUrl(env, url, o.key), key: o.key, name: o.key.split("/").pop(),
+        if (o.key.endsWith(".thumb")) continue;   // the thumb rides with its photo, not a photo itself
+        photos.push({ url: await fileUrl(env, url, o.key), thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key), hasThumb: thumbSet.has(o.key + ".thumb"),
+          key: o.key, name: o.key.split("/").pop(),
           jobRef: j.helpdeskRef || j.id, jobId: j.id, at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
           by: (o.customMetadata && (o.customMetadata.by || o.customMetadata.uploadedBy)) || "", source: "job" });
       }
     }
     if (siteKey) {
       const up = await env.JOB_FILES.list({ prefix: `sitedocs/${siteKey}/Site Photos/`, include: ["customMetadata"] });
+      const thumbSet = new Set((up.objects || []).filter(o => o.key.endsWith(".thumb")).map(o => o.key));
       for (const o of up.objects || []) {
-        photos.push({ url: await fileUrl(env, url, o.key), key: o.key, name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
+        if (o.key.endsWith(".thumb")) continue;
+        photos.push({ url: await fileUrl(env, url, o.key), thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key), hasThumb: thumbSet.has(o.key + ".thumb"),
+          key: o.key, name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null, by: o.customMetadata && o.customMetadata.by, source: "upload" });
       }
     }
@@ -1091,7 +1097,51 @@ export async function handle(request, env, ctx, url, sess) {
       httpMetadata: { contentType: file.type || "application/octet-stream" },
       customMetadata: { name: file.name || safe, by: (sess && sess.user && sess.user.username) || "", at: new Date().toISOString() }
     });
+    // A small client-generated thumbnail rides along (photos) → stored as
+    // <key>.thumb so the grid loads a tiny image instead of the full-res one.
+    const thumb = form.get("thumb");
+    if (thumb && typeof thumb.stream === "function") {
+      try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
+    }
     return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
+  }
+
+  // Serve a small thumbnail for a site photo / job photo — <key>.thumb if it
+  // exists, else the original (edge-cached briefly so it's replaced once a thumb
+  // is backfilled). Edge-cached on the KEY (ignoring the signature) so it's fast
+  // across page loads. Same key constraints + sig gate as /site/doc.
+  if (subpath === "/site/thumb" && method === "GET") {
+    const key = searchParams.get("key");
+    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/")))
+      return jsonResponse({ error: "Bad key" }, headers, 400);
+    if (!sess && !(await verifyFileSig(env, key, searchParams)))
+      return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
+    const cache = caches.default;
+    const cacheKey = new Request(`${url.origin}/sla/site/thumb?key=${encodeURIComponent(key)}`);
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+    let obj = await env.JOB_FILES.get(key + ".thumb");
+    let cc = "public, max-age=31536000, immutable";
+    if (!obj) { obj = await env.JOB_FILES.get(key); cc = "public, max-age=86400"; }   // no thumb yet → original
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    const resp = new Response(obj.body, { status: 200, headers: {
+      ...headers, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
+      "Content-Disposition": "inline", "Cache-Control": cc
+    }});
+    ctx?.waitUntil(cache.put(cacheKey, resp.clone()));
+    return resp;
+  }
+
+  // Store a thumbnail for an EXISTING photo (backfill) — client generates it.
+  if (subpath === "/site/thumb" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const form = await request.formData();
+    const key = String(form.get("key") || "");
+    const thumb = form.get("thumb");
+    if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
+      return jsonResponse({ error: "Bad request" }, headers, 400);
+    await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+    return jsonResponse({ ok: true }, headers);
   }
 
   // Stream a site document with CORS + inline, so an in-app viewer (PDF.js /
@@ -1123,6 +1173,7 @@ export async function handle(request, env, ctx, url, sess) {
     const { key } = await readJson(request);
     if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
+    try { await env.JOB_FILES.delete(key + ".thumb"); } catch {}   // its thumbnail too
     return jsonResponse({ ok: true }, headers);
   }
 

@@ -255,6 +255,27 @@ function openJobModal(j){
 function closeJobModal(){ $("jobModal").classList.remove("show"); }
 
 /* ---- Site Photos ---- */
+// Shrink an image File to a max dimension → JPEG Blob (for thumbnails + slimming
+// uploads so the grid never decodes dozens of full-res photos at once).
+function shrinkImage(file, maxDim, quality){
+  return new Promise((resolve) => {
+    if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
+    const img = new Image(); const u = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(u);
+      let w = img.naturalWidth, h = img.naturalHeight;
+      const s = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.max(1, Math.round(w*s)); h = Math.max(1, Math.round(h*s));
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      cv.toBlob(b => resolve(b), "image/jpeg", quality || 0.8);
+    };
+    img.onerror = () => { URL.revokeObjectURL(u); resolve(null); };
+    img.src = u;
+  });
+}
+
+let photoIO = null;
 async function renderPhotos(){
   const c = $("content"); c.innerHTML = `<div class="empty">Loading photos…</div>`;
   let photos = cache.photos;
@@ -267,21 +288,61 @@ async function renderPhotos(){
   if(admin) c.appendChild(uploadBar("Site Photos", "image/*", true));
   if(!photos.length){ const d=document.createElement("div"); d.className="empty"; d.textContent="No photos from jobs at this site yet."; c.appendChild(d); return; }
   const grid = document.createElement("div"); grid.className = "grid";
+  // Windowed lazy loading: each tile loads its THUMBNAIL only when it scrolls
+  // near the viewport, and drops it when it scrolls far away — so the page holds
+  // only a handful of small images in memory, never all of them. The full-res
+  // photo is fetched only when a tile is tapped (the lightbox).
+  if(photoIO){ photoIO.disconnect(); }
+  photoIO = new IntersectionObserver((entries) => {
+    entries.forEach(en => {
+      const img = en.target.querySelector("img"); if(!img) return;
+      if(en.isIntersecting){ if(!img.getAttribute("src") && img.dataset.src) img.src = img.dataset.src; }
+      else if(img.getAttribute("src")){ img.removeAttribute("src"); }   // free memory off-screen
+    });
+  }, { root: null, rootMargin: "500px 0px" });
   photos.forEach(p => {
     const g = document.createElement("div"); g.className = "gitem";
     const label = p.by ? esc(p.by) : (p.jobRef ? esc(p.jobRef) : "photo");
     const tip = [p.by ? "Uploaded by " + p.by : "", p.jobRef ? "Job " + p.jobRef : ""].filter(Boolean).join(" · ");
-    // Admins can delete MANUALLY-UPLOADED site photos (source "upload"); job and
-    // archive photos belong to their jobs and aren't removable from here.
     const canDel = admin && p.source === "upload" && p.key;
-    g.innerHTML = `<img loading="lazy" decoding="async" src="${esc(p.url)}" alt="" title="${esc(tip)}">`
+    g.innerHTML = `<img decoding="async" alt="" title="${esc(tip)}" data-src="${esc(p.thumb || p.url)}">`
       + (canDel ? `<button class="gdel" title="Delete this photo">✕</button>` : "")
       + `<span class="tag" title="${esc(tip)}">${label}</span>`;
-    g.querySelector("img").addEventListener("click", () => openLb(p.url));
+    g.querySelector("img").addEventListener("click", () => openLb(p.url));   // full-res only on tap
     if(canDel) g.querySelector(".gdel").addEventListener("click", (e) => { e.stopPropagation(); delSitePhoto(p.key); });
     grid.appendChild(g);
+    photoIO.observe(g);
   });
   c.appendChild(grid);
+  if(admin) backfillThumbs(photos);   // quietly create thumbs for older full-res photos
+}
+
+// Self-healing: for photos that don't yet have a stored thumbnail, download the
+// full image ONE AT A TIME, shrink it, and store the thumb — so a site full of
+// old full-res photos becomes light without any manual step (and never loads
+// them all at once).
+let _backfilling = false;
+async function backfillThumbs(photos){
+  if(_backfilling) return;
+  const todo = photos.filter(p => p.hasThumb === false && p.key && (p.source === "upload" || p.source === "job"));
+  if(!todo.length) return;
+  _backfilling = true;
+  for(const p of todo){
+    if(activeTab !== "Site Photos") break;
+    try{
+      const blob = await fetch(p.url).then(r => r.ok ? r.blob() : null);
+      if(blob){
+        const thumb = await shrinkImage(new File([blob], "p.jpg", { type: blob.type || "image/jpeg" }), 400, 0.7);
+        if(thumb){
+          const form = new FormData(); form.append("key", p.key); form.append("thumb", thumb, "thumb.jpg");
+          await authFetch("/sla/site/thumb", { method:"POST", body: form });
+          p.hasThumb = true;
+        }
+      }
+    }catch(e){ /* skip this one */ }
+    await new Promise(r => setTimeout(r, 120));   // gentle pacing
+  }
+  _backfilling = false;
 }
 
 async function delSitePhoto(key){
@@ -386,7 +447,18 @@ function uploadBar(area, accept, cameraHint){
     let ok = 0, fail = 0;
     for(const file of files){
       try{
-        const form = new FormData(); form.append("file", file, file.name);
+        const form = new FormData();
+        // Photos: upload a slimmed 1600px copy + a 400px thumbnail so the grid
+        // stays light. Documents (and non-images) upload unchanged.
+        if(cameraHint && /^image\//.test(file.type)){
+          const main = await shrinkImage(file, 1600, 0.82);
+          const thumb = await shrinkImage(file, 400, 0.7);
+          const base = (file.name || "photo").replace(/\.[^.]+$/, "") || "photo";
+          form.append("file", main || file, main ? (base + ".jpg") : (file.name || "photo"));
+          if(thumb) form.append("thumb", thumb, "thumb.jpg");
+        } else {
+          form.append("file", file, file.name);
+        }
         const r = await authFetch(`/sla/site/docs?siteCode=${encodeURIComponent(siteCode)}&area=${encodeURIComponent(area)}`, { method:"POST", body: form }).then(r=>r.json());
         if(r.ok) ok++; else fail++;
       }catch(e){ fail++; }
