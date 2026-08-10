@@ -1482,15 +1482,18 @@ async function fuelByVehicle(env, tid) {
   return out;
 }
 // Odometer span per vehicle — merges van-check mileages AND manual odometer
-// readings. first/last are DATE strings (YYYY-MM-DD) so fuel can be windowed to
-// the reading period. { REGNORM: {min,max,milesDriven,first,last,readings} }.
+// readings. Span is measured between the CHRONOLOGICAL endpoints (first→last by
+// date), NOT raw min/max, so a single wild reading in the middle (e.g. a
+// "123456" test value in a van check) can't blow up the distance. Same-date
+// clashes prefer the manual reading. first/last are DATE strings (YYYY-MM-DD)
+// so fuel can be windowed to the reading period.
+// { REGNORM: {min,max,milesDriven,first,last,readings} }.
 async function odoByVehicle(env, tid) {
-  const out = {};
-  const add = (k, mi, date) => {
+  const byReg = {};   // regNorm -> { date -> {miles, source} }
+  const put = (k, mi, date, source) => {
     if (!k || !mi || !date) return;
-    const o = out[k] || (out[k] = { min: mi, max: mi, first: date, last: date, readings: 0 });
-    o.min = Math.min(o.min, mi); o.max = Math.max(o.max, mi); o.readings++;
-    if (date < o.first) o.first = date; if (date > o.last) o.last = date;
+    const m = byReg[k] || (byReg[k] = {}); const cur = m[date];
+    if (!cur || (source === "manual" && cur.source === "vancheck") || (source === cur.source && mi > cur.miles)) m[date] = { miles: mi, source };
   };
   try {
     const { results } = await env.DB.prepare(
@@ -1498,15 +1501,25 @@ async function odoByVehicle(env, tid) {
     ).bind(tid).all();
     for (const r of results || []) {
       let m = ""; try { m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, ""); } catch {}
-      add(dnReg(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10));
+      put(dnReg(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10), "vancheck");
     }
   } catch {}
   try {
     await ensureOdoTable(env);
     const { results } = await env.DB.prepare("SELECT reg, date, miles FROM odometer_readings WHERE tenant_id=?").bind(tid).all();
-    for (const r of results || []) add(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10));
+    for (const r of results || []) put(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), "manual");
   } catch {}
-  for (const k of Object.keys(out)) out[k].milesDriven = Math.max(0, out[k].max - out[k].min);
+  const out = {};
+  for (const k of Object.keys(byReg)) {
+    const series = Object.entries(byReg[k]).map(([date, o]) => ({ date, miles: o.miles })).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    if (!series.length) continue;
+    const first = series[0], last = series[series.length - 1];
+    out[k] = {
+      min: Math.min(...series.map(s => s.miles)), max: Math.max(...series.map(s => s.miles)),
+      first: first.date, last: last.date, readings: series.length,
+      milesDriven: Math.max(0, last.miles - first.miles)
+    };
+  }
   return out;
 }
 // Fuel fill-ups grouped per vehicle (same attribution as fuelByVehicle, but
