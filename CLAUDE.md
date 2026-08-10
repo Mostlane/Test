@@ -414,10 +414,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   (`#colPriority` hidden, SLA badge hidden, label→"Status"), sla-main.html
   (`isProjectJob` → blank priority cell + empty `slaBadge`) and sla-jobedit.js
   (`#mljePriorityWrap` hidden). A blank priority never trips the P1 "Urgent" flag.
-  **A project job's reference = its project number** (site code, e.g. "P0002"),
-  not the internal UUID: createOrUpdateJobFromPayload defaults a new project job's
-  `helpdeskRef` to the site code (and patchJob heals an old UUID one) unless an
-  explicit reference is typed. **Project jobs also use a SLIM status set** —
+  **A job's reference is NEVER the internal UUID.** When no reference is typed,
+  createOrUpdateJobFromPayload + patchJob default `helpdeskRef` to a CLEAR name:
+  a **project** job → its project number (site code, e.g. "P0002"); **every other
+  job → the SITE NAME** (else site code). Both heal an old UUID-defaulted ref the
+  same way; an explicitly typed reference always wins. (Existing UUID-ref jobs
+  were one-off backfilled to the site name / P-number.) **Project jobs also use a SLIM status set** —
   Scheduled · Travelling · In Progress · Complete — everywhere (engineer-job grid,
   job-view chips, sla-jobedit + sla-main dropdowns; On Hold/Quote/Order/custom
   categories are dropped for projects, the job's current status always included).

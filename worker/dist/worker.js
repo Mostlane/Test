@@ -799,10 +799,6 @@ function shapeUser2(u, perms) {
     // Office/field split + manual drag order (set in Users admin, stored in the
     // profile blob so no schema change is needed). Everything sorts by these.
     StaffType: profile.staffType === "office" ? "office" : "field",
-    // Office/admin people are hidden from job-assignment lists by default;
-    // `allocatable` puts a specific office person back on that list (e.g. an
-    // owner who also does site work).
-    Allocatable: profile.allocatable === true || profile.allocatable === "Yes",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Profile: profile,
     ...perms
@@ -5609,7 +5605,7 @@ function jobPushBody(job) {
   const desc = (job.description || "").trim();
   const ref = job.helpdeskRef || "";
   let name = site || desc || "";
-  const showRef = ref && ref !== job.id && !isUuidLike(ref);
+  const showRef = ref && ref !== job.id && !isUuidLike(ref) && ref !== site;
   if (showRef) name = name ? `${ref} \u2014 ${name}` : ref;
   if (!name) name = "New job";
   return `${name}${job.priority ? " \xB7 " + job.priority : ""}. Tap to view.`;
@@ -5768,11 +5764,10 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : !isProjJob;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let helpdeskRef = body.reference || existing?.helpdeskRef || id;
-  if (isProjJob && !body.reference) {
-    const projNum = String(body.siteCode || existing?.siteCode || "").trim();
-    if (projNum && (!existing?.helpdeskRef || existing.helpdeskRef === id || UUID_RE.test(String(existing.helpdeskRef)))) {
-      helpdeskRef = projNum;
-    }
+  if (!body.reference && (!helpdeskRef || helpdeskRef === id || UUID_RE.test(String(helpdeskRef)))) {
+    const siteNm = String(body.siteName || existing?.siteName || "").trim();
+    const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
+    helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
   }
   const job = {
     id,
@@ -5878,9 +5873,13 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.priority !== void 0 && patch.priority) job.priority = patch.priority;
   if (patch.description !== void 0 && patch.description) job.description = patch.description;
   if (patch.helpdeskRef !== void 0 && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
-  if (jobIsProject(job) && job.siteCode) {
+  {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) job.helpdeskRef = job.siteCode;
+    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) {
+      const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
+      const healed = jobIsProject(job) ? siteCd || siteNm : siteNm || siteCd;
+      if (healed) job.helpdeskRef = healed;
+    }
   }
   if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
   if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
