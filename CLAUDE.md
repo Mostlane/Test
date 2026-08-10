@@ -1114,8 +1114,18 @@ signed `doc` URL per signer → "Who signed" links each name to their signed cop
 The **acknowledgement PDF now carries the Mostlane logo**: `lib/pdf.js` gained
 JPEG image embedding (`doc.image(bytes,x,yTop,w,h)` → DCTDecode XObject; `bytes()`
 rewritten to assemble binary chunks so image streams stay byte-exact; text-only
-output unchanged), and `lib/logo.js` holds the logo as a baseline-JPEG base64
-(2000×798). My Documents (my-documents.html) already lets Full Access pick any
+output unchanged; `jpegInfo` exported), and `lib/logo.js` holds the logo as a
+baseline-JPEG base64 (2000×798). **The signer's DRAWN signature is embedded ON the
+PDF** (JotSign-style) + an audit line with **date + IP address**: memo-sign.html
+captures the white-bg signature canvas as a **JPEG** (`toDataURL("image/jpeg")`) so
+the worker can embed it; /ack captures `CF-Connecting-IP` into a new `memo_acks.ip`
+column (self-migrating) and passes `{sigJpeg, ip}` to buildMemoPdf. An old client
+that still sends a PNG signature stores fine but isn't embedded (graceful — falls
+back to the text line). **docviewer.js ext detection fix:** a filed doc named
+"Memo — Test" (no extension) with the real name in the `?key=` param now detects as
+a PDF (ext() checks name → url path → key param), so Open renders it in the modal
+(which already has a ⬇ download in its top bar) instead of the "can't preview"
+fallback. docviewer.js bumped to `?v=3`. My Documents (my-documents.html) already lets Full Access pick any
 user + delete (server /staff/doc-delete is Full-only — no other role can delete
 personal docs); a per-row ⬇ download was added.
 Tables **memos** (draft/sent + the header fields + body + recipients) and **memo_acks**

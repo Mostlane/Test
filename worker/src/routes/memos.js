@@ -15,7 +15,7 @@ import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
-import { PdfDoc, textWidth } from "../lib/pdf.js";
+import { PdfDoc, textWidth, jpegInfo } from "../lib/pdf.js";
 import { signedFileUrl } from "../lib/filesign.js";
 import { logoBytes, MOSTLANE_LOGO_W, MOSTLANE_LOGO_H } from "../lib/logo.js";
 
@@ -32,6 +32,8 @@ async function ensure(env) {
   )`).run();
   // recipients: JSON array of usernames the memo targets; NULL/empty = everyone.
   try { await env.DB.prepare("ALTER TABLE memos ADD COLUMN recipients TEXT").run(); } catch { /* already there */ }
+  // ip: the signer's IP address, captured at ack time (audit trail).
+  try { await env.DB.prepare("ALTER TABLE memo_acks ADD COLUMN ip TEXT").run(); } catch { /* already there */ }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memo_acks (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     memo_id INTEGER NOT NULL,
@@ -97,9 +99,10 @@ function wrap(str, size, maxW) {
   return lines.length ? lines : [""];
 }
 
-// Build the signed-acknowledgement PDF (text-only; the drawn signature is stored
-// alongside as PNG for the admin record).
-function buildMemoPdf(memo, signerName, signedAtISO) {
+// Build the signed-acknowledgement PDF: memo content + the signer's DRAWN
+// signature embedded on the page + an audit line (date + IP), so the copy is
+// self-contained and official (JotSign-style). `opts` = { sigJpeg, ip }.
+function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   const doc = new PdfDoc();
   const L = 56, R = 539, W = R - L;
   let y = 44;
@@ -134,10 +137,24 @@ function buildMemoPdf(memo, signerName, signedAtISO) {
   doc.hr(L, y, R, { grey: true }); y += 22;
   doc.text(L, y, "Acknowledgement", { size: 12, bold: true }); y += 18;
   for (const ln of wrap('I confirm that I have read and understood the content of this memo.', 11, W)) { doc.text(L, y, ln, { size: 11 }); y += 16; }
-  y += 6;
+  y += 10;
+  // The signer's DRAWN signature, embedded on the page (baseline JPEG). Scaled to
+  // a max box keeping its aspect ratio; falls through to text if anything's off.
+  if (opts.sigJpeg && opts.sigJpeg.length) {
+    try {
+      const d = jpegInfo(opts.sigJpeg);
+      let sw = 200, sh = sw * (d.h / d.w);
+      if (sh > 72) { sh = 72; sw = sh * (d.w / d.h); }
+      if (y + sh > 800) { doc.newPage(); y = 60; }
+      doc.image(opts.sigJpeg, L, y, sw, sh);
+      y += sh + 4;
+      doc.hr(L, y, L + Math.max(120, sw), { grey: true }); y += 14;
+    } catch { /* fall back to the text line below */ }
+  }
   doc.text(L, y, "Signed: " + signerName, { size: 11, bold: true }); y += 16;
   doc.text(L, y, "Date: " + fmtWhen(signedAtISO), { size: 11 }); y += 16;
-  doc.text(L, y, "Signed electronically via the Mostlane Portal. Drawn signature held on file.", { size: 8.5, grey: true });
+  if (opts.ip) { doc.text(L, y, "IP address: " + opts.ip, { size: 11 }); y += 16; }
+  doc.text(L, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
 
@@ -304,9 +321,13 @@ export async function handle(request, env, ctx, url, sess) {
     const signerName = urow ? (((urow.first_name || "") + " " + (urow.last_name || "")).trim() || me) : me;
     const at = new Date().toISOString();
     const ts = Date.now();
+    // The signer's IP (Cloudflare gives the real client IP) — audit trail.
+    const ip = request.headers.get("CF-Connecting-IP")
+      || (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() || "";
 
-    // Store the drawn signature PNG (admin record).
-    let sigKey = null;
+    // Store the drawn signature image (admin record) + keep the bytes to embed in
+    // the PDF. Only a baseline JPEG can be embedded, so track whether it is one.
+    let sigKey = null, sigJpeg = null;
     try {
       const dataUrl = String(b.signature || "");
       const mm = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
@@ -314,11 +335,12 @@ export async function handle(request, env, ctx, url, sess) {
         const bin = Uint8Array.from(atob(mm[2]), (c) => c.charCodeAt(0));
         sigKey = `memos/${tid}/${id}/${safeName(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
         await env.JOB_FILES.put(sigKey, bin, { httpMetadata: { contentType: "image/" + mm[1] } });
+        if (mm[1] === "jpeg") sigJpeg = bin;   // embeddable on the PDF
       }
     } catch { /* signature optional to store; PDF still filed */ }
 
     // Build + file the signed-acknowledgement PDF into My Documents › Memos.
-    const pdf = buildMemoPdf(memo, signerName, at);
+    const pdf = buildMemoPdf(memo, signerName, at, { sigJpeg, ip });
     const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName(memo.m_re || "memo")}.pdf`;
     await env.JOB_FILES.put(docKey, pdf, {
       httpMetadata: { contentType: "application/pdf" },
@@ -326,9 +348,9 @@ export async function handle(request, env, ctx, url, sess) {
     });
 
     await env.DB.prepare(
-      "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key) VALUES (?,?,?,?,?,?) " +
-      "ON CONFLICT(tenant_id, memo_id, username) DO UPDATE SET signed_at=excluded.signed_at, doc_key=excluded.doc_key, sig_key=excluded.sig_key"
-    ).bind(tid, id, me, at, docKey, sigKey).run();
+      "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key, ip) VALUES (?,?,?,?,?,?,?) " +
+      "ON CONFLICT(tenant_id, memo_id, username) DO UPDATE SET signed_at=excluded.signed_at, doc_key=excluded.doc_key, sig_key=excluded.sig_key, ip=excluded.ip"
+    ).bind(tid, id, me, at, docKey, sigKey, ip || null).run();
     return jr({ ok: true, signed_at: at }, headers);
   }
 

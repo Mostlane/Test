@@ -112,7 +112,9 @@
       const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
       const down = e => { drawing = true; const p = pos(e); sctx.beginPath(); sctx.moveTo(p.x, p.y); e.preventDefault(); };
       const move = e => { if (!drawing) return; const p = pos(e); sctx.lineTo(p.x, p.y); sctx.stroke(); e.preventDefault(); };
-      const up = () => { if (!drawing) return; drawing = false; sigData = c.toDataURL("image/png"); refresh(); };
+      // JPEG (white background) so the server can embed the drawn signature into
+      // the acknowledgement PDF (the PDF engine embeds baseline JPEGs).
+      const up = () => { if (!drawing) return; drawing = false; sigData = c.toDataURL("image/jpeg", 0.92); refresh(); };
       c.onpointerdown = down; c.onpointermove = move; c.onpointerup = up; c.onpointerleave = up;
     }
 
