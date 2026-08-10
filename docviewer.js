@@ -176,14 +176,13 @@
     el.back.classList.add("show");
 
     if (["png","jpg","jpeg","gif","webp","bmp","svg"].indexOf(e) >= 0) {
+      // Known image: a plain <img> loads it reliably everywhere.
       current.kind = "img"; showZoomControls(true); renderImg();
-    } else if (e === "pdf") {
-      current.kind = "pdf"; showZoomControls(true); openPdf();
     } else {
-      // Unknown extension (e.g. a project file served from /download/ID?inline=1
-      // with no filename, or a doc whose name has no extension). Fetch it once,
-      // read the Content-Type, and route — reusing the bytes for PDFs so there's
-      // no second download.
+      // PDFs AND unknown types: fetch the bytes ONCE and hand them to PDF.js as
+      // {data}. Mobile Safari frequently fails PDF.js's own (HTTP-range) cross-
+      // origin fetch, which dropped the viewer to the "Open document" fallback —
+      // fetching the whole file ourselves avoids that and renders inline on phones.
       sniffAndRoute();
     }
   }
