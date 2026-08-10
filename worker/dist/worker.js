@@ -10211,15 +10211,12 @@ async function fuelByVehicle(env, tid) {
   return out;
 }
 async function odoByVehicle(env, tid) {
-  const out = {};
-  const add = (k, mi, date) => {
+  const byReg = {};
+  const put = (k, mi, date, source) => {
     if (!k || !mi || !date) return;
-    const o = out[k] || (out[k] = { min: mi, max: mi, first: date, last: date, readings: 0 });
-    o.min = Math.min(o.min, mi);
-    o.max = Math.max(o.max, mi);
-    o.readings++;
-    if (date < o.first) o.first = date;
-    if (date > o.last) o.last = date;
+    const m = byReg[k] || (byReg[k] = {});
+    const cur = m[date];
+    if (!cur || source === "manual" && cur.source === "vancheck" || source === cur.source && mi > cur.miles) m[date] = { miles: mi, source };
   };
   try {
     const { results } = await env.DB.prepare(
@@ -10231,17 +10228,30 @@ async function odoByVehicle(env, tid) {
         m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
       } catch {
       }
-      add(dnReg(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10));
+      put(dnReg(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10), "vancheck");
     }
   } catch {
   }
   try {
     await ensureOdoTable(env);
     const { results } = await env.DB.prepare("SELECT reg, date, miles FROM odometer_readings WHERE tenant_id=?").bind(tid).all();
-    for (const r of results || []) add(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10));
+    for (const r of results || []) put(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), "manual");
   } catch {
   }
-  for (const k of Object.keys(out)) out[k].milesDriven = Math.max(0, out[k].max - out[k].min);
+  const out = {};
+  for (const k of Object.keys(byReg)) {
+    const series = Object.entries(byReg[k]).map(([date, o]) => ({ date, miles: o.miles })).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    if (!series.length) continue;
+    const first = series[0], last = series[series.length - 1];
+    out[k] = {
+      min: Math.min(...series.map((s) => s.miles)),
+      max: Math.max(...series.map((s) => s.miles)),
+      first: first.date,
+      last: last.date,
+      readings: series.length,
+      milesDriven: Math.max(0, last.miles - first.miles)
+    };
+  }
   return out;
 }
 async function fuelRowsByVehicle(env, tid) {
