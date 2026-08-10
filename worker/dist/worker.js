@@ -10387,6 +10387,10 @@ async function ensure3(env) {
     await env.DB.prepare("ALTER TABLE memos ADD COLUMN recipients TEXT").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE memo_acks ADD COLUMN ip TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memo_acks (
     tenant_id INTEGER NOT NULL DEFAULT 1,
     memo_id INTEGER NOT NULL,
@@ -10465,7 +10469,7 @@ function wrap(str, size, maxW) {
   if (cur) lines.push(cur);
   return lines.length ? lines : [""];
 }
-function buildMemoPdf(memo, signerName, signedAtISO) {
+function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   const doc = new PdfDoc();
   const L = 56, R = 539, W2 = R - L;
   let y = 44;
@@ -10524,12 +10528,35 @@ function buildMemoPdf(memo, signerName, signedAtISO) {
     doc.text(L, y, ln, { size: 11 });
     y += 16;
   }
-  y += 6;
+  y += 10;
+  if (opts.sigJpeg && opts.sigJpeg.length) {
+    try {
+      const d = jpegInfo(opts.sigJpeg);
+      let sw = 200, sh = sw * (d.h / d.w);
+      if (sh > 72) {
+        sh = 72;
+        sw = sh * (d.w / d.h);
+      }
+      if (y + sh > 800) {
+        doc.newPage();
+        y = 60;
+      }
+      doc.image(opts.sigJpeg, L, y, sw, sh);
+      y += sh + 4;
+      doc.hr(L, y, L + Math.max(120, sw), { grey: true });
+      y += 14;
+    } catch {
+    }
+  }
   doc.text(L, y, "Signed: " + signerName, { size: 11, bold: true });
   y += 16;
   doc.text(L, y, "Date: " + fmtWhen(signedAtISO), { size: 11 });
   y += 16;
-  doc.text(L, y, "Signed electronically via the Mostlane Portal. Drawn signature held on file.", { size: 8.5, grey: true });
+  if (opts.ip) {
+    doc.text(L, y, "IP address: " + opts.ip, { size: 11 });
+    y += 16;
+  }
+  doc.text(L, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
 async function handle22(request, env, ctx, url, sess) {
@@ -10697,7 +10724,8 @@ async function handle22(request, env, ctx, url, sess) {
     const signerName = urow ? ((urow.first_name || "") + " " + (urow.last_name || "")).trim() || me : me;
     const at = (/* @__PURE__ */ new Date()).toISOString();
     const ts = Date.now();
-    let sigKey = null;
+    const ip = request.headers.get("CF-Connecting-IP") || (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() || "";
+    let sigKey = null, sigJpeg = null;
     try {
       const dataUrl = String(b.signature || "");
       const mm = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
@@ -10705,18 +10733,19 @@ async function handle22(request, env, ctx, url, sess) {
         const bin = Uint8Array.from(atob(mm[2]), (c) => c.charCodeAt(0));
         sigKey = `memos/${tid}/${id}/${safeName2(me)}.${mm[1] === "jpeg" ? "jpg" : "png"}`;
         await env.JOB_FILES.put(sigKey, bin, { httpMetadata: { contentType: "image/" + mm[1] } });
+        if (mm[1] === "jpeg") sigJpeg = bin;
       }
     } catch {
     }
-    const pdf = buildMemoPdf(memo, signerName, at);
+    const pdf = buildMemoPdf(memo, signerName, at, { sigJpeg, ip });
     const docKey = `staffdocs/${tid}/user/${me}/Memos/${ts}-Memo-${safeName2(memo.m_re || "memo")}.pdf`;
     await env.JOB_FILES.put(docKey, pdf, {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: "Memo \u2014 " + (memo.m_re || "Company memo"), by: "Signed acknowledgement" }
     });
     await env.DB.prepare(
-      "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, memo_id, username) DO UPDATE SET signed_at=excluded.signed_at, doc_key=excluded.doc_key, sig_key=excluded.sig_key"
-    ).bind(tid, id, me, at, docKey, sigKey).run();
+      "INSERT INTO memo_acks (tenant_id, memo_id, username, signed_at, doc_key, sig_key, ip) VALUES (?,?,?,?,?,?,?) ON CONFLICT(tenant_id, memo_id, username) DO UPDATE SET signed_at=excluded.signed_at, doc_key=excluded.doc_key, sig_key=excluded.sig_key, ip=excluded.ip"
+    ).bind(tid, id, me, at, docKey, sigKey, ip || null).run();
     return jr5({ ok: true, signed_at: at }, headers);
   }
   return jr5({ error: "Not found: " + sub }, headers, 404);

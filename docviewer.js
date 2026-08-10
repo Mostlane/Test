@@ -149,9 +149,14 @@
   }
 
   function ext(name, url) {
-    var s = (name || url || "").split("?")[0].split("#")[0];
-    var m = /\.([a-z0-9]+)$/i.exec(s);
-    return m ? m[1].toLowerCase() : "";
+    function ex(v) { var s = String(v || "").split("?")[0].split("#")[0]; var m = /\.([a-z0-9]+)$/i.exec(s); return m ? m[1].toLowerCase() : ""; }
+    // Try the display name, then the URL path, then the ?key= param — signed
+    // file routes (/staff/doc, /sla/site/doc) carry the real filename there, so a
+    // name like "Memo — Test" with no extension is still detected as a PDF.
+    var e = ex(name); if (e) return e;
+    e = ex(url); if (e) return e;
+    try { var k = new URL(url, location.href).searchParams.get("key"); if (k) return ex(k); } catch (err) {}
+    return "";
   }
 
   function open(opts) {

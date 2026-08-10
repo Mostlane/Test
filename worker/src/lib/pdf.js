@@ -54,7 +54,7 @@ function pdfStr(s) {
 
 // Read a baseline/progressive JPEG's intrinsic size + colour components from its
 // SOF marker — enough to build the image XObject dictionary.
-function jpegInfo(bytes) {
+export function jpegInfo(bytes) {
   let i = 2;
   while (i < bytes.length) {
     if (bytes[i] !== 0xFF) { i++; continue; }
