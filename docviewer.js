@@ -180,8 +180,33 @@
     } else if (e === "pdf") {
       current.kind = "pdf"; showZoomControls(true); openPdf();
     } else {
-      showZoomControls(false); showFallback("This file type can't be previewed here.");
+      // Unknown extension (e.g. a project file served from /download/ID?inline=1
+      // with no filename, or a doc whose name has no extension). Fetch it once,
+      // read the Content-Type, and route — reusing the bytes for PDFs so there's
+      // no second download.
+      sniffAndRoute();
     }
+  }
+
+  function sniffAndRoute() {
+    var tok = ++renderToken;
+    fetch(current.fetchUrl, { credentials: "omit" }).then(function (res) {
+      var ct = (res.headers.get("content-type") || "").toLowerCase();
+      return res.arrayBuffer().then(function (buf) { return { ct: ct, buf: buf }; });
+    }).then(function (o) {
+      if (tok !== renderToken || !current) return;   // viewer moved on / closed
+      var isPdf = o.ct.indexOf("pdf") >= 0 || looksLikePdf(o.buf);
+      var isImg = o.ct.indexOf("image/") >= 0;
+      if (isPdf) { current.kind = "pdf"; current.pdfData = new Uint8Array(o.buf); showZoomControls(true); openPdf(); }
+      else if (isImg) { current.kind = "img"; showZoomControls(true); renderImg(); }
+      else { showZoomControls(false); showFallback("This file type can't be previewed here."); }
+    }).catch(function () {
+      showZoomControls(false); showFallback("This document opens best full screen on this device.");
+    });
+  }
+  function looksLikePdf(buf) {
+    try { var b = new Uint8Array(buf, 0, 5); return b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46; } // %PDF
+    catch (e) { return false; }
   }
 
   /* ---- image ---- */
@@ -219,9 +244,11 @@
 
   function openPdf() {
     loadPdfjs().then(function (pdfjsLib) {
-      // Plain GET (no custom headers) so there's no CORS preflight — the site
-      // route is public+CORS and the projects route authenticates by query.
-      return pdfjsLib.getDocument({ url: current.fetchUrl, withCredentials: false }).promise;
+      // Reuse bytes already fetched during type-sniffing; otherwise plain GET
+      // (no custom headers, so no CORS preflight) — the site route is public+CORS
+      // and the projects route authenticates by query.
+      var src = current.pdfData ? { data: current.pdfData } : { url: current.fetchUrl, withCredentials: false };
+      return pdfjsLib.getDocument(src).promise;
     }).then(function (pdf) {
       pdfDoc = pdf;
       var maxPages = Math.min(pdf.numPages, 200);

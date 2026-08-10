@@ -416,15 +416,27 @@ async function mmDelete(id){
   const r = await (await authFetch("/memos/delete", { method:"POST", body: JSON.stringify({ id }) })).json();
   if(r.ok){ toast("Deleted"); if(MM_EDIT===id) mmSetForm(null); await mmLoad(); } else toast(r.error||"Failed");
 }
+function fmtSignWhen(iso){ if(!iso) return ""; try{ return new Date(iso).toLocaleString(undefined,{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }catch{ return String(iso); } }
 async function mmShowWho(id, host){
   host.innerHTML = "Loading…";
   const r = await (await authFetch("/memos/status?id="+id)).json();
   if(!r.ok){ host.textContent = r.error||"Failed"; return; }
-  const sList = r.signed.map(s => s.doc
-      ? '<a href="'+esc(s.doc)+'" target="_blank" rel="noopener" title="View '+esc(s.name)+'’s signed copy">'+esc(s.name)+' ✓</a>'
-      : esc(s.name)+" ✓").join(", ") || "—";
+  // Signed: one row each — name (links to their signed copy) · when · IP (audit).
+  const rows = r.signed.map(s => {
+    const nameHtml = s.doc
+      ? '<a href="'+esc(s.doc)+'" target="_blank" rel="noopener" title="View '+esc(s.name)+'’s signed copy">'+esc(s.name)+'</a>'
+      : esc(s.name);
+    const bits = [];
+    if(s.at) bits.push('🕒 '+esc(fmtSignWhen(s.at)));
+    if(s.ip) bits.push('🌐 '+esc(s.ip));
+    return '<div style="padding:3px 0;border-bottom:1px solid #eef2f7;">✓ '+nameHtml
+      + (bits.length ? ' <span class="sub" style="margin:0;">— '+bits.join(' · ')+'</span>' : '') + '</div>';
+  }).join("") || '<div class="sub" style="margin:0;">—</div>';
   const uList = r.unsigned.map(u => esc(u.name)).join(", ") || "everyone ✓";
-  host.innerHTML = "<b>Signed ("+r.signed.length+"):</b> "+sList+" <span class='sub' style='margin:0;'>(tap a name to view their signed copy)</span><br><b>Not yet ("+r.unsigned.length+"):</b> "+uList;
+  host.innerHTML = "<div style='margin-bottom:6px;'><b>Signed ("+r.signed.length+")</b> "
+    + "<span class='sub' style='margin:0;'>· tap a name to view their signed copy</span></div>"
+    + rows
+    + "<div style='margin-top:8px;'><b>Not yet ("+r.unsigned.length+"):</b> "+uList+"</div>";
 }
 async function mmLoad(){
   const host = g("mmList");
