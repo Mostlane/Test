@@ -799,6 +799,10 @@ function shapeUser2(u, perms) {
     // Office/field split + manual drag order (set in Users admin, stored in the
     // profile blob so no schema change is needed). Everything sorts by these.
     StaffType: profile.staffType === "office" ? "office" : "field",
+    // Office/admin people are hidden from job-assignment lists by default;
+    // `allocatable` puts a specific office person back on that list (e.g. an
+    // owner who also does site work).
+    Allocatable: profile.allocatable === true || profile.allocatable === "Yes",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Profile: profile,
     ...perms
@@ -5597,12 +5601,23 @@ async function engUsernameMap(env, tid) {
   }
   return map;
 }
+function isUuidLike(s) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ""));
+}
+function jobPushBody(job) {
+  const site = job.siteName || job.siteCode || "";
+  const desc = (job.description || "").trim();
+  const ref = job.helpdeskRef || "";
+  let name = site || desc || "";
+  const showRef = ref && ref !== job.id && !isUuidLike(ref);
+  if (showRef) name = name ? `${ref} \u2014 ${name}` : ref;
+  if (!name) name = "New job";
+  return `${name}${job.priority ? " \xB7 " + job.priority : ""}. Tap to view.`;
+}
 async function pushJobToEngineers(env, tid, job, engineerIds) {
   if (!engineerIds.length) return;
   const map = await engUsernameMap(env, tid);
-  const ref = job.helpdeskRef || job.id;
-  const site = job.siteName || job.siteCode || "";
-  const body = `${ref}${site ? " \u2014 " + site : ""}${job.priority ? " \xB7 " + job.priority : ""}. Tap to view.`;
+  const body = jobPushBody(job);
   for (const eng of engineerIds) {
     const username = map[normId(eng)] || eng;
     await sendToUser(env, tid, username, {
@@ -5648,9 +5663,7 @@ async function notifyNewlyAssigned(env, tid, before, after) {
     }
   } catch {
   }
-  const ref = after.helpdeskRef || after.id;
-  const site = after.siteName || after.siteCode || "";
-  const body = `${ref}${site ? " \u2014 " + site : ""}${after.priority ? " \xB7 " + after.priority : ""}. Tap to view.`;
+  const body = jobPushBody(after);
   for (const eng of added) {
     const username = map[normId(eng)] || eng;
     await sendToUser(env, tid, username, {
