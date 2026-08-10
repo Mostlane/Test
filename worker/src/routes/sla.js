@@ -1514,7 +1514,8 @@ function jobPushBody(job) {
   const desc = (job.description || "").trim();
   const ref = job.helpdeskRef || "";
   let name = site || desc || "";
-  const showRef = ref && ref !== job.id && !isUuidLike(ref);
+  // Prefix a real reference only if it's not the UUID and not just the site again.
+  const showRef = ref && ref !== job.id && !isUuidLike(ref) && ref !== site;
   if (showRef) name = name ? `${ref} — ${name}` : ref;
   if (!name) name = "New job";
   return `${name}${job.priority ? " · " + job.priority : ""}. Tap to view.`;
@@ -1699,16 +1700,17 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const requiresNote = body.requiresNote !== undefined ? !!body.requiresNote
     : (existing?.requiresNote !== undefined ? !!existing.requiresNote : !isProjJob);
 
-  // A project job's reference IS its project number (the site code, e.g. "P0002"),
-  // not the internal UUID. Use it for a new project job — and heal an old one whose
-  // ref defaulted to the UUID — unless an explicit reference was typed.
+  // A job's reference must never be the internal UUID — that shows up as gibberish
+  // in lists and notifications. When no reference is typed, default it to a CLEAR
+  // name: a project job uses its project number (site code, e.g. "P0002"); every
+  // other job uses the SITE NAME (else the site code). Heal an old job whose ref
+  // defaulted to the UUID the same way. An explicitly typed reference always wins.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let helpdeskRef = body.reference || existing?.helpdeskRef || id;
-  if (isProjJob && !body.reference) {
-    const projNum = String(body.siteCode || existing?.siteCode || "").trim();
-    if (projNum && (!existing?.helpdeskRef || existing.helpdeskRef === id || UUID_RE.test(String(existing.helpdeskRef)))) {
-      helpdeskRef = projNum;
-    }
+  if (!body.reference && (!helpdeskRef || helpdeskRef === id || UUID_RE.test(String(helpdeskRef)))) {
+    const siteNm = String(body.siteName || existing?.siteName || "").trim();
+    const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
+    helpdeskRef = isProjJob ? (siteCd || siteNm || id) : (siteNm || siteCd || id);
   }
 
   const job = {
@@ -1823,10 +1825,15 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.priority !== undefined && patch.priority) job.priority = patch.priority;
   if (patch.description !== undefined && patch.description) job.description = patch.description;
   if (patch.helpdeskRef !== undefined && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
-  // A project job's reference is its project number — heal a UUID default.
-  if (jobIsProject(job) && job.siteCode) {
+  // A reference must never be the internal UUID — heal a UUID default to a clear
+  // name: project → project number (site code); otherwise the site name.
+  {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) job.helpdeskRef = job.siteCode;
+    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) {
+      const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
+      const healed = jobIsProject(job) ? (siteCd || siteNm) : (siteNm || siteCd);
+      if (healed) job.helpdeskRef = healed;
+    }
   }
   if (patch.raisedAt !== undefined && patch.raisedAt) job.raisedAt = patch.raisedAt;
   // The SLA target is raised-time + priority window — recompute it whenever

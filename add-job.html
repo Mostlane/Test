@@ -332,10 +332,10 @@ function paintAssignUsers() {
     const uname = u.Username || "";
     // Office/admin staff are hidden unless the tick is on OR they're the one
     // already picked — engineers are who jobs go to.
-    // Office/admin staff are hidden unless the tick is on, they're marked
-    // Allocatable (always assignable), or they're the one already picked.
+    // Office/admin staff are hidden unless the tick is on OR they're the one
+    // already picked — engineers are who jobs go to.
     const isOffice = u.StaffType === "office";
-    if (isOffice && !u.Allocatable && !showOffice && uname !== keep) return;
+    if (isOffice && !showOffice && uname !== keep) return;
     // Build the name from real parts only — a null first/last must never render
     // as the literal "null null". Fall back to the username, then skip empties.
     const name = [u.FirstName, u.LastName]
