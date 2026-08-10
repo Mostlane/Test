@@ -813,6 +813,20 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   /fleet/fuel/entry-delete**, **GET /fleet/fuel/stats?card=** (overall +
   per-period + per-vehicle; the response's `money:true/false` says whether
   per-vehicle `running` cost was included — the page hides that column when false).
+  - **Statement import + direct reg tagging (Aug 2026)**: `fuel_entries` gained
+    **`reg`** (a fill-up tagged straight to a vehicle, bypassing the
+    card→user→assignment chain) + **`ref`** (the statement's unique transaction
+    id, for dedupe). `fuelByVehicle` + the insights fuel loop **prefer `reg`**
+    when present, else fall back to card→user→assignment. **POST /fleet/fuel/import**
+    (Full Access) bulk-loads `{entries:[{reg,date,litres,cost,ref?,card?}]}`,
+    upserting by `ref` so re-importing a file never double-counts. Used to load a
+    Shell fuel-card CSV: 240 rows across the 11 vans, **net (ex-VAT)** cost basis,
+    Feb–Aug 2026 (Chloe/Megan personal cards + 4 non-fleet plates excluded). The
+    Shell CSV's reg lives across Vehicle License Number / Fleet ID / Driver Name
+    and ~⅓ of rows are blank — resolve every row via its **Card Full Number**
+    (each card → one van, seen from its other rows). Imported rows carry no
+    matching `profile.fuelCard`, so they show per-VAN (MPG/running-cost/insights)
+    but not in the per-card entry list — by design.
   - **MPG** (`mpgByVehicle`, all-available-data): litres attributed to a vehicle
     via card→user→**assignment-at-date** (`vehicle_assignments`, fallback current
     `vehicle_assigned`) ÷ UK gallon (4.54609), miles = the van's van-check
