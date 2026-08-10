@@ -196,6 +196,7 @@
             <option value="ELS Private">ELS Private</option>
             <option value="Cobra">Cobra</option>
             <option value="Wenzel’s">Wenzel’s</option>
+            <option value="FBC">FBC</option>
             <option value="Projects">Projects</option>
           </select>
         </div>
@@ -427,25 +428,30 @@ async function populateSites(){
     "cobra":"cobra",
     "wenzel’s":"wenzels",
     "wenzels":"wenzels",
+    "fbc":"fbc",
     "projects":"projects"
   };
 
   let sites = [];
 
   if (!siteTypeVal) {
-    const keys = [...new Set(Object.values(keyMap))];
-    let combined = [];
-    for (const k of keys){
-      const part = await fetchSitesForKey(k);
-      combined = combined.concat(part);
-    }
-    sites = combined;
+    // "All sites" = ask the API for everything, so EVERY category shows (FBC,
+    // Projects, one-off "general" sites) — not just a hardcoded shortlist.
+    sites = await fetchSitesForKey("all");
   } else {
     const key = keyMap[siteTypeVal] || "retail";
     sites = await fetchSitesForKey(key);
   }
 
-  allSites = sites.sort((a,b) => Number(a.code) - Number(b.code));
+  // Numeric store codes sort numerically; lettered codes (projects P0001…)
+  // fall to the end, sorted amongst themselves.
+  allSites = sites.sort((a,b) => {
+    const na = Number(a.code), nb = Number(b.code);
+    if (isNaN(na) && isNaN(nb)) return String(a.code).localeCompare(String(b.code));
+    if (isNaN(na)) return 1;
+    if (isNaN(nb)) return -1;
+    return na - nb;
+  });
 
   sel.innerHTML = "";
   if (!allSites.length){
