@@ -9329,12 +9329,15 @@ async function handle20(request, env, ctx, url, sess) {
     const userCurrent = {};
     for (const c of Object.values(byCard)) userCurrent[c.username] = c.vehicle;
     const intervals = await assignmentIntervals(env, tid);
-    const { results: frows } = await env.DB.prepare("SELECT card, username, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    const { results: frows } = await env.DB.prepare("SELECT card, username, reg, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
     for (const e of frows || []) {
       if (!inRange(e.date)) continue;
-      const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
-      if (!user) continue;
-      const reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      let reg = e.reg || "";
+      if (!reg) {
+        const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+        if (!user) continue;
+        reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      }
       if (!reg) continue;
       const v = ensureV(reg);
       v.fuel += Number(e.cost) || 0;
@@ -9402,7 +9405,7 @@ async function handle20(request, env, ctx, url, sess) {
       pos
     }, headers);
   }
-  if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" || sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats") {
+  if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" || sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats" || sub === "/fuel/import") {
     if (sub === "/finance" && method === "POST") {
       if (!await canMoney(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
       await ensureVehTable(env);
@@ -9478,6 +9481,40 @@ async function handle20(request, env, ctx, url, sess) {
       if (!id || isNaN(id)) return jr3({ error: "id required" }, headers, 400);
       await env.DB.prepare("DELETE FROM fuel_entries WHERE tenant_id=? AND id=?").bind(tid, id).run();
       return jr3({ ok: true }, headers);
+    }
+    if (sub === "/fuel/import" && method === "POST") {
+      if (!await canMoney(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
+      await ensureFuelTable(env);
+      const b = await readJson4(request);
+      const entries = Array.isArray(b.entries) ? b.entries : [];
+      if (!entries.length) return jr3({ error: "no entries" }, headers, 400);
+      if (entries.length > 2e3) return jr3({ error: "too many rows in one call (max 2000)" }, headers, 400);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      let created = 0, updated = 0, skipped = 0;
+      for (const e of entries) {
+        const reg = String(e.reg || "").trim();
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : "";
+        if (!reg || !date) {
+          skipped++;
+          continue;
+        }
+        const litres = Math.round((Number(e.litres) || 0) * 100) / 100;
+        const cost = Math.round((Number(e.cost) || 0) * 100) / 100;
+        const ref = String(e.ref || "").trim().slice(0, 80);
+        const card = String(e.card || "").trim().slice(0, 40);
+        const note = String(e.note || "").slice(0, 200);
+        if (ref) {
+          const ex = await env.DB.prepare("SELECT id FROM fuel_entries WHERE tenant_id=? AND ref=?").bind(tid, ref).first();
+          if (ex && ex.id) {
+            await env.DB.prepare("UPDATE fuel_entries SET reg=?,card=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(reg, card, date, litres, cost, note, tid, ex.id).run();
+            updated++;
+            continue;
+          }
+        }
+        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
+        created++;
+      }
+      return jr3({ ok: true, created, updated, skipped, total: entries.length }, headers);
     }
     if (sub === "/fuel/stats" && method === "GET") {
       await ensureFuelTable(env);
@@ -10005,6 +10042,18 @@ async function ensureFuelTable(env) {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fuel_card ON fuel_entries(tenant_id,card)").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE fuel_entries ADD COLUMN reg TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE fuel_entries ADD COLUMN ref TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fuel_ref ON fuel_entries(tenant_id,ref)").run();
+  } catch {
+  }
 }
 async function fuelCardMap(env, tid) {
   const byCard = {}, cards = [];
@@ -10054,11 +10103,14 @@ async function fuelByVehicle(env, tid) {
   const intervals = await assignmentIntervals(env, tid);
   const out = {};
   try {
-    const { results } = await env.DB.prepare("SELECT card, username, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    const { results } = await env.DB.prepare("SELECT card, username, reg, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
     for (const e of results || []) {
-      const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
-      if (!user) continue;
-      let reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      let reg = e.reg || "";
+      if (!reg) {
+        const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+        if (!user) continue;
+        reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      }
       if (!reg) continue;
       const k = dnReg(reg);
       const o = out[k] || (out[k] = { litres: 0, spend: 0, first: "", last: "", count: 0 });
