@@ -277,8 +277,9 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
   <span class="emoji">🧾</span> Timesheet Admin
 </a>
     -->
-    <!-- FIXED -->
-    <a class="button" href="javascript:void(0)" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
+    <!-- Legacy SharePoint "My Documents" tile removed — the portal My Documents
+         (#MyDocs → my-documents.html, always visible below) replaced it. The old
+         one was a dead javascript:void(0) button for anyone without a SharePointPath. -->
     <a class="button" id="Projects" href="projects.html">
   <span class="emoji">📁</span> Projects
 </a>
@@ -340,7 +341,6 @@ const MAP = window.ML_PERM_MAP || {
   PurchaseOrders: ["PurchaseOrders", "purchaseBtn", "poMenuBtn", "PurchaseOrders2"],
   Sites: ["Sites", "AddSite", "sitesBtn", "Customers"],
   Assets: ["Assets", "Plant&Equipment", "assetsBtn", "assetmenuhtml", "myassetshtml", "assetsadminhtml"],
-  MyDocuments: ["MyDocuments", "my-documents-btn"],
   Projects: ["Projects", "ProjectsAccess", "projects", "projectsBtn", "ProjectsAdmin", "ProjectsAdminAccess", "projectsAdmin"],
   HolidayAdmin: ["HolidayAdmin", "HolidayAdminAccess", "holidayAdmin", "HolidayAdminBtn"],
   Weekly: ["Weekly"],
@@ -391,7 +391,7 @@ const MAP = window.ML_PERM_MAP || {
       // Apply the menu gating for a given permission set. Idempotent, so it can
       // run twice: instantly from the cached permissions, then again with the
       // fresh server copy.
-      const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "SiteLog", "Holiday", "MyDocuments", "Assets", "Forms", "Compliance"]);
+      const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "SiteLog", "Holiday", "Assets", "Forms", "Compliance"]);
       function applyGate(user) {
         const fullAccess = String(user.FullAccess || "").toLowerCase() === "yes";
         const isStory = String(user.StoryMode || "").toLowerCase() === "yes";
@@ -410,7 +410,6 @@ const MAP = window.ML_PERM_MAP || {
             if ((href && mlHidden.has(href)) || (buttonID === "HSPlan" && mlHidden.has("hs"))) allowed = false;
           }
           btn.classList.toggle("visible", allowed);
-          if (allowed && buttonID === "MyDocuments" && user.SharePointPath) btn.href = user.SharePointPath;
         });
 
         // Merged tiles: point each at the page THIS user can actually open, so a
