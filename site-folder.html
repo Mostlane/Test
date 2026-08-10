@@ -64,6 +64,8 @@
     .gitem .tag{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .gitem .gdel{position:absolute;top:4px;right:4px;width:24px;height:24px;border:0;border-radius:50%;background:rgba(185,28,28,.92);color:#fff;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.4);}
     .gitem .gdel:hover{background:#b91c1c;}
+    .gitem img.pending{visibility:hidden;}
+    .gitem.pend::before{content:"📷";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:24px;pointer-events:none;}
 
     /* docs */
     .doclist{display:flex;flex-direction:column;gap:6px;}
@@ -275,7 +277,6 @@ function shrinkImage(file, maxDim, quality){
   });
 }
 
-let photoIO = null;
 async function renderPhotos(){
   const c = $("content"); c.innerHTML = `<div class="empty">Loading photos…</div>`;
   let photos = cache.photos;
@@ -286,62 +287,76 @@ async function renderPhotos(){
   if(activeTab !== "Site Photos") return;
   c.innerHTML = "";
   if(admin) c.appendChild(uploadBar("Site Photos", "image/*", true));
+  const pending = photos.filter(p => p.hasThumb === false && p.key && (p.source === "upload" || p.source === "job")).length;
+  if(admin && pending){
+    const note = document.createElement("div"); note.className = "muted"; note.style.cssText = "font-size:12px;margin-bottom:8px;";
+    note.id = "thumbNote"; note.textContent = `Optimising ${pending} photo${pending>1?"s":""} for fast loading…`;
+    c.appendChild(note);
+  }
   if(!photos.length){ const d=document.createElement("div"); d.className="empty"; d.textContent="No photos from jobs at this site yet."; c.appendChild(d); return; }
   const grid = document.createElement("div"); grid.className = "grid";
-  // Windowed lazy loading: each tile loads its THUMBNAIL only when it scrolls
-  // near the viewport, and drops it when it scrolls far away — so the page holds
-  // only a handful of small images in memory, never all of them. The full-res
-  // photo is fetched only when a tile is tapped (the lightbox).
-  if(photoIO){ photoIO.disconnect(); }
-  photoIO = new IntersectionObserver((entries) => {
-    entries.forEach(en => {
-      const img = en.target.querySelector("img"); if(!img) return;
-      if(en.isIntersecting){ if(!img.getAttribute("src") && img.dataset.src) img.src = img.dataset.src; }
-      else if(img.getAttribute("src")){ img.removeAttribute("src"); }   // free memory off-screen
-    });
-  }, { root: null, rootMargin: "500px 0px" });
+  // The grid only ever loads small THUMBNAILS (native lazy-load, so off-screen
+  // ones don't load). A photo that doesn't have a thumbnail yet shows a light
+  // placeholder — it is NEVER loaded full-res here (that only happens on tap /
+  // in the lightbox) — and the background backfill fills it in once its thumb
+  // exists. So even a site with hundreds of full-res photos stays light.
   photos.forEach(p => {
-    const g = document.createElement("div"); g.className = "gitem";
+    const g = document.createElement("div"); g.className = "gitem"; if(p.key) g.dataset.key = p.key;
     const label = p.by ? esc(p.by) : (p.jobRef ? esc(p.jobRef) : "photo");
     const tip = [p.by ? "Uploaded by " + p.by : "", p.jobRef ? "Job " + p.jobRef : ""].filter(Boolean).join(" · ");
     const canDel = admin && p.source === "upload" && p.key;
-    g.innerHTML = `<img decoding="async" alt="" title="${esc(tip)}" data-src="${esc(p.thumb || p.url)}">`
+    const has = p.hasThumb !== false;   // archive photos are already compressed → treat as ready
+    if(!has) g.classList.add("pend");
+    g.innerHTML = `<img loading="lazy" decoding="async" alt="" title="${esc(tip)}"${has ? ` src="${esc(p.thumb || p.url)}"` : ` class="pending"`}>`
       + (canDel ? `<button class="gdel" title="Delete this photo">✕</button>` : "")
       + `<span class="tag" title="${esc(tip)}">${label}</span>`;
-    g.querySelector("img").addEventListener("click", () => openLb(p.url));   // full-res only on tap
+    g.addEventListener("click", () => openLb(p.url));   // full-res only on tap
     if(canDel) g.querySelector(".gdel").addEventListener("click", (e) => { e.stopPropagation(); delSitePhoto(p.key); });
+    // If a thumbnail ever fails, fall back to the full image once so nothing is blank.
+    const img = g.querySelector("img");
+    img.addEventListener("error", () => { if(img.getAttribute("src") && img.src.indexOf("/sla/site/doc") < 0){ img.src = p.url; } });
     grid.appendChild(g);
-    photoIO.observe(g);
   });
   c.appendChild(grid);
   if(admin) backfillThumbs(photos);   // quietly create thumbs for older full-res photos
 }
 
-// Self-healing: for photos that don't yet have a stored thumbnail, download the
-// full image ONE AT A TIME, shrink it, and store the thumb — so a site full of
-// old full-res photos becomes light without any manual step (and never loads
-// them all at once).
+// Self-healing: for photos with no stored thumbnail, download the full image
+// (a few at a time, OFF the grid), shrink it, store the thumb, then drop the
+// thumb into its tile. The grid never holds full-res images, so this is smooth
+// even for hundreds of photos.
 let _backfilling = false;
 async function backfillThumbs(photos){
   if(_backfilling) return;
   const todo = photos.filter(p => p.hasThumb === false && p.key && (p.source === "upload" || p.source === "job"));
   if(!todo.length) return;
   _backfilling = true;
-  for(const p of todo){
-    if(activeTab !== "Site Photos") break;
-    try{
-      const blob = await fetch(p.url).then(r => r.ok ? r.blob() : null);
-      if(blob){
-        const thumb = await shrinkImage(new File([blob], "p.jpg", { type: blob.type || "image/jpeg" }), 400, 0.7);
-        if(thumb){
-          const form = new FormData(); form.append("key", p.key); form.append("thumb", thumb, "thumb.jpg");
-          await authFetch("/sla/site/thumb", { method:"POST", body: form });
-          p.hasThumb = true;
+  let idx = 0, done = 0;
+  const total = todo.length;
+  async function worker(){
+    while(idx < todo.length){
+      if(activeTab !== "Site Photos") return;
+      const p = todo[idx++];
+      try{
+        const blob = await fetch(p.url).then(r => r.ok ? r.blob() : null);
+        if(blob){
+          const thumb = await shrinkImage(new File([blob], "p.jpg", { type: blob.type || "image/jpeg" }), 400, 0.7);
+          if(thumb){
+            const form = new FormData(); form.append("key", p.key); form.append("thumb", thumb, "thumb.jpg");
+            const r = await authFetch("/sla/site/thumb", { method:"POST", body: form }).then(r=>r.json()).catch(()=>null);
+            if(r && r.ok){
+              p.hasThumb = true;
+              const tileImg = document.querySelector('.gitem[data-key="' + (window.CSS && CSS.escape ? CSS.escape(p.key) : p.key) + '"] img');
+              if(tileImg){ tileImg.classList.remove("pending"); tileImg.closest(".gitem").classList.remove("pend"); tileImg.src = p.thumb; }
+            }
+          }
         }
-      }
-    }catch(e){ /* skip this one */ }
-    await new Promise(r => setTimeout(r, 120));   // gentle pacing
+      }catch(e){ /* skip */ }
+      done++;
+      const note = $("thumbNote"); if(note){ const left = total - done; note.textContent = left > 0 ? `Optimising ${left} photo${left>1?"s":""} for fast loading…` : "All photos optimised ✓"; }
+    }
   }
+  await Promise.all([worker(), worker(), worker(), worker()]);   // 4 at a time
   _backfilling = false;
 }
 
