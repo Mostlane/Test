@@ -439,6 +439,7 @@
         ${detailRow("Notes", v.notes?esc(v.notes):"")}
       </div>
       ${runningCostBlock(v)}
+      <div id="vpoBlock" class="grp" style="margin-top:12px;display:none"></div>
       <div class="card-actions" style="border-top:0;padding-top:4px">
         <button class="btn small" onclick="pClose();openAssign('${esc(reg)}')">👤 Driver</button>
         <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
@@ -449,6 +450,31 @@
         <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>
       </div>`;
     pModal(html);
+    loadVehiclePOs(reg);
+  }
+
+  /* Purchase orders tagged to this van (AdBlue / parts…), pulled live from the
+     PO system via the portal. Loaded after the modal opens so a slow PO lookup
+     never delays the deep-dive; the block stays hidden if there are none. */
+  async function loadVehiclePOs(reg){
+    const box = document.getElementById("vpoBlock");
+    if(!box) return;
+    let d;
+    try{ d = await aFetch("/fleet/vehicle-pos?reg="+encodeURIComponent(reg)).then(r=>r.json()); }catch(e){ return; }
+    if(!d || !d.ok || !d.pos || !d.pos.length) return;   // nothing tagged yet → stay hidden
+    const rows = d.pos.map(p=>{
+      const cost = (p.cost!=null) ? money0(p.cost) : `<span style="color:var(--muted)">not priced</span>`;
+      const meta = [p.supplier, p.category, p.ref].filter(Boolean).map(esc).join(" · ");
+      const date = p.date ? `<small style="color:var(--muted)">${esc(p.date)}</small>` : "";
+      return `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px">`+
+             `<span>${meta||"PO"} ${date}</span><span style="font-weight:600;white-space:nowrap">${d.money?cost:""}</span></div>`;
+    }).join("");
+    const total = d.money && d.total!=null
+      ? `<div style="display:flex;justify-content:space-between;padding:8px 0 0;margin-top:4px;border-top:1px solid var(--line);font-weight:800"><span>Total (ex VAT)</span><span>${money0(d.total)}</span></div>`
+      : "";
+    const unp = d.unpriced ? `<div class="hint" style="margin-top:6px">${d.unpriced} not priced yet</div>` : "";
+    box.innerHTML = `<h4>🧾 Purchase orders <span style="color:var(--muted);font-weight:400">(${d.count})</span></h4>${rows}${total}${unp}`;
+    box.style.display = "block";
   }
 
   /* ── Driver assignment (registry with history) ── */

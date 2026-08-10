@@ -9295,7 +9295,7 @@ async function handle20(request, env, ctx, url, sess) {
     const per = {};
     const ensureV = (reg) => {
       const k = dnReg(reg);
-      return per[k] || (per[k] = { reg, maint: 0, fuel: 0, litres: 0, byCat: {} });
+      return per[k] || (per[k] = { reg, maint: 0, fuel: 0, litres: 0, po: 0, byCat: {} });
     };
     const vrows = (await env.DB.prepare("SELECT reg FROM vehicles WHERE tenant_id=?").bind(tid).all()).results || [];
     vrows.forEach((v) => {
@@ -9328,15 +9328,21 @@ async function handle20(request, env, ctx, url, sess) {
       v.fuel += Number(e.cost) || 0;
       v.litres += Number(e.litres) || 0;
     }
+    for (const p of await vehiclePoRows(env, { from, to })) {
+      const c = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : 0;
+      if (!isFinite(c) || !c || !p.vehicle_reg) continue;
+      ensureV(p.vehicle_reg).po += c;
+    }
     const vehicles = Object.values(per).map((v) => {
       const byCat = {};
       for (const [cat, c] of Object.entries(v.byCat)) byCat[cat] = { cost: r2(c.cost), count: c.count };
-      return { reg: v.reg, maint: r2(v.maint), fuel: r2(v.fuel), litres: Math.round(v.litres * 10) / 10, total: r2(v.maint + v.fuel), byCat };
+      return { reg: v.reg, maint: r2(v.maint), fuel: r2(v.fuel), po: r2(v.po), litres: Math.round(v.litres * 10) / 10, total: r2(v.maint + v.fuel + v.po), byCat };
     }).sort((a, b) => b.total - a.total);
-    const fleet = { maint: 0, fuel: 0, total: 0, byCat: {} };
+    const fleet = { maint: 0, fuel: 0, po: 0, total: 0, byCat: {} };
     for (const v of vehicles) {
       fleet.maint += v.maint;
       fleet.fuel += v.fuel;
+      fleet.po += v.po;
       fleet.total += v.total;
       for (const [cat, c] of Object.entries(v.byCat)) {
         const f = fleet.byCat[cat] || (fleet.byCat[cat] = { cost: 0, count: 0 });
@@ -9346,8 +9352,43 @@ async function handle20(request, env, ctx, url, sess) {
     }
     fleet.maint = r2(fleet.maint);
     fleet.fuel = r2(fleet.fuel);
+    fleet.po = r2(fleet.po);
     fleet.total = r2(fleet.total);
     return jr3({ ok: true, from, to, categories: cats, vehicles, fleet }, headers);
+  }
+  if (sub === "/vehicle-pos" && method === "GET") {
+    const reg = q.get("reg") || "";
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const money2 = await canMoney(env, tid, sess);
+    const from = q.get("from") || "", to = q.get("to") || "";
+    const rows = await vehiclePoRows(env, { reg, from, to });
+    let total = 0, unpriced = 0;
+    const pos = rows.map((r) => {
+      const raw = r.cost_ex_vat != null && r.cost_ex_vat !== "" ? Number(r.cost_ex_vat) : null;
+      const priced = raw != null && isFinite(raw);
+      if (priced) total += raw;
+      else unpriced++;
+      return {
+        supplier: r.supplier || "",
+        category: r.cost_category || "",
+        trade: r.trade || "",
+        cost: money2 ? priced ? Math.round(raw * 100) / 100 : null : void 0,
+        ref: r.incident_no || r.job_ref || "",
+        by: r.engineer_name || "",
+        site: r.site || "",
+        date: r.d || ""
+      };
+    });
+    return jr3({
+      ok: true,
+      reg,
+      poBound: !!env.PO_DB,
+      money: money2,
+      count: pos.length,
+      total: money2 ? Math.round(total * 100) / 100 : void 0,
+      unpriced,
+      pos
+    }, headers);
   }
   if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" || sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats") {
     if (sub === "/finance" && method === "POST") {
@@ -9919,6 +9960,31 @@ async function latestMileage(env, tid) {
   return out;
 }
 var dnReg = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+async function vehiclePoRows(env, { reg, from, to } = {}) {
+  if (!env.PO_DB) return [];
+  const where = ["(deleted IS NULL OR deleted=0)", "vehicle_reg IS NOT NULL", "TRIM(vehicle_reg)!=''"];
+  const bind = [];
+  if (reg) {
+    where.push("UPPER(REPLACE(vehicle_reg,' ',''))=?");
+    bind.push(dnReg(reg));
+  }
+  if (from) {
+    where.push("substr(COALESCE(issued_at,cost_entered_at),1,10)>=?");
+    bind.push(from);
+  }
+  if (to) {
+    where.push("substr(COALESCE(issued_at,cost_entered_at),1,10)<=?");
+    bind.push(to);
+  }
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT vehicle_reg, engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, substr(COALESCE(issued_at,cost_entered_at),1,10) AS d FROM po_log WHERE " + where.join(" AND ") + " ORDER BY COALESCE(issued_at,cost_entered_at)"
+    ).bind(...bind).all();
+    return results || [];
+  } catch {
+    return [];
+  }
+}
 async function ensureFuelTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fuel_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,

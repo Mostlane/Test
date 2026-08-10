@@ -753,7 +753,11 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   sig-verified, streams inline). The page shows a spend-per-category bar chart +
   tap-to-filter chips + a chronological timeline (date · description · coloured
   category badges w/ per-cat cost · total · open-document · edit). vehicle-delete
-  purges the maintenance rows + their R2 docs.
+  purges the maintenance rows + their R2 docs. **Documents open in the in-app
+  viewer** (docviewer.js `MLDocViewer.open`, `?v=5` — robust for every PDF type +
+  images, scrolls/zooms on mobile) rather than a new browser tab: the 📄 record
+  button and the edit modal's "Open" both call `openDoc(url,name)`; the signed
+  /fleet/maintenance-doc URL is CORS-enabled so PDF.js fetches it directly.
 - **Old vehicle documents** (`/fleet/vehicle-doc*`, R2 `vehicledocs/…`): the UI
   was REMOVED (replaced by the Maintenance log). The GET/list/POST/delete
   endpoints remain in fleet.js so any old signed links still open, but nothing
@@ -774,6 +778,25 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   edge auto-scroll), saves `/fleet/vehicle-order` (app_config
   `fleet:vehorder:<tid>` = [reg,…]); order applied server-side in
   /fleet/vehicles so it's the same everywhere.
+- **Vehicle-tagged purchase orders (Aug 2026)** — a PO raised for a van (AdBlue,
+  parts…) can be tagged to it in the PO system, which stamps the van's
+  registration onto **`po_log.vehicle_reg`** (the PO worker offers the portal's
+  vehicles as pickable "sites", read from its `PORTAL_DB` binding's `vehicles`
+  table). Portal side (fleet.js): helper **`vehiclePoRows(env,{reg,from,to})`**
+  reads PO_DB `po_log WHERE vehicle_reg=?` (reg normalised both sides:
+  `UPPER(REPLACE(vehicle_reg,' ',''))`), **fails soft to `[]`** when PO_DB is
+  unbound OR the `vehicle_reg` column doesn't exist yet (SQLite throws the whole
+  SELECT on an unknown column — try/catch keeps fleet views working, POs light up
+  on their own once the PO worker adds the column). **GET /fleet/vehicle-pos?reg=&
+  from=&to=** (any Vehicles user sees the list; £ figures stripped unless
+  `canMoney`) powers a **🧾 Purchase orders** block in the vehicles.html deep-dive
+  (loaded async after the modal opens; hidden when none). **/fleet/insights**
+  folds PO spend in as a third bucket per van (`v.po` + `fleet.po`, added to
+  `total`) — a distinct indigo segment on the "Spend per van" bars, a summary
+  tile, a "Where the money goes" row + a breakdown-table column (all only when
+  any PO spend exists). Only PRICED POs count (`cost_ex_vat`); match on
+  `vehicle_reg` only (never a display field). The PO-worker side is delivered as
+  a paste-in prompt (Jamie's PO environment builds it).
 - **Fuel cards, MPG & running cost** — page **fuel-cards.html** (⛽ Fuel Cards
   button in the vehicles header, shown to ANY Vehicles user). A fuel card = a
   user's `profile.fuelCard` (set in Users Admin). Log fill-ups (**date · litres ·

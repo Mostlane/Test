@@ -8,7 +8,7 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
   <style>
-  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; --maint:#2563eb; --fuel:#f59e0b; }
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; --maint:#2563eb; --fuel:#f59e0b; --po:#6366f1; }
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
   header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
@@ -37,7 +37,7 @@
   .track{background:#eef2f7;border-radius:7px;height:22px;overflow:hidden;display:flex;}
   .seg{height:100%;}
   .track .seg + .seg{box-shadow:inset 1px 0 0 rgba(255,255,255,.65);}
-  .seg.maint{background:var(--maint);} .seg.fuel{background:var(--fuel);}
+  .seg.maint{background:var(--maint);} .seg.fuel{background:var(--fuel);} .seg.po{background:var(--po);}
   .barrow .amt{font-weight:700;font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px;}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;}
@@ -186,13 +186,15 @@ function render(){
   if(!DATA) return;
   const focus = focusReg ? vehByReg(focusReg) : null;
   // ---- summary tiles ----
-  const src = focus ? { total:focus.total, maint:focus.maint, fuel:focus.fuel } : DATA.fleet;
+  const src = focus ? { total:focus.total, maint:focus.maint, fuel:focus.fuel, po:focus.po||0 } : DATA.fleet;
   const nVeh = DATA.vehicles.length;
   const avg = nVeh ? DATA.fleet.total / nVeh : 0;
+  const anyPo = (DATA.fleet.po||0) > 0;
   $("stats").innerHTML = `
-    <div class="stat"><div class="l">${focus ? esc(focus.reg)+" — total" : "Total spend"}</div><div class="v">${money0(src.total)}</div><div class="s">maintenance + fuel</div></div>
+    <div class="stat"><div class="l">${focus ? esc(focus.reg)+" — total" : "Total spend"}</div><div class="v">${money0(src.total)}</div><div class="s">maintenance + fuel${anyPo?" + POs":""}</div></div>
     <div class="stat"><div class="l">Maintenance</div><div class="v">${money0(src.maint)}</div><div class="s">${src.total?Math.round(src.maint/src.total*100):0}% of spend</div></div>
     <div class="stat"><div class="l">Fuel</div><div class="v">${money0(src.fuel)}</div><div class="s">${src.total?Math.round(src.fuel/src.total*100):0}% of spend</div></div>
+    ${anyPo ? `<div class="stat"><div class="l">Purchase orders</div><div class="v">${money0(src.po||0)}</div><div class="s">${src.total?Math.round((src.po||0)/src.total*100):0}% of spend</div></div>` : ""}
     ${focus ? `<div class="stat"><div class="l">vs fleet average</div><div class="v">${money0(focus.total)}</div><div class="s">avg ${money0(avg)}/van</div></div>`
             : `<div class="stat"><div class="l">Vehicles</div><div class="v">${nVeh}</div><div class="s">avg ${money0(avg)}/van</div></div>`}`;
 
@@ -216,6 +218,7 @@ function renderPerVan(){
       segs += `<div class="seg" style="width:${o.cost/max*100}%;background:${catColour[cat]||'#64748b'}" title="${esc(cat)} ${money(o.cost)}${o.count?` (${o.count})`:""}"></div>`;
     }
     if(v.fuel > 0) segs += `<div class="seg" style="width:${v.fuel/max*100}%;background:var(--fuel)" title="Fuel ${money(v.fuel)}"></div>`;
+    if((v.po||0) > 0) segs += `<div class="seg" style="width:${v.po/max*100}%;background:var(--po)" title="Purchase orders ${money(v.po)}"></div>`;
     return `<div class="barrow">
       <div class="name" data-reg="${esc(v.reg)}" title="Focus ${esc(v.reg)}">${esc(v.reg)}</div>
       <div class="track">${segs}</div>
@@ -228,6 +231,7 @@ function renderPerVan(){
   $("perVanLegend").innerHTML =
     used.map(cat => `<span><i style="background:${catColour[cat]||'#64748b'}"></i>${esc(cat)}</span>`).join("")
     + (list.some(v => v.fuel > 0) ? `<span><i style="background:var(--fuel)"></i>Fuel</span>` : "")
+    + (list.some(v => (v.po||0) > 0) ? `<span><i style="background:var(--po)"></i>Purchase orders</span>` : "")
     + `<span class="muted">Tap a van to focus it.</span>`;
 }
 
@@ -236,13 +240,15 @@ function renderCatBars(focus){
   const host = $("catBars");
   const byCat = focus ? focus.byCat : DATA.fleet.byCat;
   const entries = Object.entries(byCat || {}).map(([c,o]) => ({ cat:c, cost:o.cost, count:o.count })).sort((a,b)=>b.cost-a.cost);
-  // include fuel as a pseudo-category so the full picture shows
+  // include fuel + POs as pseudo-categories so the full picture shows
   const fuelAmt = focus ? focus.fuel : DATA.fleet.fuel;
   if(fuelAmt > 0) entries.push({ cat:"Fuel", cost:fuelAmt, count:null, fuel:true });
+  const poAmt = focus ? (focus.po||0) : (DATA.fleet.po||0);
+  if(poAmt > 0) entries.push({ cat:"Purchase orders", cost:poAmt, count:null, po:true });
   if(!entries.length){ host.innerHTML = '<div class="empty">No maintenance recorded in this range.</div>'; return; }
   const max = Math.max(...entries.map(e=>e.cost), 1);
   host.innerHTML = entries.map(e => {
-    const col = e.fuel ? "var(--fuel)" : (catColour[e.cat] || "#64748b");
+    const col = e.fuel ? "var(--fuel)" : e.po ? "var(--po)" : (catColour[e.cat] || "#64748b");
     return `<div class="catbar">
       <div class="cn">${esc(e.cat)}${e.count!=null?` <span class="muted">×${e.count}</span>`:""}</div>
       <div class="track"><div class="seg" style="width:${e.cost/max*100}%;background:${col}"></div></div>
@@ -273,17 +279,21 @@ function renderCatCompare(){
 
 function renderTable(){
   const cats = Object.keys(DATA.fleet.byCat||{});
-  const head = `<tr><th>Vehicle</th><th class="num">Total</th><th class="num">Maint.</th><th class="num">Fuel</th>${cats.map(c=>`<th class="num">${esc(c)}</th>`).join("")}</tr>`;
+  const anyPo = (DATA.fleet.po||0) > 0;
+  const poH = anyPo ? `<th class="num">POs</th>` : "";
+  const head = `<tr><th>Vehicle</th><th class="num">Total</th><th class="num">Maint.</th><th class="num">Fuel</th>${poH}${cats.map(c=>`<th class="num">${esc(c)}</th>`).join("")}</tr>`;
   $("tbl").querySelector("thead").innerHTML = head;
   const rows = (DATA.vehicles||[]).map(v => `<tr>
     <td class="reg">${esc(v.reg)}</td>
     <td class="num"><b>${money0(v.total)}</b></td>
     <td class="num">${money0(v.maint)}</td>
     <td class="num">${money0(v.fuel)}</td>
+    ${anyPo?`<td class="num">${(v.po||0)?money0(v.po):"—"}</td>`:""}
     ${cats.map(c=>{ const o=v.byCat[c]; return `<td class="num">${o?money0(o.cost)+(o.count?` <span class="muted">(${o.count})</span>`:""):"—"}</td>`; }).join("")}
   </tr>`).join("");
   const foot = `<tr style="font-weight:800;background:#f8fafc;">
     <td>Fleet total</td><td class="num">${money0(DATA.fleet.total)}</td><td class="num">${money0(DATA.fleet.maint)}</td><td class="num">${money0(DATA.fleet.fuel)}</td>
+    ${anyPo?`<td class="num">${money0(DATA.fleet.po)}</td>`:""}
     ${cats.map(c=>{ const o=DATA.fleet.byCat[c]; return `<td class="num">${o?money0(o.cost)+(o.count?` (${o.count})`:""):"—"}</td>`; }).join("")}
   </tr>`;
   $("tbl").querySelector("tbody").innerHTML = rows + foot || `<tr><td class="empty">No data.</td></tr>`;
