@@ -299,7 +299,7 @@
 <div class="row2" id="siteNumberRow">
   <div>
     <label>Site Number</label>
-    <input id="editNumber" placeholder="e.g. 1234">
+    <input id="editNumber" placeholder="e.g. 1234" autocomplete="off" inputmode="numeric">
   </div>
   <div>
     <label>Active</label>
@@ -1050,7 +1050,10 @@ if (marker && marker.setPosition) {
 if (isProjectSave) {
   delete currentEditing.siteNumber;
 } else {
-  currentEditing.siteNumber = editNumber.value.trim() || undefined;
+  // Read the box; if it comes back empty (autofill/timing quirk that made the
+  // first save wrongly say "siteNumber required") fall back to the site's
+  // existing number so editing an existing site never loses it.
+  currentEditing.siteNumber = editNumber.value.trim() || oldNum || undefined;
 }
 // Preserve jobNumber only for projects
 if (!isProjectSave) delete currentEditing.jobNumber;
