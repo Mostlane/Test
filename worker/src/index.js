@@ -253,6 +253,8 @@ const PUBLIC_ROUTES = [
   // Site documents streamed for the in-app viewer (parity with the public R2
   // URL these already have; adds CORS for fetch-based rendering).
   ["GET", "/sla/site/doc"],
+  // Site/job photo thumbnails — signed URL, verified in-handler (like /site/doc).
+  ["GET", "/sla/site/thumb"],
   // Staff documents streamed for the in-app viewer — access-gated by the
   // signed URL (see filesign.js), so being "public" only means "no session
   // header needed"; an unsigned/expired link is refused inside the handler.

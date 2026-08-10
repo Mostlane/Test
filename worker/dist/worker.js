@@ -5165,9 +5165,13 @@ async function handle8(request, env, ctx, url, sess) {
     const photos = [];
     for (const j of jobsHere) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/`, include: ["customMetadata"] });
+      const thumbSet = new Set((listed.objects || []).filter((o) => o.key.endsWith(".thumb")).map((o) => o.key));
       for (const o of listed.objects || []) {
+        if (o.key.endsWith(".thumb")) continue;
         photos.push({
           url: await fileUrl(env, url, o.key),
+          thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
+          hasThumb: thumbSet.has(o.key + ".thumb"),
           key: o.key,
           name: o.key.split("/").pop(),
           jobRef: j.helpdeskRef || j.id,
@@ -5180,9 +5184,13 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (siteKey) {
       const up = await env.JOB_FILES.list({ prefix: `sitedocs/${siteKey}/Site Photos/`, include: ["customMetadata"] });
+      const thumbSet = new Set((up.objects || []).filter((o) => o.key.endsWith(".thumb")).map((o) => o.key));
       for (const o of up.objects || []) {
+        if (o.key.endsWith(".thumb")) continue;
         photos.push({
           url: await fileUrl(env, url, o.key),
+          thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
+          hasThumb: thumbSet.has(o.key + ".thumb"),
           key: o.key,
           name: o.customMetadata && o.customMetadata.name || o.key.split("/").pop(),
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
@@ -5253,7 +5261,50 @@ async function handle8(request, env, ctx, url, sess) {
       httpMetadata: { contentType: file.type || "application/octet-stream" },
       customMetadata: { name: file.name || safe, by: sess && sess.user && sess.user.username || "", at: (/* @__PURE__ */ new Date()).toISOString() }
     });
+    const thumb = form.get("thumb");
+    if (thumb && typeof thumb.stream === "function") {
+      try {
+        await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+      } catch {
+      }
+    }
     return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
+  }
+  if (subpath === "/site/thumb" && method === "GET") {
+    const key = searchParams.get("key");
+    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/")))
+      return jsonResponse({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, searchParams))
+      return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
+    const cache = caches.default;
+    const cacheKey = new Request(`${url.origin}/sla/site/thumb?key=${encodeURIComponent(key)}`);
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+    let obj = await env.JOB_FILES.get(key + ".thumb");
+    let cc = "public, max-age=31536000, immutable";
+    if (!obj) {
+      obj = await env.JOB_FILES.get(key);
+      cc = "public, max-age=86400";
+    }
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    const resp = new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
+      "Content-Disposition": "inline",
+      "Cache-Control": cc
+    } });
+    ctx?.waitUntil(cache.put(cacheKey, resp.clone()));
+    return resp;
+  }
+  if (subpath === "/site/thumb" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const form = await request.formData();
+    const key = String(form.get("key") || "");
+    const thumb = form.get("thumb");
+    if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
+      return jsonResponse({ error: "Bad request" }, headers, 400);
+    await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+    return jsonResponse({ ok: true }, headers);
   }
   if (subpath === "/site/doc" && method === "GET") {
     const key = searchParams.get("key");
@@ -5275,6 +5326,10 @@ async function handle8(request, env, ctx, url, sess) {
     const { key } = await readJson2(request);
     if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
+    try {
+      await env.JOB_FILES.delete(key + ".thumb");
+    } catch {
+    }
     return jsonResponse({ ok: true }, headers);
   }
   if (subpath === "/site/area" && method === "POST") {
@@ -12753,6 +12808,8 @@ var PUBLIC_ROUTES = [
   // Site documents streamed for the in-app viewer (parity with the public R2
   // URL these already have; adds CORS for fetch-based rendering).
   ["GET", "/sla/site/doc"],
+  // Site/job photo thumbnails — signed URL, verified in-handler (like /site/doc).
+  ["GET", "/sla/site/thumb"],
   // Staff documents streamed for the in-app viewer — access-gated by the
   // signed URL (see filesign.js), so being "public" only means "no session
   // header needed"; an unsigned/expired link is refused inside the handler.
