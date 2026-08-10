@@ -1103,7 +1103,22 @@ compose, drafts & sent list, per-memo "Who signed"). A sent memo:
   drawn signature PNG is stored alongside at `memos/<tid>/<id>/<user>.png` as the
   admin record). The **author is auto-acknowledged** on send (not gated, counts
   as signed, no PDF filed for them).
-Tables **memos** (draft/sent + the header fields + body) and **memo_acks**
+**Targeting + logo + cleanup (Aug 2026):** a memo sends to **everyone OR selected
+people** (`memos.recipients` = JSON usernames, null=everyone, self-migrating;
+notification-centre.html has a searchable checkbox picker). /send pushes only the
+recipients; /pending shows a memo only to its recipients; /status + signed/total
+are relative to recipients; /ack rejects a non-recipient. **Deleting a memo also
+purges the filed acknowledgement PDFs + signature PNGs** (via memo_acks.doc_key/
+sig_key) so a test memo cleans up from everyone's My Documents. /status returns a
+signed `doc` URL per signer → "Who signed" links each name to their signed copy.
+The **acknowledgement PDF now carries the Mostlane logo**: `lib/pdf.js` gained
+JPEG image embedding (`doc.image(bytes,x,yTop,w,h)` → DCTDecode XObject; `bytes()`
+rewritten to assemble binary chunks so image streams stay byte-exact; text-only
+output unchanged), and `lib/logo.js` holds the logo as a baseline-JPEG base64
+(2000×798). My Documents (my-documents.html) already lets Full Access pick any
+user + delete (server /staff/doc-delete is Full-only — no other role can delete
+personal docs); a per-row ⬇ download was added.
+Tables **memos** (draft/sent + the header fields + body + recipients) and **memo_acks**
 (tenant/memo/user PK; signed_at, doc_key, sig_key) — self-migrating. Routes
 (FullAccess unless noted): POST /memos/save (draft upsert), /memos/send,
 /memos/delete, GET /memos/list (+signed/total), GET /memos/status?id= (who
