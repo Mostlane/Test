@@ -301,7 +301,7 @@
      for the Shell layout but tolerant: columns are found by header NAME, and
      rows whose reg is blank/mistyped are resolved via the Card Full Number
      (each card belongs to one van — read from that card's other rows). */
-  let IMP_ROWS=null, IMP_ENTRIES=null, FLEETSET=null, FLEETCANON=null;
+  let IMP_ROWS=null, IMP_ENTRIES=null, IMP_ODO=null, FLEETSET=null, FLEETCANON=null;
   function normReg(s){ return String(s||"").replace(/[^A-Za-z0-9]/g,"").toUpperCase(); }
   function d2iso(s){ const m=String(s||"").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/); if(!m) return ""; let dd=m[1],mm=m[2],yy=m[3]; if(yy.length===2) yy="20"+yy; return yy+"-"+mm.padStart(2,"0")+"-"+dd.padStart(2,"0"); }
   function parseCSV(text){
@@ -324,7 +324,7 @@
       card:colIdx(hdr,"Card Full Number"), date:colIdx(hdr,"Delivery Date"), qty:colIdx(hdr,"Quantity"),
       net:colIdx(hdr,"Net Amount in transaction currency"),
       gross:colIdx(hdr,"Gross Purchase Price in transaction currency"),
-      ref:colIdx(hdr,"Transaction Identifier") };
+      ref:colIdx(hdr,"Transaction Identifier"), odo:colIdx(hdr,"Odometer Reading") };
     const costIdx = basis==="gross" ? ci.gross : ci.net;
     if(ci.date<0 || ci.qty<0 || costIdx<0 || (ci.lic<0 && ci.fleet<0 && ci.driver<0))
       return {error:"That doesn't look like a fuel-card statement — expected columns like Vehicle License Number, Delivery Date, Quantity and an amount weren't found."};
@@ -339,6 +339,7 @@
       cardTotal[card]=(cardTotal[card]||0)+1; const v=rowVan(r); if(v){ (votes[card]=votes[card]||{})[v]=(votes[card][v]||0)+1; } }
     const cardVan={}; for(const c in votes){ const top=Object.entries(votes[c]).sort((a,b)=>b[1]-a[1])[0]; if(top && top[1]/(cardTotal[c]||1) >= 0.5) cardVan[c]=top[0]; }
     const entries=[], perVan={}, unmatched={}; let total=0;
+    const odoRaw={};   // reg -> { date -> maxMiles } (secondary mileage source)
     for(const r of data){
       const date=d2iso(r[ci.date]); if(!date) continue;   // skip header repeats / junk
       const card=String(r[ci.card]||"").replace(/'/g,"").trim();
@@ -349,12 +350,32 @@
       if(van){
         entries.push({reg:van,date,litres:litresV,cost,ref,card});
         const o=perVan[van]=perVan[van]||{fills:0,litres:0,cost:0}; o.fills++; o.litres+=litresV; o.cost+=cost; total+=cost;
+        if(ci.odo>=0){ const od=parseInt(String(r[ci.odo]||"").replace(/[^0-9]/g,""),10);
+          if(od>0){ const m=odoRaw[van]=odoRaw[van]||{}; if(!m[date]||od>m[date]) m[date]=od; } }
       } else {
         const label=String(r[ci.driver]||"").trim() || normReg(r[ci.lic]) || normReg(r[ci.fleet]) || "(no id)";
         const u=unmatched[label]=unmatched[label]||{count:0,cost:0}; u.count++; u.cost+=cost;
       }
     }
-    return {entries,perVan,unmatched,total:Math.round(total*100)/100};
+    // Sanity-filter the odometers: sort by date, keep a monotonic non-decreasing
+    // run with a plausible daily rate, then DROP a van whose series doesn't look
+    // like a real odometer (no movement / <2 points — e.g. drivers typing "1").
+    const odo={}; let odoCount=0;
+    for(const van of Object.keys(odoRaw)){
+      const pts=Object.entries(odoRaw[van]).map(([d,mi])=>[d,mi]).sort((a,b)=>a[0]<b[0]?-1:1);
+      const kept=[];
+      for(const [d,mi] of pts){
+        if(!kept.length){ kept.push([d,mi]); continue; }
+        const [pd,po]=kept[kept.length-1];
+        const days=Math.max(1,(Date.parse(d)-Date.parse(pd))/86400000);
+        if(mi<po || (mi-po)/days>500) continue;   // backwards or implausible jump
+        kept.push([d,mi]);
+      }
+      if(kept.length>=2 && (kept[kept.length-1][1]-kept[0][1])>=25){
+        odo[van]=kept.map(([date,miles])=>({date,miles})); odoCount+=kept.length;
+      }
+    }
+    return {entries,perVan,unmatched,total:Math.round(total*100)/100, odo, odoCount};
   }
   async function ensureFleet(){
     if(FLEETSET) return;
@@ -376,11 +397,13 @@
     if(!IMP_ROWS){ return; }
     const res=buildImport(IMP_ROWS, impBasis());
     if(res.error){ $("impPreview").innerHTML='<span style="color:#dc2626">'+esc(res.error)+'</span>'; $("impGo").disabled=true; IMP_ENTRIES=null; return; }
-    IMP_ENTRIES=res.entries;
+    IMP_ENTRIES=res.entries; IMP_ODO=res.odo||{};
     const vans=Object.entries(res.perVan).sort((a,b)=>b[1].cost-a[1].cost);
     if(!vans.length){ $("impPreview").innerHTML='<span style="color:#dc2626">No rows could be matched to any of your vans.</span>'; $("impGo").disabled=true; return; }
     let html=`<b>${res.entries.length}</b> fill-ups → <b>${vans.length}</b> vans · <b>${money(res.total)}</b> (${impBasis()==="net"?"ex-VAT":"inc-VAT"})`;
     html+='<div style="margin-top:8px;max-height:220px;overflow:auto">'+vans.map(([reg,o])=>`<div class="imp-van"><span class="reg">${esc(reg)}</span><span>${o.fills} fills · ${litres(o.litres)} · ${money(o.cost)}</span></div>`).join("")+'</div>';
+    const odoVans=Object.keys(res.odo||{});
+    if(res.odoCount){ html+=`<div class="who" style="margin-top:8px">📏 Also pulling <b>${res.odoCount}</b> sensible mileage reading(s) across <b>${odoVans.length}</b> van(s): ${odoVans.map(esc).join(", ")}. Van-check mileage stays priority; these are secondary.</div>`; }
     const un=Object.entries(res.unmatched);
     if(un.length){ const uc=un.reduce((s,x)=>s+x[1].count,0);
       html+=`<div class="imp-warn"><b>${uc}</b> row(s) couldn't be matched to a van and will be <b>skipped</b>: `+un.map(x=>`${esc(x[0])} (${x[1].count})`).join(", ")+`</div>`; }
@@ -400,7 +423,13 @@
         created+=r.created||0; updated+=r.updated||0; skipped+=r.skipped||0;
         $("impStatus").textContent=`Importing… ${Math.min(i+B,IMP_ENTRIES.length)}/${IMP_ENTRIES.length}`;
       }
-      $("impStatus").innerHTML=`✓ Done — <b>${created}</b> new fill-up(s), <b>${updated}</b> already present (skipped)${skipped?`, ${skipped} invalid`:""}.`;
+      // Odometer readings (secondary source — never overrides a van check).
+      let odoNew=0;
+      for(const reg of Object.keys(IMP_ODO||{})){
+        try{ const r=await aFetch("/fleet/odometer/import",{method:"POST",body:JSON.stringify({reg,readings:IMP_ODO[reg],source:"fuel"})}).then(r=>r.json());
+          if(r&&r.ok) odoNew+=(r.created||0); }catch(e){}
+      }
+      $("impStatus").innerHTML=`✓ Done — <b>${created}</b> new fill-up(s), <b>${updated}</b> already present (skipped)${skipped?`, ${skipped} invalid`:""}${odoNew?` · <b>${odoNew}</b> new mileage reading(s)`:""}.`;
       toast("Fuel imported");
       reloadAll();
     }catch(e){ $("impStatus").textContent="Import failed — "+(e.message||""); $("impGo").disabled=false; }
