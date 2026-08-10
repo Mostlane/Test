@@ -335,8 +335,8 @@
       const reg=v.reg||"UNKNOWN";
       const drv=v.driver?pName(v.driver):"Unassigned";
       const odo = v.currentMiles!=null
-        ? `<span class="odo">🛣 ${fmtMiles(v.currentMiles)} mi <small>from van check ${v.milesAt?fmtDMY(v.milesAt):""}</small></span>`
-        : `<span class="odo"><small>🛣 mileage will show once a van check records it</small></span>`;
+        ? `<span class="odo">🛣 ${fmtMiles(v.currentMiles)} mi <small>as of ${v.milesAt?fmtDMY(v.milesAt):""}</small></span>`
+        : `<span class="odo"><small>🛣 mileage will show once a reading is recorded</small></span>`;
       const card=document.createElement("div"); card.className="card"; card.dataset.reg=reg;
       const photo = v.photoUrl
         ? `<img class="vphoto" src="${esc(v.photoUrl)}" alt="${esc(reg)}" loading="lazy" onclick="openVehicle('${esc(reg)}')">`
@@ -409,7 +409,7 @@
     if(!v){ return; }
     const drv = v.driver ? pName(v.driver) : "Unassigned";
     const miles = v.currentMiles!=null
-      ? `${fmtMiles(v.currentMiles)} mi <small style="color:var(--muted);font-weight:400">(van check ${v.milesAt?fmtDMY(v.milesAt):"—"})</small>`
+      ? `${fmtMiles(v.currentMiles)} mi <small style="color:var(--muted);font-weight:400">(as of ${v.milesAt?fmtDMY(v.milesAt):"—"})</small>`
       : `<small style="color:var(--muted);font-weight:400">Not recorded yet</small>`;
     const photo = v.photoUrl
       ? `<img src="${esc(v.photoUrl)}" alt="${esc(reg)}" style="width:100%;max-height:240px;object-fit:contain;background:#eef2f7;border-radius:12px;display:block;margin-bottom:12px;cursor:zoom-in" onclick="enlarge('${esc(v.photoUrl)}')">`
@@ -442,6 +442,7 @@
       <div id="vpoBlock" class="grp" style="margin-top:12px;display:none"></div>
       <div class="card-actions" style="border-top:0;padding-top:4px">
         <button class="btn small" onclick="pClose();openAssign('${esc(reg)}')">👤 Driver</button>
+        <button class="btn ghost small" onclick="pClose();openMileage('${esc(reg)}')">📏 Mileage</button>
         <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
         <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
         <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
@@ -475,6 +476,60 @@
     const unp = d.unpriced ? `<div class="hint" style="margin-top:6px">${d.unpriced} not priced yet</div>` : "";
     box.innerHTML = `<h4>🧾 Purchase orders <span style="color:var(--muted);font-weight:400">(${d.count})</span></h4>${rows}${total}${unp}`;
     box.style.display = "block";
+  }
+
+  /* ── Odometer readings + MPG ──────────────────────────────────────────────
+     Log mileage readings for a van; MPG is worked out server-side from the
+     fuel bought within the reading window (a true figure, not all-time). */
+  let MILE_REG="";
+  async function openMileage(reg){
+    MILE_REG=reg;
+    pModal(`<div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px">
+        <h3 style="margin:0">📏 ${esc(reg)} — Mileage</h3><button class="btn ghost small" onclick="pClose()">✕ Close</button></div>
+      <div id="mpgHead"></div>
+      <div style="display:flex;gap:6px;align-items:end;margin:12px 0">
+        <div style="flex:0 0 auto"><label style="font-size:12px;color:var(--muted);display:block">Date</label><input type="date" id="odDate" style="padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit"></div>
+        <div style="flex:1"><label style="font-size:12px;color:var(--muted);display:block">Odometer (mi)</label><input type="number" id="odMiles" inputmode="numeric" placeholder="e.g. 85054" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit"></div>
+        <button class="btn primary" onclick="addReading()">＋ Add</button>
+      </div>
+      <div id="odList"><span class="hint">Loading…</span></div>`);
+    $("odDate").value=new Date().toISOString().slice(0,10);
+    loadMileage();
+  }
+  async function loadMileage(){
+    let d; try{ d=await aFetch("/fleet/odometer?reg="+encodeURIComponent(MILE_REG)).then(r=>r.json()); }catch(e){ $("odList").innerHTML='<span class="hint">Couldn\'t load.</span>'; return; }
+    if(!d||!d.ok){ $("odList").innerHTML='<span class="hint">Couldn\'t load.</span>'; return; }
+    const m=d.mpg||{};
+    $("mpgHead").innerHTML = (m.mpg!=null)
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 12px">
+           <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">MPG over logged period</div>
+           <div style="font-size:26px;font-weight:800">${Number(m.mpg).toFixed(1)} mpg</div>
+           <div style="font-size:12px;color:var(--muted)">${fmtMiles(m.miles)} mi on ${Number(m.litres).toFixed(0)} L · ${esc(fmtDMY(m.from))} → ${esc(fmtDMY(m.to))}</div></div>`
+      : `<div class="hint">${(d.readings&&d.readings.length>=2)?"Not enough fuel logged in this period to work out MPG yet.":"Add at least two readings to work out MPG."}</div>`;
+    const rd=d.readings||[];
+    if(!rd.length){ $("odList").innerHTML='<div class="hint" style="margin-top:8px">No readings yet.</div>'; return; }
+    // readings come back newest-first; show gap to the PREVIOUS (older) reading
+    $("odList").innerHTML='<div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:6px 0">Readings</div>'+
+      rd.map((r,i)=>{
+        const older=rd[i+1];
+        const gap=older?` <span style="color:var(--muted)">(+${(r.miles-older.miles).toLocaleString("en-GB")} mi)</span>`:"";
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:13px">
+          <span style="font-weight:700;white-space:nowrap">${esc(fmtDMY(r.date))}</span>
+          <span style="flex:1">${Number(r.miles).toLocaleString("en-GB")} mi${gap}</span>
+          <button class="btn ghost small" onclick="delReading(${r.id})">✕</button></div>`;
+      }).join("");
+  }
+  async function addReading(){
+    const date=$("odDate").value, miles=parseInt(String($("odMiles").value).replace(/[^0-9]/g,""),10);
+    if(!date||!miles){ toast("Enter a date and odometer reading"); return; }
+    try{ const r=await aFetch("/fleet/odometer",{method:"POST",body:JSON.stringify({reg:MILE_REG,date,miles})}).then(r=>r.json());
+      if(!r.ok) throw new Error(r.error||"failed");
+      $("odMiles").value=""; toast(r.updated?"Reading updated":"Reading added"); loadMileage(); loadFleet();
+    }catch(e){ toast("Couldn't save — "+(e.message||"")); }
+  }
+  async function delReading(id){
+    if(!confirm("Delete this reading?")) return;
+    try{ const r=await aFetch("/fleet/odometer-delete",{method:"POST",body:JSON.stringify({id})}).then(r=>r.json()); if(r.ok){ toast("Deleted"); loadMileage(); loadFleet(); } }catch(e){}
   }
 
   /* ── Driver assignment (registry with history) ── */
@@ -726,7 +781,7 @@
   }
 
   // expose for inline handlers
-  Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,addSpecRow,finToggle,importOld,pClose,openPhotoModal,closePhotoModal,uploadPhoto,setCover,deletePhoto,enlarge,closeLightbox});
+  Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,addSpecRow,finToggle,importOld,pClose,openPhotoModal,closePhotoModal,uploadPhoto,setCover,deletePhoto,enlarge,closeLightbox,openMileage,addReading,delReading});
   document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);
