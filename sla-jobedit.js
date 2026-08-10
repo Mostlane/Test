@@ -356,7 +356,7 @@
         const d = await r.json();
         let list = (d.Users || d.users || []).filter(u => u.Username && (u.Status || "").toLowerCase() === "active");
         if (window.mlOrderUsers) list = window.mlOrderUsers(list);
-        engineers = list.map(u => ({ username: u.Username, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username, staffType: (u.StaffType === "office" ? "office" : "field") }));
+        engineers = list.map(u => ({ username: u.Username, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username, staffType: (u.StaffType === "office" ? "office" : "field"), allocatable: !!u.Allocatable }));
       } catch (e) { engineers = []; }
     }
     if (!customers) {
@@ -495,7 +495,7 @@
       box.innerHTML = "";
       (engineers || []).forEach(e => {
         const isOffice = e.staffType === "office";
-        if (isOffice && !showOffice && !on(e.username)) return;
+        if (isOffice && !e.allocatable && !showOffice && !on(e.username)) return;
         const label = document.createElement("label");
         const input = document.createElement("input");
         input.type = "checkbox";

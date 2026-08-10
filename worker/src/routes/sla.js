@@ -1504,13 +1504,26 @@ async function engUsernameMap(env, tid) {
   } catch {}
   return map;
 }
+// A job's internal id is a UUID — never show it in a push. A helpdesk ref is
+// only worth showing if it's a real reference, not that UUID.
+function isUuidLike(s) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || "")); }
+// Push body = the CLEAR job name (site, else the works description), with a real
+// reference prefixed only when there is one. Keeps the ugly UUID out.
+function jobPushBody(job) {
+  const site = job.siteName || job.siteCode || "";
+  const desc = (job.description || "").trim();
+  const ref = job.helpdeskRef || "";
+  let name = site || desc || "";
+  const showRef = ref && ref !== job.id && !isUuidLike(ref);
+  if (showRef) name = name ? `${ref} — ${name}` : ref;
+  if (!name) name = "New job";
+  return `${name}${job.priority ? " · " + job.priority : ""}. Tap to view.`;
+}
 // Fire the "new job" push to a specific set of engineer ids.
 async function pushJobToEngineers(env, tid, job, engineerIds) {
   if (!engineerIds.length) return;
   const map = await engUsernameMap(env, tid);
-  const ref = job.helpdeskRef || job.id;
-  const site = job.siteName || job.siteCode || "";
-  const body = `${ref}${site ? " — " + site : ""}${job.priority ? " · " + job.priority : ""}. Tap to view.`;
+  const body = jobPushBody(job);
   for (const eng of engineerIds) {
     const username = map[normId(eng)] || eng;
     await sendToUser(env, tid, username, {
@@ -1560,9 +1573,7 @@ export async function notifyNewlyAssigned(env, tid, before, after) {
       if (full) map[normId(full)] = u.username;
     }
   } catch {}
-  const ref = after.helpdeskRef || after.id;
-  const site = after.siteName || after.siteCode || "";
-  const body = `${ref}${site ? " — " + site : ""}${after.priority ? " · " + after.priority : ""}. Tap to view.`;
+  const body = jobPushBody(after);
   for (const eng of added) {
     const username = map[normId(eng)] || eng;
     await sendToUser(env, tid, username, {

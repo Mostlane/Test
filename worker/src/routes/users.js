@@ -350,6 +350,10 @@ function shapeUser(u, perms) {
     // Office/field split + manual drag order (set in Users admin, stored in the
     // profile blob so no schema change is needed). Everything sorts by these.
     StaffType: profile.staffType === "office" ? "office" : "field",
+    // Office/admin people are hidden from job-assignment lists by default;
+    // `allocatable` puts a specific office person back on that list (e.g. an
+    // owner who also does site work).
+    Allocatable: profile.allocatable === true || profile.allocatable === "Yes",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Profile: profile,
     ...perms,
