@@ -9371,6 +9371,73 @@ async function handle20(request, env, ctx, url, sess) {
     fleet.total = r2(fleet.total);
     return jr3({ ok: true, from, to, categories: cats, vehicles, fleet }, headers);
   }
+  if (sub === "/odometer" && method === "GET") {
+    await ensureOdoTable(env);
+    const reg = q.get("reg") || "";
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT id, reg, date, miles, note, by FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? ORDER BY date DESC, id DESC"
+    ).bind(tid, dnReg(reg)).all();
+    const readings = (results || []).map((r) => ({ id: r.id, date: r.date || "", miles: r.miles, note: r.note || "", by: r.by || "" }));
+    const mpg = await mpgForReg(env, tid, reg);
+    return jr3({ ok: true, reg, readings, mpg }, headers);
+  }
+  if (sub === "/odometer" && method === "POST") {
+    await ensureOdoTable(env);
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date : "";
+    const milesV = parseInt(String(b.miles == null ? "" : b.miles).replace(/[^0-9]/g, ""), 10);
+    if (!reg || !date || !milesV) return jr3({ error: "reg, date and miles are required" }, headers, 400);
+    const note = String(b.note || "").slice(0, 120);
+    const id = parseInt(String(b.id || ""), 10);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (id && !isNaN(id)) {
+      await env.DB.prepare("UPDATE odometer_readings SET reg=?,date=?,miles=?,note=? WHERE tenant_id=? AND id=?").bind(reg, date, milesV, note, tid, id).run();
+      return jr3({ ok: true, id }, headers);
+    }
+    const ex = await env.DB.prepare("SELECT id FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND date=?").bind(tid, dnReg(reg), date).first();
+    if (ex && ex.id) {
+      await env.DB.prepare("UPDATE odometer_readings SET miles=?,note=? WHERE tenant_id=? AND id=?").bind(milesV, note, tid, ex.id).run();
+      return jr3({ ok: true, id: ex.id, updated: true }, headers);
+    }
+    const res = await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, note, sess.user.username, now).run();
+    return jr3({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
+  }
+  if (sub === "/odometer/import" && method === "POST") {
+    await ensureOdoTable(env);
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    const readings = Array.isArray(b.readings) ? b.readings : [];
+    if (!reg || !readings.length) return jr3({ error: "reg + readings required" }, headers, 400);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let created = 0, updated = 0, skipped = 0;
+    for (const rd of readings) {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(rd.date || "") ? rd.date : "";
+      const milesV = parseInt(String(rd.miles == null ? "" : rd.miles).replace(/[^0-9]/g, ""), 10);
+      if (!date || !milesV) {
+        skipped++;
+        continue;
+      }
+      const ex = await env.DB.prepare("SELECT id FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND date=?").bind(tid, dnReg(reg), date).first();
+      if (ex && ex.id) {
+        await env.DB.prepare("UPDATE odometer_readings SET miles=? WHERE tenant_id=? AND id=?").bind(milesV, tid, ex.id).run();
+        updated++;
+      } else {
+        await env.DB.prepare("INSERT INTO odometer_readings (tenant_id,reg,date,miles,note,by,at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, date, milesV, "", sess.user.username, now).run();
+        created++;
+      }
+    }
+    return jr3({ ok: true, created, updated, skipped }, headers);
+  }
+  if (sub === "/odometer-delete" && method === "POST") {
+    await ensureOdoTable(env);
+    const b = await readJson4(request);
+    const id = parseInt(String(b.id || ""), 10);
+    if (!id || isNaN(id)) return jr3({ error: "id required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM odometer_readings WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    return jr3({ ok: true }, headers);
+  }
   if (sub === "/vehicle-pos" && method === "GET") {
     const reg = q.get("reg") || "";
     if (!reg) return jr3({ error: "reg required" }, headers, 400);
@@ -9991,6 +10058,11 @@ async function ensureMaintTable(env) {
 async function latestMileage(env, tid) {
   const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
   const out = {};
+  const consider = (k, mi, dateStr, at) => {
+    if (!k || !mi || !dateStr) return;
+    const cur = out[k];
+    if (!cur || dateStr >= cur.date) out[k] = { miles: mi, at: at || dateStr, date: dateStr };
+  };
   try {
     const { results } = await env.DB.prepare(
       "SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!='' ORDER BY checked_at ASC"
@@ -10001,12 +10073,26 @@ async function latestMileage(env, tid) {
         m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
       } catch {
       }
-      if (!m) continue;
-      out[dn(r.vehicle)] = { miles: parseInt(m, 10), at: r.checked_at };
+      consider(dn(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10), r.checked_at);
     }
   } catch {
   }
+  try {
+    await ensureOdoTable(env);
+    const { results } = await env.DB.prepare("SELECT reg, date, miles FROM odometer_readings WHERE tenant_id=? ORDER BY date ASC").bind(tid).all();
+    for (const r of results || []) consider(dn(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10), r.date);
+  } catch {
+  }
   return out;
+}
+async function ensureOdoTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS odometer_readings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    reg TEXT, date TEXT, miles INTEGER, note TEXT, by TEXT, at TEXT)`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_odo_reg ON odometer_readings(tenant_id,reg)").run();
+  } catch {
+  }
 }
 var dnReg = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
 async function vehiclePoRows(env, { reg, from, to } = {}) {
@@ -10126,9 +10212,18 @@ async function fuelByVehicle(env, tid) {
 }
 async function odoByVehicle(env, tid) {
   const out = {};
+  const add = (k, mi, date) => {
+    if (!k || !mi || !date) return;
+    const o = out[k] || (out[k] = { min: mi, max: mi, first: date, last: date, readings: 0 });
+    o.min = Math.min(o.min, mi);
+    o.max = Math.max(o.max, mi);
+    o.readings++;
+    if (date < o.first) o.first = date;
+    if (date > o.last) o.last = date;
+  };
   try {
     const { results } = await env.DB.prepare(
-      "SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!='' ORDER BY checked_at ASC"
+      "SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
     ).bind(tid).all();
     for (const r of results || []) {
       let m = "";
@@ -10136,34 +10231,107 @@ async function odoByVehicle(env, tid) {
         m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
       } catch {
       }
-      if (!m) continue;
-      const miles = parseInt(m, 10);
-      if (!miles) continue;
-      const k = dnReg(r.vehicle);
-      const o = out[k] || (out[k] = { min: miles, max: miles, first: r.checked_at, last: r.checked_at, readings: 0 });
-      o.min = Math.min(o.min, miles);
-      o.max = Math.max(o.max, miles);
-      o.readings++;
-      if (r.checked_at < o.first) o.first = r.checked_at;
-      if (r.checked_at > o.last) o.last = r.checked_at;
+      add(dnReg(r.vehicle), parseInt(m, 10), (r.checked_at || "").slice(0, 10));
     }
-    for (const k of Object.keys(out)) out[k].milesDriven = Math.max(0, out[k].max - out[k].min);
+  } catch {
+  }
+  try {
+    await ensureOdoTable(env);
+    const { results } = await env.DB.prepare("SELECT reg, date, miles FROM odometer_readings WHERE tenant_id=?").bind(tid).all();
+    for (const r of results || []) add(dnReg(r.reg), parseInt(r.miles, 10), (r.date || "").slice(0, 10));
+  } catch {
+  }
+  for (const k of Object.keys(out)) out[k].milesDriven = Math.max(0, out[k].max - out[k].min);
+  return out;
+}
+async function fuelRowsByVehicle(env, tid) {
+  await ensureFuelTable(env);
+  const { byCard } = await fuelCardMap(env, tid);
+  const userCurrent = {};
+  for (const c of Object.values(byCard)) userCurrent[c.username] = c.vehicle;
+  const intervals = await assignmentIntervals(env, tid);
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT card, username, reg, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    for (const e of results || []) {
+      let reg = e.reg || "";
+      if (!reg) {
+        const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+        if (!user) continue;
+        reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      }
+      if (!reg) continue;
+      (out[dnReg(reg)] || (out[dnReg(reg)] = [])).push({ date: e.date || "", litres: Number(e.litres) || 0, cost: Number(e.cost) || 0 });
+    }
   } catch {
   }
   return out;
 }
 async function mpgByVehicle(env, tid) {
-  const fuel = await fuelByVehicle(env, tid);
+  const rowsByReg = await fuelRowsByVehicle(env, tid);
   const odo = await odoByVehicle(env, tid);
   const out = {};
   for (const k of Object.keys(odo)) {
-    const f = fuel[k];
     const o = odo[k];
-    if (!f || !(f.litres > 0) || !(o.milesDriven > 0) || o.readings < 2) continue;
-    const gallons = f.litres / UK_GALLON;
-    out[k] = { mpg: Math.round(o.milesDriven / gallons * 10) / 10, miles: o.milesDriven, litres: Math.round(f.litres * 10) / 10, gallons };
+    if (!(o.milesDriven > 0) || o.readings < 2) continue;
+    let litres = 0;
+    for (const e of rowsByReg[k] || []) if (e.date > o.first && e.date <= o.last) litres += e.litres;
+    if (!(litres > 0)) continue;
+    const gallons = litres / UK_GALLON;
+    out[k] = { mpg: Math.round(o.milesDriven / gallons * 10) / 10, miles: o.milesDriven, litres: Math.round(litres * 10) / 10, gallons, from: o.first, to: o.last };
   }
   return out;
+}
+async function odoSeries(env, tid, k) {
+  const byDate = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND UPPER(REPLACE(vehicle,' ',''))=?").bind(tid, k).all();
+    for (const r of results || []) {
+      let m = "";
+      try {
+        m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
+      } catch {
+      }
+      const mi = parseInt(m, 10), d = (r.checked_at || "").slice(0, 10);
+      if (mi && d && (!byDate[d] || mi > byDate[d].miles)) byDate[d] = { date: d, miles: mi, source: "vancheck" };
+    }
+  } catch {
+  }
+  try {
+    await ensureOdoTable(env);
+    const { results } = await env.DB.prepare("SELECT date, miles FROM odometer_readings WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, k).all();
+    for (const r of results || []) {
+      const mi = parseInt(r.miles, 10), d = (r.date || "").slice(0, 10);
+      if (mi && d && (!byDate[d] || mi > byDate[d].miles || byDate[d].source === "vancheck")) byDate[d] = { date: d, miles: mi, source: "manual" };
+    }
+  } catch {
+  }
+  return Object.values(byDate).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+}
+async function mpgForReg(env, tid, reg) {
+  const k = dnReg(reg);
+  const series = await odoSeries(env, tid, k);
+  if (series.length < 2) return { readings: series.length };
+  const rows = (await fuelRowsByVehicle(env, tid))[k] || [];
+  const win = (from, to) => rows.reduce((s, e) => e.date > from && e.date <= to ? s + (Number(e.litres) || 0) : s, 0);
+  const first = series[0], last = series[series.length - 1];
+  const miles = Math.max(0, last.miles - first.miles);
+  const litres = win(first.date, last.date), gallons = litres / UK_GALLON;
+  const intervals = [];
+  for (let i = 1; i < series.length; i++) {
+    const a = series[i - 1], b = series[i];
+    const md = Math.max(0, b.miles - a.miles), l = win(a.date, b.date), g = l / UK_GALLON;
+    intervals.push({ from: a.date, to: b.date, miles: md, litres: Math.round(l * 10) / 10, mpg: md > 0 && g > 0 ? Math.round(md / g * 10) / 10 : null });
+  }
+  return {
+    readings: series.length,
+    from: first.date,
+    to: last.date,
+    miles,
+    litres: Math.round(litres * 10) / 10,
+    mpg: miles > 0 && gallons > 0 ? Math.round(miles / gallons * 10) / 10 : null,
+    intervals
+  };
 }
 function financeOf(v) {
   return parseJson(v && v.finance, {}) || {};
