@@ -124,6 +124,7 @@ function renderGroups(container, groups, canDelete){
       <div class="doc">
         <div class="nm"><b>${esc(f.name)}</b><span>${fmtDate(f.at)}${f.by?" · added by "+esc(f.by):""}</span></div>
         <button class="btn small" data-open='${esc(JSON.stringify({url:f.url,name:f.name}))}'>👁 Open</button>
+        <a class="btn small" href="${esc(f.url)}" target="_blank" rel="noopener" title="Download / open in browser">⬇</a>
         ${canDelete?`<button class="btn small danger" data-del="${esc(f.key)}">Delete</button>`:""}
       </div>`).join("")}
   `).join("");

@@ -52,10 +52,42 @@ function pdfStr(s) {
   return out;
 }
 
+// Read a baseline/progressive JPEG's intrinsic size + colour components from its
+// SOF marker — enough to build the image XObject dictionary.
+function jpegInfo(bytes) {
+  let i = 2;
+  while (i < bytes.length) {
+    if (bytes[i] !== 0xFF) { i++; continue; }
+    const marker = bytes[i + 1];
+    if (marker === 0xD8 || marker === 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+    const len = (bytes[i + 2] << 8) | bytes[i + 3];
+    // SOF0..SOF15 (baseline / progressive / etc.) carry the frame header.
+    if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+      const h = (bytes[i + 5] << 8) | bytes[i + 6];
+      const w = (bytes[i + 7] << 8) | bytes[i + 8];
+      const comps = bytes[i + 9];
+      return { w, h, comps };
+    }
+    i += 2 + len;
+  }
+  return { w: 1, h: 1, comps: 3 };
+}
+
 export class PdfDoc {
-  constructor() { this.pages = []; this.newPage(); }
+  constructor() { this.pages = []; this.images = []; this.newPage(); }
   newPage() { this.pages.push([]); return this; }
   get _ops() { return this.pages[this.pages.length - 1]; }
+
+  // Draw a JPEG image. (x, yTop) = top-left corner from the page top; w/h in pt.
+  // Bytes must be a baseline JPEG (DCTDecode). Registers one XObject reused across
+  // pages by index.
+  image(bytes, x, yTop, w, h) {
+    const idx = this.images.length;
+    this.images.push(bytes);
+    const y = PAGE_H - yTop - h;   // PDF origin is bottom-left
+    this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
+    return this;
+  }
 
   // yTop is measured from the top of the page to the text BASELINE.
   text(x, yTop, str, opt = {}) {
@@ -78,34 +110,67 @@ export class PdfDoc {
 
   bytes() {
     const enc = new TextEncoder();
-    const objs = [];                    // 1-indexed object bodies (strings)
-    objs.push("<< /Type /Catalog /Pages 2 0 R >>");                       // 1
-    // Objects land as: 1 catalog, 2 pages, 3-4 fonts, 5 info, then per page
-    // a CONTENT stream (6, 8, …) followed by its PAGE object (7, 9, …).
-    // Kids must reference the PAGE objects — pointing at the streams renders
-    // a blank document in strict viewers (iOS).
-    const pageIds = this.pages.map((_, i) => 7 + i * 2);
-    objs.push(`<< /Type /Pages /Kids [${pageIds.map(id => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>`); // 2
-    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");        // 3
-    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");   // 4
-    objs.push("<< /Producer (Mostlane Portal) >>");                                                        // 5
+    const nImg = this.images.length;
+    const imgMeta = this.images.map((b) => {
+      const d = jpegInfo(b);
+      const cs = d.comps === 1 ? "/DeviceGray" : (d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB");
+      return { bytes: b, w: d.w, h: d.h, cs };
+    });
+
+    // Object layout: 1 catalog, 2 pages, 3-4 fonts, 5 info, then nImg image
+    // XObjects (6…), then per page a CONTENT stream + its PAGE object. Kids must
+    // reference the PAGE objects (strict viewers/iOS render blank otherwise).
+    const IMG0 = 6;
+    const firstPageObj = IMG0 + nImg;
+    const pageIds = this.pages.map((_, i) => firstPageObj + i * 2 + 1);
+    const xobjRes = nImg
+      ? ` /XObject << ${imgMeta.map((_, i) => `/Im${i} ${IMG0 + i} 0 R`).join(" ")} >>` : "";
+
+    // Each object is { s } (text) or { s, raw, sAfter } (text + binary + text).
+    const objs = [];
+    objs.push({ s: "<< /Type /Catalog /Pages 2 0 R >>" });                       // 1
+    objs.push({ s: `<< /Type /Pages /Kids [${pageIds.map(id => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>` }); // 2
+    objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>" });        // 3
+    objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>" });   // 4
+    objs.push({ s: "<< /Producer (Mostlane Portal) >>" });                        // 5
+    for (const m of imgMeta) {                                                    // 6 … image XObjects
+      objs.push({
+        s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.bytes.length} >>\nstream\n`,
+        raw: m.bytes, sAfter: "\nendstream"
+      });
+    }
     for (const ops of this.pages) {
       const stream = ops.join("\n");
-      objs.push(`<< /Length ${enc.encode(stream).length} >>\nstream\n${stream}\nendstream`);               // content
-      const cid = objs.length;
-      objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] ` +
-        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${cid} 0 R >>`);                       // page
+      objs.push({ s: `<< /Length ${enc.encode(stream).length} >>\nstream\n${stream}\nendstream` });          // content
+      const cid = objs.length;   // 1-indexed object number of the content just pushed
+      objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] ` +
+        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjRes} >> /Contents ${cid} 0 R >>` });             // page
     }
-    let body = "%PDF-1.4\n%âãÏÓ\n";
+
+    // Assemble as binary chunks so image streams stay byte-exact.
+    const chunks = [];
+    let len = 0;
+    const put = (u8) => { chunks.push(u8); len += u8.length; };
+    const putStr = (s) => put(enc.encode(s));
+
+    putStr("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
     const offsets = [0];
     for (let i = 0; i < objs.length; i++) {
-      offsets.push(enc.encode(body).length);
-      body += `${i + 1} 0 obj\n${objs[i]}\nendobj\n`;
+      offsets.push(len);
+      putStr(`${i + 1} 0 obj\n`);
+      putStr(objs[i].s);
+      if (objs[i].raw) { put(objs[i].raw); putStr(objs[i].sAfter || ""); }
+      putStr("\nendobj\n");
     }
-    const xrefAt = enc.encode(body).length;
-    body += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
-    for (let i = 1; i <= objs.length; i++) body += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
-    body += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info 5 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`;
-    return enc.encode(body);
+    const xrefAt = len;
+    let tail = `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+    for (let i = 1; i <= objs.length; i++) tail += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+    tail += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info 5 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`;
+    putStr(tail);
+
+    const out = new Uint8Array(len);
+    let p = 0;
+    for (const c of chunks) { out.set(c, p); p += c.length; }
+    return out;
   }
 }

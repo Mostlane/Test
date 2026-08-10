@@ -17,6 +17,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
 import { signedFileUrl } from "../lib/filesign.js";
+import { logoBytes, MOSTLANE_LOGO_W, MOSTLANE_LOGO_H } from "../lib/logo.js";
 
 let READY = false;
 async function ensure(env) {
@@ -101,8 +102,14 @@ function wrap(str, size, maxW) {
 function buildMemoPdf(memo, signerName, signedAtISO) {
   const doc = new PdfDoc();
   const L = 56, R = 539, W = R - L;
-  let y = 70;
-  doc.text(L, y, "MEMO", { size: 26, bold: true });
+  let y = 44;
+  // Company logo, top-left (scaled to ~150pt wide, keeping its aspect ratio).
+  try {
+    const lw = 150, lh = lw * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
+    doc.image(logoBytes(), L, y, lw, lh);
+    y += lh + 16;
+  } catch { y = 70; }
+  doc.text(L, y, "MEMO", { size: 22, bold: true });
   y += 10; doc.hr(L, y, R, { w: 1.2 }); y += 28;
   const row = (label, val) => {
     doc.text(L, y, label, { size: 11, bold: true });
