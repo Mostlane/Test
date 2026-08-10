@@ -1141,6 +1141,8 @@ export async function handle(request, env, ctx, url, sess) {
     if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
       return jsonResponse({ error: "Bad request" }, headers, 400);
     await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+    // Drop any edge-cached original for this key so the new thumb is served next.
+    try { ctx?.waitUntil(caches.default.delete(new Request(`${url.origin}/sla/site/thumb?key=${encodeURIComponent(key)}`))); } catch {}
     return jsonResponse({ ok: true }, headers);
   }
 
