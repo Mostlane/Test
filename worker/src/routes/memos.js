@@ -16,6 +16,7 @@ import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
+import { signedFileUrl } from "../lib/filesign.js";
 
 let READY = false;
 async function ensure(env) {
@@ -202,6 +203,16 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await readJson(request);
     const id = parseInt(b.id, 10);
     if (!id) return jr({ error: "id required" }, headers, 400);
+    // Purge the signed-acknowledgement PDFs + signature PNGs that were filed into
+    // people's My Documents when they signed — so deleting a (test) memo cleans up
+    // fully and nothing is left in anyone's account.
+    try {
+      const acks = (await env.DB.prepare("SELECT doc_key, sig_key FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).all()).results || [];
+      for (const a of acks) {
+        if (a.doc_key) { try { await env.JOB_FILES.delete(a.doc_key); } catch { /* best effort */ } }
+        if (a.sig_key) { try { await env.JOB_FILES.delete(a.sig_key); } catch { /* best effort */ } }
+      }
+    } catch { /* best effort */ }
     await env.DB.prepare("DELETE FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).run();
     await env.DB.prepare("DELETE FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).run();
     return jr({ ok: true }, headers);
@@ -233,15 +244,17 @@ export async function handle(request, env, ctx, url, sess) {
     if (!id) return jr({ error: "id required" }, headers, 400);
     const memo = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).first();
     if (!memo) return jr({ error: "Not found" }, headers, 404);
-    const acks = (await env.DB.prepare("SELECT username, signed_at FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).all()).results || [];
-    const ackMap = {}; acks.forEach((a) => { ackMap[lc(a.username)] = a.signed_at; });
+    const acks = (await env.DB.prepare("SELECT username, signed_at, doc_key FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).all()).results || [];
+    const ackMap = {}, docMap = {}; acks.forEach((a) => { ackMap[lc(a.username)] = a.signed_at; if (a.doc_key) docMap[lc(a.username)] = a.doc_key; });
     const users = await recipientUsers(env, tid, memo);   // only the memo's recipients
     const signed = [], unsigned = [];
     users.forEach((u) => {
-      if (ackMap[lc(u.username)]) signed.push({ username: u.username, name: fullName(u), at: ackMap[lc(u.username)] });
+      if (ackMap[lc(u.username)]) signed.push({ username: u.username, name: fullName(u), at: ackMap[lc(u.username)], docKey: docMap[lc(u.username)] || null });
       else unsigned.push({ username: u.username, name: fullName(u) });
     });
     signed.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    // A signed, expiring link so an admin can view each person's signed copy.
+    for (const s of signed) { if (s.docKey) s.doc = await signedFileUrl(env, url.origin, "/staff/doc", s.docKey); delete s.docKey; }
     return jr({ ok: true, memo: { id: memo.id, re: memo.m_re, from: memo.m_from, sent_at: memo.sent_at }, signed, unsigned }, headers);
   }
 

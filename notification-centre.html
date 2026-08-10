@@ -420,9 +420,11 @@ async function mmShowWho(id, host){
   host.innerHTML = "Loading…";
   const r = await (await authFetch("/memos/status?id="+id)).json();
   if(!r.ok){ host.textContent = r.error||"Failed"; return; }
-  const sList = r.signed.map(s => esc(s.name)+" ✓").join(", ") || "—";
+  const sList = r.signed.map(s => s.doc
+      ? '<a href="'+esc(s.doc)+'" target="_blank" rel="noopener" title="View '+esc(s.name)+'’s signed copy">'+esc(s.name)+' ✓</a>'
+      : esc(s.name)+" ✓").join(", ") || "—";
   const uList = r.unsigned.map(u => esc(u.name)).join(", ") || "everyone ✓";
-  host.innerHTML = "<b>Signed ("+r.signed.length+"):</b> "+sList+"<br><b>Not yet ("+r.unsigned.length+"):</b> "+uList;
+  host.innerHTML = "<b>Signed ("+r.signed.length+"):</b> "+sList+" <span class='sub' style='margin:0;'>(tap a name to view their signed copy)</span><br><b>Not yet ("+r.unsigned.length+"):</b> "+uList;
 }
 async function mmLoad(){
   const host = g("mmList");

@@ -279,8 +279,13 @@
   function showFallback(msg) {
     showZoomControls(false);
     el.stage = null;
+    // current.url is ALREADY a fully-encoded URL (its ?key= is percent-encoded).
+    // Do NOT run encodeURI over it — that double-encodes %2F -> %252F, so the
+    // worker sees a key like "staffdocs%2F..." and rejects it ("Bad key"). Just
+    // make it safe for an HTML attribute (escape & and ") without re-encoding.
+    var href = String((current && (current.downloadUrl || current.url)) || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
     el.mldvBody.innerHTML = '<div class="mldv-msg">' + msg
-      + '<br><a class="big" href="' + encodeURI(current.url) + '" target="_blank" rel="noopener">📄 Open document</a></div>';
+      + '<br><a class="big" href="' + href + '" target="_blank" rel="noopener">📄 Open document</a></div>';
   }
 
   /* ---- two-finger pinch zoom + pan ----
