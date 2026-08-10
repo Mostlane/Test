@@ -750,7 +750,12 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   allocs JSON, file?, removeDoc?; new file replaces the old doc), **POST
   /fleet/maintenance-delete** `{id}` (also purges the R2 doc), **GET/POST
   /fleet/maint-categories**, **GET /fleet/maintenance-doc** (PUBLIC_ROUTES,
-  sig-verified, streams inline). The page shows a spend-per-category bar chart +
+  sig-verified, streams inline). **Each allocation can carry an optional `qty`**
+  (integer — number of tyres, puncture repairs… on that line; a small "Qty" box
+  on each category row, editable retrospectively on old invoices). Insights'
+  per-category **count sums qty** (fallback 1 per line for legacy allocs with no
+  qty), so "how many tyres" / the "How many" compare metric is a real total; the
+  maintenance list badge shows "Tyres ×4". The page shows a spend-per-category bar chart +
   tap-to-filter chips + a chronological timeline (date · description · coloured
   category badges w/ per-cat cost · total · open-document · edit). vehicle-delete
   purges the maintenance rows + their R2 docs. **Documents open in the in-app

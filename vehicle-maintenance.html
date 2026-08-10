@@ -75,6 +75,8 @@
   .mrow .hint{font-size:11.5px;color:var(--muted);}
   .allocrow{display:flex;gap:6px;align-items:center;margin-bottom:7px;}
   .allocrow select{flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
+  .allocrow .qty{flex:0 0 60px;}
+  .allocrow .qty input{width:100%;padding:8px 6px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;text-align:center;}
   .allocrow .cost{flex:0 0 108px;position:relative;}
   .allocrow .cost input{width:100%;padding:8px 8px 8px 20px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
   .allocrow .cost .cur{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;}
@@ -243,7 +245,7 @@
     if(SELCAT) recs=recs.filter(r=>(r.allocs||[]).some(a=>a.cat===SELCAT));
     if(!recs.length){ $("recList").innerHTML='<span class="empty">'+(SELCAT?("No "+esc(SELCAT)+" work recorded."):"No maintenance recorded yet. Use “Add maintenance”.")+'</span>'; return; }
     $("recList").innerHTML=recs.map(r=>{
-      const badges=(r.allocs||[]).map(a=>`<span class="cbadge ${SELCAT&&a.cat!==SELCAT?"dim":""}" style="background:${esc(colourFor(a.cat))}">${esc(a.cat)} <em>${money(a.cost)}</em></span>`).join("");
+      const badges=(r.allocs||[]).map(a=>`<span class="cbadge ${SELCAT&&a.cat!==SELCAT?"dim":""}" style="background:${esc(colourFor(a.cat))}">${esc(a.cat)}${a.qty?` ×${esc(a.qty)}`:""} <em>${money(a.cost)}</em></span>`).join("");
       const doc=r.docUrl?`<button type="button" class="btn ghost small" data-url="${esc(r.docUrl)}" data-name="${esc(r.docName||"Document")}" onclick="openDoc(this.dataset.url,this.dataset.name)">📄 ${esc(r.docName||"Document")}</button>`:"";
       return `<div class="rec">
         <div class="top">
@@ -268,20 +270,22 @@
     if(sel && !names.includes(sel)) names=[sel].concat(names);   // keep a since-removed category visible
     return '<option value="">— category —</option>'+names.map(n=>`<option value="${esc(n)}" ${n===sel?"selected":""}>${esc(n)}</option>`).join("");
   }
-  function allocRowHtml(cat,cost){
+  function allocRowHtml(cat,cost,qty){
     return `<div class="allocrow">
       <select class="aCat">${catOptions(cat||"")}</select>
+      <div class="qty"><input class="aQty" type="number" min="0" step="1" inputmode="numeric" placeholder="Qty" title="Number of items on this line — e.g. 4 tyres or 2 puncture repairs (optional)" value="${qty!=null&&qty!==""?esc(qty):""}"></div>
       <div class="cost"><span class="cur">£</span><input class="aCost" type="number" min="0" step="0.01" placeholder="0.00" value="${cost!=null&&cost!==""?esc(cost):""}" oninput="recalcAlloc()"></div>
       <button type="button" class="btn ghost small" onclick="this.closest('.allocrow').remove();recalcAlloc()" title="Remove">✕</button>
     </div>`;
   }
-  function addAllocRow(cat,cost){ $("allocRows").insertAdjacentHTML("beforeend",allocRowHtml(cat||"",cost)); recalcAlloc(); }
+  function addAllocRow(cat,cost,qty){ $("allocRows").insertAdjacentHTML("beforeend",allocRowHtml(cat||"",cost,qty)); recalcAlloc(); }
   function collectAllocs(){
     const out=[];
     $("allocRows").querySelectorAll(".allocrow").forEach(r=>{
       const cat=r.querySelector(".aCat").value.trim();
       const cost=parseFloat(r.querySelector(".aCost").value);
-      if(cat) out.push({cat,cost:isNaN(cost)?0:cost});
+      const qty=parseInt(r.querySelector(".aQty").value,10);
+      if(cat){ const o={cat,cost:isNaN(cost)?0:cost}; if(!isNaN(qty)&&qty>=0) o.qty=qty; out.push(o); }
     });
     return out;
   }
@@ -310,7 +314,7 @@
       $("recDate").value=r.date||"";
       $("recDesc").value=r.description||"";
       $("allocRows").innerHTML="";
-      (r.allocs&&r.allocs.length?r.allocs:[{cat:"",cost:""}]).forEach(a=>addAllocRow(a.cat,a.cost));
+      (r.allocs&&r.allocs.length?r.allocs:[{cat:"",cost:""}]).forEach(a=>addAllocRow(a.cat,a.cost,a.qty));
       CUR_DOC={docKey:r.docKey,docName:r.docName,docUrl:r.docUrl};
       $("recDelBtn").style.display="inline-flex";
     } else {
