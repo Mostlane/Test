@@ -837,12 +837,25 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     match nothing (unknown plates, personal cards like Chloe/Megan) are listed and
     SKIPPED. A Net/Gross toggle (default Net) + a per-van preview show before
     committing; dedupe-by-ref means re-importing overlapping periods is safe.
-  - **MPG** (`mpgByVehicle`, all-available-data): litres attributed to a vehicle
-    via card→user→**assignment-at-date** (`vehicle_assignments`, fallback current
-    `vehicle_assigned`) ÷ UK gallon (4.54609), miles = the van's van-check
-    odometer span (max−min, needs ≥2 readings). Shown as **Current MPG** on the
-    vehicle cards + deep-dive (MPG isn't money, so any Vehicles user sees it);
-    `/fleet/vehicles` returns `currentMpg` for everyone.
+  - **MPG** (`mpgByVehicle`): miles = the van's odometer span (max−min, needs
+    ≥2 readings) merged from van checks **AND manual odometer readings**; litres
+    = fuel bought **WITHIN that reading window** (`> first date, ≤ last date`, via
+    `fuelRowsByVehicle`) ÷ UK gallon (4.54609) — a true like-for-like figure, not
+    all-time. Shown as **Current MPG** on the vehicle cards + deep-dive (MPG isn't
+    money, so any Vehicles user sees it); `/fleet/vehicles` returns `currentMpg`.
+  - **Odometer readings (Aug 2026)** — ad-hoc mileage readings, separate from
+    van checks, in table **odometer_readings** (self-migrating; tenant/reg/date/
+    miles). Endpoints (Vehicles): **GET /fleet/odometer?reg=** (readings +
+    `mpgForReg`: overall + a per-interval breakdown between each pair of
+    readings), **POST /fleet/odometer** (upsert, deduped by reg+date), **POST
+    /fleet/odometer/import** (`{reg,readings:[{date,miles}]}` bulk), **POST
+    /fleet/odometer-delete**. `latestMileage` + `odoByVehicle` merge these with
+    van-check mileages (newest reading from either source = the van's current
+    mileage; card label is now "as of <date>", not "van check"). Front-end:
+    **📏 Mileage** button in the vehicles.html deep-dive → modal (MPG headline +
+    readings list w/ gap-miles + add/delete). NB per-interval MPG is noisy when
+    readings don't align with fill dates — the **overall window MPG** is the
+    reliable figure.
   - **Stats** foldable **Weekly / Monthly / 3-Monthly / Yearly** (`periodStats`):
     every average = total ÷ (real data span in days) × period days; a period
     LONGER than the real span is flagged **`projected`** in the response and
