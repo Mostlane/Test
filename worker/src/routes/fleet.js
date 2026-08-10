@@ -574,7 +574,12 @@ export async function handle(request, env, ctx, url, sess) {
     const records = [];
     for (const r of results || []) {
       const allocs = (parseJson(r.allocs, []) || [])
-        .map(a => ({ cat: String(a.cat || a.category || ""), cost: Number(a.cost) || 0 }))
+        .map(a => {
+          const o = { cat: String(a.cat || a.category || ""), cost: Number(a.cost) || 0 };
+          const q = Number(a.qty);
+          if (a.qty != null && a.qty !== "" && Number.isFinite(q) && q >= 0) o.qty = q;
+          return o;
+        })
         .filter(a => a.cat);
       records.push({
         id: r.id, date: r.date || "", description: r.description || "", allocs,
@@ -597,7 +602,12 @@ export async function handle(request, env, ctx, url, sess) {
     const date = String(form.get("date") || "").slice(0, 10);
     const description = String(form.get("description") || "").slice(0, 500);
     const allocs = (parseJson(String(form.get("allocs") || "[]"), []) || [])
-      .map(a => ({ cat: String(a.cat || a.category || "").trim().slice(0, 40), cost: Math.round((Number(a.cost) || 0) * 100) / 100 }))
+      .map(a => {
+        const o = { cat: String(a.cat || a.category || "").trim().slice(0, 40), cost: Math.round((Number(a.cost) || 0) * 100) / 100 };
+        const q = Math.round(Number(a.qty));
+        if (a.qty != null && a.qty !== "" && Number.isFinite(q) && q >= 0) o.qty = q;   // optional item count (tyres, punctures…)
+        return o;
+      })
       .filter(a => a.cat);
     const file = form.get("file");
     const removeDoc = String(form.get("removeDoc") || "") === "1";
@@ -658,17 +668,21 @@ export async function handle(request, env, ctx, url, sess) {
     const vrows = (await env.DB.prepare("SELECT reg FROM vehicles WHERE tenant_id=?").bind(tid).all()).results || [];
     vrows.forEach(v => { if (v.reg) ensureV(v.reg); });
 
-    // Maintenance — sum each cost allocation into its vehicle + category (count
-    // = number of allocations, so "how many tyres" is comparable per van).
+    // Maintenance — sum each cost allocation into its vehicle + category. The
+    // count reflects the line's QUANTITY (e.g. 4 tyres, 2 puncture repairs) when
+    // one is set, else 1 per line (legacy invoices) — so "how many tyres" is a
+    // real total, comparable per van.
     const { results: mrows } = await env.DB.prepare("SELECT reg, date, allocs FROM vehicle_maintenance WHERE tenant_id=?").bind(tid).all();
     for (const m of mrows || []) {
       if (!m.reg || !inRange(m.date)) continue;
       const v = ensureV(m.reg);
       for (const a of parseJson(m.allocs, []) || []) {
         const cat = a.cat || "Other", cost = Number(a.cost) || 0;
+        const q = Number(a.qty);
+        const n = (a.qty != null && a.qty !== "" && Number.isFinite(q) && q >= 0) ? q : 1;
         v.maint += cost;
         const c = v.byCat[cat] || (v.byCat[cat] = { cost: 0, count: 0 });
-        c.cost += cost; c.count += 1;
+        c.cost += cost; c.count += n;
       }
     }
 
