@@ -10672,16 +10672,17 @@ async function handle22(request, env, ctx, url, sess) {
     if (!id) return jr5({ error: "id required" }, headers, 400);
     const memo = await env.DB.prepare("SELECT * FROM memos WHERE tenant_id=? AND id=?").bind(tid, id).first();
     if (!memo) return jr5({ error: "Not found" }, headers, 404);
-    const acks = (await env.DB.prepare("SELECT username, signed_at, doc_key FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).all()).results || [];
-    const ackMap = {}, docMap = {};
+    const acks = (await env.DB.prepare("SELECT username, signed_at, doc_key, ip FROM memo_acks WHERE tenant_id=? AND memo_id=?").bind(tid, id).all()).results || [];
+    const ackMap = {}, docMap = {}, ipMap = {};
     acks.forEach((a) => {
       ackMap[lc2(a.username)] = a.signed_at;
       if (a.doc_key) docMap[lc2(a.username)] = a.doc_key;
+      if (a.ip) ipMap[lc2(a.username)] = a.ip;
     });
     const users = await recipientUsers(env, tid, memo);
     const signed = [], unsigned = [];
     users.forEach((u) => {
-      if (ackMap[lc2(u.username)]) signed.push({ username: u.username, name: fullName(u), at: ackMap[lc2(u.username)], docKey: docMap[lc2(u.username)] || null });
+      if (ackMap[lc2(u.username)]) signed.push({ username: u.username, name: fullName(u), at: ackMap[lc2(u.username)], ip: ipMap[lc2(u.username)] || null, docKey: docMap[lc2(u.username)] || null });
       else unsigned.push({ username: u.username, name: fullName(u) });
     });
     signed.sort((a, b) => String(b.at).localeCompare(String(a.at)));
