@@ -690,12 +690,15 @@ export async function handle(request, env, ctx, url, sess) {
     const { byCard } = await fuelCardMap(env, tid);
     const userCurrent = {}; for (const c of Object.values(byCard)) userCurrent[c.username] = c.vehicle;
     const intervals = await assignmentIntervals(env, tid);
-    const { results: frows } = await env.DB.prepare("SELECT card, username, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    const { results: frows } = await env.DB.prepare("SELECT card, username, reg, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
     for (const e of frows || []) {
       if (!inRange(e.date)) continue;
-      const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
-      if (!user) continue;
-      const reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      let reg = e.reg || "";   // directly-tagged reg (import) wins
+      if (!reg) {
+        const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+        if (!user) continue;
+        reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      }
       if (!reg) continue;
       const v = ensureV(reg);
       v.fuel += Number(e.cost) || 0; v.litres += Number(e.litres) || 0;
@@ -756,7 +759,8 @@ export async function handle(request, env, ctx, url, sess) {
   // Fuel (cards/entries/stats/MPG) is open to any Vehicles user; the vehicle
   // FINANCIALS (insurance/finance) + the running-cost rollup stay Full-Access.
   if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" ||
-      sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats") {
+      sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats" ||
+      sub === "/fuel/import") {
 
     // Save a vehicle's financials — Full Access only (money).
     if (sub === "/finance" && method === "POST") {
@@ -831,6 +835,44 @@ export async function handle(request, env, ctx, url, sess) {
       if (!id || isNaN(id)) return jr({ error: "id required" }, headers, 400);
       await env.DB.prepare("DELETE FROM fuel_entries WHERE tenant_id=? AND id=?").bind(tid, id).run();
       return jr({ ok: true }, headers);
+    }
+
+    // Bulk import fuel-card statement rows, each tagged to a vehicle by reg
+    // (Full Access only — money). Deduped by `ref` (the statement's unique
+    // transaction id) so re-importing the same file never double-counts:
+    // an existing ref is UPDATED in place, a new one inserted. Body:
+    //   { entries: [{ reg, date (YYYY-MM-DD), litres, cost, ref?, card?, note? }] }
+    if (sub === "/fuel/import" && method === "POST") {
+      if (!(await canMoney(env, tid, sess))) return jr({ error: "Forbidden" }, headers, 403);
+      await ensureFuelTable(env);
+      const b = await readJson(request);
+      const entries = Array.isArray(b.entries) ? b.entries : [];
+      if (!entries.length) return jr({ error: "no entries" }, headers, 400);
+      if (entries.length > 2000) return jr({ error: "too many rows in one call (max 2000)" }, headers, 400);
+      const now = new Date().toISOString();
+      let created = 0, updated = 0, skipped = 0;
+      for (const e of entries) {
+        const reg = String(e.reg || "").trim();
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(e.date || "") ? e.date : "";
+        if (!reg || !date) { skipped++; continue; }
+        const litres = Math.round((Number(e.litres) || 0) * 100) / 100;
+        const cost = Math.round((Number(e.cost) || 0) * 100) / 100;
+        const ref = String(e.ref || "").trim().slice(0, 80);
+        const card = String(e.card || "").trim().slice(0, 40);
+        const note = String(e.note || "").slice(0, 200);
+        if (ref) {
+          const ex = await env.DB.prepare("SELECT id FROM fuel_entries WHERE tenant_id=? AND ref=?").bind(tid, ref).first();
+          if (ex && ex.id) {
+            await env.DB.prepare("UPDATE fuel_entries SET reg=?,card=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?")
+              .bind(reg, card, date, litres, cost, note, tid, ex.id).run();
+            updated++; continue;
+          }
+        }
+        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+          .bind(tid, card, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
+        created++;
+      }
+      return jr({ ok: true, created, updated, skipped, total: entries.length }, headers);
     }
 
     // Aggregated stats: overall + per-period (real-span averages, projections
@@ -1289,6 +1331,12 @@ async function ensureFuelTable(env) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     card TEXT, username TEXT, date TEXT, litres REAL, cost REAL, note TEXT, by TEXT, at TEXT)`).run();
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fuel_card ON fuel_entries(tenant_id,card)").run(); } catch {}
+  // reg = a fill-up tagged DIRECTLY to a vehicle (fuel-card statement imports),
+  // bypassing the card→user→assignment attribution. ref = the statement's unique
+  // transaction id, for dedupe on re-import. Both self-migrating.
+  try { await env.DB.prepare("ALTER TABLE fuel_entries ADD COLUMN reg TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE fuel_entries ADD COLUMN ref TEXT").run(); } catch {}
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fuel_ref ON fuel_entries(tenant_id,ref)").run(); } catch {}
 }
 // card number → { username, name } from users.profile.fuelCard.
 async function fuelCardMap(env, tid) {
@@ -1337,11 +1385,15 @@ async function fuelByVehicle(env, tid) {
   const intervals = await assignmentIntervals(env, tid);
   const out = {};
   try {
-    const { results } = await env.DB.prepare("SELECT card, username, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    const { results } = await env.DB.prepare("SELECT card, username, reg, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
     for (const e of results || []) {
-      const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
-      if (!user) continue;
-      let reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      // A directly-tagged reg (statement import) wins; else card→user→assignment.
+      let reg = e.reg || "";
+      if (!reg) {
+        const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+        if (!user) continue;
+        reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      }
       if (!reg) continue;
       const k = dnReg(reg);
       const o = out[k] || (out[k] = { litres: 0, spend: 0, first: "", last: "", count: 0 });
