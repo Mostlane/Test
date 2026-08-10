@@ -82,7 +82,7 @@
   <div class="panel" id="perVanPanel">
     <h2 id="perVanTitle">Spend per van</h2>
     <div class="bars" id="perVan"><div class="empty">Loading…</div></div>
-    <div class="legend"><span><i style="background:var(--maint)"></i>Maintenance</span><span><i style="background:var(--fuel)"></i>Fuel</span><span class="muted">Tap a van to focus it.</span></div>
+    <div class="legend" id="perVanLegend"></div>
   </div>
 
   <div class="panel">
@@ -163,6 +163,14 @@ async function load(){
 }
 
 function vehByReg(reg){ return (DATA.vehicles||[]).find(v => v.reg === reg); }
+// Stable category order (defined categories first, then any extras seen), so a
+// category keeps the same colour + position across every van's bar.
+function orderedCats(){
+  const seen = new Set(), out = [];
+  (DATA.categories||[]).forEach(c => { if(!seen.has(c.name)){ seen.add(c.name); out.push(c.name); } });
+  (DATA.vehicles||[]).forEach(v => Object.keys(v.byCat||{}).forEach(c => { if(!seen.has(c)){ seen.add(c); out.push(c); } }));
+  return out;
+}
 
 function render(){
   if(!DATA) return;
@@ -187,17 +195,30 @@ function render(){
 function renderPerVan(){
   const host = $("perVan");
   const list = (DATA.vehicles||[]).filter(v => v.total > 0);
-  if(!list.length){ host.innerHTML = '<div class="empty">No spend recorded in this range.</div>'; return; }
+  if(!list.length){ host.innerHTML = '<div class="empty">No spend recorded in this range.</div>'; $("perVanLegend").innerHTML = ""; return; }
   const max = Math.max(...list.map(v => v.total), 1);
+  const cats = orderedCats();
+  // Each bar is split into a coloured segment PER maintenance category + fuel.
   host.innerHTML = list.map(v => {
-    const mW = (v.maint/max*100), fW = (v.fuel/max*100);
+    let segs = "";
+    for(const cat of cats){
+      const o = v.byCat[cat]; if(!o || !o.cost) continue;
+      segs += `<div class="seg" style="width:${o.cost/max*100}%;background:${catColour[cat]||'#64748b'}" title="${esc(cat)} ${money(o.cost)}${o.count?` (${o.count})`:""}"></div>`;
+    }
+    if(v.fuel > 0) segs += `<div class="seg" style="width:${v.fuel/max*100}%;background:var(--fuel)" title="Fuel ${money(v.fuel)}"></div>`;
     return `<div class="barrow">
       <div class="name" data-reg="${esc(v.reg)}" title="Focus ${esc(v.reg)}">${esc(v.reg)}</div>
-      <div class="track"><div class="seg maint" style="width:${mW}%" title="Maintenance ${money(v.maint)}"></div><div class="seg fuel" style="width:${fW}%" title="Fuel ${money(v.fuel)}"></div></div>
+      <div class="track">${segs}</div>
       <div class="amt">${money0(v.total)}</div>
     </div>`;
   }).join("");
   host.querySelectorAll(".name[data-reg]").forEach(n => n.addEventListener("click", () => { $("vehSel").value = n.dataset.reg; focusReg = n.dataset.reg; render(); }));
+  // Legend — only the categories actually present, in the same order/colours.
+  const used = cats.filter(cat => list.some(v => (v.byCat[cat]||{}).cost));
+  $("perVanLegend").innerHTML =
+    used.map(cat => `<span><i style="background:${catColour[cat]||'#64748b'}"></i>${esc(cat)}</span>`).join("")
+    + (list.some(v => v.fuel > 0) ? `<span><i style="background:var(--fuel)"></i>Fuel</span>` : "")
+    + `<span class="muted">Tap a van to focus it.</span>`;
 }
 
 function renderCatBars(focus){
