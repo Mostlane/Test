@@ -273,7 +273,7 @@
     }
     h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
     h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
-    h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" capture="environment" multiple style="display:none"></div>';
+    h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
     h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">Set status</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
     h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
