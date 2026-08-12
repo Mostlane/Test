@@ -1354,12 +1354,17 @@ then reports in a **REVIEW-first** layout:
   printed on every EICR (the old naive substring test made satisfactory reports read
   as unsatisfactory), falling back to a boilerplate-stripped scan only when ambiguous;
   shown green/red. A **⚠ "Outcome should be UNSATISFACTORY" review** fires when the
-  report is marked SATISFACTORY yet has any C1/C2/FI (legend-stripped counts). Also
-  **latest date on the report** (max dd/mm/yyyy), **all signatories**
+  report is marked SATISFACTORY yet has any C1/C2/FI. **Code counting is
+  legend-robust** (`isLegendLine`): a line carrying 2+ hazard codes together
+  (`C1 C2 C3 FI`), the PASS-key phrase, or a code definition is a KEY/LEGEND —
+  stripped before counting, since a genuine observation only ever carries ONE code
+  (fixed phantom C1/C2/FI on Tysoft EasyCert & other templates whose reconstructed
+  key rows slipped past the earlier exact-line strip and faked an unsatisfactory).
+  Also **latest date on the report** (max dd/mm/yyyy), **all signatories**
   (name · role · date — regex `Name (Qualified Supervisor|Electrician|Inspector|
-  Tester|…) dd/mm/yyyy`), C1/C2/C3/FI counts + **LIM %** (LIM ÷ all Pass/LIM/N-A/
-  code outcome tokens; legend/code-key lines `PASS C1 or C2…` and bare `C1 C2 C3 FI`
-  stripped so they don't inflate counts).
+  Tester|…) dd/mm/yyyy`), C1/C2/C3/FI counts + **LIM %** measured over the INSPECTION
+  SCHEDULE only (numbered items `5.12 LIM`, not the DB-details / test-result rows
+  where LIM/N-A are data — that inflated a clean cert to ~14%; legend rows stripped).
 - **⚠ Review section (shown FIRST)**, each item labelled **DB x · CCT y** (e.g.
   "DB 4 · CCT 3L1") with a plain-English reason:
   - **Document logic**: any C1/C2/FI present but marked SATISFACTORY; **no
