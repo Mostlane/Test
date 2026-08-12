@@ -12674,6 +12674,28 @@ async function ensure5(env) {
     await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN site_number TEXT").run();
   } catch {
   }
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS compliance_review (
+    tenant_id  INTEGER NOT NULL DEFAULT 1,
+    scheme     TEXT NOT NULL DEFAULT 'coop',
+    code       TEXT NOT NULL,          -- site code
+    type       TEXT NOT NULL,          -- check type (fiveYear, \u2026)
+    status     TEXT DEFAULT 'open',    -- open | done
+    outcome    TEXT,                   -- SATISFACTORY | UNSATISFACTORY | '' | error
+    attention  INTEGER DEFAULT 0,      -- 1 = something flagged for review
+    summary    TEXT,                   -- short headline
+    flags      TEXT,                   -- JSON array of finding strings
+    file_id    INTEGER,                -- compliance_files.id checked
+    doc_at     TEXT,                   -- the newest-doc timestamp checked against
+    checked_at TEXT,                   -- when the verifier last ran (last run)
+    notes      TEXT,
+    updated_by TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (tenant_id, scheme, code, type)
+  )`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE compliance_review ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run();
+  } catch {
+  }
   READY4 = true;
 }
 function schemeOf(q) {
@@ -13264,6 +13286,137 @@ async function handle24(request, env, ctx, url, sess) {
       if (isFinite(n) && n > max) max = n;
     }
     return jr6({ ok: true, code: String(max + 1).padStart(4, "0") }, headers);
+  }
+  if (sub === "/review/targets" && method === "GET") {
+    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    const CHECK_TYPES = ["fiveYear"];
+    const siteLatest = {};
+    const sl = await env.DB.prepare("SELECT code, MAX(uploaded_at) AS latest FROM compliance_files WHERE tenant_id=? AND scheme=? GROUP BY code").bind(tid, scheme).all();
+    for (const r of sl.results || []) siteLatest[r.code] = r.latest;
+    const rev = {};
+    const rv = await env.DB.prepare("SELECT code, type, status, outcome, attention, checked_at FROM compliance_review WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
+    for (const r of rv.results || []) rev[r.code + "|" + r.type] = r;
+    const targets = [];
+    for (const type of CHECK_TYPES) {
+      const { results } = await env.DB.prepare(
+        `SELECT f.code, f.id, f.r2_key, f.filename, f.doc_date, f.uploaded_at, s.site_name AS sname, cs.name AS cname
+           FROM compliance_files f
+           LEFT JOIN sites s ON s.tenant_id=f.tenant_id AND s.site_number=f.code
+           LEFT JOIN compliance_stores cs ON cs.tenant_id=f.tenant_id AND cs.scheme=f.scheme AND cs.code=f.code
+          WHERE f.tenant_id=? AND f.scheme=? AND f.type=?
+          ORDER BY f.code, COALESCE(f.doc_date,f.uploaded_at) DESC`
+      ).bind(tid, scheme, type).all();
+      const seen = {};
+      for (const r of results || []) {
+        if (seen[r.code]) continue;
+        seen[r.code] = 1;
+        const latestDoc = siteLatest[r.code] || r.uploaded_at;
+        const rr = rev[r.code + "|" + type];
+        const needs = !rr || !rr.checked_at || latestDoc && rr.checked_at < latestDoc;
+        targets.push({
+          code: r.code,
+          type,
+          name: r.sname || r.cname || r.code,
+          fileId: r.id,
+          url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key),
+          docAt: latestDoc,
+          needs,
+          review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at } : null
+        });
+      }
+    }
+    return jr6({ ok: true, targets, count: targets.length }, headers);
+  }
+  if (sub === "/review/save" && method === "POST") {
+    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code), type = canonType(b.type || "fiveYear");
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    const flags = Array.isArray(b.flags) ? b.flags.slice(0, 60).map((x) => String(x).slice(0, 400)) : [];
+    const attention = b.attention != null ? b.attention ? 1 : 0 : flags.length ? 1 : 0;
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare(
+      `INSERT INTO compliance_review (tenant_id, scheme, code, type, status, outcome, attention, summary, flags, file_id, doc_at, checked_at, updated_by, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(tenant_id, scheme, code, type) DO UPDATE SET
+         status='open', outcome=excluded.outcome, attention=excluded.attention, summary=excluded.summary,
+         flags=excluded.flags, file_id=excluded.file_id, doc_at=excluded.doc_at, checked_at=excluded.checked_at,
+         updated_by=excluded.updated_by, updated_at=excluded.updated_at`
+    ).bind(
+      tid,
+      scheme,
+      code,
+      type,
+      "open",
+      String(b.outcome || "").slice(0, 20),
+      attention,
+      String(b.summary || "").slice(0, 300),
+      JSON.stringify(flags),
+      b.fileId ? parseInt(b.fileId, 10) : null,
+      String(b.docAt || at),
+      at,
+      me,
+      at
+    ).run();
+    return jr6({ ok: true, code, type, attention }, headers);
+  }
+  if (sub === "/review/list" && method === "GET") {
+    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    const { results } = await env.DB.prepare(
+      `SELECT r.code, r.type, r.status, r.outcome, r.attention, r.summary, r.flags, r.file_id, r.checked_at, r.notes,
+              s.site_name AS sname, cs.name AS cname, f.r2_key AS r2_key
+         FROM compliance_review r
+         LEFT JOIN sites s ON s.tenant_id=r.tenant_id AND s.site_number=r.code
+         LEFT JOIN compliance_stores cs ON cs.tenant_id=r.tenant_id AND cs.scheme=r.scheme AND cs.code=r.code
+         LEFT JOIN compliance_files f ON f.id=r.file_id
+        WHERE r.tenant_id=? AND r.scheme=?`
+    ).bind(tid, scheme).all();
+    const rows = [];
+    for (const r of results || []) {
+      let flags = [];
+      if (r.flags) {
+        try {
+          flags = JSON.parse(r.flags) || [];
+        } catch {
+        }
+      }
+      rows.push({
+        code: r.code,
+        type: r.type,
+        name: r.sname || r.cname || r.code,
+        status: r.status || "open",
+        outcome: r.outcome || "",
+        attention: r.attention || 0,
+        summary: r.summary || "",
+        flags,
+        checkedAt: r.checked_at,
+        notes: r.notes || "",
+        url: r.r2_key ? await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key) : ""
+      });
+    }
+    return jr6({ ok: true, rows, count: rows.length }, headers);
+  }
+  if (sub === "/review/status" && method === "POST") {
+    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code), type = canonType(b.type || "fiveYear");
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const sets = [], vals = [];
+    if (b.status != null) {
+      sets.push("status=?");
+      vals.push(b.status === "done" ? "done" : "open");
+    }
+    if (b.notes != null) {
+      sets.push("notes=?");
+      vals.push(String(b.notes).slice(0, 2e3));
+    }
+    if (!sets.length) return jr6({ error: "nothing to update" }, headers, 400);
+    sets.push("updated_by=?", "updated_at=?");
+    vals.push(me, at);
+    vals.push(tid, scheme, code, type);
+    const r = await env.DB.prepare(`UPDATE compliance_review SET ${sets.join(", ")} WHERE tenant_id=? AND scheme=? AND code=? AND type=?`).bind(...vals).run();
+    return jr6({ ok: true, changed: r.meta ? r.meta.changes : 0 }, headers);
   }
   if (sub === "/summary" && method === "GET") {
     const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM compliance_files WHERE tenant_id=? AND scheme=?").bind(tid, scheme).first())?.n || 0;

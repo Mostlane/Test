@@ -753,6 +753,26 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   `9998` Hook Recreation Ground is the other project's, untouched). NB the Fareham
   chart page (fareham.html) still keys on (scheme=fareham, code=0001–0024) — the
   `site_number` link is only the bridge to Site Documents.
+  **Compliance-check WORKLIST (compliance-review.html + `compliance_review` table,
+  Aug 2026):** batch-runs the EICR verifier against every stored **5-year (EICR)**
+  cert and builds a tick-off worklist. The verification runs IN THE BROWSER using the
+  **shared engine `eicr-engine.js` (`window.MLEICR` — readPdf/analyze/summarize)** that
+  eicr-check.html was refactored onto (ONE source of truth, no drift). Flow: **GET
+  /compliance/review/targets** (newest cert per site + signed URL + the site's newest
+  ANY-type doc time + stored review row; `needs`=true when never run OR a document was
+  added to the site since last run — the "skip unchanged sites" rule, user chose
+  re-check on ANY new doc so more check-types can be added later); client fetches each
+  cert (the /compliance/file GET is CORS-enabled), runs MLEICR, **POST
+  /compliance/review/save** {code,type,outcome,summary,flags,fileId,docAt} (a fresh run
+  resets tick-off to open). Worklist: **GET /compliance/review/list** (rows + fresh
+  signed cert URLs), **POST /compliance/review/status** {status done|open, notes}. Row
+  = site → outcome badge + headline + issues + 💡recommendations + a done checkbox +
+  autosaving notes + Open-certificate. `attention` (red) = genuine issues only
+  (unsatisfactory / mis-coded / missing sigs / >10% LIM / circuit flags / unreadable);
+  routine C3 recommendations are listed but don't make a compliant report red. Runs in
+  a 2-lane pool, resumable (skip logic re-computes each run). Extensible: a check
+  registry (`CHECK_TYPES=["fiveYear"]` in the worker) — PAT/EM/PV/EV etc. plug in as
+  their own verifiers later. Button: "🔍 Run compliance checks" in eicr-portal.html.
   **site-folder.html Previous Jobs** (the Documents → Previous Jobs tab) lists LIVE
   jobs + the imported ARCHIVE (historical) jobs for the store (GET /sla/site/jobs
   returns both, each tagged `source:live|archive`; archive carries its full imported
