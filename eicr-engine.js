@@ -286,8 +286,15 @@
       else verified.push({ db: c.db, cct: c.cct, live: c.live, cpc: c.cpc, type: c.type, rating: c.rating, maxZs: c.maxZs, measured: c.measured, note: note, raw: c.raw });
     });
 
+    // Is this document actually an EICR (vs a remedial sheet / quote / other doc filed
+    // under "5 Year")? An EICR carries the title, and/or a stated overall assessment,
+    // and/or a schedule of test results — a remedial sheet has none of these.
+    var isEicr = /electrical installation condition report/i.test(rawFlat)
+      || outcome !== ""
+      || /schedule of (test results|circuit details)/i.test(rawFlat);
+
     return {
-      empty: false, ref: ref, outcome: outcome, latest: latest, sigs: sigs, codes: codes,
+      empty: false, isEicr: isEicr, ref: ref, outcome: outcome, latest: latest, sigs: sigs, codes: codes,
       lim: { pct: limPct, limOut: limOut, totOut: totOut },
       suggestions: suggestions, reviews: reviews, verified: verified, circuitsCount: circuits.length
     };
@@ -327,7 +334,7 @@
     // Bump VERSION whenever the analysis changes — the compliance worklist stores it
     // with each result and auto-re-checks any cert scored by an older engine, so fixes
     // reach the saved findings without a manual "re-check every site".
-    VERSION: 8,
+    VERSION: 9,
     loadPdfjs: loadPdfjs, readPdf: readPdf, analyze: analyze, summarize: summarize,
     DETECTORS: DETECTORS
   };
