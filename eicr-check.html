@@ -69,15 +69,30 @@
       </div>
 
       <div class="tabs" id="tabs">
-        <button data-t="zs" class="on">Max Zs</button>
+        <button data-t="pdf" class="on">📄 Verify a PDF</button>
+        <button data-t="zs">Max Zs</button>
         <button data-t="rcd">RCD &amp; times</button>
         <button data-t="ir">Insulation</button>
         <button data-t="ring">Ring circuit</button>
         <button data-t="code">Coding (C1–C3)</button>
       </div>
 
+      <!-- ── PDF verify ────────────────────────────────────────── -->
+      <section class="panel" data-sec="pdf">
+        <h2>Verify an EICR PDF</h2>
+        <p class="sub">Drop an EICR report below (or tap to choose). It reads the schedule of test results and checks each circuit against BS 7671 — the report never leaves your device.</p>
+        <div id="drop" style="border:2px dashed #94a3b8;border-radius:12px;padding:26px 16px;text-align:center;color:var(--muted);cursor:pointer;background:#f8fafc;">
+          <div style="font-size:32px">📄⚡</div>
+          <div style="font-weight:700;color:var(--ink);margin-top:6px">Drop an EICR PDF here</div>
+          <div style="font-size:12.5px;margin-top:2px">or tap to choose a file</div>
+          <input id="pdfInput" type="file" accept="application/pdf,.pdf" style="display:none">
+        </div>
+        <div id="pdfStatus" class="note" style="margin-top:10px"></div>
+        <div id="pdfReport"></div>
+      </section>
+
       <!-- ── MAX Zs ─────────────────────────────────────────────── -->
-      <section class="panel" data-sec="zs">
+      <section class="panel hide" data-sec="zs">
         <h2>Maximum earth-fault loop impedance (Zs)</h2>
         <p class="sub">BS 7671 Tables 41.3 / 41.4 (Cmin 0.95, U₀ 230 V). For MCBs / RCBOs the limit is set by the magnetic trip.</p>
         <div class="row">
@@ -326,6 +341,155 @@
     }
     $("codeSearch").addEventListener("input", function (e) { renderCodes(e.target.value); });
     renderCodes("");
+
+    /* ─────────────────────────────────────────────────────────────────────
+       PDF VERIFY — reads an EICR PDF in the browser (PDF.js, same reader the
+       document viewer uses), scans it, and reports: (1) codebreaker-style
+       suggested observations (present/absent detection — robust), and (2) a
+       best-effort per-circuit Zs check (transparent; shows the raw row).
+       Built against the sample EICR layout; other software may need tuning.
+    ───────────────────────────────────────────────────────────────────────*/
+    var PDFJS_BASE = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
+    var pdfjsReady = null;
+    function loadPdfjs() {
+      if (pdfjsReady) return pdfjsReady;
+      pdfjsReady = new Promise(function (res, rej) {
+        if (window.pdfjsLib) return res(window.pdfjsLib);
+        var s = document.createElement("script"); s.src = PDFJS_BASE + "pdf.min.js";
+        s.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js"; } catch (e) {} res(window.pdfjsLib); };
+        s.onerror = function () { rej(new Error("Couldn't load the PDF reader (needs an internet connection).")); };
+        document.head.appendChild(s);
+      });
+      return pdfjsReady;
+    }
+    function esc2(s) { return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+
+    async function readPdf(file) {
+      var lib = await loadPdfjs();
+      var buf = await file.arrayBuffer();
+      var pdf = await lib.getDocument({ data: buf }).promise;
+      var pages = [];
+      for (var p = 1; p <= pdf.numPages; p++) {
+        var page = await pdf.getPage(p);
+        var tc = await page.getTextContent();
+        var items = tc.items.map(function (it) { return { s: it.str, x: it.transform[4], y: it.transform[5] }; }).filter(function (it) { return it.s && it.s.trim(); });
+        items.sort(function (a, b) { return (Math.round(b.y) - Math.round(a.y)) || (a.x - b.x); });
+        var lines = [], cur = null;
+        items.forEach(function (it) { if (!cur || Math.abs(it.y - cur.y) > 3) { cur = { y: it.y, t: [] }; lines.push(cur); } cur.t.push(it.s); });
+        pages.push(lines.map(function (l) { return l.t.join(" ").replace(/\s+/g, " ").trim(); }));
+      }
+      return pages;
+    }
+
+    // Codebreaker-style detectors. `find(txt)` → true when the observation applies.
+    // Wording aligned to BS 7671:2018+A2:2022 & GN3 (guidance, not verbatim).
+    // NB detection uses the DEVICE product standard (61643 SPD, 62606 AFDD, and
+    // the RCD BS EN + "AC" in the schedule) — NOT the bare keywords, which appear
+    // in the form's template/column headers even when nothing is fitted.
+    function acCount(t) { return (t.match(/\b(61008|61009|62423)\b[^A-Za-z0-9]{0,8}ac\b/gi) || []).length; }
+    var DETECTORS = [
+      { code: "C3", find: function (t) { return !/61643/.test(t); },
+        title: "No surge protection device (SPD)",
+        obs: "The installation is not provided with protection against transient overvoltages — no surge protective device (to BS EN 61643 series) was identified. Following Amendment 2, an SPD should be provided unless a documented risk assessment determines that protection is not required; its absence is recorded as an improvement.",
+        regs: ["Section 443", "443.4", "534.4.1"] },
+      { code: "C3", find: function (t) { return acCount(t) > 0; },
+        detail: function (t) { var n = acCount(t); return n > 1 ? "Approximately " + n + " Type AC device(s) identified in the schedule. " : ""; },
+        title: "RCD / RCBO of Type AC",
+        obs: "One or more residual current devices are of Type AC. A Type AC RCD detects only sinusoidal AC residual currents; equipment containing electronic components (LED drivers, switch-mode power supplies, EV charging, variable-speed drives) can produce smooth DC residual currents that may 'blind' the device and impair disconnection. Replacement with a device of at least Type A should be considered.",
+        regs: ["531.3.3", "GN3"] },
+      { code: "C3", find: function (t) { return !/62606/.test(t); },
+        title: "No arc fault detection (AFDD)",
+        obs: "No arc fault detection devices (to BS EN 62606) were identified. For premises with a higher risk of fire, or with sleeping accommodation, consideration should be given to providing AFDDs on final circuits.",
+        regs: ["421.1.7"] }
+    ];
+
+    // Best-effort per-circuit Zs parse (MCB/RCBO rows: BS EN + type + rating).
+    function parseCircuits(pages) {
+      var out = [];
+      pages.forEach(function (lines) {
+        lines.forEach(function (t) {
+          var m = t.match(/\b(60898|61009)\b\s+([BCD])\s+(\d{1,3})\b/);
+          if (!m) return;
+          var type = m[2], In = +m[3];
+          var limit = UCMIN / (K[type] * In);
+          var decs = (t.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+          // measured Zs ≈ largest reading below the limit, ignoring the printed
+          // limit itself and the fixed 0.4/5 s disconnection-time values.
+          var cand = decs.filter(function (n) { return n > 0 && n < limit * 0.999 && n !== 0.4 && n !== 5; });
+          var measured = cand.length ? Math.max.apply(null, cand) : null;
+          out.push({ raw: t, type: type, In: In, limit: limit, measured: measured, conf: cand.length === 1 ? "high" : cand.length ? "med" : "none" });
+        });
+      });
+      return out;
+    }
+
+    function regTags(regs) { return regs.map(function (r) { return "<span style='display:inline-block;background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:700;margin:2px 3px 0 0'>" + esc2(r) + "</span>"; }).join(""); }
+
+    async function handlePdf(file) {
+      var rep = $("pdfReport"), st = $("pdfStatus");
+      rep.innerHTML = ""; st.textContent = "Reading " + file.name + "…";
+      if (file.type && file.type.indexOf("pdf") === -1 && !/\.pdf$/i.test(file.name)) { st.innerHTML = "<span style='color:var(--fail)'>That isn't a PDF.</span>"; return; }
+      var pages;
+      try { pages = await readPdf(file); }
+      catch (e) { st.innerHTML = "<span style='color:var(--fail)'>" + esc2(e.message || "Couldn't read the PDF.") + "</span>"; return; }
+      var txt = pages.map(function (p) { return p.join("\n"); }).join("\n");
+      if (txt.replace(/\s/g, "").length < 40) { st.innerHTML = "<span style='color:var(--fail)'>No readable text found — this looks like a scanned/flattened image PDF. The tool needs a text-based EICR export.</span>"; return; }
+      st.textContent = "";
+
+      // Header facts
+      var ref = (txt.match(/Ref[:\s]+(\S+)/i) || [])[1] || "";
+      var outcome = /UNSATISFACTORY/i.test(txt) ? "UNSATISFACTORY" : (/SATISFACTORY/i.test(txt) ? "SATISFACTORY" : "");
+      var codesFound = { C1: (txt.match(/\bC1\b/g) || []).length, C2: (txt.match(/\bC2\b/g) || []).length, FI: (txt.match(/\bFI\b/g) || []).length };
+
+      // Suggestions
+      var sugg = DETECTORS.filter(function (d) { return d.find(txt); });
+      var suggHtml = sugg.length ? sugg.map(function (d, i) {
+        var pre = d.detail ? d.detail(txt) : "";
+        return "<div class='cdef'><h4><span class='code-pill code-" + d.code + "'>" + d.code + "</span> " + esc2(d.title) +
+          " <button class='sugcopy' data-i='" + i + "' style='float:right;font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer'>Copy</button></h4>" +
+          "<div style='font-size:13px;line-height:1.5;margin:4px 0'>" + (pre ? "<b>" + esc2(pre) + "</b>" : "") + esc2(d.obs) + "</div><div>" + regTags(d.regs) + "</div></div>";
+      }).join("") : "<div class='lim'>No auto-suggestions triggered — an SPD, Type A RCDs and AFDDs were all identified (or the indicators didn't apply). Still review manually against the full checklist.</div>";
+
+      // Circuit checks
+      var circuits = parseCircuits(pages);
+      var circHtml;
+      if (!circuits.length) {
+        circHtml = "<div class='lim'>Couldn't read individual circuit rows from this layout — the schedule may be formatted differently. The suggestions above still apply. (Send me this file and I'll tune the circuit reader to it.)</div>";
+      } else {
+        circHtml = "<table><thead><tr><th>Device</th><th class='n'>Max Zs</th><th class='n'>Measured</th><th>Result</th></tr></thead><tbody>" +
+          circuits.map(function (c, i) {
+            var rule = 0.8 * c.limit, verdict, cls;
+            if (c.measured == null) { verdict = "Read the row"; cls = ""; }
+            else if (c.measured <= rule) { verdict = "✓ Pass"; cls = "color:var(--pass)"; }
+            else if (c.measured <= c.limit) { verdict = "⚠ Review"; cls = "color:var(--warn)"; }
+            else { verdict = "✗ Fail"; cls = "color:var(--fail)"; }
+            return "<tr><td><b>Type " + c.type + " " + c.In + " A</b></td><td class='n'>" + fmt(c.limit) + " Ω<br><small style='color:var(--muted)'>0.8× " + fmt(rule) + "</small></td>" +
+              "<td class='n'>" + (c.measured == null ? "?" : fmt(c.measured) + " Ω") + (c.conf === "med" ? " <small style='color:var(--warn)'>?</small>" : "") + "</td>" +
+              "<td style='font-weight:700;" + cls + "'>" + verdict + " <button class='rowraw' data-i='" + i + "' style='font-weight:600;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:5px;padding:1px 6px;cursor:pointer;color:var(--muted)'>row</button></td></tr>" +
+              "<tr id='raw" + i + "' style='display:none'><td colspan='4' style='font-size:11.5px;color:var(--muted);word-break:break-word'>" + esc2(c.raw) + "</td></tr>";
+          }).join("") + "</tbody></table>" +
+          "<p class='note'>Measured Zs is read heuristically (a <b>?</b> means more than one candidate on the row) — tap <b>row</b> to see the raw text and confirm. The tool never passes a value it can't read cleanly.</p>";
+      }
+
+      rep.innerHTML =
+        "<div class='lim' style='margin-top:14px'>" + (ref ? "<b>Ref " + esc2(ref) + "</b> · " : "") +
+          (outcome ? "reported <b>" + outcome + "</b> · " : "") + circuits.length + " circuit row(s) read · " +
+          "codes in file: C1 " + codesFound.C1 + ", C2 " + codesFound.C2 + ", FI " + codesFound.FI +
+          ((codesFound.C1 + codesFound.C2 + codesFound.FI > 0 && outcome === "SATISFACTORY") ? " &nbsp;<span style='color:var(--fail);font-weight:700'>⚠ C1/C2/FI present but marked Satisfactory — check</span>" : "") + "</div>" +
+        "<h3 style='font-size:15px;margin:16px 0 6px'>Suggested observations</h3>" + suggHtml +
+        "<h3 style='font-size:15px;margin:16px 0 6px'>Circuit Zs checks</h3>" + circHtml +
+        "<p class='note'>Automated read of a text-based EICR — a checking aid, not a substitute for the report, BS 7671, or the inspector. Suggestions are for the inspector to confirm as applicable to the specific installation; wording is aligned to BS 7671:2018+A2:2022 / GN3.</p>";
+
+      rep.querySelectorAll(".sugcopy").forEach(function (b) { b.addEventListener("click", function () { var d = sugg[+b.dataset.i]; var full = d.obs + " (BS 7671: " + d.regs.join(", ") + ") [" + d.code + "]"; navigator.clipboard && navigator.clipboard.writeText(full); b.textContent = "Copied ✓"; setTimeout(function () { b.textContent = "Copy"; }, 1500); }); });
+      rep.querySelectorAll(".rowraw").forEach(function (b) { b.addEventListener("click", function () { var r = $("raw" + b.dataset.i); if (r) r.style.display = r.style.display === "none" ? "table-row" : "none"; }); });
+    }
+
+    var drop = $("drop"), pdfInput = $("pdfInput");
+    drop.addEventListener("click", function () { pdfInput.click(); });
+    pdfInput.addEventListener("change", function (e) { if (e.target.files[0]) handlePdf(e.target.files[0]); });
+    ["dragenter", "dragover"].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.style.background = "#eef2ff"; }); });
+    ["dragleave", "drop"].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.style.background = "#f8fafc"; }); });
+    drop.addEventListener("drop", function (e) { var f = e.dataTransfer.files[0]; if (f) handlePdf(f); });
   })();
   </script>
 </body>
