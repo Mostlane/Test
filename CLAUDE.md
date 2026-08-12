@@ -1263,7 +1263,13 @@ EICR PDF → PDF.js (same unpkg build docviewer.js uses) reconstructs each line 
 Y/X position (group-by-Y tol 3, sort-by-X — the schedule table's real columns),
 then reports in a **REVIEW-first** layout:
 - **Header facts card**: Certificate/Ref number, overall SATISFACTORY/UNSATISFACTORY
-  (green/red), **latest date on the report** (max dd/mm/yyyy), **all signatories**
+  read from the STATED value — `readOutcome()` matches the standalone assessment-box
+  line, NOT the footnote "An unsatisfactory assessment indicates … (Code C1)…" that's
+  printed on every EICR (the old naive substring test made satisfactory reports read
+  as unsatisfactory), falling back to a boilerplate-stripped scan only when ambiguous;
+  shown green/red. A **⚠ "Outcome should be UNSATISFACTORY" review** fires when the
+  report is marked SATISFACTORY yet has any C1/C2/FI (legend-stripped counts). Also
+  **latest date on the report** (max dd/mm/yyyy), **all signatories**
   (name · role · date — regex `Name (Qualified Supervisor|Electrician|Inspector|
   Tester|…) dd/mm/yyyy`), C1/C2/C3/FI counts + **LIM %** (LIM ÷ all Pass/LIM/N-A/
   code outcome tokens; legend/code-key lines `PASS C1 or C2…` and bare `C1 C2 C3 FI`
