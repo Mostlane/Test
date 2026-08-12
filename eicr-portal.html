@@ -274,7 +274,7 @@
       <button class="bubble" data-cat="pat">PAT</button>
       <button class="bubble" data-cat="em">EM</button>
       <button class="bubble" data-cat="pv">PV</button>
-      <button class="bubble" data-cat="ev">EV</button>
+      <button class="bubble" data-cat="ev">EV/Forecourt</button>
       <button class="bubble" data-cat="pump">Pump</button>
     </div>
 
@@ -290,7 +290,7 @@
         <thead>
           <tr>
             <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
-            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV</th><th>Pump</th><th>Docs</th>
+            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV/Forecourt</th><th>Pump</th><th>Docs</th>
           </tr>
         </thead>
         <tbody id="tableBody"><tr><td colspan="12" class="loading">Loading data…</td></tr></tbody>
@@ -381,8 +381,8 @@ function baseData(){ return allData.filter(e => viewMode === 'closed' ? e.active
 let complianceIndex = {};
 let storeFiles = {};   // code -> { type: [ {url,current,date,filename}, … ] } (lazy-loaded)
 const CERT_TYPE = { fiveYear:'fiveYear', pat:'pat', em:'em', pv:'pv', ev:'ev', pump:'pump' };
-const TYPE_LABEL = { fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV', forecourt:'Forecourt', pump:'Pump', other:'Other' };
-const ALL_TYPES = ['fiveYear','pat','em','pv','ev','forecourt','pump','other'];
+const TYPE_LABEL = { fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV/Forecourt', forecourt:'EV/Forecourt', pump:'Pump', other:'Other' };
+const ALL_TYPES = ['fiveYear','pat','em','pv','ev','pump','other'];
 function mlToken(){ try { return localStorage.getItem('mostlaneToken') || ''; } catch(e){ return ''; } }
 function authFetch(path, opts){
   opts = opts || {};
@@ -460,7 +460,7 @@ const CertViewer = (function(){
 async function siteDocList(code){
   const r = await authFetch('/compliance/files?code=' + encodeURIComponent(code));
   const j = await r.json(); const files = (j && j.files) || {};
-  const STD = ['fiveYear','pat','em','pv','ev','forecourt','pump'];
+  const STD = ['fiveYear','pat','em','pv','ev','pump'];
   const order = [...STD.filter(t=>files[t] && files[t].length),
                  ...Object.keys(files).filter(t=>!STD.includes(t) && files[t] && files[t].length)];
   const list = [];
@@ -689,8 +689,8 @@ function openUploadModal(code, file){
 async function openVersionsModal(code){
   const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
   const canEdit = canEditCompliance();
-  const HEAD = { fiveYear:'5 Year', em:'Emergency Lighting', pat:'PAT Testing', pv:'PV', ev:'EV', pump:'Pump', forecourt:'Forecourt', other:'Other' };
-  const ORDER = ['fiveYear','em','pat','pv','ev','pump','forecourt'];
+  const HEAD = { fiveYear:'5 Year', em:'Emergency Lighting', pat:'PAT Testing', pv:'PV', ev:'EV/Forecourt', pump:'Pump', forecourt:'EV/Forecourt', other:'Other' };
+  const ORDER = ['fiveYear','em','pat','pv','ev','pump'];
   const TRACKABLE = ['fiveYear','em','pat','pv','ev','pump'];
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
   modal.innerHTML=`<div class="modal-content">
@@ -1151,7 +1151,7 @@ async function migrateFromOld(){
 /* ============ Edit / Save / Add / Delete ============ */
 function enableEditing(state){
   document.body.classList.toggle('cmp-edit', !!state);   // shows the 🗄 archive hint on site names
-  const editableCols = ["5 Year","PAT","EM","PV","EV","Pump"];
+  const editableCols = ["5 Year","PAT","EM","PV","EV/Forecourt","Pump"];
   document.querySelectorAll("table tbody tr").forEach(row=>{
     [...row.children].forEach((td,i)=>{
       const header = document.querySelectorAll("thead th")[i].textContent.trim();
@@ -1210,7 +1210,7 @@ async function saveEditInstant(row){
     pat: cleanDate(record["PAT"]),
     em:  cleanDate(record["EM"]),
     pv:  cleanDate(record["PV"]),
-    ev:  cleanDate(record["EV"]),
+    ev:  cleanDate(record["EV/Forecourt"]),
     pump: cleanDate(record["Pump"])
   };
 
@@ -1270,7 +1270,7 @@ function openAddSiteModal(){
         <div><label>PV</label><input id="add_pv" type="text" placeholder="dd/mm/yyyy" /></div>
       </div>
       <div class="row">
-        <div><label>EV</label><input id="add_ev" type="text" placeholder="dd/mm/yyyy" /></div>
+        <div><label>EV/Forecourt</label><input id="add_ev" type="text" placeholder="dd/mm/yyyy" /></div>
         <div><label>Pump</label><input id="add_pump" type="text" placeholder="dd/mm/yyyy" /></div>
       </div>
       <label>SharePoint URL</label><input id="add_sp" type="text" placeholder="https://..." />
@@ -1407,7 +1407,7 @@ function openSearchModal(){
         <option value="pat">PAT</option>
         <option value="em">EM</option>
         <option value="pv">PV</option>
-        <option value="ev">EV</option>
+        <option value="ev">EV/Forecourt</option>
         <option value="pump">Pump</option>
       </select>
       <label>From Date:</label>
@@ -1506,7 +1506,7 @@ function exportExcel(){
 
   const headers = [
     "Store Code","Site Name","Store Type","Postcode","Status",
-    "5 Year","PAT","EM","PV","EV","Pump","SharePoint"
+    "5 Year","PAT","EM","PV","EV/Forecourt","Pump","SharePoint"
   ];
   wsData.push(headers);
 
@@ -1543,7 +1543,7 @@ async function loadSettings(){
 }
 function openSettingsModal(){
   if(!canEditCompliance()) return alert("You don't have permission to change compliance settings.");
-  const TYPES = [['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
+  const TYPES = [['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV/Forecourt'],['pump','Pump']];
   const rows = TYPES.map(([k,lbl])=>{
     const s = typeSettings(k);
     return `<tr>

@@ -12739,7 +12739,7 @@ function canonType(t) {
   if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
   if (/\bpat\b/.test(s)) return "pat";
   if (/emergency|\bem\b|em\s*light/.test(s)) return "em";
-  if (/forecourt|\bpfs\b|petrol|fuel/.test(s)) return "forecourt";
+  if (/forecourt|\bpfs\b|petrol|fuel/.test(s)) return "ev";
   if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
   if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
   if (/pump|sump/.test(s)) return "pump";
