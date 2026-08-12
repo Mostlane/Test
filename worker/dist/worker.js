@@ -12918,16 +12918,32 @@ async function handle24(request, env, ctx, url, sess) {
   if (sub === "/site-files" && method === "GET") {
     const site = String(q.get("site") || "").trim();
     if (!site) return jr6({ error: "site required" }, headers, 400);
-    const { results } = await env.DB.prepare(
+    const seen = /* @__PURE__ */ new Set();
+    const stores = [];
+    const add = (r) => {
+      const k = r.scheme + "|" + r.code;
+      if (!seen.has(k)) {
+        seen.add(k);
+        stores.push({ scheme: r.scheme, code: r.code, name: r.name || "" });
+      }
+    };
+    const linked = await env.DB.prepare(
       "SELECT scheme, code, name FROM compliance_stores WHERE tenant_id=? AND site_number=?"
     ).bind(tid, site).all();
-    const stores = (results || []).map((r) => ({ scheme: r.scheme, code: r.code, name: r.name || "" }));
+    for (const r of linked.results || []) add(r);
+    const siteRow = await env.DB.prepare("SELECT site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, site).first();
+    if (siteRow && siteRow.site_name) {
+      const byName = await env.DB.prepare(
+        "SELECT scheme, code, name FROM compliance_stores WHERE tenant_id=? AND LOWER(TRIM(name))=LOWER(TRIM(?))"
+      ).bind(tid, siteRow.site_name).all();
+      for (const r of byName.results || []) add(r);
+    }
     const plain = pad4(site);
     if (plain && !stores.some((s) => s.scheme === "coop" && s.code === plain)) {
       const has = await env.DB.prepare(
         "SELECT 1 FROM compliance_stores WHERE tenant_id=? AND scheme='coop' AND code=? UNION SELECT 1 FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND code=? LIMIT 1"
       ).bind(tid, plain, tid, plain).first();
-      if (has) stores.push({ scheme: "coop", code: plain, name: "" });
+      if (has) add({ scheme: "coop", code: plain, name: "" });
     }
     const sections = [];
     for (const s of stores) {
@@ -13024,6 +13040,19 @@ async function handle24(request, env, ctx, url, sess) {
     return jr6({ ok: true }, headers);
   }
   if (sub === "/stores" && method === "GET") {
+    if (scheme !== "coop") {
+      try {
+        await env.DB.prepare(
+          `UPDATE compliance_stores SET site_number = (
+             SELECT s.site_number FROM sites s
+             WHERE s.tenant_id = compliance_stores.tenant_id
+               AND LOWER(TRIM(s.site_name)) = LOWER(TRIM(compliance_stores.name))
+             ORDER BY s.site_number LIMIT 1)
+           WHERE tenant_id=? AND scheme=? AND name IS NOT NULL AND (site_number IS NULL OR site_number='')`
+        ).bind(tid, scheme).run();
+      } catch {
+      }
+    }
     const { results } = scheme === "coop" ? await env.DB.prepare(
       `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active, cs.meta,
                   s.site_name AS sname, s.postcode AS spost
