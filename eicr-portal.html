@@ -127,6 +127,17 @@
     .doc-sec{ margin-bottom:12px; }
     .doc-sec > b{ display:block; margin-bottom:2px; }
     .doc-row .nm{ cursor:pointer; color:#0071CE; text-decoration:underline; }
+    /* Documents modal — a header bar per compliance type, drag docs between them. */
+    .doc-type{ border:1px solid #dbe3ec; border-radius:10px; margin:10px 0; overflow:hidden; }
+    .doc-type > .hbar{ background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:7px 11px; font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px; }
+    .doc-type > .hbar .cnt{ font-weight:400; opacity:.85; font-size:12px; }
+    .doc-type > .body{ padding:5px 9px; min-height:26px; background:#fff; }
+    .doc-type.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; }
+    .doc-type.drop-hot > .body{ background:#eaf4ff; }
+    .doc-sub{ font-size:12px; font-weight:700; color:#334155; background:#eef3f9; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin:6px 0 3px; display:flex; align-items:center; gap:6px; }
+    .doc-empty{ color:#94a3b8; font-size:12px; padding:5px 2px; }
+    .doc-row[draggable="true"], .doc-sub[draggable="true"]{ cursor:grab; }
+    .doc-row.dragging, .doc-sub.dragging{ opacity:.45; }
 
     /* Left/right navigation through a site's certificates, layered ABOVE the
        in-app PDF viewer (docviewer.js uses z-index 100001). */
@@ -678,65 +689,74 @@ function openUploadModal(code, file){
 async function openVersionsModal(code){
   const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
   const canEdit = canEditCompliance();
+  const HEAD = { fiveYear:'5 Year', em:'Emergency Lighting', pat:'PAT Testing', pv:'PV', ev:'EV', pump:'Pump', forecourt:'Forecourt', other:'Other' };
+  const ORDER = ['fiveYear','em','pat','pv','ev','pump','forecourt'];
+  const TRACKABLE = ['fiveYear','em','pat','pv','ev','pump'];
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
   modal.innerHTML=`<div class="modal-content">
     <h2>Documents</h2>
     <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
-    ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Tip: tick <b>keep</b> on two or more documents of the same type to link them (e.g. a 5-Year report split across two PDFs) — both stay current.</p>`:''}
+    ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
     <div id="vlist">Loading…</div>
     <div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
   </div>`;
   document.body.appendChild(modal);
   modal.querySelector('#vc').onclick=()=>modal.remove();
   modal.querySelector('#vadd').onclick=()=>{ modal.remove(); openUploadModal(code); };
-
   const host=modal.querySelector('#vlist');
-  const STD=['fiveYear','pat','em','pv','ev','forecourt','pump'];
 
-  function buildSections(files){
-    const secs=[];
-    STD.forEach(t=>{ if(files[t]&&files[t].length) secs.push({title:TYPE_LABEL[t]||t, items:files[t]}); });
-    if(files.other&&files.other.length){
-      const byLabel={};
-      files.other.forEach(f=>{ const k=f.label||'Other'; (byLabel[k]=byLabel[k]||[]).push(f); });
-      Object.keys(byLabel).forEach(k=>secs.push({title:k, items:byLabel[k]}));
-    }
-    Object.keys(files).forEach(t=>{ if(!STD.includes(t)&&t!=='other'&&files[t]&&files[t].length) secs.push({title:TYPE_LABEL[t]||t, items:files[t]}); });
-    return secs;
-  }
-  function rowHtml(f){
-    const nm=esc(f.label||f.filename||'file');
-    const badge=f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>';
+  // A doc's display name can carry a sub-folder path ("subA / report") from a
+  // folder upload — split it so the folder becomes a small sub-header.
+  const subParse=(name)=>{ const s=String(name||''); const i=s.lastIndexOf(' / '); return i>=0 ? {sub:s.slice(0,i).trim(), leaf:s.slice(i+3).trim()} : {sub:'', leaf:s}; };
+
+  function rowHtml(f, type){
+    const raw=f.label||f.filename||'file';
+    const {leaf}=subParse(raw);
+    const isOther=(type==='other');
+    const badge=isOther?'':(f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>');
     const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
-    const edit=canEdit?`
-      <label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>
-      <button class="mini rn" type="button">Rename</button>
-      <button class="mini del" type="button">Delete</button>`:'';
-    return `<div class="doc-row" data-id="${f.id}">${badge}<a class="nm" href="${f.url}" target="_blank">${nm}</a>${date}${edit}</div>`;
+    const keep=(canEdit&&!isOther)?`<label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
+    const edit=canEdit?`${keep}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:'';
+    return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${f.id}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${f.url}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
+  }
+  function typeHtml(type, items){
+    items = items||[];
+    const direct=[], subs={}, subOrder=[];
+    items.forEach(f=>{ const {sub}=subParse(f.label||f.filename||''); if(sub){ if(!subs[sub]){subs[sub]=[];subOrder.push(sub);} subs[sub].push(f);} else direct.push(f); });
+    let body='';
+    if(!items.length) body+=`<div class="doc-empty">No documents${canEdit?' — drag one here to file it under '+esc(HEAD[type]||type):''}.</div>`;
+    body+=direct.map(f=>rowHtml(f,type)).join('');
+    subOrder.forEach(sname=>{
+      const ids=subs[sname].map(f=>f.id);
+      body+=`<div class="doc-sub" ${canEdit?'draggable="true"':''} data-ids='${esc(JSON.stringify(ids))}'>📁 ${esc(sname)}</div>`+subs[sname].map(f=>rowHtml(f,type)).join('');
+    });
+    return `<div class="doc-type" data-type="${type}"><div class="hbar">${esc(HEAD[type]||type)} <span class="cnt">(${items.length})</span></div><div class="body">${body}</div></div>`;
   }
   async function refresh(){
     let files={};
-    try{
-      const r=await authFetch('/compliance/files?code='+encodeURIComponent(code));
-      const j=await r.json(); files=j.files||{};
-    }catch(e){ host.innerHTML='<p>Could not load.</p>'; return; }
-    const secs=buildSections(files);
-    host.innerHTML = secs.length
-      ? secs.map(s=>`<div class="doc-sec"><b>${esc(s.title)}</b>${s.items.map(rowHtml).join('')}</div>`).join('')
-      : '<p>No documents yet.</p>';
+    try{ const r=await authFetch('/compliance/files?code='+encodeURIComponent(code)); const j=await r.json(); files=j.files||{}; }
+    catch(e){ host.innerHTML='<p>Could not load.</p>'; return; }
+    const hasDocs=Object.keys(files).filter(t=>files[t]&&files[t].length);
+    const tracks=TRACKABLE.filter(t=>rec[t]);
+    // only the applicable headings for this site: types it tracks or has docs for,
+    // plus Other (always, as the catch-all + drop target).
+    const applicable=[];
+    ORDER.forEach(t=>{ if(hasDocs.includes(t)||tracks.includes(t)) applicable.push(t); });
+    applicable.push('other');
+    hasDocs.forEach(t=>{ if(!applicable.includes(t)) applicable.push(t); });
+    host.innerHTML = applicable.map(t=>typeHtml(t, files[t])).join('');
   }
 
-  // Delegated rename / delete / keep — survive re-render.
+  // click: open / rename / delete / keep
   host.addEventListener('click', async (ev)=>{
     const row=ev.target.closest('.doc-row'); if(!row) return;
     const id=+row.dataset.id;
-    if(ev.target.classList.contains('nm')){
-      ev.preventDefault(); openCertById(code, id); return;
-    }
+    if(ev.target.classList.contains('nm')){ ev.preventDefault(); openCertById(code, id); return; }
     if(ev.target.classList.contains('rn')){
-      const cur=row.querySelector('.nm').textContent;
-      const name=prompt('Rename this document:', cur); if(name==null) return;
-      await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,label:name.trim()})});
+      const {sub,leaf}=subParse(row.dataset.label||'');
+      const name=prompt('Rename this document:', leaf); if(name==null) return;
+      const label=(sub?sub+' / ':'')+name.trim();   // keep it in its sub-folder
+      await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,label})});
       refresh();
     } else if(ev.target.classList.contains('del')){
       if(!confirm('Delete this document permanently? This cannot be undone.')) return;
@@ -746,9 +766,28 @@ async function openVersionsModal(code){
   });
   host.addEventListener('change', async (ev)=>{
     if(!ev.target.classList.contains('cbpin')) return;
-    const row=ev.target.closest('.doc-row'); const id=+row.dataset.id;
+    const id=+ev.target.closest('.doc-row').dataset.id;
     await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pinned:ev.target.checked?1:0})});
     refresh();
+  });
+
+  // drag a document (or a whole 📁 sub-folder) onto another heading to re-file it
+  let dragIds=null;
+  host.addEventListener('dragstart',(ev)=>{
+    const sub=ev.target.closest('.doc-sub'); const row=ev.target.closest('.doc-row');
+    if(sub){ try{dragIds=JSON.parse(sub.dataset.ids||'[]');}catch(e){dragIds=null;} sub.classList.add('dragging'); }
+    else if(row){ dragIds=[+row.dataset.id]; row.classList.add('dragging'); }
+    else { dragIds=null; return; }
+    if(ev.dataTransfer){ ev.dataTransfer.effectAllowed='move'; try{ev.dataTransfer.setData('text/plain','move');}catch(e){} }
+  });
+  host.addEventListener('dragend',()=>{ host.querySelectorAll('.dragging').forEach(e=>e.classList.remove('dragging')); host.querySelectorAll('.doc-type.drop-hot').forEach(z=>z.classList.remove('drop-hot')); });
+  host.addEventListener('dragover',(ev)=>{ if(!dragIds) return; const zone=ev.target.closest('.doc-type'); if(!zone) return; ev.preventDefault(); host.querySelectorAll('.doc-type.drop-hot').forEach(z=>{ if(z!==zone) z.classList.remove('drop-hot'); }); zone.classList.add('drop-hot'); });
+  host.addEventListener('drop',async(ev)=>{
+    const zone=ev.target.closest('.doc-type'); if(!zone||!dragIds) return;
+    ev.preventDefault(); zone.classList.remove('drop-hot');
+    const targetType=zone.dataset.type; const ids=dragIds; dragIds=null;
+    try{ await Promise.all(ids.map(id=>authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,type:targetType})}))); }catch(e){}
+    await refresh(); loadFromPortal();
   });
 
   refresh();

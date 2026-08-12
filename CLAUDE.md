@@ -689,9 +689,18 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   multiple current docs of one type** by ticking "keep" (pinned) — if any file of a
   type is pinned, ALL pinned ones are `current` together (e.g. a 5-Year report split
   across two PDFs), else the newest is current. **Named custom docs:** upload with
-  type **Other** + a name (label, required) files an extra document that isn't a
-  due-dated type (no `bump`) and shows as its OWN named section in the modal (e.g.
-  "O&M for PV"). **Compact rows:** date cells are `td.dc{white-space:nowrap}` so the
+  type **Other** + a name (label) files an extra document that isn't a due-dated
+  type (no `bump`). **Documents modal layout (Aug 2026):** grouped under a **header
+  bar per compliance type** (HEAD map: 5 Year / Emergency Lighting / PAT Testing /
+  PV / EV / Pump / Other) showing only the **applicable** headings for that site
+  (types it tracks-via-due-date OR has docs for, + Other always). A doc's label may
+  carry a **sub-folder path** ("Manuals / Boiler" from a folder upload) → the folder
+  becomes a small **📁 sub-header** and only the leaf shows as the doc name; rename
+  keeps the prefix. **Drag to re-file:** each doc row (and each 📁 sub-header, which
+  moves its whole group) is `draggable`; dropping on another type's header POSTs
+  /compliance/file-update {id,type} (canonicalised) to recategorise it — Other docs
+  get filed under a real type this way. current/previous badges + "keep" pin show
+  for standard types only, not Other. HTML5 DnD (desktop). **Compact rows:** date cells are `td.dc{white-space:nowrap}` so the
   📄 cert icon sits BESIDE the date (no wrap → rows with a doc are the same height);
   cells are `vertical-align:middle`; long site names are `td.site{white-space:nowrap}`.
   **In-app cert viewer:** clicking a 📄 date-cell icon OR a document link in the modal

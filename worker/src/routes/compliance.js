@@ -296,9 +296,9 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true }, headers);
   }
 
-  // ── Update a document: rename (label) and/or pin it as current (link) ────────
-  // Body { id, label?, pinned? }. `label` is a display name (empty clears it back
-  // to the filename); `pinned` marks the doc as a current/linked one for its type.
+  // ── Update a document: rename (label), pin as current (link), or re-file (type)
+  // Body { id, label?, pinned?, type? }. `type` re-files the doc under another
+  // compliance heading (drag-and-drop in the Documents modal), canonicalised.
   if (sub === "/file-update" && method === "POST") {
     if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
@@ -307,6 +307,7 @@ export async function handle(request, env, ctx, url, sess) {
     const sets = [], vals = [];
     if (b.label != null) { sets.push("label=?"); vals.push(String(b.label).slice(0, 160).trim() || null); }
     if (b.pinned != null) { sets.push("pinned=?"); vals.push(b.pinned ? 1 : 0); }
+    if (b.type != null) { sets.push("type=?"); vals.push(canonType(b.type)); }
     if (!sets.length) return jr({ error: "nothing to update" }, headers, 400);
     vals.push(tid, id);
     await env.DB.prepare(`UPDATE compliance_files SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
