@@ -747,3 +747,24 @@ CREATE TABLE IF NOT EXISTS compliance_stores (
   updated_at TEXT,
   PRIMARY KEY (tenant_id, code)
 );
+
+-- Compliance-check WORKLIST. One row per site+check-type; the verifier runs in the
+-- browser (shared EICR engine) and posts its result here. Keeps the findings + a
+-- tick-off status + notes so the check is worked through and survives across devices.
+CREATE TABLE IF NOT EXISTS compliance_review (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  code       TEXT NOT NULL,           -- site code
+  type       TEXT NOT NULL,           -- check type (fiveYear, …)
+  status     TEXT DEFAULT 'open',     -- open | done
+  outcome    TEXT,                    -- SATISFACTORY | UNSATISFACTORY | '' | error
+  attention  INTEGER DEFAULT 0,       -- 1 = something flagged for review
+  summary    TEXT,                    -- short headline
+  flags      TEXT,                    -- JSON array of finding strings
+  file_id    INTEGER,                 -- compliance_files.id checked
+  doc_at     TEXT,                    -- newest-doc timestamp checked against
+  checked_at TEXT,                    -- when the verifier last ran (last run)
+  notes      TEXT,
+  updated_by TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (tenant_id, code, type)
+);

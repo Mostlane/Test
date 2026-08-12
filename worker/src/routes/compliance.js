@@ -48,6 +48,28 @@ async function ensure(env) {
     updated_at TEXT,
     PRIMARY KEY (tenant_id, code)
   )`).run();
+  // Compliance-check WORKLIST. One row per site+check-type. The verifier runs in
+  // the browser (reusing the EICR engine) and posts its result here; the row keeps
+  // the findings + a tick-off status + notes so the check can be worked through and
+  // survives across devices. `checked_at` (last run) vs the site's newest document
+  // upload drives the "skip unchanged sites" re-run rule.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS compliance_review (
+    tenant_id  INTEGER NOT NULL DEFAULT 1,
+    code       TEXT NOT NULL,          -- site code
+    type       TEXT NOT NULL,          -- check type (fiveYear, …)
+    status     TEXT DEFAULT 'open',    -- open | done
+    outcome    TEXT,                   -- SATISFACTORY | UNSATISFACTORY | '' | error
+    attention  INTEGER DEFAULT 0,      -- 1 = something flagged for review
+    summary    TEXT,                   -- short headline
+    flags      TEXT,                   -- JSON array of finding strings
+    file_id    INTEGER,                -- compliance_files.id checked
+    doc_at     TEXT,                   -- the newest-doc timestamp checked against
+    checked_at TEXT,                   -- when the verifier last ran (last run)
+    notes      TEXT,
+    updated_by TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (tenant_id, code, type)
+  )`).run();
   READY = true;
 }
 
@@ -353,6 +375,124 @@ export async function handle(request, env, ctx, url, sess) {
     if (!code) return jr({ error: "code required" }, headers, 400);
     await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).run();
     return jr({ ok: true }, headers);
+  }
+
+  // ══ Compliance-check WORKLIST ═══════════════════════════════════════════════
+  // The verification runs in the browser (the shared EICR engine); these routes
+  // hand it the certs to check and store/serve the resulting worklist.
+
+  // Targets to run the check against. For every site that has a cert of a
+  // checkable type, return its NEWEST cert of that type (signed URL) + the site's
+  // newest document upload time (ANY type) + the stored review row. `needs` is
+  // true when nothing's been run yet OR a document has been added to the site
+  // since the last run — the client skips the rest.
+  if (sub === "/review/targets" && method === "GET") {
+    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    const CHECK_TYPES = ["fiveYear"];   // extend as more per-type checkers are added
+    // newest document per site (any type) → the "has anything changed" clock
+    const siteLatest = {};
+    const sl = await env.DB.prepare("SELECT code, MAX(uploaded_at) AS latest FROM compliance_files WHERE tenant_id=? GROUP BY code").bind(tid).all();
+    for (const r of sl.results || []) siteLatest[r.code] = r.latest;
+    // stored review rows
+    const rev = {};
+    const rv = await env.DB.prepare("SELECT code, type, status, outcome, attention, checked_at FROM compliance_review WHERE tenant_id=?").bind(tid).all();
+    for (const r of rv.results || []) rev[r.code + "|" + r.type] = r;
+    const targets = [];
+    for (const type of CHECK_TYPES) {
+      const { results } = await env.DB.prepare(
+        `SELECT f.code, f.id, f.r2_key, f.filename, f.doc_date, f.uploaded_at, s.site_name AS sname, cs.name AS cname
+           FROM compliance_files f
+           LEFT JOIN sites s ON s.tenant_id=f.tenant_id AND s.site_number=f.code
+           LEFT JOIN compliance_stores cs ON cs.tenant_id=f.tenant_id AND cs.code=f.code
+          WHERE f.tenant_id=? AND f.type=?
+          ORDER BY f.code, COALESCE(f.doc_date,f.uploaded_at) DESC`
+      ).bind(tid, type).all();
+      const seen = {};
+      for (const r of results || []) {
+        if (seen[r.code]) continue; seen[r.code] = 1;  // newest per site only
+        const latestDoc = siteLatest[r.code] || r.uploaded_at;
+        const rr = rev[r.code + "|" + type];
+        const needs = !rr || !rr.checked_at || (latestDoc && rr.checked_at < latestDoc);
+        targets.push({
+          code: r.code, type,
+          name: r.sname || r.cname || r.code,
+          fileId: r.id,
+          url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key),
+          docAt: latestDoc,
+          needs,
+          review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at } : null,
+        });
+      }
+    }
+    return jr({ ok: true, targets, count: targets.length }, headers);
+  }
+
+  // Store one check result (client posts after running the verifier on a cert).
+  if (sub === "/review/save" && method === "POST") {
+    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code), type = canonType(b.type || "fiveYear");
+    if (!code) return jr({ error: "code required" }, headers, 400);
+    const flags = Array.isArray(b.flags) ? b.flags.slice(0, 60).map(x => String(x).slice(0, 400)) : [];
+    // `attention` (red) means a genuine issue — the client sends it from the engine's
+    // summarize(); fall back to "any flag" only if it wasn't provided.
+    const attention = (b.attention != null) ? (b.attention ? 1 : 0) : (flags.length ? 1 : 0);
+    const at = new Date().toISOString();
+    // A fresh run (new/changed cert) resets the tick-off to open; keep the prior
+    // notes. status column is only advanced to 'done' by /review/status.
+    await env.DB.prepare(
+      `INSERT INTO compliance_review (tenant_id, code, type, status, outcome, attention, summary, flags, file_id, doc_at, checked_at, updated_by, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(tenant_id, code, type) DO UPDATE SET
+         status='open', outcome=excluded.outcome, attention=excluded.attention, summary=excluded.summary,
+         flags=excluded.flags, file_id=excluded.file_id, doc_at=excluded.doc_at, checked_at=excluded.checked_at,
+         updated_by=excluded.updated_by, updated_at=excluded.updated_at`
+    ).bind(tid, code, type, "open", String(b.outcome || "").slice(0, 20), attention,
+      String(b.summary || "").slice(0, 300), JSON.stringify(flags),
+      b.fileId ? parseInt(b.fileId, 10) : null, String(b.docAt || at), at, me, at).run();
+    return jr({ ok: true, code, type, attention }, headers);
+  }
+
+  // The worklist (with a fresh signed URL to open each cert).
+  if (sub === "/review/list" && method === "GET") {
+    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    const { results } = await env.DB.prepare(
+      `SELECT r.code, r.type, r.status, r.outcome, r.attention, r.summary, r.flags, r.file_id, r.checked_at, r.notes,
+              s.site_name AS sname, cs.name AS cname, f.r2_key AS r2_key
+         FROM compliance_review r
+         LEFT JOIN sites s ON s.tenant_id=r.tenant_id AND s.site_number=r.code
+         LEFT JOIN compliance_stores cs ON cs.tenant_id=r.tenant_id AND cs.code=r.code
+         LEFT JOIN compliance_files f ON f.id=r.file_id
+        WHERE r.tenant_id=?`
+    ).bind(tid).all();
+    const rows = [];
+    for (const r of results || []) {
+      let flags = []; if (r.flags) { try { flags = JSON.parse(r.flags) || []; } catch {} }
+      rows.push({
+        code: r.code, type: r.type, name: r.sname || r.cname || r.code,
+        status: r.status || "open", outcome: r.outcome || "", attention: r.attention || 0,
+        summary: r.summary || "", flags, checkedAt: r.checked_at, notes: r.notes || "",
+        url: r.r2_key ? await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key) : "",
+      });
+    }
+    return jr({ ok: true, rows, count: rows.length }, headers);
+  }
+
+  // Tick off / add a note.
+  if (sub === "/review/status" && method === "POST") {
+    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code), type = canonType(b.type || "fiveYear");
+    if (!code) return jr({ error: "code required" }, headers, 400);
+    const at = new Date().toISOString();
+    const sets = [], vals = [];
+    if (b.status != null) { sets.push("status=?"); vals.push(b.status === "done" ? "done" : "open"); }
+    if (b.notes != null) { sets.push("notes=?"); vals.push(String(b.notes).slice(0, 2000)); }
+    if (!sets.length) return jr({ error: "nothing to update" }, headers, 400);
+    sets.push("updated_by=?", "updated_at=?"); vals.push(me, at);
+    vals.push(tid, code, type);
+    const r = await env.DB.prepare(`UPDATE compliance_review SET ${sets.join(", ")} WHERE tenant_id=? AND code=? AND type=?`).bind(...vals).run();
+    return jr({ ok: true, changed: r.meta ? r.meta.changes : 0 }, headers);
   }
 
   // ── Summary / progress (how many certs stored, by type) ─────────────────────
