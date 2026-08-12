@@ -182,7 +182,7 @@
         <h4 style="margin:12px 0 6px;font-size:13.5px;">Common observations → typical code</h4>
         <input id="codeSearch" type="search" placeholder="Search observations…">
         <table class="clist"><tbody id="codeRows"></tbody></table>
-        <p class="note">Curated examples for guidance only. Where an item could be assessed either way, the inspector's judgement of the specific risk decides — and if it can't be assessed, it's <b>FI</b>.</p>
+        <p class="note">Curated examples per BS 7671:2018+<b>A2:2022</b> / GN3 / BPG4 — guidance only, not rulings. The <b>Type AC → Type A</b>, <b>SPD</b> and <b>AFDD</b> items are amendment-driven and usually <b>C3</b>, but escalate where the circuit specifically needs it (e.g. a Type AC RCD on an EV charge point or known DC-fault equipment is typically <b>C2</b>). Where an item could go either way, the inspector's judgement of the actual risk decides — and if it can't be assessed, it's <b>FI</b>.</p>
       </section>
     </div>
   </div>
@@ -276,25 +276,46 @@
 
     // ---- Coding examples (curated, BPG4-style) ----
     var CODES = [
-      ["Exposed live parts (accessible)", "C1"],
-      ["Incorrect polarity", "C1"],
-      ["Damaged accessory exposing live parts", "C1"],
-      ["Conductive part made live (no CPC + fault)", "C1"],
-      ["Absence of main protective bonding", "C2"],
-      ["Absence of earthing / no CPC at accessory", "C2"],
-      ["Undersized main protective bonding conductor", "C2"],
-      ["No RCD for socket likely to supply outdoor equipment", "C2"],
-      ["Damaged accessory (no exposed live parts)", "C2"],
-      ["Signs of overheating at a connection", "C2"],
-      ["Inadequate/absent circuit identification at the board", "C3"],
-      ["No RCD (not required at time of installation)", "C3"],
-      ["No surge protection device (SPD)", "C3"],
-      ["Old (pre-2004) cable colours with a warning notice", "C3"],
-      ["Consumer unit not to current standard but safe", "C3"],
-      ["No warning notice where required (e.g. mixed colours)", "C3"],
+      // ── C1 — danger present ──────────────────────────────────
+      ["Exposed live parts, accessible to touch", "C1"],
+      ["Incorrect polarity (L/N reversed, or CPC used as a live)", "C1"],
+      ["Conductive part made live (broken CPC / open bonding + fault)", "C1"],
+      ["Damaged accessory or enclosure exposing live parts", "C1"],
+      ["Accessible live busbar / missing barrier or shroud at the board", "C1"],
+      ["Class I equipment with no earth connection", "C1"],
+      // ── C2 — potentially dangerous ───────────────────────────
+      ["Earthing — absent or ineffective means of earthing", "C2"],
+      ["Bonding — main protective bonding to gas/water absent", "C2"],
+      ["Bonding — main bonding conductor undersized", "C2"],
+      ["Bonding — supplementary bonding absent where required (e.g. wet zone)", "C2"],
+      ["CPC — absent at an accessory / Class I point", "C2"],
+      ["RCD — no RCD for socket-outlets supplying outdoor/mobile equipment", "C2"],
+      ["RCD — no RCD for cables in walls <50 mm without mechanical protection (522.6.202)", "C2"],
+      ["Protective device rating exceeds the cable's current capacity", "C2"],
+      ["Cable insulation damaged or deteriorated (e.g. old rubber/VIR, heat)", "C2"],
+      ["Non-sheathed cables not enclosed at an accessory / entering an enclosure", "C2"],
+      ["Signs of overheating / thermal damage at a connection", "C2"],
+      ["Open knockouts or missing blanking plates on an enclosure", "C2"],
+      ["Wiring not supported against premature collapse (escape routes, 521.10.202)", "C2"],
+      ["Inadequate IP rating for a wet / dusty location", "C2"],
+      ["Water ingress into an accessory or consumer unit", "C2"],
+      ["RCD fails to operate / trip time outside limits", "C2"],
+      // ── C3 — improvement recommended ─────────────────────────
+      ["RCD — Type AC fitted where Type A (or higher) is now recommended (A2:2022)", "C3"],
+      ["SPD — absence of surge protection device where now recommended (443/534)", "C3"],
+      ["AFDD — absence of arc-fault detection where now recommended (421.1.7)", "C3"],
+      ["RCD — no RCD / additional protection (not required at time of installation)", "C3"],
+      ["Consumer unit not to the current standard but serviceable", "C3"],
+      ["Non-metallic consumer unit (domestic, 421.1.201)", "C3"],
+      ["Old (pre-2006) cable colours with a warning notice fitted", "C3"],
+      ["No / inadequate circuit identification or labelling at the board", "C3"],
+      ["No periodic-inspection or RCD-test notice fitted", "C3"],
       ["Accessory not to a current standard but serviceable", "C3"],
+      ["Main switch / means of isolation not readily accessible or unlabelled", "C3"],
+      // ── FI — further investigation ───────────────────────────
       ["Part of the installation not accessible for inspection", "FI"],
-      ["Suspected defect that couldn't be confirmed on site", "FI"]
+      ["Suspected defect that couldn't be confirmed / tested on site", "FI"],
+      ["Insufficient records or information to fully assess", "FI"]
     ];
     var codeRows = $("codeRows");
     function renderCodes(q) {
