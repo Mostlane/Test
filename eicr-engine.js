@@ -173,11 +173,11 @@
     // Enter on the "Observations" table header; end at the classification key printed
     // below it (any line carrying 2+ codes) or the page footer; count single-code rows.
     function countObs(text) {
-      var lines = text.split("\n"), c = { C1: 0, C2: 0, C3: 0, FI: 0 }, inObs = false, since = 0;
+      var lines = text.split("\n"), c = { C1: 0, C2: 0, C3: 0, FI: 0 }, inObs = false, since = 0, pendNum = null, seen = {};
       for (var i = 0; i < lines.length; i++) {
         var l = lines[i].trim();
         if (!inObs) {
-          if (/^(item\s*no\.?\s+)?observations?\b/i.test(l) && !/no observations?\s+(were|are|found|recorded|made|noted)/i.test(l)) { inObs = true; since = 0; }
+          if (/^(item\s*no\.?\s+)?observations?\b/i.test(l) && !/no observations?\s+(were|are|found|recorded|made|noted)/i.test(l)) { inObs = true; since = 0; pendNum = null; }
           continue;
         }
         since++;
@@ -185,7 +185,17 @@
         if (codes.length >= 2) { inObs = false; continue; }          // classification key → end of table
         if (/^Ref[:\s]|Page:\s*\d|Classification\b|general condition|schedule of|declaration|next inspection|extent and limitation|summary of/i.test(l)) { inObs = false; continue; }
         if (since > 50) { inObs = false; continue; }
-        if (codes.length === 1 && c[codes[0]] != null) c[codes[0]]++;
+        var numM = l.match(/^(\d{1,3})\b/);
+        if (codes.length === 1) {
+          // Dedupe by observation item number + code, so a table repeated across pages
+          // isn't over-counted. The item number is on this line, or on the line above.
+          var num = numM ? numM[1] : (pendNum != null ? pendNum : "?" + i);
+          var key = num + "|" + codes[0];
+          if (!seen[key]) { seen[key] = 1; if (c[codes[0]] != null) c[codes[0]]++; }
+          pendNum = null;
+        } else if (numM) {
+          pendNum = numM[1];                                          // number line; code follows
+        }
       }
       return c;
     }
@@ -294,7 +304,11 @@
   function summarize(result) {
     if (!result || result.empty) return { attention: true, headline: "Couldn't read text — scanned/image PDF", flags: ["No readable text — this looks like a scanned/flattened image PDF. Verify manually."], recommendations: [], outcome: "" };
     var hard = result.reviews.filter(function (r) { return r.hard; });
-    var soft = result.reviews.filter(function (r) { return !r.hard; });
+    // Per-circuit findings (labelled "DB x · CCT y" / "CCT y") are dropped from the
+    // worklist: reading each schedule row's columns + circuit number varies too much
+    // across EICR programs to trust here. They remain in the single-cert checker
+    // (eicr-check.html), where the raw row is shown alongside for the user to judge.
+    var soft = result.reviews.filter(function (r) { return !r.hard && !/^(DB\s|CCT\s)/.test(r.label); });
     var flags = hard.map(fmtReview);                                   // red — drive attention
     // soft findings + codebreaker suggestions are informational notes
     var recommendations = soft.map(fmtReview).concat(result.suggestions.map(function (s) { return s.code + " · " + s.title; }));
@@ -313,7 +327,7 @@
     // Bump VERSION whenever the analysis changes — the compliance worklist stores it
     // with each result and auto-re-checks any cert scored by an older engine, so fixes
     // reach the saved findings without a manual "re-check every site".
-    VERSION: 7,
+    VERSION: 8,
     loadPdfjs: loadPdfjs, readPdf: readPdf, analyze: analyze, summarize: summarize,
     DETECTORS: DETECTORS
   };
