@@ -75,8 +75,21 @@
       display:inline-block; padding:6px 10px; border-radius:6px; background:#0071CE; color:#fff;
       text-decoration:none; font-weight:bold; border:0; cursor:pointer;
     }
-    .cert-link{ text-decoration:none; margin-left:4px; cursor:pointer; font-size:15px; }
+    .cert-link{ text-decoration:none; margin-left:3px; cursor:pointer; font-size:13px; vertical-align:middle; }
     .cert-link:hover{ opacity:.7; }
+    /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
+       is the same height as one without (no wrap → no taller rows). */
+    td.dc{ white-space:nowrap; }
+    /* Document rows inside the Documents modal. */
+    .doc-row{ display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #eef2f7; flex-wrap:wrap; }
+    .doc-row:last-child{ border-bottom:0; }
+    .doc-row .nm{ flex:1 1 160px; min-width:0; word-break:break-word; }
+    .doc-row .mini{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 8px; cursor:pointer; font-size:12px; color:#1f2937; }
+    .doc-row .mini:hover{ background:#f1f5f9; }
+    .doc-row .mini.del{ color:#b42318; border-color:#f3c6c0; }
+    .doc-row .pin{ display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#475569; white-space:nowrap; }
+    .doc-sec{ margin-bottom:12px; }
+    .doc-sec > b{ display:block; margin-bottom:2px; }
     .doc-btn{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:13px; }
     .doc-btn:hover{ background:#f1f5f9; }
     tr.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; background:#eaf4ff !important; }
@@ -239,6 +252,9 @@ function canEditCompliance(){
   } catch (e) { return false; }
 }
 
+/* Escape user-supplied text (document labels/names) before putting it in HTML. */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
 /* ===== State ===== */
 let allData = [];       // full set (normalised)
 let currentData = [];   // filtered / searched view
@@ -301,28 +317,39 @@ function openUploadModal(code, file){
     <p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p>
     <label>Compliance type</label>
     <div class="typegrid" id="ug"></div>
+    <label id="unl">Document name (optional)</label>
+    <input type="text" id="uname" placeholder="e.g. O&amp;M for PV — leave blank to use the file name">
     <div class="row">
       <div><label>File</label><input type="file" id="uf"></div>
       <div><label>Certificate date (optional)</label><input type="date" id="ud"></div>
     </div>
-    <p class="drop-note">The newest document becomes the current one; older ones are kept as previous versions (never deleted). A dated certificate updates the next-due date automatically.</p>
+    <p class="drop-note">The newest document becomes the current one; older ones are kept as previous versions (never deleted). A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
     <div class="actions">
       <button class="btn" id="udo">Upload</button>
       <button class="btn" style="background:#ccc;color:#000;" id="uc">Cancel</button>
     </div></div>`;
   document.body.appendChild(modal);
   const grid=modal.querySelector('#ug');
-  order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); }; grid.appendChild(b); });
+  const nameLbl=modal.querySelector('#unl');
+  const syncNameLbl=()=>{ nameLbl.textContent = (sel==='other') ? 'Document name (required)' : 'Document name (optional)'; };
+  order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); syncNameLbl(); }; grid.appendChild(b); });
+  syncNameLbl();
   const fileInput=modal.querySelector('#uf');
   if(file){ try{ const dt=new DataTransfer(); dt.items.add(file); fileInput.files=dt.files; }catch(e){} }
   modal.querySelector('#uc').onclick=()=>modal.remove();
   modal.querySelector('#udo').onclick=async()=>{
     const f=fileInput.files&&fileInput.files[0]; if(!f) return alert('Choose a file first.');
+    const name=(modal.querySelector('#uname').value||'').trim();
+    if(sel==='other' && !name) return alert('Please give this document a name (e.g. "O&M for PV").');
     const btn=modal.querySelector('#udo'); btn.disabled=true; btn.textContent='Uploading…';
     const form=new FormData();
     form.append('file',f); form.append('code',code); form.append('type',sel);
     const d=modal.querySelector('#ud').value; if(d) form.append('date',d);
-    form.append('bump','1'); form.append('filename',f.name);
+    if(name) form.append('label',name);
+    // A named "Other" document is an extra file (e.g. O&M), not a due-dated
+    // compliance type — so don't let it advance a due date.
+    if(sel!=='other') form.append('bump','1');
+    form.append('filename',f.name);
     try{
       const r=await authFetch('/compliance/file',{method:'POST',body:form});
       const out=await r.json().catch(()=>({}));
@@ -333,26 +360,83 @@ function openUploadModal(code, file){
   };
 }
 
-/* View every document for a store — grouped by type, current + previous versions. */
+/* View + manage every document for a store. Standard compliance types group by
+   their label; named "Other" documents (e.g. O&M for PV) each become their own
+   named section. Admins can rename, delete, and pin/link documents in place. */
 async function openVersionsModal(code){
   const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const canEdit = canEditCompliance();
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
-  modal.innerHTML=`<div class="modal-content"><h2>Documents</h2><p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p><div id="vlist">Loading…</div><div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div></div>`;
+  modal.innerHTML=`<div class="modal-content">
+    <h2>Documents</h2>
+    <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
+    ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Tip: tick <b>keep</b> on two or more documents of the same type to link them (e.g. a 5-Year report split across two PDFs) — both stay current.</p>`:''}
+    <div id="vlist">Loading…</div>
+    <div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
+  </div>`;
   document.body.appendChild(modal);
   modal.querySelector('#vc').onclick=()=>modal.remove();
   modal.querySelector('#vadd').onclick=()=>{ modal.remove(); openUploadModal(code); };
-  try{
-    const r=await authFetch('/compliance/files?code='+encodeURIComponent(code));
-    const j=await r.json(); const files=j.files||{};
-    const host=modal.querySelector('#vlist');
-    const types=Object.keys(files);
-    if(!types.length){ host.innerHTML='<p>No documents yet.</p>'; return; }
-    host.innerHTML=types.map(t=>{
-      const rows=files[t].map(f=>`<div style="padding:2px 0">${f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>'} · <a href="${f.url}" target="_blank">${f.filename||'file'}</a>${f.date?(' · '+String(f.date).slice(0,10)):''}${(canEditCompliance()&&!f.current)?` · <a href="#" class="verdel" data-id="${f.id}">delete</a>`:''}</div>`).join('');
-      return `<div style="margin-bottom:10px"><b>${TYPE_LABEL[t]||t}</b>${rows}</div>`;
-    }).join('');
-    host.querySelectorAll('.verdel').forEach(a=>a.onclick=async ev=>{ ev.preventDefault(); if(!confirm('Delete this previous version? (the current one is kept)'))return; await authFetch('/compliance/file-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:+a.dataset.id})}); modal.remove(); openVersionsModal(code); loadFromPortal(); });
-  }catch(e){ modal.querySelector('#vlist').innerHTML='<p>Could not load.</p>'; }
+
+  const host=modal.querySelector('#vlist');
+  const STD=['fiveYear','pat','em','pv','ev','forecourt','pump'];
+
+  function buildSections(files){
+    const secs=[];
+    STD.forEach(t=>{ if(files[t]&&files[t].length) secs.push({title:TYPE_LABEL[t]||t, items:files[t]}); });
+    if(files.other&&files.other.length){
+      const byLabel={};
+      files.other.forEach(f=>{ const k=f.label||'Other'; (byLabel[k]=byLabel[k]||[]).push(f); });
+      Object.keys(byLabel).forEach(k=>secs.push({title:k, items:byLabel[k]}));
+    }
+    Object.keys(files).forEach(t=>{ if(!STD.includes(t)&&t!=='other'&&files[t]&&files[t].length) secs.push({title:TYPE_LABEL[t]||t, items:files[t]}); });
+    return secs;
+  }
+  function rowHtml(f){
+    const nm=esc(f.label||f.filename||'file');
+    const badge=f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>';
+    const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
+    const edit=canEdit?`
+      <label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>
+      <button class="mini rn" type="button">Rename</button>
+      <button class="mini del" type="button">Delete</button>`:'';
+    return `<div class="doc-row" data-id="${f.id}">${badge}<a class="nm" href="${f.url}" target="_blank">${nm}</a>${date}${edit}</div>`;
+  }
+  async function refresh(){
+    let files={};
+    try{
+      const r=await authFetch('/compliance/files?code='+encodeURIComponent(code));
+      const j=await r.json(); files=j.files||{};
+    }catch(e){ host.innerHTML='<p>Could not load.</p>'; return; }
+    const secs=buildSections(files);
+    host.innerHTML = secs.length
+      ? secs.map(s=>`<div class="doc-sec"><b>${esc(s.title)}</b>${s.items.map(rowHtml).join('')}</div>`).join('')
+      : '<p>No documents yet.</p>';
+  }
+
+  // Delegated rename / delete / keep — survive re-render.
+  host.addEventListener('click', async (ev)=>{
+    const row=ev.target.closest('.doc-row'); if(!row) return;
+    const id=+row.dataset.id;
+    if(ev.target.classList.contains('rn')){
+      const cur=row.querySelector('.nm').textContent;
+      const name=prompt('Rename this document:', cur); if(name==null) return;
+      await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,label:name.trim()})});
+      refresh();
+    } else if(ev.target.classList.contains('del')){
+      if(!confirm('Delete this document permanently? This cannot be undone.')) return;
+      await authFetch('/compliance/file-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+      await refresh(); loadFromPortal();
+    }
+  });
+  host.addEventListener('change', async (ev)=>{
+    if(!ev.target.classList.contains('cbpin')) return;
+    const row=ev.target.closest('.doc-row'); const id=+row.dataset.id;
+    await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pinned:ev.target.checked?1:0})});
+    refresh();
+  });
+
+  refresh();
 }
 /* Normalise any stored due date to UK day-first DD/MM/YYYY for display. Handles
    ISO (YYYY-MM-DD, as the auto-advance stores it) and DD/MM/YY(YY) or DD-MM-YY
@@ -466,8 +550,8 @@ function renderTable(d){
     tr.innerHTML = `
       <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
       <td>${e.postcode}</td><td>${getStatus(e)}</td>
-      <td>${dateCell(e.storeCode,'fiveYear',e.fiveYear)}</td><td>${dateCell(e.storeCode,'pat',e.pat)}</td><td>${dateCell(e.storeCode,'em',e.em)}</td>
-      <td>${dateCell(e.storeCode,'pv',e.pv)}</td><td>${dateCell(e.storeCode,'ev',e.ev)}</td><td>${dateCell(e.storeCode,'pump',e.pump)}</td>
+      <td class="dc">${dateCell(e.storeCode,'fiveYear',e.fiveYear)}</td><td class="dc">${dateCell(e.storeCode,'pat',e.pat)}</td><td class="dc">${dateCell(e.storeCode,'em',e.em)}</td>
+      <td class="dc">${dateCell(e.storeCode,'pv',e.pv)}</td><td class="dc">${dateCell(e.storeCode,'ev',e.ev)}</td><td class="dc">${dateCell(e.storeCode,'pump',e.pump)}</td>
       <td class="docs-cell">${docsCell}</td>
     `;
     frag.appendChild(tr);
