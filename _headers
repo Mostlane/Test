@@ -111,3 +111,5 @@
   Cache-Control: no-cache
 /timesheets-admin.html
   Cache-Control: no-cache
+/eicr-check.html
+  Cache-Control: no-cache

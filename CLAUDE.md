@@ -1255,6 +1255,19 @@ scratchpad pattern gen-help-shots*.cjs). Search + tap-to-enlarge lightbox.
 Known gap: PO guide is text-only (external code — Jamie may supply a phone
 screenshot to embed). **UPDATE THE RELEVANT GUIDE WHENEVER FEATURES CHANGE.**
 
+## EICR / BS 7671 check (eicr-check.html)
+Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
+Compliance|FullAccess). NO backend — all limits client-side, works offline. Tabs:
+**Max Zs** (Type B/C/D MCB/RCBO, computed `218.5/(k·In)` where k=5/10/20 = BS 7671
+A2 Cmin-0.95 method; shows tabulated + the 0.8× cold rule-of-thumb, pass/review/
+fail; fuses not preset — use Table 41.2/41.4), **RCD & times** (30 mA ≤300 ms@1×/
+≤40 ms@5×; Zs≤50/I∆n; Table 41.1 disconnection times; typical Ze), **Insulation**
+(Table 61 — 0.5/1.0 MΩ at 250/500/1000 V), **Ring circuit** (r1/rn/rn checks +
+expected r2/r1 from CSA + R1+R2=(r1+r2)/4), **Coding** (C1/C2/C3/FI defs +
+searchable BPG4 example list + the "unsatisfactory if any C1/C2/FI" rule).
+Framed throughout as a checking AID, not a substitute for BS 7671 / a competent
+person. Update the values if a new BS 7671 amendment lands.
+
 ## Menu gating (main.html)
 MAP object: KEY = element id, list = permission names (any-of; FullAccess
 sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
