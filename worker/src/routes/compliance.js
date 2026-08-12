@@ -91,6 +91,9 @@ async function ensure(env) {
     PRIMARY KEY (tenant_id, scheme, code, type)
   )`).run();
   try { await env.DB.prepare("ALTER TABLE compliance_review ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run(); } catch {}
+  // Engine version that produced the stored result — lets the client auto-re-check
+  // any cert scored by an older verifier without a manual "re-check every site".
+  try { await env.DB.prepare("ALTER TABLE compliance_review ADD COLUMN ver INTEGER DEFAULT 0").run(); } catch {}
   READY = true;
 }
 
@@ -715,7 +718,7 @@ export async function handle(request, env, ctx, url, sess) {
     for (const r of sl.results || []) siteLatest[r.code] = r.latest;
     // stored review rows
     const rev = {};
-    const rv = await env.DB.prepare("SELECT code, type, status, outcome, attention, checked_at FROM compliance_review WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
+    const rv = await env.DB.prepare("SELECT code, type, status, outcome, attention, checked_at, ver FROM compliance_review WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
     for (const r of rv.results || []) rev[r.code + "|" + r.type] = r;
     const targets = [];
     for (const type of CHECK_TYPES) {
@@ -740,7 +743,7 @@ export async function handle(request, env, ctx, url, sess) {
           url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key),
           docAt: latestDoc,
           needs,
-          review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at } : null,
+          review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at, ver: rr.ver || 0 } : null,
         });
       }
     }
@@ -760,16 +763,17 @@ export async function handle(request, env, ctx, url, sess) {
     const at = new Date().toISOString();
     // A fresh run (new/changed cert) resets the tick-off to open; keep the prior
     // notes. status column is only advanced to 'done' by /review/status.
+    const ver = parseInt(b.ver, 10) || 0;
     await env.DB.prepare(
-      `INSERT INTO compliance_review (tenant_id, scheme, code, type, status, outcome, attention, summary, flags, file_id, doc_at, checked_at, updated_by, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `INSERT INTO compliance_review (tenant_id, scheme, code, type, status, outcome, attention, summary, flags, file_id, doc_at, checked_at, ver, updated_by, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(tenant_id, scheme, code, type) DO UPDATE SET
          status='open', outcome=excluded.outcome, attention=excluded.attention, summary=excluded.summary,
          flags=excluded.flags, file_id=excluded.file_id, doc_at=excluded.doc_at, checked_at=excluded.checked_at,
-         updated_by=excluded.updated_by, updated_at=excluded.updated_at`
+         ver=excluded.ver, updated_by=excluded.updated_by, updated_at=excluded.updated_at`
     ).bind(tid, scheme, code, type, "open", String(b.outcome || "").slice(0, 20), attention,
       String(b.summary || "").slice(0, 300), JSON.stringify(flags),
-      b.fileId ? parseInt(b.fileId, 10) : null, String(b.docAt || at), at, me, at).run();
+      b.fileId ? parseInt(b.fileId, 10) : null, String(b.docAt || at), at, ver, me, at).run();
     return jr({ ok: true, code, type, attention }, headers);
   }
 
