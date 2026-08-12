@@ -1257,7 +1257,23 @@ screenshot to embed). **UPDATE THE RELEVANT GUIDE WHENEVER FEATURES CHANGE.**
 
 ## EICR / BS 7671 check (eicr-check.html)
 Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
-Compliance|FullAccess). NO backend — all limits client-side, works offline. Tabs:
+Compliance|FullAccess; sidebar NAV entry too). NO backend — the PDF is read
+in-browser, nothing uploaded. **Primary tab "📄 Verify a PDF"**: drop/upload an
+EICR PDF → PDF.js (same unpkg build docviewer.js uses) extracts the text →
+(1) **codebreaker-style suggested observations** from an accurate device-signal
+scan — **no SPD** (`!/61643/` — BS EN 61643, NOT the "SPD" keyword which lives in
+the form template) → C3 (443/534); **Type AC RCD/RCBO** (device rows `6100[89]|
+62423 … AC`, counted) → C3 recommend Type A re DC-blinding (531.3.3/GN3); **no
+AFDD** (`!/62606/`) → C3 (421.1.7) — each with reg tags + a Copy button; and
+(2) a **best-effort per-circuit Zs check** (regex `(60898|61009) [BCD] <rating>` →
+computed limit vs a heuristic measured Zs, always showing the raw row, never
+silent-passing). Header facts (ref/outcome) + a "C1/C2/FI present but marked
+Satisfactory" cross-check. Detection uses DEVICE PRODUCT STANDARDS not keywords
+(templates mention SPD/AFDD in headers even when none fitted — validated against
+the Tangier Rd Co-op sample: computed Max Zs matched the report to the decimal;
+all three suggestions fired correctly). **Format-specific — built against that
+Co-op EICR software's layout; other systems need the circuit reader tuned.**
+Manual reference tabs still present:
 **Max Zs** (Type B/C/D MCB/RCBO, computed `218.5/(k·In)` where k=5/10/20 = BS 7671
 A2 Cmin-0.95 method; shows tabulated + the 0.8× cold rule-of-thumb, pass/review/
 fail; fuses not preset — use Table 41.2/41.4), **RCD & times** (30 mA ≤300 ms@1×/
