@@ -248,15 +248,19 @@
     circuits.forEach(function (c) {
       var lbl = (c.db ? "DB " + c.db + " · " : "") + "CCT " + c.cct;
       var liveN = toNum(c.live), cpcN = toNum(c.cpc), issues = [];
-      // Under-rated only when the OCPD clearly exceeds the cable capacity (30% margin,
-      // so marginal/rounding cases don't cry wolf) AND it isn't a standard 2.5 mm² ring
-      // final on ≤32 A (a normal socket ring, not a fault).
-      if (liveN && CAP[c.live] && c.rating > CAP[c.live] * 1.3 && !(c.live === "2.5" && c.rating <= 32))
+      // 2.5 mm² above its radial capacity (i.e. on a 32 A device) is fine ONLY as a
+      // confirmed ring final — end-to-end r1/rn/r2 readings present. Without them it's
+      // a radial and under-rated. Only assessed when the layout was recognised, so we
+      // can actually read the ring columns (oMax ≥ 0).
+      if (c.live === "2.5" && liveN && c.rating > CAP["2.5"] && c.rating <= 32) {
+        if (c.oMax >= 0 && !c.ring)
+          issues.push("2.5 mm² on a " + c.rating + " A device with no ring end-to-end (r1/rn/r2) continuity readings recorded — a ring final is expected at this rating; as a radial it is under-rated. Confirm it is a ring and the end-to-end readings are present.");
+      } else if (liveN && CAP[c.live] && c.rating > CAP[c.live] * 1.3) {
+        // Other cables: clearly above capacity (30% margin so rounding/method cases don't cry wolf).
         issues.push(c.live + " mm² live conductor on a " + c.rating + " A Type " + c.type + " device — above its typical current capacity (~" + CAP[c.live] + " A). Check the design current, install method and grouping.");
+      }
       if (liveN && cpcN && liveN <= 10 && TE_CPC[c.live] && cpcN < parseFloat(TE_CPC[c.live]))
         issues.push("CPC " + c.cpc + " mm² looks undersized for a " + c.live + " mm² line (a twin-&-earth cpc would be " + TE_CPC[c.live] + " mm²). Confirm the cable type and check the adiabatic (543.1.3).");
-      if (c.live === "2.5" && c.rating > 20 && !c.ring && c.oMax >= 0)
-        issues.push("2.5 mm² on a " + c.rating + " A device (a ring final is expected) but the end-to-end r1/rn/r2 continuity readings are missing. Record them, or confirm it isn't a ring.");
       var note = "";
       if (c.measured != null && c.maxZs) {
         var rule08 = 0.8 * c.maxZs;
