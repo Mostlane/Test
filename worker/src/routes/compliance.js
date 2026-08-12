@@ -325,25 +325,37 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── A PORTAL SITE's compliance docs across every scheme (drives "Site
   // Documents"). Resolves site_number → the linked compliance store(s), so a
-  // Co-op site shows its Co-op certs and a Fareham site (FBC-nnnn) shows its
-  // Fareham certs — from the one place a site is opened. `site` is the portal
-  // site_number (may carry a letter prefix), NOT a bare compliance code.
+  // Co-op site shows its Co-op certs and a Fareham site shows its Fareham certs
+  // — from the one place a site is opened. `site` is the portal site_number.
   if (sub === "/site-files" && method === "GET") {
     const site = String(q.get("site") || "").trim();
     if (!site) return jr({ error: "site required" }, headers, 400);
-    // Every compliance store linked to this portal site (any scheme).
-    const { results } = await env.DB.prepare(
+    const seen = new Set();
+    const stores = [];
+    const add = (r) => { const k = r.scheme + "|" + r.code; if (!seen.has(k)) { seen.add(k); stores.push({ scheme: r.scheme, code: r.code, name: r.name || "" }); } };
+    // 1) Stores explicitly linked to this portal site (any scheme).
+    const linked = await env.DB.prepare(
       "SELECT scheme, code, name FROM compliance_stores WHERE tenant_id=? AND site_number=?"
     ).bind(tid, site).all();
-    const stores = (results || []).map((r) => ({ scheme: r.scheme, code: r.code, name: r.name || "" }));
-    // Back-compat: a plain-numeric site with no linked row is a Co-op store by
-    // code (covers rows created before site_number was backfilled).
+    for (const r of linked.results || []) add(r);
+    // 2) Stores whose NAME matches this site's name — covers a store not yet
+    //    relinked to a freshly-created site (e.g. Fareham buildings whose portal
+    //    site is added by a separate workflow after the compliance chart exists).
+    const siteRow = await env.DB.prepare("SELECT site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, site).first();
+    if (siteRow && siteRow.site_name) {
+      const byName = await env.DB.prepare(
+        "SELECT scheme, code, name FROM compliance_stores WHERE tenant_id=? AND LOWER(TRIM(name))=LOWER(TRIM(?))"
+      ).bind(tid, siteRow.site_name).all();
+      for (const r of byName.results || []) add(r);
+    }
+    // 3) Back-compat: a plain-numeric site is a Co-op store by code (covers rows
+    //    from before site_number was backfilled).
     const plain = pad4(site);
     if (plain && !stores.some((s) => s.scheme === "coop" && s.code === plain)) {
       const has = await env.DB.prepare(
         "SELECT 1 FROM compliance_stores WHERE tenant_id=? AND scheme='coop' AND code=? UNION SELECT 1 FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND code=? LIMIT 1"
       ).bind(tid, plain, tid, plain).first();
-      if (has) stores.push({ scheme: "coop", code: plain, name: "" });
+      if (has) add({ scheme: "coop", code: plain, name: "" });
     }
     const sections = [];
     for (const s of stores) {
@@ -434,6 +446,22 @@ export async function handle(request, env, ctx, url, sess) {
   // from the sites table (fallback to the cached copy), its category + due dates,
   // and which types already have a document on file (drives the 📄 links).
   if (sub === "/stores" && method === "GET") {
+    // Non-Co-op stores link to a portal site by NAME. Portal sites for other
+    // schemes may be created by a separate workflow AFTER the compliance chart,
+    // so self-heal on load: link any still-unlinked store whose name now matches
+    // a site (one cheap correlated UPDATE, touches only null rows).
+    if (scheme !== "coop") {
+      try {
+        await env.DB.prepare(
+          `UPDATE compliance_stores SET site_number = (
+             SELECT s.site_number FROM sites s
+             WHERE s.tenant_id = compliance_stores.tenant_id
+               AND LOWER(TRIM(s.site_name)) = LOWER(TRIM(compliance_stores.name))
+             ORDER BY s.site_number LIMIT 1)
+           WHERE tenant_id=? AND scheme=? AND name IS NOT NULL AND (site_number IS NULL OR site_number='')`
+        ).bind(tid, scheme).run();
+      } catch {}
+    }
     // 'coop' resolves live name/postcode from the sites table; other schemes
     // (Fareham) store them directly on the compliance row.
     const { results } = scheme === "coop"
