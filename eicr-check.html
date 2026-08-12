@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
+  <script src="eicr-engine.js"></script>
   <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb;
          --pass:#166534; --passbg:#dcfce7; --fail:#b91c1c; --failbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; }
@@ -349,279 +350,37 @@
        best-effort per-circuit Zs check (transparent; shows the raw row).
        Built against the sample EICR layout; other software may need tuning.
     ───────────────────────────────────────────────────────────────────────*/
-    var PDFJS_BASE = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
-    var pdfjsReady = null;
-    function loadPdfjs() {
-      if (pdfjsReady) return pdfjsReady;
-      pdfjsReady = new Promise(function (res, rej) {
-        if (window.pdfjsLib) return res(window.pdfjsLib);
-        var s = document.createElement("script"); s.src = PDFJS_BASE + "pdf.min.js";
-        s.onload = function () { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.js"; } catch (e) {} res(window.pdfjsLib); };
-        s.onerror = function () { rej(new Error("Couldn't load the PDF reader (needs an internet connection).")); };
-        document.head.appendChild(s);
-      });
-      return pdfjsReady;
-    }
+    /* PDF VERIFY — reads an EICR PDF in the browser and reports it. All the
+       analysis lives in the shared engine (eicr-engine.js → window.MLEICR), so
+       this page and the compliance batch worklist stay in lock-step. */
     function esc2(s) { return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
-
-    async function readPdf(file) {
-      var lib = await loadPdfjs();
-      var buf = await file.arrayBuffer();
-      var pdf = await lib.getDocument({ data: buf }).promise;
-      var pages = [];
-      for (var p = 1; p <= pdf.numPages; p++) {
-        var page = await pdf.getPage(p);
-        var tc = await page.getTextContent();
-        var items = tc.items.map(function (it) { return { s: it.str, x: it.transform[4], y: it.transform[5] }; }).filter(function (it) { return it.s && it.s.trim(); });
-        items.sort(function (a, b) { return (Math.round(b.y) - Math.round(a.y)) || (a.x - b.x); });
-        var lines = [], cur = null;
-        items.forEach(function (it) { if (!cur || Math.abs(it.y - cur.y) > 3) { cur = { y: it.y, t: [] }; lines.push(cur); } cur.t.push(it.s); });
-        pages.push(lines.map(function (l) { return l.t.join(" ").replace(/\s+/g, " ").trim(); }));
-      }
-      return pages;
-    }
-
-    // Codebreaker-style detectors. `find(txt)` → true when the observation applies.
-    // Wording aligned to BS 7671:2018+A2:2022 & GN3 (guidance, not verbatim).
-    // NB detection uses the DEVICE product standard (61643 SPD, 62606 AFDD, and
-    // the RCD BS EN + "AC" in the schedule) — NOT the bare keywords, which appear
-    // in the form's template/column headers even when nothing is fitted.
-    function acCount(t) { return (t.match(/\b(61008|61009|62423)\b[^A-Za-z0-9]{0,8}ac\b/gi) || []).length; }
-    var DETECTORS = [
-      { code: "C3", find: function (t) { return !/61643/.test(t); },
-        title: "No surge protection device (SPD)",
-        obs: "The installation is not provided with protection against transient overvoltages — no surge protective device (to BS EN 61643 series) was identified. Following Amendment 2, an SPD should be provided unless a documented risk assessment determines that protection is not required; its absence is recorded as an improvement.",
-        regs: ["Section 443", "443.4", "534.4.1"] },
-      { code: "C3", find: function (t) { return acCount(t) > 0; },
-        detail: function (t) { var n = acCount(t); return n > 1 ? "Approximately " + n + " Type AC device(s) identified in the schedule. " : ""; },
-        title: "RCD / RCBO of Type AC",
-        obs: "One or more residual current devices are of Type AC. A Type AC RCD detects only sinusoidal AC residual currents; equipment containing electronic components (LED drivers, switch-mode power supplies, EV charging, variable-speed drives) can produce smooth DC residual currents that may 'blind' the device and impair disconnection. Replacement with a device of at least Type A should be considered.",
-        regs: ["531.3.3", "GN3"] },
-      { code: "C3", find: function (t) { return !/62606/.test(t); },
-        title: "No arc fault detection (AFDD)",
-        obs: "No arc fault detection devices (to BS EN 62606) were identified. For premises with a higher risk of fire, or with sleeping accommodation, consideration should be given to providing AFDDs on final circuits.",
-        regs: ["421.1.7"] },
-      { code: "C3", find: function (t) { return /\b3036\b/.test(t); },
-        title: "BS 3036 semi-enclosed (rewireable) fuses",
-        obs: "One or more circuits are protected by BS 3036 semi-enclosed (rewireable) fuses. These have a high fusing factor, offer no additional (RCD) protection and are easily re-fused with the wrong wire. Replacement with BS EN 60898 circuit-breakers or BS EN 61009 RCBOs should be considered to improve fault protection and disconnection times.",
-        regs: ["533.1.1", "GN3"] },
-      { code: "C3", find: function (t) { return /\b3871\b/.test(t); },
-        title: "BS 3871 miniature circuit-breakers (obsolete)",
-        obs: "Miniature circuit-breakers to BS 3871 were identified. This standard has been withdrawn and the devices are obsolete; correct operation and the availability of spares cannot be assured. Replacement with BS EN 60898 circuit-breakers should be considered.",
-        regs: ["533.1.1", "GN3"] }
-    ];
-
-    /* ── Structured schedule parser ──────────────────────────────────────
-       Rows in the schedule of test results read (once glued) like:
-       DB cct phase wiring ref points LIVE CPC maxDisc  BS(EN) TYPE RATING kA MAXZs
-          [RCDbsen RCDtype RCDmA RCDi]  r1 rn r2  R1+R2  pol  IRv IR-LL IR-LE  Zs  RCDt …
-       Anchor on the OCPD BS EN number; read fixed offsets around it. Validated
-       against a real 68-circuit 3-phase Co-op EICR (all fields + measured Zs). */
-    var OCPD_RE = /^(60898|61009|60947|61008|3036|88)$/;
-    // Standard twin-&-earth reduced cpc for a given line size (mm²).
-    var TE_CPC = { "1": "1", "1.5": "1", "2.5": "1.5", "4": "1.5", "6": "2.5", "10": "4", "16": "6", "25": "10" };
-    // Generous current capacity (A) for a line size (clipped-direct / method C) — used only to catch clearly under-rated cables.
-    var CAP = { "1": 16, "1.5": 20, "2.5": 27, "4": 37, "6": 47, "10": 64, "16": 85, "25": 112 };
-    function toNum(x) { var n = parseFloat(x); return isNaN(n) ? null : n; }
-    function isReading(x) { return x && x !== "---" && x !== "N/A" && x !== "n/a" && /^\d/.test(x); }
-    function plainNum(x) { return x && !/[<>]/.test(x) && /^\d+(\.\d+)?$/.test(x); }
-    // Glue "> 200" → ">200" so IR/Zs columns stay single tokens, then split.
-    function rowToks(line) { return line.replace(/([<>])\s+/g, "$1").trim().split(/\s+/); }
-    // Circuit designation (DB · CCT) — anchor on the phase token (L1/L2/L3/TP/SP/N)
-    // so it survives the leading-column differences between EICR programs.
-    function designation(t, iDev) {
-      var phaseIdx = -1;
-      for (var pi = 0; pi < iDev; pi++) { if (/^(L[123]|TP|SP|N)$/i.test(t[pi])) { phaseIdx = pi; break; } }
-      var cctNum, phase = "";
-      if (phaseIdx > 0) { cctNum = t[phaseIdx - 1]; phase = t[phaseIdx].toUpperCase(); }
-      else { cctNum = /^\d/.test(t[1] || "") ? t[1] : t[0]; }
-      var db = (t[0] !== cctNum && /^\d/.test(t[0])) ? t[0] : "";
-      return { db: db, cct: ((cctNum || "") + phase).toUpperCase() };
-    }
-
-    /* Layout-aware row parse. Stable across EICR programs: live=iDev-3, cpc=iDev-2,
-       type=iDev+1, rating=iDev+2. The columns AFTER the device vary by program, so:
-       max Zs is COMPUTED (218.5/(k·In)); the report's own max-Zs column is then located
-       by matching that value, which also tells us the layout family (oMax 4 = a 4-col RCD
-       block follows → ring at +9; oMax 5 = RCD-mA precedes max-Zs → ring at +6). Measured
-       Zs = the first plain number ≤50 after the IR test-voltage token (250/500/1000). */
-    function parseCircuit(line) {
-      var t = rowToks(line), iDev = -1;
-      for (var i = 1; i < t.length; i++) { if (OCPD_RE.test(t[i])) { iDev = i; break; } }
-      if (iDev < 4) return null;
-      var dev = t[iDev], type = t[iDev + 1], rating = toNum(t[iDev + 2]);
-      if (!/^[BCD]$/.test(type) || !rating) return null;        // real MCB/RCBO final/dist row
-      var maxZs = UCMIN / (K[type] * rating);                   // computed — layout-independent
-      var oMax = -1;
-      for (var o = 3; o <= 8; o++) { var v = toNum(t[iDev + o]); if (v && Math.abs(v - maxZs) / maxZs < 0.04) { oMax = o; break; } }
-      var ringBase = oMax >= 0 ? (oMax === 4 ? 9 : (oMax === 5 ? 6 : oMax + 1)) : -1;
-      var r1, rn, r2, ring = false;
-      if (ringBase > 0) { r1 = t[iDev + ringBase]; rn = t[iDev + ringBase + 1]; r2 = t[iDev + ringBase + 2]; ring = isReading(r1) && isReading(rn) && isReading(r2); }
-      var measured = null;
-      var jv = -1; for (var k = (oMax > 0 ? iDev + oMax : iDev + 3); k < t.length; k++) { if (/^(250|500|1000)$/.test(t[k])) { jv = k; break; } }
-      if (jv >= 0) { for (var q = jv + 1; q < t.length; q++) { if (plainNum(t[q])) { var vv = toNum(t[q]); if (vv <= 50) { measured = vv; break; } } } }
-      var d = designation(t, iDev);
-      return {
-        db: d.db, cct: d.cct,
-        live: t[iDev - 3], cpc: t[iDev - 2],
-        type: type, rating: rating, maxZs: maxZs, oMax: oMax,
-        r1: r1, rn: rn, r2: r2,
-        rcd: /^(61008|61009|62423)$/.test(dev),   // an RCBO carries its own RCD
-        ring: ring,
-        lim: /\bLIM\b/i.test(line), measured: measured, raw: line
-      };
-    }
-
-    function parseCircuits(pages) {
-      var out = [];
-      pages.forEach(function (lines) { lines.forEach(function (t) { var c = parseCircuit(t); if (c) out.push(c); }); });
-      return out;
-    }
-
-    function regTags(regs) { return regs.map(function (r) { return "<span style='display:inline-block;background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:700;margin:2px 3px 0 0'>" + esc2(r) + "</span>"; }).join(""); }
-
-    // Pull the signatories (name · role · date) out of the report text.
-    function findSignatories(flat) {
-      var re = /([A-Z][a-zA-Z'’]+(?:[ -][A-Z][a-zA-Z'’]+)+)\s+(Qualified Supervisor|Approved Electrician|Electrician|Inspector(?: and Tester)?|Tester|Engineer)\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/g;
-      var seen = {}, out = [], m;
-      while ((m = re.exec(flat))) { var key = m[1] + "|" + m[2]; if (!seen[key]) { seen[key] = 1; out.push({ name: m[1], role: m[2], date: m[3] }); } }
-      return out;
-    }
-    function latestDate(flat) {
-      var ds = [], m, re = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g;
-      while ((m = re.exec(flat))) { var y = +m[3]; if (y < 100) y += 2000; var d = new Date(y, +m[2] - 1, +m[1]); if (!isNaN(d) && y >= 2000 && y <= 2100) ds.push(d); }
-      if (!ds.length) return null;
-      return new Date(Math.max.apply(null, ds.map(Number)));
-    }
-    // Read the STATED overall assessment robustly. The filled box is a line that is
-    // just the word; the footnote ("An unsatisfactory assessment indicates … (Code C1)…")
-    // and the option labels must not be mistaken for it, so match the standalone line
-    // first, and only fall back to a boilerplate-stripped scan when that's ambiguous.
-    function readOutcome(flat) {
-      var lines = flat.split("\n"), su = 0, ss = 0;
-      lines.forEach(function (l) {
-        var t = l.trim().replace(/^[\s*:._\-]+|[\s*:._\-]+$/g, "");
-        if (/^UN\s*SATISFACTORY$/i.test(t)) su++;
-        else if (/^SATISFACTORY$/i.test(t)) ss++;
-      });
-      if (su && !ss) return "UNSATISFACTORY";
-      if (ss && !su) return "SATISFACTORY";
-      var c = flat.replace(/an?\s+['"]?un\s*satisfactory['"]?\s+assessment[\s\S]*?\./ig, "")
-                  .replace(/[\s\S]*?is\s+stated\s+as\s+['"]?un\s*satisfactory['"]?/ig, "")
-                  .replace(/\(\s*code[^)]*\)/ig, "");
-      if (/UN\s*SATISFACTORY/i.test(c)) return "UNSATISFACTORY";
-      if (/SATISFACTORY/i.test(c)) return "SATISFACTORY";
-      return "";
-    }
+    function regTags(regs) { return (regs || []).map(function (r) { return "<span style='display:inline-block;background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:700;margin:2px 3px 0 0'>" + esc2(r) + "</span>"; }).join(""); }
 
     async function handlePdf(file) {
       var rep = $("pdfReport"), st = $("pdfStatus");
       rep.innerHTML = ""; st.textContent = "Reading " + file.name + "…";
       if (file.type && file.type.indexOf("pdf") === -1 && !/\.pdf$/i.test(file.name)) { st.innerHTML = "<span style='color:var(--fail)'>That isn't a PDF.</span>"; return; }
       var pages;
-      try { pages = await readPdf(file); }
+      try { pages = await MLEICR.readPdf(file); }
       catch (e) { st.innerHTML = "<span style='color:var(--fail)'>" + esc2(e.message || "Couldn't read the PDF.") + "</span>"; return; }
-      var rawFlat = pages.map(function (p) { return p.join("\n"); }).join("\n");
-      if (rawFlat.replace(/\s/g, "").length < 40) { st.innerHTML = "<span style='color:var(--fail)'>No readable text found — this looks like a scanned/flattened image PDF. The tool needs a text-based EICR export.</span>"; return; }
+      var result = MLEICR.analyze(pages);
+      if (result.empty) { st.innerHTML = "<span style='color:var(--fail)'>No readable text found — this looks like a scanned/flattened image PDF. The tool needs a text-based EICR export.</span>"; return; }
       st.textContent = "";
 
-      // Drop the outcome/observation-code legend rows so they don't pollute the
-      // LIM % or C1/C2/C3/FI counts (both are column keys, not real results).
-      var LEG = /PASS C1 or C2 C3 FI N\/V Limitation LIM/;
-      var CODEKEY = /^\s*C1 C2 C3 FI\s*$/;
-      var flat = rawFlat.split("\n").filter(function (l) { return !LEG.test(l) && !CODEKEY.test(l); }).join("\n");
-
-      // ── Header facts ───────────────────────────────────────────────
-      var ref = (rawFlat.match(/(?:Certificate Number|Ref)[:\s]+(\S+)/i) || [])[1] || "";
-      var outcome = readOutcome(rawFlat);
-      var sigs = findSignatories(flat);
-      var latest = latestDate(flat);
-      var codesFound = { C1: (flat.match(/(?:^|\s)C1(?=\s|$)/g) || []).length, C2: (flat.match(/(?:^|\s)C2(?=\s|$)/g) || []).length, FI: (flat.match(/(?:^|\s)FI(?=\s|$)/g) || []).length };
-
-      // LIM proportion across the inspection outcomes.
-      var outRe = /(?:^|\s)(Pass|LIM|N\/A|N\/V|C1|C2|C3|FI)(?=\s|$)/g, om, totOut = 0, limOut = 0;
-      while ((om = outRe.exec(flat))) { totOut++; if (om[1] === "LIM") limOut++; }
-      var limPct = totOut ? Math.round(limOut / totOut * 100) : 0;
-
-      var circuits = parseCircuits(pages);
-
-      // ── Build the REVIEW list (everything that needs a human's eye) ──
-      var reviews = [];   // {label, why, code?}
-      function addReview(label, why, code) { reviews.push({ label: label, why: why, code: code || "" }); }
-
-      // Document-level logic checks
-      if (codesFound.C1 + codesFound.C2 + codesFound.FI > 0 && outcome === "SATISFACTORY") {
-        var parts = [];
-        if (codesFound.C1) parts.push(codesFound.C1 + " × C1");
-        if (codesFound.C2) parts.push(codesFound.C2 + " × C2");
-        if (codesFound.FI) parts.push(codesFound.FI + " × FI");
-        addReview("⚠ Outcome should be UNSATISFACTORY", "The report is marked SATISFACTORY, but it contains " + parts.join(", ") + " observation(s). Any C1, C2 or FI means the installation must be assessed UNSATISFACTORY (BS 7671 / GN3). Check the coding and the overall assessment.", "C1");
-      }
-      if (!sigs.length)
-        addReview("Signatures", "No signatory (name · role · date) could be read on the report. Confirm the inspector/tester and, where required, the qualified supervisor have signed and dated it.");
-      if (limPct > 10)
-        addReview("Extent of testing", limOut + " of " + totOut + " assessed items are recorded as a Limitation (LIM) — about " + limPct + "%. More than 10% of the certificate is a limitation; check the extent & limitations were justified and agreed.");
-      // Phase-rotation sanity: sequence confirmed but the job looks single-phase
-      var phaseSeq = /phase sequence|phase rotation/i.test(rawFlat);
-      var threePhase = /\bTP\b|\bL2\b|\bL3\b|400\s?V|three[ -]?phase/i.test(rawFlat);
-      if (phaseSeq && !threePhase)
-        addReview("Phase sequence", "Phase sequence / rotation is referenced, but the installation appears to be single-phase (no L2/L3/TP circuits or 400 V supply found). Confirm this isn't a template default left ticked.");
-
-      // Suggested observations (device-signal, codebreaker-style)
-      var sugg = DETECTORS.filter(function (d) { return d.find(rawFlat); });
-      // Parser-derived: final circuits (≤32 A) with no RCD additional protection.
-      var noRcd = circuits.filter(function (c) { return !c.rcd && c.rating && c.rating <= 32; });
-      if (noRcd.length) {
-        var eg = noRcd.slice(0, 6).map(function (c) { return c.db + "·" + c.cct; }).join(", ") + (noRcd.length > 6 ? " …" : "");
-        sugg.push({
-          code: "C3",
-          title: noRcd.length + " circuit(s) with no RCD additional protection",
-          detail: function () { return "e.g. " + eg + ". "; },
-          obs: "Circuits rated 32 A or below were identified with no RCD. Amendment 2 requires 30 mA RCD additional protection for socket-outlets rated up to 32 A intended for use by ordinary persons, and for cables concealed in walls or partitions at a depth of less than 50 mm without earthed mechanical protection. Review which of these circuits now require additional protection.",
-          regs: ["411.3.3", "411.3.4", "522.6.202"]
-        });
-      }
-
-      // Per-circuit checks → split into review vs verified
-      var verified = [];
-      circuits.forEach(function (c) {
-        var lbl = (c.db ? "DB " + c.db + " · " : "") + "CCT " + c.cct;
-        var liveN = toNum(c.live), cpcN = toNum(c.cpc), issues = [];
-        // Cable clearly under-rated for its OCPD
-        if (liveN && CAP[c.live] && c.rating > CAP[c.live] && !(c.live === "2.5" && c.rating <= 32 && c.ring))
-          issues.push(c.live + " mm² live conductor on a " + c.rating + " A Type " + c.type + " device — above its typical current capacity (~" + CAP[c.live] + " A). Check the design current, install method and grouping.");
-        // CPC UNDERSIZED for the line size (T&E domain only) — a larger cpc is safe, don't flag it
-        if (liveN && cpcN && liveN <= 10 && TE_CPC[c.live] && cpcN < parseFloat(TE_CPC[c.live]))
-          issues.push("CPC " + c.cpc + " mm² looks undersized for a " + c.live + " mm² line (a twin-&-earth cpc would be " + TE_CPC[c.live] + " mm²). Confirm the cable type and check the adiabatic (543.1.3).");
-        // 2.5 mm² on >20 A should be a ring — needs end-to-end readings (only when the layout is recognised)
-        if (c.live === "2.5" && c.rating > 20 && !c.ring && c.oMax >= 0)
-          issues.push("2.5 mm² on a " + c.rating + " A device (a ring final is expected) but the end-to-end r1/rn/r2 continuity readings are missing. Record them, or confirm it isn't a ring.");
-        // Measured Zs vs limit
-        var zsNote = "";
-        if (c.measured != null && c.maxZs) {
-          var rule08 = 0.8 * c.maxZs;
-          if (c.measured > c.maxZs) issues.push("Measured Zs " + fmt(c.measured) + " Ω exceeds the maximum permitted " + fmt(c.maxZs) + " Ω for this device.");
-          else if (c.measured > rule08) zsNote = "Zs " + fmt(c.measured) + " Ω is above the 0.8× cold rule-of-thumb (" + fmt(rule08) + " Ω) but within the tabulated max (" + fmt(c.maxZs) + " Ω) — verify temperature.";
-        }
-        if (c.lim) zsNote = (zsNote ? zsNote + " " : "") + "Row contains a LIM (a value could not be measured).";
-
-        if (issues.length) addReview(lbl, issues.join(" "));
-        else verified.push({ c: c, note: zsNote });
-      });
-
-      // ── Render ─────────────────────────────────────────────────────
+      var ref = result.ref, outcome = result.outcome, latest = result.latest, sigs = result.sigs;
+      var codes = result.codes, lim = result.lim, sugg = result.suggestions, reviews = result.reviews, verified = result.verified;
       var reviewCount = reviews.length + sugg.length;
+
       var head =
         "<div class='lim' style='margin-top:14px;line-height:1.7'>" +
         (ref ? "<b>Ref " + esc2(ref) + "</b>" : "<b>EICR</b>") +
         (outcome ? " &nbsp;·&nbsp; overall <b style='color:" + (outcome === "SATISFACTORY" ? "var(--pass)" : "var(--fail)") + "'>" + outcome + "</b>" : "") +
         (latest ? " &nbsp;·&nbsp; latest date on report <b>" + latest.toLocaleDateString("en-GB") + "</b>" : "") +
-        "<br>" + circuits.length + " circuit row(s) read &nbsp;·&nbsp; codes in file: C1 " + codesFound.C1 + " · C2 " + codesFound.C2 + " · C3 " + (flat.match(/(?:^|\s)C3(?=\s|$)/g) || []).length + " · FI " + codesFound.FI +
-        " &nbsp;·&nbsp; LIM " + limPct + "% (" + limOut + "/" + totOut + ")" +
+        "<br>" + result.circuitsCount + " circuit row(s) read &nbsp;·&nbsp; codes in file: C1 " + codes.C1 + " · C2 " + codes.C2 + " · C3 " + codes.C3 + " · FI " + codes.FI +
+        " &nbsp;·&nbsp; LIM " + lim.pct + "% (" + lim.limOut + "/" + lim.totOut + ")" +
         "<br><b>Signatories:</b> " + (sigs.length ? sigs.map(function (s) { return esc2(s.name) + " <span style='color:var(--muted)'>(" + esc2(s.role) + ", " + esc2(s.date) + ")</span>"; }).join(" &nbsp;·&nbsp; ") : "<span style='color:var(--fail)'>none found</span>") +
         "</div>";
 
-      // REVIEW section first
       var reviewHtml = "";
       reviews.forEach(function (r) {
         reviewHtml += "<div class='cdef' style='border-left:4px solid #f59e0b'>" +
@@ -629,29 +388,26 @@
           "<div style='font-size:13px;line-height:1.5'>" + esc2(r.why) + "</div></div>";
       });
       sugg.forEach(function (d, i) {
-        var pre = d.detail ? d.detail(rawFlat) : "";
         reviewHtml += "<div class='cdef' style='border-left:4px solid #f59e0b'><h4><span class='code-pill code-" + d.code + "'>" + d.code + "</span> " + esc2(d.title) +
           " <button class='sugcopy' data-i='" + i + "' style='float:right;font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer'>Copy</button></h4>" +
-          "<div style='font-size:13px;line-height:1.5;margin:4px 0'>" + (pre ? "<b>" + esc2(pre) + "</b>" : "") + esc2(d.obs) + "</div><div>" + regTags(d.regs) + "</div></div>";
+          "<div style='font-size:13px;line-height:1.5;margin:4px 0'>" + (d.detail ? "<b>" + esc2(d.detail) + "</b>" : "") + esc2(d.obs) + "</div><div>" + regTags(d.regs) + "</div></div>";
       });
       if (!reviewCount) reviewHtml = "<div class='verdict pass' style='display:flex'>✓ Nothing flagged for review<small>No logic issues, cable/CPC/ring anomalies or amendment-driven observations were detected. Still confirm manually against BS 7671.</small></div>";
 
-      // VERIFIED circuits — collapsed
       var verHtml;
-      if (!circuits.length) {
+      if (!result.circuitsCount) {
         verHtml = "<div class='lim'>Couldn't read individual circuit rows from this layout — the schedule may be formatted differently, so the circuit checks were skipped. The document checks above still apply. (Send me this file and I'll tune the circuit reader to it.)</div>";
       } else {
         verHtml = "<details style='margin-top:6px'><summary style='cursor:pointer;font-weight:700;font-size:14px;padding:6px 0'>✓ " + verified.length + " circuit(s) verified — tap to view</summary>" +
           "<table style='margin-top:8px'><thead><tr><th>DB · CCT</th><th>Cable</th><th>Device</th><th class='n'>Max Zs</th><th class='n'>Zs</th><th></th></tr></thead><tbody>" +
-          verified.map(function (v, i) {
-            var c = v.c;
+          verified.map(function (c, i) {
             return "<tr><td><b>" + (c.db ? esc2(c.db) + " · " : "") + esc2(c.cct) + "</b></td>" +
               "<td>" + esc2(c.live) + "/" + esc2(c.cpc) + " mm²</td>" +
               "<td>Type " + esc2(c.type) + " " + c.rating + " A</td>" +
               "<td class='n'>" + (c.maxZs ? fmt(c.maxZs) + " Ω" : "—") + "</td>" +
               "<td class='n'>" + (c.measured == null ? "—" : fmt(c.measured) + " Ω") + "</td>" +
               "<td><button class='rowraw' data-i='" + i + "' style='font-weight:600;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:5px;padding:1px 6px;cursor:pointer;color:var(--muted)'>row</button></td></tr>" +
-              (v.note ? "<tr><td colspan='6' style='font-size:11.5px;color:var(--warn);padding-top:0'>" + esc2(v.note) + "</td></tr>" : "") +
+              (c.note ? "<tr><td colspan='6' style='font-size:11.5px;color:var(--warn);padding-top:0'>" + esc2(c.note) + "</td></tr>" : "") +
               "<tr id='raw" + i + "' style='display:none'><td colspan='6' style='font-size:11.5px;color:var(--muted);word-break:break-word'>" + esc2(c.raw) + "</td></tr>";
           }).join("") + "</tbody></table></details>";
       }

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=3"></script>
+  <title>Mostlane • Compliance Checks</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <script src="eicr-engine.js"></script>
+  <style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb;
+         --pass:#166534; --passbg:#dcfce7; --fail:#b91c1c; --failbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:160px;}
+  a.ml-back{text-decoration:none;font-size:15px;color:#fff;}
+  .wrap{max-width:900px;margin:0 auto;padding:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .card h2{font-size:15px;margin:0 0 6px;}
+  .sub{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0 0 12px;}
+  .btn{appearance:none;border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:9px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer;}
+  .btn.ghost{background:#fff;color:var(--ink);border-color:var(--line);}
+  .btn[disabled]{opacity:.5;cursor:default;}
+  .prog{height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:12px 0 6px;display:none;}
+  .prog>span{display:block;height:100%;background:var(--brand);width:0;transition:width .2s;}
+  .status{font-size:13px;color:var(--muted);min-height:18px;}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+  .chip{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+  .chip.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+  input[type=search],textarea{font:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;background:#fff;}
+  .counts{font-size:13px;color:var(--muted);margin-bottom:8px;}
+  .row{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:#fff;}
+  .row.att{border-left:4px solid #ef4444;}
+  .row.done{opacity:.62;}
+  .rtop{display:flex;gap:10px;align-items:flex-start;}
+  .rtop .cbx{margin-top:3px;width:20px;height:20px;flex:none;}
+  .rmain{flex:1;min-width:0;}
+  .rname{font-weight:700;font-size:15px;}
+  .rname small{color:var(--muted);font-weight:500;}
+  .badge{display:inline-block;border-radius:6px;padding:1px 8px;font-size:11.5px;font-weight:800;vertical-align:middle;margin-left:6px;}
+  .b-sat{background:var(--passbg);color:var(--pass);}
+  .b-unsat{background:var(--failbg);color:var(--fail);}
+  .b-unk{background:#e2e8f0;color:#475569;}
+  .b-type{background:#eef2ff;color:#3730a3;}
+  .rhead{font-size:13px;color:#334155;margin-top:2px;}
+  .flags{margin:8px 0 4px;padding:0;list-style:none;font-size:12.5px;line-height:1.55;color:#334155;}
+  .flags li{padding:3px 0 3px 16px;position:relative;}
+  .flags li:before{content:"•";position:absolute;left:2px;color:#ef4444;}
+  .flags li.rec:before{content:"💡";left:0;font-size:11px;}
+  .rlinks{margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;}
+  .rlinks a{color:var(--brand);text-decoration:none;font-weight:600;cursor:pointer;}
+  .notes{margin-top:8px;}
+  .notes textarea{min-height:38px;font-size:12.5px;}
+  .savedtxt{font-size:11px;color:var(--muted);margin-top:2px;min-height:13px;}
+  .hide{display:none;}
+  .empty{color:var(--muted);font-size:13.5px;text-align:center;padding:20px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="eicr-portal.html" title="Back">‹ Back</a>
+    <h1>🔍 Compliance Checks</h1>
+  </header>
+
+  <div class="wrap">
+    <div id="gate" class="card hide"><b>Compliance access needed.</b> This tool is for Compliance / Full-Access users.</div>
+
+    <div id="app" class="hide">
+      <div class="card">
+        <h2>Verify stored certificates</h2>
+        <p class="sub">Runs the EICR verifier against every stored <b>5-year (EICR)</b> certificate and builds a worklist of anything that needs a look — mis-coded outcomes, missing signatures, high LIM, cable/CPC/Zs issues and recommendations. A site is <b>skipped</b> if no document has been added since its last check. Best run on a desktop with the tab open; it's resumable. The certificate never leaves your device.</p>
+        <div class="toolbar">
+          <button class="btn" id="runBtn">🔍 Run 5-year checks</button>
+          <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;"><input type="checkbox" id="forceAll"> Re-check every site (ignore skip)</label>
+        </div>
+        <div class="prog" id="prog"><span id="progBar"></span></div>
+        <div class="status" id="runStatus"></div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <button class="chip on" data-f="all">All</button>
+          <button class="chip" data-f="att">⚠ Needs attention</button>
+          <button class="chip" data-f="open">Open</button>
+          <button class="chip" data-f="done">Done</button>
+          <div style="flex:1;min-width:140px;"><input type="search" id="search" placeholder="Search site or code…"></div>
+        </div>
+        <div class="counts" id="counts"></div>
+        <div id="list"><div class="empty">No checks run yet — press <b>Run 5-year checks</b> above.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var perms = {};
+    try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+    var ok = perms.FullAccess === "Yes" || perms.Compliance === "Yes";
+    document.getElementById(ok ? "app" : "gate").classList.remove("hide");
+    if (!ok) return;
+
+    var $ = function (id) { return document.getElementById(id); };
+    function mlToken() { try { return localStorage.getItem("mostlaneToken") || ""; } catch (e) { return ""; } }
+    function authFetch(path, opts) {
+      opts = opts || {};
+      var h = Object.assign({}, opts.headers || {});
+      var t = mlToken(); if (t) h["Authorization"] = "Bearer " + t;
+      return fetch((window.MOSTLANE_API || "") + path, Object.assign({}, opts, { headers: h }));
+    }
+    function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+    var TYPE_LABEL = { fiveYear: "5-Year", pat: "PAT", em: "EM", pv: "PV", ev: "EV", forecourt: "Forecourt", pump: "Pump", other: "Other" };
+
+    // ── Batch run ───────────────────────────────────────────────────────────
+    var running = false;
+    async function runChecks() {
+      if (running) return; running = true;
+      var btn = $("runBtn"); btn.disabled = true;
+      var prog = $("prog"), bar = $("progBar"), st = $("runStatus");
+      st.textContent = "Loading the list of certificates…"; prog.style.display = "none"; bar.style.width = "0";
+      var targets;
+      try { var r = await authFetch("/compliance/review/targets"); var j = await r.json(); targets = j.targets || []; }
+      catch (e) { st.innerHTML = "<span style='color:var(--fail)'>Couldn't load the list. " + esc(e.message || "") + "</span>"; running = false; btn.disabled = false; return; }
+      var force = $("forceAll").checked;
+      var todo = force ? targets : targets.filter(function (t) { return t.needs; });
+      var skipped = targets.length - todo.length;
+      if (!todo.length) { st.innerHTML = "Nothing to check — " + (targets.length ? "all " + targets.length + " site(s) are up to date (no new documents since last run)." : "no 5-year certificates are stored yet."); await loadList(); running = false; btn.disabled = false; return; }
+      prog.style.display = "block";
+      var total = todo.length, done = 0, attention = 0, errors = 0;
+      function tick(label) { done++; bar.style.width = Math.round(done / total * 100) + "%"; st.textContent = "Checking " + done + " of " + total + (skipped ? " (" + skipped + " skipped — unchanged)" : "") + "… " + (label || ""); }
+
+      async function one(t) {
+        try {
+          var resp = await fetch(t.url, { cache: "no-store" });
+          if (!resp.ok) throw new Error("download " + resp.status);
+          var buf = await resp.arrayBuffer();
+          var pages = await MLEICR.readPdf(buf);
+          var result = MLEICR.analyze(pages);
+          var summ = MLEICR.summarize(result);
+          if (summ.attention) attention++;
+          var flags = summ.flags.concat((summ.recommendations || []).map(function (x) { return "💡 " + x; }));
+          await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: t.code, type: t.type, outcome: result.outcome || summ.outcome || "", summary: summ.headline, flags: flags, attention: summ.attention ? 1 : 0, fileId: t.fileId, docAt: t.docAt }) });
+        } catch (e) {
+          errors++;
+          try { await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't read this certificate", flags: ["Couldn't download or read the PDF (" + (e.message || "error") + ") — open it and verify manually. It may be a scanned image."], fileId: t.fileId, docAt: t.docAt }) }); } catch (e2) {}
+        }
+        tick(t.name);
+      }
+
+      // small concurrency pool (2 lanes) so big PDFs don't stall the whole run
+      var i = 0;
+      async function lane() { while (i < todo.length) { var t = todo[i++]; await one(t); } }
+      await Promise.all([lane(), lane()]);
+
+      st.innerHTML = "Done — checked " + total + " certificate(s): <b>" + attention + "</b> need attention" + (errors ? ", " + errors + " couldn't be read" : "") + (skipped ? ", " + skipped + " skipped." : ".");
+      await loadList();
+      running = false; btn.disabled = false;
+    }
+
+    // ── Worklist ────────────────────────────────────────────────────────────
+    var ROWS = [], filter = "all", search = "";
+    async function loadList() {
+      var r = await authFetch("/compliance/review/list"); var j = await r.json();
+      ROWS = j.rows || [];
+      render();
+    }
+    function matches(row) {
+      if (filter === "att" && !row.attention) return false;
+      if (filter === "open" && row.status !== "open") return false;
+      if (filter === "done" && row.status !== "done") return false;
+      if (search) { var s = search.toLowerCase(); if ((row.name || "").toLowerCase().indexOf(s) === -1 && (row.code || "").indexOf(s) === -1) return false; }
+      return true;
+    }
+    function outcomeBadge(o) {
+      if (o === "SATISFACTORY") return "<span class='badge b-sat'>SAT</span>";
+      if (o === "UNSATISFACTORY") return "<span class='badge b-unsat'>UNSAT</span>";
+      if (o === "error") return "<span class='badge b-unk'>UNREAD</span>";
+      return "<span class='badge b-unk'>?</span>";
+    }
+    function render() {
+      var host = $("list");
+      // sort: attention+open first, then open, then done; then by name
+      var rank = function (x) { return (x.status === "done" ? 2 : 0) + (x.attention && x.status !== "done" ? -1 : 0); };
+      var view = ROWS.filter(matches).sort(function (a, b) { return rank(a) - rank(b) || (a.name || "").localeCompare(b.name || ""); });
+      var nAtt = ROWS.filter(function (x) { return x.attention && x.status !== "done"; }).length;
+      var nOpen = ROWS.filter(function (x) { return x.status === "open"; }).length;
+      var nDone = ROWS.filter(function (x) { return x.status === "done"; }).length;
+      $("counts").innerHTML = ROWS.length + " site(s) checked &nbsp;·&nbsp; <b style='color:var(--fail)'>" + nAtt + "</b> need attention &nbsp;·&nbsp; " + nOpen + " open &nbsp;·&nbsp; " + nDone + " done";
+      if (!view.length) { host.innerHTML = "<div class='empty'>Nothing here" + (ROWS.length ? " for this filter." : " yet — run the checks above.") + "</div>"; return; }
+      host.innerHTML = view.map(function (row, i) {
+        var flagsHtml = (row.flags || []).map(function (f) { var rec = f.indexOf("💡") === 0; return "<li class='" + (rec ? "rec" : "") + "'>" + esc(rec ? f.replace(/^💡\s*/, "") : f) + "</li>"; }).join("");
+        return "<div class='row " + (row.attention && row.status !== "done" ? "att " : "") + (row.status === "done" ? "done" : "") + "' data-code='" + esc(row.code) + "' data-type='" + esc(row.type) + "'>" +
+          "<div class='rtop'>" +
+            "<input type='checkbox' class='cbx' " + (row.status === "done" ? "checked" : "") + " title='Mark done'>" +
+            "<div class='rmain'>" +
+              "<div class='rname'>" + esc(row.name || row.code) + " <small>" + esc(row.code) + "</small>" +
+                "<span class='badge b-type'>" + esc(TYPE_LABEL[row.type] || row.type) + "</span>" + outcomeBadge(row.outcome) + "</div>" +
+              "<div class='rhead'>" + esc(row.summary || "") + "</div>" +
+              (flagsHtml ? "<ul class='flags'>" + flagsHtml + "</ul>" : "") +
+              "<div class='rlinks'>" + (row.url ? "<a href='" + esc(row.url) + "' target='_blank' rel='noopener'>📄 Open certificate</a>" : "") +
+                (row.checkedAt ? "<span style='color:var(--muted)'>checked " + esc(new Date(row.checkedAt).toLocaleDateString("en-GB")) + "</span>" : "") + "</div>" +
+              "<div class='notes'><textarea placeholder='Notes / what you did…'>" + esc(row.notes || "") + "</textarea><div class='savedtxt'></div></div>" +
+            "</div>" +
+          "</div></div>";
+      }).join("");
+      // wire events
+      host.querySelectorAll(".row").forEach(function (el) {
+        var code = el.getAttribute("data-code"), type = el.getAttribute("data-type");
+        el.querySelector(".cbx").addEventListener("change", function () {
+          var status = this.checked ? "done" : "open";
+          var rowObj = ROWS.filter(function (r) { return r.code === code && r.type === type; })[0]; if (rowObj) rowObj.status = status;
+          authFetch("/compliance/review/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code, type: type, status: status }) });
+          el.classList.toggle("done", status === "done");
+        });
+        var ta = el.querySelector("textarea"), saved = el.querySelector(".savedtxt"), tmr = null;
+        ta.addEventListener("input", function () {
+          saved.textContent = "…"; clearTimeout(tmr);
+          tmr = setTimeout(function () {
+            authFetch("/compliance/review/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code, type: type, notes: ta.value }) })
+              .then(function () { saved.textContent = "Saved ✓"; var r = ROWS.filter(function (x) { return x.code === code && x.type === type; })[0]; if (r) r.notes = ta.value; setTimeout(function () { saved.textContent = ""; }, 1500); })
+              .catch(function () { saved.textContent = "Save failed — retrying"; setTimeout(function () { ta.dispatchEvent(new Event("input")); }, 4000); });
+          }, 900);
+        });
+      });
+    }
+
+    $("runBtn").addEventListener("click", runChecks);
+    document.querySelectorAll(".chip").forEach(function (c) { c.addEventListener("click", function () { document.querySelectorAll(".chip").forEach(function (x) { x.classList.remove("on"); }); c.classList.add("on"); filter = c.getAttribute("data-f"); render(); }); });
+    $("search").addEventListener("input", function (e) { search = e.target.value.trim(); render(); });
+
+    loadList();
+  })();
+  </script>
+</body>
+</html>
