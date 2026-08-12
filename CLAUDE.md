@@ -682,7 +682,18 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   1y otherwise; the historical backfill omits bump so it can't stomp live dates).
   **Versioning:** every upload is kept — GET /compliance/files flags the newest per
   type `current`, older ones previous (never deleted); the 🗂 button opens a
-  per-store documents modal (admins can delete a *previous* version). **In-job:**
+  per-store documents modal. **Doc management (Aug 2026):** compliance_files gained
+  `label` (admin display name) + `pinned` (self-migrating ALTERs). The Documents
+  modal now lets admins **rename** (POST /compliance/file-update {id,label}),
+  **delete ANY file** (not just previous — /compliance/file-delete), and **link
+  multiple current docs of one type** by ticking "keep" (pinned) — if any file of a
+  type is pinned, ALL pinned ones are `current` together (e.g. a 5-Year report split
+  across two PDFs), else the newest is current. **Named custom docs:** upload with
+  type **Other** + a name (label, required) files an extra document that isn't a
+  due-dated type (no `bump`) and shows as its OWN named section in the modal (e.g.
+  "O&M for PV"). **Compact rows:** date cells are `td.dc{white-space:nowrap}` so the
+  📄 cert icon sits BESIDE the date (no wrap → rows with a doc are the same height).
+  **In-job:**
   **site-folder.html**'s **Compliance** tab reads /compliance/files?code= (grouped
   by type, current/previous, full-access upload), so Site documents from a job
   shows every cert. mostlane-pos is retired (migration is one-tap); chart, Sites,

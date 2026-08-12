@@ -25,11 +25,16 @@ async function ensure(env) {
     year TEXT,                   -- e.g. "2025" (if known)
     r2_key TEXT NOT NULL,
     filename TEXT,
+    label TEXT,                  -- admin-given display name (rename + named custom docs e.g. "O&M for PV")
+    pinned INTEGER DEFAULT 0,    -- 1 = keep as current (link several current docs of one type together)
     size INTEGER,
     doc_date TEXT,               -- certificate date (if parsed)
     source TEXT,                 -- SharePoint item id / webUrl — used to de-dupe re-runs
     uploaded_at TEXT
   )`).run();
+  // Self-migrating: add label + pinned to any existing (pre-this-change) table.
+  try { await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN label TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN pinned INTEGER DEFAULT 0").run(); } catch {}
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_compfiles_code ON compliance_files(tenant_id, code, type)").run(); } catch {}
   // One row per source item (nulls stay distinct, so manual uploads aren't blocked).
   try { await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_compfiles_src ON compliance_files(tenant_id, source)").run(); } catch {}
@@ -173,18 +178,24 @@ export async function handle(request, env, ctx, url, sess) {
     const code = pad4(q.get("code"));
     if (!code) return jr({ error: "code required" }, headers, 400);
     const { results } = await env.DB.prepare(
-      "SELECT id, type, year, r2_key, filename, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+      "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
     ).bind(tid, code).all();
     const byType = {};
     for (const r of results || []) {
       (byType[r.type] = byType[r.type] || []).push({
-        id: r.id, year: r.year, filename: r.filename, size: r.size, date: r.doc_date || r.uploaded_at,
+        id: r.id, year: r.year, filename: r.filename, label: r.label || null, pinned: r.pinned ? 1 : 0,
+        size: r.size, date: r.doc_date || r.uploaded_at,
         url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key)
       });
     }
-    // Rows come back newest-first, so the FIRST of each type is the current one;
-    // the rest are kept as previous versions (never deleted).
-    for (const t of Object.keys(byType)) byType[t].forEach((f, i) => { f.current = i === 0; });
+    // "current" set per type: if any files are pinned, ALL pinned ones are current
+    // (so two linked docs — e.g. a 5-Year report split across two PDFs — both stay
+    // current); otherwise the newest single file is current, the rest previous.
+    for (const t of Object.keys(byType)) {
+      const arr = byType[t];
+      const anyPinned = arr.some(f => f.pinned);
+      arr.forEach((f, i) => { f.current = anyPinned ? !!f.pinned : (i === 0); });
+    }
     return jr({ ok: true, code, files: byType }, headers);
   }
 
@@ -214,13 +225,16 @@ export async function handle(request, env, ctx, url, sess) {
     }
     const year = String(form.get("year") || "").replace(/[^0-9]/g, "").slice(0, 4) || null;
     const fname = safeName(form.get("filename") || file.name || (type + ".pdf"));
+    // Optional admin display name (e.g. a named custom "O&M for PV" doc, or a
+    // clearer name than the raw filename). Empty → null (falls back to filename).
+    const label = String(form.get("label") || "").slice(0, 160).trim() || null;
     const at = new Date().toISOString();
     const key = `compliance/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
     const docDate = String(form.get("date") || "") || null;
     const res = await env.DB.prepare(
-      "INSERT INTO compliance_files (tenant_id, code, type, year, r2_key, filename, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
-    ).bind(tid, code, type, year, key, fname, file.size || null, docDate, source, at).run();
+      "INSERT INTO compliance_files (tenant_id, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, code, type, year, key, fname, label, file.size || null, docDate, source, at).run();
     // A "current" drag-drop upload (bump=1) advances the store's due date from the
     // new cert's date; the historical backfill never sends bump, so it can't stomp
     // the live due dates.
@@ -237,6 +251,23 @@ export async function handle(request, env, ctx, url, sess) {
     const row = await env.DB.prepare("SELECT r2_key FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).first();
     if (row) { try { await env.JOB_FILES.delete(row.r2_key); } catch {} }
     await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    return jr({ ok: true }, headers);
+  }
+
+  // ── Update a document: rename (label) and/or pin it as current (link) ────────
+  // Body { id, label?, pinned? }. `label` is a display name (empty clears it back
+  // to the filename); `pinned` marks the doc as a current/linked one for its type.
+  if (sub === "/file-update" && method === "POST") {
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const id = parseInt(b.id, 10);
+    if (!id) return jr({ error: "id required" }, headers, 400);
+    const sets = [], vals = [];
+    if (b.label != null) { sets.push("label=?"); vals.push(String(b.label).slice(0, 160).trim() || null); }
+    if (b.pinned != null) { sets.push("pinned=?"); vals.push(b.pinned ? 1 : 0); }
+    if (!sets.length) return jr({ error: "nothing to update" }, headers, 400);
+    vals.push(tid, id);
+    await env.DB.prepare(`UPDATE compliance_files SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
     return jr({ ok: true }, headers);
   }
 

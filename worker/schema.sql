@@ -724,6 +724,8 @@ CREATE TABLE IF NOT EXISTS compliance_files (
   year        TEXT,                    -- e.g. "2025" (if known)
   r2_key      TEXT NOT NULL,
   filename    TEXT,
+  label       TEXT,                    -- admin display name (rename + named custom docs e.g. "O&M for PV")
+  pinned      INTEGER DEFAULT 0,       -- 1 = keep as current (link several current docs of one type)
   size        INTEGER,
   doc_date    TEXT,                    -- certificate date (if parsed)
   source      TEXT,                    -- SharePoint item id / webUrl — dedupe re-runs
