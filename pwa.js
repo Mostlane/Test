@@ -14,6 +14,18 @@ if ("serviceWorker" in navigator) {
   let reloading = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (reloading || !hadController) return;
+    // Rate-limit the auto-reload across reloads. During a deploy, GitHub Pages'
+    // edge can briefly serve two SW versions inconsistently, so reg.update() on
+    // each load sees a "new" worker → it claims → controllerchange fires → we
+    // reload → repeat, many times a second (the "main.html flickers" bug). The
+    // per-load `reloading` flag can't stop that because it resets every reload.
+    // A persisted timestamp caps us at one reload per minute — enough to pick up
+    // a real update, but the loop breaks (and self-heals once the edge settles).
+    try {
+      const last = +(sessionStorage.getItem("mlSwReloadAt") || 0);
+      if (Date.now() - last < 60000) return;
+      sessionStorage.setItem("mlSwReloadAt", String(Date.now()));
+    } catch (e) {}
     reloading = true;
     location.reload();
   });

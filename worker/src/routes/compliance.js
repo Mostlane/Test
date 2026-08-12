@@ -509,7 +509,7 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ── Save a store's location / access meta (📍 pin + 🔑 access) ───────────────
-  // Body { code, lat?, lng?, w3w?, access?, contact? } — merged into meta JSON.
+  // Body { code, lat?, lng?, w3w?, access?, contact?, keys? } — merged into meta JSON.
   if (sub === "/store-meta" && method === "POST") {
     if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
@@ -524,6 +524,7 @@ export async function handle(request, env, ctx, url, sess) {
     if ("w3w" in b) meta.w3w = String(b.w3w || "").replace(/^\/+/, "").slice(0, 120) || null;
     if ("access" in b) meta.access = String(b.access || "").slice(0, 2000) || null;
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2000) || null;
+    if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2000) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
     else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(meta), at).run();
     return jr({ ok: true, code, meta }, headers);
