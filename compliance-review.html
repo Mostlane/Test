@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
-  <script src="eicr-engine.js?v=3"></script>
+  <script src="eicr-engine.js?v=4"></script>
   <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb;
          --pass:#166534; --passbg:#dcfce7; --fail:#b91c1c; --failbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; }
@@ -70,7 +70,7 @@
     <div id="app" class="hide">
       <div class="card">
         <h2>Verify stored certificates</h2>
-        <p class="sub">Runs the EICR verifier against every stored <b>5-year (EICR)</b> certificate and builds a worklist of anything that needs a look — mis-coded outcomes, missing signatures, high LIM, cable/CPC/Zs issues and recommendations. A site is <b>skipped</b> if no document has been added since its last check. Best run on a desktop with the tab open; it's resumable. The certificate never leaves your device.</p>
+        <p class="sub">Runs the EICR verifier against every stored <b>5-year (EICR)</b> certificate. A cert is marked <b>⚠ needs attention</b> (red) only when it's genuinely actionable — stated <b>Unsatisfactory</b>, a <b>mis-coded outcome</b> (marked Satisfactory but carrying a C1/C2/FI), or a cert that <b>couldn't be read</b>. Softer findings (signatures, LIM, cable/Zs notes) and C3 recommendations show on each row as <b>💡 notes</b>, not red. A site is <b>skipped</b> if no document has been added since its last check. Best run on a desktop with the tab open; it's resumable. The certificate never leaves your device.</p>
         <div class="toolbar">
           <button class="btn" id="runBtn">🔍 Run 5-year checks</button>
           <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;"><input type="checkbox" id="forceAll"> Re-check every site (ignore skip)</label>
