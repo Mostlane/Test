@@ -113,3 +113,7 @@
   Cache-Control: no-cache
 /eicr-check.html
   Cache-Control: no-cache
+/eicr-engine.js
+  Cache-Control: no-cache
+/compliance-review.html
+  Cache-Control: no-cache
