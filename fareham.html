@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=3"></script>
+  <script src="auth.js"></script>
+  <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
+  <script src="docviewer.js?v=5"></script>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fareham Borough Council Compliance</title>
+
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+  <!-- Leaflet for the location pin map (same CDN pattern as sites-register.html). -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: #1f2937;
+      background-color: #eef1f4;
+      position: relative;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    /* Portal-style header bar (matches the rest of the portal). */
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; text-align:left; }
+    .flabel { font-size:12px; font-weight:700; color:#5b6b7c; text-transform:uppercase; letter-spacing:.05em; align-self:center; margin-right:2px; }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background:  no-repeat center/180%;
+      z-index: -1;
+    }
+    .container {
+      background-color: rgba(255,255,255,0.6);
+      margin: 20px auto;
+      padding: 20px;
+      border-radius: 15px;
+      max-width: 95%;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+    h1 { text-align: center; color: #0071CE; margin-top: 0; }
+    .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
+
+    .backbar, .summary-bubbles, .filter-bubbles, .search-container, .utilbar {
+      display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-start; margin-bottom:10px;
+    }
+    .summary-bubbles, .filter-bubbles { justify-content:center; margin-bottom: 14px; }
+
+    .backlink, .bubble, .btn {
+      display:inline-flex; align-items:center; gap:6px;
+      background:#0071CE; color:#fff; text-decoration:none;
+      padding:7px 13px; border-radius:20px; font-weight:600; font-size:13.5px; border:0; cursor:pointer;
+    }
+    .btn { background:#1A4F8F; }
+    .bubble:hover, .btn:hover, .backlink:hover { opacity:.9; }
+    .bubble.active { background:#28a745; }
+
+    .search-input { padding:8px; width:300px; border-radius:20px; border:1px solid #ccc; }
+
+    .table-wrapper { overflow-x:auto; overflow-y:auto; max-height:70vh; width:100%; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { border:1px solid #d5dde5; padding:3px 8px; text-align:center; font-size:14px; line-height:1.25; vertical-align:middle; }
+    th { background:#1A4F8F; color:#fff; position:sticky; top:0; z-index:5; padding:6px 8px; }
+    /* Compact document buttons so the Docs column doesn't force tall rows. */
+    td .doc-btn{ padding:1px 6px; line-height:1.3; }
+    /* Keep the 📎 + 🗂 buttons on ONE line so a store with documents isn't a
+       taller (two-line) row than an empty one. */
+    td.docs-cell{ white-space:nowrap; }
+    /* The dominant cause of tall desktop rows was long site names wrapping to a
+       second line. Keep the name on one line (left-aligned so it reads naturally);
+       the table already scrolls sideways if a column gets wide. */
+    td.site{ white-space:nowrap; text-align:left; }
+    /* Click a site name to highlight the whole row (easier to read across). The
+       overlay sits on top of any status tint so both stay visible. */
+    tbody td.site{ cursor:pointer; }
+    tr.row-sel td{ box-shadow: inset 0 0 0 9999px rgba(37,99,235,.16); }
+    tr.row-sel td.site{ font-weight:700; }
+    /* Location / access buttons that aren't set yet show a faint ❓. */
+    .doc-btn.loc, .doc-btn.key{ font-size:14px; }
+    /* Status colours — the Status light AND each due-date cell tint green/amber/red
+       based on that compliance's own warning settings. */
+    td.st-green{ background:#e3f6e8; }
+    td.st-amber{ background:#fff1c9; }
+    td.st-red{ background:#ffd9d9; }
+    tr:hover td.st-green{ background:#d6f1dd; }
+    tr:hover td.st-amber{ background:#ffe9ad; }
+    tr:hover td.st-red{ background:#ffc7c7; }
+    /* Settings modal grid */
+    table.setg{ border-collapse:collapse; width:100%; }
+    table.setg th, table.setg td{ border:1px solid #e2e8f0; padding:6px 8px; font-size:13px; text-align:center; }
+    table.setg th{ position:static; top:auto; background:#eef3f9; color:#1f2937; z-index:auto; }
+    table.setg td:first-child, table.setg th:first-child{ position:static; left:auto; text-align:left; background:#eef3f9; }
+    table.setg input{ width:78px; padding:5px; border:1px solid #ccc; border-radius:6px; text-align:center; font-size:14px; }
+    tr:nth-child(even){ background:#f4f7fb; }
+    tr:nth-child(odd){ background:#fff; }
+    /* Keep the Store Code column visible while scrolling the wide table sideways. */
+    th:first-child, td:first-child { position:sticky; left:0; z-index:4; }
+    th:first-child { z-index:6; }
+    td:first-child { background:#eef3f9; font-weight:700; }
+    .sp-btn{
+      display:inline-block; padding:6px 10px; border-radius:6px; background:#0071CE; color:#fff;
+      text-decoration:none; font-weight:bold; border:0; cursor:pointer;
+    }
+    .cert-link{ text-decoration:none; margin-left:3px; cursor:pointer; font-size:13px; vertical-align:middle; }
+    .cert-link:hover{ opacity:.7; }
+    /* Keep a due date and its 📄 cert icon on ONE line so a cell with a document
+       is the same height as one without (no wrap → no taller rows). */
+    td.dc{ white-space:nowrap; }
+    /* Document rows inside the Documents modal. */
+    .doc-row{ display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid #eef2f7; flex-wrap:wrap; }
+    .doc-row:last-child{ border-bottom:0; }
+    .doc-row .nm{ flex:1 1 160px; min-width:0; word-break:break-word; }
+    .doc-row .mini{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 8px; cursor:pointer; font-size:12px; color:#1f2937; }
+    .doc-row .mini:hover{ background:#f1f5f9; }
+    .doc-row .mini.del{ color:#b42318; border-color:#f3c6c0; }
+    .doc-row .pin{ display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#475569; white-space:nowrap; }
+    .doc-sec{ margin-bottom:12px; }
+    .doc-sec > b{ display:block; margin-bottom:2px; }
+    .doc-row .nm{ cursor:pointer; color:#0071CE; text-decoration:underline; }
+    /* Documents modal — a header bar per compliance type, drag docs between them. */
+    .doc-type{ border:1px solid #dbe3ec; border-radius:10px; margin:10px 0; overflow:hidden; }
+    .doc-type > .hbar{ background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:7px 11px; font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px; }
+    .doc-type > .hbar .cnt{ font-weight:400; opacity:.85; font-size:12px; }
+    .doc-type > .body{ padding:5px 9px; min-height:26px; background:#fff; }
+    .doc-type.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; }
+    .doc-type.drop-hot > .body{ background:#eaf4ff; }
+    .doc-sub{ font-size:12px; font-weight:700; color:#334155; background:#eef3f9; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin:6px 0 3px; display:flex; align-items:center; gap:6px; }
+    .doc-empty{ color:#94a3b8; font-size:12px; padding:5px 2px; }
+    .doc-row[draggable="true"], .doc-sub[draggable="true"]{ cursor:grab; }
+    .doc-row.dragging, .doc-sub.dragging{ opacity:.45; }
+
+    /* Left/right navigation through a site's certificates, layered ABOVE the
+       in-app PDF viewer (docviewer.js uses z-index 100001). */
+    #certNav{ display:none; }
+    #certNav .cvArrow{ position:fixed; top:50%; transform:translateY(-50%); z-index:100002;
+      width:48px; height:70px; border:0; border-radius:12px; background:rgba(15,23,42,.72); color:#fff;
+      font-size:34px; line-height:1; cursor:pointer; align-items:center; justify-content:center; display:flex; }
+    #certNav .cvArrow:hover{ background:rgba(15,23,42,.92); }
+    #certNav .cvArrow:disabled{ opacity:.35; cursor:default; }
+    #certNav .cvPrev{ left:12px; }
+    #certNav .cvNext{ right:12px; }
+    #certNav .cvCount{ position:fixed; z-index:100002; bottom:16px; left:50%; transform:translateX(-50%);
+      background:rgba(15,23,42,.82); color:#fff; padding:6px 14px; border-radius:20px; font-size:13px;
+      max-width:82vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    @media (max-width:768px){ #certNav .cvArrow{ width:42px; height:58px; font-size:28px; } }
+    .doc-btn{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:13px; }
+    .doc-btn:hover{ background:#f1f5f9; }
+    tr.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; background:#eaf4ff !important; }
+    .ver-current{ font-weight:700; } .ver-old{ color:#64748b; }
+    .modal .typegrid{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 12px; }
+    .modal .typegrid button{ border:1px solid #cbd5e1; background:#fff; border-radius:20px; padding:6px 12px; cursor:pointer; font-size:13px; }
+    .modal .typegrid button.on{ background:#0071CE; color:#fff; border-color:#0071CE; }
+    .drop-note{ font-size:12px; color:#64748b; margin:4px 0 0; }
+    [contenteditable="true"]{ background:#fff6d1; }
+
+    .info { font-size:12px; color:#374151; display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:6px 0 10px; }
+
+    .modal {
+      display:none; position:fixed; z-index:999; inset:0; background:rgba(0,0,0,0.5);
+      overflow-y:auto; -webkit-overflow-scrolling:touch;
+    }
+    .modal-content {
+      background:#fff; border-radius:10px; max-width:560px; width:92%;
+      margin:40px auto; padding:20px; box-shadow:0 4px 10px rgba(0,0,0,0.3); position:relative;
+    }
+    .modal h2 { margin:0 0 10px; color:#0071CE; text-align:center; }
+    .modal label { display:block; margin:6px 0; }
+    .modal input[type="text"], .modal input[type="date"], .modal select {
+      width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;
+    }
+    .modal .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px; }
+    .modal .btn { border-radius:6px; }
+
+    .filter-summary {
+      background:rgba(255,255,255,0.8); border:1px solid #e5e7eb; border-radius:10px;
+      padding:8px 12px; margin:10px auto; max-width:95%; text-align:center; color:#1f2937;
+      font-size:14px; opacity:0; transition:opacity .3s ease; pointer-events:none;
+    }
+    .filter-summary.visible { opacity:1; pointer-events:auto; }
+
+    .loading { text-align:center; padding:20px; font-size:16px; color:#0071CE; }
+    .error { text-align:center; padding:20px; font-size:16px; color:#ff0000; }
+
+    /* ✅ Success banner that stays until reload */
+    .save-banner {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: #28a745; color: #fff; padding: 10px;
+      text-align: center; font-weight: bold; z-index: 2000; display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    @media (max-width:768px){
+      .search-input{ width:90%; font-size:16px; }
+      th,td{ font-size:12px; padding:6px; }
+      .modal-content{ max-width:92%; }
+      .modal .row{ grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ✅ Success banner -->
+  <div id="saveBanner" class="save-banner">✅ Changes saved. (This notice will clear on reload)</div>
+
+  <header class="page">
+    <a class="ml-back" data-role="home" href="compliance.html" title="Back to Compliance" style="text-decoration:none;">‹ Back</a>
+    <h1>🏛️ Fareham Borough Council Compliance</h1>
+  </header>
+
+  <div class="container">
+    <!-- Top bar -->
+    <div class="backbar">
+      <button id="reloadBtn" class="btn" title="Reload live data">↻ Reload</button>
+      <span id="liveNote" class="info">Live • <span id="loadedCount">0</span> records</span>
+
+      <!-- Edit cluster -->
+      <button id="editBtn" class="btn">✏️ Edit</button>
+      <button id="saveBtn" class="btn" style="display:none;">Save Changes</button>
+      <button id="addSiteBtn" class="btn" style="display:none;">＋ Add Site</button>
+      <button id="deleteSiteBtn" class="btn" style="display:none;">🗑 Delete Site</button>
+    </div>
+
+    <!-- Utility actions (separated from the filters to cut clutter) -->
+    <div class="utilbar" style="justify-content:center;">
+      <button class="bubble" id="searchModalBtn">🔎 Search by date/type</button>
+      <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
+      <button class="bubble" id="summaryBtn">％ Summary</button>
+      <button class="bubble" id="clearBtn">✕ Clear filters</button>
+      <button class="bubble" id="settingsBtn" style="display:none;">⚙ Settings</button>
+    </div>
+
+    <!-- Due-date filters -->
+    <div class="filter-bubbles summary-bubbles" id="dueFilters">
+      <span class="flabel">Due</span>
+      <button class="bubble" id="overdueBtn">Overdue</button>
+      <button class="bubble" data-days="30">30 days</button>
+      <button class="bubble" data-days="90">90 days</button>
+      <button class="bubble" data-days="365">365 days</button>
+    </div>
+
+    <!-- Compliance type filters -->
+    <div class="filter-bubbles" id="complianceFilters">
+      <span class="flabel">Compliance</span>
+      <button class="bubble" data-cat="fiveYear">5 Year</button>
+      <button class="bubble" data-cat="emMonthly">EM Monthly</button>
+      <button class="bubble" data-cat="emYearly">EM Yearly</button>
+      <button class="bubble" data-cat="pat">PAT</button>
+      <button class="bubble" data-cat="pv">PV</button>
+    </div>
+
+    <div id="filterSummary" class="filter-summary"></div>
+
+    <!-- Search bar -->
+    <div class="search-container" style="justify-content:center;">
+      <input class="search-input" id="searchBar" placeholder="Search site name, number or type..." />
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th><th>Site Name</th><th>Type</th><th>Status</th>
+            <th>5 Year</th><th>EM Monthly</th><th>EM Yearly</th><th>PAT</th><th>PV</th>
+            <th>📍</th><th>🔑</th><th>Docs</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"><tr><td colspan="12" class="loading">Loading data…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- XLSX for export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <script>
+/* =========================
+   Fareham Borough Council compliance chart — shares the scheme-aware /compliance
+   backend with the Southern Co-op page (scheme=fareham).
+   ========================= */
+const SCHEME = 'fareham';
+
+/* Editing is permission-based (Compliance or Full Access). */
+function canEditCompliance(){
+  try {
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    return p.FullAccess === "Yes" || p.Compliance === "Yes";
+  } catch (e) { return false; }
+}
+
+/* Escape user-supplied text (document labels/names) before putting it in HTML. */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ===== Page settings (per-type frequency + amber/red warning windows) ===== */
+let complianceSettings = { types: {
+  fiveYear:{years:5,amberDays:90,redDays:30},
+  emMonthly:{months:1,amberDays:14,redDays:7},
+  emYearly:{years:1,amberDays:90,redDays:30},
+  pat:{years:1,amberDays:90,redDays:30},
+  pv:{years:1,amberDays:90,redDays:30}
+} };
+const STATUS_TYPES = ['fiveYear','emMonthly','emYearly','pat','pv'];
+function typeSettings(type){
+  const t = (complianceSettings.types||{})[type] || {};
+  const mo = (type==='emMonthly');
+  return {
+    years: t.years!=null ? t.years : (type==='fiveYear'?5:1),
+    months: t.months!=null ? t.months : (mo?1:null),
+    amberDays: t.amberDays!=null ? t.amberDays : (mo?14:90),
+    redDays: t.redDays!=null ? t.redDays : (mo?7:30)
+  };
+}
+/* Status of ONE compliance type for a store: '' (no due date), 'green', 'amber'
+   or 'red', from that type's own warning windows. Red = due within redDays (or
+   overdue); amber = due within amberDays; green = further off. */
+function typeStatus(e, type){
+  const d = parseDate(e[type]);
+  if (!d) return '';
+  const cfg = typeSettings(type);
+  const daysLeft = (d - new Date()) / 86400000;
+  if (daysLeft <= cfg.redDays) return 'red';
+  if (daysLeft <= cfg.amberDays) return 'amber';
+  return 'green';
+}
+/* Worst status across a store's tracked compliances (drives the Status light). */
+function worstStatus(e){
+  let worst = 'green';
+  for (const t of STATUS_TYPES){
+    const s = typeStatus(e, t);
+    if (s === 'red') return 'red';
+    if (s === 'amber') worst = 'amber';
+  }
+  return worst;
+}
+
+/* ===== State ===== */
+let allData = [];       // full set (normalised)
+let currentData = [];   // filtered / searched view
+let editMode = false;
+let activeStoreType = 'ALL';
+const activeCategories = new Set();
+let viewMode = 'active';   // 'active' = live chart, 'closed' = archived (Closed Sites)
+/* Rows for the current view: live chart shows active stores, Closed Sites shows
+   archived (active===0) ones. */
+function baseData(){ return allData.filter(e => viewMode === 'closed' ? e.active === 0 : e.active !== 0); }
+
+/* Compliance certificate index (store code → { type: 1 }) — populated from the
+   portal's own /compliance store (SharePoint certs migrated into R2). Drives the
+   📄 links on each date cell. Column key → canonical compliance type. */
+let complianceIndex = {};
+let storeFiles = {};   // code -> { type: [ {url,current,date,filename}, … ] } (lazy-loaded)
+const CERT_TYPE = { fiveYear:'fiveYear', emMonthly:'emMonthly', emYearly:'emYearly', pat:'pat', pv:'pv' };
+const TYPE_LABEL = { fiveYear:'5 Year', emMonthly:'EM Monthly', emYearly:'EM Yearly', pat:'PAT', pv:'PV', asbestos:'Asbestos Register', other:'Other' };
+const ALL_TYPES = ['fiveYear','emMonthly','emYearly','pat','pv','asbestos','other'];
+function mlToken(){ try { return localStorage.getItem('mostlaneToken') || ''; } catch(e){ return ''; } }
+/* All /compliance/* calls are scoped to this scheme (Fareham). */
+function withScheme(path){
+  if (!/^\/compliance\//.test(path)) return path;
+  return path + (path.includes('?') ? '&' : '?') + 'scheme=' + SCHEME;
+}
+function authFetch(path, opts){
+  opts = opts || {};
+  const h = Object.assign({}, opts.headers || {});
+  const t = mlToken(); if (t) h['Authorization'] = 'Bearer ' + t;
+  return fetch((window.MOSTLANE_API || '') + withScheme(path), Object.assign({}, opts, { headers:h }));
+}
+async function loadComplianceIndex(){
+  try {
+    const r = await authFetch('/compliance/index');
+    if (!r.ok) return;
+    const j = await r.json();
+    complianceIndex = (j && j.map) ? j.map : {};
+    // re-render so cells pick up their 📄 links (data may already be shown)
+    if (allData.length) applyFilters();
+  } catch(e){ /* certs are non-critical — table still works without them */ }
+}
+/* ── In-app certificate viewer with ◀ ▶ navigation across a site's documents ──
+   Renders each PDF/image inside docviewer.js (robust, mobile zoom/scroll) and
+   layers our own arrows + keyboard nav on top so you can flick through every
+   certificate on file for the store. */
+const CertViewer = (function(){
+  let items = [], idx = 0, nav = null, hooked = false;
+  function ensureUI(){
+    if (nav) return;
+    nav = document.createElement('div'); nav.id = 'certNav';
+    nav.innerHTML = '<button class="cvArrow cvPrev" title="Previous (←)" aria-label="Previous">‹</button>'
+                  + '<button class="cvArrow cvNext" title="Next (→)" aria-label="Next">›</button>'
+                  + '<div class="cvCount"></div>';
+    document.body.appendChild(nav);
+    nav.querySelector('.cvPrev').onclick = ()=>go(idx-1);
+    nav.querySelector('.cvNext').onclick = ()=>go(idx+1);
+  }
+  function hookClose(){
+    if (hooked) return;
+    const btn = document.getElementById('mldvClose');
+    if (btn){ btn.addEventListener('click', hide); hooked = true; }
+  }
+  function go(i){
+    if (!items.length || typeof MLDocViewer === 'undefined') return;
+    idx = (i + items.length) % items.length;            // wrap around
+    const it = items[idx];
+    MLDocViewer.open({ url: it.url, name: it.name, downloadUrl: it.url });
+    hookClose();
+    update();
+  }
+  function update(){
+    ensureUI();
+    const multi = items.length > 1;
+    nav.querySelector('.cvPrev').style.display = multi ? '' : 'none';
+    nav.querySelector('.cvNext').style.display = multi ? '' : 'none';
+    const c = nav.querySelector('.cvCount');
+    c.style.display = multi ? '' : 'none';
+    c.textContent = (idx+1) + ' / ' + items.length + (items[idx] && items[idx].name ? ' · ' + items[idx].name : '');
+  }
+  function openList(list, startIdx){
+    items = (list || []).filter(x=>x && x.url);
+    if (!items.length) return alert('No certificate on file for this one yet.');
+    ensureUI(); nav.style.display = 'block';
+    go(Math.max(0, Math.min(startIdx||0, items.length-1)));
+  }
+  function hide(){ if (nav) nav.style.display = 'none'; items = []; }
+  document.addEventListener('keydown', (e)=>{
+    if (!nav || nav.style.display === 'none') return;
+    if (e.key === 'ArrowLeft'){ e.preventDefault(); go(idx-1); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); go(idx+1); }
+    else if (e.key === 'Escape'){ hide(); }   // docviewer closes itself on Esc too
+  });
+  return { openList, hide };
+})();
+
+/* Build the ordered document list for a store (from /compliance/files): standard
+   types in chart order, each with its current doc(s) first then previous ones,
+   named "TYPE — filename" (custom "Other" docs keep their own name). */
+async function siteDocList(code){
+  const r = await authFetch('/compliance/files?code=' + encodeURIComponent(code));
+  const j = await r.json(); const files = (j && j.files) || {};
+  const STD = ['fiveYear','pat','em','pv','ev','pump'];
+  const order = [...STD.filter(t=>files[t] && files[t].length),
+                 ...Object.keys(files).filter(t=>!STD.includes(t) && files[t] && files[t].length)];
+  const list = [];
+  order.forEach(t=>{
+    const arr = [...files[t]].sort((a,b)=> (b.current?1:0)-(a.current?1:0));  // current first
+    arr.forEach(f=>{
+      const base = f.label || f.filename || 'file';
+      list.push({ id:f.id, url:f.url, type:t, current:!!f.current,
+        name: (t==='other') ? base : ((TYPE_LABEL[t]||t) + ' — ' + base) });
+    });
+  });
+  return list;
+}
+
+/* 📄 on a date cell → open that type's current cert, then arrow through the site. */
+async function openCert(code, type){
+  try{
+    const list = await siteDocList(code);
+    if (!list.length) return alert('No certificate on file for this one yet.');
+    let start = list.findIndex(d=> d.type===type && d.current);
+    if (start < 0) start = list.findIndex(d=> d.type===type);
+    if (start < 0) start = 0;
+    CertViewer.openList(list, start);
+  }catch(e){ alert('Could not open the certificate.'); }
+}
+
+/* A document link in the Documents modal → open that exact file, arrow through the rest. */
+async function openCertById(code, id){
+  try{
+    const list = await siteDocList(code);
+    const start = Math.max(0, list.findIndex(d=> d.id===id));
+    CertViewer.openList(list, start);
+  }catch(e){ alert('Could not open the document.'); }
+}
+function pad4(v){ return String(v==null?'':v).replace(/\D/g,'').padStart(4,'0'); }
+
+/* Types this store tracks (has a due date) first, then the rest — so the picker
+   defaults to "what compliances we have for that site". */
+function typesForStore(code){
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const has = ['fiveYear','pat','em','pv','ev','pump'].filter(t=> rec[t]);
+  return [...has, ...ALL_TYPES.filter(t=>!has.includes(t))];
+}
+
+/* ── Auto-detect the compliance type + completed date from an uploaded PDF ────
+   Reads the PDF in-browser (PDF.js — nothing leaves the device until Upload),
+   detects the type from the certificate title and the completed date as the
+   latest date that isn't in the future (skips PAT retest / EICR next-inspection
+   dates, and takes the final day of a multi-day EICR). PAT / EM / 5 Year only. */
+const PDFJS_SRC = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
+let _pdfjsP = null;
+function ensurePdfjs(){
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (_pdfjsP) return _pdfjsP;
+  _pdfjsP = new Promise((resolve,reject)=>{
+    const s=document.createElement('script'); s.src=PDFJS_SRC+'pdf.min.js';
+    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_SRC+'pdf.worker.min.js'; resolve(window.pdfjsLib);}catch(e){reject(e);} };
+    s.onerror=()=>reject(new Error('pdfjs load failed'));
+    document.head.appendChild(s);
+  });
+  return _pdfjsP;
+}
+async function extractPdfText(file, maxPages){
+  const lib = await ensurePdfjs();
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  const n = Math.min(maxPages||4, pdf.numPages);
+  let out='';
+  for (let i=1;i<=n;i++){ const page=await pdf.getPage(i); const tc=await page.getTextContent(); out+=' '+tc.items.map(it=>it.str).join(' '); }
+  try{ pdf.destroy(); }catch(e){}
+  return out;
+}
+function detectComplianceType(text){
+  // Collapse all whitespace (newlines from PDF layout) so titles that wrap across
+  // lines — e.g. "…CONDITION\nREPORT" — still match.
+  const t=String(text||'').toLowerCase().replace(/\s+/g,' ');
+  if(/portable appliance test/.test(t)) return 'pat';
+  if(/emergency lighting/.test(t)){
+    // Annual (yearly) full-duration test vs the monthly function test.
+    if(/annual|yearly|3\s*hour|full\s*duration|drain\s*test|duration test/.test(t)) return 'emYearly';
+    return 'emMonthly';
+  }
+  if(/electrical installation condition report/.test(t) || /\beicr\b/.test(t)) return 'fiveYear';
+  if(/\bpv\b|solar|photovolt/.test(t)) return 'pv';
+  return '';
+}
+function detectCompletedDate(text){
+  const re=/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/g;
+  const grace = Date.now() + 2*86400000;   // today (+2d) — anything later is a future retest/next-due
+  let best=null, m;
+  while((m=re.exec(String(text||'')))){
+    let d=+m[1], mo=+m[2], y=+m[3]; if(y<100) y+=2000;
+    if(mo<1||mo>12||d<1||d>31) continue;
+    const ts=Date.UTC(y,mo-1,d); if(isNaN(ts)||ts>grace) continue;
+    if(!best||ts>best.ts) best={ts, iso:`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`};
+  }
+  return best?best.iso:'';
+}
+async function detectComplianceMeta(file){
+  const text = await extractPdfText(file, 4);
+  return { type: detectComplianceType(text), dateISO: detectCompletedDate(text) };
+}
+
+/* Drop / choose a file → pick the compliance type + optional date → upload. */
+function openUploadModal(code, file){
+  if(!canEditCompliance()) return alert("You don't have permission to add compliance documents.");
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const order = typesForStore(code);
+  let sel = order[0] || 'fiveYear';
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content">
+    <h2>Add document</h2>
+    <p style="margin:.2em 0 .6em"><b>${code}</b> — ${rec.siteName||''}</p>
+    <label>Compliance type</label>
+    <div class="typegrid" id="ug"></div>
+    <label id="unl">Document name (optional)</label>
+    <input type="text" id="uname" placeholder="e.g. O&amp;M for PV — leave blank to use the file name">
+    <div class="row">
+      <div><label>File</label><input type="file" id="uf"></div>
+      <div><label>Certificate date (optional)</label><input type="date" id="ud"></div>
+    </div>
+    <div id="udet" class="drop-note" style="min-height:1.1em;color:#0071CE;font-weight:600;margin:2px 0 0"></div>
+    <div id="ufolderRow" style="display:none">
+      <label>…or upload a whole folder of PDFs</label>
+      <input type="file" id="ufolder" webkitdirectory directory multiple>
+      <p class="drop-note" style="margin:4px 0 0">Every PDF inside the folder <b>and its sub-folders</b> is added as its own named document (named from its file/sub-folder path). Desktop only.</p>
+    </div>
+    <p class="drop-note">The newest document becomes the current one; older ones are kept as previous versions (never deleted). A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
+    <div class="actions">
+      <button class="btn" id="udo">Upload</button>
+      <button class="btn" style="background:#ccc;color:#000;" id="uc">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  const grid=modal.querySelector('#ug');
+  const nameLbl=modal.querySelector('#unl');
+  const folderRow=modal.querySelector('#ufolderRow');
+  const syncNameLbl=()=>{
+    const isOther = (sel==='other');
+    nameLbl.textContent = isOther ? 'Document name (optional for a single file)' : 'Document name (optional)';
+    folderRow.style.display = isOther ? '' : 'none';   // folder upload is Other-only
+  };
+  let userPickedType = false;
+  const selectType=(t)=>{ if(!t) return; sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); syncNameLbl(); };
+  order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ userPickedType=true; selectType(t); }; grid.appendChild(b); });
+  syncNameLbl();
+  const fileInput=modal.querySelector('#uf');
+
+  // Read a chosen PDF, pre-select its type + fill the completed date (user still
+  // reviews and presses Upload). Won't override a type the user picked by hand.
+  async function autofillFromFile(f){
+    const det=modal.querySelector('#udet');
+    const isPdf = f && (/\.pdf$/i.test(f.name) || f.type==='application/pdf');
+    if(!isPdf){ if(det) det.textContent=''; return; }
+    if(det) det.textContent='🔍 Reading certificate…';
+    try{
+      const meta=await detectComplianceMeta(f);
+      if(meta.type && !userPickedType) selectType(meta.type);
+      if(meta.dateISO) modal.querySelector('#ud').value=meta.dateISO;
+      if(meta.type || meta.dateISO){
+        const parts=[];
+        if(meta.type) parts.push(TYPE_LABEL[meta.type]||meta.type);
+        if(meta.dateISO) parts.push(meta.dateISO.split('-').reverse().join('/'));
+        det.textContent='✓ Auto-detected: '+parts.join(' · ')+' — check it, then Upload.';
+      } else { det.textContent='Couldn’t auto-detect — please set the type and date.'; }
+    }catch(e){ if(det) det.textContent='Couldn’t read this PDF — set the type and date manually.'; }
+  }
+  fileInput.addEventListener('change', ()=>{ const f=fileInput.files&&fileInput.files[0]; if(f) autofillFromFile(f); });
+
+  if(file){ try{ const dt=new DataTransfer(); dt.items.add(file); fileInput.files=dt.files; }catch(e){} autofillFromFile(file); }
+  modal.querySelector('#uc').onclick=()=>modal.remove();
+  const folderInput=modal.querySelector('#ufolder');
+  modal.querySelector('#udo').onclick=async()=>{
+    const name=(modal.querySelector('#uname').value||'').trim();
+    const btn=modal.querySelector('#udo');
+
+    // ── "Other" folder upload: every PDF in the folder + sub-folders ──────────
+    const pdfs = (sel==='other' && folderInput && folderInput.files)
+      ? [...folderInput.files].filter(f=>/\.pdf$/i.test(f.name)) : [];
+    if(sel==='other' && pdfs.length){
+      btn.disabled=true;
+      let done=0, failed=0;
+      for(const f of pdfs){
+        // Name each doc from its path inside the chosen folder (drop the root
+        // folder, drop .pdf), so sub-folder structure is preserved in the name.
+        const rel=(f.webkitRelativePath||f.name).split('/').filter(Boolean);
+        if(rel.length>1) rel.shift();
+        let lbl=rel.join(' / ').replace(/\.pdf$/i,'') || f.name.replace(/\.pdf$/i,'');
+        if(name) lbl=name+' — '+lbl;
+        const form=new FormData();
+        form.append('file',f); form.append('code',code); form.append('type','other');
+        form.append('label',lbl.slice(0,160)); form.append('filename',f.name);
+        try{ const r=await authFetch('/compliance/file',{method:'POST',body:form}); const out=await r.json().catch(()=>({})); (r.ok&&out.ok)?done++:failed++; }
+        catch(e){ failed++; }
+        btn.textContent=`Uploading… ${done+failed}/${pdfs.length}`;
+      }
+      modal.remove();
+      alert(`Uploaded ${done} PDF${done===1?'':'s'} from the folder${failed?` (${failed} failed)`:''}.`);
+      loadFromPortal();
+      return;
+    }
+
+    // ── Single-file upload ────────────────────────────────────────────────────
+    const f=fileInput.files&&fileInput.files[0];
+    if(!f){
+      if(sel==='other' && folderInput && folderInput.files && folderInput.files.length)
+        return alert('No PDF files were found in that folder.');
+      return alert('Choose a file (or, for Other, a folder of PDFs).');
+    }
+    btn.disabled=true; btn.textContent='Uploading…';
+    const form=new FormData();
+    form.append('file',f); form.append('code',code); form.append('type',sel);
+    const d=modal.querySelector('#ud').value; if(d) form.append('date',d);
+    if(name) form.append('label',name);
+    // A named "Other" document is an extra file (e.g. O&M), not a due-dated
+    // compliance type — so don't let it advance a due date.
+    if(sel!=='other') form.append('bump','1');
+    form.append('filename',f.name);
+    try{
+      const r=await authFetch('/compliance/file',{method:'POST',body:form});
+      const out=await r.json().catch(()=>({}));
+      if(!r.ok||!out.ok){ btn.disabled=false; btn.textContent='Upload'; return alert('Upload failed: '+(out.error||r.status)); }
+      modal.remove();
+      loadFromPortal();
+    }catch(e){ btn.disabled=false; btn.textContent='Upload'; alert('Upload failed.'); }
+  };
+}
+
+/* View + manage every document for a store. Standard compliance types group by
+   their label; named "Other" documents (e.g. O&M for PV) each become their own
+   named section. Admins can rename, delete, and pin/link documents in place. */
+async function openVersionsModal(code){
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const canEdit = canEditCompliance();
+  const HEAD = { fiveYear:'5 Year', emMonthly:'EM Monthly', emYearly:'EM Yearly', pat:'PAT Testing', pv:'PV', asbestos:'Asbestos Register', other:'Other' };
+  const ORDER = ['fiveYear','emMonthly','emYearly','pat','pv'];
+  const TRACKABLE = ['fiveYear','emMonthly','emYearly','pat','pv'];
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content">
+    <h2>Documents</h2>
+    <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
+    ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
+    <div id="vlist">Loading…</div>
+    <div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#vc').onclick=()=>modal.remove();
+  modal.querySelector('#vadd').onclick=()=>{ modal.remove(); openUploadModal(code); };
+  const host=modal.querySelector('#vlist');
+
+  // A doc's display name can carry a sub-folder path ("subA / report") from a
+  // folder upload — split it so the folder becomes a small sub-header.
+  const subParse=(name)=>{ const s=String(name||''); const i=s.lastIndexOf(' / '); return i>=0 ? {sub:s.slice(0,i).trim(), leaf:s.slice(i+3).trim()} : {sub:'', leaf:s}; };
+
+  // These types are collections of distinct documents (not versioned) — no
+  // current/previous badge or "keep" link.
+  const noVer = (type)=> ['other','asbestos','emMonthly'].includes(type);
+  const monthLabel=(dateStr)=>{ const d=dateStr?new Date(dateStr):null; if(!d||isNaN(d)) return 'Undated'; return d.toLocaleDateString('en-GB',{month:'long',year:'numeric'}); };
+
+  function rowHtml(f, type){
+    const raw=f.label||f.filename||'file';
+    const {leaf}=subParse(raw);
+    const nv=noVer(type);
+    const badge=nv?'':(f.current?'<span class="ver-current">● current</span>':'<span class="ver-old">previous</span>');
+    const date=f.date?`<span class="ver-old" style="font-size:12px;white-space:nowrap">${esc(String(f.date).slice(0,10))}</span>`:'';
+    const keep=(canEdit&&!nv)?`<label class="pin" title="Keep as a current document. Tick two or more of a type to link them."><input type="checkbox" class="cbpin" ${f.pinned?'checked':''}> keep</label>`:'';
+    const edit=canEdit?`${keep}<button class="mini rn" type="button">Rename</button><button class="mini del" type="button">Delete</button>`:'';
+    return `<div class="doc-row" ${canEdit?'draggable="true"':''} data-id="${f.id}" data-type="${type}" data-label="${esc(raw)}">${badge}<a class="nm" draggable="false" href="${f.url}" target="_blank">${esc(leaf)}</a>${date}${edit}</div>`;
+  }
+  function typeHtml(type, items){
+    items = items||[];
+    let body='';
+    if(!items.length){
+      body+=`<div class="doc-empty">No documents${canEdit?' — drag one here to file it under '+esc(HEAD[type]||type):''}.</div>`;
+    } else if(type==='emMonthly'){
+      // EM Monthly gets a LOT of certs — group them under clear month sub-headers,
+      // newest month first, so each month's certificate is easy to find.
+      const byMonth={}, order=[];
+      items.forEach(f=>{ const k=monthLabel(f.date); if(!byMonth[k]){byMonth[k]=[];order.push(k);} byMonth[k].push(f); });
+      order.sort((a,b)=>{ const da=a==='Undated'?0:Date.parse('1 '+a); const db=b==='Undated'?0:Date.parse('1 '+b); return db-da; });
+      order.forEach(mn=>{ body+=`<div class="doc-sub">🗓 ${esc(mn)}</div>`+byMonth[mn].map(f=>rowHtml(f,type)).join(''); });
+    } else {
+      // Everything else: optional sub-folders (from folder uploads) as sub-headers.
+      const direct=[], subs={}, subOrder=[];
+      items.forEach(f=>{ const {sub}=subParse(f.label||f.filename||''); if(sub){ if(!subs[sub]){subs[sub]=[];subOrder.push(sub);} subs[sub].push(f);} else direct.push(f); });
+      body+=direct.map(f=>rowHtml(f,type)).join('');
+      subOrder.forEach(sname=>{
+        const ids=subs[sname].map(f=>f.id);
+        body+=`<div class="doc-sub" ${canEdit?'draggable="true"':''} data-ids='${esc(JSON.stringify(ids))}'>📁 ${esc(sname)}</div>`+subs[sname].map(f=>rowHtml(f,type)).join('');
+      });
+    }
+    return `<div class="doc-type" data-type="${type}"><div class="hbar">${esc(HEAD[type]||type)} <span class="cnt">(${items.length})</span></div><div class="body">${body}</div></div>`;
+  }
+  async function refresh(){
+    let files={};
+    try{ const r=await authFetch('/compliance/files?code='+encodeURIComponent(code)); const j=await r.json(); files=j.files||{}; }
+    catch(e){ host.innerHTML='<p>Could not load.</p>'; return; }
+    const hasDocs=Object.keys(files).filter(t=>files[t]&&files[t].length);
+    const tracks=TRACKABLE.filter(t=>rec[t]);
+    // only the applicable headings for this site: types it tracks or has docs for,
+    // plus Other (always, as the catch-all + drop target).
+    const applicable=[];
+    ORDER.forEach(t=>{ if(hasDocs.includes(t)||tracks.includes(t)) applicable.push(t); });
+    applicable.push('asbestos');   // Asbestos Register — always a section per site
+    applicable.push('other');
+    hasDocs.forEach(t=>{ if(!applicable.includes(t)) applicable.push(t); });
+    host.innerHTML = applicable.map(t=>typeHtml(t, files[t])).join('');
+  }
+
+  // click: open / rename / delete / keep
+  host.addEventListener('click', async (ev)=>{
+    const row=ev.target.closest('.doc-row'); if(!row) return;
+    const id=+row.dataset.id;
+    if(ev.target.classList.contains('nm')){ ev.preventDefault(); openCertById(code, id); return; }
+    if(ev.target.classList.contains('rn')){
+      const {sub,leaf}=subParse(row.dataset.label||'');
+      const name=prompt('Rename this document:', leaf); if(name==null) return;
+      const label=(sub?sub+' / ':'')+name.trim();   // keep it in its sub-folder
+      await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,label})});
+      refresh();
+    } else if(ev.target.classList.contains('del')){
+      if(!confirm('Delete this document permanently? This cannot be undone.')) return;
+      await authFetch('/compliance/file-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+      await refresh(); loadFromPortal();
+    }
+  });
+  host.addEventListener('change', async (ev)=>{
+    if(!ev.target.classList.contains('cbpin')) return;
+    const id=+ev.target.closest('.doc-row').dataset.id;
+    await authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,pinned:ev.target.checked?1:0})});
+    refresh();
+  });
+
+  // drag a document (or a whole 📁 sub-folder) onto another heading to re-file it
+  let dragIds=null;
+  host.addEventListener('dragstart',(ev)=>{
+    const sub=ev.target.closest('.doc-sub'); const row=ev.target.closest('.doc-row');
+    if(sub){ try{dragIds=JSON.parse(sub.dataset.ids||'[]');}catch(e){dragIds=null;} sub.classList.add('dragging'); }
+    else if(row){ dragIds=[+row.dataset.id]; row.classList.add('dragging'); }
+    else { dragIds=null; return; }
+    if(ev.dataTransfer){ ev.dataTransfer.effectAllowed='move'; try{ev.dataTransfer.setData('text/plain','move');}catch(e){} }
+  });
+  host.addEventListener('dragend',()=>{ host.querySelectorAll('.dragging').forEach(e=>e.classList.remove('dragging')); host.querySelectorAll('.doc-type.drop-hot').forEach(z=>z.classList.remove('drop-hot')); });
+  host.addEventListener('dragover',(ev)=>{ if(!dragIds) return; const zone=ev.target.closest('.doc-type'); if(!zone) return; ev.preventDefault(); host.querySelectorAll('.doc-type.drop-hot').forEach(z=>{ if(z!==zone) z.classList.remove('drop-hot'); }); zone.classList.add('drop-hot'); });
+  host.addEventListener('drop',async(ev)=>{
+    const zone=ev.target.closest('.doc-type'); if(!zone||!dragIds) return;
+    ev.preventDefault(); zone.classList.remove('drop-hot');
+    const targetType=zone.dataset.type; const ids=dragIds; dragIds=null;
+    try{ await Promise.all(ids.map(id=>authFetch('/compliance/file-update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,type:targetType})}))); }catch(e){}
+    await refresh(); loadFromPortal();
+  });
+
+  refresh();
+}
+/* Normalise any stored due date to UK day-first DD/MM/YYYY for display. Handles
+   ISO (YYYY-MM-DD, as the auto-advance stores it) and DD/MM/YY(YY) or DD-MM-YY
+   from the migrated data — so every cell reads the same way round. Unknown text
+   is left untouched. (Slashes + 4-digit year so it round-trips through the edit
+   save + the overdue calc, both of which parse DD/MM/YYYY.) */
+function fmtDue(s){
+  // Strip any stray cert emoji that a bad edit may have baked into the stored
+  // value, so a due date can never render an extra 📄 (see dateCell — the "has a
+  // document" 📄 is added there, exactly once per type).
+  s = String(s == null ? '' : s).replace(/📄/g, '').trim();
+  if (!s) return '';
+  let d, m, y, mm;
+  if ((mm = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/.exec(s))) { y=+mm[1]; m=+mm[2]; d=+mm[3]; }        // ISO YYYY-MM-DD
+  else if ((mm = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(s))) { d=+mm[1]; m=+mm[2]; y=+mm[3]; if (y<100) y+=2000; } // DD/MM/YY(YY)
+  else return s;
+  if (!(m>=1 && m<=12 && d>=1 && d<=31)) return s;
+  const p = n => String(n).padStart(2,'0');
+  return `${p(d)}/${p(m)}/${y}`;
+}
+/* HTML for a date cell, with a 📄 link appended when a cert is on file. */
+function dateCell(code, colKey, val){
+  const t = CERT_TYPE[colKey];
+  const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
+  const link = has ? ` <a class="cert-link" href="#" data-code="${code}" data-type="${t}" title="Open certificate">📄</a>` : '';
+  return `${fmtDue(val)}${link}`;
+}
+
+/* ===== Helpers ===== */
+function bust(url){
+  const u = new URL(url);
+  u.searchParams.set('v', Date.now() + Math.random());
+  return u.toString();
+}
+
+async function fetchNoCacheJSON(url) {
+  try {
+    const res = await fetch(bust(url), {
+      cache: 'no-store',
+      mode: 'cors'
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('fetchNoCacheJSON error:', e);
+    return null;
+  }
+}
+
+function pad4(v){ return String(v ?? "").replace(/\D/g,"").padStart(4,"0"); }
+function pick(o, keys){ for (const k of keys){ if(o && o[k]!=null && String(o[k]).trim()!=="") return o[k]; } return ""; }
+
+function normaliseRecord(raw, label){
+  const rawCode = pick(raw, ["branchCode","Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"]);
+  const storeCode = pad4(rawCode || "");
+  const siteName  = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]);
+  const postcode  = pick(raw, ["Postcode","postcode","Post Code","ZIP"]);
+  const fiveYear  = pick(raw, ["5_Year","5 Year","5year","FiveYear"]);
+  const pat       = pick(raw, ["PAT","Pat"]);
+  const em        = pick(raw, ["EM","Emergency Lighting","EmergencyLighting"]);
+  const pv        = pick(raw, ["PV","Photovoltaic"]);
+  const ev        = pick(raw, ["EV","EVCP","EV_Charge"]);
+  const pump      = pick(raw, ["PUMP","Pump"]);
+  const sharePoint= pick(raw, ["SharePoint","SharePointURL","sharePointURL","sharePoint","SP"]);
+
+  return {
+    storeCode,
+    siteName,
+    postcode,
+    storeType: label,
+    fiveYear, pat, em, pv, ev, pump,
+    sharePoint
+  };
+}
+
+function parseDate(d) {
+  if (!d) return null;
+  const s = String(d).trim().replace(/^\*/, '');
+  if (!s) return null;
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
+    const [dd, mm, yy] = s.split('/');
+    const y = yy.length === 2 ? (2000 + Number(yy)) : Number(yy);
+    return new Date(y, Number(mm)-1, Number(dd));
+  }
+  const dt = new Date(s);
+  return isNaN(dt) ? null : dt;
+}
+
+function statusEmoji(s){ return s==='red' ? '🔴' : s==='amber' ? '🟡' : '🟢'; }
+function getStatus(e){ return statusEmoji(worstStatus(e)); }
+
+/* ============ Rendering ============ */
+function renderTable(d){
+  currentData = d;
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '';
+  const frag = document.createDocumentFragment();
+
+  d.forEach(e=>{
+    if (!e.storeCode || !e.siteName) return;
+    const tr = document.createElement('tr');
+    tr.dataset.code = e.storeCode;
+    const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
+    const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
+      + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '');
+    const m = e.meta || {};
+    const pinSet = (m.lat!=null && m.lng!=null) || m.w3w;
+    const keySet = (m.access && m.access.trim()) || (m.contact && m.contact.trim());
+    const locCell = `<button class="doc-btn loc" data-code="${e.storeCode}" title="${pinSet?'Location set — view/edit':'Set location'}">${pinSet?'📍':'📍❓'}</button>`;
+    const keyCell = `<button class="doc-btn key" data-code="${e.storeCode}" title="${keySet?'Access info — view/edit':'Add access info'}">${keySet?'🔑':'🔑❓'}</button>`;
+    const ws = worstStatus(e);
+    const dtd = (type) => { const s = typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
+    tr.innerHTML = `
+      <td>${e.storeCode}</td><td class="site">${e.siteName}</td><td>${esc(e.storeType||'')}</td>
+      <td class="${ws?'st-'+ws:''}">${statusEmoji(ws)}</td>
+      ${dtd('fiveYear')}${dtd('emMonthly')}${dtd('emYearly')}${dtd('pat')}${dtd('pv')}
+      <td>${locCell}</td><td>${keyCell}</td>
+      <td class="docs-cell">${docsCell}</td>
+    `;
+    frag.appendChild(tr);
+  });
+
+  tb.appendChild(frag);
+  document.getElementById('loadedCount').textContent = d.length;
+  if (editMode) enableEditing(true);
+}
+
+/* apply filters + re-render */
+function applyFilters(){
+  let data = baseData();
+  if (activeStoreType !== 'ALL') data = data.filter(e=>e.storeType === activeStoreType);
+  if (activeCategories.size > 0) {
+    data = data.filter(e=>{
+      for (const cat of activeCategories) {
+        const val = e[cat]; if (!val || String(val).trim()==="") return false;
+      }
+      return true;
+    });
+  }
+  const q = document.getElementById('searchBar').value.toLowerCase().trim();
+  if (q) {
+    data = data.filter(e =>
+      (e.storeCode || '').toLowerCase().includes(q) ||
+      (e.siteName || '').toLowerCase().includes(q) ||
+      (e.postcode || '').toLowerCase().includes(q)
+    );
+  }
+  renderTable(data);
+  updateFilterSummary();
+}
+
+function updateFilterSummary(){
+  const el = document.getElementById('filterSummary');
+  const cats = activeCategories.size ? Array.from(activeCategories).join(', ') : 'None';
+  el.textContent = `Compliance: ${cats} | Showing ${currentData.length} of ${baseData().length}`;
+  el.classList.add('visible');
+  updateClosedCount();
+}
+/* Keep the "Closed Sites" button label showing how many are archived. */
+function updateClosedCount(){
+  const btn = document.getElementById('closedSitesBtn');
+  if (!btn) return;
+  const n = allData.filter(e=>e.active === 0).length;
+  btn.textContent = '🗄 Closed Sites' + (n ? ` (${n})` : '');
+}
+
+/* Archive a store → moves it off the live chart into Closed Sites (docs kept). */
+async function archiveRow(code){
+  if (!canEditCompliance()) return;
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code));
+  if (!confirm(`Archive "${rec?rec.siteName:code}" to Closed Sites?\n\nIt's removed from this chart — its documents are kept and you can still add more.`)) return;
+  try{
+    const r = await authFetch('/compliance/store-archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code, archived:true})});
+    if(!r.ok) throw 0;
+    const it = allData.find(x=>pad4(x.storeCode)===pad4(code)); if(it) it.active = 0;
+    applyFilters();
+  }catch(e){ alert('Could not archive this site.'); }
+}
+/* Reopen an archived store back onto the live chart. */
+async function reopenRow(code){
+  if (!canEditCompliance()) return;
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code));
+  if (!confirm(`Reopen "${rec?rec.siteName:code}" back onto the live compliance chart?`)) return;
+  try{
+    const r = await authFetch('/compliance/store-archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code, archived:false})});
+    if(!r.ok) throw 0;
+    const it = allData.find(x=>pad4(x.storeCode)===pad4(code)); if(it) it.active = 1;
+    applyFilters();
+  }catch(e){ alert('Could not reopen this site.'); }
+}
+/* Switch between the live chart and the Closed Sites view. */
+function setView(mode){
+  viewMode = mode;
+  const closed = (mode === 'closed');
+  document.body.classList.toggle('closed-view', closed);
+  document.getElementById('closedHead').style.display = closed ? 'flex' : 'none';
+  // leaving/entering closed view always drops edit mode
+  if (editMode){ editMode = false; enableEditing(false);
+    document.getElementById('editBtn').style.display = canEditCompliance() ? 'inline-flex' : 'none';
+    ['saveBtn','addSiteBtn','deleteSiteBtn'].forEach(id=>document.getElementById(id).style.display='none');
+  }
+  // reset the DUE quick-filters when switching
+  document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
+  applyFilters();
+  try{ document.querySelector('.table-wrapper').scrollTop = 0; }catch(e){}
+}
+
+/* ============ Progressive Live Loads ============ */
+const SOURCES = [
+  { path: 'retail',      label: 'Retail' },
+  { path: 'els',         label: 'ELS' },
+  { path: 'els_private', label: 'ELS Private' },
+  { path: 'cobra',       label: 'Cobra' },
+  { path: 'wenzels',     label: "Wenzel's" }
+];
+
+async function fetchOneSource(s) {
+  const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
+  if (!j) return [];
+
+  let arr = [];
+
+  // Case 1: array of objects [{...}, {...}]
+  if (Array.isArray(j) && j.length > 0 && !j.some(v => typeof v !== 'object')) {
+    // Handle nested object arrays like [ { "9701": {...}, "9704": {...} } ]
+    if (Object.keys(j[0] || {}).some(k => typeof j[0][k] === "object")) {
+      arr = Object.values(j[0]);
+    } else {
+      arr = j;
+    }
+  }
+  // Case 2: plain object {"9701": {...}}
+  else if (j && typeof j === "object" && !Array.isArray(j)) {
+    arr = Object.values(j);
+  }
+  // Case 3: wrapped under "data" key
+  else if (j && Array.isArray(j.data)) {
+    arr = j.data;
+  }
+
+  return arr
+    .map(r => normaliseRecord(r, s.label))
+   .filter(r => r.storeCode && (r.storeName ?? r.siteName ?? "").trim() !== "");
+}
+async function fetchAllProgressive(){
+  allData = [];
+  renderTable([]);
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data…</td></tr>';
+
+  for (const s of SOURCES){
+    const chunk = await fetchOneSource(s).catch(err => {
+      console.error('fetchOneSource error for', s.path, err);
+      return [];
+    });
+    if (chunk.length){
+      allData = allData.concat(chunk);
+      applyFilters();
+    }
+  }
+  if (!allData.length) {
+    tb.innerHTML = '<tr><td colspan="12" class="error">No data returned.</td></tr>';
+  }
+}
+
+/* ============ Portal-native load (single source: /compliance/stores) ========
+   The chart now reads from the portal. Each row's name/postcode come from the
+   canonical `sites` home; category + due dates from the compliance overlay; and
+   `files` says which types already have a document (drives the 📄 links). */
+async function loadFromPortal(){
+  const tb = document.getElementById('tableBody');
+  // Preserve where the user is looking. Uploading/deleting a document (and the
+  // Reload button) re-runs this; without capturing the scroll the rebuilt table
+  // would snap back to the top.
+  const wrap = document.querySelector('.table-wrapper');
+  const keepScroll = wrap ? wrap.scrollTop : 0;
+  const keepWin = window.scrollY;
+  const firstLoad = !allData.length;
+  // Only show the "Loading…" placeholder on the very first load — on a refresh we
+  // keep the current rows visible (no flash, no jump) until the new ones arrive.
+  if (firstLoad) tb.innerHTML = '<tr><td colspan="12" class="loading">Loading…</td></tr>';
+  let stores = [];
+  try{
+    const r = await authFetch('/compliance/stores');
+    const j = await r.json();
+    stores = j.stores || [];
+  }catch(e){
+    console.error('loadFromPortal', e);
+    // On a background refresh, keep what's on screen rather than blanking it.
+    if (firstLoad) tb.innerHTML = '<tr><td colspan="12" class="error">Could not load compliance data.</td></tr>';
+    return;
+  }
+  complianceIndex = {};
+  storeFiles = {};
+  allData = stores.map(s => {
+    const code = pad4(s.code);
+    complianceIndex[code] = s.files || {};
+    const d = s.due || {};
+    return {
+      storeCode: code,
+      siteName: s.name || '',
+      postcode: s.postcode || '',
+      storeType: s.category || '',
+      hasSite: !!s.hasSite,
+      active: s.active == null ? 1 : s.active,
+      meta: s.meta || {},
+      fiveYear: d.fiveYear || '', emMonthly: d.emMonthly || '', emYearly: d.emYearly || '',
+      pat: d.pat || '', pv: d.pv || '',
+      sharePoint: ''
+    };
+  });
+  if (!allData.length){
+    tb.innerHTML = '<tr><td colspan="12" class="loading">No sites yet — press ✏️ Edit then ＋ Add Site to add one.</td></tr>';
+    return;
+  }
+  applyFilters();
+  // Restore the scroll position now that the table has its full height back.
+  if (wrap) wrap.scrollTop = keepScroll;
+  if (keepWin) window.scrollTo(0, keepWin);
+}
+
+/* One-time migration: read the old mostlane-pos store list BROWSER-SIDE (it's
+   still CORS-reachable here) and post it into the portal. Missing sites are
+   created so the chart and Sites share one home. After this, mostlane-pos is
+   retired — the chart reads only from the portal. */
+async function migrateFromOld(){
+  if (!canEditCompliance()) return;
+  if (!confirm("Import all stores + due dates from the OLD system into the portal?\n\nMissing stores will be added to Sites so everything shares one home. Safe to run more than once.")) return;
+  const btn = document.getElementById('migrateBtn');
+  if (btn){ btn.disabled = true; btn.textContent = 'Importing…'; }
+  let all = [];
+  for (const s of SOURCES){
+    const chunk = await fetchOneSource(s).catch(()=>[]);
+    all = all.concat(chunk);
+  }
+  const stores = all.filter(r => r.storeCode).map(r => ({
+    code: r.storeCode, name: r.siteName, postcode: r.postcode, category: r.storeType,
+    due: { fiveYear: r.fiveYear, pat: r.pat, em: r.em, pv: r.pv, ev: r.ev, pump: r.pump }
+  }));
+  let imported = 0, matched = 0, sitesCreated = 0;
+  for (let i = 0; i < stores.length; i += 200){
+    const batch = stores.slice(i, i + 200);
+    try{
+      const r = await authFetch('/compliance/stores/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stores: batch, createSites: true })
+      });
+      const j = await r.json();
+      imported += j.imported || 0; matched += j.matched || 0; sitesCreated += j.sitesCreated || 0;
+    }catch(e){ console.error('import batch', e); }
+    if (btn) btn.textContent = `Importing… ${Math.min(i+200, stores.length)}/${stores.length}`;
+  }
+  if (btn){ btn.disabled = false; btn.textContent = '⤵ Import from old system'; }
+  alert(`Imported ${imported} stores.\nMatched ${matched} existing sites, created ${sitesCreated} new ones.`);
+  loadFromPortal();
+}
+
+/* ============ Edit / Save / Add / Delete ============ */
+function enableEditing(state){
+  document.body.classList.toggle('cmp-edit', !!state);
+  const editableCols = ["5 Year","EM Monthly","EM Yearly","PAT","PV"];
+  document.querySelectorAll("table tbody tr").forEach(row=>{
+    [...row.children].forEach((td,i)=>{
+      const header = document.querySelectorAll("thead th")[i].textContent.trim();
+      if (state && editableCols.includes(header)) {
+        // Remove the 📄 cert link before editing so its emoji can't be captured
+        // into the due-date text on save (that was baking "📄" into the value).
+        td.querySelectorAll('.cert-link').forEach(a => a.remove());
+        td.contentEditable = true;
+        td.style.background = "#fff6d1";
+        td.addEventListener("input", ()=> row.dataset.changed = "true", { once:true });
+      } else {
+        td.contentEditable = false;
+        td.style.background = "";
+      }
+    });
+    if (!state) row.removeAttribute("data-changed");
+  });
+}
+
+/* —— Canonical KV keys (accept various headers, write consistent fields) —— */
+const KEY_CANONICAL = {
+  "5 Year": "5_Year",
+  "5_Year": "5_Year",
+  "PAT": "PAT",
+  "EM": "EM",
+  "PV": "PV",
+  "EV": "EV",
+  "Pump": "PUMP",
+  "PUMP": "PUMP",
+  "SharePoint": "sharePointURL",
+  "SharePointURL": "sharePointURL",
+  "sharePointURL": "sharePointURL"
+};
+
+/* —— NEW: strict normaliser for KV category names (fixes Wenzel's) —— */
+function normaliseTypeLabel(label) {
+  return String(label || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/ig, "_")     // non-alphanumerics -> underscores
+    .replace(/^_+|_+$/g, "")          // trim underscores
+    .replace(/_+/g, "_");             // collapse
+}
+
+/* Save the edited due dates to the portal (compliance_stores overlay on the
+   canonical site) — replaces the old mostlane-pos KV write. */
+async function saveEditInstant(row){
+  const code = row.children[0].textContent.trim();
+  const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
+  const record = {};
+  [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
+  // Keep only date characters (digits / . - /) so no stray emoji or text can be
+  // saved into a due date. An empty cell stays empty (clears that due date).
+  const cleanDate = v => String(v || "").replace(/[^\d\/.\-]/g, "").trim();
+  const due = {
+    fiveYear:  cleanDate(record["5 Year"]),
+    emMonthly: cleanDate(record["EM Monthly"]),
+    emYearly:  cleanDate(record["EM Yearly"]),
+    pat:       cleanDate(record["PAT"]),
+    pv:        cleanDate(record["PV"])
+  };
+
+  row.style.opacity = "0.6";
+  row.style.background = "#eaf6ff";
+  try {
+    const res = await authFetch("/compliance/store", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, due })
+    });
+    const out = await res.json().catch(()=>({}));
+    if (res.ok && out.ok === true) {
+      row.style.background = "#d7ffd9";
+      const banner = document.getElementById('saveBanner');
+      if (banner) banner.style.display = 'block';
+    } else {
+      row.style.background = "#ffecec";
+      console.warn("Save not OK:", out);
+    }
+  } catch (e) {
+    console.error("Save error:", e);
+    row.style.background = "#ffecec";
+  } finally {
+    row.style.opacity = "1";
+  }
+}
+
+/* Add Site modal (Fareham — auto-numbered code, Type description, 5 dates) */
+async function openAddSiteModal(){
+  let nextCode = '';
+  try{ const r=await authFetch('/compliance/next-code'); const j=await r.json(); nextCode=j.code||''; }catch(e){}
+  const modal = document.createElement('div');
+  modal.className = 'modal'; modal.style.display = 'block';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Add Site</h2>
+      <div class="row">
+        <div><label>Site code</label><input id="add_code" type="text" value="${esc(nextCode)}" /></div>
+        <div><label>Type</label><input id="add_type" type="text" placeholder="e.g. Pavilion / Toilets / Office" /></div>
+      </div>
+      <label>Site name</label><input id="add_name" type="text" placeholder="Site name" />
+      <div class="row">
+        <div><label>5 Year</label><input id="add_five" type="text" placeholder="dd/mm/yyyy" /></div>
+        <div><label>EM Monthly</label><input id="add_emm" type="text" placeholder="dd/mm/yyyy" /></div>
+      </div>
+      <div class="row">
+        <div><label>EM Yearly</label><input id="add_emy" type="text" placeholder="dd/mm/yyyy" /></div>
+        <div><label>PAT</label><input id="add_pat" type="text" placeholder="dd/mm/yyyy" /></div>
+      </div>
+      <div class="row">
+        <div><label>PV</label><input id="add_pv" type="text" placeholder="dd/mm/yyyy" /></div>
+        <div></div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="add_save">Save</button>
+        <button class="btn" style="background:#ccc;color:#000;" id="add_cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#add_cancel').onclick = ()=> modal.remove();
+  modal.querySelector('#add_save').onclick = async ()=>{
+    const code = (modal.querySelector('#add_code').value || '').replace(/\D/g,'').padStart(4, '0');
+    const name = modal.querySelector('#add_name').value || '';
+    if (!/^\d{4}$/.test(code)) return alert("Site code must be numeric (e.g. 0001).");
+    if (!name) return alert("Site name is required.");
+    const store = {
+      code, name, category: modal.querySelector('#add_type').value || '',
+      due: {
+        fiveYear:  modal.querySelector('#add_five').value || '',
+        emMonthly: modal.querySelector('#add_emm').value || '',
+        emYearly:  modal.querySelector('#add_emy').value || '',
+        pat:       modal.querySelector('#add_pat').value || '',
+        pv:        modal.querySelector('#add_pv').value || ''
+      }
+    };
+    try{
+      const res = await authFetch("/compliance/stores/import", {
+        method: "POST", headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ stores: [store], createSites: false })
+      });
+      const out = await res.json().catch(()=>({}));
+      modal.remove();
+      if(!out.ok) alert("❌ Failed to add site.");
+      loadFromPortal();
+    }catch(e){ console.error(e); alert("❌ Failed to add site."); }
+  };
+}
+
+/* Delete Site modal */
+function openDeleteSiteModal(){
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Delete Site</h2>
+      <label>Site code</label>
+      <input id="del_code" type="text" placeholder="e.g. 0001" />
+      <p class="drop-note">Removes the site from this chart. Its documents are kept.</p>
+      <div class="actions">
+        <button class="btn" style="background:#d9534f" id="del_go">Delete</button>
+        <button class="btn" style="background:#ccc;color:#000;" id="del_cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+
+  modal.querySelector('#del_cancel').onclick = ()=> modal.remove();
+  modal.querySelector('#del_go').onclick = async ()=>{
+    const code = (modal.querySelector('#del_code').value || '').replace(/\D/g,'').padStart(4, '0');
+    if (!/^\d{4}$/.test(code)) return alert("Site code must be numeric.");
+
+    try{
+      const res = await authFetch("/compliance/store-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+      await res.json().catch(()=>({}));
+      modal.remove();
+      alert("🗑️ Removed from the compliance chart (documents kept).");
+      loadFromPortal();
+    }catch(e){
+      console.error(e);
+      alert("❌ Failed to remove.");
+    }
+  };
+}
+
+/* ============ Date Filters / Search / Summary / Export ============ */
+function filterOverdue(){
+  const now = new Date();
+  const filtered = baseData().filter(e => {
+    return [e.fiveYear,e.emMonthly,e.emYearly,e.pat,e.pv]
+      .map(parseDate).filter(Boolean).some(d => d < now);
+  });
+  renderTable(filtered);
+  updateFilterSummary();
+}
+function filterDueWithin(days){
+  const now = new Date();
+  const end = new Date(now.getTime() + days*86400000);
+  const filtered = baseData().filter(e => {
+    return [e.fiveYear,e.emMonthly,e.emYearly,e.pat,e.pv]
+      .map(parseDate).filter(Boolean).some(d => d >= now && d <= end);
+  });
+  renderTable(filtered);
+  updateFilterSummary();
+}
+
+function openSearchModal(){
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Search by Date/Type</h2>
+      <label>Compliance Type:</label>
+      <select id="searchType">
+        <option value="">All</option>
+        <option value="fiveYear">5 Year</option>
+        <option value="emMonthly">EM Monthly</option>
+        <option value="emYearly">EM Yearly</option>
+        <option value="pat">PAT</option>
+        <option value="pv">PV</option>
+      </select>
+      <label>From Date:</label>
+      <input type="date" id="fromDate">
+      <label>To Date:</label>
+      <input type="date" id="toDate">
+      <div class="actions">
+        <button class="btn" id="go">Search</button>
+        <button class="btn" style="background:#ccc;color:#000;" id="close">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+  modal.querySelector('#close').onclick = ()=> modal.remove();
+  modal.querySelector('#go').onclick = ()=>{
+    const type = document.getElementById('searchType').value;
+    const from = parseDate(document.getElementById('fromDate').value);
+    const to   = parseDate(document.getElementById('toDate').value);
+
+    let filtered = [...allData];
+    if (type) filtered = filtered.filter(e => e[type] && String(e[type]).trim()!=='');
+    if (from || to) {
+      filtered = filtered.filter(e => {
+        const keys = type ? [type] : ['fiveYear','emMonthly','emYearly','pat','pv'];
+        return keys.some(k => {
+          const d = parseDate(e[k]); if (!d) return false;
+          return (!from || d >= from) && (!to || d <= to);
+        });
+      });
+    }
+    renderTable(filtered);
+    updateFilterSummary();
+    modal.remove();
+  };
+}
+
+function clearFilters(){
+  activeStoreType = 'ALL';
+  activeCategories.clear();
+  document.querySelectorAll('#complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
+  document.getElementById('searchBar').value = '';
+  applyFilters();
+}
+
+function openSummaryModal(){
+  const groups = {};
+  const now = new Date();
+  currentData.forEach(e=>{
+    const key = e.storeType || 'Unknown';
+    if (!groups[key]) groups[key] = { total:0, GREEN:0, AMBER:0, RED:0 };
+    groups[key].total++;
+    const s = worstStatus(e).toUpperCase();   // GREEN | AMBER | RED (per-type settings)
+    groups[key][s]++;
+  });
+
+  const order = Object.keys(groups).sort();
+  const rows = order.filter(k=>groups[k]).map(k=>{
+    const g = groups[k], t = g.total || 1;
+    const pct = n => ( (n*100/t).toFixed(1) + '%' );
+    return `
+      <div style="border:1px solid #ddd; border-radius:10px; margin:10px 0; padding:10px; background:#fff;">
+        <div style="font-weight:bold; border-bottom:1px solid #ddd; padding-bottom:6px; margin-bottom:10px; color:#0071CE; text-transform:capitalize;">${k}</div>
+        <div>Total: <b>${g.total}</b></div>
+        <div>🟢 GREEN: <b>${g.GREEN}</b> (${pct(g.GREEN)})</div>
+        <div>🟡 AMBER: <b>${g.AMBER}</b> (${pct(g.AMBER)})</div>
+        <div>🔴 RED: <b>${g.RED}</b> (${pct(g.RED)})</div>
+      </div>`;
+  });
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Compliance Summary</h2>
+      ${rows.join('') || '<p>No data.</p>'}
+      <div class="actions"><button class="btn" style="background:#ccc;color:#000;" id="close">Close</button></div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+  modal.querySelector('#close').onclick = ()=> modal.remove();
+}
+
+function exportExcel(){
+  const wb = XLSX.utils.book_new();
+  const wsData = [];
+
+  wsData.push(["Fareham Borough Council Compliance Export"]);
+  const uname = (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ");
+  wsData.push(["Exported by:", uname]);
+  wsData.push(["Date/Time:", new Date().toLocaleString("en-GB")]);
+
+  const cats = activeCategories.size ? Array.from(activeCategories).join(', ') : 'None';
+  wsData.push(["Active Filters:", `Compliance: ${cats}`]);
+  wsData.push([]);
+
+  const headers = [
+    "Code","Site Name","Type","Status",
+    "5 Year","EM Monthly","EM Yearly","PAT","PV"
+  ];
+  wsData.push(headers);
+
+  currentData.forEach(e=>{
+    wsData.push([
+      e.storeCode, e.siteName, e.storeType, getStatus(e),
+      e.fiveYear || "", e.emMonthly || "", e.emYearly || "", e.pat || "", e.pv || ""
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  XLSX.utils.book_append_sheet(wb, ws, 'Fareham');
+  const datePart = new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+  XLSX.writeFile(wb, `Fareham_Compliance_${datePart}.xlsx`);
+}
+
+/* ============ Page settings (frequency + amber/red warning windows) ======== */
+async function loadSettings(){
+  try{
+    const r = await authFetch('/compliance/settings');
+    const j = await r.json();
+    if (j && j.settings && j.settings.types) complianceSettings = j.settings;
+  }catch(e){ /* keep defaults */ }
+}
+function openSettingsModal(){
+  if(!canEditCompliance()) return alert("You don't have permission to change compliance settings.");
+  // [key, label, unit] — EM Monthly recurs in months, the rest in years.
+  const TYPES = [['fiveYear','5 Year','years'],['emMonthly','EM Monthly','months'],['emYearly','EM Yearly','years'],['pat','PAT','years'],['pv','PV','years']];
+  const rows = TYPES.map(([k,lbl,unit])=>{
+    const s = typeSettings(k);
+    const freq = unit==='months' ? (s.months!=null?s.months:1) : s.years;
+    return `<tr>
+      <td>${lbl}</td>
+      <td><input type="number" min="1" max="120" id="fy_${k}" value="${freq}"> <span style="color:#64748b">${unit}</span></td>
+      <td><input type="number" min="0" max="3650" id="am_${k}" value="${s.amberDays}"></td>
+      <td><input type="number" min="0" max="3650" id="rd_${k}" value="${s.redDays}"></td>
+    </tr>`;
+  }).join('');
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content" style="max-width:660px">
+    <h2>⚙ Compliance settings</h2>
+    <p class="drop-note" style="margin:0 0 10px">Set how often each compliance recurs, and when the status light — and its date cell — turns amber or red. <b>Amber</b> = due within the amber days; <b>Red</b> = due within the red days (or overdue); <b>Green</b> = further off than that. The frequency auto-sets the next due date when you upload a dated certificate.</p>
+    <div style="overflow-x:auto">
+      <table class="setg"><thead><tr>
+        <th>Compliance</th><th>Frequency</th><th>Amber<br>(days before due)</th><th>Red<br>(days before due)</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>
+    <div class="actions">
+      <button class="btn" id="setSave">Save</button>
+      <button class="btn" style="background:#ccc;color:#000;" id="setCancel">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#setCancel').onclick=()=>modal.remove();
+  modal.querySelector('#setSave').onclick=async()=>{
+    const types={};
+    TYPES.forEach(([k,,unit])=>{
+      const freq=Math.max(1,+modal.querySelector('#fy_'+k).value||1);
+      types[k]={
+        amberDays:Math.max(0,+modal.querySelector('#am_'+k).value||0),
+        redDays:Math.max(0,+modal.querySelector('#rd_'+k).value||0)
+      };
+      if(unit==='months') types[k].months=freq; else types[k].years=freq;
+    });
+    const btn=modal.querySelector('#setSave'); btn.disabled=true; btn.textContent='Saving…';
+    try{
+      const r=await authFetch('/compliance/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({types})});
+      const j=await r.json();
+      if(r.ok && j.ok){ complianceSettings=j.settings||complianceSettings; modal.remove(); applyFilters(); }
+      else { btn.disabled=false; btn.textContent='Save'; alert('Could not save settings.'); }
+    }catch(e){ btn.disabled=false; btn.textContent='Save'; alert('Could not save settings.'); }
+  };
+}
+
+/* ============ 📍 Location (map pin + what3words) ============ */
+function openLocationModal(code){
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const meta = Object.assign({}, rec.meta || {});
+  const canEdit = canEditCompliance();
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content" style="max-width:620px">
+    <h2>📍 Location — ${esc(rec.siteName||code)}</h2>
+    <label>what3words</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <input type="text" id="lm_w3w" placeholder="e.g. tasty.jumpy.gone" value="${esc(meta.w3w||'')}" ${canEdit?'':'disabled'}>
+      <a id="lm_w3wlink" href="#" target="_blank" class="btn" style="white-space:nowrap">Open ↗</a>
+    </div>
+    <p class="drop-note" style="margin:4px 0 8px">${canEdit?'Drag the pin (or click the map) to set the exact location; the what3words words are stored alongside.':'Location (read-only).'}</p>
+    <div id="lm_map" style="height:320px; border-radius:10px; overflow:hidden; border:1px solid #cbd5e1;"></div>
+    <div class="info" style="margin-top:6px">Pin: <span id="lm_ll">${meta.lat!=null&&meta.lng!=null?(meta.lat.toFixed(5)+', '+meta.lng.toFixed(5)):'not set'}</span></div>
+    <div class="actions">
+      ${canEdit?'<button class="btn" id="lm_save">Save</button>':''}
+      <button class="btn" style="background:#ccc;color:#000;" id="lm_close">Close</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#lm_close').onclick=()=>modal.remove();
+  const w3wIn = modal.querySelector('#lm_w3w');
+  const syncLink=()=>{ const w=(w3wIn.value||'').replace(/^\/+/,'').trim(); const a=modal.querySelector('#lm_w3wlink'); a.href = w? ('https://what3words.com/'+encodeURIComponent(w)) : '#'; a.style.opacity = w?'1':'.5'; };
+  syncLink(); w3wIn.addEventListener('input', syncLink);
+  let lat = meta.lat, lng = meta.lng, marker=null, map=null;
+  setTimeout(()=>{
+    try{
+      map = L.map(modal.querySelector('#lm_map')).setView([lat!=null?lat:50.852, lng!=null?lng:-1.179], (lat!=null?15:12));
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19, attribution:'© OpenStreetMap, © CARTO' }).addTo(map);
+      function setPin(la,ln){ lat=la; lng=ln; modal.querySelector('#lm_ll').textContent = la.toFixed(5)+', '+ln.toFixed(5); if(marker) marker.setLatLng([la,ln]); else { marker = L.marker([la,ln], {draggable:canEdit}).addTo(map); if(canEdit) marker.on('dragend', ()=>{ const p=marker.getLatLng(); setPin(p.lat,p.lng); }); } }
+      if(lat!=null && lng!=null) setPin(lat,lng);
+      if(canEdit) map.on('click', (e)=> setPin(e.latlng.lat, e.latlng.lng));
+      map.invalidateSize();
+    }catch(e){ modal.querySelector('#lm_map').innerHTML='<div class="doc-empty" style="padding:20px">Map unavailable.</div>'; }
+  }, 60);
+  const saveBtn = modal.querySelector('#lm_save');
+  if(saveBtn) saveBtn.onclick=async()=>{
+    saveBtn.disabled=true; saveBtn.textContent='Saving…';
+    const body={ code, w3w:(w3wIn.value||'').replace(/^\/+/,'').trim(), lat:(lat!=null?lat:null), lng:(lng!=null?lng:null) };
+    try{ const r=await authFetch('/compliance/store-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json(); if(r.ok&&j.ok){ if(rec) rec.meta=j.meta; modal.remove(); applyFilters(); }
+      else { saveBtn.disabled=false; saveBtn.textContent='Save'; alert('Could not save location.'); }
+    }catch(e){ saveBtn.disabled=false; saveBtn.textContent='Save'; alert('Could not save location.'); }
+  };
+}
+
+/* ============ 🔑 Access instructions + site contact ============ */
+function openAccessModal(code){
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
+  const meta = Object.assign({}, rec.meta || {});
+  const canEdit = canEditCompliance();
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content">
+    <h2>🔑 Access — ${esc(rec.siteName||code)}</h2>
+    <label>Access instructions</label>
+    <textarea id="ak_access" rows="4" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="e.g. By appointment — Mon-Fri 8am-5pm" ${canEdit?'':'disabled'}>${esc(meta.access||'')}</textarea>
+    <label style="margin-top:8px">Site contact</label>
+    <textarea id="ak_contact" rows="3" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="Name / phone / email (where relevant)" ${canEdit?'':'disabled'}>${esc(meta.contact||'')}</textarea>
+    <div class="actions">
+      ${canEdit?'<button class="btn" id="ak_save">Save</button>':''}
+      <button class="btn" style="background:#ccc;color:#000;" id="ak_close">Close</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#ak_close').onclick=()=>modal.remove();
+  const saveBtn=modal.querySelector('#ak_save');
+  if(saveBtn) saveBtn.onclick=async()=>{
+    saveBtn.disabled=true; saveBtn.textContent='Saving…';
+    const body={ code, access:modal.querySelector('#ak_access').value, contact:modal.querySelector('#ak_contact').value };
+    try{ const r=await authFetch('/compliance/store-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json(); if(r.ok&&j.ok){ if(rec) rec.meta=j.meta; modal.remove(); applyFilters(); }
+      else { saveBtn.disabled=false; saveBtn.textContent='Save'; alert('Could not save.'); }
+    }catch(e){ saveBtn.disabled=false; saveBtn.textContent='Save'; alert('Could not save.'); }
+  };
+}
+
+/* ============ Wiring UI ============ */
+document.addEventListener('DOMContentLoaded', () => {
+  // Buttons
+  document.getElementById('reloadBtn').onclick = loadFromPortal;
+  const settingsBtn = document.getElementById('settingsBtn');
+  if (canEditCompliance()) { settingsBtn.style.display = ''; settingsBtn.onclick = openSettingsModal; }
+  document.getElementById('overdueBtn').onclick = ()=> {
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
+    document.getElementById('overdueBtn').classList.add('active');
+    filterOverdue();
+  };
+  document.querySelectorAll('.summary-bubbles .bubble[data-days]').forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      filterDueWithin(Number(b.dataset.days));
+    };
+  });
+  document.getElementById('searchModalBtn').onclick = openSearchModal;
+  document.getElementById('clearBtn').onclick = ()=>{
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
+    clearFilters();
+  };
+  document.getElementById('exportBtn').onclick = exportExcel;
+  document.getElementById('summaryBtn').onclick = openSummaryModal;
+
+  // Compliance filters
+  document.querySelectorAll('#complianceFilters .bubble').forEach(b=>{
+    b.onclick = ()=>{
+      const cat = b.dataset.cat;
+      if (activeCategories.has(cat)) { activeCategories.delete(cat); b.classList.remove('active'); }
+      else { activeCategories.add(cat); b.classList.add('active'); }
+      applyFilters();
+    };
+  });
+
+  // Search bar (debounced)
+  const searchBar = document.getElementById('searchBar');
+  let t;
+  searchBar.addEventListener('input', ()=>{
+    clearTimeout(t);
+    t = setTimeout(applyFilters, 120);
+  });
+
+  // Edit flow
+  const editBtn = document.getElementById('editBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const addBtn  = document.getElementById('addSiteBtn');
+  const delBtn  = document.getElementById('deleteSiteBtn');
+
+  // Only Compliance / Full-Access users can edit; everyone else just views.
+  if (!canEditCompliance()) editBtn.style.display = "none";
+
+  editBtn.onclick = ()=>{
+    if (!canEditCompliance()) return;
+    editMode = true;
+    enableEditing(true);
+    editBtn.style.display = "none";
+    saveBtn.style.display = "inline-flex";
+    addBtn.style.display  = "inline-flex";
+    delBtn.style.display  = "inline-flex";
+  };
+
+  saveBtn.onclick = async ()=>{
+    const changed = [...document.querySelectorAll("tbody tr[data-changed='true']")];
+    if (!changed.length) return alert("No changes detected.");
+    alert("✅ Changes queued — sending now.");
+    for (const r of changed) { await saveEditInstant(r); }
+    enableEditing(false);
+    editMode = false;
+    editBtn.style.display = "inline-flex";
+    saveBtn.style.display = "none";
+    addBtn.style.display  = "none";
+    delBtn.style.display  = "none";
+    // do NOT auto reload so the green banner persists
+  };
+
+  addBtn.onclick = openAddSiteModal;
+  delBtn.onclick = openDeleteSiteModal;
+
+  const tb = document.getElementById('tableBody');
+  // 📄 certificate links + 📎 upload / 🗂 view (event-delegated, survives re-render)
+  tb.addEventListener('click', (ev)=>{
+    const cert = ev.target.closest('.cert-link');
+    if (cert && !editMode){ ev.preventDefault(); openCert(cert.dataset.code, cert.dataset.type); return; }
+    const up = ev.target.closest('.doc-btn.up');
+    if (up){ ev.preventDefault(); pickAndUpload(up.dataset.code); return; }
+    const view = ev.target.closest('.doc-btn.view');
+    if (view){ ev.preventDefault(); openVersionsModal(view.dataset.code); return; }
+    const loc = ev.target.closest('.doc-btn.loc');
+    if (loc){ ev.preventDefault(); openLocationModal(loc.dataset.code); return; }
+    const key = ev.target.closest('.doc-btn.key');
+    if (key){ ev.preventDefault(); openAccessModal(key.dataset.code); return; }
+    // Site-name click: highlight the row (single-select).
+    const site = ev.target.closest('td.site');
+    if (site){
+      const tr = site.closest('tr'); if (!tr) return;
+      const already = tr.classList.contains('row-sel');
+      document.querySelectorAll('tr.row-sel').forEach(r=>r.classList.remove('row-sel'));
+      if (!already) tr.classList.add('row-sel');
+      return;
+    }
+  });
+
+  // Clicking anywhere off the selected row (whitespace, another row, a button)
+  // clears the highlight. A site-name click is handled above (moves selection),
+  // and clicking within the already-selected row keeps it.
+  document.addEventListener('click', (ev)=>{
+    if (ev.target.closest('td.site')) return;       // row-select handles this
+    if (ev.target.closest('tr.row-sel')) return;    // click inside the selected row → keep it
+    document.querySelectorAll('tr.row-sel').forEach(r=>r.classList.remove('row-sel'));
+  });
+
+  // Drag a file onto any store row → upload against that site.
+  tb.addEventListener('dragover', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')){ ev.preventDefault(); tr.classList.add('drop-hot'); } });
+  tb.addEventListener('dragleave', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && !tr.contains(ev.relatedTarget)) tr.classList.remove('drop-hot'); });
+  tb.addEventListener('drop', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
+
+  // initial load (portal is the single source now) — settings first so the
+  // status colours are right on the first paint.
+  loadSettings().then(loadFromPortal);
+});
+
+/* Hidden file input helper for the 📎 button (mobile-friendly). */
+function pickAndUpload(code){
+  const inp=document.createElement('input'); inp.type='file'; inp.style.display='none';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) openUploadModal(code, f); inp.remove(); };
+  document.body.appendChild(inp); inp.click();
+}
+  </script>
+</body>
+</html>
