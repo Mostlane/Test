@@ -166,16 +166,31 @@
     }
     var flat = rawFlat.split("\n").filter(function (l) { return !isLegendLine(l); }).join("\n");
 
+    // Count GENUINE coded observations only. A real observation carries exactly ONE
+    // code AND either an item number or real descriptive words. This rejects the code
+    // KEY however a program lays it out — a horizontal cluster ("C1 C2 C3 FI"), a
+    // VERTICAL fragment (a lone "C1" on its own line), or a code DEFINITION
+    // ("C1 — Danger present…") — all of which faked phantom C1/C2/FI before.
+    function countObs(text) {
+      var c = { C1: 0, C2: 0, C3: 0, FI: 0 };
+      text.split("\n").forEach(function (line) {
+        var codes = (line.match(/(?:^|\s)(C1|C2|C3|FI)(?=\s|[).,:]|$)/g) || []).map(function (s) { return s.trim(); });
+        if (codes.length !== 1) return;
+        if (/danger present|potentially dangerous|improvement recommended|further investigation|risk of injury|remedial action|indicates that/i.test(line)) return;
+        var rest = line.replace(/(?:^|\s)(C1|C2|C3|FI|N\/V|N\/A|Pass|LIM)(?=\s|[).,:]|$)/g, " ").trim();
+        var letters = (rest.match(/[A-Za-z]/g) || []).length;
+        var hasItemNo = /\b\d+\.\d+/.test(line) || /^\s*\d+\s+[A-Za-z]/.test(line);
+        if (!hasItemNo && letters < 6) return;
+        c[codes[0]]++;
+      });
+      return c;
+    }
+
     var ref = (rawFlat.match(/(?:Certificate Number|Ref)[:\s]+(\S+)/i) || [])[1] || "";
     var outcome = readOutcome(rawFlat);
     var sigs = findSignatories(flat);
     var latest = latestDate(flat);
-    var codes = {
-      C1: (flat.match(/(?:^|\s)C1(?=\s|$)/g) || []).length,
-      C2: (flat.match(/(?:^|\s)C2(?=\s|$)/g) || []).length,
-      C3: (flat.match(/(?:^|\s)C3(?=\s|$)/g) || []).length,
-      FI: (flat.match(/(?:^|\s)FI(?=\s|$)/g) || []).length
-    };
+    var codes = countObs(flat);
     // LIM % over the INSPECTION SCHEDULE only — a line that starts with a numbered
     // item (5.12, 6.15.1 …) and carries an outcome. This is the natural reading of
     // "x% of the certificate is a limitation" and avoids the false inflation from the
