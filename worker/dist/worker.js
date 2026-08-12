@@ -13310,19 +13310,32 @@ async function handle24(request, env, ctx, url, sess) {
           WHERE f.tenant_id=? AND f.scheme=? AND f.type=?
           ORDER BY f.code, COALESCE(f.doc_date,f.uploaded_at) DESC`
       ).bind(tid, scheme, type).all();
-      const seen = {};
+      const byCode = {};
       for (const r of results || []) {
-        if (seen[r.code]) continue;
-        seen[r.code] = 1;
-        const latestDoc = siteLatest[r.code] || r.uploaded_at;
-        const rr = rev[r.code + "|" + type];
+        if (!byCode[r.code]) byCode[r.code] = { code: r.code, name: r.sname || r.cname || r.code, docs: [] };
+        if (byCode[r.code].docs.length < 8) {
+          byCode[r.code].docs.push({
+            fileId: r.id,
+            filename: r.filename || "",
+            date: r.doc_date || r.uploaded_at,
+            url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key)
+          });
+        }
+      }
+      for (const code of Object.keys(byCode)) {
+        const t = byCode[code];
+        const latestDoc = siteLatest[code] || t.docs[0] && t.docs[0].date;
+        const rr = rev[code + "|" + type];
         const needs = !rr || !rr.checked_at || latestDoc && rr.checked_at < latestDoc;
         targets.push({
-          code: r.code,
+          code,
           type,
-          name: r.sname || r.cname || r.code,
-          fileId: r.id,
-          url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key),
+          name: t.name,
+          docs: t.docs,
+          fileId: t.docs[0] ? t.docs[0].fileId : null,
+          // back-compat
+          url: t.docs[0] ? t.docs[0].url : "",
+          // back-compat
           docAt: latestDoc,
           needs,
           review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at, ver: rr.ver || 0 } : null

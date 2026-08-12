@@ -153,20 +153,48 @@
 
       async function one(t) {
         try {
-          var resp = await fetch(t.url, { cache: "no-store" });
-          if (!resp.ok) throw new Error("download " + resp.status);
-          var buf = await resp.arrayBuffer();
-          var pages = await MLEICR.readPdf(buf);
-          var result = MLEICR.analyze(pages);
-          var summ = MLEICR.summarize(result);
-          if (summ.attention) attention++;
-          var flags = summ.flags.concat((summ.recommendations || []).map(function (x) { return "💡 " + x; }));
-          await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: t.code, type: t.type, outcome: result.outcome || summ.outcome || "", summary: summ.headline, flags: flags, attention: summ.attention ? 1 : 0, fileId: t.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+          // Work through the site's 5-Year documents newest-first; verify the FIRST
+          // that is a real EICR and ignore the rest (remedial sheets / other docs).
+          var docs = (t.docs && t.docs.length) ? t.docs : [{ fileId: t.fileId, url: t.url }];
+          var chosen = null, unreadable = null, dl;
+          for (var di = 0; di < docs.length; di++) {
+            var d = docs[di];
+            try {
+              var resp = await fetch(d.url, { cache: "no-store" });
+              if (!resp.ok) throw new Error("download " + resp.status);
+              var buf = await resp.arrayBuffer();
+              var pages = await MLEICR.readPdf(buf);
+              var result = MLEICR.analyze(pages);
+              if (result.empty) { if (!unreadable) unreadable = d; continue; }   // scanned — maybe the cert; remember
+              if (result.isEicr) { chosen = { d: d, result: result }; break; }   // the real certificate → use it
+              // else: a readable non-EICR (remedial sheet) → ignore, try older docs
+            } catch (e) { if (!dl) dl = e; }
+          }
+
+          if (chosen) {
+            var summ = MLEICR.summarize(chosen.result);
+            if (summ.attention) attention++;
+            var flags = summ.flags.concat((summ.recommendations || []).map(function (x) { return "💡 " + x; }));
+            await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: t.code, type: t.type, outcome: chosen.result.outcome || "", summary: summ.headline, flags: flags, attention: summ.attention ? 1 : 0, fileId: chosen.d.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+          } else if (unreadable) {
+            attention++;
+            await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't read the 5-year certificate", flags: ["The 5-year document is a scanned/flattened image (no text) — open it and verify manually."], attention: 1, fileId: unreadable.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+          } else if (dl) {
+            errors++;
+            await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't download the certificate", flags: ["Couldn't download the PDF (" + (dl.message || "error") + ") — try again or open it manually."], attention: 1, fileId: (docs[0] || {}).fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+          } else {
+            // Readable documents on file, but none is an EICR — only remedial/other docs.
+            attention++;
+            await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: t.code, type: t.type, outcome: "", summary: "No valid 5-year certificate on file", flags: ["The documents filed under 5-Year are remedial sheets or other paperwork — none is an EICR certificate. Upload the 5-year Electrical Installation Condition Report."], attention: 1, fileId: (docs[0] || {}).fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+          }
         } catch (e) {
           errors++;
           try { await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't read this certificate", flags: ["Couldn't download or read the PDF (" + (e.message || "error") + ") — open it and verify manually. It may be a scanned image."], fileId: t.fileId, docAt: t.docAt, ver: ENGINE_VER }) }); } catch (e2) {}
+            body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't check this site", flags: ["Error: " + (e.message || "unknown") + " — verify manually."], attention: 1, fileId: t.fileId, docAt: t.docAt, ver: ENGINE_VER }) }); } catch (e2) {}
         }
         tick(t.name);
       }
