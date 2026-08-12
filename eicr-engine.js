@@ -207,14 +207,19 @@
 
     var circuits = parseCircuits(pages);
 
+    // `hard` reviews drive the red "needs attention" flag in the worklist — only the
+    // high-confidence, template-independent one (a mis-coded outcome). Everything else
+    // (signatures, LIM, phase, circuit checks) is a SOFT note: shown, but it doesn't
+    // turn a satisfactory cert red, because those reads vary too much across EICR
+    // programs to trust as a hard fail.
     var reviews = [];
-    function addReview(label, why, code) { reviews.push({ label: label, why: why, code: code || "" }); }
+    function addReview(label, why, code, hard) { reviews.push({ label: label, why: why, code: code || "", hard: !!hard }); }
     if (codes.C1 + codes.C2 + codes.FI > 0 && outcome === "SATISFACTORY") {
       var parts = [];
       if (codes.C1) parts.push(codes.C1 + " × C1");
       if (codes.C2) parts.push(codes.C2 + " × C2");
       if (codes.FI) parts.push(codes.FI + " × FI");
-      addReview("⚠ Outcome should be UNSATISFACTORY", "The report is marked SATISFACTORY, but it contains " + parts.join(", ") + " observation(s). Any C1, C2 or FI means the installation must be assessed UNSATISFACTORY (BS 7671 / GN3). Check the coding and the overall assessment.", "C1");
+      addReview("⚠ Outcome should be UNSATISFACTORY", "The report is marked SATISFACTORY, but it contains " + parts.join(", ") + " observation(s). Any C1, C2 or FI means the installation must be assessed UNSATISFACTORY (BS 7671 / GN3). Check the coding and the overall assessment.", "C1", true);
     }
     if (!sigs.length) addReview("Signatures", "No signatory (name · role · date) could be read on the report. Confirm the inspector/tester and, where required, the qualified supervisor have signed and dated it.");
     if (limPct > 10) addReview("Extent of testing", limOut + " of " + totOut + " assessed items are recorded as a Limitation (LIM) — about " + limPct + "%. More than 10% of the certificate is a limitation; check the extent & limitations were justified and agreed.");
@@ -243,7 +248,10 @@
     circuits.forEach(function (c) {
       var lbl = (c.db ? "DB " + c.db + " · " : "") + "CCT " + c.cct;
       var liveN = toNum(c.live), cpcN = toNum(c.cpc), issues = [];
-      if (liveN && CAP[c.live] && c.rating > CAP[c.live] && !(c.live === "2.5" && c.rating <= 32 && c.ring))
+      // Under-rated only when the OCPD clearly exceeds the cable capacity (30% margin,
+      // so marginal/rounding cases don't cry wolf) AND it isn't a standard 2.5 mm² ring
+      // final on ≤32 A (a normal socket ring, not a fault).
+      if (liveN && CAP[c.live] && c.rating > CAP[c.live] * 1.3 && !(c.live === "2.5" && c.rating <= 32))
         issues.push(c.live + " mm² live conductor on a " + c.rating + " A Type " + c.type + " device — above its typical current capacity (~" + CAP[c.live] + " A). Check the design current, install method and grouping.");
       if (liveN && cpcN && liveN <= 10 && TE_CPC[c.live] && cpcN < parseFloat(TE_CPC[c.live]))
         issues.push("CPC " + c.cpc + " mm² looks undersized for a " + c.live + " mm² line (a twin-&-earth cpc would be " + TE_CPC[c.live] + " mm²). Confirm the cable type and check the adiabatic (543.1.3).");
@@ -271,20 +279,26 @@
   // issue to action — unsatisfactory, a mis-coded outcome, missing signatures, >10%
   // LIM, a circuit problem, or unreadable. Routine C3 recommendations (no SPD/AFDD,
   // Type AC…) are LISTED but don't by themselves make a compliant report "red".
-  function firstSentence(s) { var m = String(s || "").match(/^[^.]*\.?/); var t = (m ? m[0] : String(s || "")).trim(); return t.length > 100 ? t.slice(0, 97) + "…" : t; }
+  // Break at a sentence-ending period (followed by space/end), NOT a decimal point —
+  // so "2.5 mm² on a 20 A device…" isn't truncated to "2.".
+  function firstSentence(s) { s = String(s || ""); var m = s.match(/^[\s\S]*?[.](?=\s|$)/); var t = (m ? m[0] : s).trim(); return t.length > 160 ? t.slice(0, 157) + "…" : t; }
+  function fmtReview(r) { return r.label.replace(/^⚠\s*/, "") + " — " + firstSentence(r.why); }
   function summarize(result) {
     if (!result || result.empty) return { attention: true, headline: "Couldn't read text — scanned/image PDF", flags: ["No readable text — this looks like a scanned/flattened image PDF. Verify manually."], recommendations: [], outcome: "" };
-    var flags = [];
-    result.reviews.forEach(function (r) { flags.push(r.label.replace(/^⚠\s*/, "") + " — " + firstSentence(r.why)); });
-    var recommendations = result.suggestions.map(function (s) { return s.code + " · " + s.title; });
-    var attention = result.reviews.length > 0 || result.outcome === "UNSATISFACTORY" || !result.outcome;
+    var hard = result.reviews.filter(function (r) { return r.hard; });
+    var soft = result.reviews.filter(function (r) { return !r.hard; });
+    var flags = hard.map(fmtReview);                                   // red — drive attention
+    // soft findings + codebreaker suggestions are informational notes
+    var recommendations = soft.map(fmtReview).concat(result.suggestions.map(function (s) { return s.code + " · " + s.title; }));
+    var attention = result.outcome === "UNSATISFACTORY" || !result.outcome || hard.length > 0;
     var headline;
     if (!result.outcome) headline = "Outcome not read — check manually";
-    else if (result.outcome === "UNSATISFACTORY") headline = "UNSATISFACTORY" + (result.reviews.length ? " · " + result.reviews.length + " to review" : "");
-    else if (result.reviews.length) headline = "Satisfactory, but " + result.reviews.length + " item(s) to review";
-    else if (recommendations.length) headline = "Satisfactory · " + recommendations.length + " recommendation(s)";
+    else if (result.outcome === "UNSATISFACTORY") headline = "UNSATISFACTORY";
+    else if (hard.length) headline = "Satisfactory — but should be reviewed";
+    else if (soft.length) headline = "Satisfactory · " + soft.length + " note(s)";
+    else if (result.suggestions.length) headline = "Satisfactory · " + result.suggestions.length + " recommendation(s)";
     else headline = "Satisfactory · nothing flagged";
-    return { attention: attention, headline: headline, flags: flags, recommendations: recommendations, outcome: result.outcome, reviewCount: result.reviews.length };
+    return { attention: attention, headline: headline, flags: flags, recommendations: recommendations, outcome: result.outcome, reviewCount: hard.length };
   }
 
   window.MLEICR = {
