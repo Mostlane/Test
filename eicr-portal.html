@@ -1651,14 +1651,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (view){ ev.preventDefault(); openVersionsModal(view.dataset.code); return; }
     const reopen = ev.target.closest('.doc-btn.reopen');
     if (reopen){ ev.preventDefault(); reopenRow(reopen.dataset.code); return; }
+    // clicking elsewhere in the table (not a site name / not the selected row)
+    // clears the highlight — see the document handler below for whitespace.
     // Site-name click: archive in Edit mode; otherwise highlight the row.
     const site = ev.target.closest('td.site');
     if (site){
       const tr = site.closest('tr'); if (!tr) return;
-      if (editMode && viewMode !== 'closed') archiveRow(tr.dataset.code);
-      else tr.classList.toggle('row-sel');
+      if (editMode && viewMode !== 'closed'){ archiveRow(tr.dataset.code); return; }
+      // Single selection: clear any other highlight, then select this row
+      // (clicking the already-selected row clears it).
+      const already = tr.classList.contains('row-sel');
+      document.querySelectorAll('tr.row-sel').forEach(r=>r.classList.remove('row-sel'));
+      if (!already) tr.classList.add('row-sel');
       return;
     }
+  });
+
+  // Clicking anywhere off the selected row (whitespace, another row, a button)
+  // clears the highlight. A site-name click is handled above (moves selection),
+  // and clicking within the already-selected row keeps it.
+  document.addEventListener('click', (ev)=>{
+    if (ev.target.closest('td.site')) return;       // row-select handles this
+    if (ev.target.closest('tr.row-sel')) return;    // click inside the selected row → keep it
+    document.querySelectorAll('tr.row-sel').forEach(r=>r.classList.remove('row-sel'));
   });
 
   // Drag a file onto any store row → upload against that site.
