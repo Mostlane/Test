@@ -12912,6 +12912,10 @@ async function handle24(request, env, ctx, url, sess) {
       sets.push("pinned=?");
       vals.push(b.pinned ? 1 : 0);
     }
+    if (b.type != null) {
+      sets.push("type=?");
+      vals.push(canonType(b.type));
+    }
     if (!sets.length) return jr6({ error: "nothing to update" }, headers, 400);
     vals.push(tid, id);
     await env.DB.prepare(`UPDATE compliance_files SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
