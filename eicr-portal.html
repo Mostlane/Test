@@ -472,6 +472,60 @@ function typesForStore(code){
   return [...has, ...ALL_TYPES.filter(t=>!has.includes(t))];
 }
 
+/* ── Auto-detect the compliance type + completed date from an uploaded PDF ────
+   Reads the PDF in-browser (PDF.js — nothing leaves the device until Upload),
+   detects the type from the certificate title and the completed date as the
+   latest date that isn't in the future (skips PAT retest / EICR next-inspection
+   dates, and takes the final day of a multi-day EICR). PAT / EM / 5 Year only. */
+const PDFJS_SRC = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
+let _pdfjsP = null;
+function ensurePdfjs(){
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (_pdfjsP) return _pdfjsP;
+  _pdfjsP = new Promise((resolve,reject)=>{
+    const s=document.createElement('script'); s.src=PDFJS_SRC+'pdf.min.js';
+    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_SRC+'pdf.worker.min.js'; resolve(window.pdfjsLib);}catch(e){reject(e);} };
+    s.onerror=()=>reject(new Error('pdfjs load failed'));
+    document.head.appendChild(s);
+  });
+  return _pdfjsP;
+}
+async function extractPdfText(file, maxPages){
+  const lib = await ensurePdfjs();
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  const n = Math.min(maxPages||4, pdf.numPages);
+  let out='';
+  for (let i=1;i<=n;i++){ const page=await pdf.getPage(i); const tc=await page.getTextContent(); out+=' '+tc.items.map(it=>it.str).join(' '); }
+  try{ pdf.destroy(); }catch(e){}
+  return out;
+}
+function detectComplianceType(text){
+  // Collapse all whitespace (newlines from PDF layout) so titles that wrap across
+  // lines — e.g. "…CONDITION\nREPORT" — still match.
+  const t=String(text||'').toLowerCase().replace(/\s+/g,' ');
+  if(/portable appliance test/.test(t)) return 'pat';
+  if(/emergency lighting/.test(t)) return 'em';
+  if(/electrical installation condition report/.test(t) || /\beicr\b/.test(t)) return 'fiveYear';
+  return '';
+}
+function detectCompletedDate(text){
+  const re=/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/g;
+  const grace = Date.now() + 2*86400000;   // today (+2d) — anything later is a future retest/next-due
+  let best=null, m;
+  while((m=re.exec(String(text||'')))){
+    let d=+m[1], mo=+m[2], y=+m[3]; if(y<100) y+=2000;
+    if(mo<1||mo>12||d<1||d>31) continue;
+    const ts=Date.UTC(y,mo-1,d); if(isNaN(ts)||ts>grace) continue;
+    if(!best||ts>best.ts) best={ts, iso:`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`};
+  }
+  return best?best.iso:'';
+}
+async function detectComplianceMeta(file){
+  const text = await extractPdfText(file, 4);
+  return { type: detectComplianceType(text), dateISO: detectCompletedDate(text) };
+}
+
 /* Drop / choose a file → pick the compliance type + optional date → upload. */
 function openUploadModal(code, file){
   if(!canEditCompliance()) return alert("You don't have permission to add compliance documents.");
@@ -490,6 +544,7 @@ function openUploadModal(code, file){
       <div><label>File</label><input type="file" id="uf"></div>
       <div><label>Certificate date (optional)</label><input type="date" id="ud"></div>
     </div>
+    <div id="udet" class="drop-note" style="min-height:1.1em;color:#0071CE;font-weight:600;margin:2px 0 0"></div>
     <div id="ufolderRow" style="display:none">
       <label>…or upload a whole folder of PDFs</label>
       <input type="file" id="ufolder" webkitdirectory directory multiple>
@@ -509,10 +564,34 @@ function openUploadModal(code, file){
     nameLbl.textContent = isOther ? 'Document name (optional for a single file)' : 'Document name (optional)';
     folderRow.style.display = isOther ? '' : 'none';   // folder upload is Other-only
   };
-  order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); syncNameLbl(); }; grid.appendChild(b); });
+  let userPickedType = false;
+  const selectType=(t)=>{ if(!t) return; sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); syncNameLbl(); };
+  order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ userPickedType=true; selectType(t); }; grid.appendChild(b); });
   syncNameLbl();
   const fileInput=modal.querySelector('#uf');
-  if(file){ try{ const dt=new DataTransfer(); dt.items.add(file); fileInput.files=dt.files; }catch(e){} }
+
+  // Read a chosen PDF, pre-select its type + fill the completed date (user still
+  // reviews and presses Upload). Won't override a type the user picked by hand.
+  async function autofillFromFile(f){
+    const det=modal.querySelector('#udet');
+    const isPdf = f && (/\.pdf$/i.test(f.name) || f.type==='application/pdf');
+    if(!isPdf){ if(det) det.textContent=''; return; }
+    if(det) det.textContent='🔍 Reading certificate…';
+    try{
+      const meta=await detectComplianceMeta(f);
+      if(meta.type && !userPickedType) selectType(meta.type);
+      if(meta.dateISO) modal.querySelector('#ud').value=meta.dateISO;
+      if(meta.type || meta.dateISO){
+        const parts=[];
+        if(meta.type) parts.push(TYPE_LABEL[meta.type]||meta.type);
+        if(meta.dateISO) parts.push(meta.dateISO.split('-').reverse().join('/'));
+        det.textContent='✓ Auto-detected: '+parts.join(' · ')+' — check it, then Upload.';
+      } else { det.textContent='Couldn’t auto-detect — please set the type and date.'; }
+    }catch(e){ if(det) det.textContent='Couldn’t read this PDF — set the type and date manually.'; }
+  }
+  fileInput.addEventListener('change', ()=>{ const f=fileInput.files&&fileInput.files[0]; if(f) autofillFromFile(f); });
+
+  if(file){ try{ const dt=new DataTransfer(); dt.items.add(file); fileInput.files=dt.files; }catch(e){} autofillFromFile(file); }
   modal.querySelector('#uc').onclick=()=>modal.remove();
   const folderInput=modal.querySelector('#ufolder');
   modal.querySelector('#udo').onclick=async()=>{
