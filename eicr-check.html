@@ -423,28 +423,51 @@
     // Generous current capacity (A) for a line size (clipped-direct / method C) — used only to catch clearly under-rated cables.
     var CAP = { "1": 16, "1.5": 20, "2.5": 27, "4": 37, "6": 47, "10": 64, "16": 85, "25": 112 };
     function toNum(x) { var n = parseFloat(x); return isNaN(n) ? null : n; }
-    function isReading(x) { return x && x !== "---" && x !== "N/A" && x !== "n/a" && /^[<>]?[\d.]/.test(x); }
+    function isReading(x) { return x && x !== "---" && x !== "N/A" && x !== "n/a" && /^\d/.test(x); }
+    function plainNum(x) { return x && !/[<>]/.test(x) && /^\d+(\.\d+)?$/.test(x); }
     // Glue "> 200" → ">200" so IR/Zs columns stay single tokens, then split.
     function rowToks(line) { return line.replace(/([<>])\s+/g, "$1").trim().split(/\s+/); }
+    // Circuit designation (DB · CCT) — anchor on the phase token (L1/L2/L3/TP/SP/N)
+    // so it survives the leading-column differences between EICR programs.
+    function designation(t, iDev) {
+      var phaseIdx = -1;
+      for (var pi = 0; pi < iDev; pi++) { if (/^(L[123]|TP|SP|N)$/i.test(t[pi])) { phaseIdx = pi; break; } }
+      var cctNum, phase = "";
+      if (phaseIdx > 0) { cctNum = t[phaseIdx - 1]; phase = t[phaseIdx].toUpperCase(); }
+      else { cctNum = /^\d/.test(t[1] || "") ? t[1] : t[0]; }
+      var db = (t[0] !== cctNum && /^\d/.test(t[0])) ? t[0] : "";
+      return { db: db, cct: ((cctNum || "") + phase).toUpperCase() };
+    }
 
+    /* Layout-aware row parse. Stable across EICR programs: live=iDev-3, cpc=iDev-2,
+       type=iDev+1, rating=iDev+2. The columns AFTER the device vary by program, so:
+       max Zs is COMPUTED (218.5/(k·In)); the report's own max-Zs column is then located
+       by matching that value, which also tells us the layout family (oMax 4 = a 4-col RCD
+       block follows → ring at +9; oMax 5 = RCD-mA precedes max-Zs → ring at +6). Measured
+       Zs = the first plain number ≤50 after the IR test-voltage token (250/500/1000). */
     function parseCircuit(line) {
       var t = rowToks(line), iDev = -1;
       for (var i = 1; i < t.length; i++) { if (OCPD_RE.test(t[i])) { iDev = i; break; } }
       if (iDev < 4) return null;
-      var type = t[iDev + 1], rating = toNum(t[iDev + 2]);
+      var dev = t[iDev], type = t[iDev + 1], rating = toNum(t[iDev + 2]);
       if (!/^[BCD]$/.test(type) || !rating) return null;        // real MCB/RCBO final/dist row
-      // measured Zs: first value after the IR block (test-voltage anchor 250/500/1000)
-      var j = -1; for (var k = iDev + 4; k < t.length; k++) { if (/^(250|500|1000)$/.test(t[k])) { j = k; break; } }
-      var measured = j >= 0 ? toNum(t[j + 3]) : null;
-      var r1 = t[iDev + 9], rn = t[iDev + 10], r2 = t[iDev + 11];
-      var rcdType = t[iDev + 6] || "";                    // RCD type column (AC/A/F/B, or ---)
+      var maxZs = UCMIN / (K[type] * rating);                   // computed — layout-independent
+      var oMax = -1;
+      for (var o = 3; o <= 8; o++) { var v = toNum(t[iDev + o]); if (v && Math.abs(v - maxZs) / maxZs < 0.04) { oMax = o; break; } }
+      var ringBase = oMax >= 0 ? (oMax === 4 ? 9 : (oMax === 5 ? 6 : oMax + 1)) : -1;
+      var r1, rn, r2, ring = false;
+      if (ringBase > 0) { r1 = t[iDev + ringBase]; rn = t[iDev + ringBase + 1]; r2 = t[iDev + ringBase + 2]; ring = isReading(r1) && isReading(rn) && isReading(r2); }
+      var measured = null;
+      var jv = -1; for (var k = (oMax > 0 ? iDev + oMax : iDev + 3); k < t.length; k++) { if (/^(250|500|1000)$/.test(t[k])) { jv = k; break; } }
+      if (jv >= 0) { for (var q = jv + 1; q < t.length; q++) { if (plainNum(t[q])) { var vv = toNum(t[q]); if (vv <= 50) { measured = vv; break; } } } }
+      var d = designation(t, iDev);
       return {
-        db: t[0], cct: (t[1] + (t[2] || "")).toUpperCase(),
+        db: d.db, cct: d.cct,
         live: t[iDev - 3], cpc: t[iDev - 2],
-        type: type, rating: rating, maxZs: toNum(t[iDev + 4]),
+        type: type, rating: rating, maxZs: maxZs, oMax: oMax,
         r1: r1, rn: rn, r2: r2,
-        rcd: /^(AC|A|F|B)$/i.test(rcdType), rcdType: rcdType,
-        ring: isReading(r1) && isReading(rn) && isReading(r2),
+        rcd: /^(61008|61009|62423)$/.test(dev),   // an RCBO carries its own RCD
+        ring: ring,
         lim: /\bLIM\b/i.test(line), measured: measured, raw: line
       };
     }
@@ -537,16 +560,16 @@
       // Per-circuit checks → split into review vs verified
       var verified = [];
       circuits.forEach(function (c) {
-        var lbl = "DB " + c.db + " · CCT " + c.cct;
+        var lbl = (c.db ? "DB " + c.db + " · " : "") + "CCT " + c.cct;
         var liveN = toNum(c.live), cpcN = toNum(c.cpc), issues = [];
         // Cable clearly under-rated for its OCPD
         if (liveN && CAP[c.live] && c.rating > CAP[c.live] && !(c.live === "2.5" && c.rating <= 32 && c.ring))
           issues.push(c.live + " mm² live conductor on a " + c.rating + " A Type " + c.type + " device — above its typical current capacity (~" + CAP[c.live] + " A). Check the design current, install method and grouping.");
-        // CPC not a recognised pairing for the line size (T&E domain only)
-        if (liveN && cpcN && liveN <= 10 && cpcN < liveN && TE_CPC[c.live] && String(cpcN) !== TE_CPC[c.live])
-          issues.push("CPC " + c.cpc + " mm² doesn't match a standard cable for a " + c.live + " mm² line (twin-&-earth cpc would be " + TE_CPC[c.live] + " mm², or a line-sized cpc). Confirm the cable type / adiabatic.");
-        // 2.5 mm² on >20 A should be a ring — needs end-to-end readings
-        if (c.live === "2.5" && c.rating > 20 && !c.ring)
+        // CPC UNDERSIZED for the line size (T&E domain only) — a larger cpc is safe, don't flag it
+        if (liveN && cpcN && liveN <= 10 && TE_CPC[c.live] && cpcN < parseFloat(TE_CPC[c.live]))
+          issues.push("CPC " + c.cpc + " mm² looks undersized for a " + c.live + " mm² line (a twin-&-earth cpc would be " + TE_CPC[c.live] + " mm²). Confirm the cable type and check the adiabatic (543.1.3).");
+        // 2.5 mm² on >20 A should be a ring — needs end-to-end readings (only when the layout is recognised)
+        if (c.live === "2.5" && c.rating > 20 && !c.ring && c.oMax >= 0)
           issues.push("2.5 mm² on a " + c.rating + " A device (a ring final is expected) but the end-to-end r1/rn/r2 continuity readings are missing. Record them, or confirm it isn't a ring.");
         // Measured Zs vs limit
         var zsNote = "";
@@ -597,7 +620,7 @@
           "<table style='margin-top:8px'><thead><tr><th>DB · CCT</th><th>Cable</th><th>Device</th><th class='n'>Max Zs</th><th class='n'>Zs</th><th></th></tr></thead><tbody>" +
           verified.map(function (v, i) {
             var c = v.c;
-            return "<tr><td><b>" + esc2(c.db) + " · " + esc2(c.cct) + "</b></td>" +
+            return "<tr><td><b>" + (c.db ? esc2(c.db) + " · " : "") + esc2(c.cct) + "</b></td>" +
               "<td>" + esc2(c.live) + "/" + esc2(c.cpc) + " mm²</td>" +
               "<td>Type " + esc2(c.type) + " " + c.rating + " A</td>" +
               "<td class='n'>" + (c.maxZs ? fmt(c.maxZs) + " Ω" : "—") + "</td>" +

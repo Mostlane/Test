@@ -1307,16 +1307,26 @@ then reports in a **REVIEW-first** layout:
     stated Max Zs column).
 - **✓ Verified results** in a **collapsible `<details>`** below (DB·CCT, cable
   live/cpc, device, Max Zs, measured Zs, tap "row" for raw text).
-**Structured schedule parser** (`parseCircuit`): glue `> 200`→`>200`, split to
-tokens, **anchor on the OCPD BS EN index** (`60898|61009|60947|61008|3036|88`),
-read fixed offsets — live=iDev-3, cpc=iDev-2, type=iDev+1, rating=iDev+2,
-maxZs=iDev+4, ring r1/rn/r2=iDev+9/10/11; **measured Zs = the value 3 tokens after
-the IR test-voltage anchor** (250/500/1000). DB=t[0], CCT=t[1]+t[2] (e.g.
-"3"+"L1"). **Validated against the Tangier Rd Co-op sample (3-phase, 68 circuits):
-all 68 rows parsed, measured Zs extracted + ≤ max on every row, both signatories +
-latest date + LIM 4% correct, ZERO false review flags** (it's a SATISFACTORY
-report). **Format-specific — built against that Co-op EICR software's layout;
-other systems need the parser offsets tuned.**
+**Structured schedule parser** (`parseCircuit`) — **layout-aware, handles multiple
+EICR programs**: glue `> 200`→`>200`, split to tokens, **anchor on the OCPD BS EN
+index** (`60898|61009|60947|61008|3036|88`). Columns at/before the device are stable
+across programs — live=iDev-3, cpc=iDev-2, type=iDev+1, rating=iDev+2. The columns
+AFTER the device vary, so: **max Zs is COMPUTED** (`218.5/(k·In)`, layout-independent)
+and the report's own max-Zs column is then LOCATED by matching that value (`oMax`),
+which also identifies the **layout family** — `oMax=4` = a 4-col RCD block follows
+(ring r1/rn/r2 at iDev+9..11, the "Tangier Co-op" software), `oMax=5` = RCD-mA
+precedes max-Zs (ring at iDev+6..8, the "QuickPDF" software). **Measured Zs = the
+first plain number ≤50 after the IR test-voltage token** (250/500/1000) — robust to
+whether the IR readings come before or after the voltage. RCD presence = the OCPD is
+an RCBO (`61008|61009|62423`). DB·CCT via `designation()` — anchors on the phase
+token (L1/L2/L3/TP/SP/N) so it survives leading-column differences. **CPC check flags
+only an UNDERSIZED cpc** (larger is safe). The 2.5 mm²>20 A ring-readings check runs
+only when the layout was recognised (`oMax>=0`). **Validated against THREE real
+reports from TWO programs — Tangier Co-op (SATISFACTORY, 3-phase, 68 circuits) and
+two QuickPDF reports (both UNSATISFACTORY, 35 & 51 circuits): all rows parse, measured
+Zs ≤ max on every row, signatories + latest date correct, LIM flagged at 11%/15%,
+and ZERO false review flags on all three.** New/other software may still need a
+family added — add its `oMax`/ring offsets.
 Manual reference tabs still present:
 **Max Zs** (Type B/C/D MCB/RCBO, computed `218.5/(k·In)` where k=5/10/20 = BS 7671
 A2 Cmin-0.95 method; shows tabulated + the 0.8× cold rule-of-thumb, pass/review/
