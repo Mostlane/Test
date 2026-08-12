@@ -63,8 +63,17 @@
 
     .table-wrapper { overflow-x:auto; overflow-y:auto; max-height:70vh; width:100%; }
     table { width:100%; border-collapse:collapse; margin-top:10px; }
-    th, td { border:1px solid #d5dde5; padding:8px; text-align:center; font-size:14px; }
-    th { background:#1A4F8F; color:#fff; position:sticky; top:0; z-index:5; }
+    th, td { border:1px solid #d5dde5; padding:3px 8px; text-align:center; font-size:14px; line-height:1.25; }
+    th { background:#1A4F8F; color:#fff; position:sticky; top:0; z-index:5; padding:6px 8px; }
+    /* Compact document buttons so the Docs column doesn't force tall rows. */
+    td .doc-btn{ padding:1px 6px; line-height:1.3; }
+    /* Keep the 📎 + 🗂 buttons on ONE line so a store with documents isn't a
+       taller (two-line) row than an empty one. */
+    td.docs-cell{ white-space:nowrap; }
+    /* The dominant cause of tall desktop rows was long site names wrapping to a
+       second line. Keep the name on one line (left-aligned so it reads naturally);
+       the table already scrolls sideways if a column gets wide. */
+    td.site{ white-space:nowrap; text-align:left; }
     tr:nth-child(even){ background:#f4f7fb; }
     tr:nth-child(odd){ background:#fff; }
     /* Keep the Store Code column visible while scrolling the wide table sideways. */
@@ -548,7 +557,7 @@ function renderTable(d){
     const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
       + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '');
     tr.innerHTML = `
-      <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
+      <td>${e.storeCode}</td><td class="site">${e.siteName}</td><td>${e.storeType}</td>
       <td>${e.postcode}</td><td>${getStatus(e)}</td>
       <td class="dc">${dateCell(e.storeCode,'fiveYear',e.fiveYear)}</td><td class="dc">${dateCell(e.storeCode,'pat',e.pat)}</td><td class="dc">${dateCell(e.storeCode,'em',e.em)}</td>
       <td class="dc">${dateCell(e.storeCode,'pv',e.pv)}</td><td class="dc">${dateCell(e.storeCode,'ev',e.ev)}</td><td class="dc">${dateCell(e.storeCode,'pump',e.pump)}</td>
