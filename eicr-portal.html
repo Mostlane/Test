@@ -666,7 +666,16 @@ async function fetchAllProgressive(){
    `files` says which types already have a document (drives the 📄 links). */
 async function loadFromPortal(){
   const tb = document.getElementById('tableBody');
-  tb.innerHTML = '<tr><td colspan="12" class="loading">Loading…</td></tr>';
+  // Preserve where the user is looking. Uploading/deleting a document (and the
+  // Reload button) re-runs this; without capturing the scroll the rebuilt table
+  // would snap back to the top.
+  const wrap = document.querySelector('.table-wrapper');
+  const keepScroll = wrap ? wrap.scrollTop : 0;
+  const keepWin = window.scrollY;
+  const firstLoad = !allData.length;
+  // Only show the "Loading…" placeholder on the very first load — on a refresh we
+  // keep the current rows visible (no flash, no jump) until the new ones arrive.
+  if (firstLoad) tb.innerHTML = '<tr><td colspan="12" class="loading">Loading…</td></tr>';
   let stores = [];
   try{
     const r = await authFetch('/compliance/stores');
@@ -674,7 +683,8 @@ async function loadFromPortal(){
     stores = j.stores || [];
   }catch(e){
     console.error('loadFromPortal', e);
-    tb.innerHTML = '<tr><td colspan="12" class="error">Could not load compliance data.</td></tr>';
+    // On a background refresh, keep what's on screen rather than blanking it.
+    if (firstLoad) tb.innerHTML = '<tr><td colspan="12" class="error">Could not load compliance data.</td></tr>';
     return;
   }
   complianceIndex = {};
@@ -699,6 +709,9 @@ async function loadFromPortal(){
     return;
   }
   applyFilters();
+  // Restore the scroll position now that the table has its full height back.
+  if (wrap) wrap.scrollTop = keepScroll;
+  if (keepWin) window.scrollTo(0, keepWin);
 }
 
 /* One-time migration: read the old mostlane-pos store list BROWSER-SIDE (it's
