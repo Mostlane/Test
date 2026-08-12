@@ -286,15 +286,36 @@
       else verified.push({ db: c.db, cct: c.cct, live: c.live, cpc: c.cpc, type: c.type, rating: c.rating, maxZs: c.maxZs, measured: c.measured, note: note, raw: c.raw });
     });
 
-    // Is this document actually an EICR (vs a remedial sheet / quote / other doc filed
-    // under "5 Year")? An EICR carries the title, and/or a stated overall assessment,
-    // and/or a schedule of test results — a remedial sheet has none of these.
-    var isEicr = /electrical installation condition report/i.test(rawFlat)
-      || outcome !== ""
-      || /schedule of (test results|circuit details)/i.test(rawFlat);
+    // Classify the certificate TYPE, so the worklist can tell an EICR (the condition
+    // report) apart from the remedial certificates that clear its observations:
+    //   • eicr        — Electrical Installation Condition Report (title / stated
+    //                   overall assessment / schedule of test results)
+    //   • minorworks  — Minor Electrical Installation Works Certificate (MEIWC): the
+    //                   certificate for a small remedial job with no new circuit
+    //   • eic         — Electrical Installation Certificate: for new work / larger
+    //                   remedial work (new/altered circuits)
+    //   • other       — remedial sheet, quote, invoice or any other paperwork
+    // A stated SATISFACTORY/UNSATISFACTORY assessment is EICR-exclusive, so it wins;
+    // otherwise the certificate title decides. A Minor Works / EIC is how remedial
+    // work following an unsatisfactory EICR is signed off (BS 7671 model forms).
+    var isConditionReport = /electrical installation condition report/i.test(rawFlat);
+    var isMinorWorks = /minor\s+(electrical\s+installation\s+)?works?\s+certificate/i.test(rawFlat) || /\bMEIWC\b/.test(rawFlat);
+    var isEIC = /electrical installation certificate/i.test(rawFlat) && !isConditionReport;
+    var docType;
+    if (outcome !== "") docType = "eicr";                                    // only EICRs state an assessment
+    else if (isMinorWorks) docType = "minorworks";
+    else if (isEIC) docType = "eic";
+    else if (isConditionReport) docType = "eicr";
+    else if (/schedule of (test results|circuit details)/i.test(rawFlat)) docType = "eicr";
+    else docType = "other";
+    var docLabel = docType === "minorworks" ? "Minor Works Certificate"
+      : docType === "eic" ? "Electrical Installation Certificate"
+      : docType === "eicr" ? "Electrical Installation Condition Report" : "Other document";
+    var isEicr = docType === "eicr";
 
     return {
-      empty: false, isEicr: isEicr, ref: ref, outcome: outcome, latest: latest, sigs: sigs, codes: codes,
+      empty: false, isEicr: isEicr, docType: docType, docLabel: docLabel,
+      ref: ref, outcome: outcome, latest: latest, sigs: sigs, codes: codes,
       lim: { pct: limPct, limOut: limOut, totOut: totOut },
       suggestions: suggestions, reviews: reviews, verified: verified, circuitsCount: circuits.length
     };
@@ -334,7 +355,7 @@
     // Bump VERSION whenever the analysis changes — the compliance worklist stores it
     // with each result and auto-re-checks any cert scored by an older engine, so fixes
     // reach the saved findings without a manual "re-check every site".
-    VERSION: 9,
+    VERSION: 10,
     loadPdfjs: loadPdfjs, readPdf: readPdf, analyze: analyze, summarize: summarize,
     DETECTORS: DETECTORS
   };

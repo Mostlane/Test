@@ -151,12 +151,17 @@
       var total = todo.length, done = 0, attention = 0, errors = 0;
       function tick(label) { done++; bar.style.width = Math.round(done / total * 100) + "%"; st.textContent = "Checking " + done + " of " + total + (skipped ? " (" + skipped + " skipped — unchanged)" : "") + "… " + (label || ""); }
 
+      function fmtDate(x) { var d = new Date(x); return isNaN(d) ? "" : (d.getDate() + "/" + (d.getMonth() + 1) + "/" + d.getFullYear()); }
+
       async function one(t) {
         try {
-          // Work through the site's 5-Year documents newest-first; verify the FIRST
-          // that is a real EICR and ignore the rest (remedial sheets / other docs).
+          // Work through the site's 5-Year documents newest-first: find the newest real
+          // EICR (the condition report) and, along the way, collect any Minor Works /
+          // Electrical Installation Certificates — the remedial certificates that clear
+          // an unsatisfactory EICR's observations. Remedials that post-date the EICR come
+          // BEFORE it in newest-first order, so they're gathered before we stop.
           var docs = (t.docs && t.docs.length) ? t.docs : [{ fileId: t.fileId, url: t.url }];
-          var chosen = null, unreadable = null, dl;
+          var chosen = null, remedials = [], unreadable = null, dl;
           for (var di = 0; di < docs.length; di++) {
             var d = docs[di];
             try {
@@ -166,17 +171,36 @@
               var pages = await MLEICR.readPdf(buf);
               var result = MLEICR.analyze(pages);
               if (result.empty) { if (!unreadable) unreadable = d; continue; }   // scanned — maybe the cert; remember
-              if (result.isEicr) { chosen = { d: d, result: result }; break; }   // the real certificate → use it
-              // else: a readable non-EICR (remedial sheet) → ignore, try older docs
+              if (result.docType === "eicr") { chosen = { d: d, result: result }; break; }   // the condition report → use it
+              if (result.docType === "minorworks" || result.docType === "eic") { remedials.push({ d: d, result: result }); continue; }
+              // else: a readable non-cert (remedial sheet / other) → ignore, try older docs
             } catch (e) { if (!dl) dl = e; }
           }
 
           if (chosen) {
             var summ = MLEICR.summarize(chosen.result);
-            if (summ.attention) attention++;
             var flags = summ.flags.concat((summ.recommendations || []).map(function (x) { return "💡 " + x; }));
+            var attn = summ.attention ? 1 : 0;
+            var outcomeStr = chosen.result.outcome || "";
+            // Remediation: an UNSATISFACTORY EICR whose observations have been cleared by
+            // a later Minor Works / Electrical Installation Certificate on file → passes.
+            if (chosen.result.outcome === "UNSATISFACTORY" && remedials.length) {
+              var eicrT = chosen.result.latest ? +new Date(chosen.result.latest) : 0;
+              var after = remedials.filter(function (r) { return r.result.latest && +new Date(r.result.latest) >= eicrT; });
+              after.sort(function (a, b) { return +new Date(b.result.latest) - +new Date(a.result.latest); });
+              if (after.length) {
+                var rr = after[0];
+                var rdate = rr.result.latest ? fmtDate(rr.result.latest) : "";
+                var edate = chosen.result.latest ? fmtDate(chosen.result.latest) : "";
+                attn = 0;
+                outcomeStr = "REMEDIED";
+                summ.headline = "Remedied — unsatisfactory EICR cleared by a later " + rr.result.docLabel;
+                flags = ["✅ The unsatisfactory EICR" + (edate ? " (" + edate + ")" : "") + " has since been remedied by a " + rr.result.docLabel + (rdate ? " dated " + rdate : "") + " on file — the observations are cleared, so this site passes."].concat(flags);
+              }
+            }
+            if (attn) attention++;
             await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ code: t.code, type: t.type, outcome: chosen.result.outcome || "", summary: summ.headline, flags: flags, attention: summ.attention ? 1 : 0, fileId: chosen.d.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
+              body: JSON.stringify({ code: t.code, type: t.type, outcome: outcomeStr, summary: summ.headline, flags: flags, attention: attn, fileId: chosen.d.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
           } else if (unreadable) {
             attention++;
             await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -225,6 +249,7 @@
     }
     function outcomeBadge(o) {
       if (o === "SATISFACTORY") return "<span class='badge b-sat'>SAT</span>";
+      if (o === "REMEDIED") return "<span class='badge b-sat'>REMEDIED</span>";
       if (o === "UNSATISFACTORY") return "<span class='badge b-unsat'>UNSAT</span>";
       if (o === "error") return "<span class='badge b-unk'>UNREAD</span>";
       return "<span class='badge b-unk'>?</span>";
