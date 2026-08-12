@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=2"></script>
+  <title>Mostlane • EICR / BS 7671 Check</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb;
+         --pass:#166534; --passbg:#dcfce7; --fail:#b91c1c; --failbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:160px;}
+  a.ml-back{text-decoration:none;font-size:15px;}
+  .wrap{max-width:760px;margin:0 auto;padding:16px;}
+  .disc{background:var(--warnbg);color:var(--warn);border:1px solid #fcd34d;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.45;margin-bottom:14px;}
+  .disc b{font-weight:700;}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+  .tabs button{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:7px 13px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .panel h2{font-size:15px;margin:0 0 4px;}
+  .panel .sub{font-size:12.5px;color:var(--muted);margin:0 0 14px;}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px;}
+  .fld{display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px;}
+  .fld label{font-size:12px;font-weight:600;color:#334155;}
+  select,input{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:#fff;width:100%;}
+  .lim{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:13.5px;line-height:1.5;margin:6px 0 12px;}
+  .lim b{font-weight:700;}
+  .lim .big{font-size:20px;font-weight:800;color:var(--brand);}
+  .verdict{display:none;border-radius:10px;padding:12px 14px;font-size:15px;font-weight:700;margin-top:6px;align-items:center;gap:8px;}
+  .verdict.pass{background:var(--passbg);color:var(--pass);display:flex;}
+  .verdict.fail{background:var(--failbg);color:var(--fail);display:flex;}
+  .verdict small{display:block;font-weight:500;font-size:12.5px;margin-top:2px;opacity:.85;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px;}
+  th,td{text-align:left;padding:8px 8px;border-bottom:1px solid var(--line);}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .note{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:10px;}
+  .code-pill{display:inline-block;font-weight:800;border-radius:6px;padding:2px 8px;font-size:12.5px;}
+  .code-C1{background:var(--failbg);color:var(--fail);}
+  .code-C2{background:#ffedd5;color:#9a3412;}
+  .code-C3{background:#fef9c3;color:#854d0e;}
+  .code-FI{background:#e0e7ff;color:#3730a3;}
+  .cdef{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13.5px;line-height:1.5;}
+  .cdef h4{margin:0 0 3px;font-size:14px;}
+  .clist th:last-child,.clist td:last-child{text-align:right;white-space:nowrap;}
+  #codeSearch{margin-bottom:10px;}
+  .hide{display:none;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+    <h1>⚡ EICR / BS 7671 Check</h1>
+  </header>
+
+  <div class="wrap">
+    <div id="gate" class="panel hide"><b>Compliance access needed.</b> This tool is for Compliance / Full-Access users.</div>
+
+    <div id="app" class="hide">
+      <div class="disc">
+        <b>A checking aid — not a substitute for a competent person, a site assessment, or BS 7671 itself.</b>
+        Limits shown are the published values of <b>BS 7671:2018+A2:2022</b> and IET <b>Guidance Note 3</b>.
+        Always confirm against the current regulations and the specific installation. Coding requires professional judgement.
+      </div>
+
+      <div class="tabs" id="tabs">
+        <button data-t="zs" class="on">Max Zs</button>
+        <button data-t="rcd">RCD &amp; times</button>
+        <button data-t="ir">Insulation</button>
+        <button data-t="ring">Ring circuit</button>
+        <button data-t="code">Coding (C1–C3)</button>
+      </div>
+
+      <!-- ── MAX Zs ─────────────────────────────────────────────── -->
+      <section class="panel" data-sec="zs">
+        <h2>Maximum earth-fault loop impedance (Zs)</h2>
+        <p class="sub">BS 7671 Tables 41.3 / 41.4 (Cmin 0.95, U₀ 230 V). For MCBs / RCBOs the limit is set by the magnetic trip.</p>
+        <div class="row">
+          <div class="fld"><label>Protective device</label>
+            <select id="zsType">
+              <option value="B">Type B MCB / RCBO (5×Iₙ)</option>
+              <option value="C">Type C MCB / RCBO (10×Iₙ)</option>
+              <option value="D">Type D MCB / RCBO (20×Iₙ)</option>
+            </select></div>
+          <div class="fld"><label>Rating (A)</label>
+            <select id="zsRating"></select></div>
+        </div>
+        <div class="lim" id="zsLim"></div>
+        <div class="row">
+          <div class="fld"><label>Measured Zs (Ω)</label>
+            <input id="zsMeas" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 0.85"></div>
+        </div>
+        <div class="verdict" id="zsVerdict"></div>
+        <p class="note">The <b>tabulated</b> value assumes conductors at operating temperature. A reading taken cold should sit at or below the <b>0.8×</b> "rule-of-thumb" figure (GN3) — that's what the pass/fail uses. If the circuit is <b>RCD-protected</b>, fault protection is by the RCD instead — see the RCD tab (Zs ≤ 50 ⁄ I∆n). Fuse presets aren't built in yet; use BS 7671 Table 41.2/41.4 for those.</p>
+      </section>
+
+      <!-- ── RCD & disconnection times ─────────────────────────── -->
+      <section class="panel hide" data-sec="rcd">
+        <h2>RCD operation &amp; disconnection times</h2>
+        <p class="sub">BS 7671 411.3 / Table 41.1 and GN3. Test at 0° and 180°, record the longer time.</p>
+
+        <h4 style="margin:4px 0 6px;font-size:13.5px;">RCD trip-time check (30 mA, additional protection)</h4>
+        <div class="row">
+          <div class="fld"><label>Measured @ 1×I∆n (ms)</label><input id="rcd1" type="number" step="1" inputmode="numeric" placeholder="≤ 300"></div>
+          <div class="fld"><label>Measured @ 5×I∆n (ms)</label><input id="rcd5" type="number" step="1" inputmode="numeric" placeholder="≤ 40"></div>
+        </div>
+        <div class="verdict" id="rcdVerdict"></div>
+        <p class="note">A 30 mA RCD for additional protection must trip <b>≤ 300 ms at 1×I∆n</b> and <b>≤ 40 ms at 5×I∆n</b>. (A no-test-button or failed operation is a code — see Coding.)</p>
+
+        <div class="lim" style="margin-top:14px">
+          <b>Max Zs for an RCD (fault protection): Zs ≤ 50 ⁄ I∆n</b><br>
+          30 mA → <b>1667 Ω</b> &nbsp;·&nbsp; 100 mA → <b>500 Ω</b> &nbsp;·&nbsp; 300 mA → <b>167 Ω</b> &nbsp;·&nbsp; 500 mA → <b>100 Ω</b>
+        </div>
+
+        <h4 style="margin:10px 0 4px;font-size:13.5px;">Maximum disconnection times — Table 41.1 (230 V)</h4>
+        <table>
+          <thead><tr><th>System</th><th>Final circuit ≤ 63 A</th><th>Distribution / &gt; 63 A</th></tr></thead>
+          <tbody>
+            <tr><td><b>TN</b> (TN-S / TN-C-S)</td><td class="n">0.4 s</td><td class="n">5 s</td></tr>
+            <tr><td><b>TT</b></td><td class="n">0.2 s</td><td class="n">1 s</td></tr>
+          </tbody>
+        </table>
+        <p class="note">Typical maximum external loop impedance (Ze): TN-S ≤ 0.8 Ω, TN-C-S (PME) ≤ 0.35 Ω, TT ≤ 21 Ω (RCD required). Confirm PFC is within the device's breaking capacity.</p>
+      </section>
+
+      <!-- ── Insulation resistance ─────────────────────────────── -->
+      <section class="panel hide" data-sec="ir">
+        <h2>Insulation resistance</h2>
+        <p class="sub">BS 7671 Table 61. Test between live conductors, and between live conductors and earth.</p>
+        <div class="row">
+          <div class="fld"><label>Circuit / nominal voltage</label>
+            <select id="irType">
+              <option value="selv">SELV / PELV — test 250 V, min 0.5 MΩ</option>
+              <option value="lv" selected>Up to 500 V (typical LV) — test 500 V, min 1.0 MΩ</option>
+              <option value="hv">Over 500 V up to 1000 V — test 1000 V, min 1.0 MΩ</option>
+            </select></div>
+        </div>
+        <div class="lim" id="irLim"></div>
+        <div class="row">
+          <div class="fld"><label>Measured insulation resistance (MΩ)</label>
+            <input id="irMeas" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 199"></div>
+        </div>
+        <div class="verdict" id="irVerdict"></div>
+        <p class="note">Where electronic equipment could be damaged, disconnect it or test live conductors connected together to earth. A reading far above the minimum (e.g. &gt;299 MΩ / ∞) is normal for a healthy circuit; a low but passing value can still warrant investigation.</p>
+      </section>
+
+      <!-- ── Ring final circuit ────────────────────────────────── -->
+      <section class="panel hide" data-sec="ring">
+        <h2>Ring final circuit continuity</h2>
+        <p class="sub">End-to-end resistances (step 1 of the 3-step test). Line &amp; neutral should match; r2 depends on the CPC size.</p>
+        <div class="row">
+          <div class="fld"><label>r1 — line (Ω)</label><input id="r1" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 0.80"></div>
+          <div class="fld"><label>rn — neutral (Ω)</label><input id="rn" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 0.80"></div>
+          <div class="fld"><label>r2 — cpc (Ω)</label><input id="r2" type="number" step="0.01" inputmode="decimal" placeholder="e.g. 1.33"></div>
+        </div>
+        <div class="row">
+          <div class="fld"><label>Line conductor (mm²)</label>
+            <select id="csaLine"><option>1.5</option><option selected>2.5</option><option>4</option><option>6</option></select></div>
+          <div class="fld"><label>CPC (mm²)</label>
+            <select id="csaCpc"><option selected>1.5</option><option>1.0</option><option>2.5</option><option>4</option></select></div>
+        </div>
+        <div class="verdict" id="ringVerdict"></div>
+        <div class="lim hide" id="ringOut"></div>
+        <p class="note">Healthy ring: <b>r1 ≈ rn</b>, and <b>r2 ≈ (line ÷ cpc) × r1</b> (e.g. 2.5/1.5 mm² → r2 ≈ 1.67 × r1). Cross-connected readings at each socket should be near-uniform; the expected <b>R1+R2 = (r1 + r2) ⁄ 4</b>. A high/odd reading points to a break, spur, or cross-connection.</p>
+      </section>
+
+      <!-- ── Coding helper ─────────────────────────────────────── -->
+      <section class="panel hide" data-sec="code">
+        <h2>Observation coding — C1 · C2 · C3 · FI</h2>
+        <p class="sub">Per IET Guidance Note 3 &amp; Best Practice Guide 4. The code depends on the actual situation — these are typical examples, not rulings.</p>
+        <div class="cdef"><h4><span class="code-pill code-C1">C1</span> Danger present</h4>Risk of injury — <b>immediate</b> remedial action required. (Exposed live parts, incorrect polarity, unsafe conductor.)</div>
+        <div class="cdef"><h4><span class="code-pill code-C2">C2</span> Potentially dangerous</h4><b>Urgent</b> remedial action required. (No/inadequate earthing or bonding, no CPC at an accessory, damaged accessory.)</div>
+        <div class="cdef"><h4><span class="code-pill code-C3">C3</span> Improvement recommended</h4>Not a fail on its own. (No RCD where now recommended but not required at install, no SPD, old cable colours with a warning notice.)</div>
+        <div class="cdef"><h4><span class="code-pill code-FI">FI</span> Further investigation</h4>Required <b>without delay</b> — something couldn't be fully assessed and may reveal a danger.</div>
+        <div class="lim"><b>Overall:</b> the report is <b>UNSATISFACTORY</b> if there is any <b>C1</b>, <b>C2</b> or <b>FI</b>. <b>C3</b> items alone → still Satisfactory (but recorded).</div>
+
+        <h4 style="margin:12px 0 6px;font-size:13.5px;">Common observations → typical code</h4>
+        <input id="codeSearch" type="search" placeholder="Search observations…">
+        <table class="clist"><tbody id="codeRows"></tbody></table>
+        <p class="note">Curated examples for guidance only. Where an item could be assessed either way, the inspector's judgement of the specific risk decides — and if it can't be assessed, it's <b>FI</b>.</p>
+      </section>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    // Gate: Compliance or Full Access.
+    var perms = {};
+    try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+    var ok = perms.FullAccess === "Yes" || perms.Compliance === "Yes";
+    document.getElementById(ok ? "app" : "gate").classList.remove("hide");
+    if (!ok) return;
+
+    var $ = function (id) { return document.getElementById(id); };
+    var fmt = function (n) { return (Math.round(n * 100) / 100).toString(); };
+
+    // ---- Tabs ----
+    var tabs = $("tabs");
+    tabs.addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-t]"); if (!b) return;
+      [].forEach.call(tabs.children, function (x) { x.classList.toggle("on", x === b); });
+      document.querySelectorAll("section[data-sec]").forEach(function (s) {
+        s.classList.toggle("hide", s.getAttribute("data-sec") !== b.getAttribute("data-t"));
+      });
+    });
+
+    // ---- Max Zs ----
+    var UCMIN = 230 * 0.95;           // 218.5 V
+    var K = { B: 5, C: 10, D: 20 };
+    var RATINGS = [6, 10, 16, 20, 25, 32, 40, 50, 63];
+    var zsRating = $("zsRating");
+    RATINGS.forEach(function (r) { var o = document.createElement("option"); o.value = r; o.textContent = r + " A"; zsRating.appendChild(o); });
+    zsRating.value = "32";
+    function zsCalc() {
+      var k = K[$("zsType").value], In = Number(zsRating.value);
+      var tab = UCMIN / (k * In);         // tabulated (Cmin 0.95)
+      var rule = 0.8 * tab;               // cold rule-of-thumb
+      $("zsLim").innerHTML = "Tabulated max Zs: <b>" + fmt(tab) + " Ω</b> &nbsp;·&nbsp; pass a cold reading at <span class='big'>≤ " + fmt(rule) + " Ω</span> (0.8× rule)";
+      var meas = parseFloat($("zsMeas").value), v = $("zsVerdict");
+      if (isNaN(meas)) { v.className = "verdict"; return; }
+      if (meas <= rule) { v.className = "verdict pass"; v.innerHTML = "✓ PASS<small>" + fmt(meas) + " Ω ≤ " + fmt(rule) + " Ω (0.8× limit). Tabulated " + fmt(tab) + " Ω.</small>"; }
+      else if (meas <= tab) { v.className = "verdict fail"; v.innerHTML = "⚠ REVIEW<small>" + fmt(meas) + " Ω is above the 0.8× cold limit (" + fmt(rule) + " Ω) but under the tabulated max (" + fmt(tab) + " Ω) — verify temperature/values.</small>"; }
+      else { v.className = "verdict fail"; v.innerHTML = "✗ FAIL<small>" + fmt(meas) + " Ω exceeds the tabulated max Zs of " + fmt(tab) + " Ω.</small>"; }
+    }
+    ["zsType", "zsRating", "zsMeas"].forEach(function (id) { $(id).addEventListener("input", zsCalc); });
+    zsCalc();
+
+    // ---- RCD trip times ----
+    function rcdCalc() {
+      var a = parseFloat($("rcd1").value), b = parseFloat($("rcd5").value), v = $("rcdVerdict");
+      if (isNaN(a) && isNaN(b)) { v.className = "verdict"; return; }
+      var fails = [];
+      if (!isNaN(a) && a > 300) fails.push(a + " ms @ 1×I∆n (max 300)");
+      if (!isNaN(b) && b > 40) fails.push(b + " ms @ 5×I∆n (max 40)");
+      if (fails.length) { v.className = "verdict fail"; v.innerHTML = "✗ FAIL<small>" + fails.join("; ") + "</small>"; }
+      else { v.className = "verdict pass"; v.innerHTML = "✓ PASS<small>Within 30 mA additional-protection limits (≤300 ms @1×, ≤40 ms @5×).</small>"; }
+    }
+    ["rcd1", "rcd5"].forEach(function (id) { $(id).addEventListener("input", rcdCalc); });
+
+    // ---- Insulation resistance ----
+    var IR = { selv: { v: 250, min: 0.5 }, lv: { v: 500, min: 1.0 }, hv: { v: 1000, min: 1.0 } };
+    function irCalc() {
+      var c = IR[$("irType").value];
+      $("irLim").innerHTML = "Test voltage <b>" + c.v + " V DC</b> — minimum <span class='big'>" + c.min + " MΩ</span>";
+      var m = parseFloat($("irMeas").value), v = $("irVerdict");
+      if (isNaN(m)) { v.className = "verdict"; return; }
+      if (m >= c.min) { v.className = "verdict pass"; v.innerHTML = "✓ PASS<small>" + m + " MΩ ≥ " + c.min + " MΩ minimum.</small>"; }
+      else { v.className = "verdict fail"; v.innerHTML = "✗ FAIL<small>" + m + " MΩ is below the " + c.min + " MΩ minimum.</small>"; }
+    }
+    ["irType", "irMeas"].forEach(function (id) { $(id).addEventListener("input", irCalc); });
+    irCalc();
+
+    // ---- Ring final circuit ----
+    function ringCalc() {
+      var r1 = parseFloat($("r1").value), rn = parseFloat($("rn").value), r2 = parseFloat($("r2").value);
+      var line = Number($("csaLine").value), cpc = Number($("csaCpc").value);
+      var v = $("ringVerdict"), out = $("ringOut");
+      if (isNaN(r1) || isNaN(rn) || isNaN(r2)) { v.className = "verdict"; out.classList.add("hide"); return; }
+      var issues = [];
+      var lnDiff = Math.abs(r1 - rn) / Math.max(r1, rn);
+      if (lnDiff > 0.05) issues.push("r1 and rn differ by " + Math.round(lnDiff * 100) + "% (expect ≈ equal — check for a spur, break or different CSA)");
+      var expRatio = line / cpc, gotRatio = r2 / r1;
+      if (Math.abs(gotRatio - expRatio) / expRatio > 0.1) issues.push("r2 ⁄ r1 = " + fmt(gotRatio) + " but expected ≈ " + fmt(expRatio) + " for " + line + "/" + cpc + " mm² (check CPC continuity)");
+      var expR1R2 = (r1 + r2) / 4;
+      out.classList.remove("hide");
+      out.innerHTML = "Expected uniform <b>R1+R2 ≈ " + fmt(expR1R2) + " Ω</b> at each socket &nbsp;·&nbsp; expected r2 ⁄ r1 ≈ <b>" + fmt(expRatio) + "</b>";
+      if (issues.length) { v.className = "verdict fail"; v.innerHTML = "⚠ CHECK<small>" + issues.join("<br>") + "</small>"; }
+      else { v.className = "verdict pass"; v.innerHTML = "✓ CONSISTENT<small>Line/neutral matched and r2 ⁄ r1 as expected. Confirm with the cross-connected socket readings.</small>"; }
+    }
+    ["r1", "rn", "r2", "csaLine", "csaCpc"].forEach(function (id) { $(id).addEventListener("input", ringCalc); });
+
+    // ---- Coding examples (curated, BPG4-style) ----
+    var CODES = [
+      ["Exposed live parts (accessible)", "C1"],
+      ["Incorrect polarity", "C1"],
+      ["Damaged accessory exposing live parts", "C1"],
+      ["Conductive part made live (no CPC + fault)", "C1"],
+      ["Absence of main protective bonding", "C2"],
+      ["Absence of earthing / no CPC at accessory", "C2"],
+      ["Undersized main protective bonding conductor", "C2"],
+      ["No RCD for socket likely to supply outdoor equipment", "C2"],
+      ["Damaged accessory (no exposed live parts)", "C2"],
+      ["Signs of overheating at a connection", "C2"],
+      ["Inadequate/absent circuit identification at the board", "C3"],
+      ["No RCD (not required at time of installation)", "C3"],
+      ["No surge protection device (SPD)", "C3"],
+      ["Old (pre-2004) cable colours with a warning notice", "C3"],
+      ["Consumer unit not to current standard but safe", "C3"],
+      ["No warning notice where required (e.g. mixed colours)", "C3"],
+      ["Accessory not to a current standard but serviceable", "C3"],
+      ["Part of the installation not accessible for inspection", "FI"],
+      ["Suspected defect that couldn't be confirmed on site", "FI"]
+    ];
+    var codeRows = $("codeRows");
+    function renderCodes(q) {
+      q = (q || "").toLowerCase();
+      codeRows.innerHTML = CODES.filter(function (r) { return !q || r[0].toLowerCase().indexOf(q) !== -1; })
+        .map(function (r) { return "<tr><td>" + r[0] + "</td><td><span class='code-pill code-" + r[1] + "'>" + r[1] + "</span></td></tr>"; }).join("")
+        || "<tr><td colspan='2' style='color:var(--muted)'>No match.</td></tr>";
+    }
+    $("codeSearch").addEventListener("input", function (e) { renderCodes(e.target.value); });
+    renderCodes("");
+  })();
+  </script>
+</body>
+</html>
