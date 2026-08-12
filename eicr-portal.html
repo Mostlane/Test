@@ -490,6 +490,11 @@ function openUploadModal(code, file){
       <div><label>File</label><input type="file" id="uf"></div>
       <div><label>Certificate date (optional)</label><input type="date" id="ud"></div>
     </div>
+    <div id="ufolderRow" style="display:none">
+      <label>…or upload a whole folder of PDFs</label>
+      <input type="file" id="ufolder" webkitdirectory directory multiple>
+      <p class="drop-note" style="margin:4px 0 0">Every PDF inside the folder <b>and its sub-folders</b> is added as its own named document (named from its file/sub-folder path). Desktop only.</p>
+    </div>
     <p class="drop-note">The newest document becomes the current one; older ones are kept as previous versions (never deleted). A dated certificate updates the next-due date automatically. Pick <b>Other</b> to store an extra named document (e.g. O&amp;M files) that isn't a due-dated compliance type.</p>
     <div class="actions">
       <button class="btn" id="udo">Upload</button>
@@ -498,17 +503,56 @@ function openUploadModal(code, file){
   document.body.appendChild(modal);
   const grid=modal.querySelector('#ug');
   const nameLbl=modal.querySelector('#unl');
-  const syncNameLbl=()=>{ nameLbl.textContent = (sel==='other') ? 'Document name (required)' : 'Document name (optional)'; };
+  const folderRow=modal.querySelector('#ufolderRow');
+  const syncNameLbl=()=>{
+    const isOther = (sel==='other');
+    nameLbl.textContent = isOther ? 'Document name (optional for a single file)' : 'Document name (optional)';
+    folderRow.style.display = isOther ? '' : 'none';   // folder upload is Other-only
+  };
   order.forEach(t=>{ const b=document.createElement('button'); b.type='button'; b.textContent=TYPE_LABEL[t]||t; b.dataset.t=t; if(t===sel)b.classList.add('on'); b.onclick=()=>{ sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); syncNameLbl(); }; grid.appendChild(b); });
   syncNameLbl();
   const fileInput=modal.querySelector('#uf');
   if(file){ try{ const dt=new DataTransfer(); dt.items.add(file); fileInput.files=dt.files; }catch(e){} }
   modal.querySelector('#uc').onclick=()=>modal.remove();
+  const folderInput=modal.querySelector('#ufolder');
   modal.querySelector('#udo').onclick=async()=>{
-    const f=fileInput.files&&fileInput.files[0]; if(!f) return alert('Choose a file first.');
     const name=(modal.querySelector('#uname').value||'').trim();
-    if(sel==='other' && !name) return alert('Please give this document a name (e.g. "O&M for PV").');
-    const btn=modal.querySelector('#udo'); btn.disabled=true; btn.textContent='Uploading…';
+    const btn=modal.querySelector('#udo');
+
+    // ── "Other" folder upload: every PDF in the folder + sub-folders ──────────
+    const pdfs = (sel==='other' && folderInput && folderInput.files)
+      ? [...folderInput.files].filter(f=>/\.pdf$/i.test(f.name)) : [];
+    if(sel==='other' && pdfs.length){
+      btn.disabled=true;
+      let done=0, failed=0;
+      for(const f of pdfs){
+        // Name each doc from its path inside the chosen folder (drop the root
+        // folder, drop .pdf), so sub-folder structure is preserved in the name.
+        const rel=(f.webkitRelativePath||f.name).split('/').filter(Boolean);
+        if(rel.length>1) rel.shift();
+        let lbl=rel.join(' / ').replace(/\.pdf$/i,'') || f.name.replace(/\.pdf$/i,'');
+        if(name) lbl=name+' — '+lbl;
+        const form=new FormData();
+        form.append('file',f); form.append('code',code); form.append('type','other');
+        form.append('label',lbl.slice(0,160)); form.append('filename',f.name);
+        try{ const r=await authFetch('/compliance/file',{method:'POST',body:form}); const out=await r.json().catch(()=>({})); (r.ok&&out.ok)?done++:failed++; }
+        catch(e){ failed++; }
+        btn.textContent=`Uploading… ${done+failed}/${pdfs.length}`;
+      }
+      modal.remove();
+      alert(`Uploaded ${done} PDF${done===1?'':'s'} from the folder${failed?` (${failed} failed)`:''}.`);
+      loadFromPortal();
+      return;
+    }
+
+    // ── Single-file upload ────────────────────────────────────────────────────
+    const f=fileInput.files&&fileInput.files[0];
+    if(!f){
+      if(sel==='other' && folderInput && folderInput.files && folderInput.files.length)
+        return alert('No PDF files were found in that folder.');
+      return alert('Choose a file (or, for Other, a folder of PDFs).');
+    }
+    btn.disabled=true; btn.textContent='Uploading…';
     const form=new FormData();
     form.append('file',f); form.append('code',code); form.append('type',sel);
     const d=modal.querySelector('#ud').value; if(d) form.append('date',d);
