@@ -692,8 +692,17 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   type **Other** + a name (label, required) files an extra document that isn't a
   due-dated type (no `bump`) and shows as its OWN named section in the modal (e.g.
   "O&M for PV"). **Compact rows:** date cells are `td.dc{white-space:nowrap}` so the
-  📄 cert icon sits BESIDE the date (no wrap → rows with a doc are the same height).
-  **In-job:**
+  📄 cert icon sits BESIDE the date (no wrap → rows with a doc are the same height);
+  cells are `vertical-align:middle`; long site names are `td.site{white-space:nowrap}`.
+  **In-app cert viewer:** clicking a 📄 date-cell icon OR a document link in the modal
+  opens the file in **docviewer.js** (`MLDocViewer`, robust PDF.js/image viewer) rather
+  than a new tab; a self-contained `CertViewer` gallery layer in eicr-portal.html adds
+  fixed ◀ ▶ arrows + ←/→ keyboard nav to flick through ALL of a store's certificates
+  (built from /compliance/files, standard types in chart order, current-first),
+  wrap-around, arrows hidden for a single doc. **NB an old edit-save quirk baked "📄"
+  into 2 stores' due dates (0023/0052, cleaned in D1); fmtDue strips stray 📄, editing
+  removes the cert link from the cell, saveEditInstant sanitises to date chars, and
+  /store strips 📄 — so it can't recur.** **In-job:**
   **site-folder.html**'s **Compliance** tab reads /compliance/files?code= (grouped
   by type, current/previous, full-access upload), so Site documents from a job
   shows every cert. mostlane-pos is retired (migration is one-tap); chart, Sites,

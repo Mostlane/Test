@@ -3,6 +3,8 @@
 <head>
   <script src="/portal-config.js?v=3"></script>
   <script src="auth.js"></script>
+  <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
+  <script src="docviewer.js?v=5"></script>
   <meta charset="UTF-8" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -99,6 +101,22 @@
     .doc-row .pin{ display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#475569; white-space:nowrap; }
     .doc-sec{ margin-bottom:12px; }
     .doc-sec > b{ display:block; margin-bottom:2px; }
+    .doc-row .nm{ cursor:pointer; color:#0071CE; text-decoration:underline; }
+
+    /* Left/right navigation through a site's certificates, layered ABOVE the
+       in-app PDF viewer (docviewer.js uses z-index 100001). */
+    #certNav{ display:none; }
+    #certNav .cvArrow{ position:fixed; top:50%; transform:translateY(-50%); z-index:100002;
+      width:48px; height:70px; border:0; border-radius:12px; background:rgba(15,23,42,.72); color:#fff;
+      font-size:34px; line-height:1; cursor:pointer; align-items:center; justify-content:center; display:flex; }
+    #certNav .cvArrow:hover{ background:rgba(15,23,42,.92); }
+    #certNav .cvArrow:disabled{ opacity:.35; cursor:default; }
+    #certNav .cvPrev{ left:12px; }
+    #certNav .cvNext{ right:12px; }
+    #certNav .cvCount{ position:fixed; z-index:100002; bottom:16px; left:50%; transform:translateX(-50%);
+      background:rgba(15,23,42,.82); color:#fff; padding:6px 14px; border-radius:20px; font-size:13px;
+      max-width:82vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    @media (max-width:768px){ #certNav .cvArrow{ width:42px; height:58px; font-size:28px; } }
     .doc-btn{ border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 7px; cursor:pointer; font-size:13px; }
     .doc-btn:hover{ background:#f1f5f9; }
     tr.drop-hot{ outline:2px dashed #0071CE; outline-offset:-2px; background:#eaf4ff !important; }
@@ -296,13 +314,100 @@ async function loadComplianceIndex(){
     if (allData.length) applyFilters();
   } catch(e){ /* certs are non-critical — table still works without them */ }
 }
+/* ── In-app certificate viewer with ◀ ▶ navigation across a site's documents ──
+   Renders each PDF/image inside docviewer.js (robust, mobile zoom/scroll) and
+   layers our own arrows + keyboard nav on top so you can flick through every
+   certificate on file for the store. */
+const CertViewer = (function(){
+  let items = [], idx = 0, nav = null, hooked = false;
+  function ensureUI(){
+    if (nav) return;
+    nav = document.createElement('div'); nav.id = 'certNav';
+    nav.innerHTML = '<button class="cvArrow cvPrev" title="Previous (←)" aria-label="Previous">‹</button>'
+                  + '<button class="cvArrow cvNext" title="Next (→)" aria-label="Next">›</button>'
+                  + '<div class="cvCount"></div>';
+    document.body.appendChild(nav);
+    nav.querySelector('.cvPrev').onclick = ()=>go(idx-1);
+    nav.querySelector('.cvNext').onclick = ()=>go(idx+1);
+  }
+  function hookClose(){
+    if (hooked) return;
+    const btn = document.getElementById('mldvClose');
+    if (btn){ btn.addEventListener('click', hide); hooked = true; }
+  }
+  function go(i){
+    if (!items.length || typeof MLDocViewer === 'undefined') return;
+    idx = (i + items.length) % items.length;            // wrap around
+    const it = items[idx];
+    MLDocViewer.open({ url: it.url, name: it.name, downloadUrl: it.url });
+    hookClose();
+    update();
+  }
+  function update(){
+    ensureUI();
+    const multi = items.length > 1;
+    nav.querySelector('.cvPrev').style.display = multi ? '' : 'none';
+    nav.querySelector('.cvNext').style.display = multi ? '' : 'none';
+    const c = nav.querySelector('.cvCount');
+    c.style.display = multi ? '' : 'none';
+    c.textContent = (idx+1) + ' / ' + items.length + (items[idx] && items[idx].name ? ' · ' + items[idx].name : '');
+  }
+  function openList(list, startIdx){
+    items = (list || []).filter(x=>x && x.url);
+    if (!items.length) return alert('No certificate on file for this one yet.');
+    ensureUI(); nav.style.display = 'block';
+    go(Math.max(0, Math.min(startIdx||0, items.length-1)));
+  }
+  function hide(){ if (nav) nav.style.display = 'none'; items = []; }
+  document.addEventListener('keydown', (e)=>{
+    if (!nav || nav.style.display === 'none') return;
+    if (e.key === 'ArrowLeft'){ e.preventDefault(); go(idx-1); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); go(idx+1); }
+    else if (e.key === 'Escape'){ hide(); }   // docviewer closes itself on Esc too
+  });
+  return { openList, hide };
+})();
+
+/* Build the ordered document list for a store (from /compliance/files): standard
+   types in chart order, each with its current doc(s) first then previous ones,
+   named "TYPE — filename" (custom "Other" docs keep their own name). */
+async function siteDocList(code){
+  const r = await authFetch('/compliance/files?code=' + encodeURIComponent(code));
+  const j = await r.json(); const files = (j && j.files) || {};
+  const STD = ['fiveYear','pat','em','pv','ev','forecourt','pump'];
+  const order = [...STD.filter(t=>files[t] && files[t].length),
+                 ...Object.keys(files).filter(t=>!STD.includes(t) && files[t] && files[t].length)];
+  const list = [];
+  order.forEach(t=>{
+    const arr = [...files[t]].sort((a,b)=> (b.current?1:0)-(a.current?1:0));  // current first
+    arr.forEach(f=>{
+      const base = f.label || f.filename || 'file';
+      list.push({ id:f.id, url:f.url, type:t, current:!!f.current,
+        name: (t==='other') ? base : ((TYPE_LABEL[t]||t) + ' — ' + base) });
+    });
+  });
+  return list;
+}
+
+/* 📄 on a date cell → open that type's current cert, then arrow through the site. */
 async function openCert(code, type){
-  try {
-    const r = await authFetch('/compliance/file-url?code=' + encodeURIComponent(code) + '&type=' + encodeURIComponent(type));
-    const j = await r.json();
-    if (j && j.url) window.open(j.url, '_blank');
-    else alert('No certificate on file for this one yet.');
-  } catch(e){ alert('Could not open the certificate.'); }
+  try{
+    const list = await siteDocList(code);
+    if (!list.length) return alert('No certificate on file for this one yet.');
+    let start = list.findIndex(d=> d.type===type && d.current);
+    if (start < 0) start = list.findIndex(d=> d.type===type);
+    if (start < 0) start = 0;
+    CertViewer.openList(list, start);
+  }catch(e){ alert('Could not open the certificate.'); }
+}
+
+/* A document link in the Documents modal → open that exact file, arrow through the rest. */
+async function openCertById(code, id){
+  try{
+    const list = await siteDocList(code);
+    const start = Math.max(0, list.findIndex(d=> d.id===id));
+    CertViewer.openList(list, start);
+  }catch(e){ alert('Could not open the document.'); }
 }
 function pad4(v){ return String(v==null?'':v).replace(/\D/g,'').padStart(4,'0'); }
 
@@ -427,6 +532,9 @@ async function openVersionsModal(code){
   host.addEventListener('click', async (ev)=>{
     const row=ev.target.closest('.doc-row'); if(!row) return;
     const id=+row.dataset.id;
+    if(ev.target.classList.contains('nm')){
+      ev.preventDefault(); openCertById(code, id); return;
+    }
     if(ev.target.classList.contains('rn')){
       const cur=row.querySelector('.nm').textContent;
       const name=prompt('Rename this document:', cur); if(name==null) return;
