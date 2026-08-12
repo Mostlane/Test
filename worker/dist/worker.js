@@ -12638,7 +12638,11 @@ async function ensure5(env) {
   } catch {
   }
   try {
-    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_compfiles_code ON compliance_files(tenant_id, code, type)").run();
+    await env.DB.prepare("ALTER TABLE compliance_files ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_compfiles_code ON compliance_files(tenant_id, scheme, code, type)").run();
   } catch {
   }
   try {
@@ -12647,27 +12651,51 @@ async function ensure5(env) {
   }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS compliance_stores (
     tenant_id  INTEGER NOT NULL DEFAULT 1,
-    code       TEXT NOT NULL,          -- = sites.site_number
-    category   TEXT,                   -- Retail | ELS | ELS Private | Cobra | Wenzels | \u2026
-    name       TEXT,                   -- fallback only (canonical = sites.site_name)
-    postcode   TEXT,                   -- fallback only
-    due        TEXT,                   -- JSON { fiveYear:"YYYY-MM-DD", pat:\u2026, em:\u2026, pv:\u2026, ev:\u2026, forecourt:\u2026, pump:\u2026 }
+    scheme     TEXT NOT NULL DEFAULT 'coop',
+    code       TEXT NOT NULL,
+    category   TEXT,
+    name       TEXT,
+    postcode   TEXT,
+    due        TEXT,
     active     INTEGER DEFAULT 1,
+    meta       TEXT,                   -- JSON { lat, lng, w3w, access, contact }
     updated_at TEXT,
-    PRIMARY KEY (tenant_id, code)
+    PRIMARY KEY (tenant_id, scheme, code)
   )`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN meta TEXT").run();
+  } catch {
+  }
   READY4 = true;
 }
+function schemeOf(q) {
+  const s = String(q && q.get && q.get("scheme") || "coop").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return s || "coop";
+}
 var DUE_YEARS = { fiveYear: 5 };
-var DEFAULT_TYPE_SETTINGS = {
-  fiveYear: { years: 5, amberDays: 90, redDays: 30 },
-  pat: { years: 1, amberDays: 90, redDays: 30 },
-  em: { years: 1, amberDays: 90, redDays: 30 },
-  pv: { years: 1, amberDays: 90, redDays: 30 },
-  ev: { years: 1, amberDays: 90, redDays: 30 },
-  forecourt: { years: 1, amberDays: 90, redDays: 30 },
-  pump: { years: 1, amberDays: 90, redDays: 30 }
+var SCHEME_DEFAULTS = {
+  coop: {
+    fiveYear: { years: 5, amberDays: 90, redDays: 30 },
+    pat: { years: 1, amberDays: 90, redDays: 30 },
+    em: { years: 1, amberDays: 90, redDays: 30 },
+    pv: { years: 1, amberDays: 90, redDays: 30 },
+    ev: { years: 1, amberDays: 90, redDays: 30 },
+    forecourt: { years: 1, amberDays: 90, redDays: 30 },
+    pump: { years: 1, amberDays: 90, redDays: 30 }
+  },
+  fareham: {
+    fiveYear: { years: 5, amberDays: 90, redDays: 30 },
+    emMonthly: { months: 1, amberDays: 14, redDays: 7 },
+    emYearly: { years: 1, amberDays: 90, redDays: 30 },
+    pat: { years: 1, amberDays: 90, redDays: 30 },
+    pv: { years: 1, amberDays: 90, redDays: 30 }
+  }
 };
+var DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;
 function numOr(v, d, min, max) {
   let n = Number(v);
   if (!isFinite(n)) n = d;
@@ -12676,22 +12704,25 @@ function numOr(v, d, min, max) {
   if (n > max) n = max;
   return n;
 }
-async function getComplianceSettings(env, tid) {
+async function getComplianceSettings(env, tid, scheme) {
+  scheme = scheme || "coop";
+  const defaults = SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop;
   let saved = {};
   try {
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='compliance_settings'").bind(tid).first();
+    const key = "compliance_settings:" + scheme;
+    let row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+    if ((!row || !row.value) && scheme === "coop") row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='compliance_settings'").bind(tid).first();
     if (row && row.value) saved = JSON.parse(row.value) || {};
   } catch {
   }
   const st = saved && saved.types || {};
   const types = {};
-  for (const [t, def] of Object.entries(DEFAULT_TYPE_SETTINGS)) {
+  for (const [t, def] of Object.entries(defaults)) {
     const s = st[t] || {};
-    types[t] = {
-      years: numOr(s.years, def.years, 1, 50),
-      amberDays: numOr(s.amberDays, def.amberDays, 0, 3650),
-      redDays: numOr(s.redDays, def.redDays, 0, 3650)
-    };
+    const one = { amberDays: numOr(s.amberDays, def.amberDays, 0, 3650), redDays: numOr(s.redDays, def.redDays, 0, 3650) };
+    if (def.months != null) one.months = numOr(s.months != null ? s.months : def.months, def.months, 1, 120);
+    else one.years = numOr(s.years != null ? s.years : def.years, def.years, 1, 50);
+    types[t] = one;
   }
   return { types };
 }
@@ -12701,18 +12732,26 @@ function addYears(dateStr, n) {
   d.setUTCFullYear(d.getUTCFullYear() + n);
   return d.toISOString().slice(0, 10);
 }
-async function bumpDue(env, tid, code, type, dateStr) {
+function addMonths(dateStr, n) {
+  const d = new Date(dateStr);
+  if (isNaN(d)) return null;
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+async function bumpDue(env, tid, scheme, code, type, dateStr) {
   if (!dateStr) return;
-  let years = DUE_YEARS[type] || 1;
+  let next = null;
   try {
-    const cfg = await getComplianceSettings(env, tid);
-    if (cfg.types[type] && cfg.types[type].years) years = cfg.types[type].years;
+    const cfg = await getComplianceSettings(env, tid, scheme);
+    const c = cfg.types[type];
+    if (c && c.months != null) next = addMonths(dateStr, c.months);
+    else next = addYears(dateStr, c && c.years || DUE_YEARS[type] || 1);
   } catch {
+    next = addYears(dateStr, DUE_YEARS[type] || 1);
   }
-  const next = addYears(dateStr, years);
   if (!next) return;
   const at = (/* @__PURE__ */ new Date()).toISOString();
-  const row = await env.DB.prepare("SELECT due FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
+  const row = await env.DB.prepare("SELECT due FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
   let due = {};
   if (row && row.due) {
     try {
@@ -12721,8 +12760,8 @@ async function bumpDue(env, tid, code, type, dateStr) {
     }
   }
   due[type] = next;
-  if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND code=?").bind(JSON.stringify(due), at, tid, code).run();
-  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, code, due, active, updated_at) VALUES (?,?,?,1,?)").bind(tid, code, JSON.stringify(due), at).run();
+  if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(due), at, tid, scheme, code).run();
+  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(due), at).run();
 }
 function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -12734,8 +12773,14 @@ var pad4 = (v) => {
   const d = s.replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
 };
+var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "other"];
 function canonType(t) {
   const s = String(t || "").toLowerCase();
+  const exact = KNOWN_TYPES.find((k2) => k2.toLowerCase() === s);
+  if (exact) return exact;
+  if (/em\s*month|month.*\bem\b|emmonthly/.test(s)) return "emMonthly";
+  if (/em\s*year|year.*\bem\b|emyearly/.test(s)) return "emYearly";
+  if (/asbestos/.test(s)) return "asbestos";
   if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
   if (/\bpat\b/.test(s)) return "pat";
   if (/emergency|\bem\b|em\s*light/.test(s)) return "em";
@@ -12797,6 +12842,7 @@ async function handle24(request, env, ctx, url, sess) {
   const tid = sess ? sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request) : await resolveTenantId(env, request);
   const me = sess ? sess.user.username : "import-bot";
   const canWrite = viaToken || await isFull3(env, tid, me);
+  const scheme = schemeOf(q);
   await ensure5(env);
   if (sub === "/has" && method === "GET") {
     const source = q.get("source") || "";
@@ -12805,7 +12851,7 @@ async function handle24(request, env, ctx, url, sess) {
     return jr6({ ok: true, exists: !!row, id: row ? row.id : null }, headers);
   }
   if (sub === "/index" && method === "GET") {
-    const { results } = await env.DB.prepare("SELECT DISTINCT code, type FROM compliance_files WHERE tenant_id=?").bind(tid).all();
+    const { results } = await env.DB.prepare("SELECT DISTINCT code, type FROM compliance_files WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
     const map = {};
     for (const r of results || []) {
       (map[r.code] = map[r.code] || {})[r.type] = 1;
@@ -12816,8 +12862,8 @@ async function handle24(request, env, ctx, url, sess) {
     const code = pad4(q.get("code"));
     if (!code) return jr6({ error: "code required" }, headers, 400);
     const { results } = await env.DB.prepare(
-      "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
-    ).bind(tid, code).all();
+      "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+    ).bind(tid, scheme, code).all();
     const byType = {};
     for (const r of results || []) {
       (byType[r.type] = byType[r.type] || []).push({
@@ -12843,8 +12889,8 @@ async function handle24(request, env, ctx, url, sess) {
   if (sub === "/file-url" && method === "GET") {
     const code = pad4(q.get("code")), type = canonType(q.get("type"));
     const row = await env.DB.prepare(
-      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
-    ).bind(tid, code, type).first();
+      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
+    ).bind(tid, scheme, code, type).first();
     if (!row) return jr6({ error: "No file" }, headers, 404);
     return jr6({ ok: true, url: await signedFileUrl(env, url.origin, "/compliance/file", row.r2_key) }, headers);
   }
@@ -12869,15 +12915,15 @@ async function handle24(request, env, ctx, url, sess) {
     const fname = safeName3(form.get("filename") || file.name || type + ".pdf");
     const label = String(form.get("label") || "").slice(0, 160).trim() || null;
     const at = (/* @__PURE__ */ new Date()).toISOString();
-    const key = `compliance/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
+    const key = `compliance/${scheme}/${code}/${type}/${year || "_"}/${Date.now()}-${fname}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
     const docDate = String(form.get("date") || "") || null;
     const res = await env.DB.prepare(
-      "INSERT INTO compliance_files (tenant_id, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-    ).bind(tid, code, type, year, key, fname, label, file.size || null, docDate, source, at).run();
+      "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, scheme, code, type, year, key, fname, label, file.size || null, docDate, source, at).run();
     if (form.get("bump") && docDate) {
       try {
-        await bumpDue(env, tid, code, type, docDate);
+        await bumpDue(env, tid, scheme, code, type, docDate);
       } catch {
       }
     }
@@ -12922,15 +12968,19 @@ async function handle24(request, env, ctx, url, sess) {
     return jr6({ ok: true }, headers);
   }
   if (sub === "/stores" && method === "GET") {
-    const { results } = await env.DB.prepare(
-      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active,
-              s.site_name AS sname, s.postcode AS spost
-         FROM compliance_stores cs
-         LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND s.site_number = cs.code
-        WHERE cs.tenant_id = ?`
-    ).bind(tid).all();
+    const { results } = scheme === "coop" ? await env.DB.prepare(
+      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active, cs.meta,
+                  s.site_name AS sname, s.postcode AS spost
+             FROM compliance_stores cs
+             LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND s.site_number = cs.code
+            WHERE cs.tenant_id = ? AND cs.scheme = ?`
+    ).bind(tid, scheme).all() : await env.DB.prepare(
+      `SELECT code, category, name AS cname, postcode AS cpost, due, active, meta,
+                  NULL AS sname, NULL AS spost
+             FROM compliance_stores WHERE tenant_id = ? AND scheme = ?`
+    ).bind(tid, scheme).all();
     const idx = {};
-    const fi = await env.DB.prepare("SELECT code, type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? GROUP BY code, type").bind(tid).all();
+    const fi = await env.DB.prepare("SELECT code, type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? AND scheme=? GROUP BY code, type").bind(tid, scheme).all();
     for (const r of fi.results || []) {
       (idx[r.code] = idx[r.code] || {})[r.type] = r.n;
     }
@@ -12942,6 +12992,13 @@ async function handle24(request, env, ctx, url, sess) {
         } catch {
         }
       }
+      let meta = {};
+      if (r.meta) {
+        try {
+          meta = JSON.parse(r.meta) || {};
+        } catch {
+        }
+      }
       return {
         code: r.code,
         name: r.sname || r.cname || "",
@@ -12950,6 +13007,7 @@ async function handle24(request, env, ctx, url, sess) {
         hasSite: !!r.sname,
         active: r.active == null ? 1 : r.active,
         due,
+        meta,
         files: idx[r.code] || {}
       };
     });
@@ -12973,15 +13031,18 @@ async function handle24(request, env, ctx, url, sess) {
         const s = String(v || "").replace(/📄/g, "").trim();
         if (s) dueClean[t] = s;
       }
+      const metaJson = r.meta && typeof r.meta === "object" ? JSON.stringify(r.meta) : null;
       await env.DB.prepare(
-        `INSERT INTO compliance_stores (tenant_id, code, category, name, postcode, due, active, updated_at)
-         VALUES (?,?,?,?,?,?,1,?)
-         ON CONFLICT(tenant_id, code) DO UPDATE SET
+        `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, meta, updated_at)
+         VALUES (?,?,?,?,?,?,?,1,?,?)
+         ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET
            category=COALESCE(excluded.category, compliance_stores.category),
            name=COALESCE(excluded.name, compliance_stores.name),
            postcode=COALESCE(excluded.postcode, compliance_stores.postcode),
-           due=excluded.due, updated_at=excluded.updated_at`
-      ).bind(tid, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), at).run();
+           due=excluded.due,
+           meta=COALESCE(excluded.meta, compliance_stores.meta),
+           updated_at=excluded.updated_at`
+      ).bind(tid, scheme, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), metaJson, at).run();
       imported++;
       const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
       if (site) matched++;
@@ -13002,23 +13063,24 @@ async function handle24(request, env, ctx, url, sess) {
     return jr6({ ok: true, imported, matched, sitesCreated }, headers);
   }
   if (sub === "/settings" && method === "GET") {
-    return jr6({ ok: true, settings: await getComplianceSettings(env, tid) }, headers);
+    return jr6({ ok: true, settings: await getComplianceSettings(env, tid, scheme) }, headers);
   }
   if (sub === "/settings" && method === "POST") {
     if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const inTypes = b && b.types || {};
-    const cur = await getComplianceSettings(env, tid);
+    const defaults = SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop;
+    const cur = await getComplianceSettings(env, tid, scheme);
     const out = { types: {} };
-    for (const [t, def] of Object.entries(DEFAULT_TYPE_SETTINGS)) {
+    for (const [t, def] of Object.entries(defaults)) {
       const s = inTypes[t] || cur.types[t] || def;
-      out.types[t] = {
-        years: numOr(s.years, def.years, 1, 50),
-        amberDays: numOr(s.amberDays, def.amberDays, 0, 3650),
-        redDays: numOr(s.redDays, def.redDays, 0, 3650)
-      };
+      const one = { amberDays: numOr(s.amberDays, def.amberDays, 0, 3650), redDays: numOr(s.redDays, def.redDays, 0, 3650) };
+      if (def.months != null) one.months = numOr(s.months != null ? s.months : def.months, def.months, 1, 120);
+      else one.years = numOr(s.years != null ? s.years : def.years, def.years, 1, 50);
+      out.types[t] = one;
     }
-    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'compliance_settings', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, JSON.stringify(out)).run();
+    const key = scheme === "coop" ? "compliance_settings" : "compliance_settings:" + scheme;
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(out)).run();
     return jr6({ ok: true, settings: out }, headers);
   }
   if (sub === "/store" && method === "POST") {
@@ -13027,7 +13089,7 @@ async function handle24(request, env, ctx, url, sess) {
     const code = pad4(b.code);
     if (!code) return jr6({ error: "code required" }, headers, 400);
     const at = (/* @__PURE__ */ new Date()).toISOString();
-    const row = await env.DB.prepare("SELECT due, category, name, postcode FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
+    const row = await env.DB.prepare("SELECT due, category, name, postcode FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
     let due = {};
     if (row && row.due) {
       try {
@@ -13047,18 +13109,45 @@ async function handle24(request, env, ctx, url, sess) {
     const name = b.name != null ? String(b.name).slice(0, 200) : row ? row.name : null;
     const postcode = b.postcode != null ? String(b.postcode).slice(0, 20) : row ? row.postcode : null;
     await env.DB.prepare(
-      `INSERT INTO compliance_stores (tenant_id, code, category, name, postcode, due, active, updated_at)
-       VALUES (?,?,?,?,?,?,1,?)
-       ON CONFLICT(tenant_id, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, updated_at=excluded.updated_at`
-    ).bind(tid, code, category, name, postcode, JSON.stringify(due), at).run();
+      `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, updated_at)
+       VALUES (?,?,?,?,?,?,?,1,?)
+       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, updated_at=excluded.updated_at`
+    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), at).run();
     return jr6({ ok: true, code, due }, headers);
+  }
+  if (sub === "/store-meta" && method === "POST") {
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const row = await env.DB.prepare("SELECT meta FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
+    let meta = {};
+    if (row && row.meta) {
+      try {
+        meta = JSON.parse(row.meta) || {};
+      } catch {
+      }
+    }
+    const numOrNull = (v) => {
+      const n = Number(v);
+      return isFinite(n) ? n : null;
+    };
+    if ("lat" in b) meta.lat = b.lat === null || b.lat === "" ? null : numOrNull(b.lat);
+    if ("lng" in b) meta.lng = b.lng === null || b.lng === "" ? null : numOrNull(b.lng);
+    if ("w3w" in b) meta.w3w = String(b.w3w || "").replace(/^\/+/, "").slice(0, 120) || null;
+    if ("access" in b) meta.access = String(b.access || "").slice(0, 2e3) || null;
+    if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2e3) || null;
+    if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
+    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(meta), at).run();
+    return jr6({ ok: true, code, meta }, headers);
   }
   if (sub === "/store-delete" && method === "POST") {
     if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const code = pad4(b.code);
     if (!code) return jr6({ error: "code required" }, headers, 400);
-    await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).run();
+    await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).run();
     return jr6({ ok: true }, headers);
   }
   if (sub === "/store-archive" && method === "POST") {
@@ -13067,17 +13156,26 @@ async function handle24(request, env, ctx, url, sess) {
     const code = pad4(b.code);
     if (!code) return jr6({ error: "code required" }, headers, 400);
     const active = b.archived ? 0 : 1;
-    await env.DB.prepare("UPDATE compliance_stores SET active=?, updated_at=? WHERE tenant_id=? AND code=?").bind(active, (/* @__PURE__ */ new Date()).toISOString(), tid, code).run();
+    await env.DB.prepare("UPDATE compliance_stores SET active=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(active, (/* @__PURE__ */ new Date()).toISOString(), tid, scheme, code).run();
     return jr6({ ok: true, code, active }, headers);
   }
+  if (sub === "/next-code" && method === "GET") {
+    const { results } = await env.DB.prepare("SELECT code FROM compliance_stores WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
+    let max = 0;
+    for (const r of results || []) {
+      const n = parseInt(String(r.code).replace(/\D/g, ""), 10);
+      if (isFinite(n) && n > max) max = n;
+    }
+    return jr6({ ok: true, code: String(max + 1).padStart(4, "0") }, headers);
+  }
   if (sub === "/summary" && method === "GET") {
-    const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM compliance_files WHERE tenant_id=?").bind(tid).first())?.n || 0;
-    const { results } = await env.DB.prepare("SELECT type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? GROUP BY type").bind(tid).all();
+    const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM compliance_files WHERE tenant_id=? AND scheme=?").bind(tid, scheme).first())?.n || 0;
+    const { results } = await env.DB.prepare("SELECT type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? AND scheme=? GROUP BY type").bind(tid, scheme).all();
     const byType = {};
     (results || []).forEach((r) => {
       byType[r.type] = r.n;
     });
-    const stores = (await env.DB.prepare("SELECT COUNT(DISTINCT code) AS n FROM compliance_files WHERE tenant_id=?").bind(tid).first())?.n || 0;
+    const stores = (await env.DB.prepare("SELECT COUNT(DISTINCT code) AS n FROM compliance_files WHERE tenant_id=? AND scheme=?").bind(tid, scheme).first())?.n || 0;
     return jr6({ ok: true, total, stores, byType }, headers);
   }
   return jr6({ error: "Not found: " + sub }, headers, 404);

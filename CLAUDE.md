@@ -620,7 +620,26 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
 - `stats.js` — /stats D1 aggregates + R2 storage totals (stats.html).
-- `compliance.js` — **Southern Co-op compliance certificates in R2+D1** (the
+- `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
+  Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
+  (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`
+  gained a **`scheme`** column (stores PK widened to (tenant_id,scheme,code) via a
+  one-off D1 migration; existing rows = coop) and stores gained a **`meta`** JSON
+  ({lat,lng,w3w,access,contact}). Per-scheme type defaults in `SCHEME_DEFAULTS`
+  (coop: fiveYear/pat/em/pv/ev/pump years; fareham: fiveYear 5y, **emMonthly 1
+  MONTH**, emYearly/pat/pv 1y) — frequency is years OR months (`bumpDue` uses
+  addMonths for emMonthly). Settings key `compliance_settings:<scheme>` (coop kept
+  its un-suffixed key). New routes: **POST /compliance/store-meta** (📍 pin lat/lng
+  + w3w, 🔑 access + contact), **GET /compliance/next-code** (auto-number a scheme's
+  next site). `canonType` is idempotent for known keys (keeps camelCase emMonthly/
+  emYearly/asbestos) and maps forecourt→ev. **fareham.html** = a tailored copy of
+  eicr-portal.html (scheme=fareham via authFetch): types 5 Year/EM Monthly/EM
+  Yearly/PAT/PV, NO archive, 📍 (Leaflet map pin + what3words) + 🔑 (access +
+  contact) columns, the docs modal groups **EM Monthly by month** (🗓 headers) and
+  always shows an **Asbestos Register** section; sites are added fresh (no
+  mostlane-pos migration, no sites-table join — name/type/meta live on the
+  compliance row). Fareham button on compliance.html now links to it.
+- `compliance.js` (coop specifics) — **Southern Co-op compliance certificates in R2+D1** (the
   SharePoint "TSC Compliance" tree migrated into the portal). Table
   **compliance_files** (self-migrating; keyed by store `code` 4-digit +
   canonical `type` — `canonType()` maps labels→`fiveYear|pat|em|pv|ev|forecourt|
