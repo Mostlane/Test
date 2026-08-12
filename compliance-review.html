@@ -7,7 +7,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
-  <script src="eicr-engine.js?v=7"></script>
   <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb;
          --pass:#166534; --passbg:#dcfce7; --fail:#b91c1c; --failbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; }
@@ -112,13 +111,31 @@
     function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
     var TYPE_LABEL = { fiveYear: "5-Year", pat: "PAT", em: "EM", pv: "PV", ev: "EV", forecourt: "Forecourt", pump: "Pump", other: "Other" };
 
+    // Load the verifier engine with a per-load cache-buster so a stale service-worker
+    // copy can never be used — the batch worklist ALWAYS runs the latest analysis.
+    var engineReady = null;
+    function ensureEngine() {
+      if (window.MLEICR) return Promise.resolve();
+      if (engineReady) return engineReady;
+      engineReady = new Promise(function (res, rej) {
+        var s = document.createElement("script");
+        s.src = "eicr-engine.js?t=" + Date.now();
+        s.onload = function () { res(); };
+        s.onerror = function () { rej(new Error("Couldn't load the verifier engine (needs an internet connection).")); };
+        document.head.appendChild(s);
+      });
+      return engineReady;
+    }
+
     // ── Batch run ───────────────────────────────────────────────────────────
     var running = false;
     async function runChecks() {
       if (running) return; running = true;
       var btn = $("runBtn"); btn.disabled = true;
       var prog = $("prog"), bar = $("progBar"), st = $("runStatus");
-      st.textContent = "Loading the list of certificates…"; prog.style.display = "none"; bar.style.width = "0";
+      st.textContent = "Loading the verifier…"; prog.style.display = "none"; bar.style.width = "0";
+      try { await ensureEngine(); } catch (e) { st.innerHTML = "<span style='color:var(--fail)'>" + esc(e.message || "Engine failed to load.") + "</span>"; running = false; btn.disabled = false; return; }
+      st.textContent = "Loading the list of certificates…";
       var targets;
       try { var r = await authFetch("/compliance/review/targets"); var j = await r.json(); targets = j.targets || []; }
       catch (e) { st.innerHTML = "<span style='color:var(--fail)'>Couldn't load the list. " + esc(e.message || "") + "</span>"; running = false; btn.disabled = false; return; }
@@ -235,6 +252,9 @@
     document.querySelectorAll(".chip").forEach(function (c) { c.addEventListener("click", function () { document.querySelectorAll(".chip").forEach(function (x) { x.classList.remove("on"); }); c.classList.add("on"); filter = c.getAttribute("data-f"); render(); }); });
     $("search").addEventListener("input", function (e) { search = e.target.value.trim(); render(); });
 
+    // Warm the engine on open (so Run is instant) and show which version is live —
+    // a quick way to confirm the browser isn't stuck on an old cached verifier.
+    ensureEngine().then(function () { $("runStatus").textContent = "Verifier ready (v" + ((window.MLEICR && MLEICR.VERSION) || "?") + ")."; }).catch(function () {});
     loadList();
   })();
   </script>
