@@ -76,6 +76,20 @@
        second line. Keep the name on one line (left-aligned so it reads naturally);
        the table already scrolls sideways if a column gets wide. */
     td.site{ white-space:nowrap; text-align:left; }
+    /* Status colours — the Status light AND each due-date cell tint green/amber/red
+       based on that compliance's own warning settings. */
+    td.st-green{ background:#e3f6e8; }
+    td.st-amber{ background:#fff1c9; }
+    td.st-red{ background:#ffd9d9; }
+    tr:hover td.st-green{ background:#d6f1dd; }
+    tr:hover td.st-amber{ background:#ffe9ad; }
+    tr:hover td.st-red{ background:#ffc7c7; }
+    /* Settings modal grid */
+    table.setg{ border-collapse:collapse; width:100%; }
+    table.setg th, table.setg td{ border:1px solid #e2e8f0; padding:6px 8px; font-size:13px; text-align:center; }
+    table.setg th{ position:static; top:auto; background:#eef3f9; color:#1f2937; z-index:auto; }
+    table.setg td:first-child, table.setg th:first-child{ position:static; left:auto; text-align:left; background:#eef3f9; }
+    table.setg input{ width:78px; padding:5px; border:1px solid #ccc; border-radius:6px; text-align:center; font-size:14px; }
     tr:nth-child(even){ background:#f4f7fb; }
     tr:nth-child(odd){ background:#fff; }
     /* Keep the Store Code column visible while scrolling the wide table sideways. */
@@ -200,6 +214,7 @@
       <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
       <button class="bubble" id="summaryBtn">％ Summary</button>
       <button class="bubble" id="clearBtn">✕ Clear filters</button>
+      <button class="bubble" id="settingsBtn" style="display:none;">⚙ Settings</button>
       <button class="bubble" id="migrateBtn" style="display:none;">⤵ Import from old system</button>
     </div>
 
@@ -281,6 +296,44 @@ function canEditCompliance(){
 
 /* Escape user-supplied text (document labels/names) before putting it in HTML. */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ===== Page settings (per-type frequency + amber/red warning windows) ===== */
+let complianceSettings = { types: {
+  fiveYear:{years:5,amberDays:90,redDays:30}, pat:{years:1,amberDays:90,redDays:30},
+  em:{years:1,amberDays:90,redDays:30}, pv:{years:1,amberDays:90,redDays:30},
+  ev:{years:1,amberDays:90,redDays:30}, pump:{years:1,amberDays:90,redDays:30}
+} };
+const STATUS_TYPES = ['fiveYear','pat','em','pv','ev','pump'];
+function typeSettings(type){
+  const t = (complianceSettings.types||{})[type] || {};
+  return {
+    years: t.years!=null ? t.years : (type==='fiveYear'?5:1),
+    amberDays: t.amberDays!=null ? t.amberDays : 90,
+    redDays: t.redDays!=null ? t.redDays : 30
+  };
+}
+/* Status of ONE compliance type for a store: '' (no due date), 'green', 'amber'
+   or 'red', from that type's own warning windows. Red = due within redDays (or
+   overdue); amber = due within amberDays; green = further off. */
+function typeStatus(e, type){
+  const d = parseDate(e[type]);
+  if (!d) return '';
+  const cfg = typeSettings(type);
+  const daysLeft = (d - new Date()) / 86400000;
+  if (daysLeft <= cfg.redDays) return 'red';
+  if (daysLeft <= cfg.amberDays) return 'amber';
+  return 'green';
+}
+/* Worst status across a store's tracked compliances (drives the Status light). */
+function worstStatus(e){
+  let worst = 'green';
+  for (const t of STATUS_TYPES){
+    const s = typeStatus(e, t);
+    if (s === 'red') return 'red';
+    if (s === 'amber') worst = 'amber';
+  }
+  return worst;
+}
 
 /* ===== State ===== */
 let allData = [];       // full set (normalised)
@@ -642,16 +695,8 @@ function parseDate(d) {
   return isNaN(dt) ? null : dt;
 }
 
-function getStatus(e){
-  const now = new Date();
-  const ds = [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump].map(parseDate).filter(Boolean);
-  let red=false, amber=false;
-  for (const dt of ds) {
-    if (dt < now) { red = true; break; }
-    if ((dt - now) / 86400000 <= 30) amber = true;
-  }
-  return red ? '🔴' : amber ? '🟡' : '🟢';
-}
+function statusEmoji(s){ return s==='red' ? '🔴' : s==='amber' ? '🟡' : '🟢'; }
+function getStatus(e){ return statusEmoji(worstStatus(e)); }
 
 /* ============ Rendering ============ */
 function renderTable(d){
@@ -667,11 +712,13 @@ function renderTable(d){
     const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
     const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
       + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '');
+    const ws = worstStatus(e);
+    const dtd = (type) => { const s = typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
     tr.innerHTML = `
       <td>${e.storeCode}</td><td class="site">${e.siteName}</td><td>${e.storeType}</td>
-      <td>${e.postcode}</td><td>${getStatus(e)}</td>
-      <td class="dc">${dateCell(e.storeCode,'fiveYear',e.fiveYear)}</td><td class="dc">${dateCell(e.storeCode,'pat',e.pat)}</td><td class="dc">${dateCell(e.storeCode,'em',e.em)}</td>
-      <td class="dc">${dateCell(e.storeCode,'pv',e.pv)}</td><td class="dc">${dateCell(e.storeCode,'ev',e.ev)}</td><td class="dc">${dateCell(e.storeCode,'pump',e.pump)}</td>
+      <td>${e.postcode}</td><td class="st-${ws}">${statusEmoji(ws)}</td>
+      ${dtd('fiveYear')}${dtd('pat')}${dtd('em')}
+      ${dtd('pv')}${dtd('ev')}${dtd('pump')}
       <td class="docs-cell">${docsCell}</td>
     `;
     frag.appendChild(tr);
@@ -1172,11 +1219,7 @@ function openSummaryModal(){
     const key = e.storeType || 'Unknown';
     if (!groups[key]) groups[key] = { total:0, GREEN:0, AMBER:0, RED:0 };
     groups[key].total++;
-    let red=false, amber=false;
-    [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean).forEach(dt=>{
-      if(dt<now) red=true; else if ((dt-now)/86400000 <= 30) amber=true;
-    });
-    const s = red ? 'RED' : amber ? 'AMBER' : 'GREEN';
+    const s = worstStatus(e).toUpperCase();   // GREEN | AMBER | RED (per-type settings)
     groups[key][s]++;
   });
 
@@ -1249,12 +1292,66 @@ function exportExcel(){
   XLSX.writeFile(wb, fileName);
 }
 
+/* ============ Page settings (frequency + amber/red warning windows) ======== */
+async function loadSettings(){
+  try{
+    const r = await authFetch('/compliance/settings');
+    const j = await r.json();
+    if (j && j.settings && j.settings.types) complianceSettings = j.settings;
+  }catch(e){ /* keep defaults */ }
+}
+function openSettingsModal(){
+  if(!canEditCompliance()) return alert("You don't have permission to change compliance settings.");
+  const TYPES = [['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
+  const rows = TYPES.map(([k,lbl])=>{
+    const s = typeSettings(k);
+    return `<tr>
+      <td>${lbl}</td>
+      <td><input type="number" min="1" max="50" id="fy_${k}" value="${s.years}"></td>
+      <td><input type="number" min="0" max="3650" id="am_${k}" value="${s.amberDays}"></td>
+      <td><input type="number" min="0" max="3650" id="rd_${k}" value="${s.redDays}"></td>
+    </tr>`;
+  }).join('');
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content" style="max-width:640px">
+    <h2>⚙ Compliance settings</h2>
+    <p class="drop-note" style="margin:0 0 10px">Set how often each compliance recurs, and when the status light — and its date cell — turns amber or red. <b>Amber</b> = due within the amber days; <b>Red</b> = due within the red days (or overdue); <b>Green</b> = further off than that. The frequency auto-sets the next due date when you upload a dated certificate.</p>
+    <div style="overflow-x:auto">
+      <table class="setg"><thead><tr>
+        <th>Compliance</th><th>Frequency<br>(years)</th><th>Amber<br>(days before due)</th><th>Red<br>(days before due)</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>
+    <div class="actions">
+      <button class="btn" id="setSave">Save</button>
+      <button class="btn" style="background:#ccc;color:#000;" id="setCancel">Cancel</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#setCancel').onclick=()=>modal.remove();
+  modal.querySelector('#setSave').onclick=async()=>{
+    const types={};
+    TYPES.forEach(([k])=>{ types[k]={
+      years:+modal.querySelector('#fy_'+k).value||1,
+      amberDays:Math.max(0,+modal.querySelector('#am_'+k).value||0),
+      redDays:Math.max(0,+modal.querySelector('#rd_'+k).value||0)
+    }; });
+    const btn=modal.querySelector('#setSave'); btn.disabled=true; btn.textContent='Saving…';
+    try{
+      const r=await authFetch('/compliance/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({types})});
+      const j=await r.json();
+      if(r.ok && j.ok){ complianceSettings=j.settings||complianceSettings; modal.remove(); applyFilters(); }
+      else { btn.disabled=false; btn.textContent='Save'; alert('Could not save settings.'); }
+    }catch(e){ btn.disabled=false; btn.textContent='Save'; alert('Could not save settings.'); }
+  };
+}
+
 /* ============ Wiring UI ============ */
 document.addEventListener('DOMContentLoaded', () => {
   // Buttons
   document.getElementById('reloadBtn').onclick = loadFromPortal;
   const migrateBtn = document.getElementById('migrateBtn');
   if (canEditCompliance()) { migrateBtn.style.display = ''; migrateBtn.onclick = migrateFromOld; }
+  const settingsBtn = document.getElementById('settingsBtn');
+  if (canEditCompliance()) { settingsBtn.style.display = ''; settingsBtn.onclick = openSettingsModal; }
   document.getElementById('overdueBtn').onclick = ()=> {
     document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
     document.getElementById('overdueBtn').classList.add('active');
@@ -1355,8 +1452,9 @@ document.addEventListener('DOMContentLoaded', () => {
   tb.addEventListener('dragleave', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && !tr.contains(ev.relatedTarget)) tr.classList.remove('drop-hot'); });
   tb.addEventListener('drop', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
 
-  // initial load (portal is the single source now)
-  loadFromPortal();
+  // initial load (portal is the single source now) — settings first so the
+  // status colours are right on the first paint.
+  loadSettings().then(loadFromPortal);
 });
 
 /* Hidden file input helper for the 📎 button (mobile-friendly). */
