@@ -773,6 +773,20 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   a 2-lane pool, resumable (skip logic re-computes each run). Extensible: a check
   registry (`CHECK_TYPES=["fiveYear"]` in the worker) — PAT/EM/PV/EV etc. plug in as
   their own verifiers later. Button: "🔍 Run compliance checks" in eicr-portal.html.
+  **Document-type classification + remediation (v10):** the engine now returns a
+  `docType` per PDF — `eicr` (condition report: title / stated SATISFACTORY-
+  UNSATISFACTORY assessment / schedule of test results), `minorworks` (Minor
+  Electrical Installation Works Certificate), `eic` (Electrical Installation
+  Certificate), or `other` (remedial sheet / quote / paperwork). A stated outcome is
+  EICR-exclusive so it wins; else the certificate title decides. The worklist walks a
+  site's 5-Year docs newest-first, picks the newest `eicr` as the condition report AND
+  collects any `minorworks`/`eic` seen along the way (the remedial certificates). **If
+  the chosen EICR is UNSATISFACTORY but a Minor Works / EIC on file is dated on/after
+  the EICR's date, the observations are treated as cleared → outcome `REMEDIED`,
+  attention off, a ✅ "remedied by a … dated …" flag** (a REMEDIED green badge). A
+  remedial cert with no readable date can't clear it (fails safe → still flagged).
+  Remedial certs are expected filed under 5-Year alongside the EICR (where Jamie files
+  them). `outcome` is stored capped at 20 chars ("REMEDIED" fits); no worker change.
   **site-folder.html Previous Jobs** (the Documents → Previous Jobs tab) lists LIVE
   jobs + the imported ARCHIVE (historical) jobs for the store (GET /sla/site/jobs
   returns both, each tagged `source:live|archive`; archive carries its full imported
