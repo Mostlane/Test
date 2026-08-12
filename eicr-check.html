@@ -493,6 +493,26 @@
       if (!ds.length) return null;
       return new Date(Math.max.apply(null, ds.map(Number)));
     }
+    // Read the STATED overall assessment robustly. The filled box is a line that is
+    // just the word; the footnote ("An unsatisfactory assessment indicates … (Code C1)…")
+    // and the option labels must not be mistaken for it, so match the standalone line
+    // first, and only fall back to a boilerplate-stripped scan when that's ambiguous.
+    function readOutcome(flat) {
+      var lines = flat.split("\n"), su = 0, ss = 0;
+      lines.forEach(function (l) {
+        var t = l.trim().replace(/^[\s*:._\-]+|[\s*:._\-]+$/g, "");
+        if (/^UN\s*SATISFACTORY$/i.test(t)) su++;
+        else if (/^SATISFACTORY$/i.test(t)) ss++;
+      });
+      if (su && !ss) return "UNSATISFACTORY";
+      if (ss && !su) return "SATISFACTORY";
+      var c = flat.replace(/an?\s+['"]?un\s*satisfactory['"]?\s+assessment[\s\S]*?\./ig, "")
+                  .replace(/[\s\S]*?is\s+stated\s+as\s+['"]?un\s*satisfactory['"]?/ig, "")
+                  .replace(/\(\s*code[^)]*\)/ig, "");
+      if (/UN\s*SATISFACTORY/i.test(c)) return "UNSATISFACTORY";
+      if (/SATISFACTORY/i.test(c)) return "SATISFACTORY";
+      return "";
+    }
 
     async function handlePdf(file) {
       var rep = $("pdfReport"), st = $("pdfStatus");
@@ -513,7 +533,7 @@
 
       // ── Header facts ───────────────────────────────────────────────
       var ref = (rawFlat.match(/(?:Certificate Number|Ref)[:\s]+(\S+)/i) || [])[1] || "";
-      var outcome = /UNSATISFACTORY/i.test(rawFlat) ? "UNSATISFACTORY" : (/SATISFACTORY/i.test(rawFlat) ? "SATISFACTORY" : "");
+      var outcome = readOutcome(rawFlat);
       var sigs = findSignatories(flat);
       var latest = latestDate(flat);
       var codesFound = { C1: (flat.match(/(?:^|\s)C1(?=\s|$)/g) || []).length, C2: (flat.match(/(?:^|\s)C2(?=\s|$)/g) || []).length, FI: (flat.match(/(?:^|\s)FI(?=\s|$)/g) || []).length };
@@ -530,8 +550,13 @@
       function addReview(label, why, code) { reviews.push({ label: label, why: why, code: code || "" }); }
 
       // Document-level logic checks
-      if (codesFound.C1 + codesFound.C2 + codesFound.FI > 0 && outcome === "SATISFACTORY")
-        addReview("Overall outcome", "A C1, C2 or FI observation appears in the report, yet the overall assessment is marked SATISFACTORY. Any C1, C2 or FI makes an EICR UNSATISFACTORY — check the coding and outcome.");
+      if (codesFound.C1 + codesFound.C2 + codesFound.FI > 0 && outcome === "SATISFACTORY") {
+        var parts = [];
+        if (codesFound.C1) parts.push(codesFound.C1 + " × C1");
+        if (codesFound.C2) parts.push(codesFound.C2 + " × C2");
+        if (codesFound.FI) parts.push(codesFound.FI + " × FI");
+        addReview("⚠ Outcome should be UNSATISFACTORY", "The report is marked SATISFACTORY, but it contains " + parts.join(", ") + " observation(s). Any C1, C2 or FI means the installation must be assessed UNSATISFACTORY (BS 7671 / GN3). Check the coding and the overall assessment.", "C1");
+      }
       if (!sigs.length)
         addReview("Signatures", "No signatory (name · role · date) could be read on the report. Confirm the inspector/tester and, where required, the qualified supervisor have signed and dated it.");
       if (limPct > 10)
