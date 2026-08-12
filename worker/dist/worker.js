@@ -12670,6 +12670,10 @@ async function ensure5(env) {
     await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN meta TEXT").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN site_number TEXT").run();
+  } catch {
+  }
   READY4 = true;
 }
 function schemeOf(q) {
@@ -12761,7 +12765,7 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
   }
   due[type] = next;
   if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(due), at, tid, scheme, code).run();
-  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(due), at).run();
+  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(due), scheme === "coop" ? code : null, at).run();
 }
 function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -12773,6 +12777,27 @@ var pad4 = (v) => {
   const d = s.replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
 };
+var SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council" };
+var schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+var TYPE_LABELS = {
+  fiveYear: "5 Year",
+  pat: "PAT",
+  em: "Emergency Lighting",
+  emMonthly: "EM Monthly",
+  emYearly: "EM Yearly",
+  pv: "PV",
+  ev: "EV/Forecourt",
+  forecourt: "EV/Forecourt",
+  pump: "Pump",
+  asbestos: "Asbestos Register",
+  other: "Other"
+};
+function typeOptionsFor(scheme) {
+  const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
+  if (scheme === "fareham" && !keys.includes("asbestos")) keys.push("asbestos");
+  if (!keys.includes("other")) keys.push("other");
+  return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
+}
 var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "other"];
 function canonType(t) {
   const s = String(t || "").toLowerCase();
@@ -12798,6 +12823,32 @@ async function isFull3(env, tid, me) {
   } catch {
     return false;
   }
+}
+async function listStoreFiles(env, origin, tid, scheme, code) {
+  const { results } = await env.DB.prepare(
+    "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+  ).bind(tid, scheme, code).all();
+  const byType = {};
+  for (const r of results || []) {
+    (byType[r.type] = byType[r.type] || []).push({
+      id: r.id,
+      year: r.year,
+      filename: r.filename,
+      label: r.label || null,
+      pinned: r.pinned ? 1 : 0,
+      size: r.size,
+      date: r.doc_date || r.uploaded_at,
+      url: await signedFileUrl(env, origin, "/compliance/file", r.r2_key)
+    });
+  }
+  for (const t of Object.keys(byType)) {
+    const arr = byType[t];
+    const anyPinned = arr.some((f) => f.pinned);
+    arr.forEach((f, i) => {
+      f.current = anyPinned ? !!f.pinned : i === 0;
+    });
+  }
+  return byType;
 }
 var CLIENT_MAP = { "retail": "retail", "els": "els", "els private": "els_private", "cobra": "cobra", "wenzel's": "wenzels", "wenzels": "wenzels" };
 function complianceClient(cat) {
@@ -12861,30 +12912,35 @@ async function handle24(request, env, ctx, url, sess) {
   if (sub === "/files" && method === "GET") {
     const code = pad4(q.get("code"));
     if (!code) return jr6({ error: "code required" }, headers, 400);
-    const { results } = await env.DB.prepare(
-      "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
-    ).bind(tid, scheme, code).all();
-    const byType = {};
-    for (const r of results || []) {
-      (byType[r.type] = byType[r.type] || []).push({
-        id: r.id,
-        year: r.year,
-        filename: r.filename,
-        label: r.label || null,
-        pinned: r.pinned ? 1 : 0,
-        size: r.size,
-        date: r.doc_date || r.uploaded_at,
-        url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key)
-      });
-    }
-    for (const t of Object.keys(byType)) {
-      const arr = byType[t];
-      const anyPinned = arr.some((f) => f.pinned);
-      arr.forEach((f, i) => {
-        f.current = anyPinned ? !!f.pinned : i === 0;
-      });
-    }
+    const byType = await listStoreFiles(env, url.origin, tid, scheme, code);
     return jr6({ ok: true, code, files: byType }, headers);
+  }
+  if (sub === "/site-files" && method === "GET") {
+    const site = String(q.get("site") || "").trim();
+    if (!site) return jr6({ error: "site required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT scheme, code, name FROM compliance_stores WHERE tenant_id=? AND site_number=?"
+    ).bind(tid, site).all();
+    const stores = (results || []).map((r) => ({ scheme: r.scheme, code: r.code, name: r.name || "" }));
+    const plain = pad4(site);
+    if (plain && !stores.some((s) => s.scheme === "coop" && s.code === plain)) {
+      const has = await env.DB.prepare(
+        "SELECT 1 FROM compliance_stores WHERE tenant_id=? AND scheme='coop' AND code=? UNION SELECT 1 FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND code=? LIMIT 1"
+      ).bind(tid, plain, tid, plain).first();
+      if (has) stores.push({ scheme: "coop", code: plain, name: "" });
+    }
+    const sections = [];
+    for (const s of stores) {
+      sections.push({
+        scheme: s.scheme,
+        schemeLabel: schemeLabel(s.scheme),
+        code: s.code,
+        name: s.name,
+        types: typeOptionsFor(s.scheme),
+        files: await listStoreFiles(env, url.origin, tid, s.scheme, s.code)
+      });
+    }
+    return jr6({ ok: true, site, sections }, headers);
   }
   if (sub === "/file-url" && method === "GET") {
     const code = pad4(q.get("code")), type = canonType(q.get("type"));
@@ -13032,31 +13088,42 @@ async function handle24(request, env, ctx, url, sess) {
         if (s) dueClean[t] = s;
       }
       const metaJson = r.meta && typeof r.meta === "object" ? JSON.stringify(r.meta) : null;
+      let siteNo = null;
+      if (scheme === "coop") siteNo = code;
+      else {
+        const match = await env.DB.prepare(
+          "SELECT site_number FROM sites WHERE tenant_id=? AND LOWER(TRIM(site_name))=LOWER(TRIM(?)) ORDER BY site_number LIMIT 1"
+        ).bind(tid, r.name || "").first();
+        siteNo = match ? match.site_number : null;
+      }
       await env.DB.prepare(
-        `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, meta, updated_at)
-         VALUES (?,?,?,?,?,?,?,1,?,?)
+        `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, meta, site_number, updated_at)
+         VALUES (?,?,?,?,?,?,?,1,?,?,?)
          ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET
            category=COALESCE(excluded.category, compliance_stores.category),
            name=COALESCE(excluded.name, compliance_stores.name),
            postcode=COALESCE(excluded.postcode, compliance_stores.postcode),
            due=excluded.due,
            meta=COALESCE(excluded.meta, compliance_stores.meta),
+           site_number=COALESCE(excluded.site_number, compliance_stores.site_number),
            updated_at=excluded.updated_at`
-      ).bind(tid, scheme, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), metaJson, at).run();
+      ).bind(tid, scheme, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), metaJson, siteNo, at).run();
       imported++;
-      const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
-      if (site) matched++;
-      else if (createSites && r.name) {
-        const client = complianceClient(r.category);
-        const name = String(r.name).slice(0, 200);
-        const postcode = String(r.postcode || "").slice(0, 20);
-        const data = JSON.stringify({ client, siteNumber: code, siteName: name, postcode, active: true });
-        try {
-          await env.DB.prepare(
-            "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
-          ).bind(tid, client, code, name, postcode, data, at).run();
-          sitesCreated++;
-        } catch (e) {
+      if (siteNo) {
+        const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, siteNo).first();
+        if (site) matched++;
+        else if (scheme === "coop" && createSites && r.name) {
+          const client = complianceClient(r.category);
+          const name = String(r.name).slice(0, 200);
+          const postcode = String(r.postcode || "").slice(0, 20);
+          const data = JSON.stringify({ client, siteNumber: siteNo, siteName: name, postcode, active: true });
+          try {
+            await env.DB.prepare(
+              "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
+            ).bind(tid, client, siteNo, name, postcode, data, at).run();
+            sitesCreated++;
+          } catch (e) {
+          }
         }
       }
     }
@@ -13109,10 +13176,10 @@ async function handle24(request, env, ctx, url, sess) {
     const name = b.name != null ? String(b.name).slice(0, 200) : row ? row.name : null;
     const postcode = b.postcode != null ? String(b.postcode).slice(0, 20) : row ? row.postcode : null;
     await env.DB.prepare(
-      `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, updated_at)
-       VALUES (?,?,?,?,?,?,?,1,?)
-       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, updated_at=excluded.updated_at`
-    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), at).run();
+      `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, site_number, updated_at)
+       VALUES (?,?,?,?,?,?,?,1,?,?)
+       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(compliance_stores.site_number, excluded.site_number), updated_at=excluded.updated_at`
+    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), scheme === "coop" ? code : null, at).run();
     return jr6({ ok: true, code, due }, headers);
   }
   if (sub === "/store-meta" && method === "POST") {
@@ -13140,7 +13207,7 @@ async function handle24(request, env, ctx, url, sess) {
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2e3) || null;
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2e3) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
-    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(meta), at).run();
+    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), scheme === "coop" ? code : null, at).run();
     return jr6({ ok: true, code, meta }, headers);
   }
   if (sub === "/store-delete" && method === "POST") {
