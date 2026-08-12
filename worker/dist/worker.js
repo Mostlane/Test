@@ -12659,6 +12659,42 @@ async function ensure5(env) {
   READY4 = true;
 }
 var DUE_YEARS = { fiveYear: 5 };
+var DEFAULT_TYPE_SETTINGS = {
+  fiveYear: { years: 5, amberDays: 90, redDays: 30 },
+  pat: { years: 1, amberDays: 90, redDays: 30 },
+  em: { years: 1, amberDays: 90, redDays: 30 },
+  pv: { years: 1, amberDays: 90, redDays: 30 },
+  ev: { years: 1, amberDays: 90, redDays: 30 },
+  forecourt: { years: 1, amberDays: 90, redDays: 30 },
+  pump: { years: 1, amberDays: 90, redDays: 30 }
+};
+function numOr(v, d, min, max) {
+  let n = Number(v);
+  if (!isFinite(n)) n = d;
+  n = Math.round(n);
+  if (n < min) n = min;
+  if (n > max) n = max;
+  return n;
+}
+async function getComplianceSettings(env, tid) {
+  let saved = {};
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='compliance_settings'").bind(tid).first();
+    if (row && row.value) saved = JSON.parse(row.value) || {};
+  } catch {
+  }
+  const st = saved && saved.types || {};
+  const types = {};
+  for (const [t, def] of Object.entries(DEFAULT_TYPE_SETTINGS)) {
+    const s = st[t] || {};
+    types[t] = {
+      years: numOr(s.years, def.years, 1, 50),
+      amberDays: numOr(s.amberDays, def.amberDays, 0, 3650),
+      redDays: numOr(s.redDays, def.redDays, 0, 3650)
+    };
+  }
+  return { types };
+}
 function addYears(dateStr, n) {
   const d = new Date(dateStr);
   if (isNaN(d)) return null;
@@ -12667,7 +12703,13 @@ function addYears(dateStr, n) {
 }
 async function bumpDue(env, tid, code, type, dateStr) {
   if (!dateStr) return;
-  const next = addYears(dateStr, DUE_YEARS[type] || 1);
+  let years = DUE_YEARS[type] || 1;
+  try {
+    const cfg = await getComplianceSettings(env, tid);
+    if (cfg.types[type] && cfg.types[type].years) years = cfg.types[type].years;
+  } catch {
+  }
+  const next = addYears(dateStr, years);
   if (!next) return;
   const at = (/* @__PURE__ */ new Date()).toISOString();
   const row = await env.DB.prepare("SELECT due FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
@@ -12954,6 +12996,26 @@ async function handle24(request, env, ctx, url, sess) {
       }
     }
     return jr6({ ok: true, imported, matched, sitesCreated }, headers);
+  }
+  if (sub === "/settings" && method === "GET") {
+    return jr6({ ok: true, settings: await getComplianceSettings(env, tid) }, headers);
+  }
+  if (sub === "/settings" && method === "POST") {
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const inTypes = b && b.types || {};
+    const cur = await getComplianceSettings(env, tid);
+    const out = { types: {} };
+    for (const [t, def] of Object.entries(DEFAULT_TYPE_SETTINGS)) {
+      const s = inTypes[t] || cur.types[t] || def;
+      out.types[t] = {
+        years: numOr(s.years, def.years, 1, 50),
+        amberDays: numOr(s.amberDays, def.amberDays, 0, 3650),
+        redDays: numOr(s.redDays, def.redDays, 0, 3650)
+      };
+    }
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'compliance_settings', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, JSON.stringify(out)).run();
+    return jr6({ ok: true, settings: out }, headers);
   }
   if (sub === "/store" && method === "POST") {
     if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);

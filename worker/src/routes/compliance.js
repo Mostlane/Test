@@ -58,6 +58,45 @@ async function ensure(env) {
 
 // Compliance frequencies (years). EICR/5-Year is 5-yearly; everything else annual.
 const DUE_YEARS = { fiveYear: 5 };
+
+// Per-type page settings (app_config key 'compliance_settings'): how often each
+// compliance recurs (years, drives the auto-advance on upload) and when the status
+// light + its date cell turn amber / red (days before the due date). Defaults below;
+// the admin overrides them from the chart's ⚙ Settings modal.
+const DEFAULT_TYPE_SETTINGS = {
+  fiveYear:  { years: 5, amberDays: 90, redDays: 30 },
+  pat:       { years: 1, amberDays: 90, redDays: 30 },
+  em:        { years: 1, amberDays: 90, redDays: 30 },
+  pv:        { years: 1, amberDays: 90, redDays: 30 },
+  ev:        { years: 1, amberDays: 90, redDays: 30 },
+  forecourt: { years: 1, amberDays: 90, redDays: 30 },
+  pump:      { years: 1, amberDays: 90, redDays: 30 },
+};
+function numOr(v, d, min, max) {
+  let n = Number(v); if (!isFinite(n)) n = d; n = Math.round(n);
+  if (n < min) n = min; if (n > max) n = max; return n;
+}
+// Read the saved compliance settings merged over the defaults (always a full,
+// validated {types:{…}} object).
+async function getComplianceSettings(env, tid) {
+  let saved = {};
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='compliance_settings'").bind(tid).first();
+    if (row && row.value) saved = JSON.parse(row.value) || {};
+  } catch {}
+  const st = (saved && saved.types) || {};
+  const types = {};
+  for (const [t, def] of Object.entries(DEFAULT_TYPE_SETTINGS)) {
+    const s = st[t] || {};
+    types[t] = {
+      years: numOr(s.years, def.years, 1, 50),
+      amberDays: numOr(s.amberDays, def.amberDays, 0, 3650),
+      redDays: numOr(s.redDays, def.redDays, 0, 3650),
+    };
+  }
+  return { types };
+}
+
 function addYears(dateStr, n) {
   const d = new Date(dateStr); if (isNaN(d)) return null;
   d.setUTCFullYear(d.getUTCFullYear() + n);
@@ -69,7 +108,10 @@ function addYears(dateStr, n) {
 // the cert was dropped on a code we weren't yet tracking.
 async function bumpDue(env, tid, code, type, dateStr) {
   if (!dateStr) return;
-  const next = addYears(dateStr, DUE_YEARS[type] || 1); if (!next) return;
+  // Use the configured per-type frequency (falls back to the built-in default).
+  let years = DUE_YEARS[type] || 1;
+  try { const cfg = await getComplianceSettings(env, tid); if (cfg.types[type] && cfg.types[type].years) years = cfg.types[type].years; } catch {}
+  const next = addYears(dateStr, years); if (!next) return;
   const at = new Date().toISOString();
   const row = await env.DB.prepare("SELECT due FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
   let due = {}; if (row && row.due) { try { due = JSON.parse(row.due) || {}; } catch {} }
@@ -351,6 +393,29 @@ export async function handle(request, env, ctx, url, sess) {
       }
     }
     return jr({ ok: true, imported, matched, sitesCreated }, headers);
+  }
+
+  // ── Page settings: per-type frequency + amber/red warning windows ───────────
+  // GET is open to any session (viewers need it to colour the chart correctly).
+  if (sub === "/settings" && method === "GET") {
+    return jr({ ok: true, settings: await getComplianceSettings(env, tid) }, headers);
+  }
+  if (sub === "/settings" && method === "POST") {
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const inTypes = (b && b.types) || {};
+    const cur = await getComplianceSettings(env, tid);
+    const out = { types: {} };
+    for (const [t, def] of Object.entries(DEFAULT_TYPE_SETTINGS)) {
+      const s = inTypes[t] || cur.types[t] || def;
+      out.types[t] = {
+        years: numOr(s.years, def.years, 1, 50),
+        amberDays: numOr(s.amberDays, def.amberDays, 0, 3650),
+        redDays: numOr(s.redDays, def.redDays, 0, 3650),
+      };
+    }
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'compliance_settings', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, JSON.stringify(out)).run();
+    return jr({ ok: true, settings: out }, headers);
   }
 
   // ── Edit one store's category / due dates (replaces the mostlane-pos update) ─
