@@ -12924,7 +12924,7 @@ async function handle24(request, env, ctx, url, sess) {
       const dueClean = {};
       for (const [k, v] of Object.entries(due)) {
         const t = canonType(k);
-        const s = String(v || "").trim();
+        const s = String(v || "").replace(/📄/g, "").trim();
         if (s) dueClean[t] = s;
       }
       await env.DB.prepare(
@@ -12972,7 +12972,7 @@ async function handle24(request, env, ctx, url, sess) {
     if (b.due && typeof b.due === "object") {
       for (const [k, v] of Object.entries(b.due)) {
         const t = canonType(k);
-        const s = String(v == null ? "" : v).trim();
+        const s = String(v == null ? "" : v).replace(/📄/g, "").trim();
         if (s) due[t] = s;
         else delete due[t];
       }

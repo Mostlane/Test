@@ -320,7 +320,7 @@ export async function handle(request, env, ctx, url, sess) {
       const due = (r.due && typeof r.due === "object") ? r.due : {};
       // keep only real dates, canonicalising the type keys
       const dueClean = {};
-      for (const [k, v] of Object.entries(due)) { const t = canonType(k); const s = String(v || "").trim(); if (s) dueClean[t] = s; }
+      for (const [k, v] of Object.entries(due)) { const t = canonType(k); const s = String(v || "").replace(/📄/g, "").trim(); if (s) dueClean[t] = s; }
       await env.DB.prepare(
         `INSERT INTO compliance_stores (tenant_id, code, category, name, postcode, due, active, updated_at)
          VALUES (?,?,?,?,?,?,1,?)
@@ -363,7 +363,9 @@ export async function handle(request, env, ctx, url, sess) {
     const row = await env.DB.prepare("SELECT due, category, name, postcode FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).first();
     let due = {}; if (row && row.due) { try { due = JSON.parse(row.due) || {}; } catch {} }
     if (b.due && typeof b.due === "object") {
-      for (const [k, v] of Object.entries(b.due)) { const t = canonType(k); const s = String(v == null ? "" : v).trim(); if (s) due[t] = s; else delete due[t]; }
+      // Strip any stray cert emoji / non-date junk so it can never be stored on a
+      // due date (that produced a phantom extra 📄 in the chart).
+      for (const [k, v] of Object.entries(b.due)) { const t = canonType(k); const s = String(v == null ? "" : v).replace(/📄/g, "").trim(); if (s) due[t] = s; else delete due[t]; }
     }
     const category = b.category != null ? String(b.category).slice(0, 60) : (row ? row.category : null);
     const name = b.name != null ? String(b.name).slice(0, 200) : (row ? row.name : null);

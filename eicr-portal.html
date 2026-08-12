@@ -63,7 +63,7 @@
 
     .table-wrapper { overflow-x:auto; overflow-y:auto; max-height:70vh; width:100%; }
     table { width:100%; border-collapse:collapse; margin-top:10px; }
-    th, td { border:1px solid #d5dde5; padding:3px 8px; text-align:center; font-size:14px; line-height:1.25; }
+    th, td { border:1px solid #d5dde5; padding:3px 8px; text-align:center; font-size:14px; line-height:1.25; vertical-align:middle; }
     th { background:#1A4F8F; color:#fff; position:sticky; top:0; z-index:5; padding:6px 8px; }
     /* Compact document buttons so the Docs column doesn't force tall rows. */
     td .doc-btn{ padding:1px 6px; line-height:1.3; }
@@ -453,7 +453,10 @@ async function openVersionsModal(code){
    is left untouched. (Slashes + 4-digit year so it round-trips through the edit
    save + the overdue calc, both of which parse DD/MM/YYYY.) */
 function fmtDue(s){
-  s = String(s == null ? '' : s).trim();
+  // Strip any stray cert emoji that a bad edit may have baked into the stored
+  // value, so a due date can never render an extra 📄 (see dateCell — the "has a
+  // document" 📄 is added there, exactly once per type).
+  s = String(s == null ? '' : s).replace(/📄/g, '').trim();
   if (!s) return '';
   let d, m, y, mm;
   if ((mm = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/.exec(s))) { y=+mm[1]; m=+mm[2]; d=+mm[3]; }        // ISO YYYY-MM-DD
@@ -757,6 +760,9 @@ function enableEditing(state){
     [...row.children].forEach((td,i)=>{
       const header = document.querySelectorAll("thead th")[i].textContent.trim();
       if (state && editableCols.includes(header)) {
+        // Remove the 📄 cert link before editing so its emoji can't be captured
+        // into the due-date text on save (that was baking "📄" into the value).
+        td.querySelectorAll('.cert-link').forEach(a => a.remove());
         td.contentEditable = true;
         td.style.background = "#fff6d1";
         td.addEventListener("input", ()=> row.dataset.changed = "true", { once:true });
@@ -800,13 +806,16 @@ async function saveEditInstant(row){
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
+  // Keep only date characters (digits / . - /) so no stray emoji or text can be
+  // saved into a due date. An empty cell stays empty (clears that due date).
+  const cleanDate = v => String(v || "").replace(/[^\d\/.\-]/g, "").trim();
   const due = {
-    fiveYear: record["5 Year"] || "",
-    pat: record["PAT"] || "",
-    em:  record["EM"]  || "",
-    pv:  record["PV"]  || "",
-    ev:  record["EV"]  || "",
-    pump: record["Pump"] || ""
+    fiveYear: cleanDate(record["5 Year"]),
+    pat: cleanDate(record["PAT"]),
+    em:  cleanDate(record["EM"]),
+    pv:  cleanDate(record["PV"]),
+    ev:  cleanDate(record["EV"]),
+    pump: cleanDate(record["Pump"])
   };
 
   row.style.opacity = "0.6";
