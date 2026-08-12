@@ -398,38 +398,66 @@ async function renderDocs(area){
   c.appendChild(list);
 }
 
-/* ---- Compliance (typed, versioned — the portal compliance store) ---- */
-const COMP_TYPES = { fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV', forecourt:'Forecourt', pump:'Pump', other:'Other' };
+/* ---- Compliance (typed, versioned — the portal compliance store) ----
+   Pulls this SITE's compliance docs across EVERY scheme (Southern Co-op,
+   Fareham …) via /compliance/site-files, which resolves the site → its linked
+   compliance store(s). So a Co-op site shows its Co-op certs and a Fareham site
+   shows its Fareham certs, all from the one Site Documents page. */
+const COMP_TYPES = { fiveYear:'5 Year', pat:'PAT', em:'Emergency Lighting', emMonthly:'EM Monthly', emYearly:'EM Yearly', pv:'PV', ev:'EV/Forecourt', forecourt:'EV/Forecourt', pump:'Pump', asbestos:'Asbestos Register', other:'Other' };
 async function renderCompliance(){
   const c = $("content"); c.innerHTML = `<div class="empty">Loading compliance…</div>`;
-  let files = {};
-  try{ files = (await authFetch("/compliance/files?code=" + encodeURIComponent(siteCode)).then(r=>r.json())).files || {}; }
+  let sections = [];
+  try{ sections = (await authFetch("/compliance/site-files?site=" + encodeURIComponent(siteCode)).then(r=>r.json())).sections || []; }
   catch(e){ c.innerHTML = `<div class="empty">Couldn't load compliance documents.</div>`; return; }
   if(activeTab !== "Compliance") return;
   c.innerHTML = "";
-  if(full) c.appendChild(compUploadBar());
-  const types = Object.keys(files);
-  if(!types.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No compliance documents on file for this site yet."; c.appendChild(e); return; }
-  types.forEach(t => {
-    const h = document.createElement("div"); h.style.cssText = "font-weight:700;margin:12px 4px 4px"; h.textContent = COMP_TYPES[t] || t;
-    c.appendChild(h);
-    const list = document.createElement("div"); list.className = "doclist";
-    files[t].forEach(f => {
-      const row = document.createElement("div"); row.className = "docrow";
-      const badge = f.current ? `<span style="color:#0a7d34;font-weight:700">● current</span>` : `<span class="muted">previous</span>`;
-      row.innerHTML = `
-        <span class="ic">${fileIcon(f.filename || "")}</span>
-        <div class="nm">${esc(f.filename || "document")}<div class="meta">${badge}${f.date ? " · " + esc(fmt(f.date)) : ""}</div></div>
-        <a class="btn small" href="${f.url}" target="_blank" rel="noopener">Open</a>`;
-      list.appendChild(row);
+  // A site with no linked compliance store yet: still let Full Access file a first
+  // doc (defaults to the Co-op scheme by this site's code).
+  if(!sections.length){
+    if(full) c.appendChild(compUploadBar({ scheme:'coop', code:siteCode, types:null }));
+    const e=document.createElement("div"); e.className="empty"; e.textContent="No compliance documents on file for this site yet."; c.appendChild(e);
+    return;
+  }
+  const multi = sections.length > 1;
+  sections.forEach(sec => {
+    if(multi){
+      const sh = document.createElement("div");
+      sh.style.cssText = "font-weight:800;margin:16px 4px 2px;color:#003468;border-bottom:2px solid #e2e8f0;padding-bottom:4px";
+      sh.textContent = sec.schemeLabel || sec.scheme;
+      c.appendChild(sh);
+    }
+    if(full) c.appendChild(compUploadBar(sec));
+    const files = sec.files || {};
+    const types = Object.keys(files);
+    if(!types.length){
+      const e=document.createElement("div"); e.className="empty"; e.style.margin="6px 4px"; e.textContent="No documents on file yet."; c.appendChild(e);
+      return;
+    }
+    types.forEach(t => {
+      const h = document.createElement("div"); h.style.cssText = "font-weight:700;margin:12px 4px 4px"; h.textContent = COMP_TYPES[t] || t;
+      c.appendChild(h);
+      const list = document.createElement("div"); list.className = "doclist";
+      files[t].forEach(f => {
+        const row = document.createElement("div"); row.className = "docrow";
+        const badge = f.current ? `<span style="color:#0a7d34;font-weight:700">● current</span>` : `<span class="muted">previous</span>`;
+        row.innerHTML = `
+          <span class="ic">${fileIcon(f.filename || "")}</span>
+          <div class="nm">${esc(f.label || f.filename || "document")}<div class="meta">${badge}${f.date ? " · " + esc(fmt(f.date)) : ""}</div></div>
+          <a class="btn small" href="${f.url}" target="_blank" rel="noopener">Open</a>`;
+        list.appendChild(row);
+      });
+      c.appendChild(list);
     });
-    c.appendChild(list);
   });
 }
-function compUploadBar(){
+// Upload bar bound to ONE scheme+code (a section). types = [{key,label}] for that
+// scheme's pickable headings; null falls back to the shared COMP_TYPES map.
+function compUploadBar(sec){
+  const scheme = sec.scheme || 'coop', code = sec.code || siteCode;
+  const opts = (sec.types && sec.types.length) ? sec.types : Object.keys(COMP_TYPES).map(k=>({key:k,label:COMP_TYPES[k]}));
   const bar = document.createElement("div"); bar.className = "uploadbar";
   const sel = document.createElement("select"); sel.className = "btn small"; sel.style.cssText = "background:#fff;color:#111";
-  Object.entries(COMP_TYPES).forEach(([k,v]) => { const o=document.createElement("option"); o.value=k; o.textContent=v; sel.appendChild(o); });
+  opts.forEach(o => { const op=document.createElement("option"); op.value=o.key; op.textContent=o.label; sel.appendChild(op); });
   const label = document.createElement("label"); label.className = "btn primary small"; label.textContent = "⬆️ Add compliance doc";
   const input = document.createElement("input"); input.type = "file"; input.hidden = true; label.appendChild(input);
   const status = document.createElement("span"); status.className = "muted"; status.style.fontSize = "12px";
@@ -438,9 +466,9 @@ function compUploadBar(){
     label.style.pointerEvents = "none"; label.textContent = "Uploading…";
     try{
       const form = new FormData();
-      form.append("file", file, file.name); form.append("code", siteCode); form.append("type", sel.value);
+      form.append("file", file, file.name); form.append("code", code); form.append("type", sel.value);
       form.append("bump", "1"); form.append("filename", file.name);
-      const r = await authFetch("/compliance/file", { method:"POST", body: form }).then(r=>r.json());
+      const r = await authFetch("/compliance/file?scheme=" + encodeURIComponent(scheme), { method:"POST", body: form }).then(r=>r.json());
       status.textContent = r.ok ? "✓ added" : ("✗ " + (r.error || "failed"));
     }catch(e){ status.textContent = "✗ failed"; }
     label.style.pointerEvents = ""; label.textContent = "⬆️ Add compliance doc"; input.value = "";

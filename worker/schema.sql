@@ -739,13 +739,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_compfiles_src ON compliance_files(tenant_i
 -- and Sites share one home (name/postcode are fallbacks; live values come from
 -- sites). Self-migrating.
 CREATE TABLE IF NOT EXISTS compliance_stores (
-  tenant_id  INTEGER NOT NULL DEFAULT 1,
-  code       TEXT NOT NULL,           -- = sites.site_number
-  category   TEXT,                    -- Retail | ELS | ELS Private | Cobra | Wenzels | …
-  name       TEXT,                    -- fallback only
-  postcode   TEXT,                    -- fallback only
-  due        TEXT,                    -- JSON { fiveYear, pat, em, pv, ev, forecourt, pump } → YYYY-MM-DD
-  active     INTEGER DEFAULT 1,
-  updated_at TEXT,
-  PRIMARY KEY (tenant_id, code)
+  tenant_id   INTEGER NOT NULL DEFAULT 1,
+  scheme      TEXT NOT NULL DEFAULT 'coop', -- coop (Southern Co-op) | fareham | …
+  code        TEXT NOT NULL,           -- store code within the scheme
+  category    TEXT,                    -- Retail | ELS | ELS Private | Cobra | Wenzels | …
+  name        TEXT,                    -- fallback (coop resolves live from sites)
+  postcode    TEXT,                    -- fallback
+  due         TEXT,                    -- JSON { <type>: YYYY-MM-DD }
+  active      INTEGER DEFAULT 1,
+  meta        TEXT,                    -- JSON { lat, lng, w3w, access, contact, keys }
+  site_number TEXT,                    -- linked PORTAL sites.site_number (coop = code;
+                                       -- other schemes resolve by name — powers Site Documents)
+  updated_at  TEXT,
+  PRIMARY KEY (tenant_id, scheme, code)
 );

@@ -62,6 +62,11 @@ async function ensure(env) {
   // widened to include scheme by a one-off migration).
   try { await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN meta TEXT").run(); } catch {}
+  // site_number = the canonical PORTAL site this compliance store belongs to, so
+  // its documents surface in that site's "Site Documents". For 'coop' this equals
+  // the code (the store IS the portal site); other schemes (Fareham) resolve it by
+  // matching an existing site by name (null until that site exists).
+  try { await env.DB.prepare("ALTER TABLE compliance_stores ADD COLUMN site_number TEXT").run(); } catch {}
   READY = true;
 }
 
@@ -156,7 +161,7 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
   let due = {}; if (row && row.due) { try { due = JSON.parse(row.due) || {}; } catch {} }
   due[type] = next;
   if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(due), at, tid, scheme, code).run();
-  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(due), at).run();
+  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(due), (scheme === "coop" ? code : null), at).run();
 }
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
@@ -166,6 +171,28 @@ const safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 
 // "" so it never resolves onto a real store's certs (stripping the letter would
 // turn "P0002" into "0002"). An empty/no-digit code is also "" (not "0000").
 const pad4 = (v) => { const s = String(v ?? ""); if (/[a-z]/i.test(s)) return ""; const d = s.replace(/\D/g, ""); return d ? d.padStart(4, "0") : ""; };
+
+// ── Scheme identity: display label. 'coop' compliance stores ARE portal sites
+// (site_number = code). Other schemes (Fareham) attach to an EXISTING portal
+// site matched by name — a separate workflow owns creating those sites — so a
+// store links up when its site exists and shows nothing extra until then.
+const SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council" };
+const schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+
+// Human labels + the pickable upload types for a scheme (drives the Site
+// Documents upload selector). Built from that scheme's due-dated types, plus
+// asbestos (Fareham) and always "other".
+const TYPE_LABELS = {
+  fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly",
+  emYearly: "EM Yearly", pv: "PV", ev: "EV/Forecourt", forecourt: "EV/Forecourt",
+  pump: "Pump", asbestos: "Asbestos Register", other: "Other",
+};
+function typeOptionsFor(scheme) {
+  const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
+  if (scheme === "fareham" && !keys.includes("asbestos")) keys.push("asbestos");
+  if (!keys.includes("other")) keys.push("other");
+  return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
+}
 
 // Canonical compliance type keys across both schemes.
 const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","other"];
@@ -192,6 +219,30 @@ function canonType(t) {
 }
 
 async function isFull(env, tid, me) { try { const p = await permissionsFor(env, tid, me); return p.FullAccess === "Yes" || p.Compliance === "Yes"; } catch { return false; } }
+
+// One store's files grouped by type (newest first, signed URLs, current/previous
+// resolved). Shared by GET /files and GET /site-files.
+async function listStoreFiles(env, origin, tid, scheme, code) {
+  const { results } = await env.DB.prepare(
+    "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
+  ).bind(tid, scheme, code).all();
+  const byType = {};
+  for (const r of results || []) {
+    (byType[r.type] = byType[r.type] || []).push({
+      id: r.id, year: r.year, filename: r.filename, label: r.label || null, pinned: r.pinned ? 1 : 0,
+      size: r.size, date: r.doc_date || r.uploaded_at,
+      url: await signedFileUrl(env, origin, "/compliance/file", r.r2_key),
+    });
+  }
+  // "current" set per type: if any files are pinned, ALL pinned ones are current
+  // (two linked docs stay current together); else the newest single file is current.
+  for (const t of Object.keys(byType)) {
+    const arr = byType[t];
+    const anyPinned = arr.some((f) => f.pinned);
+    arr.forEach((f, i) => { f.current = anyPinned ? !!f.pinned : (i === 0); });
+  }
+  return byType;
+}
 
 // Map a compliance category label to the portal's canonical lowercase client id
 // (matches how sites are already stored: retail/els/els_private/cobra/wenzels).
@@ -268,26 +319,41 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/files" && method === "GET") {
     const code = pad4(q.get("code"));
     if (!code) return jr({ error: "code required" }, headers, 400);
+    const byType = await listStoreFiles(env, url.origin, tid, scheme, code);
+    return jr({ ok: true, code, files: byType }, headers);
+  }
+
+  // ── A PORTAL SITE's compliance docs across every scheme (drives "Site
+  // Documents"). Resolves site_number → the linked compliance store(s), so a
+  // Co-op site shows its Co-op certs and a Fareham site (FBC-nnnn) shows its
+  // Fareham certs — from the one place a site is opened. `site` is the portal
+  // site_number (may carry a letter prefix), NOT a bare compliance code.
+  if (sub === "/site-files" && method === "GET") {
+    const site = String(q.get("site") || "").trim();
+    if (!site) return jr({ error: "site required" }, headers, 400);
+    // Every compliance store linked to this portal site (any scheme).
     const { results } = await env.DB.prepare(
-      "SELECT id, type, year, r2_key, filename, label, pinned, size, doc_date, uploaded_at FROM compliance_files WHERE tenant_id=? AND scheme=? AND code=? ORDER BY COALESCE(doc_date,uploaded_at) DESC"
-    ).bind(tid, scheme, code).all();
-    const byType = {};
-    for (const r of results || []) {
-      (byType[r.type] = byType[r.type] || []).push({
-        id: r.id, year: r.year, filename: r.filename, label: r.label || null, pinned: r.pinned ? 1 : 0,
-        size: r.size, date: r.doc_date || r.uploaded_at,
-        url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key)
+      "SELECT scheme, code, name FROM compliance_stores WHERE tenant_id=? AND site_number=?"
+    ).bind(tid, site).all();
+    const stores = (results || []).map((r) => ({ scheme: r.scheme, code: r.code, name: r.name || "" }));
+    // Back-compat: a plain-numeric site with no linked row is a Co-op store by
+    // code (covers rows created before site_number was backfilled).
+    const plain = pad4(site);
+    if (plain && !stores.some((s) => s.scheme === "coop" && s.code === plain)) {
+      const has = await env.DB.prepare(
+        "SELECT 1 FROM compliance_stores WHERE tenant_id=? AND scheme='coop' AND code=? UNION SELECT 1 FROM compliance_files WHERE tenant_id=? AND scheme='coop' AND code=? LIMIT 1"
+      ).bind(tid, plain, tid, plain).first();
+      if (has) stores.push({ scheme: "coop", code: plain, name: "" });
+    }
+    const sections = [];
+    for (const s of stores) {
+      sections.push({
+        scheme: s.scheme, schemeLabel: schemeLabel(s.scheme), code: s.code, name: s.name,
+        types: typeOptionsFor(s.scheme),
+        files: await listStoreFiles(env, url.origin, tid, s.scheme, s.code),
       });
     }
-    // "current" set per type: if any files are pinned, ALL pinned ones are current
-    // (so two linked docs — e.g. a 5-Year report split across two PDFs — both stay
-    // current); otherwise the newest single file is current, the rest previous.
-    for (const t of Object.keys(byType)) {
-      const arr = byType[t];
-      const anyPinned = arr.some(f => f.pinned);
-      arr.forEach((f, i) => { f.current = anyPinned ? !!f.pinned : (i === 0); });
-    }
-    return jr({ ok: true, code, files: byType }, headers);
+    return jr({ ok: true, site, sections }, headers);
   }
 
   // ── Latest cert URL for a store+type (used by the 📄 links) ─────────────────
@@ -424,35 +490,53 @@ export async function handle(request, env, ctx, url, sess) {
       const dueClean = {};
       for (const [k, v] of Object.entries(due)) { const t = canonType(k); const s = String(v || "").replace(/📄/g, "").trim(); if (s) dueClean[t] = s; }
       const metaJson = (r.meta && typeof r.meta === "object") ? JSON.stringify(r.meta) : null;
+      // The portal site this store links to. Co-op stores ARE portal sites (site
+      // number = code). Other schemes (Fareham) attach to an EXISTING portal site
+      // matched by name — a separate workflow owns creating those sites, so we
+      // never invent a duplicate here; unmatched stores link once their site lands.
+      let siteNo = null;
+      if (scheme === "coop") siteNo = code;
+      else {
+        const match = await env.DB.prepare(
+          "SELECT site_number FROM sites WHERE tenant_id=? AND LOWER(TRIM(site_name))=LOWER(TRIM(?)) ORDER BY site_number LIMIT 1"
+        ).bind(tid, r.name || "").first();
+        siteNo = match ? match.site_number : null;
+      }
       await env.DB.prepare(
-        `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, meta, updated_at)
-         VALUES (?,?,?,?,?,?,?,1,?,?)
+        `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, meta, site_number, updated_at)
+         VALUES (?,?,?,?,?,?,?,1,?,?,?)
          ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET
            category=COALESCE(excluded.category, compliance_stores.category),
            name=COALESCE(excluded.name, compliance_stores.name),
            postcode=COALESCE(excluded.postcode, compliance_stores.postcode),
            due=excluded.due,
            meta=COALESCE(excluded.meta, compliance_stores.meta),
+           site_number=COALESCE(excluded.site_number, compliance_stores.site_number),
            updated_at=excluded.updated_at`
-      ).bind(tid, scheme, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), metaJson, at).run();
+      ).bind(tid, scheme, code, r.category || null, r.name || null, r.postcode || null, JSON.stringify(dueClean), metaJson, siteNo, at).run();
       imported++;
-      const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, code).first();
-      if (site) matched++;
-      else if (createSites && r.name) {
-        // `sites.client` is NOT NULL. Map the compliance category to the portal's
-        // canonical lowercase client id, and — crucially — write the full site
-        // object into `data`, because /get-sites (and sites.html) render ONLY from
-        // that JSON blob; a columns-only row shows up blank.
-        const client = complianceClient(r.category);
-        const name = String(r.name).slice(0, 200);
-        const postcode = String(r.postcode || "").slice(0, 20);
-        const data = JSON.stringify({ client, siteNumber: code, siteName: name, postcode, active: true });
-        try {
-          await env.DB.prepare(
-            "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
-          ).bind(tid, client, code, name, postcode, data, at).run();
-          sitesCreated++;
-        } catch (e) { /* skip a store we can't create a site for */ }
+      // Only Co-op creates a missing portal site (opt-in via createSites — its
+      // sites already exist). Other schemes just link; if the named site exists
+      // it's a match, otherwise it links up later when that site is added.
+      if (siteNo) {
+        const site = await env.DB.prepare("SELECT site_number FROM sites WHERE tenant_id=? AND site_number=?").bind(tid, siteNo).first();
+        if (site) matched++;
+        else if (scheme === "coop" && createSites && r.name) {
+          // `sites.client` is NOT NULL. Map the compliance category to the portal's
+          // canonical lowercase client id, and — crucially — write the full site
+          // object into `data`, because /get-sites (and sites.html) render ONLY from
+          // that JSON blob; a columns-only row shows up blank.
+          const client = complianceClient(r.category);
+          const name = String(r.name).slice(0, 200);
+          const postcode = String(r.postcode || "").slice(0, 20);
+          const data = JSON.stringify({ client, siteNumber: siteNo, siteName: name, postcode, active: true });
+          try {
+            await env.DB.prepare(
+              "INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at) VALUES (?,?,?,?,?,1,0,?,?)"
+            ).bind(tid, client, siteNo, name, postcode, data, at).run();
+            sitesCreated++;
+          } catch (e) { /* skip a store we can't create a site for */ }
+        }
       }
     }
     return jr({ ok: true, imported, matched, sitesCreated }, headers);
@@ -501,10 +585,10 @@ export async function handle(request, env, ctx, url, sess) {
     const name = b.name != null ? String(b.name).slice(0, 200) : (row ? row.name : null);
     const postcode = b.postcode != null ? String(b.postcode).slice(0, 20) : (row ? row.postcode : null);
     await env.DB.prepare(
-      `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, updated_at)
-       VALUES (?,?,?,?,?,?,?,1,?)
-       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, updated_at=excluded.updated_at`
-    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), at).run();
+      `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, site_number, updated_at)
+       VALUES (?,?,?,?,?,?,?,1,?,?)
+       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(compliance_stores.site_number, excluded.site_number), updated_at=excluded.updated_at`
+    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), (scheme === "coop" ? code : null), at).run();
     return jr({ ok: true, code, due }, headers);
   }
 
@@ -526,7 +610,7 @@ export async function handle(request, env, ctx, url, sess) {
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2000) || null;
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2000) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
-    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, updated_at) VALUES (?,?,?,?,1,?)").bind(tid, scheme, code, JSON.stringify(meta), at).run();
+    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), (scheme === "coop" ? code : null), at).run();
     return jr({ ok: true, code, meta }, headers);
   }
 
