@@ -541,6 +541,7 @@
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
+          { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["Compliance"], match: ["eicr-check.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
           { label: "My Documents", href: "my-documents.html", icon: "forms", always: true, match: ["my-documents.html"] },
           { label: "Settings", href: "personalise.html", icon: "paint", always: true, match: ["personalise.html", "theme.html"] },
