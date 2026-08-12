@@ -731,10 +731,28 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   into 2 stores' due dates (0023/0052, cleaned in D1); fmtDue strips stray 📄, editing
   removes the cert link from the cell, saveEditInstant sanitises to date chars, and
   /store strips 📄 — so it can't recur.** **In-job:**
-  **site-folder.html**'s **Compliance** tab reads /compliance/files?code= (grouped
-  by type, current/previous, full-access upload), so Site documents from a job
-  shows every cert. mostlane-pos is retired (migration is one-tap); chart, Sites,
-  job costing and site documents all reference the one site by `site_number`.
+  **site-folder.html**'s **Compliance** tab reads **GET /compliance/site-files?site=**
+  (NOT the per-scheme /files) so it shows a site's certs across **EVERY scheme**
+  (Southern Co-op, Fareham …), grouped by type, current/previous, with a full-access
+  upload bar per section that posts to the right `?scheme=`+code. mostlane-pos is
+  retired (migration is one-tap); chart, Sites, job costing and site documents all
+  reference the one site by `site_number`.
+  **Compliance store → portal site link (Aug 2026):** `compliance_stores` gained a
+  **`site_number`** column = the canonical PORTAL site a store belongs to, so its
+  docs surface in that site's Site Documents. **Co-op stores ARE their portal site**
+  (`site_number = code`, backfilled). **Other schemes (Fareham) link to an EXISTING
+  portal site by NAME** — a separate workflow owns creating those sites, so the
+  worker never invents a duplicate: `/stores/import` + the create-if-missing paths
+  set `site_number` (coop=code, else name-match/null); **/stores GET self-heals**
+  (one correlated UPDATE relinks any still-null non-coop store whose name now
+  matches a site); and **/site-files also matches by the site's NAME** so docs show
+  the moment the site exists. `listStoreFiles()` is the shared file-lister for /files
+  + /site-files. **Fareham sites live under client `fbc`, numbered 3001–3024** (3001
+  Civic Offices / 3002 Civic Way Shoppers Car Park pre-existed from the concurrent
+  project; 3003–3024 created 12 Aug to give all 24 buildings a portal home — spare
+  `9998` Hook Recreation Ground is the other project's, untouched). NB the Fareham
+  chart page (fareham.html) still keys on (scheme=fareham, code=0001–0024) — the
+  `site_number` link is only the bridge to Site Documents.
   **site-folder.html Previous Jobs** (the Documents → Previous Jobs tab) lists LIVE
   jobs + the imported ARCHIVE (historical) jobs for the store (GET /sla/site/jobs
   returns both, each tagged `source:live|archive`; archive carries its full imported
