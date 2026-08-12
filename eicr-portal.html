@@ -76,6 +76,17 @@
        second line. Keep the name on one line (left-aligned so it reads naturally);
        the table already scrolls sideways if a column gets wide. */
     td.site{ white-space:nowrap; text-align:left; }
+    /* Click a site name to highlight the whole row (easier to read across). The
+       overlay sits on top of any status tint so both stay visible. */
+    tbody td.site{ cursor:pointer; }
+    tr.row-sel td{ box-shadow: inset 0 0 0 9999px rgba(37,99,235,.16); }
+    tr.row-sel td.site{ font-weight:700; }
+    /* In Edit mode the site name archives the row → show it as an action. */
+    body.cmp-edit tbody td.site{ color:#0071CE; text-decoration:underline; }
+    body.cmp-edit tbody td.site::after{ content:' 🗄'; font-size:12px; }
+    /* Closed Sites view: hide the edit cluster, utility bar and the DUE (time)
+       filters; the store-type/compliance filters, search + docs stay. */
+    body.closed-view .backbar, body.closed-view .utilbar, body.closed-view #dueFilters{ display:none !important; }
     /* Status colours — the Status light AND each due-date cell tint green/amber/red
        based on that compliance's own warning settings. */
     td.st-green{ background:#e3f6e8; }
@@ -196,6 +207,12 @@
   </header>
 
   <div class="container">
+    <!-- Closed Sites header (shown only in the closed-sites view) -->
+    <div id="closedHead" style="display:none; margin-bottom:12px; align-items:center; gap:12px;">
+      <button class="btn" id="closedBack">‹ Back to compliance chart</button>
+      <b style="font-size:16px;">🗄 Closed Sites</b>
+      <span class="info">Archived stores — documents can still be added; no time filters.</span>
+    </div>
     <!-- Top bar -->
     <div class="backbar">
       <button id="reloadBtn" class="btn" title="Reload live data">↻ Reload</button>
@@ -214,12 +231,13 @@
       <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
       <button class="bubble" id="summaryBtn">％ Summary</button>
       <button class="bubble" id="clearBtn">✕ Clear filters</button>
+      <button class="bubble" id="closedSitesBtn">🗄 Closed Sites</button>
       <button class="bubble" id="settingsBtn" style="display:none;">⚙ Settings</button>
       <button class="bubble" id="migrateBtn" style="display:none;">⤵ Import from old system</button>
     </div>
 
     <!-- Due-date filters -->
-    <div class="filter-bubbles summary-bubbles">
+    <div class="filter-bubbles summary-bubbles" id="dueFilters">
       <span class="flabel">Due</span>
       <button class="bubble" id="overdueBtn">Overdue</button>
       <button class="bubble" data-days="30">30 days</button>
@@ -341,6 +359,10 @@ let currentData = [];   // filtered / searched view
 let editMode = false;
 let activeStoreType = 'ALL';
 const activeCategories = new Set();
+let viewMode = 'active';   // 'active' = live chart, 'closed' = archived (Closed Sites)
+/* Rows for the current view: live chart shows active stores, Closed Sites shows
+   archived (active===0) ones. */
+function baseData(){ return allData.filter(e => viewMode === 'closed' ? e.active === 0 : e.active !== 0); }
 
 /* Compliance certificate index (store code → { type: 1 }) — populated from the
    portal's own /compliance store (SharePoint certs migrated into R2). Drives the
@@ -833,13 +855,19 @@ function renderTable(d){
     const tr = document.createElement('tr');
     tr.dataset.code = e.storeCode;
     const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
+    const reopenBtn = (viewMode==='closed' && canEditCompliance())
+      ? ` <button class="doc-btn reopen" data-code="${e.storeCode}" title="Reopen to the live chart">↩</button>` : '';
     const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
-      + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '');
-    const ws = worstStatus(e);
-    const dtd = (type) => { const s = typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
+      + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
+      + reopenBtn;
+    // Closed Sites: plain document dates, no status light/tints (due warnings
+    // don't apply to an archived store).
+    const closed = (viewMode === 'closed');
+    const ws = closed ? '' : worstStatus(e);
+    const dtd = (type) => { const s = closed ? '' : typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
     tr.innerHTML = `
       <td>${e.storeCode}</td><td class="site">${e.siteName}</td><td>${e.storeType}</td>
-      <td>${e.postcode}</td><td class="st-${ws}">${statusEmoji(ws)}</td>
+      <td>${e.postcode}</td><td class="${ws?'st-'+ws:''}">${closed ? '' : statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('pat')}${dtd('em')}
       ${dtd('pv')}${dtd('ev')}${dtd('pump')}
       <td class="docs-cell">${docsCell}</td>
@@ -854,7 +882,7 @@ function renderTable(d){
 
 /* apply filters + re-render */
 function applyFilters(){
-  let data = [...allData];
+  let data = baseData();
   if (activeStoreType !== 'ALL') data = data.filter(e=>e.storeType === activeStoreType);
   if (activeCategories.size > 0) {
     data = data.filter(e=>{
@@ -879,8 +907,57 @@ function applyFilters(){
 function updateFilterSummary(){
   const el = document.getElementById('filterSummary');
   const cats = activeCategories.size ? Array.from(activeCategories).join(', ') : 'None';
-  el.textContent = `Store Type: ${activeStoreType} | Compliance: ${cats} | Showing ${currentData.length} of ${allData.length}`;
+  el.textContent = `Store Type: ${activeStoreType} | Compliance: ${cats} | Showing ${currentData.length} of ${baseData().length}`;
   el.classList.add('visible');
+  updateClosedCount();
+}
+/* Keep the "Closed Sites" button label showing how many are archived. */
+function updateClosedCount(){
+  const btn = document.getElementById('closedSitesBtn');
+  if (!btn) return;
+  const n = allData.filter(e=>e.active === 0).length;
+  btn.textContent = '🗄 Closed Sites' + (n ? ` (${n})` : '');
+}
+
+/* Archive a store → moves it off the live chart into Closed Sites (docs kept). */
+async function archiveRow(code){
+  if (!canEditCompliance()) return;
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code));
+  if (!confirm(`Archive "${rec?rec.siteName:code}" to Closed Sites?\n\nIt's removed from this chart — its documents are kept and you can still add more.`)) return;
+  try{
+    const r = await authFetch('/compliance/store-archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code, archived:true})});
+    if(!r.ok) throw 0;
+    const it = allData.find(x=>pad4(x.storeCode)===pad4(code)); if(it) it.active = 0;
+    applyFilters();
+  }catch(e){ alert('Could not archive this site.'); }
+}
+/* Reopen an archived store back onto the live chart. */
+async function reopenRow(code){
+  if (!canEditCompliance()) return;
+  const rec = allData.find(r=>pad4(r.storeCode)===pad4(code));
+  if (!confirm(`Reopen "${rec?rec.siteName:code}" back onto the live compliance chart?`)) return;
+  try{
+    const r = await authFetch('/compliance/store-archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code, archived:false})});
+    if(!r.ok) throw 0;
+    const it = allData.find(x=>pad4(x.storeCode)===pad4(code)); if(it) it.active = 1;
+    applyFilters();
+  }catch(e){ alert('Could not reopen this site.'); }
+}
+/* Switch between the live chart and the Closed Sites view. */
+function setView(mode){
+  viewMode = mode;
+  const closed = (mode === 'closed');
+  document.body.classList.toggle('closed-view', closed);
+  document.getElementById('closedHead').style.display = closed ? 'flex' : 'none';
+  // leaving/entering closed view always drops edit mode
+  if (editMode){ editMode = false; enableEditing(false);
+    document.getElementById('editBtn').style.display = canEditCompliance() ? 'inline-flex' : 'none';
+    ['saveBtn','addSiteBtn','deleteSiteBtn'].forEach(id=>document.getElementById(id).style.display='none');
+  }
+  // reset the DUE quick-filters when switching
+  document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
+  applyFilters();
+  try{ document.querySelector('.table-wrapper').scrollTop = 0; }catch(e){}
 }
 
 /* ============ Progressive Live Loads ============ */
@@ -980,6 +1057,7 @@ async function loadFromPortal(){
       postcode: s.postcode || '',
       storeType: s.category || '',
       hasSite: !!s.hasSite,
+      active: s.active == null ? 1 : s.active,
       fiveYear: d.fiveYear || '', pat: d.pat || '', em: d.em || '',
       pv: d.pv || '', ev: d.ev || '', pump: d.pump || '',
       sharePoint: ''
@@ -1033,6 +1111,7 @@ async function migrateFromOld(){
 
 /* ============ Edit / Save / Add / Delete ============ */
 function enableEditing(state){
+  document.body.classList.toggle('cmp-edit', !!state);   // shows the 🗄 archive hint on site names
   const editableCols = ["5 Year","PAT","EM","PV","EV","Pump"];
   document.querySelectorAll("table tbody tr").forEach(row=>{
     [...row.children].forEach((td,i)=>{
@@ -1258,7 +1337,7 @@ function openDeleteSiteModal(){
 /* ============ Date Filters / Search / Summary / Export ============ */
 function filterOverdue(){
   const now = new Date();
-  const filtered = allData.filter(e => {
+  const filtered = baseData().filter(e => {
     return [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump]
       .map(parseDate).filter(Boolean).some(d => d < now);
   });
@@ -1268,7 +1347,7 @@ function filterOverdue(){
 function filterDueWithin(days){
   const now = new Date();
   const end = new Date(now.getTime() + days*86400000);
-  const filtered = allData.filter(e => {
+  const filtered = baseData().filter(e => {
     return [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump]
       .map(parseDate).filter(Boolean).some(d => d >= now && d <= end);
   });
@@ -1475,6 +1554,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (canEditCompliance()) { migrateBtn.style.display = ''; migrateBtn.onclick = migrateFromOld; }
   const settingsBtn = document.getElementById('settingsBtn');
   if (canEditCompliance()) { settingsBtn.style.display = ''; settingsBtn.onclick = openSettingsModal; }
+  document.getElementById('closedSitesBtn').onclick = ()=> setView('closed');
+  document.getElementById('closedBack').onclick = ()=> setView('active');
   document.getElementById('overdueBtn').onclick = ()=> {
     document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
     document.getElementById('overdueBtn').classList.add('active');
@@ -1568,6 +1649,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (up){ ev.preventDefault(); pickAndUpload(up.dataset.code); return; }
     const view = ev.target.closest('.doc-btn.view');
     if (view){ ev.preventDefault(); openVersionsModal(view.dataset.code); return; }
+    const reopen = ev.target.closest('.doc-btn.reopen');
+    if (reopen){ ev.preventDefault(); reopenRow(reopen.dataset.code); return; }
+    // Site-name click: archive in Edit mode; otherwise highlight the row.
+    const site = ev.target.closest('td.site');
+    if (site){
+      const tr = site.closest('tr'); if (!tr) return;
+      if (editMode && viewMode !== 'closed') archiveRow(tr.dataset.code);
+      else tr.classList.toggle('row-sel');
+      return;
+    }
   });
 
   // Drag a file onto any store row → upload against that site.

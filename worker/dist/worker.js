@@ -13057,6 +13057,15 @@ async function handle24(request, env, ctx, url, sess) {
     await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND code=?").bind(tid, code).run();
     return jr6({ ok: true }, headers);
   }
+  if (sub === "/store-archive" && method === "POST") {
+    if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr6({ error: "code required" }, headers, 400);
+    const active = b.archived ? 0 : 1;
+    await env.DB.prepare("UPDATE compliance_stores SET active=?, updated_at=? WHERE tenant_id=? AND code=?").bind(active, (/* @__PURE__ */ new Date()).toISOString(), tid, code).run();
+    return jr6({ ok: true, code, active }, headers);
+  }
   if (sub === "/summary" && method === "GET") {
     const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM compliance_files WHERE tenant_id=?").bind(tid).first())?.n || 0;
     const { results } = await env.DB.prepare("SELECT type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? GROUP BY type").bind(tid).all();

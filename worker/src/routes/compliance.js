@@ -453,6 +453,19 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true }, headers);
   }
 
+  // ── Archive / reopen a store (moves it to/from the Closed Sites view) ────────
+  // Body { code, archived }. Keeps the row + its documents; just flips `active`.
+  if (sub === "/store-archive" && method === "POST") {
+    if (!canWrite) return jr({ error: "Compliance access required" }, headers, 403);
+    const b = await request.json().catch(() => ({}));
+    const code = pad4(b.code);
+    if (!code) return jr({ error: "code required" }, headers, 400);
+    const active = b.archived ? 0 : 1;
+    await env.DB.prepare("UPDATE compliance_stores SET active=?, updated_at=? WHERE tenant_id=? AND code=?")
+      .bind(active, new Date().toISOString(), tid, code).run();
+    return jr({ ok: true, code, active }, headers);
+  }
+
   // ── Summary / progress (how many certs stored, by type) ─────────────────────
   if (sub === "/summary" && method === "GET") {
     const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM compliance_files WHERE tenant_id=?").bind(tid).first())?.n || 0;
