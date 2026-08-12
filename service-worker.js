@@ -2,7 +2,7 @@
 // Single canonical SW (scope "/"). Registering this replaces any earlier SW at
 // the same scope (the old push-only service-worker.js), so there's just one.
 
-const CACHE_NAME = "mostlane-v64";
+const CACHE_NAME = "mostlane-v65";
 
 // Precache the shell so the app can at least boot on a dead/flaky connection.
 const CORE_ASSETS = [
@@ -38,10 +38,15 @@ self.addEventListener("activate", (e) => {
 });
 
 // Race a network fetch against a timeout so a weak signal can't hang the page.
+// cache:'reload' bypasses the browser HTTP cache (GitHub Pages sets a ~10-min HTML
+// cache) so a network-first navigation always gets the freshest page — the fix for
+// "the PWA won't update". On failure the caller still falls back to the SW cache.
 function fetchWithTimeout(request, ms) {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("timeout")), ms);
-    fetch(request).then(
+    let p;
+    try { p = fetch(request, { cache: "reload" }); } catch (e) { p = fetch(request); }
+    p.then(
       (res) => { clearTimeout(t); resolve(res); },
       (err) => { clearTimeout(t); reject(err); }
     );
