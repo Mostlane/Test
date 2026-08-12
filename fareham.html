@@ -579,10 +579,10 @@ function openUploadModal(code, file){
   const grid=modal.querySelector('#ug');
   const nameLbl=modal.querySelector('#unl');
   const folderRow=modal.querySelector('#ufolderRow');
+  const folderable = ()=> (sel==='other' || sel==='asbestos');   // types that take a whole folder of PDFs
   const syncNameLbl=()=>{
-    const isOther = (sel==='other');
-    nameLbl.textContent = isOther ? 'Document name (optional for a single file)' : 'Document name (optional)';
-    folderRow.style.display = isOther ? '' : 'none';   // folder upload is Other-only
+    nameLbl.textContent = (sel==='other') ? 'Document name (optional for a single file)' : 'Document name (optional)';
+    folderRow.style.display = folderable() ? '' : 'none';
   };
   let userPickedType = false;
   const selectType=(t)=>{ if(!t) return; sel=t; grid.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.t===t)); syncNameLbl(); };
@@ -618,10 +618,10 @@ function openUploadModal(code, file){
     const name=(modal.querySelector('#uname').value||'').trim();
     const btn=modal.querySelector('#udo');
 
-    // ── "Other" folder upload: every PDF in the folder + sub-folders ──────────
-    const pdfs = (sel==='other' && folderInput && folderInput.files)
+    // ── Folder upload (Other / Asbestos): every PDF in the folder + sub-folders ─
+    const pdfs = (folderable() && folderInput && folderInput.files)
       ? [...folderInput.files].filter(f=>/\.pdf$/i.test(f.name)) : [];
-    if(sel==='other' && pdfs.length){
+    if(folderable() && pdfs.length){
       btn.disabled=true;
       let done=0, failed=0;
       for(const f of pdfs){
@@ -632,7 +632,7 @@ function openUploadModal(code, file){
         let lbl=rel.join(' / ').replace(/\.pdf$/i,'') || f.name.replace(/\.pdf$/i,'');
         if(name) lbl=name+' — '+lbl;
         const form=new FormData();
-        form.append('file',f); form.append('code',code); form.append('type','other');
+        form.append('file',f); form.append('code',code); form.append('type',sel);
         form.append('label',lbl.slice(0,160)); form.append('filename',f.name);
         try{ const r=await authFetch('/compliance/file',{method:'POST',body:form}); const out=await r.json().catch(()=>({})); (r.ok&&out.ok)?done++:failed++; }
         catch(e){ failed++; }
@@ -647,18 +647,18 @@ function openUploadModal(code, file){
     // ── Single-file upload ────────────────────────────────────────────────────
     const f=fileInput.files&&fileInput.files[0];
     if(!f){
-      if(sel==='other' && folderInput && folderInput.files && folderInput.files.length)
+      if(folderable() && folderInput && folderInput.files && folderInput.files.length)
         return alert('No PDF files were found in that folder.');
-      return alert('Choose a file (or, for Other, a folder of PDFs).');
+      return alert('Choose a file (or, for Other / Asbestos, a folder of PDFs).');
     }
     btn.disabled=true; btn.textContent='Uploading…';
     const form=new FormData();
     form.append('file',f); form.append('code',code); form.append('type',sel);
     const d=modal.querySelector('#ud').value; if(d) form.append('date',d);
     if(name) form.append('label',name);
-    // A named "Other" document is an extra file (e.g. O&M), not a due-dated
-    // compliance type — so don't let it advance a due date.
-    if(sel!=='other') form.append('bump','1');
+    // Only a real due-dated compliance advances a due date on upload — Asbestos
+    // Register and Other are just filed documents.
+    if(['fiveYear','emMonthly','emYearly','pat','pv'].includes(sel)) form.append('bump','1');
     form.append('filename',f.name);
     try{
       const r=await authFetch('/compliance/file',{method:'POST',body:form});
@@ -1595,33 +1595,56 @@ function openLocationModal(code){
   };
 }
 
-/* ============ 🔑 Access instructions + site contact ============ */
+/* ============ 🔑 Access instructions + site contact (view → edit) ============ */
 function openAccessModal(code){
   const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
-  const meta = Object.assign({}, rec.meta || {});
   const canEdit = canEditCompliance();
   const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
-  modal.innerHTML=`<div class="modal-content">
-    <h2>🔑 Access — ${esc(rec.siteName||code)}</h2>
-    <label>Access instructions</label>
-    <textarea id="ak_access" rows="4" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="e.g. By appointment — Mon-Fri 8am-5pm" ${canEdit?'':'disabled'}>${esc(meta.access||'')}</textarea>
-    <label style="margin-top:8px">Site contact</label>
-    <textarea id="ak_contact" rows="3" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="Name / phone / email (where relevant)" ${canEdit?'':'disabled'}>${esc(meta.contact||'')}</textarea>
-    <div class="actions">
-      ${canEdit?'<button class="btn" id="ak_save">Save</button>':''}
-      <button class="btn" style="background:#ccc;color:#000;" id="ak_close">Close</button>
-    </div></div>`;
+  modal.innerHTML=`<div class="modal-content"></div>`;
   document.body.appendChild(modal);
-  modal.querySelector('#ak_close').onclick=()=>modal.remove();
-  const saveBtn=modal.querySelector('#ak_save');
-  if(saveBtn) saveBtn.onclick=async()=>{
-    saveBtn.disabled=true; saveBtn.textContent='Saving…';
-    const body={ code, access:modal.querySelector('#ak_access').value, contact:modal.querySelector('#ak_contact').value };
-    try{ const r=await authFetch('/compliance/store-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      const j=await r.json(); if(r.ok&&j.ok){ if(rec) rec.meta=j.meta; modal.remove(); applyFilters(); }
-      else { saveBtn.disabled=false; saveBtn.textContent='Save'; alert('Could not save.'); }
-    }catch(e){ saveBtn.disabled=false; saveBtn.textContent='Save'; alert('Could not save.'); }
-  };
+  const host=modal.querySelector('.modal-content');
+  const nl = s => esc(s).replace(/\n/g,'<br>');
+
+  function view(){
+    const m = rec.meta || {};
+    const acc = (m.access||'').trim(), con = (m.contact||'').trim();
+    const block = (label,val,ph) => `<div style="margin:8px 0"><div style="font-weight:700;color:#334155">${label}</div>`
+      + (val ? `<div style="white-space:pre-wrap;margin-top:2px">${nl(val)}</div>` : `<div style="color:#94a3b8;margin-top:2px">${ph}</div>`) + `</div>`;
+    host.innerHTML = `
+      <h2>🔑 Access — ${esc(rec.siteName||code)}</h2>
+      ${block('Access instructions', acc, 'Not set yet')}
+      ${block('Site contact', con, 'Not set yet')}
+      <div class="actions">
+        ${canEdit?'<button class="btn" id="ak_edit">✏️ Edit</button>':''}
+        <button class="btn" style="background:#ccc;color:#000;" id="ak_close">Close</button>
+      </div>`;
+    host.querySelector('#ak_close').onclick=()=>modal.remove();
+    const eb=host.querySelector('#ak_edit'); if(eb) eb.onclick=edit;
+  }
+  function edit(){
+    const m = rec.meta || {};
+    host.innerHTML = `
+      <h2>🔑 Access — ${esc(rec.siteName||code)}</h2>
+      <label>Access instructions</label>
+      <textarea id="ak_access" rows="4" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="e.g. By appointment — Mon-Fri 8am-5pm">${esc(m.access||'')}</textarea>
+      <label style="margin-top:8px">Site contact</label>
+      <textarea id="ak_contact" rows="3" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="Name / phone / email (where relevant)">${esc(m.contact||'')}</textarea>
+      <div class="actions">
+        <button class="btn" id="ak_save">Save</button>
+        <button class="btn" style="background:#ccc;color:#000;" id="ak_cancel">Cancel</button>
+      </div>`;
+    host.querySelector('#ak_cancel').onclick=view;
+    const sb=host.querySelector('#ak_save');
+    sb.onclick=async()=>{
+      sb.disabled=true; sb.textContent='Saving…';
+      const body={ code, access:host.querySelector('#ak_access').value, contact:host.querySelector('#ak_contact').value };
+      try{ const r=await authFetch('/compliance/store-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const j=await r.json(); if(r.ok&&j.ok){ rec.meta=j.meta; applyFilters(); view(); }
+        else { sb.disabled=false; sb.textContent='Save'; alert('Could not save.'); }
+      }catch(e){ sb.disabled=false; sb.textContent='Save'; alert('Could not save.'); }
+    };
+  }
+  view();
 }
 
 /* ============ Wiring UI ============ */
