@@ -152,9 +152,19 @@
     var rawFlat = pages.map(function (p) { return p.join("\n"); }).join("\n");
     if (rawFlat.replace(/\s/g, "").length < 40) return { empty: true, textLen: 0 };
 
-    var LEG = /PASS C1 or C2 C3 FI N\/V Limitation LIM/;
-    var CODEKEY = /^\s*C1 C2 C3 FI\s*$/;
-    var flat = rawFlat.split("\n").filter(function (l) { return !LEG.test(l) && !CODEKEY.test(l); }).join("\n");
+    // Strip the outcome/observation-code LEGEND & KEY rows before counting, so they
+    // never masquerade as real observations. A legend line carries 2+ hazard codes
+    // together (e.g. "C1 C2 C3 FI"), or the PASS-key phrase, or a code definition —
+    // a GENUINE observation only ever carries a single code. Done per-line (not an
+    // exact match) so it survives however a given EICR program lays the key out.
+    function isLegendLine(l) {
+      var hz = (l.match(/(?:^|\s)(C1|C2|C3|FI)(?=\s|[).,:]|$)/g) || []).length;
+      if (hz >= 2) return true;
+      if (/PASS\s+C1\s+or\s+C2|Limitation\s+LIM|N\/V\b[\s\S]*Limitation/i.test(l)) return true;
+      if (/\b(C1|C2|C3|FI)\b\s*[-–:]?\s*(danger present|potentially dangerous|improvement recommended|further investigation)/i.test(l)) return true;
+      return false;
+    }
+    var flat = rawFlat.split("\n").filter(function (l) { return !isLegendLine(l); }).join("\n");
 
     var ref = (rawFlat.match(/(?:Certificate Number|Ref)[:\s]+(\S+)/i) || [])[1] || "";
     var outcome = readOutcome(rawFlat);
@@ -166,8 +176,18 @@
       C3: (flat.match(/(?:^|\s)C3(?=\s|$)/g) || []).length,
       FI: (flat.match(/(?:^|\s)FI(?=\s|$)/g) || []).length
     };
-    var outRe = /(?:^|\s)(Pass|LIM|N\/A|N\/V|C1|C2|C3|FI)(?=\s|$)/g, om, totOut = 0, limOut = 0;
-    while ((om = outRe.exec(flat))) { totOut++; if (om[1] === "LIM") limOut++; }
+    // LIM % over the INSPECTION SCHEDULE only — a line that starts with a numbered
+    // item (5.12, 6.15.1 …) and carries an outcome. This is the natural reading of
+    // "x% of the certificate is a limitation" and avoids the false inflation from the
+    // DB-details / test-results rows (e.g. "N/A 400 V 230 V LIM") where LIM/N/A are
+    // data, not inspection limitations.
+    var totOut = 0, limOut = 0;
+    flat.split("\n").forEach(function (l) {
+      if (!/^\s*\d+\.\d+(\.\d+)?\s/.test(l)) return;
+      var m = l.match(/(?:^|\s)(Pass|LIM|N\/A|N\/V|C1|C2|C3|FI)(?=\s|$)/g);
+      if (!m || !m.length) return;
+      totOut++; if (m.some(function (t) { return /LIM/.test(t); })) limOut++;
+    });
     var limPct = totOut ? Math.round(limOut / totOut * 100) : 0;
 
     var circuits = parseCircuits(pages);
