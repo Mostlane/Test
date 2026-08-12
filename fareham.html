@@ -31,6 +31,7 @@
     /* Portal-style header bar (matches the rest of the portal). */
     header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
     header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; text-align:left; }
+    header.page .hdrlogo { height:44px; width:auto; max-width:64px; object-fit:contain; background:#fff; border-radius:6px; padding:2px 4px; flex:none; }
     .flabel { font-size:12px; font-weight:700; color:#5b6b7c; text-transform:uppercase; letter-spacing:.05em; align-self:center; margin-right:2px; }
     body::before {
       content: "";
@@ -213,7 +214,8 @@
 
   <header class="page">
     <a class="ml-back" data-role="home" href="compliance.html" title="Back to Compliance" style="text-decoration:none;">‹ Back</a>
-    <h1>🏛️ Fareham Borough Council Compliance</h1>
+    <img class="hdrlogo" src="fareham-crest.jpg" alt="Fareham Borough Council">
+    <h1>Fareham Borough Council Compliance</h1>
   </header>
 
   <div class="container">
