@@ -12696,6 +12696,10 @@ async function ensure5(env) {
     await env.DB.prepare("ALTER TABLE compliance_review ADD COLUMN scheme TEXT NOT NULL DEFAULT 'coop'").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE compliance_review ADD COLUMN ver INTEGER DEFAULT 0").run();
+  } catch {
+  }
   READY4 = true;
 }
 function schemeOf(q) {
@@ -13294,7 +13298,7 @@ async function handle24(request, env, ctx, url, sess) {
     const sl = await env.DB.prepare("SELECT code, MAX(uploaded_at) AS latest FROM compliance_files WHERE tenant_id=? AND scheme=? GROUP BY code").bind(tid, scheme).all();
     for (const r of sl.results || []) siteLatest[r.code] = r.latest;
     const rev = {};
-    const rv = await env.DB.prepare("SELECT code, type, status, outcome, attention, checked_at FROM compliance_review WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
+    const rv = await env.DB.prepare("SELECT code, type, status, outcome, attention, checked_at, ver FROM compliance_review WHERE tenant_id=? AND scheme=?").bind(tid, scheme).all();
     for (const r of rv.results || []) rev[r.code + "|" + r.type] = r;
     const targets = [];
     for (const type of CHECK_TYPES) {
@@ -13321,7 +13325,7 @@ async function handle24(request, env, ctx, url, sess) {
           url: await signedFileUrl(env, url.origin, "/compliance/file", r.r2_key),
           docAt: latestDoc,
           needs,
-          review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at } : null
+          review: rr ? { status: rr.status, outcome: rr.outcome, attention: rr.attention, checked_at: rr.checked_at, ver: rr.ver || 0 } : null
         });
       }
     }
@@ -13335,13 +13339,14 @@ async function handle24(request, env, ctx, url, sess) {
     const flags = Array.isArray(b.flags) ? b.flags.slice(0, 60).map((x) => String(x).slice(0, 400)) : [];
     const attention = b.attention != null ? b.attention ? 1 : 0 : flags.length ? 1 : 0;
     const at = (/* @__PURE__ */ new Date()).toISOString();
+    const ver = parseInt(b.ver, 10) || 0;
     await env.DB.prepare(
-      `INSERT INTO compliance_review (tenant_id, scheme, code, type, status, outcome, attention, summary, flags, file_id, doc_at, checked_at, updated_by, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `INSERT INTO compliance_review (tenant_id, scheme, code, type, status, outcome, attention, summary, flags, file_id, doc_at, checked_at, ver, updated_by, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(tenant_id, scheme, code, type) DO UPDATE SET
          status='open', outcome=excluded.outcome, attention=excluded.attention, summary=excluded.summary,
          flags=excluded.flags, file_id=excluded.file_id, doc_at=excluded.doc_at, checked_at=excluded.checked_at,
-         updated_by=excluded.updated_by, updated_at=excluded.updated_at`
+         ver=excluded.ver, updated_by=excluded.updated_by, updated_at=excluded.updated_at`
     ).bind(
       tid,
       scheme,
@@ -13355,6 +13360,7 @@ async function handle24(request, env, ctx, url, sess) {
       b.fileId ? parseInt(b.fileId, 10) : null,
       String(b.docAt || at),
       at,
+      ver,
       me,
       at
     ).run();

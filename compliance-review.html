@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
-  <script src="eicr-engine.js?v=5"></script>
+  <script src="eicr-engine.js?v=6"></script>
   <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb;
          --pass:#166534; --passbg:#dcfce7; --fail:#b91c1c; --failbg:#fee2e2; --warn:#92400e; --warnbg:#fef3c7; }
@@ -123,7 +123,11 @@
       try { var r = await authFetch("/compliance/review/targets"); var j = await r.json(); targets = j.targets || []; }
       catch (e) { st.innerHTML = "<span style='color:var(--fail)'>Couldn't load the list. " + esc(e.message || "") + "</span>"; running = false; btn.disabled = false; return; }
       var force = $("forceAll").checked;
-      var todo = force ? targets : targets.filter(function (t) { return t.needs; });
+      var ENGINE_VER = (window.MLEICR && MLEICR.VERSION) || 0;
+      // Re-check a site when: forced, a new document since last run (t.needs), never
+      // checked, OR its stored result came from an OLDER engine — so verifier fixes
+      // reach the saved findings automatically, without "re-check every site".
+      var todo = force ? targets : targets.filter(function (t) { return t.needs || !t.review || (t.review.ver || 0) < ENGINE_VER; });
       var skipped = targets.length - todo.length;
       if (!todo.length) { st.innerHTML = "Nothing to check — " + (targets.length ? "all " + targets.length + " site(s) are up to date (no new documents since last run)." : "no 5-year certificates are stored yet."); await loadList(); running = false; btn.disabled = false; return; }
       prog.style.display = "block";
@@ -141,11 +145,11 @@
           if (summ.attention) attention++;
           var flags = summ.flags.concat((summ.recommendations || []).map(function (x) { return "💡 " + x; }));
           await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: t.code, type: t.type, outcome: result.outcome || summ.outcome || "", summary: summ.headline, flags: flags, attention: summ.attention ? 1 : 0, fileId: t.fileId, docAt: t.docAt }) });
+            body: JSON.stringify({ code: t.code, type: t.type, outcome: result.outcome || summ.outcome || "", summary: summ.headline, flags: flags, attention: summ.attention ? 1 : 0, fileId: t.fileId, docAt: t.docAt, ver: ENGINE_VER }) });
         } catch (e) {
           errors++;
           try { await authFetch("/compliance/review/save", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't read this certificate", flags: ["Couldn't download or read the PDF (" + (e.message || "error") + ") — open it and verify manually. It may be a scanned image."], fileId: t.fileId, docAt: t.docAt }) }); } catch (e2) {}
+            body: JSON.stringify({ code: t.code, type: t.type, outcome: "error", summary: "Couldn't read this certificate", flags: ["Couldn't download or read the PDF (" + (e.message || "error") + ") — open it and verify manually. It may be a scanned image."], fileId: t.fileId, docAt: t.docAt, ver: ENGINE_VER }) }); } catch (e2) {}
         }
         tick(t.name);
       }

@@ -306,6 +306,10 @@
   }
 
   window.MLEICR = {
+    // Bump VERSION whenever the analysis changes — the compliance worklist stores it
+    // with each result and auto-re-checks any cert scored by an older engine, so fixes
+    // reach the saved findings without a manual "re-check every site".
+    VERSION: 6,
     loadPdfjs: loadPdfjs, readPdf: readPdf, analyze: analyze, summarize: summarize,
     DETECTORS: DETECTORS
   };
