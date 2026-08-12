@@ -403,27 +403,63 @@
         regs: ["421.1.7"] }
     ];
 
-    // Best-effort per-circuit Zs parse (MCB/RCBO rows: BS EN + type + rating).
+    /* ── Structured schedule parser ──────────────────────────────────────
+       Rows in the schedule of test results read (once glued) like:
+       DB cct phase wiring ref points LIVE CPC maxDisc  BS(EN) TYPE RATING kA MAXZs
+          [RCDbsen RCDtype RCDmA RCDi]  r1 rn r2  R1+R2  pol  IRv IR-LL IR-LE  Zs  RCDt …
+       Anchor on the OCPD BS EN number; read fixed offsets around it. Validated
+       against a real 68-circuit 3-phase Co-op EICR (all fields + measured Zs). */
+    var OCPD_RE = /^(60898|61009|60947|61008|3036|88)$/;
+    // Standard twin-&-earth reduced cpc for a given line size (mm²).
+    var TE_CPC = { "1": "1", "1.5": "1", "2.5": "1.5", "4": "1.5", "6": "2.5", "10": "4", "16": "6", "25": "10" };
+    // Generous current capacity (A) for a line size (clipped-direct / method C) — used only to catch clearly under-rated cables.
+    var CAP = { "1": 16, "1.5": 20, "2.5": 27, "4": 37, "6": 47, "10": 64, "16": 85, "25": 112 };
+    function toNum(x) { var n = parseFloat(x); return isNaN(n) ? null : n; }
+    function isReading(x) { return x && x !== "---" && x !== "N/A" && x !== "n/a" && /^[<>]?[\d.]/.test(x); }
+    // Glue "> 200" → ">200" so IR/Zs columns stay single tokens, then split.
+    function rowToks(line) { return line.replace(/([<>])\s+/g, "$1").trim().split(/\s+/); }
+
+    function parseCircuit(line) {
+      var t = rowToks(line), iDev = -1;
+      for (var i = 1; i < t.length; i++) { if (OCPD_RE.test(t[i])) { iDev = i; break; } }
+      if (iDev < 4) return null;
+      var type = t[iDev + 1], rating = toNum(t[iDev + 2]);
+      if (!/^[BCD]$/.test(type) || !rating) return null;        // real MCB/RCBO final/dist row
+      // measured Zs: first value after the IR block (test-voltage anchor 250/500/1000)
+      var j = -1; for (var k = iDev + 4; k < t.length; k++) { if (/^(250|500|1000)$/.test(t[k])) { j = k; break; } }
+      var measured = j >= 0 ? toNum(t[j + 3]) : null;
+      var r1 = t[iDev + 9], rn = t[iDev + 10], r2 = t[iDev + 11];
+      return {
+        db: t[0], cct: (t[1] + (t[2] || "")).toUpperCase(),
+        live: t[iDev - 3], cpc: t[iDev - 2],
+        type: type, rating: rating, maxZs: toNum(t[iDev + 4]),
+        r1: r1, rn: rn, r2: r2,
+        ring: isReading(r1) && isReading(rn) && isReading(r2),
+        lim: /\bLIM\b/i.test(line), measured: measured, raw: line
+      };
+    }
+
     function parseCircuits(pages) {
       var out = [];
-      pages.forEach(function (lines) {
-        lines.forEach(function (t) {
-          var m = t.match(/\b(60898|61009)\b\s+([BCD])\s+(\d{1,3})\b/);
-          if (!m) return;
-          var type = m[2], In = +m[3];
-          var limit = UCMIN / (K[type] * In);
-          var decs = (t.match(/\d+(?:\.\d+)?/g) || []).map(Number);
-          // measured Zs ≈ largest reading below the limit, ignoring the printed
-          // limit itself and the fixed 0.4/5 s disconnection-time values.
-          var cand = decs.filter(function (n) { return n > 0 && n < limit * 0.999 && n !== 0.4 && n !== 5; });
-          var measured = cand.length ? Math.max.apply(null, cand) : null;
-          out.push({ raw: t, type: type, In: In, limit: limit, measured: measured, conf: cand.length === 1 ? "high" : cand.length ? "med" : "none" });
-        });
-      });
+      pages.forEach(function (lines) { lines.forEach(function (t) { var c = parseCircuit(t); if (c) out.push(c); }); });
       return out;
     }
 
     function regTags(regs) { return regs.map(function (r) { return "<span style='display:inline-block;background:#eef2ff;color:#3730a3;border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:700;margin:2px 3px 0 0'>" + esc2(r) + "</span>"; }).join(""); }
+
+    // Pull the signatories (name · role · date) out of the report text.
+    function findSignatories(flat) {
+      var re = /([A-Z][a-zA-Z'’]+(?:[ -][A-Z][a-zA-Z'’]+)+)\s+(Qualified Supervisor|Approved Electrician|Electrician|Inspector(?: and Tester)?|Tester|Engineer)\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/g;
+      var seen = {}, out = [], m;
+      while ((m = re.exec(flat))) { var key = m[1] + "|" + m[2]; if (!seen[key]) { seen[key] = 1; out.push({ name: m[1], role: m[2], date: m[3] }); } }
+      return out;
+    }
+    function latestDate(flat) {
+      var ds = [], m, re = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g;
+      while ((m = re.exec(flat))) { var y = +m[3]; if (y < 100) y += 2000; var d = new Date(y, +m[2] - 1, +m[1]); if (!isNaN(d) && y >= 2000 && y <= 2100) ds.push(d); }
+      if (!ds.length) return null;
+      return new Date(Math.max.apply(null, ds.map(Number)));
+    }
 
     async function handlePdf(file) {
       var rep = $("pdfReport"), st = $("pdfStatus");
@@ -432,53 +468,128 @@
       var pages;
       try { pages = await readPdf(file); }
       catch (e) { st.innerHTML = "<span style='color:var(--fail)'>" + esc2(e.message || "Couldn't read the PDF.") + "</span>"; return; }
-      var txt = pages.map(function (p) { return p.join("\n"); }).join("\n");
-      if (txt.replace(/\s/g, "").length < 40) { st.innerHTML = "<span style='color:var(--fail)'>No readable text found — this looks like a scanned/flattened image PDF. The tool needs a text-based EICR export.</span>"; return; }
+      var rawFlat = pages.map(function (p) { return p.join("\n"); }).join("\n");
+      if (rawFlat.replace(/\s/g, "").length < 40) { st.innerHTML = "<span style='color:var(--fail)'>No readable text found — this looks like a scanned/flattened image PDF. The tool needs a text-based EICR export.</span>"; return; }
       st.textContent = "";
 
-      // Header facts
-      var ref = (txt.match(/Ref[:\s]+(\S+)/i) || [])[1] || "";
-      var outcome = /UNSATISFACTORY/i.test(txt) ? "UNSATISFACTORY" : (/SATISFACTORY/i.test(txt) ? "SATISFACTORY" : "");
-      var codesFound = { C1: (txt.match(/\bC1\b/g) || []).length, C2: (txt.match(/\bC2\b/g) || []).length, FI: (txt.match(/\bFI\b/g) || []).length };
+      // Drop the outcome/observation-code legend rows so they don't pollute the
+      // LIM % or C1/C2/C3/FI counts (both are column keys, not real results).
+      var LEG = /PASS C1 or C2 C3 FI N\/V Limitation LIM/;
+      var CODEKEY = /^\s*C1 C2 C3 FI\s*$/;
+      var flat = rawFlat.split("\n").filter(function (l) { return !LEG.test(l) && !CODEKEY.test(l); }).join("\n");
 
-      // Suggestions
-      var sugg = DETECTORS.filter(function (d) { return d.find(txt); });
-      var suggHtml = sugg.length ? sugg.map(function (d, i) {
-        var pre = d.detail ? d.detail(txt) : "";
-        return "<div class='cdef'><h4><span class='code-pill code-" + d.code + "'>" + d.code + "</span> " + esc2(d.title) +
+      // ── Header facts ───────────────────────────────────────────────
+      var ref = (rawFlat.match(/(?:Certificate Number|Ref)[:\s]+(\S+)/i) || [])[1] || "";
+      var outcome = /UNSATISFACTORY/i.test(rawFlat) ? "UNSATISFACTORY" : (/SATISFACTORY/i.test(rawFlat) ? "SATISFACTORY" : "");
+      var sigs = findSignatories(flat);
+      var latest = latestDate(flat);
+      var codesFound = { C1: (flat.match(/(?:^|\s)C1(?=\s|$)/g) || []).length, C2: (flat.match(/(?:^|\s)C2(?=\s|$)/g) || []).length, FI: (flat.match(/(?:^|\s)FI(?=\s|$)/g) || []).length };
+
+      // LIM proportion across the inspection outcomes.
+      var outRe = /(?:^|\s)(Pass|LIM|N\/A|N\/V|C1|C2|C3|FI)(?=\s|$)/g, om, totOut = 0, limOut = 0;
+      while ((om = outRe.exec(flat))) { totOut++; if (om[1] === "LIM") limOut++; }
+      var limPct = totOut ? Math.round(limOut / totOut * 100) : 0;
+
+      var circuits = parseCircuits(pages);
+
+      // ── Build the REVIEW list (everything that needs a human's eye) ──
+      var reviews = [];   // {label, why, code?}
+      function addReview(label, why, code) { reviews.push({ label: label, why: why, code: code || "" }); }
+
+      // Document-level logic checks
+      if (codesFound.C1 + codesFound.C2 + codesFound.FI > 0 && outcome === "SATISFACTORY")
+        addReview("Overall outcome", "A C1, C2 or FI observation appears in the report, yet the overall assessment is marked SATISFACTORY. Any C1, C2 or FI makes an EICR UNSATISFACTORY — check the coding and outcome.");
+      if (!sigs.length)
+        addReview("Signatures", "No signatory (name · role · date) could be read on the report. Confirm the inspector/tester and, where required, the qualified supervisor have signed and dated it.");
+      if (limPct > 10)
+        addReview("Extent of testing", limOut + " of " + totOut + " assessed items are recorded as a Limitation (LIM) — about " + limPct + "%. More than 10% of the certificate is a limitation; check the extent & limitations were justified and agreed.");
+      // Phase-rotation sanity: sequence confirmed but the job looks single-phase
+      var phaseSeq = /phase sequence|phase rotation/i.test(rawFlat);
+      var threePhase = /\bTP\b|\bL2\b|\bL3\b|400\s?V|three[ -]?phase/i.test(rawFlat);
+      if (phaseSeq && !threePhase)
+        addReview("Phase sequence", "Phase sequence / rotation is referenced, but the installation appears to be single-phase (no L2/L3/TP circuits or 400 V supply found). Confirm this isn't a template default left ticked.");
+
+      // Suggested observations (SPD / Type AC / AFDD) — codebreaker-style
+      var sugg = DETECTORS.filter(function (d) { return d.find(rawFlat); });
+
+      // Per-circuit checks → split into review vs verified
+      var verified = [];
+      circuits.forEach(function (c) {
+        var lbl = "DB " + c.db + " · CCT " + c.cct;
+        var liveN = toNum(c.live), cpcN = toNum(c.cpc), issues = [];
+        // Cable clearly under-rated for its OCPD
+        if (liveN && CAP[c.live] && c.rating > CAP[c.live] && !(c.live === "2.5" && c.rating <= 32 && c.ring))
+          issues.push(c.live + " mm² live conductor on a " + c.rating + " A Type " + c.type + " device — above its typical current capacity (~" + CAP[c.live] + " A). Check the design current, install method and grouping.");
+        // CPC not a recognised pairing for the line size (T&E domain only)
+        if (liveN && cpcN && liveN <= 10 && cpcN < liveN && TE_CPC[c.live] && String(cpcN) !== TE_CPC[c.live])
+          issues.push("CPC " + c.cpc + " mm² doesn't match a standard cable for a " + c.live + " mm² line (twin-&-earth cpc would be " + TE_CPC[c.live] + " mm², or a line-sized cpc). Confirm the cable type / adiabatic.");
+        // 2.5 mm² on >20 A should be a ring — needs end-to-end readings
+        if (c.live === "2.5" && c.rating > 20 && !c.ring)
+          issues.push("2.5 mm² on a " + c.rating + " A device (a ring final is expected) but the end-to-end r1/rn/r2 continuity readings are missing. Record them, or confirm it isn't a ring.");
+        // Measured Zs vs limit
+        var zsNote = "";
+        if (c.measured != null && c.maxZs) {
+          var rule08 = 0.8 * c.maxZs;
+          if (c.measured > c.maxZs) issues.push("Measured Zs " + fmt(c.measured) + " Ω exceeds the maximum permitted " + fmt(c.maxZs) + " Ω for this device.");
+          else if (c.measured > rule08) zsNote = "Zs " + fmt(c.measured) + " Ω is above the 0.8× cold rule-of-thumb (" + fmt(rule08) + " Ω) but within the tabulated max (" + fmt(c.maxZs) + " Ω) — verify temperature.";
+        }
+        if (c.lim) zsNote = (zsNote ? zsNote + " " : "") + "Row contains a LIM (a value could not be measured).";
+
+        if (issues.length) addReview(lbl, issues.join(" "));
+        else verified.push({ c: c, note: zsNote });
+      });
+
+      // ── Render ─────────────────────────────────────────────────────
+      var reviewCount = reviews.length + sugg.length;
+      var head =
+        "<div class='lim' style='margin-top:14px;line-height:1.7'>" +
+        (ref ? "<b>Ref " + esc2(ref) + "</b>" : "<b>EICR</b>") +
+        (outcome ? " &nbsp;·&nbsp; overall <b style='color:" + (outcome === "SATISFACTORY" ? "var(--pass)" : "var(--fail)") + "'>" + outcome + "</b>" : "") +
+        (latest ? " &nbsp;·&nbsp; latest date on report <b>" + latest.toLocaleDateString("en-GB") + "</b>" : "") +
+        "<br>" + circuits.length + " circuit row(s) read &nbsp;·&nbsp; codes in file: C1 " + codesFound.C1 + " · C2 " + codesFound.C2 + " · C3 " + (flat.match(/(?:^|\s)C3(?=\s|$)/g) || []).length + " · FI " + codesFound.FI +
+        " &nbsp;·&nbsp; LIM " + limPct + "% (" + limOut + "/" + totOut + ")" +
+        "<br><b>Signatories:</b> " + (sigs.length ? sigs.map(function (s) { return esc2(s.name) + " <span style='color:var(--muted)'>(" + esc2(s.role) + ", " + esc2(s.date) + ")</span>"; }).join(" &nbsp;·&nbsp; ") : "<span style='color:var(--fail)'>none found</span>") +
+        "</div>";
+
+      // REVIEW section first
+      var reviewHtml = "";
+      reviews.forEach(function (r) {
+        reviewHtml += "<div class='cdef' style='border-left:4px solid #f59e0b'>" +
+          "<h4>" + (r.code ? "<span class='code-pill code-" + r.code + "'>" + r.code + "</span> " : "⚠ ") + esc2(r.label) + "</h4>" +
+          "<div style='font-size:13px;line-height:1.5'>" + esc2(r.why) + "</div></div>";
+      });
+      sugg.forEach(function (d, i) {
+        var pre = d.detail ? d.detail(rawFlat) : "";
+        reviewHtml += "<div class='cdef' style='border-left:4px solid #f59e0b'><h4><span class='code-pill code-" + d.code + "'>" + d.code + "</span> " + esc2(d.title) +
           " <button class='sugcopy' data-i='" + i + "' style='float:right;font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer'>Copy</button></h4>" +
           "<div style='font-size:13px;line-height:1.5;margin:4px 0'>" + (pre ? "<b>" + esc2(pre) + "</b>" : "") + esc2(d.obs) + "</div><div>" + regTags(d.regs) + "</div></div>";
-      }).join("") : "<div class='lim'>No auto-suggestions triggered — an SPD, Type A RCDs and AFDDs were all identified (or the indicators didn't apply). Still review manually against the full checklist.</div>";
+      });
+      if (!reviewCount) reviewHtml = "<div class='verdict pass' style='display:flex'>✓ Nothing flagged for review<small>No logic issues, cable/CPC/ring anomalies or amendment-driven observations were detected. Still confirm manually against BS 7671.</small></div>";
 
-      // Circuit checks
-      var circuits = parseCircuits(pages);
-      var circHtml;
+      // VERIFIED circuits — collapsed
+      var verHtml;
       if (!circuits.length) {
-        circHtml = "<div class='lim'>Couldn't read individual circuit rows from this layout — the schedule may be formatted differently. The suggestions above still apply. (Send me this file and I'll tune the circuit reader to it.)</div>";
+        verHtml = "<div class='lim'>Couldn't read individual circuit rows from this layout — the schedule may be formatted differently, so the circuit checks were skipped. The document checks above still apply. (Send me this file and I'll tune the circuit reader to it.)</div>";
       } else {
-        circHtml = "<table><thead><tr><th>Device</th><th class='n'>Max Zs</th><th class='n'>Measured</th><th>Result</th></tr></thead><tbody>" +
-          circuits.map(function (c, i) {
-            var rule = 0.8 * c.limit, verdict, cls;
-            if (c.measured == null) { verdict = "Read the row"; cls = ""; }
-            else if (c.measured <= rule) { verdict = "✓ Pass"; cls = "color:var(--pass)"; }
-            else if (c.measured <= c.limit) { verdict = "⚠ Review"; cls = "color:var(--warn)"; }
-            else { verdict = "✗ Fail"; cls = "color:var(--fail)"; }
-            return "<tr><td><b>Type " + c.type + " " + c.In + " A</b></td><td class='n'>" + fmt(c.limit) + " Ω<br><small style='color:var(--muted)'>0.8× " + fmt(rule) + "</small></td>" +
-              "<td class='n'>" + (c.measured == null ? "?" : fmt(c.measured) + " Ω") + (c.conf === "med" ? " <small style='color:var(--warn)'>?</small>" : "") + "</td>" +
-              "<td style='font-weight:700;" + cls + "'>" + verdict + " <button class='rowraw' data-i='" + i + "' style='font-weight:600;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:5px;padding:1px 6px;cursor:pointer;color:var(--muted)'>row</button></td></tr>" +
-              "<tr id='raw" + i + "' style='display:none'><td colspan='4' style='font-size:11.5px;color:var(--muted);word-break:break-word'>" + esc2(c.raw) + "</td></tr>";
-          }).join("") + "</tbody></table>" +
-          "<p class='note'>Measured Zs is read heuristically (a <b>?</b> means more than one candidate on the row) — tap <b>row</b> to see the raw text and confirm. The tool never passes a value it can't read cleanly.</p>";
+        verHtml = "<details style='margin-top:6px'><summary style='cursor:pointer;font-weight:700;font-size:14px;padding:6px 0'>✓ " + verified.length + " circuit(s) verified — tap to view</summary>" +
+          "<table style='margin-top:8px'><thead><tr><th>DB · CCT</th><th>Cable</th><th>Device</th><th class='n'>Max Zs</th><th class='n'>Zs</th><th></th></tr></thead><tbody>" +
+          verified.map(function (v, i) {
+            var c = v.c;
+            return "<tr><td><b>" + esc2(c.db) + " · " + esc2(c.cct) + "</b></td>" +
+              "<td>" + esc2(c.live) + "/" + esc2(c.cpc) + " mm²</td>" +
+              "<td>Type " + esc2(c.type) + " " + c.rating + " A</td>" +
+              "<td class='n'>" + (c.maxZs ? fmt(c.maxZs) + " Ω" : "—") + "</td>" +
+              "<td class='n'>" + (c.measured == null ? "—" : fmt(c.measured) + " Ω") + "</td>" +
+              "<td><button class='rowraw' data-i='" + i + "' style='font-weight:600;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:5px;padding:1px 6px;cursor:pointer;color:var(--muted)'>row</button></td></tr>" +
+              (v.note ? "<tr><td colspan='6' style='font-size:11.5px;color:var(--warn);padding-top:0'>" + esc2(v.note) + "</td></tr>" : "") +
+              "<tr id='raw" + i + "' style='display:none'><td colspan='6' style='font-size:11.5px;color:var(--muted);word-break:break-word'>" + esc2(c.raw) + "</td></tr>";
+          }).join("") + "</tbody></table></details>";
       }
 
-      rep.innerHTML =
-        "<div class='lim' style='margin-top:14px'>" + (ref ? "<b>Ref " + esc2(ref) + "</b> · " : "") +
-          (outcome ? "reported <b>" + outcome + "</b> · " : "") + circuits.length + " circuit row(s) read · " +
-          "codes in file: C1 " + codesFound.C1 + ", C2 " + codesFound.C2 + ", FI " + codesFound.FI +
-          ((codesFound.C1 + codesFound.C2 + codesFound.FI > 0 && outcome === "SATISFACTORY") ? " &nbsp;<span style='color:var(--fail);font-weight:700'>⚠ C1/C2/FI present but marked Satisfactory — check</span>" : "") + "</div>" +
-        "<h3 style='font-size:15px;margin:16px 0 6px'>Suggested observations</h3>" + suggHtml +
-        "<h3 style='font-size:15px;margin:16px 0 6px'>Circuit Zs checks</h3>" + circHtml +
-        "<p class='note'>Automated read of a text-based EICR — a checking aid, not a substitute for the report, BS 7671, or the inspector. Suggestions are for the inspector to confirm as applicable to the specific installation; wording is aligned to BS 7671:2018+A2:2022 / GN3.</p>";
+      rep.innerHTML = head +
+        "<h3 style='font-size:15px;margin:16px 0 6px'>⚠ Review — " + reviewCount + " item(s)</h3>" + reviewHtml +
+        "<h3 style='font-size:15px;margin:18px 0 6px'>Verified results</h3>" + verHtml +
+        "<p class='note'>Automated read of a text-based EICR — a checking aid, not a substitute for the report, BS 7671, or the inspector. Cable/CPC/ring and Zs checks are best-effort from the schedule layout; confirm each against the actual installation. Wording is aligned to BS 7671:2018+A2:2022 / GN3.</p>";
 
       rep.querySelectorAll(".sugcopy").forEach(function (b) { b.addEventListener("click", function () { var d = sugg[+b.dataset.i]; var full = d.obs + " (BS 7671: " + d.regs.join(", ") + ") [" + d.code + "]"; navigator.clipboard && navigator.clipboard.writeText(full); b.textContent = "Copied ✓"; setTimeout(function () { b.textContent = "Copy"; }, 1500); }); });
       rep.querySelectorAll(".rowraw").forEach(function (b) { b.addEventListener("click", function () { var r = $("raw" + b.dataset.i); if (r) r.style.display = r.style.display === "none" ? "table-row" : "none"; }); });

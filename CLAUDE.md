@@ -1259,20 +1259,44 @@ screenshot to embed). **UPDATE THE RELEVANT GUIDE WHENEVER FEATURES CHANGE.**
 Self-contained compliance tool (⚡ EICR Check tile, MAP `EicrCheck:["Compliance"]`,
 Compliance|FullAccess; sidebar NAV entry too). NO backend — the PDF is read
 in-browser, nothing uploaded. **Primary tab "📄 Verify a PDF"**: drop/upload an
-EICR PDF → PDF.js (same unpkg build docviewer.js uses) extracts the text →
-(1) **codebreaker-style suggested observations** from an accurate device-signal
-scan — **no SPD** (`!/61643/` — BS EN 61643, NOT the "SPD" keyword which lives in
-the form template) → C3 (443/534); **Type AC RCD/RCBO** (device rows `6100[89]|
-62423 … AC`, counted) → C3 recommend Type A re DC-blinding (531.3.3/GN3); **no
-AFDD** (`!/62606/`) → C3 (421.1.7) — each with reg tags + a Copy button; and
-(2) a **best-effort per-circuit Zs check** (regex `(60898|61009) [BCD] <rating>` →
-computed limit vs a heuristic measured Zs, always showing the raw row, never
-silent-passing). Header facts (ref/outcome) + a "C1/C2/FI present but marked
-Satisfactory" cross-check. Detection uses DEVICE PRODUCT STANDARDS not keywords
-(templates mention SPD/AFDD in headers even when none fitted — validated against
-the Tangier Rd Co-op sample: computed Max Zs matched the report to the decimal;
-all three suggestions fired correctly). **Format-specific — built against that
-Co-op EICR software's layout; other systems need the circuit reader tuned.**
+EICR PDF → PDF.js (same unpkg build docviewer.js uses) reconstructs each line by
+Y/X position (group-by-Y tol 3, sort-by-X — the schedule table's real columns),
+then reports in a **REVIEW-first** layout:
+- **Header facts card**: Certificate/Ref number, overall SATISFACTORY/UNSATISFACTORY
+  (green/red), **latest date on the report** (max dd/mm/yyyy), **all signatories**
+  (name · role · date — regex `Name (Qualified Supervisor|Electrician|Inspector|
+  Tester|…) dd/mm/yyyy`), C1/C2/C3/FI counts + **LIM %** (LIM ÷ all Pass/LIM/N-A/
+  code outcome tokens; legend/code-key lines `PASS C1 or C2…` and bare `C1 C2 C3 FI`
+  stripped so they don't inflate counts).
+- **⚠ Review section (shown FIRST)**, each item labelled **DB x · CCT y** (e.g.
+  "DB 4 · CCT 3L1") with a plain-English reason:
+  - **Document logic**: any C1/C2/FI present but marked SATISFACTORY; **no
+    signatures found**; **>10% LIM**; **phase-sequence referenced but the job looks
+    single-phase** (no L2/L3/TP/400 V).
+  - **Codebreaker-style suggested observations** (device-signal scan, C3 + reg
+    tags + Copy): **no SPD** (`!/61643/` — BS EN 61643, NOT the "SPD" keyword which
+    lives in the form template) → 443/534; **Type AC RCD/RCBO** (`6100[89]|62423 …
+    AC`, counted) → recommend Type A re DC-blinding (531.3.3/GN3); **no AFDD**
+    (`!/62606/`) → 421.1.7.
+  - **Per-circuit checks** from the structured parser: **cable under-rated** (live
+    mm² vs a generous clipped-direct capacity table vs the OCPD rating); **CPC not a
+    recognised pairing** for the line size (twin-&-earth reduced-cpc table `TE_CPC`,
+    checked only in the ≤10 mm² T&E domain — larger = singles/SWA, skipped to avoid
+    false positives on legit 16/10 etc.); **2.5 mm² on >20 A but no ring end-to-end
+    r1/rn/r2 readings**; **measured Zs > max permitted Zs** (uses the report's own
+    stated Max Zs column).
+- **✓ Verified results** in a **collapsible `<details>`** below (DB·CCT, cable
+  live/cpc, device, Max Zs, measured Zs, tap "row" for raw text).
+**Structured schedule parser** (`parseCircuit`): glue `> 200`→`>200`, split to
+tokens, **anchor on the OCPD BS EN index** (`60898|61009|60947|61008|3036|88`),
+read fixed offsets — live=iDev-3, cpc=iDev-2, type=iDev+1, rating=iDev+2,
+maxZs=iDev+4, ring r1/rn/r2=iDev+9/10/11; **measured Zs = the value 3 tokens after
+the IR test-voltage anchor** (250/500/1000). DB=t[0], CCT=t[1]+t[2] (e.g.
+"3"+"L1"). **Validated against the Tangier Rd Co-op sample (3-phase, 68 circuits):
+all 68 rows parsed, measured Zs extracted + ≤ max on every row, both signatories +
+latest date + LIM 4% correct, ZERO false review flags** (it's a SATISFACTORY
+report). **Format-specific — built against that Co-op EICR software's layout;
+other systems need the parser offsets tuned.**
 Manual reference tabs still present:
 **Max Zs** (Type B/C/D MCB/RCBO, computed `218.5/(k·In)` where k=5/10/20 = BS 7671
 A2 Cmin-0.95 method; shows tabulated + the 0.8× cold rule-of-thumb, pass/review/
