@@ -400,7 +400,15 @@
       { code: "C3", find: function (t) { return !/62606/.test(t); },
         title: "No arc fault detection (AFDD)",
         obs: "No arc fault detection devices (to BS EN 62606) were identified. For premises with a higher risk of fire, or with sleeping accommodation, consideration should be given to providing AFDDs on final circuits.",
-        regs: ["421.1.7"] }
+        regs: ["421.1.7"] },
+      { code: "C3", find: function (t) { return /\b3036\b/.test(t); },
+        title: "BS 3036 semi-enclosed (rewireable) fuses",
+        obs: "One or more circuits are protected by BS 3036 semi-enclosed (rewireable) fuses. These have a high fusing factor, offer no additional (RCD) protection and are easily re-fused with the wrong wire. Replacement with BS EN 60898 circuit-breakers or BS EN 61009 RCBOs should be considered to improve fault protection and disconnection times.",
+        regs: ["533.1.1", "GN3"] },
+      { code: "C3", find: function (t) { return /\b3871\b/.test(t); },
+        title: "BS 3871 miniature circuit-breakers (obsolete)",
+        obs: "Miniature circuit-breakers to BS 3871 were identified. This standard has been withdrawn and the devices are obsolete; correct operation and the availability of spares cannot be assured. Replacement with BS EN 60898 circuit-breakers should be considered.",
+        regs: ["533.1.1", "GN3"] }
     ];
 
     /* ── Structured schedule parser ──────────────────────────────────────
@@ -429,11 +437,13 @@
       var j = -1; for (var k = iDev + 4; k < t.length; k++) { if (/^(250|500|1000)$/.test(t[k])) { j = k; break; } }
       var measured = j >= 0 ? toNum(t[j + 3]) : null;
       var r1 = t[iDev + 9], rn = t[iDev + 10], r2 = t[iDev + 11];
+      var rcdType = t[iDev + 6] || "";                    // RCD type column (AC/A/F/B, or ---)
       return {
         db: t[0], cct: (t[1] + (t[2] || "")).toUpperCase(),
         live: t[iDev - 3], cpc: t[iDev - 2],
         type: type, rating: rating, maxZs: toNum(t[iDev + 4]),
         r1: r1, rn: rn, r2: r2,
+        rcd: /^(AC|A|F|B)$/i.test(rcdType), rcdType: rcdType,
         ring: isReading(r1) && isReading(rn) && isReading(r2),
         lim: /\bLIM\b/i.test(line), measured: measured, raw: line
       };
@@ -509,8 +519,20 @@
       if (phaseSeq && !threePhase)
         addReview("Phase sequence", "Phase sequence / rotation is referenced, but the installation appears to be single-phase (no L2/L3/TP circuits or 400 V supply found). Confirm this isn't a template default left ticked.");
 
-      // Suggested observations (SPD / Type AC / AFDD) — codebreaker-style
+      // Suggested observations (device-signal, codebreaker-style)
       var sugg = DETECTORS.filter(function (d) { return d.find(rawFlat); });
+      // Parser-derived: final circuits (≤32 A) with no RCD additional protection.
+      var noRcd = circuits.filter(function (c) { return !c.rcd && c.rating && c.rating <= 32; });
+      if (noRcd.length) {
+        var eg = noRcd.slice(0, 6).map(function (c) { return c.db + "·" + c.cct; }).join(", ") + (noRcd.length > 6 ? " …" : "");
+        sugg.push({
+          code: "C3",
+          title: noRcd.length + " circuit(s) with no RCD additional protection",
+          detail: function () { return "e.g. " + eg + ". "; },
+          obs: "Circuits rated 32 A or below were identified with no RCD. Amendment 2 requires 30 mA RCD additional protection for socket-outlets rated up to 32 A intended for use by ordinary persons, and for cables concealed in walls or partitions at a depth of less than 50 mm without earthed mechanical protection. Review which of these circuits now require additional protection.",
+          regs: ["411.3.3", "411.3.4", "522.6.202"]
+        });
+      }
 
       // Per-circuit checks → split into review vs verified
       var verified = [];
