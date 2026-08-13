@@ -76,7 +76,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (path === "/api/subcontractors" && method === "GET") return jr(await getSubcontractors(db));
     if (path === "/api/trades" && method === "GET") return jr(await getTrades(db));
     if (path === "/api/sites" && method === "GET") return jr(await getSites(db));
-    if (path === "/api/engineers" && method === "GET") return jr(await getEngineers(db));
+    if (path === "/api/engineers" && method === "GET") return jr(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr(await getVehicles(env));
     if (path === "/api/closures" && method === "GET") return jr(await getClosures(db));
@@ -142,6 +142,21 @@ export async function handle(request, env, ctx, url, sess) {
     console.error("PO route error:", e && e.message);
     return error("PO error: " + (e && e.message || "unknown"), 500, env, request);
   }
+}
+
+// The "assign to engineer" dropdown is sourced LIVE from portal staff (field
+// users), so it stays current with no dependency on the old worker's sync or the
+// PO engineers table. slug = slugify(username) — matches what an engineer's own
+// raise stamps (userSlug), so assignments line up.
+async function getPortalEngineers(env, tenantId) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR LOWER(status)='active') ORDER BY first_name, last_name"
+    ).bind(tenantId).all();
+    return (results || []).filter(u => {
+      try { const p = JSON.parse(u.profile || "{}"); return (p.staffType || "field") === "field"; } catch { return true; }
+    }).map(u => ({ slug: slugify(u.username), name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username, active: 1 }));
+  } catch (e) { console.error("PO getPortalEngineers failed:", e && e.message); return []; }
 }
 
 // ── Ported data-layer functions (from the standalone worker; db = env.PO_DB) ──
