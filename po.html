@@ -2,52 +2,812 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=3"></script>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Purchase Orders — Mostlane Portal</title>
   <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Purchase Orders — Mostlane Portal</title>
   <style>
-    html, body { margin:0; height:100%; background:#eef1f4; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; }
-    #poFrame { border:0; width:100%; height:100vh; display:none; }
-    #poMsg { padding:48px 22px; text-align:center; color:#5b6b78; font-size:15px; }
-    #poMsg h2 { color:#003366; font-size:18px; margin:0 0 8px; }
-    #poMsg a { color:#0066cc; }
-  </style>
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #e6e8eb;
+  color: #1a1a1a;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; top: 0; z-index: 10;
+}
+.topbar .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 15px; }
+.topbar .brand img { height: 32px; width: auto; background: #fff; padding: 4px 8px; border-radius: 6px; }
+.topbar .backbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  border-radius: 10px; background: rgba(255,255,255,0.15);
+  color: #fff; text-decoration: none;
+  transition: background 0.15s, transform 0.15s;
+}
+.topbar .backbtn:hover { background: rgba(255,255,255,0.28); transform: translateX(-1px); }
+.topbar .backbtn:active { transform: translateX(0); }
+.topbar .backbtn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.topbar nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.topbar nav a {
+  color: #fff; text-decoration: none; font-size: 13px; font-weight: 500;
+  padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.1);
+  transition: background 0.15s;
+}
+.topbar nav a:hover, .topbar nav a.active { background: rgba(255,255,255,0.25); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px 14px 60px; }
+.wrap-narrow { max-width: 560px; margin: 0 auto; padding: 16px 14px 60px; }
+h1 { font-size: 22px; font-weight: 600; color: #003366; margin: 0 0 16px; }
+h2 { font-size: 17px; font-weight: 600; color: #003366; margin: 0 0 12px; }
+h3 { font-size: 14px; font-weight: 600; color: #003366; margin: 0 0 10px; }
+p { margin: 0 0 12px; }
+.muted { color: #5a6677; font-size: 13px; }
+.card {
+  background: #ffffff; border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  box-shadow: 0 2px 10px rgba(0, 30, 80, 0.06); border: 1px solid #e3e7ee;
+}
+label { display: block; font-size: 13px; font-weight: 600; color: #003366; margin-bottom: 6px; }
+input, select, textarea {
+  width: 100%; padding: 12px 14px; border: 1px solid #c9d2dd; border-radius: 10px;
+  font-size: 16px; font-family: inherit; background: #fff; color: #1a1a1a;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: #1A4F8F; box-shadow: 0 0 0 3px rgba(26, 79, 143, 0.12);
+}
+textarea { min-height: 90px; resize: vertical; }
+.field { margin-bottom: 14px; }
+button, .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff; border: none; border-radius: 12px;
+  font-weight: 600; font-size: 15px; font-family: inherit;
+  cursor: pointer; text-decoration: none;
+  box-shadow: 0 3px 8px rgba(0,30,80,0.20), inset 0 1px 2px rgba(255,255,255,0.15);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(0,30,80,0.28), inset 0 1px 2px rgba(255,255,255,0.20); }
+button:active, .btn:active { transform: translateY(0); }
+button.ghost, .btn.ghost {
+  background: #fff; color: #003366; border: 1px solid #c9d2dd;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+button.ghost:hover { background: #f5f7fb; transform: translateY(-1px); }
+button.danger { background: linear-gradient(180deg, #c0392b 0%, #962d22 100%); }
+button.big { padding: 18px 24px; font-size: 16px; width: 100%; }
+button.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: #5a6677; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 2px solid #003366; }
+td { padding: 12px 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+tr:hover td { background: #f8fafd; }
+.badge { display: inline-block; padding: 3px 9px; font-size: 12px; font-weight: 600; border-radius: 20px; }
+.badge.review { background: #fff4d6; color: #8a6100; }
+.badge.ok { background: #d6f5dd; color: #1e6c33; }
+.badge.engineer { background: #d6e4f5; color: #1A4F8F; }
+.badge.office { background: #ececf0; color: #555; }
+.badge.danger-badge { background: #fdeeec; color: #962d22; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (min-width: 700px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+.stat { background: #fff; border: 1px solid #e3e7ee; padding: 14px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,30,80,0.04); }
+.stat .v { font-size: 26px; font-weight: 700; color: #003366; line-height: 1.1; }
+.stat .l { font-size: 12px; color: #5a6677; margin-top: 4px; font-weight: 500; }
+.attention-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 700px) { .attention-grid { grid-template-columns: repeat(6, 1fr); } }
+.att { background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; padding: 12px 14px; cursor: pointer; text-align: left; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; }
+.att:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,30,80,0.12); border-color: #c9d2dd; }
+.att .v { font-size: 24px; font-weight: 700; line-height: 1; }
+.att .l { font-size: 11px; color: #5a6677; margin-top: 5px; font-weight: 600; }
+.att.zero { opacity: 0.5; }
+.att.zero:hover { opacity: 0.8; }
+.alert { padding: 14px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #003366; background: #f0f5fc; font-size: 14px; color: #1a1a1a; }
+.alert.warn { border-color: #c0392b; background: #fdeeec; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.po-display { font-size: 64px; font-weight: 700; color: #003366; letter-spacing: -0.02em; line-height: 1; text-align: center; }
+.filter-bar { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 14px; }
+@media (min-width: 700px) { .filter-bar { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+.filter-bar input, .filter-bar select { font-size: 14px; padding: 9px 12px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; background: #fff; padding: 6px; border-radius: 12px; border: 1px solid #e3e7ee; overflow-x: auto; }
+.tab { padding: 9px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: #5a6677; border-radius: 8px; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.tab.active { background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%); color: #fff; }
+.tab:hover:not(.active) { background: #f0f5fc; color: #003366; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 500px) { .grid-2 { grid-template-columns: 1fr; } }
+.table-scroll { overflow-x: auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f0f5fc; border: 1px solid #d6e4f5; border-radius: 20px; font-size: 13px; color: #003366; }
+.chip button { padding: 0; width: 18px; height: 18px; line-height: 1; background: transparent; box-shadow: none; color: #5a6677; font-size: 14px; border-radius: 50%; }
+.chip button:hover { background: #d6e4f5; transform: none; box-shadow: none; }
+.modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0, 20, 40, 0.5); z-index: 100; justify-content: center; align-items: center; padding: 16px; }
+.modal-backdrop.show { display: flex; }
+.modal { background: #fff; border-radius: 14px; padding: 20px; max-width: 500px; width: 100%; max-height: 92vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,30,80,0.25); }
+.bar-chart { display: flex; flex-direction: column; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: 140px 1fr 50px; gap: 10px; align-items: center; font-size: 13px; }
+@media (max-width: 500px) { .bar-row { grid-template-columns: 100px 1fr 40px; font-size: 12px; } }
+.bar-row .name { color: #003366; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .bar { background: #e3e7ee; height: 22px; border-radius: 6px; position: relative; overflow: hidden; }
+.bar-row .bar .fill { height: 100%; background: linear-gradient(90deg, #1A4F8F, #003468); border-radius: 6px; transition: width 0.4s ease; }
+.bar-row .count { font-weight: 600; color: #003366; text-align: right; }
+.fade-in { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.empty { text-align: center; padding: 40px 20px; color: #5a6677; font-size: 14px; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; background: #f0f5fc; padding: 2px 6px; border-radius: 4px; color: #003366; }
+.ac-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: #fff; border: 1px solid #c9d2dd; border-top: none;
+  border-radius: 0 0 10px 10px; max-height: 280px; overflow-y: auto;
+  box-shadow: 0 4px 14px rgba(0,30,80,0.12);
+}
+.ac-item { padding: 10px 14px; cursor: pointer; font-size: 15px; color: #1a1a1a; border-bottom: 1px solid #f0f5fc; }
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: #f0f5fc; color: #003366; }
+.ac-item strong { color: #1A4F8F; font-weight: 700; background: #fff4d6; }
+.ac-empty { padding: 14px; color: #5a6677; font-size: 13px; font-style: italic; }
+.my-po { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eef1f5; align-items: center; }
+.my-po:last-child { border-bottom: none; }
+.my-po-num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 700; color: #003366; font-size: 15px; min-width: 60px; }
+.my-po-detail { flex: 1; font-size: 14px; }
+
+  .po-nav a{color:#fff;text-decoration:none;font-size:13px;font-weight:500;padding:6px 10px;border-radius:6px;background:rgba(255,255,255,0.12)}
+  .po-nav a:hover{background:rgba(255,255,255,0.25)}
+  #poGate{max-width:560px;margin:40px auto;padding:0 16px}</style>
 </head>
 <body>
-  <div id="poMsg">Opening Purchase Orders…</div>
-  <iframe id="poFrame" title="Purchase Orders"></iframe>
+  <header class="page" style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px">
+    <a class="ml-back" href="main.html" title="Back" style="color:#fff">‹ Back</a>
+    <h1 style="font-size:17px;margin:0;flex:1;color:#fff">🧾 Purchase Orders</h1>
+    <nav class="po-nav" style="display:flex;gap:6px;flex-wrap:wrap"><a href="po-jobs.html">Job Costs</a><a href="po-summary.html">Summary</a><a href="po-accounts.html">Accounts</a><a href="po-stats.html">Stats</a><a href="po-admin.html">Admin</a></nav>
+  </header>
+  <div id="poGate" class="muted">Checking access…</div>
+  <div id="poApp" style="display:none">
+  <div class="wrap">
+    <div class="row-between">
+      <h1 style="margin:0">PO Log</h1>
+      <div class="row">
+        <button class="ghost small" onclick="exportCSV()">⬇ Export CSV</button>
+        <button class="ghost small" onclick="openReport()">🖨 PDF Report</button>
+        <button class="small" onclick="openNewPO()">+ New PO</button>
+      </div>
+    </div>
+    <div class="card" id="attention-card" style="display:none;padding:16px">
+      <h2 style="margin-bottom:10px">Needs attention</h2>
+      <div class="attention-grid" id="attention"></div>
+    </div>
+    <div class="stat-grid" id="stats"></div>
 
-  <script>
-    (function () {
-      var API = window.MOSTLANE_API;
-      var token = localStorage.getItem("mostlaneToken");
-      if (!token) { location.href = "login.html"; return; }
-      var msg = document.getElementById("poMsg");
-      var frame = document.getElementById("poFrame");
-      var isMobile = window.matchMedia("(max-width:999px)").matches;
+    <div class="tab-bar" id="status-tabs">
+      <div class="tab active" data-status="">All</div>
+      <div class="tab" data-status="open">Open</div>
+      <div class="tab" data-status="priced">Priced</div>
+      <div class="tab" data-status="flagged">🚩 Flagged</div>
+      <div class="tab" data-status="credit_due">💷 Credit Due</div>
+      <div class="tab" data-status="complete">✓ Complete</div>
+    </div>
 
-      fetch(API + "/po-config", { headers: { "Authorization": "Bearer " + token } })
-        .then(function (r) { return r.json(); })
-        .then(function (c) {
-          if (!c || !c.ok || !c.url) {
-            msg.innerHTML = "<h2>No PO link on your account</h2>Ask the office to add your personal PO URL in Users admin.";
-            return;
-          }
-          if (isMobile) {
-            // Mobile: the sidebar is hidden anyway — go straight to PO (its own top bar handles navigation).
-            location.replace(c.url);
-            return;
-          }
-          // Desktop: embed PO to the right of the portal sidebar. embed=1 tells PO to hide its own bar.
-          frame.src = c.url + (c.url.indexOf("?") > -1 ? "&" : "?") + "embed=1";
-          frame.style.display = "block";
-          msg.style.display = "none";
-        })
-        .catch(function () {
-          msg.innerHTML = "<h2>Couldn't open Purchase Orders</h2>Check your connection and try again.";
-        });
-    })();
-  </script>
-</body>
-</html>
+    <div class="card">
+      <div class="field" style="margin-bottom:10px">
+        <input id="search-input" type="text" placeholder="🔍 Search PO #, engineer, site, incident no, supplier, description..." oninput="loadPOs()">
+      </div>
+      <div class="filter-bar">
+        <select id="filter-engineer"><option value="">All engineers</option></select>
+        <select id="filter-office-user"><option value="">All office users</option></select>
+        <select id="filter-supplier"><option value="">All suppliers</option></select>
+        <select id="filter-category"><option value="">Materials + Subcontractor</option><option value="materials">📦 Materials only</option><option value="subcontractor">👷 Subcontractor only</option></select>
+        <input id="filter-from" type="date">
+        <input id="filter-to" type="date">
+      </div>
+      <div class="row" style="margin-bottom:0">
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#1a1a1a;font-weight:500;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="filter-review" style="width:auto;margin:0" onchange="loadPOs()"> Needs office review
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#1a1a1a;font-weight:500;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="filter-uncosted" style="width:auto;margin:0" onchange="loadPOs()"> Uncosted only
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#1a1a1a;font-weight:500;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="filter-unmatched-site" style="width:auto;margin:0" onchange="loadPOs()"> Site not in list
+        </label>
+        <button class="ghost small" onclick="clearFilters()">Clear filters</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>PO #</th><th>Issued</th><th>Issued By</th><th>Engineer</th><th>Site / Incident</th><th>Supplier</th><th>Cost</th><th>Status</th><th></th></tr></thead>
+          <tbody id="po-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="modal"><div class="modal">
+    <div class="row-between"><h2 id="modal-title" style="margin:0"></h2><button class="ghost small" onclick="closeModal()">✕</button></div>
+    <div id="modal-body" style="margin-top:12px"></div>
+  </div></div>
+  </div>
+<script>
+const API = window.MOSTLANE_API;
+function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
+// Client-side CSV of the currently-shown POs (no server round-trip, no un-authed tab).
+function downloadCSV(pos){ var H=["PO","Issued","Source","Category","Trade","Issued By","Engineer","Site","Incident","Vehicle","Supplier","Description","Status","Cost ex VAT","VAT %","Cost inc VAT"];
+  function q(v){return "\""+String(v==null?"":v).replace(/\"/g,"\"\"")+"\"";}
+  var lines=[H.join(",")];
+  pos.forEach(function(p){ var r=p.vat_rate!=null?p.vat_rate:20; var inc=p.cost_ex_vat!=null?(p.cost_ex_vat*(1+r/100)).toFixed(2):"";
+    lines.push([p.po_number,fmtDateTime(p.issued_at),p.source,p.cost_category||"materials",p.trade||"",p.office_user_name||"",p.engineer_name||"",p.site||"",p.incident_no||"",p.vehicle_reg||"",p.supplier||"",p.description||"",p.status||"open",p.cost_ex_vat!=null?p.cost_ex_vat:"",p.cost_ex_vat!=null?r:"",inc].map(q).join(",")); });
+  var blob=new Blob([lines.join("\n")],{type:"text/csv"}); var a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="mostlane-po-"+new Date().toISOString().slice(0,10)+".csv"; a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);},2000); }
+// Client-side print-friendly report of the currently-shown POs.
+function printReport(pos){ var money=function(n){return "\u00a3"+Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");};
+  var totalEx=0,totalInc=0,un=0; pos.forEach(function(p){ if(p.cost_ex_vat!=null){var r=p.vat_rate!=null?p.vat_rate:20; totalEx+=p.cost_ex_vat; totalInc+=p.cost_ex_vat*(1+r/100);} else un++; });
+  var rows=pos.map(function(p){var r=p.vat_rate!=null?p.vat_rate:20; return "<tr><td>"+p.po_number+"</td><td>"+fmtDate(p.issued_at)+"</td><td>"+escapeHtml(p.engineer_name||p.office_user_name||"")+"</td><td>"+escapeHtml(p.site||p.incident_no||"")+"</td><td>"+escapeHtml(p.supplier||"")+"</td><td>"+escapeHtml(p.description||"")+"</td><td style=text-align:right>"+(p.cost_ex_vat!=null?money(p.cost_ex_vat):"\u2014")+"</td><td>"+escapeHtml(p.status||"open")+"</td></tr>";}).join("");
+  var w=window.open("","_blank"); if(!w){alert("Allow pop-ups to print the report");return;}
+  w.document.write("<!doctype html><meta charset=utf-8><title>PO Report</title><style>body{font-family:Segoe UI,sans-serif;margin:24px;color:#1a1a1a}h1{color:#003366}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid #e3e7ee;padding:5px 6px;text-align:left}th{border-bottom:2px solid #003366;font-size:10px;text-transform:uppercase;color:#5a6677}</style>"+
+    "<h1>Purchase Order Report</h1><p>"+pos.length+" PO(s) \u00b7 Net "+money(totalEx)+" \u00b7 Gross "+money(totalInc)+(un?" \u00b7 "+un+" awaiting cost":"")+" \u00b7 "+new Date().toLocaleString("en-GB")+"</p>"+
+    "<table><thead><tr><th>PO</th><th>Date</th><th>Raised By</th><th>Site/Incident</th><th>Supplier</th><th>Description</th><th>Net</th><th>Status</th></tr></thead><tbody>"+rows+"</tbody></table>");
+  w.document.close(); setTimeout(function(){w.print();},300); }
+// Gate: must hold PurchaseOrders or FullAccess. Then reveal the app + boot the office view.
+async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{}; if(!(u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="This page needs the Purchase Orders permission."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
+let allPOs = [], allEngineers = [], allSuppliers = [], allSites = [], allSubcontractors = [], allTrades = [];
+let currentStatus = '';
+async function init() {
+  const [engineers, suppliers, sites, officeUsers, subs, trades] = await Promise.all([
+    authFetch('/po/api/engineers').then(r => r.json()),
+    authFetch('/po/api/suppliers').then(r => r.json()),
+    authFetch('/po/api/sites').then(r => r.json()),
+    authFetch('/po/api/office-users').then(r => r.json()),
+    authFetch('/po/api/subcontractors').then(r => r.json()).catch(() => []),
+    authFetch('/po/api/trades').then(r => r.json()).catch(() => [])
+  ]);
+  allEngineers = engineers; allSuppliers = suppliers; allSites = sites; allSubcontractors = subs; allTrades = trades;
+  document.getElementById('filter-engineer').innerHTML = '<option value="">All engineers</option>' + engineers.filter(e => e.active).map(e => '<option value="' + e.slug + '">' + escapeHtml(e.name) + '</option>').join('');
+  document.getElementById('filter-supplier').innerHTML = '<option value="">All suppliers</option>' + suppliers.map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHtml(s.name) + '</option>').join('');
+  document.getElementById('filter-office-user').innerHTML = '<option value="">All office users</option>' + officeUsers.filter(u => u.active).map(u => '<option value="' + u.slug + '">' + escapeHtml(u.name) + '</option>').join('');
+  ['filter-engineer','filter-supplier','filter-category','filter-from','filter-to','filter-office-user'].forEach(id => { document.getElementById(id).onchange = loadPOs; });
+  document.querySelectorAll('#status-tabs .tab').forEach(t => {
+    t.addEventListener('click', () => { setStatusTab(t.dataset.status || ''); loadPOs(); });
+  });
+  loadPOs();
+  loadDashboard();
+  openNewPOFromJob();
+}
+// Arriving from the portal's "Raise PO for this job" (#mlpo=<base64 JSON>)
+// is a raise-a-PO intent, not a "show me the log" one — so open the New PO
+// modal pre-filled with the job instead of leaving the user on the dashboard.
+// Anything malformed is ignored and the page behaves exactly as normal.
+function decodeJobPayload() {
+  const m = location.hash.match(/mlpo=([^&]+)/);
+  if (!m) return null;
+  try {
+    let raw = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (raw.length % 4) raw += '=';
+    const bin = atob(raw);
+    let json;
+    try {
+      json = new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+    } catch (e) {
+      json = decodeURIComponent(escape(bin));
+    }
+    return JSON.parse(json);
+  } catch (e) { return null; }
+}
+async function openNewPOFromJob() {
+  const d = decodeJobPayload();
+  if (!d) return;
+  await openNewPO();
+  const siteField = document.getElementById('m-site');
+  const incField = document.getElementById('m-incident');
+  let filled = false;
+  if (d.site && siteField && !siteField.value) { siteField.value = d.site; filled = true; }
+  if (d.jobRef && incField && !incField.value) { incField.value = d.jobRef; filled = true; }
+  // Carry the job link through so the portal can cost this PO against the job
+  const jobIdField = document.getElementById('m-job-id');
+  const jobRefField = document.getElementById('m-job-ref');
+  if (d.jobId && jobIdField) { jobIdField.value = d.jobId; filled = true; }
+  if (d.jobRef && jobRefField) { jobRefField.value = d.jobRef; }
+  if (!filled) return;
+  const body = document.getElementById('modal-body');
+  if (!body) return;
+  const note = document.createElement('div');
+  note.style.cssText = 'margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#d6f5dd;color:#1e6c33;font-size:13px;font-weight:600';
+  note.textContent = '✓ Pre-filled from job ' + (d.jobRef || d.site || '');
+  body.insertBefore(note, body.firstChild);
+}
+function setStatusTab(status) {
+  document.querySelectorAll('#status-tabs .tab').forEach(x => x.classList.toggle('active', (x.dataset.status || '') === status));
+  currentStatus = status;
+}
+async function loadDashboard() {
+  let d;
+  try { d = await authFetch('/po/api/dashboard').then(r => r.json()); } catch (e) { return; }
+  const cards = [
+    ['uncosted', 'Uncosted', d.uncosted, '#003366'],
+    ['review', 'Awaiting review', d.needs_review, '#b58a00'],
+    ['flagged', 'Flagged', d.flagged, '#c0392b'],
+    ['credit_due', 'Credit due', d.credit_due, '#b58a00'],
+    ['unmatched_site', 'Site not in list', d.unmatched_site, '#b58a00'],
+    ['today', 'Raised today', d.today, '#003366']
+  ];
+  document.getElementById('attention-card').style.display = 'block';
+  document.getElementById('attention').innerHTML = cards.map(([kind, label, v, color]) =>
+    '<div class="att ' + (v ? '' : 'zero') + '" onclick="applyAttention(\'' + kind + '\')"><div class="v" style="color:' + (v ? color : '#003366') + '">' + v + '</div><div class="l">' + label + '</div></div>'
+  ).join('');
+}
+// Clicking an attention card resets filters and isolates that backlog.
+function applyAttention(kind) {
+  resetFilterInputs();
+  if (kind === 'uncosted') document.getElementById('filter-uncosted').checked = true;
+  else if (kind === 'review') document.getElementById('filter-review').checked = true;
+  else if (kind === 'unmatched_site') document.getElementById('filter-unmatched-site').checked = true;
+  else if (kind === 'flagged') setStatusTab('flagged');
+  else if (kind === 'credit_due') setStatusTab('credit_due');
+  else if (kind === 'today') {
+    const t = new Date().toISOString().split('T')[0];
+    document.getElementById('filter-from').value = t;
+    document.getElementById('filter-to').value = t;
+  }
+  loadPOs();
+  const tbl = document.querySelector('.table-scroll');
+  if (tbl) tbl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function formatMoney(n) { return '£' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+function renderStats() {
+  const today = new Date().toISOString().split('T')[0];
+  const todayPOs = allPOs.filter(p => p.issued_at && p.issued_at.startsWith(today)).length;
+  const flagged = allPOs.filter(p => p.status === 'flagged').length;
+  const creditDue = allPOs.filter(p => p.status === 'credit_due').length;
+  const uncosted = allPOs.filter(p => p.cost_ex_vat == null).length;
+  const siteNames = new Set(allSites.map(s => s.name));
+  const unmatchedSites = allPOs.filter(p => p.site && !siteNames.has(p.site)).length;
+  const totalSpend = allPOs.reduce((s, p) => s + (p.cost_ex_vat != null ? Number(p.cost_ex_vat) : 0), 0);
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="v">${allPOs.length}</div><div class="l">Showing</div></div>
+    <div class="stat"><div class="v">${uncosted}</div><div class="l">Uncosted</div></div>
+    <div class="stat"><div class="v" style="color:${unmatchedSites?'#b58a00':'#003366'}">${unmatchedSites}</div><div class="l">Site needs review</div></div>
+    <div class="stat"><div class="v" style="color:${flagged?'#c0392b':'#003366'}">${flagged}</div><div class="l">Flagged</div></div>
+    <div class="stat"><div class="v" style="color:${creditDue?'#b58a00':'#003366'}">${creditDue}</div><div class="l">Credit Due</div></div>
+    <div class="stat"><div class="v">${formatMoney(totalSpend)}</div><div class="l">Total ex VAT</div></div>`;
+}
+async function loadPOs() {
+  const params = new URLSearchParams();
+  const eng = document.getElementById('filter-engineer').value;
+  const officeUser = document.getElementById('filter-office-user').value;
+  const sup = document.getElementById('filter-supplier').value;
+  const category = document.getElementById('filter-category').value;
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+  const review = document.getElementById('filter-review').checked;
+  const uncosted = document.getElementById('filter-uncosted').checked;
+  const unmatchedSite = document.getElementById('filter-unmatched-site').checked;
+  const search = document.getElementById('search-input').value.trim();
+  if (eng) params.set('engineer', eng);
+  if (officeUser) params.set('office_user', officeUser);
+  if (sup) params.set('supplier', sup);
+  if (category) params.set('category', category);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (review) params.set('needs_review', '1');
+  if (uncosted) params.set('uncosted', '1');
+  if (unmatchedSite) params.set('unmatched_site', '1');
+  if (search) params.set('search', search);
+  if (currentStatus) params.set('status', currentStatus);
+  allPOs = await authFetch('/po/api/pos?' + params).then(r => r.json());
+  renderStats(); renderPOs(allPOs);
+}
+function resetFilterInputs() {
+  ['filter-engineer','filter-office-user','filter-supplier','filter-category','filter-from','filter-to','search-input'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('filter-review').checked = false;
+  document.getElementById('filter-uncosted').checked = false;
+  document.getElementById('filter-unmatched-site').checked = false;
+  setStatusTab('');
+}
+function clearFilters() { resetFilterInputs(); loadPOs(); }
+function statusBadge(p) {
+  const s = p.status || 'open';
+  const map = {
+    open: '<span class="badge office">Open</span>',
+    priced: '<span class="badge ok">Priced</span>',
+    flagged: '<span class="badge danger-badge">🚩 Flagged</span>',
+    credit_due: '<span class="badge review">💷 Credit Due</span>',
+    complete: '<span class="badge ok">✓ Complete</span>'
+  };
+  let html = map[s] || map.open;
+  if (p.needs_review) html += ' <span class="badge review" title="Engineer-raised, needs office review">Review</span>';
+  return html;
+}
+function renderPOs(pos) {
+  const tbody = document.getElementById('po-tbody');
+  if (!pos.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No POs match your filters.</div></td></tr>'; return; }
+  const siteNames = new Set(allSites.map(s => s.name));
+  tbody.innerHTML = pos.map(p => {
+    const dStr = fmtDateTime(p.issued_at);
+    const cost = p.cost_ex_vat != null ? formatMoney(p.cost_ex_vat) : '<span class="muted">—</span>';
+    const siteUnmatched = p.site && !siteNames.has(p.site);
+    let siteCell = (p.site ? escapeHtml(p.site) : (p.incident_no ? '<span class="muted">—</span>' : '—')) + (siteUnmatched ? ' <span title="Site not in master list" style="color:#b58a00">⚠️</span>' : '');
+    if (p.incident_no) siteCell += '<div style="font-size:12px;margin-top:2px"><span class="badge engineer" title="Incident number">🎫 ' + escapeHtml(p.incident_no) + '</span></div>';
+    if (p.vehicle_reg) siteCell += '<div style="font-size:12px;margin-top:2px"><span class="badge office" title="Tagged to vehicle">🚐 ' + escapeHtml(p.vehicle_reg) + '</span></div>';
+    const isSub = (p.cost_category || 'materials') === 'subcontractor';
+    let supplierCell = escapeHtml(p.supplier || '—');
+    if (isSub) supplierCell += '<div style="font-size:12px;margin-top:2px"><span class="badge review" title="Subcontractor PO">👷 ' + escapeHtml(p.trade || 'Subcontractor') + '</span></div>';
+    return `<tr>
+      <td><strong style="color:#003366">${p.po_number}</strong></td>
+      <td class="muted">${dStr}</td>
+      <td>${escapeHtml(p.office_user_name || (p.source === 'engineer' ? '(engineer)' : '—'))}</td>
+      <td>${escapeHtml(p.engineer_name || '—')}</td>
+      <td>${siteCell}</td>
+      <td>${supplierCell}</td>
+      <td>${cost}</td>
+      <td>${statusBadge(p)}</td>
+      <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ghost small" onclick='openEdit(${p.po_number})'>Edit</button><button class="danger small" title="Delete PO ${p.po_number}" onclick='hardDeletePO(${p.po_number}, false)'>🗑</button></div></td>
+    </tr>`;
+  }).join('');
+}
+async function openNewPO() {
+  if (!allEngineers || allEngineers.length === 0) {
+    try { allEngineers = await authFetch('/po/api/engineers').then(r => r.json()); } catch (e) { console.error('fetch engineers failed', e); }
+  }
+  if (!allSuppliers || allSuppliers.length === 0) {
+    try { allSuppliers = await authFetch('/po/api/suppliers').then(r => r.json()); } catch (e) { console.error('fetch suppliers failed', e); }
+  }
+  if (!allSites || allSites.length === 0) {
+    try { allSites = await authFetch('/po/api/sites').then(r => r.json()); } catch (e) { console.error('fetch sites failed', e); }
+  }
+  if (!allSubcontractors || allSubcontractors.length === 0) {
+    try { allSubcontractors = await authFetch('/po/api/subcontractors').then(r => r.json()); } catch (e) { console.error('fetch subcontractors failed', e); }
+  }
+  if (!allTrades || allTrades.length === 0) {
+    try { allTrades = await authFetch('/po/api/trades').then(r => r.json()); } catch (e) { console.error('fetch trades failed', e); }
+  }
+  const activeEngs = (allEngineers || []).filter(e => Number(e.active) === 1);
+  const engOptions = activeEngs.map(e => '<option value="' + e.slug + '">' + escapeHtml(e.name) + '</option>').join('');
+  const subOptions = (allSubcontractors || []).map(s => '<option value="' + escapeAttr(s.name) + '">' + escapeHtml(s.name) + '</option>').join('');
+  const tradeOptions = (allTrades || []).map(t => '<option value="' + escapeAttr(t.name) + '">' + escapeHtml(t.name) + '</option>').join('');
+  document.getElementById('modal-title').textContent = 'New PO';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="field"><label>PO type</label>
+      <div class="tab-bar" style="margin-bottom:0">
+        <div class="tab active" id="mtype-materials" onclick="setMType('materials')">📦 Materials</div>
+        <div class="tab" id="mtype-subcontractor" onclick="setMType('subcontractor')">👷 Subcontractor</div>
+      </div>
+    </div>
+    <div class="field" id="m-engineer-field"><label>Engineer (optional)</label><select id="m-engineer"><option value="">— None / Office —</option>${engOptions}</select></div>
+    <div class="field" style="position:relative"><label id="m-site-label">Site</label><input id="m-site" type="text" autocomplete="off" oninput="filterMSites()" onfocus="filterMSites()" onblur="setTimeout(hideMSites,200)"><div id="m-site-dropdown" class="ac-dropdown" style="display:none"></div></div>
+    <input id="m-job-id" type="hidden"><input id="m-job-ref" type="hidden">
+    <div id="m-materials-fields">
+      <div class="field"><label>Incident number <span style="font-weight:400;color:#5a6677">(optional)</span></label><input id="m-incident" type="text" placeholder="e.g. INC123456" autocomplete="off"></div>
+      <div class="field" style="position:relative"><label>Supplier</label><input id="m-supplier" type="text" autocomplete="off" oninput="filterMSuppliers()" onfocus="filterMSuppliers()" onblur="setTimeout(hideMSuppliers,200)"><div id="m-supplier-dropdown" class="ac-dropdown" style="display:none"></div></div>
+    </div>
+    <div id="m-sub-fields" style="display:none">
+      <div class="field"><label>Subcontractor</label><select id="m-subcontractor">${subOptions ? '<option value="">— Select —</option>' + subOptions : '<option value="">No subcontractors — add them in Admin</option>'}</select></div>
+      <div class="field"><label>Trade</label><select id="m-trade">${tradeOptions ? '<option value="">— Select —</option>' + tradeOptions : '<option value="">No trades — add them in Admin</option>'}</select></div>
+    </div>
+    <div class="field"><label>Description</label><textarea id="m-description"></textarea></div>
+    <button onclick="submitNewPO(this)">Issue PO</button>`;
+  window.mType = 'materials';
+  document.getElementById('modal').classList.add('show');
+}
+function setMType(t) {
+  window.mType = t;
+  const sub = t === 'subcontractor';
+  document.getElementById('mtype-materials').classList.toggle('active', !sub);
+  document.getElementById('mtype-subcontractor').classList.toggle('active', sub);
+  document.getElementById('m-materials-fields').style.display = sub ? 'none' : 'block';
+  document.getElementById('m-sub-fields').style.display = sub ? 'block' : 'none';
+  document.getElementById('m-engineer-field').style.display = sub ? 'none' : 'block';
+  document.getElementById('m-site-label').textContent = sub ? 'Site (job)' : 'Site';
+}
+function filterMSites() {
+  const input = document.getElementById('m-site');
+  const dd = document.getElementById('m-site-dropdown');
+  if (!input || !dd) return;
+  const q = input.value.trim().toLowerCase();
+  if (!q) { dd.style.display = 'none'; return; }
+  const matches = (allSites || []).filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No match — will be saved as free-text site</div>'; dd.style.display = 'block'; return; }
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickMSite(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.style.display = 'block';
+}
+function pickMSite(name) { document.getElementById('m-site').value = name; hideMSites(); }
+function hideMSites() { const dd = document.getElementById('m-site-dropdown'); if (dd) dd.style.display = 'none'; }
+function filterMSuppliers() {
+  const input = document.getElementById('m-supplier');
+  const dd = document.getElementById('m-supplier-dropdown');
+  if (!input || !dd) return;
+  const q = input.value.trim().toLowerCase();
+  if (!q) { dd.style.display = 'none'; return; }
+  const matches = (allSuppliers || []).filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickMSupplier(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.style.display = 'block';
+}
+function pickMSupplier(name) { document.getElementById('m-supplier').value = name; hideMSuppliers(); }
+function hideMSuppliers() { const dd = document.getElementById('m-supplier-dropdown'); if (dd) dd.style.display = 'none'; }
+function filterESuppliers() {
+  const input = document.getElementById('e-supplier');
+  const dd = document.getElementById('e-supplier-dropdown');
+  if (!input || !dd) return;
+  const q = input.value.trim().toLowerCase();
+  if (!q) { dd.style.display = 'none'; return; }
+  const matches = (allSuppliers || []).filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickESupplier(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.style.display = 'block';
+}
+function pickESupplier(name) { document.getElementById('e-supplier').value = name; hideESuppliers(); }
+function hideESuppliers() { const dd = document.getElementById('e-supplier-dropdown'); if (dd) dd.style.display = 'none'; }
+function highlightText(text, q) {
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return escapeHtml(text);
+  return escapeHtml(text.slice(0,i)) + '<strong>' + escapeHtml(text.slice(i,i+q.length)) + '</strong>' + escapeHtml(text.slice(i+q.length));
+}
+function escapeJsAttr(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+let submittingNewPO = false;
+async function submitNewPO(btn) {
+  if (submittingNewPO) return;
+  const isSub = window.mType === 'subcontractor';
+  const site = document.getElementById('m-site').value.trim();
+  const description = document.getElementById('m-description').value.trim();
+  let body;
+  if (isSub) {
+    const subcontractor = document.getElementById('m-subcontractor').value.trim();
+    const trade = document.getElementById('m-trade').value.trim();
+    if (!site) { alert('Site (job) is required for a subcontractor PO'); return; }
+    if (!subcontractor) { alert('Please pick a subcontractor'); return; }
+    if (!trade) { alert('Please pick a trade'); return; }
+    if (!description) { alert('Description is required'); return; }
+    body = { source: 'office', cost_category: 'subcontractor', site, supplier: subcontractor, trade, description,
+      job_id: (document.getElementById('m-job-id') || {}).value || null, job_ref: (document.getElementById('m-job-ref') || {}).value || null,
+      office_user_slug: null, office_user_name: null };
+  } else {
+    const incident = document.getElementById('m-incident').value.trim();
+    const supplier = document.getElementById('m-supplier').value.trim();
+    if (!site && !incident) { alert('Enter a site or an incident number'); return; }
+    if (!supplier) { alert('Supplier is required'); return; }
+    if (!description) { alert('Description is required'); return; }
+    if (!(allSuppliers || []).some(s => s.name === supplier)) { alert('Please pick a supplier from the dropdown list'); return; }
+    const engSlug = document.getElementById('m-engineer').value;
+    const eng = allEngineers.find(e => e.slug === engSlug);
+    body = { engineer_slug: engSlug || null, engineer_name: eng ? eng.name : null, source: 'office', cost_category: 'materials',
+      site, incident_no: incident, supplier, description,
+      job_id: (document.getElementById('m-job-id') || {}).value || null, job_ref: (document.getElementById('m-job-ref') || {}).value || null,
+      office_user_slug: null, office_user_name: null };
+  }
+  submittingNewPO = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Issuing...'; }
+  try {
+    const res = await authFetch('/po/api/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+    if (res.error) { alert(res.error); return; }
+    alert('PO ' + res.po_number + ' issued');
+    closeModal(); loadPOs(); loadDashboard();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    submittingNewPO = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Issue PO'; }
+  }
+}
+function openEdit(poNumber) {
+  const p = allPOs.find(x => x.po_number === poNumber);
+  const status = p.status || 'open';
+  const vatRate = p.vat_rate != null ? p.vat_rate : 20;
+  const costEx = p.cost_ex_vat != null ? p.cost_ex_vat : '';
+  const costInc = p.cost_ex_vat != null ? (p.cost_ex_vat * (1 + vatRate / 100)).toFixed(2) : '';
+  document.getElementById('modal-title').textContent = 'PO ' + poNumber;
+  const auditBits = [];
+  if (p.office_user_name) auditBits.push('Issued by <strong>' + escapeHtml(p.office_user_name) + '</strong>');
+  else if (p.source === 'engineer') auditBits.push('Issued by engineer (' + escapeHtml(p.engineer_name || '—') + ')');
+  if (p.last_edited_by_name && p.last_edited_at) {
+    auditBits.push('Last edited by <strong>' + escapeHtml(p.last_edited_by_name) + '</strong> on ' + fmtDateTime(p.last_edited_at));
+  }
+  const auditHtml = auditBits.length ? '<div class="muted" style="font-size:12px;margin-bottom:12px;line-height:1.5">' + auditBits.join('<br>') + '</div>' : '';
+  document.getElementById('modal-body').innerHTML = auditHtml + `
+    <h3 style="margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Details</h3>
+    <div class="field"><label>Engineer</label><select id="e-engineer"><option value="">— None —</option>${allEngineers.map(e => '<option value="' + e.slug + '"' + (e.slug === p.engineer_slug ? ' selected' : '') + '>' + escapeHtml(e.name) + '</option>').join('')}</select></div>
+    <div class="field" style="position:relative"><label>Site</label>
+      <input id="e-site" type="text" autocomplete="off" value="${escapeAttr(p.site || '')}" oninput="filterEditSites()" onfocus="filterEditSites()" onblur="setTimeout(hideEditSites,200)">
+      <div id="e-site-dropdown" class="ac-dropdown" style="display:none"></div>
+      <div id="e-site-status" style="margin-top:6px;font-size:12px"></div>
+    </div>
+    <div class="field"><label>Incident number</label><input id="e-incident" type="text" placeholder="e.g. INC123456" autocomplete="off" value="${escapeAttr(p.incident_no || '')}"></div>
+    <div class="field" style="position:relative"><label>${(p.cost_category === 'subcontractor') ? 'Subcontractor' : 'Supplier'}</label><input id="e-supplier" type="text" autocomplete="off" value="${escapeAttr(p.supplier || '')}" oninput="filterESuppliers()" onfocus="filterESuppliers()" onblur="setTimeout(hideESuppliers,200)"><div id="e-supplier-dropdown" class="ac-dropdown" style="display:none"></div></div>
+    ${(p.cost_category === 'subcontractor') ? '<div class="field"><label>Trade <span class="badge review" style="font-weight:600">👷 Subcontractor</span></label><select id="e-trade"><option value="">— Select —</option>' + (allTrades || []).map(t => '<option value="' + escapeAttr(t.name) + '"' + (t.name === p.trade ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('') + (p.trade && !(allTrades || []).some(t => t.name === p.trade) ? '<option value="' + escapeAttr(p.trade) + '" selected>' + escapeHtml(p.trade) + '</option>' : '') + '</select></div>' : ''}
+    <div class="field"><label>Description</label><textarea id="e-description">${escapeHtml(p.description || '')}</textarea></div>
+
+    <h3 style="margin-top:18px;margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Invoice / Cost</h3>
+    <div class="grid-2">
+      <div class="field"><label>Cost ex VAT (£)</label><input id="e-cost-ex" type="number" step="0.01" value="${costEx}" oninput="syncCost('ex')"></div>
+      <div class="field"><label>VAT rate (%)</label><input id="e-vat-rate" type="number" step="0.01" value="${vatRate}" oninput="syncCost('rate')"></div>
+    </div>
+    <div class="field"><label>Cost inc VAT (£)</label><input id="e-cost-inc" type="number" step="0.01" value="${costInc}" oninput="syncCost('inc')"></div>
+
+    <h3 style="margin-top:18px;margin-bottom:6px;font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:#5a6677">Status</h3>
+    <div class="field"><label>Status</label>
+      <select id="e-status">
+        <option value="open"${status==='open'?' selected':''}>Open (awaiting invoice)</option>
+        <option value="priced"${status==='priced'?' selected':''}>Priced (invoice entered)</option>
+        <option value="flagged"${status==='flagged'?' selected':''}>🚩 Flagged (suspicious / tools / query)</option>
+        <option value="credit_due"${status==='credit_due'?' selected':''}>💷 Credit Due</option>
+        <option value="complete"${status==='complete'?' selected':''}>✓ Complete</option>
+      </select>
+    </div>
+    <div class="field" id="flag-reason-field" style="display:${status==='flagged'?'block':'none'}">
+      <label>Flag reason</label>
+      <textarea id="e-flag-reason" placeholder="Why is this flagged?">${escapeHtml(p.flag_reason || '')}</textarea>
+    </div>
+    <div class="field" id="credit-note-field" style="display:${status==='credit_due'?'block':'none'}">
+      <label>Credit expected</label>
+      <textarea id="e-credit-note" placeholder="What credit is expected and from whom?">${escapeHtml(p.credit_note || '')}</textarea>
+    </div>
+
+    ${p.needs_review ? '<div class="alert" style="margin-top:14px">⚠️ Engineer-raised, needs office review of details above.</div>' : ''}
+
+    <div class="row-between" style="margin-top:18px;margin-bottom:0">
+      <button class="danger small" onclick='hardDeletePO(${poNumber}, true)'>Delete</button>
+      <div class="row">
+        ${p.needs_review ? '<button class="ghost small" onclick="markReviewed(' + poNumber + ')">Mark Reviewed</button>' : ''}
+        <button class="small" onclick='saveEdit(${poNumber})'>Save</button>
+      </div>
+    </div>`;
+
+  // Wire status change to show/hide reason fields
+  document.getElementById('e-status').addEventListener('change', (e) => {
+    document.getElementById('flag-reason-field').style.display = e.target.value === 'flagged' ? 'block' : 'none';
+    document.getElementById('credit-note-field').style.display = e.target.value === 'credit_due' ? 'block' : 'none';
+  });
+
+  document.getElementById('modal').classList.add('show');
+}
+function filterEditSites() {
+  const input = document.getElementById('e-site');
+  const dd = document.getElementById('e-site-dropdown');
+  const status = document.getElementById('e-site-status');
+  if (!input || !dd) return;
+  const q = input.value.trim().toLowerCase();
+  // Update status indicator
+  if (q && status) {
+    const matchExact = allSites.some(s => s.name.toLowerCase() === q);
+    if (matchExact) {
+      status.innerHTML = '<span style="color:#1e6c33">✓ In sites list</span>';
+    } else {
+      const v = input.value.trim();
+      status.innerHTML = '<span style="color:#b58a00">⚠️ Not in sites list</span> <button class="ghost small" style="padding:3px 8px;font-size:11px;margin-left:6px" onclick="addCurrentSiteToList()">+ Add to list</button>';
+    }
+  } else if (status) {
+    status.innerHTML = '';
+  }
+  if (!q) { dd.style.display = 'none'; return; }
+  const matches = allSites.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickEditSite(\''+escapeJsAttr(s.name)+'\')">'+highlightText(s.name, q)+'</div>').join('');
+  dd.style.display = 'block';
+}
+function pickEditSite(name) { document.getElementById('e-site').value = name; hideEditSites(); filterEditSites(); }
+function hideEditSites() { const dd = document.getElementById('e-site-dropdown'); if (dd) dd.style.display = 'none'; }
+async function addCurrentSiteToList() {
+  const name = document.getElementById('e-site').value.trim();
+  if (!name) return;
+  if (!confirm('Add "' + name + '" to the master sites list?')) return;
+  await authFetch('/po/api/sites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  allSites = await authFetch('/po/api/sites').then(r => r.json());
+  filterEditSites();
+  alert('Added to sites list');
+}
+function syncCost(changed) {
+  const ex = parseFloat(document.getElementById('e-cost-ex').value);
+  const rate = parseFloat(document.getElementById('e-vat-rate').value);
+  const inc = parseFloat(document.getElementById('e-cost-inc').value);
+  if (changed === 'ex' && !isNaN(ex) && !isNaN(rate)) {
+    document.getElementById('e-cost-inc').value = (ex * (1 + rate / 100)).toFixed(2);
+  } else if (changed === 'inc' && !isNaN(inc) && !isNaN(rate)) {
+    document.getElementById('e-cost-ex').value = (inc / (1 + rate / 100)).toFixed(2);
+  } else if (changed === 'rate' && !isNaN(ex) && !isNaN(rate)) {
+    document.getElementById('e-cost-inc').value = (ex * (1 + rate / 100)).toFixed(2);
+  }
+}
+async function saveEdit(poNumber) {
+  const engSlug = document.getElementById('e-engineer').value;
+  const eng = allEngineers.find(e => e.slug === engSlug);
+  const costExStr = document.getElementById('e-cost-ex').value.trim();
+  const costEx = costExStr === '' ? null : parseFloat(costExStr);
+  const vatRateStr = document.getElementById('e-vat-rate').value.trim();
+  const vatRate = vatRateStr === '' ? 20 : parseFloat(vatRateStr);
+  let newStatus = document.getElementById('e-status').value;
+  const p = allPOs.find(x => x.po_number === poNumber);
+  const oldStatus = p.status || 'open';
+  // Auto-promote open -> priced when cost is first entered (unless explicitly flagged/credit_due/complete)
+  if (oldStatus === 'open' && costEx != null && newStatus === 'open') {
+    newStatus = 'priced';
+  }
+  const flagReason = document.getElementById('e-flag-reason') ? document.getElementById('e-flag-reason').value.trim() : '';
+  const creditNote = document.getElementById('e-credit-note') ? document.getElementById('e-credit-note').value.trim() : '';
+  if (newStatus === 'flagged' && !flagReason) { alert('Flag reason is required when status is Flagged'); return; }
+  if (newStatus === 'credit_due' && !creditNote) { alert('Credit note is required when status is Credit Due'); return; }
+  await authFetch('/po/api/pos/' + poNumber, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      engineer_slug: engSlug || null,
+      engineer_name: eng ? eng.name : null,
+      site: document.getElementById('e-site').value.trim(),
+      incident_no: document.getElementById('e-incident').value.trim(),
+      supplier: document.getElementById('e-supplier').value.trim(),
+      trade: document.getElementById('e-trade') ? document.getElementById('e-trade').value.trim() : (p.trade || null),
+      description: document.getElementById('e-description').value.trim(),
+      cost_ex_vat: costEx,
+      vat_rate: vatRate,
+      status: newStatus,
+      flag_reason: newStatus === 'flagged' ? flagReason : null,
+      credit_note: newStatus === 'credit_due' ? creditNote : null,
+      edited_by_slug: null,
+      edited_by_name: null
+    }) });
+  closeModal(); loadPOs(); loadDashboard();
+}
+async function markReviewed(n) { await authFetch('/po/api/pos/' + n, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ needs_review: 0, edited_by_slug: null, edited_by_name: null }) }); closeModal(); loadPOs(); loadDashboard(); }
+async function hardDeletePO(n, fromModal) {
+  if (!confirm('Delete PO ' + n + ' permanently?\n\nThe number ' + n + ' will be freed and reused on the next PO, so the sequence has no gaps. This cannot be undone.')) return;
+  await authFetch('/po/api/pos/' + n, { method: 'DELETE' });
+  if (fromModal) closeModal();
+  loadPOs(); loadDashboard();
+}
+function exportCSV() {
+  const params = new URLSearchParams();
+  const eng = document.getElementById('filter-engineer').value;
+  const sup = document.getElementById('filter-supplier').value;
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+  if (eng) params.set('engineer', eng); if (sup) params.set('supplier', sup);
+  if (from) params.set('from', from); if (to) params.set('to', to);
+  if (currentStatus) params.set('status', currentStatus);
+  if (from) params.set('from', from); if (to) params.set('to', to);
+  window.location.href = '/api/export?' + params;
+}
+// Opens the print-ready report with every filter currently applied to the log
+function openReport() {
+  const params = new URLSearchParams();
+  const eng = document.getElementById('filter-engineer').value;
+  const officeUser = document.getElementById('filter-office-user').value;
+  const sup = document.getElementById('filter-supplier').value;
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+  const search = document.getElementById('search-input').value.trim();
+  if (eng) params.set('engineer', eng);
+  if (officeUser) params.set('office_user', officeUser);
+  if (sup) params.set('supplier', sup);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (search) params.set('search', search);
+  if (currentStatus) params.set('status', currentStatus);
+  if (document.getElementById('filter-review').checked) params.set('needs_review', '1');
+  if (document.getElementById('filter-uncosted').checked) params.set('uncosted', '1');
+  if (document.getElementById('filter-unmatched-site').checked) params.set('unmatched_site', '1');
+  printReport(allPOs);
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+function fmtDate(v) {
+  if (!v) return '';
+  const s = String(v);
+  if (s.length === 10 && s.charAt(4) === '-') return s.slice(8,10) + '-' + s.slice(5,7) + '-' + s.slice(2,4);
+  const d = new Date(v);
+  if (isNaN(d)) return s;
+  const p = n => (n < 10 ? '0' : '') + n;
+  return p(d.getDate()) + '-' + p(d.getMonth() + 1) + '-' + String(d.getFullYear()).slice(2);
+}
+function fmtDateTime(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d)) return String(v);
+  const p = n => (n < 10 ? '0' : '') + n;
+  return fmtDate(d) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+let modalMouseDownTarget = null;
+document.getElementById('modal').addEventListener('mousedown', (e) => { modalMouseDownTarget = e.target; });
+document.getElementById('modal').addEventListener('click', (e) => { if (e.target.id === 'modal' && modalMouseDownTarget === e.target) closeModal(); });
+boot();
+
+</script>
+</body></html>

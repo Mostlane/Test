@@ -71,6 +71,8 @@
   Cache-Control: no-cache
 /notification-centre.html
   Cache-Control: no-cache
+/po.html
+  Cache-Control: no-cache
 /memo-sign.html
   Cache-Control: no-cache
 /fleet-report.html
