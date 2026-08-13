@@ -13625,7 +13625,7 @@ async function handle25(request, env, ctx, url, sess) {
     if (path === "/api/subcontractors" && method === "GET") return jr7(await getSubcontractors(db));
     if (path === "/api/trades" && method === "GET") return jr7(await getTrades(db));
     if (path === "/api/sites" && method === "GET") return jr7(await getSites(db));
-    if (path === "/api/engineers" && method === "GET") return jr7(await getEngineers(db));
+    if (path === "/api/engineers" && method === "GET") return jr7(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr7(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr7(await getVehicles(env));
     if (path === "/api/closures" && method === "GET") return jr7(await getClosures(db));
@@ -13683,6 +13683,24 @@ async function handle25(request, env, ctx, url, sess) {
     return error("PO error: " + (e && e.message || "unknown"), 500, env, request);
   }
 }
+async function getPortalEngineers(env, tenantId) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR LOWER(status)='active') ORDER BY first_name, last_name"
+    ).bind(tenantId).all();
+    return (results || []).filter((u) => {
+      try {
+        const p = JSON.parse(u.profile || "{}");
+        return (p.staffType || "field") === "field";
+      } catch {
+        return true;
+      }
+    }).map((u) => ({ slug: slugify(u.username), name: ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username, active: 1 }));
+  } catch (e) {
+    console.error("PO getPortalEngineers failed:", e && e.message);
+    return [];
+  }
+}
 async function getConfigMap(db) {
   const rows = await db.prepare(`SELECT key, value FROM config`).all();
   const map = {};
@@ -13713,9 +13731,6 @@ async function getSystemStatus(db) {
   if (!officeDays.includes(today) || closure) return { mode: "ooh", message: null, reason: closure ? closure.reason : "weekend" };
   if (currentTime >= config.office_hours_start && currentTime <= config.office_hours_end) return { mode: "office_hours", message: "Please call the office on " + config.office_phone };
   return { mode: "ooh", message: null };
-}
-async function getEngineers(db) {
-  return (await db.prepare(`SELECT * FROM engineers ORDER BY name`).all()).results;
 }
 async function getOfficeUsers(db) {
   return (await db.prepare(`SELECT * FROM office_users ORDER BY name`).all()).results;
