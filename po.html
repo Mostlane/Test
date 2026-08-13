@@ -32,15 +32,21 @@
         .then(function (r) { return r.json(); })
         .then(function (me) {
           var u = (me && me.user) || {};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}}
-          // Office/admin first: anyone who can MANAGE POs gets the full office view
-          // (this also covers owners/admins whose staffType defaults to "field").
-          if (u.FullAccess === "Yes" || u.PurchaseOrders === "Yes") {
+          // Admins get the full office board (covers admins whose staffType
+          // defaults to "field").
+          if (u.FullAccess === "Yes") {
             location.replace("po-office.html");
             return;
           }
-          // Field engineers raise POs (out-of-hours rule enforced on the page).
+          // FIELD ENGINEERS get the restricted raise page — even if they hold the
+          // PurchaseOrders permission (that just means "can use POs", not "manage").
           if (u.StaffType === "field") {
             location.replace("po-raise.html");
+            return;
+          }
+          // Office staff with the Purchase Orders permission → full office board.
+          if (u.PurchaseOrders === "Yes") {
+            location.replace("po-office.html");
             return;
           }
           msg.innerHTML = "<h2>No PO access</h2>Ask the office to enable Purchase Orders for your account.";
