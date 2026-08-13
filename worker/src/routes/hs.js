@@ -11,22 +11,116 @@
 // Gated to HSPlan or FullAccess (matches the existing H&S button). Tenant-scoped
 // like everything else — so it's automatically per-company for the SaaS product.
 
-import { json, error } from "../lib/http.js";
+import { json, error, corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { sendToUser } from "./push.js";
 
 const PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
 
+// Self-migrating extra columns on hs_documents: file attachments (appended to
+// the PDF) and remote sign-off requests (sent to a portal user to view+sign).
+// Both are kept OUT of the form's `data` blob so a form re-save never wipes them.
+async function ensureHsCols(db) {
+  for (const col of ["attachments TEXT", "sign_requests TEXT"]) {
+    try { await db.prepare(`ALTER TABLE hs_documents ADD COLUMN ${col}`).run(); } catch {}
+  }
+}
+const parseArr = s => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+// Sign a stored attachment so the browser <img>/link can fetch it without a token.
+async function attachmentUrl(env, origin, key) {
+  return signedFileUrl(env, origin, "/hs/attachment", key);
+}
+async function withAttachmentUrls(env, origin, atts) {
+  const out = [];
+  for (const a of atts) out.push({ ...a, url: await attachmentUrl(env, origin, a.key) });
+  return out;
+}
+
 export async function handle(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const q = url.searchParams;
+
+  // ── PUBLIC: stream an attachment (access-gated by the signed URL) ───────────
+  // <img> tags and download links can't send an auth header; the signature is
+  // verified in-handler (same pattern as /fleet/vehicle-doc, /staff/doc …).
+  if (path === "/hs/attachment" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("hsdocs/")) return error("Bad key", 400, env, request);
+    if (!sess && !(await verifyFileSig(env, key, q))) return error("Link expired or invalid", 403, env, request);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers: corsHeaders(env, request) });
+    return new Response(obj.body, { status: 200, headers: {
+      ...corsHeaders(env, request),
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline", "Cache-Control": "private, max-age=3600"
+    }});
+  }
+
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  const db = tenantDB(env, sess.tenantId);
+  await ensureHsCols(db);
+  const me = sess.user.username;
+
+  // ── Remote signing — allowed for a TARGETED RECIPIENT who may not otherwise
+  // have H&S access (their own auth: they must be named on the doc), so these
+  // sit BEFORE the H&S permission gate below. ──────────────────────────────────
+  if (path === "/hs/to-sign" && method === "GET") {
+    const { results } = await db.prepare(
+      "SELECT id, doc_type, ref, site, sign_requests FROM hs_documents WHERE tenant_id=? AND sign_requests IS NOT NULL ORDER BY updated_at DESC LIMIT 500"
+    ).bind(db.tenantId).all();
+    const items = [];
+    for (const r of results || []) {
+      const mine = parseArr(r.sign_requests).find(s => s.username === me && s.status === "pending");
+      if (mine) items.push({ id: r.id, doc_type: r.doc_type, ref: r.ref, site: r.site, requestedAt: mine.requestedAt });
+    }
+    return json({ ok: true, items }, {}, env, request);
+  }
+  if (path === "/hs/sign" && method === "GET") {
+    const id = q.get("id");
+    if (!id) return error("Missing id", 400, env, request);
+    const row = await db.prepare("SELECT * FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    const reqs = parseArr(row.sign_requests);
+    const mine = reqs.find(s => s.username === me);
+    const isHS = perms.HSPlan === "Yes" || perms.FullAccess === "Yes";
+    if (!mine && !isHS) return error("This document wasn't sent to you.", 403, env, request);
+    let data = {}; try { data = row.data ? JSON.parse(row.data) : {}; } catch {}
+    const atts = await withAttachmentUrls(env, url.origin, parseArr(row.attachments));
+    return json({ ok: true, doc: {
+      id: row.id, doc_type: row.doc_type, ref: row.ref, site: row.site, status: row.status,
+      created_by: row.created_by, created_at: row.created_at, updated_at: row.updated_at,
+      data, attachments: atts, signRequests: reqs
+    }, myStatus: mine ? mine.status : null }, {}, env, request);
+  }
+  if (path === "/hs/sign" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const signature = String(b.signature || "");
+    if (!id) return error("Missing id", 400, env, request);
+    if (!/^data:image\//.test(signature) || signature.length > 400000) return error("A signature is required.", 400, env, request);
+    const row = await db.prepare("SELECT id, sign_requests, created_by FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    const reqs = parseArr(row.sign_requests);
+    const mine = reqs.find(s => s.username === me);
+    if (!mine) return error("This document wasn't sent to you.", 403, env, request);
+    mine.status = "signed"; mine.signedAt = new Date().toISOString(); mine.signature = signature;
+    await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(reqs), mine.signedAt, db.tenantId, id).run();
+    if (ctx && ctx.waitUntil && row.created_by && row.created_by !== me) ctx.waitUntil(sendToUser(env, db.tenantId, row.created_by, {
+      title: "Risk assessment signed", body: `${mine.name || me} has signed ${row.ref || "a risk assessment"}.`,
+      url: "/hs-docs.html", tag: "hs-signed"
+    }));
+    return json({ ok: true }, {}, env, request);
+  }
+
+  // ── Everything below needs H&S access ───────────────────────────────────────
   if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
     return error("This needs H&S access.", 403, env, request);
-
-  const db = tenantDB(env, sess.tenantId);
-  const path = url.pathname;
-  const method = request.method.toUpperCase();
 
   // ── List ───────────────────────────────────────────────────────────────────
   if (path === "/hs/docs" && method === "GET") {
@@ -45,7 +139,87 @@ export async function handle(request, env, ctx, url, sess) {
     const row = await db.prepare("SELECT * FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
     if (!row) return error("Document not found", 404, env, request);
     let data = {}; try { data = row.data ? JSON.parse(row.data) : {}; } catch {}
-    return json({ ok: true, doc: { id: row.id, doc_type: row.doc_type, ref: row.ref, site: row.site, status: row.status, created_by: row.created_by, created_at: row.created_at, updated_at: row.updated_at, data } }, {}, env, request);
+    const atts = await withAttachmentUrls(env, url.origin, parseArr(row.attachments));
+    return json({ ok: true, doc: { id: row.id, doc_type: row.doc_type, ref: row.ref, site: row.site, status: row.status, created_by: row.created_by, created_at: row.created_at, updated_at: row.updated_at, data, attachments: atts, signRequests: parseArr(row.sign_requests) } }, {}, env, request);
+  }
+
+  // ── Attachments — files/images appended to the produced PDF ─────────────────
+  if (path === "/hs/doc/attach" && method === "POST") {
+    const form = await request.formData();
+    const id = String(form.get("id") || "");
+    const file = form.get("file");
+    if (!id || !file) return error("id and file required", 400, env, request);
+    const row = await db.prepare("SELECT id, attachments FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    if ((file.size || 0) > 25 * 1024 * 1024) return error("File too large (max 25 MB).", 400, env, request);
+    const safe = String(file.name || "file").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+    const key = `hsdocs/${db.tenantId}/${id}/${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+      customMetadata: { name: file.name || safe, by: me, at: new Date().toISOString() }
+    });
+    const atts = parseArr(row.attachments);
+    const meta = { key, name: file.name || safe, type: file.type || "", size: file.size || 0, at: new Date().toISOString(), by: me };
+    atts.push(meta);
+    await db.prepare("UPDATE hs_documents SET attachments=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(atts), new Date().toISOString(), db.tenantId, id).run();
+    return json({ ok: true, attachment: { ...meta, url: await attachmentUrl(env, url.origin, key) } }, {}, env, request);
+  }
+  if (path === "/hs/doc/attach-delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || ""); const key = String(b.key || "");
+    if (!id || !key) return error("id and key required", 400, env, request);
+    const row = await db.prepare("SELECT id, attachments FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    const atts = parseArr(row.attachments).filter(a => a.key !== key);
+    try { await env.JOB_FILES.delete(key); } catch {}
+    await db.prepare("UPDATE hs_documents SET attachments=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(atts), new Date().toISOString(), db.tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+
+  // ── Send for signing — add pending recipients + push them ───────────────────
+  if (path === "/hs/doc/sign-request" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const usernames = Array.isArray(b.usernames) ? b.usernames.map(String) : (b.username ? [String(b.username)] : []);
+    if (!id || !usernames.length) return error("id and at least one recipient required", 400, env, request);
+    const row = await db.prepare("SELECT id, ref, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    const reqs = parseArr(row.sign_requests);
+    // Resolve display names for the chosen users.
+    const nameOf = {};
+    try {
+      const { results } = await db.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const u of results || []) nameOf[u.username] = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+    } catch {}
+    const added = [];
+    for (const un of usernames) {
+      if (reqs.some(s => s.username === un && s.status !== "declined")) continue;   // already pending/signed
+      reqs.push({ username: un, name: nameOf[un] || un, status: "pending", requestedAt: new Date().toISOString(), requestedBy: me });
+      added.push(un);
+    }
+    await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(reqs), new Date().toISOString(), db.tenantId, id).run();
+    for (const un of added) {
+      if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
+        title: "Risk assessment to sign", body: `Please read and sign ${row.ref || "a risk assessment"}.`,
+        url: "/hs-sign.html?id=" + encodeURIComponent(id), tag: "hs-sign"
+      }));
+    }
+    return json({ ok: true, signRequests: reqs, added }, {}, env, request);
+  }
+  // Cancel / remove a sign request (admin tidy-up).
+  if (path === "/hs/doc/sign-cancel" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || ""); const un = String(b.username || "");
+    if (!id || !un) return error("id and username required", 400, env, request);
+    const row = await db.prepare("SELECT id, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    const reqs = parseArr(row.sign_requests).filter(s => s.username !== un);
+    await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(reqs), new Date().toISOString(), db.tenantId, id).run();
+    return json({ ok: true, signRequests: reqs }, {}, env, request);
   }
 
   // ── Create / update ────────────────────────────────────────────────────────

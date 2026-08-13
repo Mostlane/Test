@@ -7,6 +7,7 @@
   <script src="/portal-config.js?v=3"></script>
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
+  <script src="hs-rams-render.js?v=1"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -339,6 +340,30 @@
       <div class="row noprint" style="margin-bottom:10px; justify-content:space-between;">
         <button class="btn hide" id="docCloseBtn" style="background:#0a7d33;">✅ Close out permit</button>
         <button class="btn" onclick="window.print()">🖨️ Print / Save PDF</button>
+      </div>
+      <div id="docTools" class="noprint hide" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;background:#f8fafc;">
+        <div class="grid2" style="gap:18px;">
+          <div>
+            <h4 style="margin:0 0 6px;">📎 Attachments <span class="muted" style="font-weight:400;font-size:12px;">— added to the end of the PDF</span></h4>
+            <div id="attList"><span class="muted">None yet.</span></div>
+            <div class="row" style="margin-top:8px;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="file" id="attFile" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" style="font-size:13px;">
+              <button class="btn ghost small" id="attUpBtn" onclick="uploadAttachment()">Upload</button>
+              <span class="muted" id="attMsg"></span>
+            </div>
+            <p class="muted" style="font-size:11px;margin:6px 0 0;">Images print as extra pages; other files attach as links.</p>
+          </div>
+          <div>
+            <h4 style="margin:0 0 6px;">✍️ Send for signing <span class="muted" style="font-weight:400;font-size:12px;">— to a portal user to read &amp; sign</span></h4>
+            <div id="signList"><span class="muted">No one sent yet.</span></div>
+            <div class="row" style="margin-top:8px;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="signUser" list="userSuggest" placeholder="Choose a person…" style="max-width:220px;">
+              <button class="btn ghost small" id="signSendBtn" onclick="sendForSigning()">Send to sign</button>
+              <datalist id="userSuggest"></datalist>
+              <span class="muted" id="signMsg"></span>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="doc" id="docBody"></div>
     </div>
@@ -1034,9 +1059,11 @@
   }
 
   // ── Printable document view ──────────────────────────────────────────────────
+  let DOC_CUR = null;                 // the doc currently open in the viewer
   async function openDoc(id) {
     const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
     if (!d.ok) return alert("Couldn't load that document.");
+    DOC_CUR = d.doc;
     show("docView");
     // RAMS prints best in landscape (wide risk-summary matrix); others portrait.
     g("printOrient").textContent = "@page { size: A4 " + (d.doc.doc_type === "rams" ? "landscape" : "portrait") + "; margin: 12mm; }";
@@ -1047,6 +1074,77 @@
     else if (d.doc.doc_type === "rams") g("docBody").innerHTML = renderRams(d.doc);
     else if (d.doc.doc_type === "incident") g("docBody").innerHTML = renderIncident(d.doc);
     else g("docBody").innerHTML = `<p class="muted">Viewer for this type is coming soon.</p>`;
+    // Attachments + send-for-signing tools are for Risk Assessments only.
+    const tools = g("docTools");
+    if (d.doc.doc_type === "rams") { tools.classList.remove("hide"); renderDocTools(d.doc); loadUserSuggest(); }
+    else tools.classList.add("hide");
+  }
+  // ── Doc-view tools: attachments + send-for-signing (RAMS) ────────────────────
+  let USERS_BY_NAME = {};
+  async function loadUserSuggest() {
+    if (Object.keys(USERS_BY_NAME).length) return;   // once per page
+    try {
+      const d = await authFetch("/users").then(r => r.json());
+      const list = (d && d.Users) || [];
+      USERS_BY_NAME = {};
+      const opts = list.map(u => {
+        const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
+        USERS_BY_NAME[name.toLowerCase()] = u.Username; USERS_BY_NAME[String(u.Username).toLowerCase()] = u.Username;
+        return { name, un: u.Username };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+      g("userSuggest").innerHTML = opts.map(o => `<option value="${esc(o.name)}">`).join("");
+    } catch (e) {}
+  }
+  function renderDocTools(doc) {
+    const atts = doc.attachments || [];
+    g("attList").innerHTML = atts.length ? atts.map(a =>
+      `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:3px 0;">
+        <a href="${esc(a.url)}" target="_blank" rel="noopener" style="font-size:13px;">${/^image\//.test(a.type||"")?"🖼️":"📄"} ${esc(a.name||"file")}</a>
+        <button class="btn red small" type="button" onclick="deleteAttachment('${esc(a.key)}')">✕</button>
+      </div>`).join("") : '<span class="muted">None yet.</span>';
+    const reqs = doc.signRequests || [];
+    g("signList").innerHTML = reqs.length ? reqs.map(s =>
+      `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:3px 0;">
+        <span style="font-size:13px;">${esc(s.name || s.username)} — ${s.status==="signed"?`<b style="color:#0a7d33;">✓ signed ${esc(s.signedAt?new Date(s.signedAt).toLocaleDateString("en-GB"):"")}</b>`:'<span style="color:#b26b00;">⏳ awaiting</span>'}</span>
+        <button class="btn grey small" type="button" title="Remove" onclick="cancelSign('${esc(s.username)}')">✕</button>
+      </div>`).join("") : '<span class="muted">No one sent yet.</span>';
+  }
+  async function uploadAttachment() {
+    const f = g("attFile").files[0]; if (!f) { g("attMsg").textContent = "Choose a file first."; return; }
+    if (!DOC_CUR) return;
+    g("attUpBtn").disabled = true; g("attMsg").textContent = "Uploading…";
+    try {
+      const form = new FormData(); form.append("id", DOC_CUR.id); form.append("file", f, f.name || "file");
+      const r = await authFetch("/hs/doc/attach", { method:"POST", body: form }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "upload failed");
+      g("attFile").value = ""; g("attMsg").textContent = "";
+      await openDoc(DOC_CUR.id);   // refresh body (appendix) + tools
+    } catch (e) { g("attMsg").textContent = "Failed — " + e.message; }
+    finally { g("attUpBtn").disabled = false; }
+  }
+  async function deleteAttachment(key) {
+    if (!DOC_CUR || !confirm("Remove this attachment?")) return;
+    try { const r = await authFetch("/hs/doc/attach-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: DOC_CUR.id, key }) }).then(r => r.json());
+      if (r.ok) await openDoc(DOC_CUR.id); } catch (e) {}
+  }
+  async function sendForSigning() {
+    if (!DOC_CUR) return;
+    const val = (g("signUser").value || "").trim();
+    const un = USERS_BY_NAME[val.toLowerCase()] || val;
+    if (!un) { g("signMsg").textContent = "Pick a person."; return; }
+    g("signSendBtn").disabled = true; g("signMsg").textContent = "Sending…";
+    try {
+      const r = await authFetch("/hs/doc/sign-request", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: DOC_CUR.id, usernames:[un] }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "failed");
+      g("signUser").value = ""; g("signMsg").textContent = (r.added && r.added.length) ? "Sent ✓" : "Already sent.";
+      await openDoc(DOC_CUR.id);
+    } catch (e) { g("signMsg").textContent = "Failed — " + e.message; }
+    finally { g("signSendBtn").disabled = false; }
+  }
+  async function cancelSign(username) {
+    if (!DOC_CUR || !confirm("Remove this person from the sign-off list?")) return;
+    try { const r = await authFetch("/hs/doc/sign-cancel", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: DOC_CUR.id, username }) }).then(r => r.json());
+      if (r.ok) await openDoc(DOC_CUR.id); } catch (e) {}
   }
   const sigImg = s => s ? `<img src="${s}" alt="signature">` : `<span class="muted">(not signed)</span>`;
   function renderInduction(doc) {
@@ -1122,88 +1220,9 @@
       : `<p class="muted">Not yet closed out.</p>`}
       <div class="foot"><b>${esc(HW_FOOTER)}</b><br>Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
   }
-  function renderRams(doc) {
-    const x = doc.data || {};
-    const hz = x.hazards || [];
-    const rank = { Low:0, Medium:1, High:2 };
-    const worst = hz.reduce((w,h) => { const b = HS.band(h.sevWith, h.likWith); return rank[b] > rank[w] ? b : w; }, "Low");
-    const td = 'style="padding:6px;border:1px solid #ccc;font-size:12.5px;vertical-align:top;"';
-    const tdc = 'style="padding:6px;border:1px solid #ccc;font-size:12.5px;text-align:center;"';
-    const solidBg = b => b === "High" ? "#c62828" : b === "Medium" ? "#f0a000" : "#2e7d32";
-    const solidFg = b => b === "Medium" ? "#3a2b00" : "#ffffff";
-    const rateCell = (s,l) => { const b = HS.band(s,l); return `<td style="padding:6px;border:1px solid #fff;font-size:12.5px;text-align:center;background:${solidBg(b)};color:${solidFg(b)};font-weight:800;">${b} (${(s||0)*(l||0)})</td>`; };
-    const numCell = (n,b) => `<td style="padding:6px;border:1px solid #fff;font-size:12.5px;text-align:center;background:${bandBg(b)};font-weight:700;">${esc(n)}</td>`;
-    const summaryRows = hz.map(h => {
-      const bW = HS.band(h.sevWithout, h.likWithout), bC = HS.band(h.sevWith, h.likWith);
-      return `
-      <tr>
-        <td ${td}>${esc(h.name||"")}</td><td ${td}>${esc(h.persons||"")}</td>
-        ${numCell(h.sevWithout,bW)}${numCell(h.likWithout,bW)}${rateCell(h.sevWithout,h.likWithout)}
-        ${numCell(h.sevWith,bC)}${numCell(h.likWith,bC)}${rateCell(h.sevWith,h.likWith)}
-      </tr>`;
-    }).join("") || `<tr><td ${td} colspan="8">No hazards recorded.</td></tr>`;
-    const mCell = (s,l) => { const b = HS.band(s,l); return `<td style="text-align:center;padding:8px 11px;border:1px solid #fff;background:${solidBg(b)};color:${solidFg(b)};font-weight:700;">${s*l}</td>`; };
-    const riskMatrix = `
-      <table style="border-collapse:collapse;margin-top:4px;">
-        <tr><td style="border:none;"></td><td colspan="5" style="text-align:center;font-weight:700;font-size:11px;padding:2px;border:none;">Severity →</td></tr>
-        <tr><td style="border:none;"></td>${[1,2,3,4,5].map(s=>`<td style="text-align:center;font-weight:700;background:#eef2f7;border:1px solid #fff;padding:6px 11px;">${s}</td>`).join("")}</tr>
-        ${[5,4,3,2,1].map(l=>`<tr><td style="text-align:center;font-weight:700;background:#eef2f7;border:1px solid #fff;padding:6px 11px;">${l}</td>${[1,2,3,4,5].map(s=>mCell(s,l)).join("")}</tr>`).join("")}
-      </table>
-      <p style="font-size:11px;margin:2px 0 0;">Likelihood ↓ (rows) &middot; Severity → (columns) &middot; number shown = risk rating</p>`;
-    const lvlLabel = id => (HS.levels.find(l => l.id === id) || { label:"" }).label;
-    const controlRows = hz.flatMap(h => (h.controls||[]).slice().sort((a,b) => (HS.levelRank[a && a.level]??3) - (HS.levelRank[b && b.level]??3)).map(c => {
-      const txt = typeof c === "string" ? c : (c.text||"");
-      const lvl = typeof c === "string" ? "" : lvlLabel(c.level);
-      return `<tr><td ${td}>${esc(h.name||"")}</td><td ${tdc}>${esc(lvl)}</td><td ${td}>${esc(txt)}</td></tr>`;
-    })).join("") || `<tr><td ${td} colspan="3">No control measures.</td></tr>`;
-    const acks = (x.acks || []).map(a => `<div style="display:inline-block;width:48%;margin:6px 1%;vertical-align:top;"><b>${esc(a.name||"")}</b><br>${sigImg(a.signature)}</div>`).join("");
-    return `
-      <div style="text-align:center;color:#667;font-size:12px;">Risk Assessment · Mostlane</div>
-      <h2>${esc(x.task || "Risk Assessment")}</h2>
-      <p class="ref">Ref: ${esc(doc.ref || "—")}</p>
-      <div style="text-align:center;font-weight:800;padding:8px;border-radius:8px;margin-bottom:14px;color:${bandCol(worst)};background:${bandBg(worst)};border:1px solid ${bandCol(worst)};">${worst} Risk Activity</div>
-      <h3>ACTIVITY DETAILS</h3>
-      <p><b>Location of activity:</b> ${esc(x.location||"")}</p>
-      <p><b>Description of activity:</b><br>${esc(x.description||"").replace(/\n/g,"<br>")}</p>
-      <div class="kv">
-        <div><b>Equipment used:</b> ${esc(x.equipment||"")}</div><div><b>Supporting documents:</b> ${esc(x.supporting||"")}</div>
-        <div><b>Person(s) affected:</b> ${esc(x.persons||"")}</div><div><b>Likely harm(s):</b> ${esc(x.harms||"")}</div>
-        <div><b>Total numbers affected:</b> ${esc(x.totalAffected||"")}</div><div><b>Frequency of exposure:</b> ${esc(x.frequency||"")}</div>
-        <div><b>Duration of exposure:</b> ${esc(x.duration||"")}</div><div><b>Assessor:</b> ${esc(x.assessor||"")}</div>
-        <div><b>Created:</b> ${esc(fmtDate(x.date))}</div><div><b>Review before:</b> ${esc(fmtDate(x.reviewDate))}</div>
-      </div>
-      <h3>RISK SUMMARY</h3>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#eef2f7;"><th ${td} rowspan="2">Hazard</th><th ${td} rowspan="2">Persons affected</th><th ${tdc} colspan="3">Risk WITHOUT controls</th><th ${tdc} colspan="3">Risk WITH controls</th></tr>
-          <tr style="background:#eef2f7;"><th ${tdc}>Sev</th><th ${tdc}>Lik</th><th ${tdc}>Rating</th><th ${tdc}>Sev</th><th ${tdc}>Lik</th><th ${tdc}>Rating</th></tr>
-        </thead>
-        <tbody>${summaryRows}</tbody>
-      </table>
-      <h3>KEY</h3>
-      <div class="kv" style="font-size:12px;">
-        <div><b>Severity</b><br>${HS.severityKey.map((t,i)=>`${i+1} = ${esc(t)}`).join("<br>")}</div>
-        <div><b>Likelihood</b><br>${HS.likelihoodKey.map((t,i)=>`${i+1} = ${esc(t)}`).join("<br>")}</div>
-      </div>
-      <p style="font-size:12px;margin-top:8px;"><b>Risk (Severity × Likelihood):</b> 15–25 = High Risk · 8–12 = Medium Risk · 1–6 = Low Risk</p>
-      <div style="margin-top:8px;"><b style="font-size:12px;">Risk matrix</b>${riskMatrix}</div>
-      <h3>RISK CONTROL PLAN</h3>
-      <table style="width:100%;border-collapse:collapse;">
-        ${HS.riskControlPlan.map(p=>`<tr><td ${td} style="width:130px;padding:6px;border:1px solid #ccc;font-weight:700;">${esc(p.band)}</td><td ${td}>${esc(p.text)}</td></tr>`).join("")}
-      </table>
-      <h3>CONTROL MEASURES <span style="font-weight:400;font-size:11px;">(ordered by hierarchy of control)</span></h3>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead><tr style="background:#eef2f7;"><th ${td}>Hazard</th><th ${tdc}>Type</th><th ${td}>Control measure</th></tr></thead>
-        <tbody>${controlRows}</tbody>
-      </table>
-      <h3>REQUIRED PPE</h3>
-      <ul>${(x.ppe && x.ppe.length ? x.ppe : []).map(p=>`<li>${esc(p)}</li>`).join("") || "<li class='muted'>See control measures.</li>"}</ul>
-      <h3>ASSESSOR</h3>
-      <div class="kv"><div><b>Name:</b> ${esc(x.assessor||"")}</div></div>
-      <div class="sig" style="margin-top:6px;">${sigImg(x.assessorSignature)}</div>
-      ${acks ? `<h3>OPERATIVE SIGN-OFF <span style="font-weight:400;font-size:12px;">— read &amp; understood</span></h3>${acks}` : ""}
-      <div class="foot">Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
-  }
+  // RAMS document render lives in the shared hs-rams-render.js so the builder
+  // and the signing page (hs-sign.html) never drift.
+  function renderRams(doc) { return window.HSRamsRender(doc); }
   function renderIncident(doc) {
     const x = doc.data || {};
     const yn = v => v ? "Yes" : "No";
