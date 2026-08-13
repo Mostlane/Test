@@ -1243,6 +1243,26 @@ travel caps), devices(device_token→person_id), visits. R2 (JOB_FILES): `fleetr
 hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
 
+## Home hub / dashboard (main.html — Aug 2026, extensible)
+The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
+set of at-a-glance widgets** — the start of "the hub of everything" (each user
+sees only the areas they have permission for). It's separate from the blocking
+attention gate: the hub is a persistent dashboard, not a snooze-able popup.
+Renders on BOTH mobile (above the tiles) and desktop (below the greeting); white
+cards so it's legible over any personalised background. **Framework:**
+`window.MostlaneHub` — `HUB.register({id,emoji,title,can(perms),load(card),wide?})`
+then `HUB.run(perms)` (reads the cached `mostlanePermissions` blob, instant, no
+network wait). A widget filtered out by `can(perms)` never renders; if NO widget
+is eligible the whole `#hubDash` stays hidden. Each `load()` fetches its own data
+(via a timeout-raced `jfetch`, since API calls bypass the SW) and fills its card;
+a throwing/timed-out widget removes its own card. **Add a new area** = one
+`HUB.register({...})` call. **First widget — Van checks** (`can`:
+FullAccess|Vehicles): GET /vancheck/week → "done/N this week" progress bar,
+outstanding-driver chips, red defect/alert rows (reg · driver · NOT SAFE / N
+issues / ⚠ alerts), a "⏸ Reminders paused" pill when `globallyPaused`, and
+actions **Open van checks** + **🔔 Remind now** (POST /vancheck/remind-now). Help
++ CLAUDE.md must list new widgets as they're added.
+
 ## Notifications system
 - Red badges on tiles (main.html) + sidebar (portal-config) from
   /asset/transfers/pending-count, /holiday/my (unseen decisions),

@@ -168,6 +168,45 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
   body.pnav-on #menuGrid, body.pnav-on #user-display { display:none !important; }
   body.pnav-on #deskLanding { display:block; }
 }
+
+/* ── Home hub / dashboard ─────────────────────────────────────────────────
+   A permission-gated set of at-a-glance widgets on the home page. Each widget
+   is a white card (legible over any personalised background). Shows on both
+   mobile (above the tiles) and desktop (below the greeting). */
+#hubDash { max-width:760px; margin:14px auto 4px; padding:0 12px; }
+#hubDash .hub-h { display:inline-block; background:rgba(255,255,255,.86); color:#003366;
+  font:700 13px 'Segoe UI',system-ui,sans-serif; letter-spacing:.02em; border-radius:999px;
+  padding:6px 14px; margin:0 0 10px 2px; box-shadow:0 2px 8px rgba(0,30,80,.12); }
+#hubGrid { display:grid; grid-template-columns:1fr; gap:12px; }
+@media (min-width:640px){ #hubGrid { grid-template-columns:1fr 1fr; } }
+.hub-card { background:#fff; border:1px solid #d7dee6; border-radius:14px; padding:14px 15px;
+  box-shadow:0 4px 16px rgba(0,30,80,.10); font-family:'Segoe UI',system-ui,sans-serif; }
+.hub-card.wide { grid-column:1 / -1; }
+.hub-card .hc-top { display:flex; align-items:center; gap:9px; margin:0 0 10px; }
+.hub-card .hc-top .hc-emoji { font-size:20px; }
+.hub-card .hc-top h3 { margin:0; font-size:15px; color:#003366; font-weight:750; flex:1; }
+.hub-card .hc-when { font-size:12px; color:#7b8794; font-weight:600; }
+.hub-card .hc-stat { display:flex; align-items:baseline; gap:8px; margin:0 0 8px; }
+.hub-card .hc-stat .big { font-size:26px; font-weight:800; color:#0b3; line-height:1; }
+.hub-card .hc-stat .big.warn { color:#d97706; }
+.hub-card .hc-stat .sub { font-size:13px; color:#5b6b78; font-weight:600; }
+.hub-bar { height:8px; border-radius:6px; background:#eef2f6; overflow:hidden; margin:2px 0 10px; }
+.hub-bar > span { display:block; height:100%; background:#16a34a; border-radius:6px; }
+.hub-chip { display:inline-block; background:#eef2f6; color:#334; border-radius:999px;
+  padding:3px 10px; font-size:12px; font-weight:600; margin:0 6px 6px 0; }
+.hub-alert { background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:8px 10px;
+  margin:0 0 8px; font-size:13px; color:#991b1b; font-weight:600; }
+.hub-alert b { color:#7f1d1d; }
+.hub-paused { background:#fef3c7; border:1px solid #f59e0b; border-radius:10px; padding:7px 10px;
+  margin:0 0 8px; font-size:12.5px; color:#92400e; font-weight:600; }
+.hub-ok { color:#15803d; font-weight:700; font-size:13.5px; }
+.hub-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.hub-btn { border:none; border-radius:9px; padding:8px 13px; font:600 13px 'Segoe UI',system-ui;
+  cursor:pointer; text-decoration:none; display:inline-block; }
+.hub-btn.primary { background:#003b82; color:#fff; }
+.hub-btn.ghost { background:#eef2f6; color:#1f2a44; }
+.hub-btn:disabled { opacity:.6; cursor:default; }
+.hub-skel { color:#8a97a6; font-size:13px; }
   </style>
   <!-- PWA CORE -->
 <link rel="manifest" href="/manifest.json">
@@ -225,6 +264,13 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
       if (d) d.textContent = new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
     })();
   </script>
+
+  <!-- Home hub / dashboard: permission-gated at-a-glance widgets. Hidden until a
+       widget the user can see has loaded (see the hub script near the page end). -->
+  <div id="hubDash" style="display:none;">
+    <span class="hub-h">🏠 Your dashboard</span>
+    <div id="hubGrid"></div>
+  </div>
 
   <div id="pushBanner" style="display:none;max-width:calc(100% - 24px);margin:0 auto 16px;background:#0f172a;color:#fff;border-radius:12px;padding:12px 16px;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.18);">
     <span style="flex:1;font-size:14px;font-weight:600;line-height:1.35;">🔔 Turn on notifications so you don't miss equipment transfers, holiday decisions and equipment checks.</span>
@@ -1136,6 +1182,135 @@ const MAP = window.ML_PERM_MAP || {
         .catch(err => { console.error("Service Worker registration failed:", err); });
     }
   </script>
-  
+
+  <!-- ═══ Home hub / dashboard ═══════════════════════════════════════════════
+       A small, extensible framework: each widget declares who can see it
+       (permission predicate) and renders its own card by fetching its own data.
+       Users only see (and can act on) widgets for areas they have permission
+       for. Add future widgets by calling HUB.register({...}). -->
+  <script>
+  (function () {
+    var API = window.MOSTLANE_API;
+    var token = localStorage.getItem("mostlaneToken");
+    if (!API || !token) return;
+    var H = { headers: { "Authorization": "Bearer " + token } };
+    function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]; }); }
+    // API calls bypass the service worker (no timeout) — race every fetch so a
+    // weak-signal hang can't leave a widget spinning forever.
+    function jfetch(path, opts, ms) {
+      return Promise.race([
+        fetch(API + path, Object.assign({}, H, opts || {})).then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); }),
+        new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, ms || 6000); })
+      ]);
+    }
+    function yes(v) { return String(v || "").toLowerCase() === "yes"; }
+
+    var HUB = {
+      widgets: [],
+      register: function (w) { this.widgets.push(w); },
+      run: function (perms) {
+        var host = document.getElementById("hubGrid");
+        var dash = document.getElementById("hubDash");
+        if (!host || !dash || host.dataset.done) return;
+        var eligible = this.widgets.filter(function (w) { try { return w.can(perms); } catch (e) { return false; } });
+        if (!eligible.length) return;
+        host.dataset.done = "1";
+        host.innerHTML = "";
+        dash.style.display = "";
+        eligible.forEach(function (w) {
+          var card = document.createElement("div");
+          card.className = "hub-card" + (w.wide ? " wide" : "");
+          card.innerHTML = '<div class="hc-top"><span class="hc-emoji">' + w.emoji + '</span><h3>' + esc(w.title) + '</h3></div><div class="hub-skel">Loading…</div>';
+          host.appendChild(card);
+          Promise.resolve().then(function () { return w.load(card); }).catch(function () {
+            card.remove();
+            if (!host.children.length) dash.style.display = "none";
+          });
+        });
+      }
+    };
+    window.MostlaneHub = HUB;
+
+    // ── Widget: Weekly van checks (Vehicles | FullAccess) ────────────────────
+    HUB.register({
+      id: "vancheck",
+      emoji: "🚐",
+      title: "Van checks",
+      can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
+      load: function (card) {
+        return jfetch("/vancheck/week").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var rows = d.rows || [];
+          var required = rows.filter(function (r) { return r.enabled !== false; });
+          var done = 0, outstanding = [], defects = [];
+          required.forEach(function (r) {
+            var c = r.check;
+            if (c && !c.skipped) {
+              done++;
+              var notSafe = c.safeToDrive === false;
+              var issues = c.defectCount || 0;
+              var al = (c.alerts && c.alerts.length) || 0;
+              if (notSafe || issues || al) defects.push({ name: r.name, reg: (c.vehicle || r.vehicle || ""), notSafe: notSafe, issues: issues, alerts: al });
+            } else if (!c) {
+              outstanding.push(r.name);
+            }
+          });
+          var N = done + outstanding.length;
+          var wk = "";
+          try { wk = new Date(d.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" }); } catch (e) {}
+          var pct = N ? Math.round(done / N * 100) : 100;
+          var allDone = outstanding.length === 0;
+
+          var html = '<div class="hc-top"><span class="hc-emoji">🚐</span><h3>Van checks</h3>' +
+            (wk ? '<span class="hc-when">w/c ' + esc(wk) + '</span>' : '') + '</div>';
+          if (d.globallyPaused) html += '<div class="hub-paused">⏸ Reminders paused for everyone</div>';
+          html += '<div class="hc-stat"><span class="big ' + (allDone ? '' : 'warn') + '">' + done + '/' + N + '</span><span class="sub">checks done this week</span></div>';
+          html += '<div class="hub-bar"><span style="width:' + pct + '%;' + (allDone ? '' : 'background:#f59e0b;') + '"></span></div>';
+
+          if (defects.length) {
+            html += defects.map(function (x) {
+              var bits = [];
+              if (x.notSafe) bits.push("🚫 NOT SAFE TO DRIVE");
+              if (x.issues) bits.push(x.issues + " issue" + (x.issues === 1 ? "" : "s"));
+              if (x.alerts) bits.push("⚠ " + x.alerts + " alert" + (x.alerts === 1 ? "" : "s"));
+              return '<div class="hub-alert"><b>' + esc(x.reg || "—") + '</b> · ' + esc(x.name) + ' — ' + bits.join(" · ") + '</div>';
+            }).join("");
+          }
+          if (outstanding.length) {
+            html += '<div style="font-size:12.5px;color:#5b6b78;font-weight:600;margin:2px 0 4px;">Still to do:</div>' +
+              outstanding.slice(0, 8).map(function (n) { return '<span class="hub-chip">' + esc(n) + '</span>'; }).join("") +
+              (outstanding.length > 8 ? '<span class="hub-chip">+' + (outstanding.length - 8) + ' more</span>' : "");
+          } else if (!defects.length) {
+            html += '<div class="hub-ok">✓ All caught up — no outstanding checks or issues.</div>';
+          }
+
+          html += '<div class="hub-actions">' +
+            '<a class="hub-btn ghost" href="van-checks.html">Open van checks</a>' +
+            (outstanding.length ? '<button class="hub-btn primary" id="hubVcRemind">🔔 Remind now (' + outstanding.length + ')</button>' : '') +
+            '</div>';
+          card.innerHTML = html;
+
+          var rb = document.getElementById("hubVcRemind");
+          if (rb) rb.addEventListener("click", function () {
+            rb.disabled = true; rb.textContent = "Sending…";
+            jfetch("/vancheck/remind-now", { method: "POST" }, 8000).then(function (r) {
+              rb.textContent = r && r.ok ? "✓ Reminded " + (r.reminded || 0) : "Done";
+            }).catch(function () { rb.disabled = false; rb.textContent = "🔔 Remind now (" + outstanding.length + ")"; });
+          });
+        });
+      }
+    });
+
+    // ── Boot: render from cached permissions (instant), then hide if none. ───
+    function boot() {
+      var perms = {};
+      try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {}; } catch (e) {}
+      HUB.run(perms);
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+    else boot();
+  })();
+  </script>
+
 </body>
 </html>
