@@ -14295,7 +14295,12 @@ async function fetchSnapshot(site, ch) {
   const tmpl = site.path || VENDOR_PATH[site.vendor === "dahua" ? "dahua" : "hik"];
   const uri = tmpl.replace(/\{ch\}/g, encodeURIComponent(ch));
   const target = base + uri;
-  const ACCEPT = { "Accept": "image/jpeg,image/*,*/*", "User-Agent": "Mostlane-CCTV/1.0" };
+  const ACCEPT = {
+    "Accept": "image/avif,image/webp,image/jpeg,image/png,image/*,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Referer": base + "/doc/index.html"
+  };
   const dbg = { firstStatus: null, wwwAuth: null, authScheme: null, authTried: false, finalStatus: null, reason: null };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8e3);
