@@ -118,6 +118,7 @@
       <div class="field"><label>Show</label>
         <select id="filterActive" onchange="renderFleet()">
           <option value="all">All vehicles</option>
+          <option value="attention">Needs attention</option>
           <option value="active">Active only</option>
           <option value="inactive">Inactive only</option>
           <option value="due">Service due / overdue</option>
@@ -134,6 +135,9 @@
     </div>
 
     <div class="reorder-hint" id="reorderHint">Tip: drag the <b>⠿</b> handle on a card to reorder the fleet — the order is saved and shared across the portal. (Clear the search/filter to reorder.)</div>
+    <div id="attnBanner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:11px 14px;margin:0 0 12px;color:#92400e;font-size:13.5px;font-weight:600;">
+      ⚠ Showing vans that <b>need attention</b> — MOT or tax due within 30 days (or overdue), a service due, or a handover still pending. The amber/red tags on each card show exactly why. <a href="#" onclick="document.getElementById('filterActive').value='all';renderFleet();return false;" style="color:#92400e;text-decoration:underline;">Show all vehicles</a>
+    </div>
     <div class="grid" id="fleetGrid"></div>
     <div class="status-line"><span id="statusLine">Loading fleet…</span><span>Mostlane • Vehicles</span></div>
   </div>
@@ -296,6 +300,9 @@
       const d=await aFetch("/fleet/vehicles").then(r=>r.json());
       FLEET=(d&&d.vehicles)?d.vehicles:[];
       try{ const us=await aFetch("/users").then(r=>r.json()); PUSERS=(us.Users||us.users||[]).filter(u=>u.Username); }catch(e){}
+      // Honour a ?filter= deep-link (e.g. the home dashboard's "vans to attend"
+      // KPI lands here on the Needs-attention view).
+      try{ const f=new URLSearchParams(location.search).get("filter"); const sel=$("filterActive"); if(f && sel && [...sel.options].some(o=>o.value===f)) sel.value=f; }catch(e){}
       updateSummary(); renderFleet();
       $("statusLine").textContent=FLEET.length?("Fleet loaded ("+FLEET.length+").") : "No vehicles yet — use “Add vehicle”.";
     }catch(e){ console.error(e); $("statusLine").textContent="Failed to load fleet."; }
@@ -357,12 +364,27 @@
     return `<span class="tag ${cls}">Service<em>${esc(sub)}</em></span>`;
   }
 
+  // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = none).
+  function daysTo(s){ if(!s) return null; const d=new Date(s); if(isNaN(d)) return null; d.setHours(0,0,0,0); const t=new Date(); t.setHours(0,0,0,0); return Math.round((d-t)/86400000); }
+  // "Needs attention" = the SAME rule as the home dashboard's "vans to attend":
+  // MOT or tax due within 30 days (or overdue), a service warn/overdue, OR a
+  // handover still pending. Each reason is shown as an amber/red tag on the card.
+  function needsAttention(v){
+    if(v.active===false) return false;
+    const m=daysTo(v.motDue), t=daysTo(v.taxDue);
+    return (m!=null&&m<=30)||(t!=null&&t<=30)||v.serviceStatus==="warn"||v.serviceStatus==="bad"||!!v.pendingHandover;
+  }
+
   function renderFleet(){
     const grid=$("fleetGrid"); grid.innerHTML="";
     const qv=($("searchInput").value||"").toLowerCase();
     const filt=$("filterActive").value;
+    // Explain the "needs attention" view so it's obvious WHY each van is listed.
+    const att=$("attnBanner");
+    if(att) att.style.display = (filt==="attention") ? "block" : "none";
     let list=FLEET.slice();
     if(qv) list=list.filter(v=>[v.reg,pName(v.driver),v.make,v.model].some(x=>(x||"").toLowerCase().includes(qv)));
+    if(filt==="attention") list=list.filter(needsAttention);
     if(filt==="active") list=list.filter(v=>v.active!==false);
     if(filt==="inactive") list=list.filter(v=>v.active===false);
     if(filt==="due") list=list.filter(v=>v.serviceStatus==="warn"||v.serviceStatus==="bad");
