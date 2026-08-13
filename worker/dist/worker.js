@@ -9137,6 +9137,41 @@ async function vanCheckPhotoCounts(env, tid) {
   }
   return out;
 }
+var DEFECTCLR_KEY = (tid) => `fleet:defectsclear:${tid}`;
+async function vanCheckDefects(env, tid, resolved) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {};
+      try {
+        items = r.items ? JSON.parse(r.items) : {};
+      } catch {
+      }
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle);
+      const clearAt = resolved && resolved[rk] || "";
+      if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
+      const answers = items.answers || {};
+      const defItems = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing").length;
+      const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
+      if (!defItems && !notSafe) continue;
+      const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
+      cur.items += defItems;
+      cur.checks += 1;
+      if (notSafe) cur.notSafe = true;
+      const at = r.checked_at || "";
+      if (at) {
+        if (!cur.since || new Date(at) < new Date(cur.since)) cur.since = at;
+        if (!cur.latest || new Date(at) > new Date(cur.latest)) cur.latest = at;
+      }
+    }
+  } catch {
+  }
+  return out;
+}
 function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
@@ -9319,6 +9354,13 @@ async function handle20(request, env, ctx, url, sess) {
     const photos = await photoIndex(env, tid);
     const covers = await coverMap(env, tid);
     const vcCounts = await vanCheckPhotoCounts(env, tid);
+    let defResolved = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
+      if (row && row.value) defResolved = JSON.parse(row.value) || {};
+    } catch {
+    }
+    const defects = await vanCheckDefects(env, tid, defResolved);
     await ensureHandoverTable(env);
     const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
     const lastHo = {}, pendHo = {};
@@ -9382,6 +9424,11 @@ async function handle20(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
+        // Outstanding van-check defects (stay flagged until an admin resolves).
+        defectItems: (defects[dn(v.reg)] || {}).items || 0,
+        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
+        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
+        defectSince: (defects[dn(v.reg)] || {}).since || "",
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0
@@ -10065,6 +10112,21 @@ async function handle20(request, env, ctx, url, sess) {
     }
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
     return jr3({ ok: true, reg, checks }, headers);
+  }
+  if (sub === "/defects-resolve" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    let map = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
+      if (row && row.value) map = JSON.parse(row.value) || {};
+    } catch {
+    }
+    map[rk] = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, reg, resolvedAt: map[rk] }, headers);
   }
   if (sub === "/handover/request" && method === "POST") {
     await ensureHandoverTable(env);
