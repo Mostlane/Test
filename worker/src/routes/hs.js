@@ -16,6 +16,7 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
+import { PdfDoc } from "../lib/pdf.js";
 
 const PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
 
@@ -115,6 +116,39 @@ export async function handle(request, env, ctx, url, sess) {
       title: "Risk assessment signed", body: `${mine.name || me} has signed ${row.ref || "a risk assessment"}.`,
       url: "/hs-docs.html", tag: "hs-signed"
     }));
+    return json({ ok: true }, {}, env, request);
+  }
+  // ── File the signer's own completed copy into their My Documents ────────────
+  // The signing page rasterises the finished document (colour-faithful) to A4
+  // page images and posts them here; we wrap them into a PDF (lib/pdf.js) and
+  // drop it into staffdocs under a "Risk Assessments" folder → it appears in
+  // My Documents › Risk Assessments for the person who signed.
+  if (path === "/hs/doc/file-signed" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const pages = Array.isArray(b.pages) ? b.pages : [];
+    if (!id || !pages.length) return error("id and pages required", 400, env, request);
+    const row = await db.prepare("SELECT id, ref, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    if (!parseArr(row.sign_requests).some(s => s.username === me)) return error("This document wasn't sent to you.", 403, env, request);
+    const pdf = new PdfDoc();
+    let first = true, n = 0;
+    for (const durl of pages.slice(0, 30)) {
+      const m = /^data:image\/jpe?g;base64,(.+)$/.exec(String(durl || ""));
+      if (!m) continue;
+      let bin; try { bin = atob(m[1]); } catch { continue; }
+      const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      if (!first) pdf.newPage(); first = false; n++;
+      pdf.image(u8, 0, 0, 595, 842);   // full-bleed A4 portrait
+    }
+    if (!n) return error("No usable page images.", 400, env, request);
+    const out = pdf.bytes();
+    const safe = String(row.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
+    const key = `staffdocs/${db.tenantId}/user/${me}/Risk Assessments/${Date.now()}-RA-${safe}.pdf`;
+    await env.JOB_FILES.put(key, out, {
+      httpMetadata: { contentType: "application/pdf" },
+      customMetadata: { name: ("Risk Assessment " + (row.ref || "")).trim() + ".pdf", by: me, at: new Date().toISOString() }
+    });
     return json({ ok: true }, {}, env, request);
   }
 

@@ -8,6 +8,7 @@
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
   <script src="hs-rams-render.js?v=1"></script>
+  <script src="html2canvas.min.js?v=1"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -75,7 +76,8 @@
 
       <div class="card noprint hide" id="doneCard" style="border-color:#0a7d33;">
         <b style="color:#0a7d33;">✓ Thank you — your signature has been saved.</b>
-        <p class="muted" style="margin:6px 0 0;">Your name and signature now appear on the document's sign-off. You can print/save a copy below.</p>
+        <p class="muted" style="margin:6px 0 0;">Your name and signature now appear on the document's sign-off.</p>
+        <p class="muted" id="fileMsg" style="margin:6px 0 0;"></p>
         <button class="btn ghost small" style="margin-top:8px;" onclick="window.print()">🖨️ Print / Save PDF</button>
       </div>
     </div>
@@ -143,7 +145,41 @@
       await loadOne(CUR_ID);
       g("signCard").classList.add("hide"); g("doneCard").classList.remove("hide");
       window.scrollTo({ top: 0, behavior: "smooth" });
+      fileMyCopy();   // file a colour-faithful copy into their My Documents
     } catch (e) { g("signMsg").className = "msg err"; g("signMsg").textContent = "Couldn't save — " + e.message; g("signBtn").disabled = false; }
+  }
+
+  // Wait for all images in an element to finish loading before rasterising.
+  function waitImgs(el) {
+    const imgs = [...el.querySelectorAll("img")];
+    return Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = im.onerror = res; })));
+  }
+  // Rasterise the finished document to A4-portrait page images (colour-faithful —
+  // it's a screenshot of the rendered doc) and file it as a PDF in My Documents.
+  async function fileMyCopy() {
+    const el = g("docBody");
+    if (!window.html2canvas || !el) return;
+    g("fileMsg").textContent = "Filing a copy to your My Documents…";
+    try {
+      await waitImgs(el);
+      const canvas = await html2canvas(el, { useCORS: true, backgroundColor: "#ffffff", scale: 2, logging: false });
+      const cw = canvas.width;
+      const pageH = Math.max(1, Math.round(cw * (842 / 595)));   // A4 portrait aspect
+      const pages = [];
+      for (let y = 0; y < canvas.height; y += pageH) {
+        const h = Math.min(pageH, canvas.height - y);
+        const pc = document.createElement("canvas"); pc.width = cw; pc.height = pageH;
+        const cx = pc.getContext("2d"); cx.fillStyle = "#ffffff"; cx.fillRect(0, 0, cw, pageH);
+        cx.drawImage(canvas, 0, y, cw, h, 0, 0, cw, h);
+        pages.push(pc.toDataURL("image/jpeg", 0.82));
+      }
+      const r = await authFetch("/hs/doc/file-signed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: CUR_ID, pages }) }).then(r => r.json());
+      g("fileMsg").innerHTML = r && r.ok
+        ? '✓ A copy has been saved to your <b>My Documents → Risk Assessments</b>.'
+        : 'Signed — but the My Documents copy couldn’t be filed. You can still print/save it below.';
+    } catch (e) {
+      g("fileMsg").textContent = "Signed — but the My Documents copy couldn’t be filed. You can still print/save it below.";
+    }
   }
 
   async function loadList() {
