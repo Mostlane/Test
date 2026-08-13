@@ -2,50 +2,51 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=3"></script>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Purchase Orders — Mostlane Portal</title>
   <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Purchase Orders — Mostlane Portal</title>
   <style>
     html, body { margin:0; height:100%; background:#eef1f4; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; }
-    #poFrame { border:0; width:100%; height:100vh; display:none; }
     #poMsg { padding:48px 22px; text-align:center; color:#5b6b78; font-size:15px; }
     #poMsg h2 { color:#003366; font-size:18px; margin:0 0 8px; }
     #poMsg a { color:#0066cc; }
   </style>
 </head>
 <body>
+  <!-- PO launcher. Every PO entry point in the portal (field-app PO tab, the menu
+       tile, the sidebar) points here. It routes by role to the IN-PORTAL PO pages:
+       office/admin (Purchase Orders or Full Access) -> po-office.html, field
+       engineers -> po-raise.html. (Was: redirected to the standalone mostlane-po
+       worker via /po-config. To revert, restore the previous version of this file.) -->
   <div id="poMsg">Opening Purchase Orders…</div>
-  <iframe id="poFrame" title="Purchase Orders"></iframe>
 
   <script>
     (function () {
       var API = window.MOSTLANE_API;
       var token = localStorage.getItem("mostlaneToken");
-      if (!token) { location.href = "login.html"; return; }
+      if (!token) { location.replace("login.html"); return; }
       var msg = document.getElementById("poMsg");
-      var frame = document.getElementById("poFrame");
-      var isMobile = window.matchMedia("(max-width:999px)").matches;
 
-      fetch(API + "/po-config", { headers: { "Authorization": "Bearer " + token } })
+      fetch(API + "/auth/me", { headers: { "Authorization": "Bearer " + token } })
         .then(function (r) { return r.json(); })
-        .then(function (c) {
-          if (!c || !c.ok || !c.url) {
-            msg.innerHTML = "<h2>No PO link on your account</h2>Ask the office to add your personal PO URL in Users admin.";
+        .then(function (me) {
+          var u = (me && me.user) || {};
+          // Office/admin first: anyone who can MANAGE POs gets the full office view
+          // (this also covers owners/admins whose staffType defaults to "field").
+          if (u.FullAccess === "Yes" || u.PurchaseOrders === "Yes") {
+            location.replace("po-office.html");
             return;
           }
-          if (isMobile) {
-            // Mobile: the sidebar is hidden anyway — go straight to PO (its own top bar handles navigation).
-            location.replace(c.url);
+          // Field engineers raise POs (out-of-hours rule enforced on the page).
+          if (u.StaffType === "field") {
+            location.replace("po-raise.html");
             return;
           }
-          // Desktop: embed PO to the right of the portal sidebar. embed=1 tells PO to hide its own bar.
-          frame.src = c.url + (c.url.indexOf("?") > -1 ? "&" : "?") + "embed=1";
-          frame.style.display = "block";
-          msg.style.display = "none";
+          msg.innerHTML = "<h2>No PO access</h2>Ask the office to enable Purchase Orders for your account.";
         })
         .catch(function () {
-          msg.innerHTML = "<h2>Couldn't open Purchase Orders</h2>Check your connection and try again.";
+          msg.innerHTML = "<h2>Couldn't open Purchase Orders</h2>Check your connection and try again, or <a href='main.html'>go back to the menu</a>.";
         });
     })();
   </script>
