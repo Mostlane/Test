@@ -7684,8 +7684,9 @@ async function withAttachmentUrls(env, origin, atts) {
 }
 var RA_PAGE_H = 842;
 var RA_PAGE_W = 595;
-var RA_FOOTER = 22;
-var RA_CONTENT_H = RA_PAGE_H - RA_FOOTER;
+var RA_MARGIN_TOP = 28;
+var RA_MARGIN_BOT = 30;
+var RA_CONTENT_H = RA_PAGE_H - RA_MARGIN_TOP - RA_MARGIN_BOT;
 function buildRaPdf(pages, ref) {
   const imgs = [];
   for (const durl of (Array.isArray(pages) ? pages : []).slice(0, 40)) {
@@ -7706,9 +7707,9 @@ function buildRaPdf(pages, ref) {
   const N = imgs.length;
   imgs.forEach((u8, i) => {
     if (i > 0) pdf.newPage();
-    pdf.image(u8, 0, 0, RA_PAGE_W, RA_CONTENT_H);
-    if (ref) pdf.text(24, RA_PAGE_H - 8, String(ref), { size: 8, grey: true });
-    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 8, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
+    pdf.image(u8, 0, RA_MARGIN_TOP, RA_PAGE_W, RA_CONTENT_H);
+    if (ref) pdf.text(24, RA_PAGE_H - 11, String(ref), { size: 8, grey: true });
+    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 11, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
   });
   return pdf.bytes();
 }
