@@ -417,6 +417,7 @@ async function getJobCost(db, params) {
   };
 }
 
+const PO_START = 10011;   // first PO number the system allocates (from the standalone worker)
 async function nextPoNumber(db) {
   const row = await db.prepare(`
     SELECT COALESCE(MIN(n), ?) AS next FROM (
