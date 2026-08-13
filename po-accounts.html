@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<script src="/portal-config.js?v=3"></script>
+<script src="auth.js"></script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>💷 Supplier Accounts — Mostlane Portal</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #e6e8eb;
+  color: #1a1a1a;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; top: 0; z-index: 10;
+}
+.topbar .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 15px; }
+.topbar .brand img { height: 32px; width: auto; background: #fff; padding: 4px 8px; border-radius: 6px; }
+.topbar .backbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  border-radius: 10px; background: rgba(255,255,255,0.15);
+  color: #fff; text-decoration: none;
+  transition: background 0.15s, transform 0.15s;
+}
+.topbar .backbtn:hover { background: rgba(255,255,255,0.28); transform: translateX(-1px); }
+.topbar .backbtn:active { transform: translateX(0); }
+.topbar .backbtn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.topbar nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.topbar nav a {
+  color: #fff; text-decoration: none; font-size: 13px; font-weight: 500;
+  padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.1);
+  transition: background 0.15s;
+}
+.topbar nav a:hover, .topbar nav a.active { background: rgba(255,255,255,0.25); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px 14px 60px; }
+.wrap-narrow { max-width: 560px; margin: 0 auto; padding: 16px 14px 60px; }
+h1 { font-size: 22px; font-weight: 600; color: #003366; margin: 0 0 16px; }
+h2 { font-size: 17px; font-weight: 600; color: #003366; margin: 0 0 12px; }
+h3 { font-size: 14px; font-weight: 600; color: #003366; margin: 0 0 10px; }
+p { margin: 0 0 12px; }
+.muted { color: #5a6677; font-size: 13px; }
+.card {
+  background: #ffffff; border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  box-shadow: 0 2px 10px rgba(0, 30, 80, 0.06); border: 1px solid #e3e7ee;
+}
+label { display: block; font-size: 13px; font-weight: 600; color: #003366; margin-bottom: 6px; }
+input, select, textarea {
+  width: 100%; padding: 12px 14px; border: 1px solid #c9d2dd; border-radius: 10px;
+  font-size: 16px; font-family: inherit; background: #fff; color: #1a1a1a;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: #1A4F8F; box-shadow: 0 0 0 3px rgba(26, 79, 143, 0.12);
+}
+textarea { min-height: 90px; resize: vertical; }
+.field { margin-bottom: 14px; }
+button, .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff; border: none; border-radius: 12px;
+  font-weight: 600; font-size: 15px; font-family: inherit;
+  cursor: pointer; text-decoration: none;
+  box-shadow: 0 3px 8px rgba(0,30,80,0.20), inset 0 1px 2px rgba(255,255,255,0.15);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(0,30,80,0.28), inset 0 1px 2px rgba(255,255,255,0.20); }
+button:active, .btn:active { transform: translateY(0); }
+button.ghost, .btn.ghost {
+  background: #fff; color: #003366; border: 1px solid #c9d2dd;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+button.ghost:hover { background: #f5f7fb; transform: translateY(-1px); }
+button.danger { background: linear-gradient(180deg, #c0392b 0%, #962d22 100%); }
+button.big { padding: 18px 24px; font-size: 16px; width: 100%; }
+button.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: #5a6677; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 2px solid #003366; }
+td { padding: 12px 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+tr:hover td { background: #f8fafd; }
+.badge { display: inline-block; padding: 3px 9px; font-size: 12px; font-weight: 600; border-radius: 20px; }
+.badge.review { background: #fff4d6; color: #8a6100; }
+.badge.ok { background: #d6f5dd; color: #1e6c33; }
+.badge.engineer { background: #d6e4f5; color: #1A4F8F; }
+.badge.office { background: #ececf0; color: #555; }
+.badge.danger-badge { background: #fdeeec; color: #962d22; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (min-width: 700px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+.stat { background: #fff; border: 1px solid #e3e7ee; padding: 14px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,30,80,0.04); }
+.stat .v { font-size: 26px; font-weight: 700; color: #003366; line-height: 1.1; }
+.stat .l { font-size: 12px; color: #5a6677; margin-top: 4px; font-weight: 500; }
+.attention-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 700px) { .attention-grid { grid-template-columns: repeat(6, 1fr); } }
+.att { background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; padding: 12px 14px; cursor: pointer; text-align: left; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; }
+.att:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,30,80,0.12); border-color: #c9d2dd; }
+.att .v { font-size: 24px; font-weight: 700; line-height: 1; }
+.att .l { font-size: 11px; color: #5a6677; margin-top: 5px; font-weight: 600; }
+.att.zero { opacity: 0.5; }
+.att.zero:hover { opacity: 0.8; }
+.alert { padding: 14px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #003366; background: #f0f5fc; font-size: 14px; color: #1a1a1a; }
+.alert.warn { border-color: #c0392b; background: #fdeeec; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.po-display { font-size: 64px; font-weight: 700; color: #003366; letter-spacing: -0.02em; line-height: 1; text-align: center; }
+.filter-bar { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 14px; }
+@media (min-width: 700px) { .filter-bar { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+.filter-bar input, .filter-bar select { font-size: 14px; padding: 9px 12px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; background: #fff; padding: 6px; border-radius: 12px; border: 1px solid #e3e7ee; overflow-x: auto; }
+.tab { padding: 9px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: #5a6677; border-radius: 8px; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.tab.active { background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%); color: #fff; }
+.tab:hover:not(.active) { background: #f0f5fc; color: #003366; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 500px) { .grid-2 { grid-template-columns: 1fr; } }
+.table-scroll { overflow-x: auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f0f5fc; border: 1px solid #d6e4f5; border-radius: 20px; font-size: 13px; color: #003366; }
+.chip button { padding: 0; width: 18px; height: 18px; line-height: 1; background: transparent; box-shadow: none; color: #5a6677; font-size: 14px; border-radius: 50%; }
+.chip button:hover { background: #d6e4f5; transform: none; box-shadow: none; }
+.modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0, 20, 40, 0.5); z-index: 100; justify-content: center; align-items: center; padding: 16px; }
+.modal-backdrop.show { display: flex; }
+.modal { background: #fff; border-radius: 14px; padding: 20px; max-width: 500px; width: 100%; max-height: 92vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,30,80,0.25); }
+.bar-chart { display: flex; flex-direction: column; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: 140px 1fr 50px; gap: 10px; align-items: center; font-size: 13px; }
+@media (max-width: 500px) { .bar-row { grid-template-columns: 100px 1fr 40px; font-size: 12px; } }
+.bar-row .name { color: #003366; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .bar { background: #e3e7ee; height: 22px; border-radius: 6px; position: relative; overflow: hidden; }
+.bar-row .bar .fill { height: 100%; background: linear-gradient(90deg, #1A4F8F, #003468); border-radius: 6px; transition: width 0.4s ease; }
+.bar-row .count { font-weight: 600; color: #003366; text-align: right; }
+.fade-in { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.empty { text-align: center; padding: 40px 20px; color: #5a6677; font-size: 14px; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; background: #f0f5fc; padding: 2px 6px; border-radius: 4px; color: #003366; }
+.ac-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: #fff; border: 1px solid #c9d2dd; border-top: none;
+  border-radius: 0 0 10px 10px; max-height: 280px; overflow-y: auto;
+  box-shadow: 0 4px 14px rgba(0,30,80,0.12);
+}
+.ac-item { padding: 10px 14px; cursor: pointer; font-size: 15px; color: #1a1a1a; border-bottom: 1px solid #f0f5fc; }
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: #f0f5fc; color: #003366; }
+.ac-item strong { color: #1A4F8F; font-weight: 700; background: #fff4d6; }
+.ac-empty { padding: 14px; color: #5a6677; font-size: 13px; font-style: italic; }
+.my-po { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eef1f5; align-items: center; }
+.my-po:last-child { border-bottom: none; }
+.my-po-num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 700; color: #003366; font-size: 15px; min-width: 60px; }
+.my-po-detail { flex: 1; font-size: 14px; }
+
+.po-nav a{color:#fff;text-decoration:none;font-size:13px;font-weight:500;padding:6px 10px;border-radius:6px;background:rgba(255,255,255,.12);margin-left:4px}
+#poGate{max-width:560px;margin:40px auto;padding:0 16px}</style>
+
+</head><body>
+<header class="page" style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px">
+<a class="ml-back" href="po-office.html" title="Back" style="color:#fff">‹ Back</a>
+<h1 style="font-size:17px;margin:0;flex:1;color:#fff">💷 Supplier Accounts</h1>
+<nav class="po-nav"><a href="po-jobs.html">Jobs</a><a href="po-summary.html">Summary</a><a href="po-accounts.html">Accounts</a><a href="po-stats.html">Stats</a></nav>
+</header>
+<div id="poGate" class="muted">Checking access…</div>
+<div id="poApp" style="display:none">
+<div class="wrap">
+    <h1>Supplier Accounts</h1>
+    <div class="card">
+      <p class="muted" style="margin-bottom:10px">Outstanding amounts per supplier by spend month, <strong>inc VAT</strong>. POs marked <strong>✓ Complete</strong> count as paid. Terms: <strong>30 days</strong> = due end of the month after the spend month; <strong>60 days</strong> = end of the second month after. Overdue amounts show in red.</p>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#1a1a1a;font-weight:500;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="filter-due" style="width:auto;margin:0" onchange="render()"> Only suppliers with a balance due now
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#1a1a1a;font-weight:500;font-size:14px;cursor:pointer">
+          <input type="checkbox" id="filter-balance" style="width:auto;margin:0" onchange="render()"> Hide suppliers with no balance
+        </label>
+      </div>
+    </div>
+    <div class="stat-grid" id="totals"></div>
+    <div class="card" style="padding:0">
+      <div class="table-scroll">
+        <table>
+          <thead id="acc-thead"></thead>
+          <tbody id="acc-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+const API=window.MOSTLANE_API;
+function authFetch(path,opts){opts=opts||{};opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")},opts.headers||{});return fetch(API+path,opts);}
+async function __gate(cb){try{var me=await authFetch("/auth/me").then(function(r){return r.json();});var u=me&&me.user||{};if(!(u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){document.getElementById("poGate").innerHTML="This page needs the Purchase Orders permission.";return;}}catch(e){location.href="login.html";return;}document.getElementById("poGate").style.display="none";document.getElementById("poApp").style.display="block";if(typeof cb==="function")cb();}
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let DATA = null;
+function formatMoney(n) { return '£' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+function ymKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+function monthLabel(ym) { return MONTH_NAMES[Number(ym.slice(5, 7)) - 1] + ' ' + ym.slice(2, 4); }
+// Due date = last day of the month 1 (30 days) or 2 (60 days) months after
+// the spend month, so the exact day count flexes with month lengths.
+function dueDate(ym, termsDays) {
+  const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  const monthsAfter = Number(termsDays) === 60 ? 2 : 1;
+  return new Date(y, m + monthsAfter, 0, 23, 59, 59);
+}
+// Past 3 months plus the current month, oldest first
+function windowMonths() {
+  const out = [];
+  const now = new Date();
+  for (let i = 3; i >= 0; i--) out.push(ymKey(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+  return out;
+}
+async function init() {
+  DATA = await authFetch('/po/api/accounts').then(r => r.json());
+  render();
+}
+function render() {
+  const months = windowMonths();
+  const onlyDue = document.getElementById('filter-due').checked;
+  const onlyBalance = document.getElementById('filter-balance').checked;
+  const now = new Date();
+  const bySupplier = {};
+  for (const row of DATA.months) {
+    (bySupplier[row.supplier] = bySupplier[row.supplier] || []).push(row);
+  }
+  const supplierMeta = {};
+  for (const s of DATA.suppliers) supplierMeta[s.name] = s;
+  // Every active supplier, plus any free-text supplier with outstanding POs
+  const names = new Set(DATA.suppliers.map(s => s.name));
+  for (const n of Object.keys(bySupplier)) names.add(n);
+  const rows = [];
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const meta = supplierMeta[name];
+    const terms = meta && meta.terms_days ? Number(meta.terms_days) : 30;
+    const cells = {};
+    let older = 0, balance = 0, dueNow = 0, uncosted = 0;
+    for (const r of (bySupplier[name] || [])) {
+      uncosted += Number(r.uncosted_open || 0);
+      const amt = Number(r.unpaid_inc_vat || 0);
+      if (!amt) continue;
+      balance += amt;
+      if (months.includes(r.ym)) cells[r.ym] = (cells[r.ym] || 0) + amt;
+      else if (r.ym < months[0]) older += amt;
+      if (dueDate(r.ym, terms) < now) dueNow += amt;
+    }
+    rows.push({ name, meta, terms, cells, older, balance, dueNow, uncosted });
+  }
+  let visible = rows;
+  if (onlyDue) visible = visible.filter(r => r.dueNow > 0);
+  if (onlyBalance) visible = visible.filter(r => r.balance > 0 || r.uncosted > 0);
+  document.getElementById('acc-thead').innerHTML = '<tr><th>Supplier</th><th>Terms</th><th>Older</th>' +
+    months.map((m, i) => '<th>' + monthLabel(m) + (i === months.length - 1 ? ' (current)' : '') + '</th>').join('') +
+    '<th>Balance</th><th>Due now</th></tr>';
+  const tBal = visible.reduce((s, r) => s + r.balance, 0);
+  const tDue = visible.reduce((s, r) => s + r.dueNow, 0);
+  const tUncosted = visible.reduce((s, r) => s + r.uncosted, 0);
+  document.getElementById('totals').innerHTML =
+    '<div class="stat"><div class="v">' + formatMoney(tBal) + '</div><div class="l">Total outstanding inc VAT</div></div>' +
+    '<div class="stat"><div class="v" style="color:' + (tDue ? '#c0392b' : '#003366') + '">' + formatMoney(tDue) + '</div><div class="l">Due now</div></div>' +
+    '<div class="stat"><div class="v">' + visible.filter(r => r.balance > 0).length + '</div><div class="l">Suppliers with balance</div></div>' +
+    '<div class="stat"><div class="v" style="color:' + (tUncosted ? '#b58a00' : '#003366') + '">' + tUncosted + '</div><div class="l">Uncosted open POs</div></div>';
+  const tbody = document.getElementById('acc-tbody');
+  if (!visible.length) { tbody.innerHTML = '<tr><td colspan="' + (5 + months.length) + '"><div class="empty">Nothing outstanding.</div></td></tr>'; return; }
+  tbody.innerHTML = visible.map(r => {
+    const warn = r.uncosted ? ' <span title="' + r.uncosted + ' open PO(s) with no cost entered yet — balance is incomplete" style="color:#b58a00">⚠️' + r.uncosted + '</span>' : '';
+    const termsCell = r.meta
+      ? '<select style="width:auto;padding:6px 8px;font-size:13px" onchange="setTerms(' + r.meta.id + ', this.value)"><option value="30"' + (r.terms === 30 ? ' selected' : '') + '>30 days</option><option value="60"' + (r.terms === 60 ? ' selected' : '') + '>60 days</option></select>'
+      : '<span class="muted" title="Not in supplier list — assumed 30 days">30 days*</span>';
+    const monthCells = months.map(m => {
+      const amt = r.cells[m] || 0;
+      if (!amt) return '<td class="muted">—</td>';
+      const overdue = dueDate(m, r.terms) < now;
+      return '<td' + (overdue ? ' style="color:#c0392b;font-weight:600" title="Past due date (' + fmtDate(dueDate(m, r.terms)) + ')"' : ' title="Due ' + fmtDate(dueDate(m, r.terms)) + '"') + '>' + formatMoney(amt) + '</td>';
+    }).join('');
+    return '<tr><td><strong>' + escapeHtml(r.name) + '</strong>' + warn + '</td><td>' + termsCell + '</td>' +
+      '<td' + (r.older ? ' style="color:#c0392b;font-weight:600" title="Unpaid spend older than shown months — past due"' : ' class="muted"') + '>' + (r.older ? formatMoney(r.older) : '—') + '</td>' +
+      monthCells +
+      '<td><strong>' + (r.balance ? formatMoney(r.balance) : '—') + '</strong></td>' +
+      '<td' + (r.dueNow ? ' style="color:#c0392b;font-weight:700"' : ' class="muted"') + '>' + (r.dueNow ? formatMoney(r.dueNow) : '—') + '</td></tr>';
+  }).join('');
+}
+async function setTerms(id, value) {
+  await authFetch('/po/api/suppliers/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ terms_days: Number(value) }) });
+  const s = DATA.suppliers.find(x => x.id === id);
+  if (s) s.terms_days = Number(value);
+  render();
+}
+function fmtDate(d) {
+  const p = n => (n < 10 ? '0' : '') + n;
+  return p(d.getDate()) + '-' + p(d.getMonth() + 1) + '-' + String(d.getFullYear()).slice(2);
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+__gate(init);
+
+</script></body></html>
