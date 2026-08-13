@@ -66,6 +66,8 @@ export async function handle(request, env, ctx, url, sess) {
     // Update = MERGE into the existing record so a partial edit (e.g. just adding
     // a phone number to a site from inside a job) never wipes the site's other
     // fields. Look up by the old number first (a rename), else the current one.
+    // While merging, build a human "before → after" note for the activity log.
+    let auditNote = "";
     if (path === "/update-site") {
       const lookNum = String(oldNum || siteNumber).trim();
       const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
@@ -73,18 +75,29 @@ export async function handle(request, env, ctx, url, sess) {
       if (row) {
         let cur = {}; try { cur = JSON.parse(row.data) || {}; } catch {}
         const merged = { ...cur };
+        // Which fields changed (human-named), for the activity-log note.
+        const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
+        const clean = s => String(s == null ? "" : s).replace(/\s+/g, " ").replace(/ · /g, " ").trim();
+        const chg = [];
         for (const [k, v] of Object.entries(site)) {
-          if (v !== undefined && v !== null && v !== "") merged[k] = v;
+          if (v !== undefined && v !== null && v !== "") {
+            if (NOTE_FIELDS[k] && clean(cur[k]) !== clean(v)) chg.push(`${NOTE_FIELDS[k]} "${clean(cur[k]) || "—"}" → "${clean(v)}"`);
+            merged[k] = v;
+          }
         }
+        if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" → "${clean(siteNumber)}"`);
         merged.siteNumber = siteNumber; merged.client = client;
         site = merged;
+        const label = clean(merged.name) || siteNumber;
+        auditNote = (chg.length ? `${label} — ${chg.join(", ")}` : label).slice(0, 380);
       }
     }
 
     await saveSite(env, tenantId, site);
     await ensureCustomer(env, tenantId, client);
     await pushSiteToSiteLog(env, site);
-    return json({ success: true, site }, {}, env, request);
+    const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
+    return json({ success: true, site }, { headers }, env, request);
   }
 
   if (path === "/next-project-job-number" && method === "GET") {

@@ -6461,6 +6461,7 @@ async function handle9(request, env, ctx, url, sess) {
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
       await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
     }
+    let auditNote = "";
     if (path === "/update-site") {
       const lookNum = String(oldNum || siteNumber).trim();
       const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
@@ -6471,18 +6472,28 @@ async function handle9(request, env, ctx, url, sess) {
         } catch {
         }
         const merged = { ...cur };
+        const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
+        const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").replace(/ · /g, " ").trim();
+        const chg = [];
         for (const [k, v] of Object.entries(site)) {
-          if (v !== void 0 && v !== null && v !== "") merged[k] = v;
+          if (v !== void 0 && v !== null && v !== "") {
+            if (NOTE_FIELDS[k] && clean(cur[k]) !== clean(v)) chg.push(`${NOTE_FIELDS[k]} "${clean(cur[k]) || "\u2014"}" \u2192 "${clean(v)}"`);
+            merged[k] = v;
+          }
         }
+        if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" \u2192 "${clean(siteNumber)}"`);
         merged.siteNumber = siteNumber;
         merged.client = client;
         site = merged;
+        const label = clean(merged.name) || siteNumber;
+        auditNote = (chg.length ? `${label} \u2014 ${chg.join(", ")}` : label).slice(0, 380);
       }
     }
     await saveSite(env, tenantId, site);
     await ensureCustomer(env, tenantId, client);
     await pushSiteToSiteLog(env, site);
-    return json({ success: true, site }, {}, env, request);
+    const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
+    return json({ success: true, site }, { headers }, env, request);
   }
   if (path === "/next-project-job-number" && method === "GET") {
     return json({ next: await nextProjectNumber(env, tenantId) }, {}, env, request);
@@ -13548,11 +13559,12 @@ var index_default = {
     const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
     try {
       const resp = await match[2](request, env, ctx, url, sess);
-      auditAction(env, ctx, sess, request, url, resp.status, auditClone);
+      const auditNote = resp && resp.headers && resp.headers.get("X-Audit-Note") || "";
+      auditAction(env, ctx, sess, request, url, resp.status, auditClone, auditNote);
       return resp;
     } catch (err) {
       console.error("Handler error:", err);
-      auditAction(env, ctx, sess, request, url, 500, auditClone);
+      auditAction(env, ctx, sess, request, url, 500, auditClone, "");
       return error("Server error: " + err.message, 500, env, request);
     }
   },
@@ -13594,7 +13606,7 @@ async function ensureAuditCols(env) {
   }
   AUDIT_MIGRATED = true;
 }
-function auditAction(env, ctx, sess, request, url, status, clone) {
+function auditAction(env, ctx, sess, request, url, status, clone, note) {
   try {
     if (!sess) return;
     const m = request.method.toUpperCase();
@@ -13611,9 +13623,17 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
     ctx.waitUntil((async () => {
       await ensureAuditCols(env);
       let detail = "";
+      if (note) {
+        try {
+          detail = decodeURIComponent(note);
+        } catch {
+          detail = String(note);
+        }
+        detail = detail.slice(0, 400);
+      }
       try {
         const ct = clone && clone.headers.get("Content-Type") || "";
-        if (clone && ct.includes("application/json")) {
+        if (!detail && clone && ct.includes("application/json")) {
           const b = await clone.json();
           const KEYS = [
             "id",
@@ -13659,7 +13679,7 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
             "vin"
           ];
           detail = KEYS.filter((k) => b && b[k] !== void 0 && b[k] !== null && typeof b[k] !== "object" && String(b[k]) !== "").map((k) => k + "=" + String(b[k]).slice(0, 60)).join(" \xB7 ").slice(0, 400);
-        } else if (ct.includes("multipart")) {
+        } else if (!detail && ct.includes("multipart")) {
           detail = "(file upload)";
         }
       } catch {

@@ -138,11 +138,15 @@ export default {
       // argument. For public routes sess is null and the handler resolves the
       // tenant from the request host via resolveTenantId().
       const resp = await match[2](request, env, ctx, url, sess);
-      auditAction(env, ctx, sess, request, url, resp.status, auditClone);
+      // A handler may attach a ready-made human "what changed" line (e.g. a
+      // before → after rename) via the X-Audit-Note response header; the audit
+      // trail uses it verbatim instead of the raw request body fields.
+      const auditNote = (resp && resp.headers && resp.headers.get("X-Audit-Note")) || "";
+      auditAction(env, ctx, sess, request, url, resp.status, auditClone, auditNote);
       return resp;
     } catch (err) {
       console.error("Handler error:", err);
-      auditAction(env, ctx, sess, request, url, 500, auditClone);
+      auditAction(env, ctx, sess, request, url, 500, auditClone, "");
       return error("Server error: " + err.message, 500, env, request);
     }
   },
@@ -191,7 +195,7 @@ async function ensureAuditCols(env) {
   AUDIT_MIGRATED = true;
 }
 
-function auditAction(env, ctx, sess, request, url, status, clone) {
+function auditAction(env, ctx, sess, request, url, status, clone, note) {
   try {
     if (!sess) return;
     const m = request.method.toUpperCase();
@@ -209,9 +213,12 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
     ctx.waitUntil((async () => {
       await ensureAuditCols(env);
       let detail = "";
+      // A handler-supplied note (a human "before → after" line) wins over the raw
+      // body-field snippet — it's already the readable version.
+      if (note) { try { detail = decodeURIComponent(note); } catch { detail = String(note); } detail = detail.slice(0, 400); }
       try {
         const ct = (clone && clone.headers.get("Content-Type")) || "";
-        if (clone && ct.includes("application/json")) {
+        if (!detail && clone && ct.includes("application/json")) {
           const b = await clone.json();
           // Human-meaningful fields to surface ("what did they add/change") —
           // never message bodies or secrets. Longer text is trimmed.
@@ -222,7 +229,7 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
             "value", "note", "reason", "role", "make", "model", "colour", "vin"];
           detail = KEYS.filter(k => b && b[k] !== undefined && b[k] !== null && typeof b[k] !== "object" && String(b[k]) !== "")
             .map(k => k + "=" + String(b[k]).slice(0, 60)).join(" · ").slice(0, 400);
-        } else if (ct.includes("multipart")) {
+        } else if (!detail && ct.includes("multipart")) {
           detail = "(file upload)";
         }
       } catch { /* body unreadable — log without detail */ }
