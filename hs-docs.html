@@ -8,6 +8,8 @@
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
   <script src="hs-rams-render.js?v=1"></script>
+  <script src="html2canvas.min.js?v=1"></script>
+  <script src="hs-pdf-capture.js?v=1"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -342,7 +344,7 @@
     <div id="docView" class="hide">
       <div class="row noprint" style="margin-bottom:10px; justify-content:space-between;">
         <button class="btn hide" id="docCloseBtn" style="background:#0a7d33;">✅ Close out permit</button>
-        <button class="btn" onclick="window.print()">🖨️ Print / Save PDF</button>
+        <button class="btn" id="producePdfBtn" onclick="producePdf()">🖨️ Print / Save PDF</button>
       </div>
       <div id="docTools" class="noprint hide" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;background:#f8fafc;">
         <div class="grid2" style="gap:18px;">
@@ -1068,8 +1070,11 @@
     if (!d.ok) return alert("Couldn't load that document.");
     DOC_CUR = d.doc;
     show("docView");
-    // RAMS prints best in landscape (wide risk-summary matrix); others portrait.
-    g("printOrient").textContent = "@page { size: A4 " + (d.doc.doc_type === "rams" ? "landscape" : "portrait") + "; margin: 12mm; }";
+    // Everything is portrait now — RAMS produces its PDF via the generated,
+    // colour-faithful download (portrait pages + ref/page footer).
+    g("printOrient").textContent = "@page { size: A4 portrait; margin: 12mm; }";
+    // For RAMS the button generates a clean PDF; other types use browser print.
+    g("producePdfBtn").textContent = d.doc.doc_type === "rams" ? "⬇ Download PDF" : "🖨️ Print / Save PDF";
     const cb = g("docCloseBtn"); cb.classList.add("hide");
     if (d.doc.doc_type === "hotworks" && d.doc.status !== "closed") { cb.classList.remove("hide"); cb.onclick = () => closeOutPermit(id); }
     if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
@@ -1082,6 +1087,26 @@
     if (d.doc.doc_type === "rams") { tools.classList.remove("hide"); renderDocTools(d.doc); loadUserSuggest(); }
     else tools.classList.add("hide");
   }
+  // Produce the PDF: RAMS → generated colour-faithful portrait PDF (ref + page
+  // footer, no browser date/title/URL); other doc types → browser print.
+  async function producePdf() {
+    if (!DOC_CUR || DOC_CUR.doc_type !== "rams") { window.print(); return; }
+    const el = g("docBody"); const btn = g("producePdfBtn");
+    btn.disabled = true; const old = btn.textContent; btn.textContent = "Preparing…";
+    try {
+      const pages = await window.HSCaptureDoc(el);
+      const res = await authFetch("/hs/doc/pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: DOC_CUR.id, pages }) });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = "RA-" + String(DOC_CUR.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_") + ".pdf";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { alert("Couldn't produce the PDF — please try again."); }
+    finally { btn.disabled = false; btn.textContent = old; }
+  }
+
   // ── Doc-view tools: attachments + send-for-signing (RAMS) ────────────────────
   let USERS_BY_NAME = {};
   async function loadUserSuggest() {
