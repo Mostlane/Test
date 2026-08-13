@@ -171,9 +171,12 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 
 /* ── Home hub / dashboard ─────────────────────────────────────────────────
    A permission-gated set of at-a-glance widgets on the home page. Each widget
-   is a white card (legible over any personalised background). Shows on both
-   mobile (above the tiles) and desktop (below the greeting). */
-#hubDash { max-width:760px; margin:14px auto 4px; padding:0 12px; }
+   is a white card (legible over any personalised background). DESKTOP ONLY —
+   shown under the greeting on the sidebar layout, hidden on mobile (where the
+   tiles + attention gate are the home experience). Same condition as the
+   greeting card (#deskLanding): min-width 1000px + the sidebar is on. */
+#hubDash { display:none; max-width:980px; margin:14px auto 4px; padding:0 12px; }
+@media (min-width:1000px){ body.pnav-on #hubDash.hub-on { display:block; } }
 #hubDash .hub-h { display:inline-block; background:rgba(255,255,255,.86); color:#003366;
   font:700 13px 'Segoe UI',system-ui,sans-serif; letter-spacing:.02em; border-radius:999px;
   padding:6px 14px; margin:0 0 10px 2px; box-shadow:0 2px 8px rgba(0,30,80,.12); }
@@ -267,7 +270,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 
   <!-- Home hub / dashboard: permission-gated at-a-glance widgets. Hidden until a
        widget the user can see has loaded (see the hub script near the page end). -->
-  <div id="hubDash" style="display:none;">
+  <div id="hubDash">
     <span class="hub-h">🏠 Your dashboard</span>
     <div id="hubGrid"></div>
   </div>
@@ -1204,6 +1207,34 @@ const MAP = window.ML_PERM_MAP || {
       ]);
     }
     function yes(v) { return String(v || "").toLowerCase() === "yes"; }
+    // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = no date).
+    function daysUntil(s) {
+      if (!s) return null;
+      var d = new Date(s); if (isNaN(d)) return null;
+      d.setHours(0, 0, 0, 0);
+      var t = new Date(); t.setHours(0, 0, 0, 0);
+      return Math.round((d - t) / 86400000);
+    }
+    // A metric row: label on the left, coloured count on the right.
+    function metric(label, n, tone) {
+      var col = tone === "bad" ? "#dc2626" : tone === "warn" ? "#d97706" : tone === "ok" ? "#15803d" : "#334155";
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #eef2f6;font-size:13.5px">' +
+        '<span style="color:#5b6b78;font-weight:600">' + esc(label) + '</span>' +
+        '<b style="color:' + col + ';font-size:15px">' + n + '</b></div>';
+    }
+    // Standard card body: title row, big headline stat, metric rows, actions.
+    function cardHtml(o) {
+      var h = '<div class="hc-top"><span class="hc-emoji">' + o.emoji + '</span><h3>' + esc(o.title) + '</h3>' +
+        (o.when ? '<span class="hc-when">' + esc(o.when) + '</span>' : '') + '</div>';
+      if (o.banner) h += o.banner;
+      h += '<div class="hc-stat"><span class="big ' + (o.tone === "warn" ? "warn" : o.tone === "bad" ? "warn" : "") + '"' +
+        (o.tone === "bad" ? ' style="color:#dc2626"' : '') + '>' + o.big + '</span><span class="sub">' + esc(o.sub) + '</span></div>';
+      if (o.ok) h += '<div class="hub-ok">✓ ' + esc(o.ok) + '</div>';
+      if (o.rows) h += o.rows;
+      if (o.actions) h += '<div class="hub-actions">' + o.actions + '</div>';
+      return h;
+    }
+    function act(href, label, primary) { return '<a class="hub-btn ' + (primary ? "primary" : "ghost") + '" href="' + href + '">' + esc(label) + '</a>'; }
 
     var HUB = {
       widgets: [],
@@ -1216,7 +1247,7 @@ const MAP = window.ML_PERM_MAP || {
         if (!eligible.length) return;
         host.dataset.done = "1";
         host.innerHTML = "";
-        dash.style.display = "";
+        dash.classList.add("hub-on");   // CSS reveals it on desktop only
         eligible.forEach(function (w) {
           var card = document.createElement("div");
           card.className = "hub-card" + (w.wide ? " wide" : "");
@@ -1224,7 +1255,7 @@ const MAP = window.ML_PERM_MAP || {
           host.appendChild(card);
           Promise.resolve().then(function () { return w.load(card); }).catch(function () {
             card.remove();
-            if (!host.children.length) dash.style.display = "none";
+            if (!host.children.length) dash.classList.remove("hub-on");
           });
         });
       }
@@ -1296,6 +1327,142 @@ const MAP = window.ML_PERM_MAP || {
             jfetch("/vancheck/remind-now", { method: "POST" }, 8000).then(function (r) {
               rb.textContent = r && r.ok ? "✓ Reminded " + (r.reminded || 0) : "Done";
             }).catch(function () { rb.disabled = false; rb.textContent = "🔔 Remind now (" + outstanding.length + ")"; });
+          });
+        });
+      }
+    });
+
+    // ── Widget: Fleet — MOT / tax / service due + pending handovers ──────────
+    HUB.register({
+      id: "fleet", emoji: "🚗", title: "Fleet",
+      can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
+      load: function (card) {
+        return jfetch("/fleet/vehicles").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var vs = (d.vehicles || []).filter(function (v) { return v.active !== false; });
+          var motBad = 0, motSoon = 0, taxBad = 0, taxSoon = 0, svc = 0, ho = 0, flagged = {};
+          vs.forEach(function (v) {
+            var m = daysUntil(v.motDue); if (m != null && m < 0) { motBad++; flagged[v.reg] = 1; } else if (m != null && m <= 30) { motSoon++; flagged[v.reg] = 1; }
+            var t = daysUntil(v.taxDue); if (t != null && t < 0) { taxBad++; flagged[v.reg] = 1; } else if (t != null && t <= 30) { taxSoon++; flagged[v.reg] = 1; }
+            if (v.serviceStatus === "bad" || v.serviceStatus === "warn") { svc++; flagged[v.reg] = 1; }
+            if (v.pendingHandover) { ho++; flagged[v.reg] = 1; }
+          });
+          var n = Object.keys(flagged).length;
+          var rows = "";
+          if (motBad || motSoon) rows += metric("MOT due / overdue", (motBad ? motBad + " overdue" : "") + (motBad && motSoon ? ", " : "") + (motSoon ? motSoon + " soon" : ""), motBad ? "bad" : "warn");
+          if (taxBad || taxSoon) rows += metric("Tax due / overdue", (taxBad ? taxBad + " overdue" : "") + (taxBad && taxSoon ? ", " : "") + (taxSoon ? taxSoon + " soon" : ""), taxBad ? "bad" : "warn");
+          if (svc) rows += metric("Service due", svc, "warn");
+          if (ho) rows += metric("Handovers pending", ho, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "🚗", title: "Fleet",
+            big: n || vs.length, sub: n ? "vans need attention" : "vans, all up to date",
+            tone: n ? "warn" : "", ok: n ? "" : "MOT, tax & service all in date.",
+            rows: rows, actions: act("vehicles.html", "Open vehicles", true)
+          });
+        });
+      }
+    });
+
+    // ── Widget: SLA jobs — open / needs scheduling / overdue / unassigned ────
+    HUB.register({
+      id: "sla", emoji: "🚨", title: "SLA jobs",
+      can: function (p) { return yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin); },
+      load: function (card) {
+        return jfetch("/sla/jobs").then(function (jobs) {
+          if (!Array.isArray(jobs)) throw new Error("bad");
+          var isDone = function (s) { return /(?:complete|closed|done)/i.test(String(s || "")); };
+          var open = jobs.filter(function (j) { return !isDone(j.status); });
+          var needs = open.filter(function (j) { return !j.scheduledAt; });
+          var overdue = jobs.filter(function (j) { return j.sla && j.sla.state === "BREACHED"; });
+          var unassigned = open.filter(function (j) { return !((j.assignedEngineers && j.assignedEngineers.length) || j.assignedTo); });
+          var rows = "";
+          if (needs.length) rows += metric("Needs scheduling", needs.length, "warn");
+          if (overdue.length) rows += metric("Overdue (past SLA)", overdue.length, "bad");
+          if (unassigned.length) rows += metric("Unassigned", unassigned.length, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "🚨", title: "SLA jobs",
+            big: open.length, sub: "open job" + (open.length === 1 ? "" : "s"),
+            tone: overdue.length ? "bad" : needs.length ? "warn" : "",
+            ok: (needs.length || overdue.length || unassigned.length) ? "" : "All open jobs are scheduled and on track.",
+            rows: rows,
+            actions: act("sla-main.html", "Open board", true) + act("sla-scheduler.html", "Scheduler")
+          });
+        });
+      }
+    });
+
+    // ── Widget: Holidays — requests awaiting approval + staff cancellations ──
+    HUB.register({
+      id: "holidays", emoji: "🌴", title: "Holidays",
+      can: function (p) { return yes(p.FullAccess) || yes(p.HolidayAdmin); },
+      load: function (card) {
+        var yr = new Date().getFullYear();
+        return jfetch("/holiday/all?year=" + yr).then(function (arr) {
+          if (!Array.isArray(arr)) throw new Error("bad");
+          var pending = arr.filter(function (h) { return h.status === "Pending"; }).length;
+          var cancels = arr.filter(function (h) { return h.status === "Cancelled" && h.cancelledBy && h.cancelledBy === h.username; }).length;
+          var rows = "";
+          if (pending) rows += metric("Awaiting approval", pending, "warn");
+          if (cancels) rows += metric("Staff cancellations", cancels, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "🌴", title: "Holidays",
+            big: pending, sub: "awaiting your approval",
+            tone: pending ? "warn" : "",
+            ok: (pending || cancels) ? "" : "No requests waiting on you.",
+            rows: rows, actions: act("holiday-admin.html", "Open holiday admin", true)
+          });
+        });
+      }
+    });
+
+    // ── Widget: Equipment — transfer requests to action + decisions ──────────
+    HUB.register({
+      id: "equipment", emoji: "⚙️", title: "Equipment",
+      can: function (p) { return yes(p.FullAccess) || yes(p.AssetAdmin); },
+      load: function (card) {
+        return jfetch("/asset/requests/attention").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var toAction = d.toAction || 0, decided = d.decided || 0;
+          var rows = "";
+          if (toAction) rows += metric("People want items you hold", toAction, "warn");
+          if (decided) rows += metric("Decisions on your requests", decided, "");
+          card.innerHTML = cardHtml({
+            emoji: "⚙️", title: "Equipment",
+            big: toAction, sub: "request" + (toAction === 1 ? "" : "s") + " to action",
+            tone: toAction ? "warn" : "",
+            ok: (toAction || decided) ? "" : "Nothing waiting on you.",
+            rows: rows, actions: act("asset-requests.html", "Open requests", true) + act("my-assets.html", "My equipment")
+          });
+        });
+      }
+    });
+
+    // ── Widget: Compliance — certificates overdue / due soon (Co-op chart) ───
+    HUB.register({
+      id: "compliance", emoji: "✔️", title: "Compliance",
+      can: function (p) { return yes(p.FullAccess) || yes(p.Compliance); },
+      load: function (card) {
+        return jfetch("/compliance/stores").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var overdue = 0, soon = 0;
+          (d.stores || []).forEach(function (s) {
+            if (s.active === 0) return;
+            var due = s.due || {};
+            Object.keys(due).forEach(function (t) {
+              var n = daysUntil(due[t]);
+              if (n == null) return;
+              if (n < 0) overdue++; else if (n <= 30) soon++;
+            });
+          });
+          var rows = "";
+          if (overdue) rows += metric("Overdue", overdue, "bad");
+          if (soon) rows += metric("Due within 30 days", soon, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "✔️", title: "Compliance",
+            big: overdue || soon, sub: overdue ? "certificate" + (overdue === 1 ? "" : "s") + " overdue" : "due within 30 days",
+            tone: overdue ? "bad" : soon ? "warn" : "",
+            ok: (overdue || soon) ? "" : "All certificates in date.",
+            rows: rows, actions: act("compliance.html", "Open compliance", true)
           });
         });
       }
