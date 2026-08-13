@@ -214,6 +214,17 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 .hub-btn.ghost { background:#eef2f6; color:#1f2a44; }
 .hub-btn:disabled { opacity:.6; cursor:default; }
 .hub-skel { color:#8a97a6; font-size:13px; }
+/* Overview "How are we doing" card — a prominent full-width KPI strip at the top. */
+.hub-card.overview { background:linear-gradient(180deg,#ffffff,#f5f8fc); border-color:#c9d6e5; }
+.hub-kpis { display:flex; flex-wrap:wrap; gap:10px; }
+.kpi { flex:1 1 130px; min-width:120px; text-decoration:none; background:#f7f9fc; border:1px solid #e5eaf0;
+  border-radius:12px; padding:11px 13px; display:block; color:inherit; cursor:pointer; transition:background .12s; }
+.kpi:hover { background:#eaf1f9; }
+.kpi .krow { display:flex; align-items:baseline; gap:7px; }
+.kpi .kn { font-size:25px; font-weight:800; line-height:1; color:#334155; }
+.kpi .ke { font-size:15px; }
+.kpi .kl { font-size:12px; color:#5b6b78; font-weight:600; margin-top:5px; line-height:1.2; }
+.kpi.bad .kn { color:#dc2626; } .kpi.warn .kn { color:#d97706; } .kpi.ok .kn { color:#15803d; }
   </style>
   <!-- PWA CORE -->
 <link rel="manifest" href="/manifest.json">
@@ -1210,6 +1221,10 @@ const MAP = window.ML_PERM_MAP || {
         new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, ms || 6000); })
       ]);
     }
+    // Memoised GET — the overview strip and each detail card share ONE fetch per
+    // endpoint (both read the same numbers, so we never hit an endpoint twice).
+    var _cache = {};
+    function jget(path) { if (!_cache[path]) _cache[path] = jfetch(path); return _cache[path]; }
     function yes(v) { return String(v || "").toLowerCase() === "yes"; }
     // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = no date).
     function daysUntil(s) {
@@ -1239,6 +1254,7 @@ const MAP = window.ML_PERM_MAP || {
       return h;
     }
     function act(href, label, primary) { return '<a class="hub-btn ' + (primary ? "primary" : "ghost") + '" href="' + href + '">' + esc(label) + '</a>'; }
+    function readPerms() { try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {}; } catch (e) { return {}; } }
 
     var HUB = {
       widgets: [],
@@ -1249,12 +1265,14 @@ const MAP = window.ML_PERM_MAP || {
         if (!host || !dash || host.dataset.done) return;
         var eligible = this.widgets.filter(function (w) { try { return w.can(perms); } catch (e) { return false; } });
         if (!eligible.length) return;
+        // The overview ("first") card renders at the top; the rest keep order.
+        eligible.sort(function (a, b) { return (b.first ? 1 : 0) - (a.first ? 1 : 0); });
         host.dataset.done = "1";
         host.innerHTML = "";
         dash.classList.add("hub-on");   // CSS reveals it on desktop only
         eligible.forEach(function (w) {
           var card = document.createElement("div");
-          card.className = "hub-card" + (w.wide ? " wide" : "");
+          card.className = "hub-card" + (w.wide ? " wide" : "") + (w.cls ? " " + w.cls : "");
           card.innerHTML = '<div class="hc-top"><span class="hc-emoji">' + w.emoji + '</span><h3>' + esc(w.title) + '</h3></div><div class="hub-skel">Loading…</div>';
           host.appendChild(card);
           Promise.resolve().then(function () { return w.load(card); }).catch(function () {
@@ -1273,7 +1291,7 @@ const MAP = window.ML_PERM_MAP || {
       title: "Van checks",
       can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
       load: function (card) {
-        return jfetch("/vancheck/week").then(function (d) {
+        return jget("/vancheck/week").then(function (d) {
           if (!d || !d.ok) throw new Error("bad");
           var rows = d.rows || [];
           var required = rows.filter(function (r) { return r.enabled !== false; });
@@ -1341,7 +1359,7 @@ const MAP = window.ML_PERM_MAP || {
       id: "fleet", emoji: "🚗", title: "Fleet",
       can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
       load: function (card) {
-        return jfetch("/fleet/vehicles").then(function (d) {
+        return jget("/fleet/vehicles").then(function (d) {
           if (!d || !d.ok) throw new Error("bad");
           var vs = (d.vehicles || []).filter(function (v) { return v.active !== false; });
           var motBad = 0, motSoon = 0, taxBad = 0, taxSoon = 0, svc = 0, ho = 0, flagged = {};
@@ -1372,7 +1390,7 @@ const MAP = window.ML_PERM_MAP || {
       id: "sla", emoji: "🚨", title: "SLA jobs",
       can: function (p) { return yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin); },
       load: function (card) {
-        return jfetch("/sla/jobs").then(function (jobs) {
+        return jget("/sla/jobs").then(function (jobs) {
           if (!Array.isArray(jobs)) throw new Error("bad");
           var isDone = function (s) { return /(?:complete|closed|done)/i.test(String(s || "")); };
           var open = jobs.filter(function (j) { return !isDone(j.status); });
@@ -1401,7 +1419,7 @@ const MAP = window.ML_PERM_MAP || {
       can: function (p) { return yes(p.FullAccess) || yes(p.HolidayAdmin); },
       load: function (card) {
         var yr = new Date().getFullYear();
-        return jfetch("/holiday/all?year=" + yr).then(function (arr) {
+        return jget("/holiday/all?year=" + yr).then(function (arr) {
           if (!Array.isArray(arr)) throw new Error("bad");
           var pending = arr.filter(function (h) { return h.status === "Pending"; }).length;
           var cancels = arr.filter(function (h) { return h.status === "Cancelled" && h.cancelledBy && h.cancelledBy === h.username; }).length;
@@ -1424,7 +1442,7 @@ const MAP = window.ML_PERM_MAP || {
       id: "equipment", emoji: "⚙️", title: "Equipment",
       can: function (p) { return yes(p.FullAccess) || yes(p.AssetAdmin); },
       load: function (card) {
-        return jfetch("/asset/requests/attention").then(function (d) {
+        return jget("/asset/requests/attention").then(function (d) {
           if (!d || !d.ok) throw new Error("bad");
           var toAction = d.toAction || 0, decided = d.decided || 0;
           var rows = "";
@@ -1446,7 +1464,7 @@ const MAP = window.ML_PERM_MAP || {
       id: "compliance", emoji: "✔️", title: "Compliance",
       can: function (p) { return yes(p.FullAccess) || yes(p.Compliance); },
       load: function (card) {
-        return jfetch("/compliance/stores").then(function (d) {
+        return jget("/compliance/stores").then(function (d) {
           if (!d || !d.ok) throw new Error("bad");
           var overdue = 0, soon = 0;
           (d.stores || []).forEach(function (s) {
@@ -1472,12 +1490,158 @@ const MAP = window.ML_PERM_MAP || {
       }
     });
 
-    // ── Boot: render from cached permissions (instant), then hide if none. ───
-    function boot() {
-      var perms = {};
-      try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {}; } catch (e) {}
-      HUB.run(perms);
+    // ── Widget: Purchase orders — POs raised but not yet priced, + review flags ─
+    HUB.register({
+      id: "po", emoji: "🧾", title: "Purchase orders",
+      can: function (p) { return yes(p.FullAccess) || yes(p.PurchaseOrders); },
+      load: function (card) {
+        return jget("/po/api/dashboard").then(function (d) {
+          if (!d || d.uncosted == null) throw new Error("bad");
+          var rows = "";
+          if (d.needs_review) rows += metric("Needs review", d.needs_review, "warn");
+          if (d.flagged) rows += metric("Flagged", d.flagged, "bad");
+          if (d.credit_due) rows += metric("Credit due", d.credit_due, "warn");
+          if (d.unmatched_site) rows += metric("Unmatched to a site", d.unmatched_site, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "🧾", title: "Purchase orders",
+            big: d.uncosted || 0, sub: "raised, awaiting a price",
+            tone: d.uncosted ? "warn" : "",
+            ok: (d.uncosted || d.needs_review || d.flagged) ? "" : "All POs priced — nothing waiting.",
+            rows: rows, actions: act("po-office.html", "Open PO system", true)
+          });
+        });
+      }
+    });
+
+    // ── Widget: Company memos — sent memos still awaiting signatures ──────────
+    HUB.register({
+      id: "memos", emoji: "📢", title: "Company memos",
+      can: function (p) { return yes(p.FullAccess); },
+      load: function (card) {
+        return jget("/memos/list").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var sent = (d.memos || []).filter(function (m) { return m.status === "sent"; });
+          var outstanding = sent.filter(function (m) { return (m.total - m.signed) > 0; });
+          var rows = outstanding.slice(0, 4).map(function (m) {
+            return metric((m.re || "Memo").slice(0, 34), m.signed + "/" + m.total + " signed", (m.total - m.signed) > 0 ? "warn" : "ok");
+          }).join("");
+          card.innerHTML = cardHtml({
+            emoji: "📢", title: "Company memos",
+            big: outstanding.length, sub: "awaiting signatures",
+            tone: outstanding.length ? "warn" : "",
+            ok: outstanding.length ? "" : (sent.length ? "Everyone has signed." : "No memos sent yet."),
+            rows: rows, actions: act("notification-centre.html", "Open memos", true)
+          });
+        });
+      }
+    });
+
+    // ── Widget: Engineer timesheets — invoices to process + this week's subs ──
+    HUB.register({
+      id: "timesheets", emoji: "⏱️", title: "Engineer timesheets",
+      can: function (p) { return yes(p.FullAccess) || yes(p.TimesheetAdmin); },
+      load: function (card) {
+        return jget("/ts/admin/overview").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var users = d.users || [];
+          var invoices = users.filter(function (u) { return u.invoice; }).length;
+          var submitted = users.filter(function (u) {
+            return u.days && Object.keys(u.days).some(function (k) { var day = u.days[k]; return day && (day.start || day.finish); });
+          }).length;
+          var rows = "";
+          if (submitted) rows += metric("Timesheets started this week", submitted, "");
+          card.innerHTML = cardHtml({
+            emoji: "⏱️", title: "Engineer timesheets",
+            big: invoices, sub: "invoice" + (invoices === 1 ? "" : "s") + " to process",
+            tone: invoices ? "warn" : "",
+            ok: (invoices || submitted) ? "" : "Nothing submitted this week yet.",
+            rows: rows, actions: act("timesheets-admin.html", "Open timesheets", true)
+          });
+        });
+      }
+    });
+
+    // ── Widget: Messages — unread office chats (opens the chat bubble) ────────
+    HUB.register({
+      id: "messages", emoji: "💬", title: "Messages",
+      can: function (p) { return String(p.StaffType || "").toLowerCase() !== "field"; },
+      load: function (card) {
+        return jget("/messages/unread").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var n = d.unread || 0;
+          card.innerHTML = cardHtml({
+            emoji: "💬", title: "Messages",
+            big: n, sub: "unread message" + (n === 1 ? "" : "s"),
+            tone: n ? "warn" : "",
+            ok: n ? "" : "No unread messages.",
+            actions: '<button class="hub-btn primary" onclick="var l=document.getElementById(\'mlchat-launch\');if(l){l.click();}">Open messages</button>'
+          });
+        });
+      }
+    });
+
+    // ── Widget: OVERVIEW — the "How are we doing" KPI strip (top, full width) ──
+    // Pulls one headline number from each area the user can see, each clickable.
+    // Reuses the very same fetches the detail cards use (jget cache), rendered
+    // progressively so a slow area never holds up the rest.
+    HUB.register({
+      id: "overview", emoji: "📊", title: "How are we doing", first: true, wide: true, cls: "overview",
+      can: function (p) { return kpiSpecs(p).length > 0; },
+      load: function (card) {
+        var specs = kpiSpecs(readPerms());
+        if (!specs.length) throw new Error("none");
+        card.innerHTML = '<div class="hc-top"><span class="hc-emoji">📊</span><h3>How are we doing</h3></div><div class="hub-kpis"></div>';
+        var box = card.querySelector(".hub-kpis");
+        var slots = {};
+        // Fixed-order placeholder slots so tiles don't jump around as they load.
+        specs.forEach(function (s, i) { var sl = document.createElement("span"); sl.style.display = "contents"; box.appendChild(sl); slots[i] = sl; });
+        var settled = 0, shown = 0;
+        return new Promise(function (resolve, reject) {
+          specs.forEach(function (s, i) {
+            jget(s.get).then(function (d) {
+              var r = s.calc(d); if (!r) return;
+              var tone = r.n === 0 ? "ok" : (r.bad ? "bad" : "warn");
+              var inner = '<div class="krow"><span class="ke">' + s.emoji + '</span><span class="kn">' + r.n + '</span></div><div class="kl">' + esc(r.label) + '</div>';
+              slots[i].innerHTML = s.onclick
+                ? '<div class="kpi ' + tone + '" onclick="' + s.onclick + '">' + inner + '</div>'
+                : '<a class="kpi ' + tone + '" href="' + s.href + '">' + inner + '</a>';
+              shown++;
+            }).catch(function () {}).then(function () {
+              settled++; if (settled === specs.length) { shown ? resolve() : reject(new Error("empty")); }
+            });
+          });
+        });
+      }
+    });
+
+    // The KPI sources: which areas the overview can summarise for this user.
+    function kpiSpecs(p) {
+      var yr = new Date().getFullYear();
+      var all = [
+        { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-main.html", get: "/sla/jobs",
+          calc: function (j) { if (!Array.isArray(j)) return null; var open = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")); }); var od = j.filter(function (x) { return x.sla && x.sla.state === "BREACHED"; }); return { n: open.length, label: od.length ? "open · " + od.length + " overdue" : "open jobs", bad: od.length > 0 }; } },
+        { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚐", href: "van-checks.html", get: "/vancheck/week",
+          calc: function (d) { if (!d || !d.ok) return null; var out = (d.rows || []).filter(function (r) { return r.enabled !== false && !r.check; }).length; return { n: out, label: "van checks due", bad: false }; } },
+        { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚗", href: "vehicles.html", get: "/fleet/vehicles",
+          calc: function (d) { if (!d || !d.ok) return null; var f = {}; (d.vehicles || []).filter(function (v) { return v.active !== false; }).forEach(function (v) { var m = daysUntil(v.motDue), t = daysUntil(v.taxDue); if ((m != null && m <= 30) || (t != null && t <= 30) || v.serviceStatus === "bad" || v.serviceStatus === "warn" || v.pendingHandover) f[v.reg] = 1; }); return { n: Object.keys(f).length, label: "vans to attend", bad: false }; } },
+        { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-scheduler.html", get: "/sla/jobs",
+          calc: function (j) { if (!Array.isArray(j)) return null; var n = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")) && !x.scheduledAt; }).length; return { n: n, label: "to schedule", bad: false }; } },
+        { ok: yes(p.FullAccess) || yes(p.PurchaseOrders), emoji: "🧾", href: "po-office.html", get: "/po/api/dashboard",
+          calc: function (d) { if (!d || d.uncosted == null) return null; return { n: d.uncosted, label: "POs to price", bad: false }; } },
+        { ok: yes(p.FullAccess) || yes(p.HolidayAdmin), emoji: "🌴", href: "holiday-admin.html", get: "/holiday/all?year=" + yr,
+          calc: function (a) { if (!Array.isArray(a)) return null; return { n: a.filter(function (h) { return h.status === "Pending"; }).length, label: "holidays to approve", bad: false }; } },
+        { ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "compliance.html", get: "/compliance/stores",
+          calc: function (d) { if (!d || !d.ok) return null; var od = 0; (d.stores || []).forEach(function (s) { if (s.active === 0) return; var due = s.due || {}; Object.keys(due).forEach(function (t) { var n = daysUntil(due[t]); if (n != null && n < 0) od++; }); }); return { n: od, label: "certs overdue", bad: od > 0 }; } },
+        { ok: yes(p.FullAccess), emoji: "📢", href: "notification-centre.html", get: "/memos/list",
+          calc: function (d) { if (!d || !d.ok) return null; var n = (d.memos || []).filter(function (m) { return m.status === "sent" && (m.total - m.signed) > 0; }).length; return { n: n, label: "memos unsigned", bad: false }; } },
+        { ok: String(p.StaffType || "").toLowerCase() !== "field", emoji: "💬", onclick: "var l=document.getElementById('mlchat-launch');if(l){l.click();}", get: "/messages/unread",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: d.unread || 0, label: "unread messages", bad: false }; } }
+      ];
+      return all.filter(function (s) { return s.ok; });
     }
+
+    // ── Boot: render from cached permissions (instant), then hide if none. ───
+    function boot() { HUB.run(readPerms()); }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
   })();

@@ -1260,8 +1260,19 @@ a throwing/timed-out widget removes its own card. **DESKTOP ONLY** (CSS: shown v
 greeting card) — mobile keeps the tiles + attention gate as its home. Shared
 render helpers `cardHtml({emoji,title,when,big,sub,tone,ok,rows,actions})`,
 `metric(label,n,tone)`, `act(href,label,primary)`, `daysUntil(YYYY-MM-DD)`.
-**Add a new area** = one `HUB.register({id,emoji,title,can,load})` call.
-Current widgets (each permission-gated):
+**Add a new area** = one `HUB.register({id,emoji,title,can,load})` call. A
+`first:true` widget sorts to the top; `wide:true` spans both columns; `cls`
+adds a card class. **Shared fetch cache `jget(path)`** memoises GETs so the
+overview strip and a detail card reading the same endpoint fetch it ONCE
+(verified: PO dashboard hit once for both its KPI + card). Reads perms via
+`readPerms()` (cached blob).
+**Overview card ("How are we doing", `first`+`wide`+`cls:"overview"`):** a
+KPI strip at the top — one clickable headline number per area the user can see
+(`kpiSpecs(perms)`): open SLA jobs (·N overdue), van checks due, vans to attend,
+jobs to schedule, POs to price, holidays to approve, certs overdue, memos
+unsigned, unread messages. Tiles render progressively (fixed-order slots) and
+reuse the detail cards' fetches; a slow/failed area just drops its tile.
+Current detail widgets (each permission-gated):
   - **Van checks** (FullAccess|Vehicles): GET /vancheck/week → done/N progress
     bar, outstanding chips, red defect/alert rows, "⏸ Reminders paused" pill,
     **Open van checks** + **🔔 Remind now** (POST /vancheck/remind-now).
@@ -1276,6 +1287,15 @@ Current widgets (each permission-gated):
     toAction + decided. Open requests + My equipment.
   - **Compliance** (FullAccess|Compliance): GET /compliance/stores → certs overdue
     / due within 30 days (per-type `due` dates). Open compliance.
+  - **Purchase orders** (FullAccess|PurchaseOrders): GET /po/api/dashboard →
+    uncosted (to price) + needs_review/flagged/credit_due/unmatched_site. Open
+    PO system (po-office.html).
+  - **Company memos** (FullAccess): GET /memos/list → sent memos with
+    signed<total (per-memo signed/total rows). Open memos (notification-centre).
+  - **Engineer timesheets** (FullAccess|TimesheetAdmin): GET /ts/admin/overview →
+    invoices to process + timesheets started this week. Open timesheets-admin.
+  - **Messages** (StaffType≠field): GET /messages/unread → unread count; action
+    clicks the chat bubble launcher (#mlchat-launch) rather than a page.
 Help + CLAUDE.md must list new widgets as they're added.
 
 ## Notifications system
