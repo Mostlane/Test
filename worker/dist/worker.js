@@ -8809,7 +8809,7 @@ async function vanCheckPhotos(env, tid, rk, names, slotLabels) {
   let rows = [];
   try {
     rows = (await env.DB.prepare(
-      "SELECT username, checked_at, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+      "SELECT username, vehicle, checked_at, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
     ).bind(tid).all()).results || [];
   } catch {
     return out;
