@@ -31,7 +31,7 @@
       fetch(API + "/auth/me", { headers: { "Authorization": "Bearer " + token } })
         .then(function (r) { return r.json(); })
         .then(function (me) {
-          var u = (me && me.user) || {};
+          var u = (me && me.user) || {};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}}
           // Office/admin first: anyone who can MANAGE POs gets the full office view
           // (this also covers owners/admins whose staffType defaults to "field").
           if (u.FullAccess === "Yes" || u.PurchaseOrders === "Yes") {

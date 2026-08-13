@@ -251,7 +251,7 @@ function printReport(pos){ var money=function(n){return "\u00a3"+Number(n||0).to
     "<table><thead><tr><th>PO</th><th>Date</th><th>Raised By</th><th>Site/Incident</th><th>Supplier</th><th>Description</th><th>Net</th><th>Status</th></tr></thead><tbody>"+rows+"</tbody></table>");
   w.document.close(); setTimeout(function(){w.print();},300); }
 // Gate: must hold PurchaseOrders or FullAccess. Then reveal the app + boot the office view.
-async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{}; if(!(u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="This page needs the Purchase Orders permission."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
+async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}} if(!(u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="This page needs the Purchase Orders permission."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
 let allPOs = [], allEngineers = [], allSuppliers = [], allSites = [], allSubcontractors = [], allTrades = [];
 let currentStatus = '';
 async function init() {

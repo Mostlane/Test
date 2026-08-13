@@ -205,7 +205,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
 <script>
 const API = window.MOSTLANE_API;
 function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
-async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{}; if(!(u.StaffType==="field"||u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="You don’t have access to raise POs."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
+async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}} if(!(u.StaffType==="field"||u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="You don’t have access to raise POs."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
 let SUPPLIERS = [];
 let SITES = [];
 let VEHICLES = [];
