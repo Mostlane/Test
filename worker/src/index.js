@@ -42,6 +42,7 @@ import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer
 import * as memos from "./routes/memos.js";        // DONE  (company memos: draft/send/sign, filed to My Documents)
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
+import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -96,9 +97,9 @@ const ROUTES = [
   ["*", "/theme",      theme.handle],    // per-user colour theme + background
   ["*", "/hs/",        hs.handle],       // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
-  // Excluded for now (separate / later systems): Purchase Orders,
-  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
-  // Compliance, Projects.
+  ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
+  // Excluded for now (separate / later systems):
+  // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
 
 export default {
