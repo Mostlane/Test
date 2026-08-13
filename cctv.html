@@ -422,8 +422,18 @@ async function testDvr(id){
   try{
     const r=await aFetch("/cctv/test",{method:"POST",body:JSON.stringify({id})});
     const d=await r.json();
-    if(d.ok) toast("✅ Camera reachable ("+Math.round((d.bytes||0)/1024)+" KB image)");
-    else toast("❌ "+(d.error?("failed: "+d.error):("failed (status "+(d.status||0)+")")));
+    if(d.ok){ toast("✅ Camera reachable ("+Math.round((d.bytes||0)/1024)+" KB image)"); return; }
+    const g=d.debug||{};
+    const lines=[
+      "❌ Test failed (status "+(d.status||0)+")",
+      d.error?("• "+d.error):"",
+      g.reason?("• DVR said: "+g.reason):"",
+      g.firstStatus!=null?("• First reply: "+g.firstStatus+(g.wwwAuth?(" — "+g.wwwAuth):"")):"",
+      g.authScheme?("• Auth: "+g.authScheme+(g.authTried?" (tried)":"")+(g.finalStatus!=null?(" → "+g.finalStatus):"")):"",
+      d.ch?("• Channel: "+d.ch):""
+    ].filter(Boolean);
+    toast("❌ "+(g.reason||("status "+(d.status||0))));
+    alert(lines.join("\n"));
   }catch(e){ toast("Test failed"); }
 }
 async function deleteDvr(){
