@@ -1597,7 +1597,20 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
    payloads fail silent to a blank form). Full patched worker was delivered
    20 Jul (2,311 lines, tail `function escapeHtmlServer(s) …`) — Jamie pastes
    it into the PO worker in the Cloudflare dashboard. my-day.html's generic
-   "Raise a PO" link carries no payload (by design).
+   "Raise a PO" link carries no payload (by design). **Start-up reliability fix
+   (13 Aug):** the worker ran its whole `ensureSchema()` DDL/seed battery on the
+   FIRST request of every cold isolate, and any single transient D1
+   "internal error" (D1_EXEC_ERROR) threw → the top-level catch blanked the page
+   with `Error: D1_EXEC_ERROR … CREATE TABLE … engineers …` (Jamie hit this on
+   mobile). Fix = a new **`ensureSchemaSafe(db)`** wrapper that both fetch +
+   `runWeeklyEmail` call instead of `ensureSchema` directly: it retries a
+   transient error up to 3× (150/300 ms) and, if it still fails, **logs and
+   proceeds** — the tables already exist, so schema-init must never block the
+   page. Delivered as a **patcher artifact** (2 anchored changes: rewire both
+   `await ensureSchema(env.DB)` call sites → `…Safe`, and insert the wrapper
+   before `async function ensureSchema(db)`) + a full pre-patched fallback file
+   (3,128 lines, tail `//# sourceMappingURL=po-worker.js.map`). Live PO worker was
+   the bundled build fetched via the Cloudflare connector (read-only) on 13 Aug.
 2. **SiteLog** — repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk;
    worker `worker.js` = **manual paste**, not auto-deployed; commit to
    Mostlane/SiteLog `main` as source-of-truth). Worker api.site-log.co.uk
