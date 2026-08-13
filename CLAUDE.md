@@ -1296,7 +1296,34 @@ Current detail widgets (each permission-gated):
     invoices to process + timesheets started this week. Open timesheets-admin.
   - **Messages** (StaffType≠field): GET /messages/unread → unread count; action
     clicks the chat bubble launcher (#mlchat-launch) rather than a page.
+  - **My tasks** (ALWAYS shown, `can:()=>true`): GET /tasks/attention → outstanding
+    (+ overdue red). Also an overview KPI (always present). Open my-tasks.html.
 Help + CLAUDE.md must list new widgets as they're added.
+
+## Admin task list (routes/tasks.js + my-tasks.html + tasks-admin.html)
+Recurring jobs a **Full-Access** user sets for staff, with a deadline day/time,
+surfaced as a home-page stat (always shown, even at zero) and auto-ticked when
+the person does the linked portal action. Tables (self-migrating): **admin_tasks**
+(defs: title, detail, assignees JSON, recurrence, due_time/due_dow/due_dom/
+due_month/due_date, area, auto_match, active) + **admin_task_done** (manual
+completions, PK task_id+username+period_key). **Recurrence**: daily/weekly/
+monthly/quarterly/yearly/once; `occurrence(task,now)` computes the current
+period key + London-wall-clock deadline instant + period start (DOM capped at 28).
+**Multiple assignees** per task; each ticks their own occurrence. **Auto-complete
+(computed live, no stored state)**: a task's `area` (a permission key from
+`TASK_AREAS`) carries a default audit-path fragment (`auto_match`, e.g. Vehicles →
+`/vancheck/submit`); `autoDone()` checks audit_log for a successful entry by that
+user matching the fragment since the period start → counts as done. **Access
+flagging + grant**: /tasks/admin returns each assignee's `hasAccess` for the
+task's linked area; tasks-admin.html shows "⚠ no <area> access" + a **Grant
+access** button → POST /tasks/grant sets user_permissions=Yes (note: user must
+re-login). Routes: GET /tasks/mine, GET /tasks/attention (hub), POST
+/tasks/complete {id,undo}, GET /tasks/admin (Full), POST /tasks/save (Full),
+POST /tasks/delete (Full), POST /tasks/grant (Full), GET /tasks/meta (Full).
+**Daily push reminder**: `sweepTaskReminders(env)` on the 5-min cron self-gates to
+~08:00 London, deduped per day (app_config `tasks:reminded:<tid>`), pushes each
+user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like Help)
+→ my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
 
 ## Notifications system
 - Red badges on tiles (main.html) + sidebar (portal-config) from
