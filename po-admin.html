@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<script src="/portal-config.js?v=3"></script>
+<script src="auth.js"></script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>⚙️ PO Admin — Mostlane Portal</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #e6e8eb;
+  color: #1a1a1a;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; top: 0; z-index: 10;
+}
+.topbar .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 15px; }
+.topbar .brand img { height: 32px; width: auto; background: #fff; padding: 4px 8px; border-radius: 6px; }
+.topbar .backbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  border-radius: 10px; background: rgba(255,255,255,0.15);
+  color: #fff; text-decoration: none;
+  transition: background 0.15s, transform 0.15s;
+}
+.topbar .backbtn:hover { background: rgba(255,255,255,0.28); transform: translateX(-1px); }
+.topbar .backbtn:active { transform: translateX(0); }
+.topbar .backbtn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.topbar nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.topbar nav a {
+  color: #fff; text-decoration: none; font-size: 13px; font-weight: 500;
+  padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.1);
+  transition: background 0.15s;
+}
+.topbar nav a:hover, .topbar nav a.active { background: rgba(255,255,255,0.25); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px 14px 60px; }
+.wrap-narrow { max-width: 560px; margin: 0 auto; padding: 16px 14px 60px; }
+h1 { font-size: 22px; font-weight: 600; color: #003366; margin: 0 0 16px; }
+h2 { font-size: 17px; font-weight: 600; color: #003366; margin: 0 0 12px; }
+h3 { font-size: 14px; font-weight: 600; color: #003366; margin: 0 0 10px; }
+p { margin: 0 0 12px; }
+.muted { color: #5a6677; font-size: 13px; }
+.card {
+  background: #ffffff; border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  box-shadow: 0 2px 10px rgba(0, 30, 80, 0.06); border: 1px solid #e3e7ee;
+}
+label { display: block; font-size: 13px; font-weight: 600; color: #003366; margin-bottom: 6px; }
+input, select, textarea {
+  width: 100%; padding: 12px 14px; border: 1px solid #c9d2dd; border-radius: 10px;
+  font-size: 16px; font-family: inherit; background: #fff; color: #1a1a1a;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: #1A4F8F; box-shadow: 0 0 0 3px rgba(26, 79, 143, 0.12);
+}
+textarea { min-height: 90px; resize: vertical; }
+.field { margin-bottom: 14px; }
+button, .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff; border: none; border-radius: 12px;
+  font-weight: 600; font-size: 15px; font-family: inherit;
+  cursor: pointer; text-decoration: none;
+  box-shadow: 0 3px 8px rgba(0,30,80,0.20), inset 0 1px 2px rgba(255,255,255,0.15);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(0,30,80,0.28), inset 0 1px 2px rgba(255,255,255,0.20); }
+button:active, .btn:active { transform: translateY(0); }
+button.ghost, .btn.ghost {
+  background: #fff; color: #003366; border: 1px solid #c9d2dd;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+button.ghost:hover { background: #f5f7fb; transform: translateY(-1px); }
+button.danger { background: linear-gradient(180deg, #c0392b 0%, #962d22 100%); }
+button.big { padding: 18px 24px; font-size: 16px; width: 100%; }
+button.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: #5a6677; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 2px solid #003366; }
+td { padding: 12px 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+tr:hover td { background: #f8fafd; }
+.badge { display: inline-block; padding: 3px 9px; font-size: 12px; font-weight: 600; border-radius: 20px; }
+.badge.review { background: #fff4d6; color: #8a6100; }
+.badge.ok { background: #d6f5dd; color: #1e6c33; }
+.badge.engineer { background: #d6e4f5; color: #1A4F8F; }
+.badge.office { background: #ececf0; color: #555; }
+.badge.danger-badge { background: #fdeeec; color: #962d22; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (min-width: 700px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+.stat { background: #fff; border: 1px solid #e3e7ee; padding: 14px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,30,80,0.04); }
+.stat .v { font-size: 26px; font-weight: 700; color: #003366; line-height: 1.1; }
+.stat .l { font-size: 12px; color: #5a6677; margin-top: 4px; font-weight: 500; }
+.attention-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 700px) { .attention-grid { grid-template-columns: repeat(6, 1fr); } }
+.att { background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; padding: 12px 14px; cursor: pointer; text-align: left; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; }
+.att:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,30,80,0.12); border-color: #c9d2dd; }
+.att .v { font-size: 24px; font-weight: 700; line-height: 1; }
+.att .l { font-size: 11px; color: #5a6677; margin-top: 5px; font-weight: 600; }
+.att.zero { opacity: 0.5; }
+.att.zero:hover { opacity: 0.8; }
+.alert { padding: 14px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #003366; background: #f0f5fc; font-size: 14px; color: #1a1a1a; }
+.alert.warn { border-color: #c0392b; background: #fdeeec; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.po-display { font-size: 64px; font-weight: 700; color: #003366; letter-spacing: -0.02em; line-height: 1; text-align: center; }
+.filter-bar { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 14px; }
+@media (min-width: 700px) { .filter-bar { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+.filter-bar input, .filter-bar select { font-size: 14px; padding: 9px 12px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; background: #fff; padding: 6px; border-radius: 12px; border: 1px solid #e3e7ee; overflow-x: auto; }
+.tab { padding: 9px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: #5a6677; border-radius: 8px; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.tab.active { background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%); color: #fff; }
+.tab:hover:not(.active) { background: #f0f5fc; color: #003366; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 500px) { .grid-2 { grid-template-columns: 1fr; } }
+.table-scroll { overflow-x: auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f0f5fc; border: 1px solid #d6e4f5; border-radius: 20px; font-size: 13px; color: #003366; }
+.chip button { padding: 0; width: 18px; height: 18px; line-height: 1; background: transparent; box-shadow: none; color: #5a6677; font-size: 14px; border-radius: 50%; }
+.chip button:hover { background: #d6e4f5; transform: none; box-shadow: none; }
+.modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0, 20, 40, 0.5); z-index: 100; justify-content: center; align-items: center; padding: 16px; }
+.modal-backdrop.show { display: flex; }
+.modal { background: #fff; border-radius: 14px; padding: 20px; max-width: 500px; width: 100%; max-height: 92vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,30,80,0.25); }
+.bar-chart { display: flex; flex-direction: column; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: 140px 1fr 50px; gap: 10px; align-items: center; font-size: 13px; }
+@media (max-width: 500px) { .bar-row { grid-template-columns: 100px 1fr 40px; font-size: 12px; } }
+.bar-row .name { color: #003366; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .bar { background: #e3e7ee; height: 22px; border-radius: 6px; position: relative; overflow: hidden; }
+.bar-row .bar .fill { height: 100%; background: linear-gradient(90deg, #1A4F8F, #003468); border-radius: 6px; transition: width 0.4s ease; }
+.bar-row .count { font-weight: 600; color: #003366; text-align: right; }
+.fade-in { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.empty { text-align: center; padding: 40px 20px; color: #5a6677; font-size: 14px; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; background: #f0f5fc; padding: 2px 6px; border-radius: 4px; color: #003366; }
+.ac-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: #fff; border: 1px solid #c9d2dd; border-top: none;
+  border-radius: 0 0 10px 10px; max-height: 280px; overflow-y: auto;
+  box-shadow: 0 4px 14px rgba(0,30,80,0.12);
+}
+.ac-item { padding: 10px 14px; cursor: pointer; font-size: 15px; color: #1a1a1a; border-bottom: 1px solid #f0f5fc; }
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: #f0f5fc; color: #003366; }
+.ac-item strong { color: #1A4F8F; font-weight: 700; background: #fff4d6; }
+.ac-empty { padding: 14px; color: #5a6677; font-size: 13px; font-style: italic; }
+.my-po { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eef1f5; align-items: center; }
+.my-po:last-child { border-bottom: none; }
+.my-po-num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 700; color: #003366; font-size: 15px; min-width: 60px; }
+.my-po-detail { flex: 1; font-size: 14px; }
+
+.po-nav a{color:#fff;text-decoration:none;font-size:13px;font-weight:500;padding:6px 10px;border-radius:6px;background:rgba(255,255,255,.12);margin-left:4px}
+#poGate{max-width:560px;margin:40px auto;padding:0 16px}</style>
+</head><body>
+<header class="page" style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px">
+<a class="ml-back" href="po-office.html" title="Back" style="color:#fff">‹ Back</a>
+<h1 style="font-size:17px;margin:0;flex:1;color:#fff">⚙️ PO Admin</h1>
+<nav class="po-nav"><a href="po-office.html">Office</a><a href="po-jobs.html">Jobs</a><a href="po-stats.html">Stats</a></nav>
+</header>
+<div id="poGate" class="muted">Checking access…</div>
+<div id="poApp" style="display:none">
+<div class="wrap">
+    <div class="tab-bar">
+      <div class="tab active" data-tab="config">System</div>
+      <div class="tab" data-tab="suppliers">Suppliers</div>
+      <div class="tab" data-tab="subcontractors">Subcontractors</div>
+      <div class="tab" data-tab="trades">Trades</div>
+      <div class="tab" data-tab="sites">Sites</div>
+      <div class="tab" data-tab="closures">Closures</div>
+    </div>
+    <div id="tab-config" class="tab-pane" style="display:block">
+      <div class="card">
+        <h2>System Status</h2>
+        <div class="alert" id="current-status"></div>
+        <div class="field"><label>Mode</label>
+          <select id="system_status">
+            <option value="live">Live (normal operation)</option>
+            <option value="disabled">Disabled (no POs can be issued)</option>
+          </select>
+        </div>
+        <div class="field"><label style="display:flex;align-items:center;gap:10px;color:#1a1a1a;font-weight:500;cursor:pointer">
+          <input type="checkbox" id="force_open_ooh" style="width:auto"> Force open out-of-hours mode (engineers can use form regardless of time)
+        </label></div>
+      </div>
+      <div class="card">
+        <h2>Office Hours</h2>
+        <div class="grid-2">
+          <div class="field"><label>Start</label><input id="office_hours_start" type="time"></div>
+          <div class="field"><label>End</label><input id="office_hours_end" type="time"></div>
+        </div>
+        <div class="field"><label>Working days</label><input id="office_days" type="text" placeholder="MON,TUE,WED,THU,FRI"></div>
+        <div class="field"><label>Office phone</label><input id="office_phone" type="text"></div>
+      </div>
+      <button onclick="saveConfig()">💾 Save</button>
+    </div>
+    <div id="tab-suppliers" class="tab-pane" style="display:none">
+      <div class="card"><h2>Suppliers</h2>
+        <div id="sup-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <div class="card"><h3>Add Supplier</h3>
+        <div class="row"><input id="new-sup-name" type="text" placeholder="Supplier name" style="flex:1;min-width:180px"><button class="small" onclick="addSupplier()">Add</button></div>
+      </div>
+    </div>
+    <div id="tab-subcontractors" class="tab-pane" style="display:none">
+      <div class="card"><h2>Subcontractors</h2>
+        <p class="muted" style="margin-bottom:12px">Companies you raise subcontractor POs to (roofers, plumbers…). Office-only — engineers never see these.</p>
+        <div id="subc-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <div class="card"><h3>Add Subcontractor</h3>
+        <div class="row"><input id="new-subc-name" type="text" placeholder="Subcontractor company" style="flex:1;min-width:180px"><button class="small" onclick="addSubcontractor()">Add</button></div>
+      </div>
+    </div>
+    <div id="tab-trades" class="tab-pane" style="display:none">
+      <div class="card"><h2>Trades</h2>
+        <p class="muted" style="margin-bottom:12px">Trade categories for subcontractor POs (used in job costing). Add sub-trades as you need them.</p>
+        <div id="trade-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <div class="card"><h3>Add Trade</h3>
+        <div class="row"><input id="new-trade-name" type="text" placeholder="Trade name" style="flex:1;min-width:180px"><button class="small" onclick="addTrade()">Add</button></div>
+      </div>
+    </div>
+    <div id="tab-sites" class="tab-pane" style="display:none">
+      <div class="card"><h2>Sites</h2>
+        <p class="muted" style="margin-bottom:12px">Master sites list. Engineers can type free-text on the form, but POs with unmatched sites get flagged for office review. Add new sites here as they come up.</p>
+        <div id="site-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <div class="card"><h3>Add Site</h3>
+        <div class="row"><input id="new-site-name" type="text" placeholder="Site name" style="flex:1;min-width:180px"><button class="small" onclick="addSite()">Add</button></div>
+      </div>
+    </div>
+    <div id="tab-closures" class="tab-pane" style="display:none">
+      <div class="card">
+        <h2>Closures / Bank Holidays</h2>
+        <p class="muted">Days the office is closed. Engineers can use the OOH form on these dates.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Date</th><th>Reason</th><th></th></tr></thead>
+          <tbody id="clo-tbody"></tbody>
+        </table></div>
+      </div>
+      <div class="card"><h3>Add Closure</h3>
+        <div class="row"><input id="new-clo-date" type="date"><input id="new-clo-reason" type="text" placeholder="Reason" style="flex:1;min-width:150px"><button class="small" onclick="addClosure()">Add</button></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+const API=window.MOSTLANE_API;
+function authFetch(path,opts){opts=opts||{};opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")},opts.headers||{});return fetch(API+path,opts);}
+async function __gate(cb){try{var me=await authFetch("/auth/me").then(function(r){return r.json();});var u=me&&me.user||{};if(!(u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){document.getElementById("poGate").innerHTML="This page needs the Purchase Orders permission.";return;}}catch(e){location.href="login.html";return;}document.getElementById("poGate").style.display="none";document.getElementById("poApp").style.display="block";if(typeof cb==="function")cb();}
+
+// Attach tab handlers IMMEDIATELY, before any async work, so they always work
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(x => { x.style.display = 'none'; });
+      t.classList.add('active');
+      const target = document.getElementById('tab-' + t.dataset.tab);
+      if (target) target.style.display = 'block';
+    });
+  });
+}
+setupTabs();
+// Someone who followed the portal's "Raise PO for this job" wants to raise a
+// PO, not manage settings — send them to their own office view (which carries
+// the fragment with it) so the New PO modal opens pre-filled. Without a job
+// payload the admin page behaves exactly as before.
+
+async function init() {
+  // Load each piece independently so one failure doesn't break the rest
+  const safe = async (fn, label) => { try { await fn(); } catch (e) { console.error(label + ' failed:', e); } };
+  await Promise.all([
+    safe(loadConfig, 'loadConfig'),
+    safe(loadSuppliers, 'loadSuppliers'),
+    safe(loadSubcontractors, 'loadSubcontractors'),
+    safe(loadTrades, 'loadTrades'),
+    safe(loadSites, 'loadSites'),
+    safe(loadClosures, 'loadClosures'),
+    safe(loadStatus, 'loadStatus')
+  ]);
+}
+async function loadStatus() {
+  const s = await authFetch('/po/api/status').then(r => r.json());
+  let txt = '<strong>Current mode:</strong> ' + s.mode;
+  if (s.message) txt += '<br><span class="muted">' + s.message + '</span>';
+  if (s.forced) txt += ' <em>(force-open enabled)</em>';
+  document.getElementById('current-status').innerHTML = txt;
+}
+async function loadConfig() {
+  const c = await authFetch('/po/api/config').then(r => r.json());
+  document.getElementById('system_status').value = c.system_status || 'live';
+  document.getElementById('force_open_ooh').checked = c.force_open_ooh === '1';
+  document.getElementById('office_hours_start').value = c.office_hours_start || '08:30';
+  document.getElementById('office_hours_end').value = c.office_hours_end || '16:30';
+  document.getElementById('office_days').value = c.office_days || 'MON,TUE,WED,THU,FRI';
+  document.getElementById('office_phone').value = c.office_phone || '';
+}
+async function saveConfig() {
+  await authFetch('/po/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_status: document.getElementById('system_status').value,
+      force_open_ooh: document.getElementById('force_open_ooh').checked ? '1' : '0',
+      office_hours_start: document.getElementById('office_hours_start').value,
+      office_hours_end: document.getElementById('office_hours_end').value,
+      office_days: document.getElementById('office_days').value,
+      office_phone: document.getElementById('office_phone').value
+    }) });
+  await loadStatus();
+  alert('Saved');
+}
+async function loadEngineers() {
+  const engs = await authFetch('/po/api/engineers').then(r => r.json());
+  const base = window.location.origin;
+  document.getElementById('eng-tbody').innerHTML = engs.filter(e => e.active).map(e => {
+    const susp = Number(e.suspended) === 1;
+    const badge = susp ? '<span class="badge danger-badge" title="' + escapeAttr(e.suspend_reason || 'No reason given') + '">Suspended</span>' : '';
+    const suspBtn = susp
+      ? '<button class="ghost small" onclick="reinstateEngineer(\'' + e.slug + '\', \'' + escapeJs(e.name) + '\')">Reinstate</button>'
+      : '<button class="ghost small" title="Block access, keep the link" onclick="suspendEngineer(\'' + e.slug + '\', \'' + escapeJs(e.name) + '\')">Suspend</button>';
+    return '<tr' + (susp ? ' style="background:#fdf3f2"' : '') + '>' +
+      '<td><strong>' + escapeHtml(e.name) + '</strong> ' + badge + '</td>' +
+      '<td><a href="/e/' + e.token + '" target="_blank" style="font-family:ui-monospace,monospace;font-size:12px;color:#1A4F8F">' + base + '/e/' + e.token + '</a></td>' +
+      '<td><div class="row"><button class="ghost small" onclick="copyLink(\'' + base + '/e/' + e.token + '\')">Copy</button>' + suspBtn +
+      '<button class="ghost small" title="Invalidate the current link and issue a new one" onclick="rotateLink(\'engineers\', \'' + e.slug + '\', \'' + escapeJs(e.name) + '\')">♻ New link</button>' +
+      '<button class="danger small" onclick="removeEngineer(\'' + e.slug + '\')">Remove</button></div></td></tr>';
+  }).join('');
+}
+function escapeJs(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+async function suspendEngineer(slug, name) {
+  const reason = prompt('Suspend ' + name + '?\n\nTheir link keeps working but shows a "suspended" message until you reinstate them.\n\nOptional reason to show them (leave blank for none):', '');
+  if (reason === null) return; // cancelled
+  await authFetch('/po/api/engineers/' + slug, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suspended: 1, suspend_reason: reason.trim() }) });
+  loadEngineers();
+}
+async function reinstateEngineer(slug, name) {
+  if (!confirm('Reinstate ' + name + '? Their existing link will work again straight away.')) return;
+  await authFetch('/po/api/engineers/' + slug, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suspended: 0 }) });
+  loadEngineers();
+}
+async function suspendEngineer(slug, name) {
+  const reason = prompt('Suspend ' + name + '?\n\nTheir link keeps working but shows a "suspended" message until you reinstate them.\n\nOptional reason to show them (leave blank for none):', '');
+  if (reason === null) return; // cancelled
+  await authFetch('/po/api/engineers/' + slug, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suspended: 1, suspend_reason: reason.trim() }) });
+  loadEngineers();
+}
+async function reinstateEngineer(slug, name) {
+  if (!confirm('Reinstate ' + name + '? Their existing link will work again straight away.')) return;
+  await authFetch('/po/api/engineers/' + slug, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suspended: 0 }) });
+  loadEngineers();
+}
+async function addEngineer() {
+  const name = document.getElementById('new-eng-name').value.trim();
+  if (!name) return;
+  await authFetch('/po/api/engineers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  document.getElementById('new-eng-name').value = ''; loadEngineers();
+}
+async function removeEngineer(slug) {
+  if (!confirm('Remove this engineer?')) return;
+  await authFetch('/po/api/engineers/' + slug, { method: 'DELETE' }); loadEngineers();
+}
+async function loadOfficeUsers() {
+  const users = await authFetch('/po/api/office-users').then(r => r.json());
+  const base = window.location.origin;
+  const active = users.filter(u => u.active);
+  if (!active.length) { document.getElementById('ou-tbody').innerHTML = '<tr><td colspan="3"><div class="empty">No office users yet</div></td></tr>'; return; }
+  document.getElementById('ou-tbody').innerHTML = active.map(u => `
+    <tr>
+      <td><strong>${escapeHtml(u.name)}</strong></td>
+      <td><a href="/o/${u.token}" target="_blank" style="font-family:ui-monospace,monospace;font-size:12px;color:#1A4F8F">${base}/o/${u.token}</a></td>
+      <td><div class="row"><button class="ghost small" onclick='copyLink("${base}/o/${u.token}")'>Copy</button><button class="ghost small" title="Invalidate the current link and issue a new one" onclick='rotateLink("office-users", "${u.slug}", "${escapeAttr(u.name)}")'>♻ New link</button><button class="danger small" onclick='removeOfficeUser("${u.slug}")'>Remove</button></div></td>
+    </tr>`).join('');
+}
+async function addOfficeUser() {
+  const name = document.getElementById('new-ou-name').value.trim();
+  if (!name) return;
+  await authFetch('/po/api/office-users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  document.getElementById('new-ou-name').value = ''; loadOfficeUsers();
+}
+async function removeOfficeUser(slug) {
+  if (!confirm('Remove this office user?')) return;
+  await authFetch('/po/api/office-users/' + slug, { method: 'DELETE' }); loadOfficeUsers();
+}
+async function loadSuppliers() {
+  const sups = await authFetch('/po/api/suppliers').then(r => r.json());
+  document.getElementById('sup-list').innerHTML = sups.map(s => `<div class="chip">${escapeHtml(s.name)} <button onclick='removeSupplier(${s.id})' title="Remove">✕</button></div>`).join('');
+}
+async function addSupplier() {
+  const name = document.getElementById('new-sup-name').value.trim();
+  if (!name) return;
+  await authFetch('/po/api/suppliers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  document.getElementById('new-sup-name').value = ''; loadSuppliers();
+}
+async function removeSupplier(id) { await authFetch('/po/api/suppliers/' + id, { method: 'DELETE' }); loadSuppliers(); }
+async function loadSubcontractors() {
+  const subs = await authFetch('/po/api/subcontractors').then(r => r.json());
+  const el = document.getElementById('subc-list');
+  el.innerHTML = subs.length ? subs.map(s => `<div class="chip">${escapeHtml(s.name)} <button onclick='removeSubcontractor(${s.id})' title="Remove">✕</button></div>`).join('') : '<div class="empty" style="padding:16px;width:100%">No subcontractors yet — add roofers, plumbers, etc.</div>';
+}
+async function addSubcontractor() {
+  const name = document.getElementById('new-subc-name').value.trim();
+  if (!name) return;
+  await authFetch('/po/api/subcontractors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  document.getElementById('new-subc-name').value = ''; loadSubcontractors();
+}
+async function removeSubcontractor(id) { await authFetch('/po/api/subcontractors/' + id, { method: 'DELETE' }); loadSubcontractors(); }
+async function loadTrades() {
+  const trades = await authFetch('/po/api/trades').then(r => r.json());
+  document.getElementById('trade-list').innerHTML = trades.map(t => `<div class="chip">${escapeHtml(t.name)} <button onclick='removeTrade(${t.id})' title="Remove">✕</button></div>`).join('');
+}
+async function addTrade() {
+  const name = document.getElementById('new-trade-name').value.trim();
+  if (!name) return;
+  await authFetch('/po/api/trades', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  document.getElementById('new-trade-name').value = ''; loadTrades();
+}
+async function removeTrade(id) { await authFetch('/po/api/trades/' + id, { method: 'DELETE' }); loadTrades(); }
+async function loadSites() {
+  const sites = await authFetch('/po/api/sites').then(r => r.json());
+  if (!sites.length) { document.getElementById('site-list').innerHTML = '<div class="empty" style="padding:20px;width:100%">No sites added yet. Add the ones you use most often — engineers can still type free-text for one-offs.</div>'; return; }
+  document.getElementById('site-list').innerHTML = sites.map(s => `<div class="chip">${escapeHtml(s.name)} <button onclick='removeSite(${s.id})' title="Remove">✕</button></div>`).join('');
+}
+async function addSite() {
+  const name = document.getElementById('new-site-name').value.trim();
+  if (!name) return;
+  await authFetch('/po/api/sites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  document.getElementById('new-site-name').value = ''; loadSites();
+}
+async function removeSite(id) { await authFetch('/po/api/sites/' + id, { method: 'DELETE' }); loadSites(); }
+async function loadClosures() {
+  const cls = await authFetch('/po/api/closures').then(r => r.json());
+  if (!cls.length) { document.getElementById('clo-tbody').innerHTML = '<tr><td colspan="3"><div class="empty">No closures added</div></td></tr>'; return; }
+  document.getElementById('clo-tbody').innerHTML = cls.map(c => `<tr><td>${fmtDate(c.date)}</td><td>${escapeHtml(c.reason || '')}</td><td><button class="danger small" onclick='removeClosure("${c.date}")'>Remove</button></td></tr>`).join('');
+}
+async function addClosure() {
+  const date = document.getElementById('new-clo-date').value;
+  const reason = document.getElementById('new-clo-reason').value.trim();
+  if (!date) return;
+  await authFetch('/po/api/closures', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, reason }) });
+  document.getElementById('new-clo-date').value = ''; document.getElementById('new-clo-reason').value = ''; loadClosures();
+}
+async function removeClosure(date) { await authFetch('/po/api/closures/' + encodeURIComponent(date), { method: 'DELETE' }); loadClosures(); }
+function copyLink(url) { navigator.clipboard.writeText(url).then(() => alert('Copied: ' + url)); }
+async function rotateLink(kind, slug, name) {
+  if (!confirm('Issue a new link for ' + name + '?\n\nTheir current link stops working immediately — send them the new one.')) return;
+  await authFetch('/po/api/' + kind + '/' + slug + '/rotate', { method: 'POST' });
+  if (kind === 'engineers') loadEngineers(); else loadOfficeUsers();
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+function fmtDate(s) {
+  s = String(s || '');
+  if (s.length === 10 && s.charAt(4) === '-') return s.slice(8,10) + '-' + s.slice(5,7) + '-' + s.slice(2,4);
+  return s;
+}
+__gate(init);
+
+</script></body></html>
