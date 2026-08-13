@@ -457,6 +457,15 @@
   // left in their guided flow (no sidebar).
   (function portalNav() {
     try {
+      // Never paint the shell sidebar inside an embedded frame. Pages such as
+      // po.html embed another same-origin portal page (e.g. po-office.html) in
+      // an <iframe>; that page also loads portal-config.js, so without this
+      // guard it renders a SECOND sidebar right beside the real one (the
+      // "two sidebars side by side" seen after opening PO System). The parent
+      // portal page already shows the sidebar — only the top document gets it.
+      // (Cross-origin frames throw on window.top access → treat as embedded.)
+      try { if (window.self !== window.top) return; } catch (e) { return; }
+
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
       // Skip auth pages, the guided day, and the portal ROOT index (a redirect
       // shell) — but NOT sub-app index files like /hs-plan/index.html.
