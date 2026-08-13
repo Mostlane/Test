@@ -168,7 +168,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cam = (site.cameras || [])[0];
     if (!cam) return json({ ok: false, error: "This site has no cameras" }, 400);
     const r = await fetchSnapshot(site, cam.ch);
-    return json({ ok: r.ok, status: r.status, bytes: r.bytes || 0, error: r.error || null, contentType: r.contentType || null });
+    return json({ ok: r.ok, status: r.status, bytes: r.bytes || 0, error: r.error || null, contentType: r.contentType || null, debug: r.debug || null, ch: cam.ch });
   }
 
   return json({ ok: false, error: "Not found: " + path }, 404);
@@ -207,33 +207,74 @@ async function snapshot(request, env, url, cors) {
 }
 
 // Fetch one JPEG from a DVR, doing a digest (or basic) handshake as needed.
+// Returns rich diagnostics (dbg) so /cctv/test can explain a failure precisely.
 async function fetchSnapshot(site, ch) {
   const scheme = site.https ? "https" : "http";
   const base = `${scheme}://${site.host}:${site.port}`;
   const tmpl = site.path || VENDOR_PATH[site.vendor === "dahua" ? "dahua" : "hik"];
   const uri = tmpl.replace(/\{ch\}/g, encodeURIComponent(ch));
   const target = base + uri;
+  const ACCEPT = { "Accept": "image/jpeg,image/*,*/*", "User-Agent": "Mostlane-CCTV/1.0" };
 
+  const dbg = { firstStatus: null, wwwAuth: null, authScheme: null, authTried: false, finalStatus: null, reason: null };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
-  try {
-    // First request — many DVRs answer 401 with a WWW-Authenticate challenge.
-    let resp = await fetch(target, { signal: ctl.signal, headers: { "Accept": "image/jpeg,image/*" } });
 
-    if (resp.status === 401 && site.user) {
-      const wa = resp.headers.get("WWW-Authenticate") || "";
-      const authHeader = await buildAuthHeader(wa, site.user, site.pass || "", "GET", uri);
-      if (authHeader) {
-        resp = await fetch(target, { signal: ctl.signal, headers: { "Accept": "image/jpeg,image/*", "Authorization": authHeader } });
+  const get = (extra) => fetch(target, { signal: ctl.signal, headers: Object.assign({}, ACCEPT, extra || {}) });
+  // Hikvision packs the real reason (userLocked / badUserPassword /
+  // insufficientPermission …) into a small XML body — pull it out for the UI.
+  const readReason = async (resp) => {
+    try {
+      const t = (await resp.text()).slice(0, 400);
+      const m = t.match(/<subStatusCode>([^<]+)<\/subStatusCode>/i) || t.match(/<statusString>([^<]+)<\/statusString>/i);
+      return m ? m[1] : (t.replace(/\s+/g, " ").trim().slice(0, 160) || null);
+    } catch { return null; }
+  };
+
+  try {
+    let resp = await get();
+    dbg.firstStatus = resp.status;
+    const wa = resp.headers.get("WWW-Authenticate") || "";
+    dbg.wwwAuth = wa ? wa.slice(0, 80) : null;
+
+    if ((resp.status === 401 || resp.status === 403) && site.user) {
+      if (wa) {
+        dbg.authScheme = /digest/i.test(wa) ? "digest" : (/basic/i.test(wa) ? "basic" : "unknown");
+        const authHeader = await buildAuthHeader(wa, site.user, site.pass || "", "GET", uri);
+        if (authHeader) {
+          dbg.authTried = true;
+          resp = await get({ "Authorization": authHeader });
+          dbg.finalStatus = resp.status;
+          // Digest rejected? Some Annke firmware is set to Basic — try that too.
+          if (!resp.ok && dbg.authScheme === "digest") {
+            const r2 = await get({ "Authorization": "Basic " + btoa(`${site.user}:${site.pass || ""}`) });
+            if (r2.ok) { resp = r2; dbg.authScheme = "digest→basic"; } else { resp = resp.status >= r2.status ? r2 : resp; }
+            dbg.finalStatus = resp.status;
+          }
+        }
+      } else {
+        // No challenge header at all — try a preemptive Basic (some firmware).
+        dbg.authScheme = "basic(preemptive)"; dbg.authTried = true;
+        resp = await get({ "Authorization": "Basic " + btoa(`${site.user}:${site.pass || ""}`) });
+        dbg.finalStatus = resp.status;
       }
     }
 
-    if (!resp.ok) return { ok: false, status: resp.status };
+    if (!resp.ok) {
+      dbg.reason = await readReason(resp);
+      return { ok: false, status: resp.status, debug: dbg };
+    }
     const ct = resp.headers.get("Content-Type") || "image/jpeg";
     const buf = await resp.arrayBuffer();
-    return { ok: true, status: 200, body: buf, bytes: buf.byteLength, contentType: ct };
+    // A tiny "image" is usually an XML error the server sent with 200 — sanity-check.
+    if (buf.byteLength < 200 && !/image\//i.test(ct)) {
+      dbg.reason = "server returned " + ct + " (" + buf.byteLength + " bytes), not an image";
+      return { ok: false, status: resp.status, debug: dbg };
+    }
+    return { ok: true, status: 200, body: buf, bytes: buf.byteLength, contentType: ct, debug: dbg };
   } catch (e) {
-    return { ok: false, status: 0, error: (e && e.name === "AbortError") ? "timed out (check host/port/forwarding)" : String(e && e.message || e) };
+    dbg.reason = (e && e.name === "AbortError") ? "timed out (check host/port/forwarding)" : String(e && e.message || e);
+    return { ok: false, status: 0, error: dbg.reason, debug: dbg };
   } finally {
     clearTimeout(timer);
   }
