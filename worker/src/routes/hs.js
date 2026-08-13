@@ -130,7 +130,9 @@ export async function handle(request, env, ctx, url, sess) {
     if (!id || !pages.length) return error("id and pages required", 400, env, request);
     const row = await db.prepare("SELECT id, ref, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
     if (!row) return error("Document not found", 404, env, request);
-    if (!parseArr(row.sign_requests).some(s => s.username === me)) return error("This document wasn't sent to you.", 403, env, request);
+    const reqs = parseArr(row.sign_requests);
+    const mine = reqs.find(s => s.username === me);
+    if (!mine) return error("This document wasn't sent to you.", 403, env, request);
     const pdf = new PdfDoc();
     let first = true, n = 0;
     for (const durl of pages.slice(0, 30)) {
@@ -149,6 +151,12 @@ export async function handle(request, env, ctx, url, sess) {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: ("Risk Assessment " + (row.ref || "")).trim() + ".pdf", by: me, at: new Date().toISOString() }
     });
+    // Record the filed copy's key on the sign-off entry so removing the person
+    // later also deletes it from their My Documents. Replace any earlier copy.
+    if (mine.docKey && mine.docKey !== key) { try { await env.JOB_FILES.delete(mine.docKey); } catch {} }
+    mine.docKey = key; mine.filedAt = new Date().toISOString();
+    await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(reqs), new Date().toISOString(), db.tenantId, id).run();
     return json({ ok: true }, {}, env, request);
   }
 
@@ -250,7 +258,12 @@ export async function handle(request, env, ctx, url, sess) {
     if (!id || !un) return error("id and username required", 400, env, request);
     const row = await db.prepare("SELECT id, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
     if (!row) return error("Document not found", 404, env, request);
-    const reqs = parseArr(row.sign_requests).filter(s => s.username !== un);
+    const all = parseArr(row.sign_requests);
+    const removed = all.find(s => s.username === un);
+    const reqs = all.filter(s => s.username !== un);
+    // If they'd already signed, their completed copy was filed into their My
+    // Documents — remove it too so it disappears when they're taken off.
+    if (removed && removed.docKey) { try { await env.JOB_FILES.delete(removed.docKey); } catch {} }
     await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(JSON.stringify(reqs), new Date().toISOString(), db.tenantId, id).run();
     return json({ ok: true, signRequests: reqs }, {}, env, request);

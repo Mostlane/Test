@@ -1145,7 +1145,7 @@
     finally { g("signSendBtn").disabled = false; }
   }
   async function cancelSign(username) {
-    if (!DOC_CUR || !confirm("Remove this person from the sign-off list?")) return;
+    if (!DOC_CUR || !confirm("Remove this person from the sign-off list?\n\nIf they've already signed, their completed copy will also be removed from their My Documents.")) return;
     try { const r = await authFetch("/hs/doc/sign-cancel", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: DOC_CUR.id, username }) }).then(r => r.json());
       if (r.ok) await openDoc(DOC_CUR.id); } catch (e) {}
   }
