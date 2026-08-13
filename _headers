@@ -77,6 +77,16 @@
   Cache-Control: no-cache
 /po-raise.html
   Cache-Control: no-cache
+/po-stats.html
+  Cache-Control: no-cache
+/po-summary.html
+  Cache-Control: no-cache
+/po-accounts.html
+  Cache-Control: no-cache
+/po-jobs.html
+  Cache-Control: no-cache
+/po-admin.html
+  Cache-Control: no-cache
 /memo-sign.html
   Cache-Control: no-cache
 /fleet-report.html
