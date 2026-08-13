@@ -13892,6 +13892,7 @@ async function getJobCost(db, params) {
     }
   };
 }
+var PO_START = 10011;
 async function nextPoNumber(db) {
   const row = await db.prepare(`
     SELECT COALESCE(MIN(n), ?) AS next FROM (
