@@ -1255,13 +1255,28 @@ then `HUB.run(perms)` (reads the cached `mostlanePermissions` blob, instant, no
 network wait). A widget filtered out by `can(perms)` never renders; if NO widget
 is eligible the whole `#hubDash` stays hidden. Each `load()` fetches its own data
 (via a timeout-raced `jfetch`, since API calls bypass the SW) and fills its card;
-a throwing/timed-out widget removes its own card. **Add a new area** = one
-`HUB.register({...})` call. **First widget — Van checks** (`can`:
-FullAccess|Vehicles): GET /vancheck/week → "done/N this week" progress bar,
-outstanding-driver chips, red defect/alert rows (reg · driver · NOT SAFE / N
-issues / ⚠ alerts), a "⏸ Reminders paused" pill when `globallyPaused`, and
-actions **Open van checks** + **🔔 Remind now** (POST /vancheck/remind-now). Help
-+ CLAUDE.md must list new widgets as they're added.
+a throwing/timed-out widget removes its own card. **DESKTOP ONLY** (CSS: shown via
+`.hub-on` under `@media(min-width:1000px) body.pnav-on`, same condition as the
+greeting card) — mobile keeps the tiles + attention gate as its home. Shared
+render helpers `cardHtml({emoji,title,when,big,sub,tone,ok,rows,actions})`,
+`metric(label,n,tone)`, `act(href,label,primary)`, `daysUntil(YYYY-MM-DD)`.
+**Add a new area** = one `HUB.register({id,emoji,title,can,load})` call.
+Current widgets (each permission-gated):
+  - **Van checks** (FullAccess|Vehicles): GET /vancheck/week → done/N progress
+    bar, outstanding chips, red defect/alert rows, "⏸ Reminders paused" pill,
+    **Open van checks** + **🔔 Remind now** (POST /vancheck/remind-now).
+  - **Fleet** (FullAccess|Vehicles): GET /fleet/vehicles → count of vans with MOT
+    /tax due-or-overdue (`daysUntil` <0 / ≤30), service warn/bad, pending handovers.
+  - **SLA jobs** (FullAccess|SLA|SLAAdmin): GET /sla/jobs → open (status not
+    complete/closed/done), needs-scheduling (no `scheduledAt`), overdue
+    (`sla.state==="BREACHED"`), unassigned. Open board + Scheduler.
+  - **Holidays** (FullAccess|HolidayAdmin): GET /holiday/all?year= → Pending +
+    staff self-cancellations. Open holiday admin.
+  - **Equipment** (FullAccess|AssetAdmin): GET /asset/requests/attention →
+    toAction + decided. Open requests + My equipment.
+  - **Compliance** (FullAccess|Compliance): GET /compliance/stores → certs overdue
+    / due within 30 days (per-type `due` dates). Open compliance.
+Help + CLAUDE.md must list new widgets as they're added.
 
 ## Notifications system
 - Red badges on tiles (main.html) + sidebar (portal-config) from
