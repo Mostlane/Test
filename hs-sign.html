@@ -37,7 +37,8 @@
     .doc .foot { margin-top:18px; font-size:12px; color:#556; border-top:1px solid #ddd; padding-top:8px; }
     table.list { width:100%; border-collapse:collapse; background:#fff; }
     table.list td { padding:10px; border-top:1px solid #f0f3f7; font-size:13.5px; }
-    @media print { header.page,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; } @page { size:A4 landscape; margin:12mm; } }
+    .doc, .doc * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    @media print { header.page,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; } .doc, .doc *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; } @page { size:A4 landscape; margin:12mm; } }
   </style>
 </head>
 <body>
