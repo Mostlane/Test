@@ -7693,14 +7693,16 @@ async function handle15(request, env, ctx, url, sess) {
     const site = String(b.site || "").trim();
     const status = b.status === "closed" ? "closed" : "open";
     const data = b.data && typeof b.data === "object" ? b.data : {};
+    const typedRef = typeof b.ref === "string" && b.ref.trim() ? b.ref.trim().slice(0, 40) : "";
     if (b.id) {
-      const existing = await db.prepare("SELECT id FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).first();
+      const existing = await db.prepare("SELECT id, ref FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).first();
       if (!existing) return error("Document not found", 404, env, request);
-      await db.prepare("UPDATE hs_documents SET site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(site, status, JSON.stringify(data), now, db.tenantId, b.id).run();
-      return json({ ok: true, id: b.id }, {}, env, request);
+      const ref2 = typedRef || existing.ref;
+      await db.prepare("UPDATE hs_documents SET ref=?, site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(ref2, site, status, JSON.stringify(data), now, db.tenantId, b.id).run();
+      return json({ ok: true, id: b.id, ref: ref2 }, {}, env, request);
     }
     const id = "HSD-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-    const ref = await mintRef(db, docType, site);
+    const ref = typedRef || await mintRef(db, docType, site);
     await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now, now).run();
     return json({ ok: true, id, ref }, {}, env, request);
   }
@@ -7751,15 +7753,21 @@ async function handle15(request, env, ctx, url, sess) {
   }
   return error("Unknown H&S route", 404, env, request);
 }
+var SEQ = {
+  rams: { prefix: "RA", sep: "", pad: 5, floor: 1280 },
+  induction: { prefix: "IND", sep: "-", pad: 4, floor: 1 },
+  incident: { prefix: "INC", sep: "-", pad: 4, floor: 1 }
+};
 async function mintRef(db, docType, site) {
-  const prefix2 = PREFIX[docType];
   if (docType === "hotworks") {
+    const prefix2 = PREFIX[docType];
     const code = (site.replace(/[^A-Za-z0-9]/g, "").toUpperCase() + "SITE").slice(0, 6);
     const d = /* @__PURE__ */ new Date();
     const ymd = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
     const n = String(Math.floor(100 + Math.random() * 900));
     return `${prefix2}-${code}-${ymd}-${n}`;
   }
+  const cfg = SEQ[docType] || { prefix: PREFIX[docType] || "DOC", sep: "-", pad: 4, floor: 1 };
   const { results } = await db.prepare(
     "SELECT ref FROM hs_documents WHERE tenant_id=? AND doc_type=? AND ref IS NOT NULL"
   ).bind(db.tenantId, docType).all();
@@ -7768,7 +7776,8 @@ async function mintRef(db, docType, site) {
     const m = /(\d+)\s*$/.exec(String(r.ref || ""));
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
-  return `${prefix2}-${String(max + 1).padStart(4, "0")}`;
+  const next = Math.max(max + 1, cfg.floor);
+  return `${cfg.prefix}${cfg.sep}${String(next).padStart(cfg.pad, "0")}`;
 }
 
 // src/routes/vancheck.js

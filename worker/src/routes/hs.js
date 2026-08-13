@@ -58,18 +58,23 @@ export async function handle(request, env, ctx, url, sess) {
     const status = b.status === "closed" ? "closed" : "open";
     const data = (b.data && typeof b.data === "object") ? b.data : {};
 
+    // An explicitly-typed document number (from the form) overrides the
+    // auto-minted one, on both create and update. Trimmed + length-capped.
+    const typedRef = (typeof b.ref === "string" && b.ref.trim()) ? b.ref.trim().slice(0, 40) : "";
+
     if (b.id) {
-      // Update — keep the existing ref/created fields.
-      const existing = await db.prepare("SELECT id FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).first();
+      // Update — keep created fields; the ref changes only if one was typed.
+      const existing = await db.prepare("SELECT id, ref FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).first();
       if (!existing) return error("Document not found", 404, env, request);
-      await db.prepare("UPDATE hs_documents SET site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?")
-        .bind(site, status, JSON.stringify(data), now, db.tenantId, b.id).run();
-      return json({ ok: true, id: b.id }, {}, env, request);
+      const ref = typedRef || existing.ref;
+      await db.prepare("UPDATE hs_documents SET ref=?, site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?")
+        .bind(ref, site, status, JSON.stringify(data), now, db.tenantId, b.id).run();
+      return json({ ok: true, id: b.id, ref }, {}, env, request);
     }
 
     // Create — mint an internal id and a human reference.
     const id = "HSD-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
-    const ref = await mintRef(db, docType, site);
+    const ref = typedRef || await mintRef(db, docType, site);
     await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now, now).run();
     return json({ ok: true, id, ref }, {}, env, request);
@@ -127,19 +132,29 @@ export async function handle(request, env, ctx, url, sess) {
   return error("Unknown H&S route", 404, env, request);
 }
 
-// Build a human reference number in the SiteLog style, per tenant.
-//   induction / rams / incident : IND-0001, RAMS-0001, INC-0001 (sequential)
+// Per-type sequential numbering. Risk assessments run as RA01280, RA01281 …
+// (5-digit, no dash, starting at 1280 — the client's existing series); the
+// others keep the SiteLog-style IND-0001 / INC-0001.
+const SEQ = {
+  rams:      { prefix: "RA",  sep: "", pad: 5, floor: 1280 },
+  induction: { prefix: "IND", sep: "-", pad: 4, floor: 1 },
+  incident:  { prefix: "INC", sep: "-", pad: 4, floor: 1 },
+};
+// Build a human reference number, per tenant.
+//   induction / rams / incident : IND-0001, RA01280, INC-0001 (sequential)
 //   hotworks                    : HWP-<SITECODE6>-<YYYYMMDD>-<nnn>
 async function mintRef(db, docType, site) {
-  const prefix = PREFIX[docType];
   if (docType === "hotworks") {
+    const prefix = PREFIX[docType];
     const code = (site.replace(/[^A-Za-z0-9]/g, "").toUpperCase() + "SITE").slice(0, 6);
     const d = new Date();
     const ymd = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
     const n = String(Math.floor(100 + Math.random() * 900));
     return `${prefix}-${code}-${ymd}-${n}`;
   }
-  // Sequential: next number after the highest existing ref for this tenant+type.
+  const cfg = SEQ[docType] || { prefix: PREFIX[docType] || "DOC", sep: "-", pad: 4, floor: 1 };
+  // Sequential: next number after the highest existing ref for this tenant+type
+  // (a manually-typed higher number feeds the sequence), floored at the start.
   const { results } = await db.prepare(
     "SELECT ref FROM hs_documents WHERE tenant_id=? AND doc_type=? AND ref IS NOT NULL"
   ).bind(db.tenantId, docType).all();
@@ -148,5 +163,6 @@ async function mintRef(db, docType, site) {
     const m = /(\d+)\s*$/.exec(String(r.ref || ""));
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
-  return `${prefix}-${String(max + 1).padStart(4, "0")}`;
+  const next = Math.max(max + 1, cfg.floor);
+  return `${cfg.prefix}${cfg.sep}${String(next).padStart(cfg.pad, "0")}`;
 }
