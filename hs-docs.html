@@ -60,7 +60,10 @@
     .hazbar .dh { cursor:grab; font-size:16px; color:#8aa; user-select:none; padding:2px 4px; }
     .hazbar .dh:active { cursor:grabbing; }
     .hazbar .hzpos { font-weight:700; color:#557; font-size:12px; background:#eef3fb; border-radius:10px; padding:1px 8px; }
-    @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; max-width:none; } }
+    /* Keep the on-screen colours (risk cells, header bars, band pills) in the
+       printed / saved PDF — browsers drop background colours unless told to. */
+    .doc, .doc * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; max-width:none; } .doc, .doc *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; } }
   </style>
   <style id="printOrient">@page { size: A4 portrait; margin: 12mm; }</style>
 </head>
