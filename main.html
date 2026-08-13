@@ -1379,7 +1379,7 @@ const MAP = window.ML_PERM_MAP || {
             emoji: "🚗", title: "Fleet",
             big: n || vs.length, sub: n ? "vans need attention" : "vans, all up to date",
             tone: n ? "warn" : "", ok: n ? "" : "MOT, tax & service all in date.",
-            rows: rows, actions: act("vehicles.html", "Open vehicles", true)
+            rows: rows, actions: act("vehicles.html?filter=attention", "Open vehicles", true)
           });
         });
       }
@@ -1622,7 +1622,7 @@ const MAP = window.ML_PERM_MAP || {
           calc: function (j) { if (!Array.isArray(j)) return null; var open = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")); }); var od = j.filter(function (x) { return x.sla && x.sla.state === "BREACHED"; }); return { n: open.length, label: od.length ? "open · " + od.length + " overdue" : "open jobs", bad: od.length > 0 }; } },
         { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚐", href: "van-checks.html", get: "/vancheck/week",
           calc: function (d) { if (!d || !d.ok) return null; var out = (d.rows || []).filter(function (r) { return r.enabled !== false && !r.check; }).length; return { n: out, label: "van checks due", bad: false }; } },
-        { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚗", href: "vehicles.html", get: "/fleet/vehicles",
+        { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚗", href: "vehicles.html?filter=attention", get: "/fleet/vehicles",
           calc: function (d) { if (!d || !d.ok) return null; var f = {}; (d.vehicles || []).filter(function (v) { return v.active !== false; }).forEach(function (v) { var m = daysUntil(v.motDue), t = daysUntil(v.taxDue); if ((m != null && m <= 30) || (t != null && t <= 30) || v.serviceStatus === "bad" || v.serviceStatus === "warn" || v.pendingHandover) f[v.reg] = 1; }); return { n: Object.keys(f).length, label: "vans to attend", bad: false }; } },
         { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-scheduler.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var n = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")) && !x.scheduledAt; }).length; return { n: n, label: "to schedule", bad: false }; } },
