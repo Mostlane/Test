@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=2"></script>
+  <title>Mostlane • CCTV Wall</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+  :root{ --bg:#0b1220; --card:#111a2e; --line:#22304d; --ink:#e8eefc; --muted:#8ea0c4; --brand:#2563eb; --ok:#22c55e; --bad:#ef4444; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;min-height:100%;}
+  header.page{background:#0f172a;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:50;border-bottom:1px solid var(--line);}
+  header.page h1{font-size:17px;margin:0;font-weight:600;flex:0 0 auto;}
+  a.ml-back{text-decoration:none;font-size:15px;color:#cbd5e1;}
+  .head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto;}
+  .btn{appearance:none;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);color:#fff;border-radius:8px;padding:7px 11px;font-size:13.5px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;}
+  .btn:hover{background:rgba(255,255,255,.18);}
+  .btn.primary{background:var(--brand);border-color:var(--brand);}
+  .btn.danger{color:#fecaca;border-color:#7f1d1d;background:rgba(127,29,29,.35);}
+  .btn.small{padding:5px 9px;font-size:12.5px;}
+  select,input[type=text],input[type=number],input[type=url],input[type=password],textarea{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#0e1830;color:var(--ink);}
+  select{background:#0e1830;color:#fff;}
+
+  .locbar{display:flex;gap:8px;align-items:center;padding:8px 14px;background:#0d1526;border-bottom:1px solid var(--line);overflow-x:auto;}
+  .loctab{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .loctab.on{background:var(--brand);border-color:var(--brand);color:#fff;}
+
+  .wall{flex:1;display:grid;gap:6px;padding:6px;grid-auto-rows:1fr;min-height:0;}
+  .wall[data-cols="1"]{grid-template-columns:1fr;}
+  .wall[data-cols="2"]{grid-template-columns:repeat(2,1fr);}
+  .wall[data-cols="3"]{grid-template-columns:repeat(3,1fr);}
+  .wall[data-cols="4"]{grid-template-columns:repeat(4,1fr);}
+  @media(max-width:760px){ .wall[data-cols="3"],.wall[data-cols="4"]{grid-template-columns:repeat(2,1fr);} }
+  @media(max-width:480px){ .wall{grid-template-columns:1fr!important;} }
+
+  .tile{position:relative;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden;min-height:150px;display:flex;align-items:center;justify-content:center;}
+  .tile video,.tile img,.tile iframe{width:100%;height:100%;object-fit:contain;background:#000;border:0;display:block;}
+  .tile .lab{position:absolute;left:0;bottom:0;right:0;padding:6px 9px;font-size:12.5px;font-weight:700;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.75));display:flex;align-items:center;gap:7px;pointer-events:none;}
+  .tile .live{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto;}
+  .tile.ok .live{background:var(--ok);box-shadow:0 0 0 3px rgba(34,197,94,.25);}
+  .tile.err .live{background:var(--bad);}
+  .tile .tctl{position:absolute;top:6px;right:6px;display:flex;gap:5px;opacity:0;transition:.15s;}
+  .tile:hover .tctl{opacity:1;}
+  .tctl button{width:30px;height:30px;border-radius:7px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.55);color:#fff;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;}
+  .tctl button:hover{background:rgba(0,0,0,.8);}
+  .tile .msg{color:#9fb0d0;font-size:13px;text-align:center;padding:14px;line-height:1.5;}
+  .tile .msg b{color:#e8eefc;}
+  .tile.fs{position:fixed;inset:0;z-index:200;border-radius:0;}
+
+  .empty{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .empty .box{max-width:580px;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 24px;}
+  .empty h2{margin:0 0 8px;font-size:20px;}
+  .empty p{color:var(--muted);font-size:14.5px;line-height:1.6;margin:8px 0;}
+  .empty .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px;}
+
+  /* modal */
+  .scrim{position:fixed;inset:0;background:rgba(3,7,18,.72);display:none;align-items:center;justify-content:center;z-index:300;padding:16px;}
+  .scrim.on{display:flex;}
+  .modal{width:100%;max-width:560px;max-height:92vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;}
+  .modal h3{margin:0 0 4px;font-size:18px;}
+  .modal .sub{color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5;}
+  .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:13px;}
+  .fld label{font-size:12.5px;font-weight:700;color:#b7c5e6;}
+  .fld .hint{font-size:12px;color:var(--muted);line-height:1.5;}
+  .fld input,.fld select,.fld textarea{width:100%;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px;flex-wrap:wrap;}
+  .typehelp{font-size:12px;color:var(--muted);background:#0e1830;border:1px solid var(--line);border-radius:8px;padding:9px 11px;line-height:1.55;margin-bottom:13px;}
+  .sitecard{background:#0e1830;border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:9px;}
+  .sitecard .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .sitecard .top b{font-size:14.5px;}
+  .sitecard .meta{color:var(--muted);font-size:12px;margin-top:3px;word-break:break-all;}
+  .pill{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;background:#1e293b;color:#cbd5e1;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;border:1px solid var(--line);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:500;max-width:90vw;text-align:center;}
+  .note{font-size:12px;color:var(--muted);line-height:1.55;background:#0e1830;border:1px solid var(--line);border-left:3px solid #f59e0b;border-radius:8px;padding:9px 11px;margin-bottom:13px;}
+  .note b{color:#fff;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html">← Menu</a>
+    <h1>📹 CCTV Wall</h1>
+    <div class="head-actions">
+      <select id="layoutSel" title="Grid layout">
+        <option value="auto">Auto grid</option>
+        <option value="1">1 × 1</option>
+        <option value="2">2 × 2</option>
+        <option value="3">3 × 3</option>
+        <option value="4">4 × 4</option>
+      </select>
+      <button class="btn small" id="refreshAll" title="Reload all feeds">🔄 Reload</button>
+      <button class="btn small" id="fsAll" title="Fullscreen the wall">⛶ Fullscreen</button>
+      <button class="btn small" id="dvrBtn" style="display:none">🖧 DVR Sites</button>
+      <button class="btn small" id="addBtn">＋ Other feed</button>
+    </div>
+  </header>
+
+  <div class="locbar" id="locbar" style="display:none"></div>
+
+  <div id="wall" class="wall" data-cols="2"></div>
+  <div id="empty" class="empty" style="display:none">
+    <div class="box">
+      <h2>Build your camera wall</h2>
+      <p>Add your <b>DVR sites</b> — the Wall pulls a live snapshot from each camera through the portal
+         (so DVR logins never touch the browser). You can also add other browser-playable feeds
+         (HLS / MJPEG / embed).</p>
+      <div class="row">
+        <button class="btn primary" id="emptyDvr" style="display:none">🖧 Add a DVR site</button>
+        <button class="btn" onclick="openAdd()">＋ Add another feed</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DVR sites admin -->
+  <div class="scrim" id="dvrScrim">
+    <div class="modal">
+      <h3 id="dvrTitle">DVR sites</h3>
+      <p class="sub">Each site's cameras become snapshot tiles on the Wall. The portal fetches the images
+         server-side (handles the digest login + HTTPS), so the DVR password stays out of the browser.</p>
+
+      <div id="dvrList"></div>
+      <div id="dvrEmpty" class="sub" style="display:none">No DVR sites yet — add your first below.</div>
+
+      <div style="border-top:1px solid var(--line);margin:14px 0"></div>
+
+      <h3 id="dvrFormTitle" style="font-size:15px">Add a DVR site</h3>
+      <div class="note">
+        <b>Before adding:</b> on the DVR, make a <b>view-only user</b> for the portal, and forward the DVR
+        to a proxy-reachable port — <b>8080</b> is easiest (allowed: 80, 8080, 8880, 2052, 2082, 2086, 2095).
+        Prefer HTTP forwarding.
+      </div>
+
+      <div class="fld">
+        <label>Site name</label>
+        <input type="text" id="dName" placeholder="e.g. Head office" maxlength="40"/>
+      </div>
+      <div class="row3">
+        <div class="fld" style="grid-column:span 2">
+          <label>DVR host / DDNS</label>
+          <input type="text" id="dHost" placeholder="e.g. myoffice.ddns.net"/>
+        </div>
+        <div class="fld">
+          <label>Port</label>
+          <input type="number" id="dPort" value="8080" min="1" max="65535"/>
+        </div>
+      </div>
+      <div class="row3">
+        <div class="fld">
+          <label>Make</label>
+          <select id="dVendor">
+            <option value="hik">Annke / Hikvision</option>
+            <option value="dahua">Dahua-based</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label>Cameras</label>
+          <input type="number" id="dCount" value="4" min="0" max="64"/>
+        </div>
+        <div class="fld">
+          <label>HTTPS?</label>
+          <select id="dHttps"><option value="0">No (HTTP)</option><option value="1">Yes</option></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="fld">
+          <label>View-only username</label>
+          <input type="text" id="dUser" autocomplete="off" placeholder="portal"/>
+        </div>
+        <div class="fld">
+          <label>Password <span id="dPassKeep" style="color:var(--muted);font-weight:400;display:none">(leave blank = keep)</span></label>
+          <input type="password" id="dPass" autocomplete="new-password" placeholder="••••••••"/>
+        </div>
+      </div>
+      <details style="margin-bottom:12px">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--muted)">Advanced — custom snapshot path</summary>
+        <div class="fld" style="margin-top:8px">
+          <input type="text" id="dPath" placeholder="/ISAPI/Streaming/channels/{ch}/picture"/>
+          <span class="hint">Use <code>{ch}</code> for the channel. Leave blank to use the make's default.</span>
+        </div>
+      </details>
+
+      <div class="modal-actions">
+        <button class="btn danger small" id="dDelete" style="display:none;margin-right:auto">🗑 Delete site</button>
+        <button class="btn small" id="dTest" style="display:none">🧪 Test</button>
+        <button class="btn small" onclick="resetDvrForm()">Clear</button>
+        <button class="btn primary small" id="dSave">Save site</button>
+      </div>
+      <div class="modal-actions" style="margin-top:14px">
+        <button class="btn small" onclick="closeDvr()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add / edit "other feed" modal -->
+  <div class="scrim" id="camScrim">
+    <div class="modal">
+      <h3 id="camTitle">Add feed</h3>
+      <p class="sub">For non-DVR feeds a browser can open directly (an HLS/MJPEG stream, a snapshot URL, or an embeddable player).</p>
+      <div class="fld"><label>Name</label><input type="text" id="fName" placeholder="e.g. Reception" maxlength="60"/></div>
+      <div class="row2">
+        <div class="fld"><label>Location / group</label><input type="text" id="fLoc" list="locList" placeholder="e.g. Head office" maxlength="40"/><datalist id="locList"></datalist></div>
+        <div class="fld"><label>Feed type</label>
+          <select id="fType">
+            <option value="hls">HLS stream (.m3u8)</option>
+            <option value="mjpeg">MJPEG stream</option>
+            <option value="snapshot">Snapshot JPEG (polling)</option>
+            <option value="embed">Embed / web player (iframe)</option>
+            <option value="video">Direct video (mp4/webm)</option>
+          </select>
+        </div>
+      </div>
+      <div class="typehelp" id="typeHelp"></div>
+      <div class="fld"><label>Feed URL</label><input type="url" id="fUrl" placeholder="https://…"/></div>
+      <div class="fld" id="intWrap" style="display:none"><label>Snapshot refresh (seconds)</label><input type="number" id="fInt" min="1" max="60" value="2" style="max-width:120px"/></div>
+      <div class="modal-actions">
+        <button class="btn danger small" id="delCam" style="display:none;margin-right:auto">🗑 Delete</button>
+        <button class="btn small" onclick="closeCam()">Cancel</button>
+        <button class="btn primary small" id="saveCam">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+/* ---------- api ---------- */
+const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
+function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+pTok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+
+/* ---------- storage (Wall prefs + manual feeds) ---------- */
+const LS_KEY = "mostlaneCCTV";
+let STATE = load();
+let DVR = [];              // sites from the worker
+let CAN_ADMIN = false;     // Full Access (can manage DVR sites)
+function load(){
+  try{ const s = JSON.parse(localStorage.getItem(LS_KEY)||"{}");
+    return { cameras:Array.isArray(s.cameras)?s.cameras:[], layout:s.layout||"auto", activeLoc:s.activeLoc||"__all", snapSecs:s.snapSecs||4 };
+  }catch(e){ return { cameras:[], layout:"auto", activeLoc:"__all", snapSecs:4 }; }
+}
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(STATE)); }
+function uid(){ return "c"+Math.abs(Date.now()^(performance.now()*1000|0)).toString(36)+(STATE.cameras.length); }
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+function toast(m){ const t=$("#toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display="none",2600); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* Combined camera list: DVR snapshot cameras + manual feeds. */
+function allCams(){
+  const out=[];
+  DVR.forEach(s=>(s.cameras||[]).forEach(c=>{
+    out.push({ id:"dvr:"+s.id+":"+c.id, name:c.name, loc:s.name, type:"snapshot", url:c.snapshotUrl, interval:STATE.snapSecs, _dvr:true });
+  }));
+  STATE.cameras.forEach(c=>out.push(Object.assign({},c)));
+  return out;
+}
+function locations(){ return [...new Set(allCams().map(c=>c.loc).filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
+function activeCams(){ const all=allCams(); return STATE.activeLoc==="__all"?all:(STATE.activeLoc===""?all.filter(c=>!c.loc):all.filter(c=>c.loc===STATE.activeLoc)); }
+
+/* ---------- HLS loader (lazy) ---------- */
+let hlsLoading=null;
+function ensureHls(){
+  if(window.Hls) return Promise.resolve(true);
+  if(hlsLoading) return hlsLoading;
+  hlsLoading = new Promise(res=>{ const s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"; s.onload=()=>res(!!window.Hls); s.onerror=()=>res(false); document.head.appendChild(s); });
+  return hlsLoading;
+}
+
+/* ---------- tiles ---------- */
+const players = new Map();
+function teardown(){ for(const p of players.values()){ try{p.hls&&p.hls.destroy();}catch(e){} try{p.timer&&clearInterval(p.timer);}catch(e){} } players.clear(); }
+function bust(url){ return url + (url.includes("?")?"&":"?") + "_t=" + Date.now(); }
+function setStatus(tile,ok){ tile.classList.toggle("ok",ok===true); tile.classList.toggle("err",ok===false); }
+function clearMedia(tile){ tile.querySelectorAll("video,img,iframe,.msg").forEach(n=>n.remove()); const p=players.get(tile.dataset.id); if(p){ try{p.hls&&p.hls.destroy();}catch(e){} try{p.timer&&clearInterval(p.timer);}catch(e){} players.delete(tile.dataset.id);} }
+function showMsg(tile,html){ clearMedia(tile); const d=document.createElement("div"); d.className="msg"; d.innerHTML=html; tile.appendChild(d); }
+
+function makeTile(cam){
+  const tile=document.createElement("div"); tile.className="tile"; tile.dataset.id=cam.id;
+  const lab=document.createElement("div"); lab.className="lab";
+  lab.innerHTML='<span class="live"></span><span>'+esc(cam.name||"Camera")+(cam.loc?' · <span style="opacity:.75">'+esc(cam.loc)+'</span>':'')+'</span>';
+  const ctl=document.createElement("div"); ctl.className="tctl";
+  ctl.innerHTML='<button title="Reload" data-a="reload">🔄</button><button title="Fullscreen" data-a="fs">⛶</button>'+(cam._dvr?'':'<button title="Edit" data-a="edit">✏️</button>');
+  ctl.addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b)return; const a=b.dataset.a;
+    if(a==="reload") startFeed(cam,tile); else if(a==="fs") toggleTileFs(tile); else if(a==="edit") openEdit(cam.id); });
+  tile.appendChild(lab); tile.appendChild(ctl);
+  startFeed(cam,tile);
+  return tile;
+}
+async function startFeed(cam,tile){
+  clearMedia(tile); setStatus(tile,null);
+  if(!cam.url){ showMsg(tile,"No URL set."); setStatus(tile,false); return; }
+  try{
+    if(cam.type==="hls") return feedHls(cam,tile);
+    if(cam.type==="mjpeg"||cam.type==="snapshot") return feedImg(cam,tile);
+    if(cam.type==="embed") return feedEmbed(cam,tile);
+    if(cam.type==="video") return feedVideo(cam,tile);
+  }catch(e){ showMsg(tile,"Couldn't start feed.<br><span style='opacity:.7'>"+esc(String(e.message||e))+"</span>"); setStatus(tile,false); }
+}
+async function feedHls(cam,tile){
+  const v=document.createElement("video"); v.muted=true; v.autoplay=true; v.playsInline=true; tile.insertBefore(v,tile.firstChild);
+  v.addEventListener("playing",()=>setStatus(tile,true)); v.addEventListener("error",()=>setStatus(tile,false));
+  if(v.canPlayType("application/vnd.apple.mpegurl")){ v.src=cam.url; v.play().catch(()=>{}); return; }
+  const ok=await ensureHls();
+  if(ok && window.Hls.isSupported()){
+    const hls=new window.Hls({liveDurationInfinity:true,lowLatencyMode:true}); players.set(cam.id,{hls});
+    hls.on(window.Hls.Events.ERROR,(_,d)=>{ if(d.fatal){ setStatus(tile,false); showMsg(tile,"Stream error — check the URL is a reachable <b>.m3u8</b> feed."); } });
+    hls.loadSource(cam.url); hls.attachMedia(v); v.play().catch(()=>{});
+  }else{ showMsg(tile,"This browser can't play HLS. Try MJPEG or snapshot."); setStatus(tile,false); }
+}
+function feedImg(cam,tile){
+  const img=document.createElement("img"); tile.insertBefore(img,tile.firstChild);
+  img.onload=()=>setStatus(tile,true);
+  img.onerror=()=>{ setStatus(tile,false); showMsg(tile, cam._dvr ? "No image from the DVR yet — open <b>DVR Sites → Test</b> to check the login/port." : "Image feed didn't load — check the URL opens in a browser tab."); };
+  if(cam.type==="mjpeg"){ img.src=cam.url; }
+  else{ const iv=Math.max(1,Math.min(60,cam.interval||3))*1000; const tick=()=>{ img.src=bust(cam.url); }; tick(); const timer=setInterval(tick,iv); players.set(cam.id,{timer}); }
+}
+function feedVideo(cam,tile){
+  const v=document.createElement("video"); v.muted=true; v.autoplay=true; v.loop=true; v.playsInline=true; v.src=cam.url; tile.insertBefore(v,tile.firstChild);
+  v.addEventListener("playing",()=>setStatus(tile,true)); v.addEventListener("error",()=>{ setStatus(tile,false); showMsg(tile,"Video didn't load."); }); v.play().catch(()=>{});
+}
+function feedEmbed(cam,tile){
+  const f=document.createElement("iframe"); f.src=cam.url; f.allow="autoplay; fullscreen; encrypted-media"; f.allowFullscreen=true; tile.insertBefore(f,tile.firstChild); setStatus(tile,true);
+}
+function toggleTileFs(tile){
+  if(document.fullscreenElement===tile){ document.exitFullscreen&&document.exitFullscreen(); return; }
+  if(tile.requestFullscreen){ tile.requestFullscreen().catch(()=>tile.classList.toggle("fs")); } else tile.classList.toggle("fs");
+}
+
+/* ---------- render ---------- */
+function computeCols(n){ if(STATE.layout!=="auto") return parseInt(STATE.layout,10); if(n<=1)return 1; if(n<=4)return 2; if(n<=9)return 3; return 4; }
+function render(){
+  teardown();
+  const wall=$("#wall"); wall.innerHTML="";
+  const cams=activeCams(); const total=allCams().length; const has=total>0;
+  $("#empty").style.display=has?"none":"flex";
+  wall.style.display=has?"grid":"none";
+  $("#dvrBtn").style.display=CAN_ADMIN?"inline-flex":"none";
+  $("#emptyDvr").style.display=CAN_ADMIN?"inline-flex":"none";
+
+  const locs=locations(); const lb=$("#locbar");
+  if(locs.length>=1){
+    lb.style.display="flex"; lb.innerHTML="";
+    const mk=(key,label)=>{ const b=document.createElement("button"); b.className="loctab"+(STATE.activeLoc===key?" on":""); b.textContent=label; b.onclick=()=>{ STATE.activeLoc=key; save(); render(); }; lb.appendChild(b); };
+    mk("__all","All ("+total+")");
+    locs.forEach(l=>mk(l,l+" ("+allCams().filter(c=>c.loc===l).length+")"));
+    const un=allCams().filter(c=>!c.loc).length; if(un) mk("","Ungrouped ("+un+")");
+  } else lb.style.display="none";
+
+  wall.dataset.cols=computeCols(cams.length);
+  cams.forEach(cam=>wall.appendChild(makeTile(cam)));
+  $("#layoutSel").value=STATE.layout;
+}
+
+/* ---------- DVR admin ---------- */
+async function loadDvr(){
+  try{
+    const r=await aFetch("/cctv/sites");
+    if(r.status===403){ CAN_ADMIN=false; DVR=[]; return; }
+    CAN_ADMIN=true;
+    const d=await r.json(); DVR=(d&&d.sites)||[];
+  }catch(e){ /* offline/no access: leave DVR empty, manual feeds still work */ }
+}
+let dEditId=null;
+function openDvr(){ dEditId=null; resetDvrForm(); renderDvrList(); $("#dvrScrim").classList.add("on"); }
+function closeDvr(){ $("#dvrScrim").classList.remove("on"); }
+function renderDvrList(){
+  const box=$("#dvrList");
+  $("#dvrEmpty").style.display=DVR.length?"none":"block";
+  box.innerHTML="";
+  DVR.forEach(s=>{
+    const el=document.createElement("div"); el.className="sitecard";
+    el.innerHTML='<div class="top"><b>'+esc(s.name)+'</b> <span class="pill">'+esc(s.vendor==="dahua"?"Dahua":"Hik/Annke")+'</span> <span class="pill">'+(s.cameras||[]).length+' cam</span></div>'+
+      '<div class="meta">'+(s.https?"https":"http")+'://'+esc(s.host)+':'+esc(s.port)+' · user '+esc(s.user||"—")+(s.hasPass?"":" · ⚠ no password")+'</div>';
+    const act=document.createElement("div"); act.style.cssText="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap";
+    const bE=b("✏️ Edit"),bT=b("🧪 Test"); bE.onclick=()=>editDvr(s.id); bT.onclick=()=>testDvr(s.id);
+    act.appendChild(bE); act.appendChild(bT); el.appendChild(act); box.appendChild(el);
+  });
+  function b(t){ const x=document.createElement("button"); x.className="btn small"; x.textContent=t; return x; }
+}
+function resetDvrForm(){
+  dEditId=null; $("#dvrFormTitle").textContent="Add a DVR site";
+  $("#dName").value=""; $("#dHost").value=""; $("#dPort").value="8080"; $("#dVendor").value="hik";
+  $("#dCount").value="4"; $("#dHttps").value="0"; $("#dUser").value=""; $("#dPass").value=""; $("#dPath").value="";
+  $("#dDelete").style.display="none"; $("#dTest").style.display="none"; $("#dPassKeep").style.display="none";
+  $("#dPass").placeholder="••••••••";
+}
+function editDvr(id){
+  const s=DVR.find(x=>x.id===id); if(!s)return; dEditId=id;
+  $("#dvrFormTitle").textContent="Edit "+s.name;
+  $("#dName").value=s.name||""; $("#dHost").value=s.host||""; $("#dPort").value=s.port||8080; $("#dVendor").value=s.vendor||"hik";
+  $("#dCount").value=(s.cameras||[]).length; $("#dHttps").value=s.https?"1":"0"; $("#dUser").value=s.user||"";
+  $("#dPass").value=""; $("#dPass").placeholder=s.hasPass?"•••••• (kept)":"set a password"; $("#dPassKeep").style.display=s.hasPass?"inline":"none";
+  $("#dPath").value=s.path||"";
+  $("#dDelete").style.display="inline-flex"; $("#dTest").style.display="inline-flex";
+  document.querySelector("#dvrScrim .modal").scrollTop=1e6;
+}
+async function saveDvr(){
+  const body={
+    id:dEditId||undefined, name:$("#dName").value.trim(), host:$("#dHost").value.trim(),
+    port:parseInt($("#dPort").value,10)||8080, vendor:$("#dVendor").value, https:$("#dHttps").value==="1",
+    user:$("#dUser").value.trim(), count:parseInt($("#dCount").value,10)||0, path:$("#dPath").value.trim()
+  };
+  const pw=$("#dPass").value; if(pw) body.pass=pw;
+  if(!body.name){ toast("Give the site a name"); return; }
+  if(!body.host){ toast("Enter the DVR host / DDNS"); return; }
+  try{
+    const r=await aFetch("/cctv/site",{method:"POST",body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d.ok){ toast(d.error||"Save failed"); return; }
+    await loadDvr(); renderDvrList(); render();
+    toast(d.isNew?"Site added":"Site saved");
+    if(d.isNew){ dEditId=d.id; editDvr(d.id); }
+  }catch(e){ toast("Save failed"); }
+}
+async function testDvr(id){
+  toast("Testing…");
+  try{
+    const r=await aFetch("/cctv/test",{method:"POST",body:JSON.stringify({id})});
+    const d=await r.json();
+    if(d.ok) toast("✅ Camera reachable ("+Math.round((d.bytes||0)/1024)+" KB image)");
+    else toast("❌ "+(d.error?("failed: "+d.error):("failed (status "+(d.status||0)+")")));
+  }catch(e){ toast("Test failed"); }
+}
+async function deleteDvr(){
+  if(!dEditId) return; const s=DVR.find(x=>x.id===dEditId);
+  if(!confirm("Delete DVR site "+(s?s.name:"")+"? Its camera tiles will be removed.")) return;
+  try{
+    const r=await aFetch("/cctv/site/delete",{method:"POST",body:JSON.stringify({id:dEditId})});
+    const d=await r.json(); if(!d.ok){ toast(d.error||"Delete failed"); return; }
+    await loadDvr(); resetDvrForm(); renderDvrList(); render(); toast("Site deleted");
+  }catch(e){ toast("Delete failed"); }
+}
+
+/* ---------- manual feed modal ---------- */
+const TYPE_HELP={
+  hls:"A live <b>.m3u8</b> stream (from a bridge like go2rtc/Frigate). Plays live in the browser.",
+  mjpeg:"A never-ending JPEG stream (older IP cams, e.g. <code>/video.mjpg</code>).",
+  snapshot:"A still-image URL re-fetched every few seconds for a near-live view.",
+  embed:"A vendor web-player page you can iframe (only if its site allows embedding).",
+  video:"A direct MP4/WebM link — handy for testing."
+};
+let editingId=null;
+function openAdd(){ closeDvr(); editingId=null; fill({type:"hls",interval:2}); $("#camTitle").textContent="Add feed"; $("#delCam").style.display="none"; $("#camScrim").classList.add("on"); }
+function openEdit(id){ const c=STATE.cameras.find(x=>x.id===id); if(!c)return; editingId=id; fill(c); $("#camTitle").textContent="Edit feed"; $("#delCam").style.display="inline-flex"; $("#camScrim").classList.add("on"); }
+function fill(c){ $("#fName").value=c.name||""; $("#fLoc").value=c.loc||""; $("#fType").value=c.type||"hls"; $("#fUrl").value=c.url||""; $("#fInt").value=c.interval||2; $("#locList").innerHTML=locations().map(l=>'<option value="'+esc(l)+'">').join(""); syncType(); }
+function syncType(){ const t=$("#fType").value; $("#typeHelp").innerHTML=TYPE_HELP[t]||""; $("#intWrap").style.display=(t==="snapshot")?"flex":"none"; }
+function closeCam(){ $("#camScrim").classList.remove("on"); }
+function saveCamera(){
+  const name=$("#fName").value.trim(), url=$("#fUrl").value.trim();
+  if(!name){ toast("Give it a name"); return; } if(!url){ toast("Add the feed URL"); return; }
+  const cam={ id:editingId||uid(), name, loc:$("#fLoc").value.trim(), type:$("#fType").value, url, interval:parseInt($("#fInt").value,10)||2 };
+  if(editingId){ const i=STATE.cameras.findIndex(c=>c.id===editingId); STATE.cameras[i]=cam; } else STATE.cameras.push(cam);
+  save(); closeCam(); render(); toast(editingId?"Updated":"Added");
+}
+function delCamera(){ if(!editingId)return; STATE.cameras=STATE.cameras.filter(c=>c.id!==editingId); save(); closeCam(); render(); toast("Removed"); }
+
+/* ---------- wire ---------- */
+$("#dvrBtn").onclick=openDvr;
+$("#emptyDvr").onclick=openDvr;
+$("#addBtn").onclick=openAdd;
+$("#saveCam").onclick=saveCamera;
+$("#delCam").onclick=delCamera;
+$("#fType").onchange=syncType;
+$("#dSave").onclick=saveDvr;
+$("#dDelete").onclick=deleteDvr;
+$("#dTest").onclick=()=>{ if(dEditId) testDvr(dEditId); };
+$("#layoutSel").onchange=e=>{ STATE.layout=e.target.value; save(); render(); };
+$("#refreshAll").onclick=()=>{ render(); toast("Reloading feeds"); };
+$("#fsAll").onclick=()=>{ if(document.fullscreenElement){ document.exitFullscreen(); } else document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(()=>{}); };
+document.querySelectorAll(".scrim").forEach(s=>s.addEventListener("click",e=>{ if(e.target===s) s.classList.remove("on"); }));
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closeCam(); closeDvr(); const t=document.querySelector(".tile.fs"); if(t)t.classList.remove("fs"); } });
+
+/* ---------- boot ---------- */
+render();               // paint whatever is cached locally immediately
+loadDvr().then(render); // then merge in DVR cameras + reveal admin
+</script>
+</body>
+</html>

@@ -43,6 +43,7 @@ import * as memos from "./routes/memos.js";        // DONE  (company memos: draf
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
+import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -98,6 +99,7 @@ const ROUTES = [
   ["*", "/hs/",        hs.handle],       // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
   ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
+  ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -291,6 +293,8 @@ const PUBLIC_ROUTES = [
   // (The handler re-resolves a real session for logged-in admins on these too.)
   ["GET", "/compliance/has"],
   ["POST", "/compliance/file"],
+  // DVR camera snapshots loaded by <img> tags — signed URL, verified in-handler.
+  ["GET", "/cctv/snapshot"],
 ];
 
 function isPublic(method, pathname) {

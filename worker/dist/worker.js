@@ -10829,16 +10829,16 @@ async function handle21(request, env, ctx, url, sess) {
       const res2 = await env.DB.prepare(
         "INSERT INTO messages (tenant_id, from_user, to_user, body, at, seen, thread_key) VALUES (?,?,?,?,?,0,?)"
       ).bind(tid, me, "@" + g.id, body, at2, key).run();
-      const newId = res2.meta ? res2.meta.last_row_id : null;
-      if (newId) ctx?.waitUntil(env.DB.prepare(
+      const newId2 = res2.meta ? res2.meta.last_row_id : null;
+      if (newId2) ctx?.waitUntil(env.DB.prepare(
         "INSERT INTO group_reads (tenant_id,user,group_id,thread_key,last_id) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id,user,group_id,thread_key) DO UPDATE SET last_id=MAX(last_id,excluded.last_id)"
-      ).bind(tid, lc(me), g.id, lc(key), newId).run());
+      ).bind(tid, lc(me), g.id, lc(key), newId2).run());
       const recips = new Set(g.members);
       recips.add(key);
       recips.forEach((rcpt) => {
         if (lc(rcpt) !== lc(me)) ctx?.waitUntil(sendToUser(env, tid, rcpt, { title: g.name + " chat", body: (me + ": " + body).slice(0, 120), url: "/inbox.html", tag: "grp:" + g.id + ":" + lc(key) }));
       });
-      return jr4({ ok: true, id: newId, at: at2, group: g.id, key }, headers, 201);
+      return jr4({ ok: true, id: newId2, at: at2, group: g.id, key }, headers, 201);
     }
     const to = String(b.to || "").trim();
     if (!to || !body) return jr4({ error: "to and body required" }, headers, 400);
@@ -14120,6 +14120,361 @@ function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+// src/routes/cctv.js
+var CFG_KEY2 = "cctv:sites";
+var ALLOWED_PORTS = /* @__PURE__ */ new Set([80, 443, 8080, 8880, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]);
+var VENDOR_PATH = {
+  hik: "/ISAPI/Streaming/channels/{ch}/picture",
+  // Annke/Hikvision (default)
+  dahua: "/cgi-bin/snapshot.cgi?channel={ch}"
+  // Dahua-based
+};
+function defaultCh(vendor, i) {
+  return vendor === "dahua" ? String(i) : String(i * 100 + 1);
+}
+async function loadSites(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY2).first();
+  let sites = [];
+  try {
+    sites = row ? JSON.parse(row.value) : [];
+  } catch {
+  }
+  return Array.isArray(sites) ? sites : [];
+}
+async function saveSites(db, sites) {
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(db.tenantId, CFG_KEY2, JSON.stringify(sites)).run();
+}
+function newId(prefix2) {
+  return prefix2 + Math.abs(Date.now() ^ Math.floor(Math.random() * 1e9)).toString(36);
+}
+function publicSite(s) {
+  return {
+    id: s.id,
+    name: s.name,
+    host: s.host,
+    port: s.port,
+    https: !!s.https,
+    user: s.user,
+    hasPass: !!s.pass,
+    vendor: s.vendor || "hik",
+    path: s.path || "",
+    cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
+  };
+}
+async function handle26(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (path === "/cctv/snapshot" && method === "GET") {
+    return snapshot(request, env, url, cors);
+  }
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+  const db = tenantDB(env, sess.tenantId);
+  if (path === "/cctv/sites" && method === "GET") {
+    const sites = await loadSites(db);
+    const out = [];
+    for (const s of sites) {
+      const v = publicSite(s);
+      v.cameras = [];
+      for (const c of s.cameras || []) {
+        const key = `${s.id}:${c.ch}`;
+        const snapUrl = await signedFileUrl(env, url.origin, "/cctv/snapshot", key, 24 * 3600);
+        v.cameras.push({ id: c.id, name: c.name, ch: c.ch, snapshotUrl: snapUrl });
+      }
+      out.push(v);
+    }
+    return json3({ ok: true, sites: out, allowedPorts: [...ALLOWED_PORTS] });
+  }
+  if (path === "/cctv/site" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const name = String(b.name || "").trim();
+    const host = String(b.host || "").trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+    const port = parseInt(b.port, 10) || (b.https ? 443 : 80);
+    if (!name) return json3({ ok: false, error: "Give the site a name" }, 400);
+    if (!host) return json3({ ok: false, error: "Enter the DVR host / DDNS address" }, 400);
+    if (!ALLOWED_PORTS.has(port)) {
+      return json3({ ok: false, error: `Port ${port} can't be reached by the proxy. Forward the DVR to one of: ${[...ALLOWED_PORTS].join(", ")} (8080 is easiest).` }, 400);
+    }
+    const vendor = b.vendor === "dahua" ? "dahua" : "hik";
+    const sites = await loadSites(db);
+    let site = b.id ? sites.find((s) => s.id === b.id) : null;
+    const isNew = !site;
+    if (!site) {
+      site = { id: newId("dvr") };
+      sites.push(site);
+    }
+    site.name = name;
+    site.host = host;
+    site.port = port;
+    site.https = !!b.https;
+    site.user = String(b.user || "").trim();
+    if (typeof b.pass === "string" && b.pass !== "") site.pass = b.pass;
+    if (b.clearPass) site.pass = "";
+    site.vendor = vendor;
+    site.path = typeof b.path === "string" && b.path.trim() ? b.path.trim() : "";
+    if (Array.isArray(b.cameras)) {
+      site.cameras = b.cameras.map((c, i) => ({
+        id: c.id || newId("cam"),
+        name: String(c.name || `Camera ${i + 1}`).slice(0, 60),
+        ch: String(c.ch || defaultCh(vendor, i + 1))
+      }));
+    } else if (b.count != null) {
+      const n = Math.max(0, Math.min(64, parseInt(b.count, 10) || 0));
+      const prev = site.cameras || [];
+      site.cameras = Array.from({ length: n }, (_, i) => prev[i] || {
+        id: newId("cam"),
+        name: `Camera ${i + 1}`,
+        ch: defaultCh(vendor, i + 1)
+      });
+    } else if (!site.cameras) {
+      site.cameras = [];
+    }
+    await saveSites(db, sites);
+    return json3({ ok: true, id: site.id, isNew, site: publicSite(site) });
+  }
+  if (path === "/cctv/site/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    let sites = await loadSites(db);
+    const before = sites.length;
+    sites = sites.filter((s) => s.id !== b.id);
+    if (sites.length === before) return json3({ ok: false, error: "Site not found" }, 404);
+    await saveSites(db, sites);
+    return json3({ ok: true });
+  }
+  if (path === "/cctv/test" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const sites = await loadSites(db);
+    const site = sites.find((s) => s.id === b.id);
+    if (!site) return json3({ ok: false, error: "Save the site first, then test" }, 404);
+    const cam = (site.cameras || [])[0];
+    if (!cam) return json3({ ok: false, error: "This site has no cameras" }, 400);
+    const r = await fetchSnapshot(site, cam.ch);
+    return json3({ ok: r.ok, status: r.status, bytes: r.bytes || 0, error: r.error || null, contentType: r.contentType || null });
+  }
+  return json3({ ok: false, error: "Not found: " + path }, 404);
+}
+async function snapshot(request, env, url, cors) {
+  const params = url.searchParams;
+  const key = params.get("key") || "";
+  const okSig = await verifyFileSig(env, key, params);
+  if (!okSig) return new Response("Bad or expired signature", { status: 403, headers: cors });
+  const sep = key.indexOf(":");
+  const siteId = sep >= 0 ? key.slice(0, sep) : key;
+  const ch = sep >= 0 ? key.slice(sep + 1) : "";
+  const tenantId = await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  const sites = await loadSites(db);
+  const site = sites.find((s) => s.id === siteId);
+  if (!site) return new Response("Unknown camera", { status: 404, headers: cors });
+  const r = await fetchSnapshot(site, ch);
+  if (!r.ok) {
+    return new Response(
+      `DVR fetch failed (${r.status || "no response"})${r.error ? ": " + r.error : ""}`,
+      { status: 502, headers: { ...cors, "Cache-Control": "no-store" } }
+    );
+  }
+  return new Response(r.body, {
+    status: 200,
+    headers: {
+      ...cors,
+      "Content-Type": r.contentType || "image/jpeg",
+      "Cache-Control": "no-store, max-age=0"
+    }
+  });
+}
+async function fetchSnapshot(site, ch) {
+  const scheme = site.https ? "https" : "http";
+  const base = `${scheme}://${site.host}:${site.port}`;
+  const tmpl = site.path || VENDOR_PATH[site.vendor === "dahua" ? "dahua" : "hik"];
+  const uri = tmpl.replace(/\{ch\}/g, encodeURIComponent(ch));
+  const target = base + uri;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8e3);
+  try {
+    let resp = await fetch(target, { signal: ctl.signal, headers: { "Accept": "image/jpeg,image/*" } });
+    if (resp.status === 401 && site.user) {
+      const wa = resp.headers.get("WWW-Authenticate") || "";
+      const authHeader = await buildAuthHeader(wa, site.user, site.pass || "", "GET", uri);
+      if (authHeader) {
+        resp = await fetch(target, { signal: ctl.signal, headers: { "Accept": "image/jpeg,image/*", "Authorization": authHeader } });
+      }
+    }
+    if (!resp.ok) return { ok: false, status: resp.status };
+    const ct = resp.headers.get("Content-Type") || "image/jpeg";
+    const buf = await resp.arrayBuffer();
+    return { ok: true, status: 200, body: buf, bytes: buf.byteLength, contentType: ct };
+  } catch (e) {
+    return { ok: false, status: 0, error: e && e.name === "AbortError" ? "timed out (check host/port/forwarding)" : String(e && e.message || e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function buildAuthHeader(wwwAuth, user, pass, methodHttp, uri) {
+  const scheme = /^\s*digest/i.test(wwwAuth) ? "digest" : /^\s*basic/i.test(wwwAuth) ? "basic" : "";
+  if (scheme === "basic") {
+    return "Basic " + btoa(`${user}:${pass}`);
+  }
+  if (scheme !== "digest") return "";
+  const p = parseAuthParams(wwwAuth);
+  const realm = p.realm || "";
+  const nonce = p.nonce || "";
+  const opaque = p.opaque;
+  const algorithm = p.algorithm || "MD5";
+  const qopList = (p.qop || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const qop = qopList.includes("auth") ? "auth" : qopList[0] || "";
+  const ha1 = await md5(`${user}:${realm}:${pass}`);
+  const ha2 = await md5(`${methodHttp}:${uri}`);
+  let response, extra = "";
+  if (qop) {
+    const cnonce = randomHex(16);
+    const nc = "00000001";
+    response = await md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`);
+    extra = `, qop=${qop}, nc=${nc}, cnonce="${cnonce}"`;
+  } else {
+    response = await md5(`${ha1}:${nonce}:${ha2}`);
+  }
+  let h = `Digest username="${user}", realm="${realm}", nonce="${nonce}", uri="${uri}", algorithm=${algorithm}, response="${response}"`;
+  if (opaque) h += `, opaque="${opaque}"`;
+  h += extra;
+  return h;
+}
+function parseAuthParams(header) {
+  const out = {};
+  const s = header.replace(/^\s*[A-Za-z]+\s+/, "");
+  const re = /(\w+)\s*=\s*(?:"([^"]*)"|([^,]*))/g;
+  let m;
+  while (m = re.exec(s)) out[m[1].toLowerCase()] = m[2] !== void 0 ? m[2] : (m[3] || "").trim();
+  return out;
+}
+function randomHex(n) {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function md5(str) {
+  return md5Hex(new TextEncoder().encode(str));
+}
+function md5Hex(bytes) {
+  function toWords(b2) {
+    const len2 = b2.length, words2 = [];
+    for (let i = 0; i < len2; i++) words2[i >> 2] = (words2[i >> 2] || 0) | b2[i] << i % 4 * 8;
+    return { words: words2, len: len2 };
+  }
+  function add(a2, b2) {
+    return a2 + b2 & 4294967295;
+  }
+  function rol(n, c2) {
+    return n << c2 | n >>> 32 - c2;
+  }
+  function cmn(q, a2, b2, x, s, t) {
+    return add(rol(add(add(a2, q), add(x, t)), s), b2);
+  }
+  function ff(a2, b2, c2, d2, x, s, t) {
+    return cmn(b2 & c2 | ~b2 & d2, a2, b2, x, s, t);
+  }
+  function gg(a2, b2, c2, d2, x, s, t) {
+    return cmn(b2 & d2 | c2 & ~d2, a2, b2, x, s, t);
+  }
+  function hh(a2, b2, c2, d2, x, s, t) {
+    return cmn(b2 ^ c2 ^ d2, a2, b2, x, s, t);
+  }
+  function ii(a2, b2, c2, d2, x, s, t) {
+    return cmn(c2 ^ (b2 | ~d2), a2, b2, x, s, t);
+  }
+  const { words, len } = toWords(bytes);
+  const bitLen = len * 8;
+  const nBlocks = (bitLen + 64 >>> 9) + 1;
+  const total = nBlocks * 16;
+  for (let i = 0; i < total; i++) if (words[i] === void 0) words[i] = 0;
+  words[bitLen >> 5] |= 128 << bitLen % 32;
+  words[total - 2] = bitLen;
+  words[total - 1] = 0;
+  let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+  for (let i = 0; i < words.length; i += 16) {
+    const oa = a, ob = b, oc = c, od = d, w = words;
+    a = ff(a, b, c, d, w[i + 0], 7, -680876936);
+    d = ff(d, a, b, c, w[i + 1], 12, -389564586);
+    c = ff(c, d, a, b, w[i + 2], 17, 606105819);
+    b = ff(b, c, d, a, w[i + 3], 22, -1044525330);
+    a = ff(a, b, c, d, w[i + 4], 7, -176418897);
+    d = ff(d, a, b, c, w[i + 5], 12, 1200080426);
+    c = ff(c, d, a, b, w[i + 6], 17, -1473231341);
+    b = ff(b, c, d, a, w[i + 7], 22, -45705983);
+    a = ff(a, b, c, d, w[i + 8], 7, 1770035416);
+    d = ff(d, a, b, c, w[i + 9], 12, -1958414417);
+    c = ff(c, d, a, b, w[i + 10], 17, -42063);
+    b = ff(b, c, d, a, w[i + 11], 22, -1990404162);
+    a = ff(a, b, c, d, w[i + 12], 7, 1804603682);
+    d = ff(d, a, b, c, w[i + 13], 12, -40341101);
+    c = ff(c, d, a, b, w[i + 14], 17, -1502002290);
+    b = ff(b, c, d, a, w[i + 15], 22, 1236535329);
+    a = gg(a, b, c, d, w[i + 1], 5, -165796510);
+    d = gg(d, a, b, c, w[i + 6], 9, -1069501632);
+    c = gg(c, d, a, b, w[i + 11], 14, 643717713);
+    b = gg(b, c, d, a, w[i + 0], 20, -373897302);
+    a = gg(a, b, c, d, w[i + 5], 5, -701558691);
+    d = gg(d, a, b, c, w[i + 10], 9, 38016083);
+    c = gg(c, d, a, b, w[i + 15], 14, -660478335);
+    b = gg(b, c, d, a, w[i + 4], 20, -405537848);
+    a = gg(a, b, c, d, w[i + 9], 5, 568446438);
+    d = gg(d, a, b, c, w[i + 14], 9, -1019803690);
+    c = gg(c, d, a, b, w[i + 3], 14, -187363961);
+    b = gg(b, c, d, a, w[i + 8], 20, 1163531501);
+    a = gg(a, b, c, d, w[i + 13], 5, -1444681467);
+    d = gg(d, a, b, c, w[i + 2], 9, -51403784);
+    c = gg(c, d, a, b, w[i + 7], 14, 1735328473);
+    b = gg(b, c, d, a, w[i + 12], 20, -1926607734);
+    a = hh(a, b, c, d, w[i + 5], 4, -378558);
+    d = hh(d, a, b, c, w[i + 8], 11, -2022574463);
+    c = hh(c, d, a, b, w[i + 11], 16, 1839030562);
+    b = hh(b, c, d, a, w[i + 14], 23, -35309556);
+    a = hh(a, b, c, d, w[i + 1], 4, -1530992060);
+    d = hh(d, a, b, c, w[i + 4], 11, 1272893353);
+    c = hh(c, d, a, b, w[i + 7], 16, -155497632);
+    b = hh(b, c, d, a, w[i + 10], 23, -1094730640);
+    a = hh(a, b, c, d, w[i + 13], 4, 681279174);
+    d = hh(d, a, b, c, w[i + 0], 11, -358537222);
+    c = hh(c, d, a, b, w[i + 3], 16, -722521979);
+    b = hh(b, c, d, a, w[i + 6], 23, 76029189);
+    a = hh(a, b, c, d, w[i + 9], 4, -640364487);
+    d = hh(d, a, b, c, w[i + 12], 11, -421815835);
+    c = hh(c, d, a, b, w[i + 15], 16, 530742520);
+    b = hh(b, c, d, a, w[i + 2], 23, -995338651);
+    a = ii(a, b, c, d, w[i + 0], 6, -198630844);
+    d = ii(d, a, b, c, w[i + 7], 10, 1126891415);
+    c = ii(c, d, a, b, w[i + 14], 15, -1416354905);
+    b = ii(b, c, d, a, w[i + 5], 21, -57434055);
+    a = ii(a, b, c, d, w[i + 12], 6, 1700485571);
+    d = ii(d, a, b, c, w[i + 3], 10, -1894986606);
+    c = ii(c, d, a, b, w[i + 10], 15, -1051523);
+    b = ii(b, c, d, a, w[i + 1], 21, -2054922799);
+    a = ii(a, b, c, d, w[i + 8], 6, 1873313359);
+    d = ii(d, a, b, c, w[i + 15], 10, -30611744);
+    c = ii(c, d, a, b, w[i + 6], 15, -1560198380);
+    b = ii(b, c, d, a, w[i + 13], 21, 1309151649);
+    a = ii(a, b, c, d, w[i + 4], 6, -145523070);
+    d = ii(d, a, b, c, w[i + 11], 10, -1120210379);
+    c = ii(c, d, a, b, w[i + 2], 15, 718787259);
+    b = ii(b, c, d, a, w[i + 9], 21, -343485551);
+    a = add(a, oa);
+    b = add(b, ob);
+    c = add(c, oc);
+    d = add(d, od);
+  }
+  const hex = (w) => {
+    let s = "";
+    for (let i = 0; i < 4; i++) s += (w >> i * 8 & 255).toString(16).padStart(2, "0");
+    return s;
+  };
+  return hex(a) + hex(b) + hex(c) + hex(d);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -14197,8 +14552,10 @@ var ROUTES = [
   // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck", handle16],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle25]
+  ["*", "/po", handle25],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
+  ["*", "/cctv", handle26]
+  // CCTV Wall: DVR site config + snapshot proxy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -14400,7 +14757,9 @@ var PUBLIC_ROUTES = [
   // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
   // (The handler re-resolves a real session for logged-in admins on these too.)
   ["GET", "/compliance/has"],
-  ["POST", "/compliance/file"]
+  ["POST", "/compliance/file"],
+  // DVR camera snapshots loaded by <img> tags — signed URL, verified in-handler.
+  ["GET", "/cctv/snapshot"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
