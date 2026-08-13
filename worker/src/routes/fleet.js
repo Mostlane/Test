@@ -175,6 +175,78 @@ async function photoIndex(env, tid) {
   return out;
 }
 
+// ── Van-check photos as gallery items ──────────────────────────────────────
+// Weekly van checks store their photos in ASSET_BUCKET (served by the public
+// /asset-image route) and tag each to a named slot (Front / Rear / a tyre …).
+// These surface in the vehicle card's Photos gallery alongside the uploaded
+// vehicle photos, tagged with their slot label so they can be filtered.
+const prettySlot = id => String(id || "other").replace(/[_-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()).trim() || "Other";
+// slotId -> label, from the editable van-check settings (falls back to a
+// prettified id for slots that were renamed/removed since a photo was taken).
+async function vanCheckSlotLabels(env, tid) {
+  const map = {};
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "vancheck:settings").first();
+    if (row && row.value) {
+      const s = JSON.parse(row.value) || {};
+      for (const sl of (Array.isArray(s.photoSlots) ? s.photoSlots : [])) if (sl && sl.id) map[sl.id] = sl.label || prettySlot(sl.id);
+    }
+  } catch {}
+  return map;
+}
+// Every van-check photo for one vehicle, newest check first, each carrying its
+// slot category so the gallery can group/filter them.
+async function vanCheckPhotos(env, tid, rk, names, slotLabels) {
+  const out = [];
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare(
+      "SELECT username, checked_at, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all()).results || [];
+  } catch { return out; }
+  rows.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+  for (const r of rows) {
+    if (regKey(r.vehicle || "") !== rk) continue;
+    let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+    if (items.skipped) continue;
+    const at = r.checked_at || "";
+    const by = (names && names[r.username]) || r.username || "";
+    const slot = (items.slotPhotos && typeof items.slotPhotos === "object") ? items.slotPhotos : {};
+    const seen = new Set();
+    for (const [slotId, key] of Object.entries(slot)) {
+      if (!key || seen.has(key)) continue; seen.add(key);
+      out.push({ key, source: "vancheck", categoryId: slotId, category: (slotLabels && slotLabels[slotId]) || prettySlot(slotId), by, at });
+    }
+    for (const key of (Array.isArray(items.photos) ? items.photos : [])) {   // extras not tied to a named slot
+      if (!key || seen.has(key)) continue; seen.add(key);
+      out.push({ key, source: "vancheck", categoryId: "other", category: "Other / damage", by, at });
+    }
+  }
+  return out;
+}
+// Van-check photo count per vehicle (one scan) — folded into the card badge.
+async function vanCheckPhotoCounts(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      if (items.skipped) continue;
+      const keys = new Set([...Object.values(items.slotPhotos || {}), ...((Array.isArray(items.photos) ? items.photos : []))].filter(Boolean));
+      if (keys.size) out[regKey(r.vehicle)] = (out[regKey(r.vehicle)] || 0) + keys.size;
+    }
+  } catch {}
+  return out;
+}
+// Serving URL for a gallery photo: uploaded vehicle photos are signed
+// (/fleet/vehicle-photo); van-check photos use the public /asset-image route.
+function galleryPhotoUrl(env, origin, key) {
+  if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
+  return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);   // returns a promise
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -359,6 +431,7 @@ export async function handle(request, env, ctx, url, sess) {
     const miles = await latestMileage(env, tid);
     const photos = await photoIndex(env, tid);
     const covers = await coverMap(env, tid);
+    const vcCounts = await vanCheckPhotoCounts(env, tid);   // van-check photos folded into the badge
     // Handover state per reg: latest completed (for the card's direct link) +
     // whether one is still pending (a badge / "awaiting handover" hint).
     await ensureHandoverTable(env);
@@ -389,10 +462,13 @@ export async function handle(request, env, ctx, url, sess) {
     const vehicles = await Promise.all((results || []).map(async v => {
       const cm = miles[dn(v.reg)] || null;
       const sv = serviceView(v, cm);
-      // Cover photo for the card: the manually-chosen one if it still exists, else newest.
+      // Cover photo for the card: the manually-chosen one if it still exists,
+      // else newest uploaded. A van-check photo can be the cover too (trusted —
+      // van-check records are rarely deleted; a stale key just 404s the image).
       const pics = photos[dn(v.reg)] || [];
       let coverKey = covers[dn(v.reg)];
-      if (!coverKey || !pics.some(p => p.key === coverKey)) coverKey = pics.length ? pics[0].key : "";
+      const coverValid = coverKey && (String(coverKey).startsWith("vancheck/") || pics.some(p => p.key === coverKey));
+      if (!coverValid) coverKey = pics.length ? pics[0].key : "";
       return {
         reg: v.reg, make: v.make, model: v.model, fuel: v.fuel, active: v.active !== 0,
         motDue: v.mot_due || "", taxDue: v.tax_due || "", nextServiceDate: sv.dueDate || "",
@@ -403,8 +479,8 @@ export async function handle(request, env, ctx, url, sess) {
         serviceDueMiles: sv.dueMiles, serviceStatus: sv.status, serviceReason: sv.reason,
         currentMiles: cm ? cm.miles : null, milesAt: cm ? cm.at : "",
         specs: parseJson(v.specs, []),
-        photoCount: pics.length,
-        photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : "",
+        photoCount: pics.length + (vcCounts[dn(v.reg)] || 0),
+        photoUrl: coverKey ? await galleryPhotoUrl(env, url.origin, coverKey) : "",
         lastHandoverId: (lastHo[dn(v.reg)] || {}).id || null,
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
@@ -1219,14 +1295,29 @@ export async function handle(request, env, ctx, url, sess) {
     if (!reg) return jr({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
     const idx = (await photoIndex(env, tid))[rk] || [];
+    const names = await nameMap(env, tid);
+    const slotLabels = await vanCheckSlotLabels(env, tid);
+    const vc = await vanCheckPhotos(env, tid, rk, names, slotLabels);
     const covers = await coverMap(env, tid);
+    // Honour an explicitly-chosen cover (uploaded OR van-check); otherwise fall
+    // back to the newest UPLOADED photo only — never auto-promote a van-check
+    // close-up (a tyre/oil shot) to the card cover.
     let coverKey = covers[rk];
-    if (!coverKey || !idx.some(p => p.key === coverKey)) coverKey = idx.length ? idx[0].key : "";
+    const allKeys = new Set([...idx.map(p => p.key), ...vc.map(p => p.key)]);
+    if (!coverKey || !allKeys.has(coverKey)) coverKey = idx.length ? idx[0].key : "";
     const photos = [];
     for (const p of idx) {
       photos.push({
-        key: p.key, name: p.name, by: p.by, at: p.at, cover: p.key === coverKey,
+        key: p.key, name: p.name, by: p.by, at: p.at, source: "upload",
+        categoryId: "upload", category: "Uploaded", canDelete: true, cover: p.key === coverKey,
         url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
+      });
+    }
+    for (const p of vc) {
+      photos.push({
+        key: p.key, name: "", by: p.by, at: p.at, source: "vancheck",
+        categoryId: p.categoryId, category: p.category, canDelete: false, cover: p.key === coverKey,
+        url: url.origin + "/asset-image?key=" + encodeURIComponent(p.key)
       });
     }
     return jr({ ok: true, photos, cover: coverKey }, headers);
@@ -1251,7 +1342,8 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/vehicle-photo-cover" && method === "POST") {
     const b = await readJson(request);
     const reg = String(b.reg || "").trim(); const key = String(b.key || "");
-    if (!reg || !key || !key.startsWith("vehiclephotos/")) return jr({ error: "reg and key required" }, headers, 400);
+    // Cover can be an uploaded vehicle photo OR a van-check photo.
+    if (!reg || !key || !(key.startsWith("vehiclephotos/") || key.startsWith("vancheck/"))) return jr({ error: "reg and key required" }, headers, 400);
     const covers = await coverMap(env, tid); covers[regKey(reg)] = key; await saveCoverMap(env, tid, covers);
     return jr({ ok: true }, headers);
   }

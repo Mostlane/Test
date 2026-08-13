@@ -89,6 +89,10 @@
   .pcell img{width:100%;height:100px;object-fit:cover;display:block;cursor:zoom-in;}
   .pcell .pacts{display:flex;justify-content:space-between;gap:4px;padding:6px;}
   .pcell .cvr{position:absolute;top:6px;left:6px;background:#166534;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;letter-spacing:.03em;}
+  .pcell .pcap{padding:5px 7px 0;font-size:11px;line-height:1.3;}
+  .pcell .pcap b{display:block;color:var(--ink,#0f172a);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pcell .pcap span{color:var(--muted);}
+  .pcell .vtag{position:absolute;top:6px;right:6px;background:rgba(15,23,42,.72);color:#fff;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:999px;letter-spacing:.03em;}
   .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);display:none;align-items:center;justify-content:center;z-index:4000;padding:20px;cursor:zoom-out;}
   .lightbox img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:3000;}
@@ -211,7 +215,14 @@
   <div class="backdrop" id="photoBackdrop">
     <div class="modal">
       <h3 id="photoTitle">Photos</h3>
-      <div class="hint" style="margin-bottom:10px">Add photos of the van (front, sides, damage). Tap a photo to enlarge. “Make cover” sets the picture shown on the vehicle card.</div>
+      <div class="hint" style="margin-bottom:10px">Uploaded photos and every weekly van-check photo for this vehicle. Tap a photo to enlarge. “Make cover” sets the picture shown on the vehicle card.</div>
+      <div id="photoControls" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <label class="hint" style="display:flex;align-items:center;gap:5px">Show
+          <select id="photoFilter" onchange="renderPhotos()" style="font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:8px"></select>
+        </label>
+        <button class="btn ghost small" id="photoSortBtn" onclick="togglePhotoSort()" title="Change order">↓ Newest first</button>
+        <span class="hint" id="photoCountLbl" style="margin-left:auto"></span>
+      </div>
       <div id="photoList"><span class="hint">Loading…</span></div>
       <div class="grp" style="margin-top:12px">
         <h4>Add a photo</h4>
@@ -678,22 +689,51 @@
       return await new Promise(res=>c.toBlob(res,"image/jpeg",0.82));
     }catch(e){ return file; }   // fall back to the raw file if the browser can't decode it
   }
-  function openPhotoModal(reg){ PHOTO_REG=reg; $("photoTitle").textContent="Photos — "+reg; $("photoMsg").textContent=""; $("photoFile").value=""; $("photoBackdrop").style.display="flex"; loadPhotos(); }
+  let PHOTO_ALL=[];   // all photos for the open vehicle (uploaded + van-check)
+  let PHOTO_SORT=(localStorage.getItem("mlVehPhotoSort")==="asc")?"asc":"desc";   // desc = newest first
+  function openPhotoModal(reg){ PHOTO_REG=reg; PHOTO_ALL=[]; $("photoTitle").textContent="Photos — "+reg; $("photoMsg").textContent=""; $("photoFile").value=""; $("photoControls").style.display="none"; $("photoBackdrop").style.display="flex"; loadPhotos(); }
   function closePhotoModal(){ $("photoBackdrop").style.display="none"; }
   async function loadPhotos(){
     const el=$("photoList"); el.innerHTML='<span class="hint">Loading…</span>';
     try{
       const d=await aFetch("/fleet/vehicle-photos?reg="+encodeURIComponent(PHOTO_REG)).then(r=>r.json());
-      const photos=d.photos||[];
-      if(!photos.length){ el.innerHTML='<span class="hint">No photos yet.</span>'; return; }
-      el.innerHTML='<div class="pgrid">'+photos.map(p=>`<div class="pcell">
+      PHOTO_ALL=d.photos||[];
+      if(!PHOTO_ALL.length){ $("photoControls").style.display="none"; el.innerHTML='<span class="hint">No photos yet — upload one below, or complete a van check to add photos automatically.</span>'; return; }
+      // Build the category filter from the categories actually present.
+      const cats=[]; const seen={};
+      PHOTO_ALL.forEach(p=>{ const id=p.categoryId||"other"; if(!seen[id]){ seen[id]=true; cats.push({id,label:p.category||id}); } });
+      cats.sort((a,b)=>a.label.localeCompare(b.label));
+      const sel=$("photoFilter"); const prev=sel.value;
+      sel.innerHTML='<option value="__all">All photos ('+PHOTO_ALL.length+')</option>'
+        +cats.map(c=>`<option value="${esc(c.id)}">${esc(c.label)} (${PHOTO_ALL.filter(p=>(p.categoryId||"other")===c.id).length})</option>`).join("");
+      if(prev && sel.querySelector('option[value="'+prev.replace(/"/g,'\\"')+'"]')) sel.value=prev;
+      $("photoControls").style.display="flex";
+      updateSortBtn();
+      renderPhotos();
+    }catch(e){ $("photoControls").style.display="none"; el.innerHTML='<span class="hint">Couldn\'t load photos.</span>'; }
+  }
+  function updateSortBtn(){ $("photoSortBtn").textContent=(PHOTO_SORT==="desc"?"↓ Newest first":"↑ Oldest first"); }
+  function togglePhotoSort(){ PHOTO_SORT=(PHOTO_SORT==="desc")?"asc":"desc"; try{localStorage.setItem("mlVehPhotoSort",PHOTO_SORT);}catch(e){} updateSortBtn(); renderPhotos(); }
+  function renderPhotos(){
+    const el=$("photoList");
+    const filt=$("photoFilter").value||"__all";
+    let list=PHOTO_ALL.filter(p=>filt==="__all"||(p.categoryId||"other")===filt);
+    list=list.slice().sort((a,b)=>{ const d=new Date(a.at||0)-new Date(b.at||0); return PHOTO_SORT==="desc"?-d:d; });
+    $("photoCountLbl").textContent=list.length+(list.length===1?" photo":" photos");
+    if(!list.length){ el.innerHTML='<span class="hint">No photos in this category.</span>'; return; }
+    el.innerHTML='<div class="pgrid">'+list.map(p=>{
+      const when=p.at?new Date(p.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"";
+      const meta=(p.source==="vancheck")?(esc(p.category)+(p.by?" · "+esc(p.by):"")):"Uploaded"+(p.by?" · "+esc(p.by):"");
+      return `<div class="pcell">
         ${p.cover?'<span class="cvr">COVER</span>':''}
+        ${p.source==="vancheck"?'<span class="vtag">VAN CHECK</span>':''}
         <img src="${esc(p.url)}" alt="photo" loading="lazy" onclick="enlarge('${esc(p.url)}')">
+        <div class="pcap"><b>${meta}</b><span>${esc(when)}</span></div>
         <div class="pacts">
           ${p.cover?'<span class="hint" style="align-self:center">✓ cover</span>':`<button class="btn ghost small" onclick="setCover('${esc(p.key)}')">Make cover</button>`}
-          <button class="btn danger small" onclick="deletePhoto('${esc(p.key)}')">Delete</button>
-        </div></div>`).join("")+'</div>';
-    }catch(e){ el.innerHTML='<span class="hint">Couldn\'t load photos.</span>'; }
+          ${p.canDelete?`<button class="btn danger small" onclick="deletePhoto('${esc(p.key)}')">Delete</button>`:''}
+        </div></div>`;
+    }).join("")+'</div>';
   }
   async function uploadPhoto(){
     const f=$("photoFile").files[0]; if(!f){ $("photoMsg").textContent="Choose a photo first."; return; }
