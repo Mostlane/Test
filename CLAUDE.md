@@ -1607,7 +1607,44 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   New scheduled jobs hang off the same handler.
 
 ## Satellite systems
-1. **PO system** — single-file worker (own D1 `mostlane-po`; legacy KV
+1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system
+   now runs INSIDE the portal (`mostlane-api`), not the standalone `mostlane-po`
+   worker. **The PO DATA was NOT moved** — it still lives in its own D1
+   (`mostlane-po`, bound as `PO_DB`); only the code moved, so there was no data
+   migration. **The standalone `mostlane-po` worker is switched OFF** (its
+   Production `workers.dev` route disabled in the dashboard — code + DB kept as an
+   instant fallback; re-enable the toggle + revert `po.html` to roll back).
+   - **Backend:** `worker/src/routes/po.js`, mounted at `/po` (longest-prefix, so
+     `/po-config` still wins for the old per-user link endpoint). Ported the PO
+     data layer against `PO_DB`, gated by portal session + `PurchaseOrders`|
+     `FullAccess`. Issuer identity is the LOGGED-IN portal user (server-stamped);
+     the out-of-hours rule is preserved (field engineers raise only when the
+     office is shut; office any time). `/po/api/*` endpoints; `/po/api/my-pos` is
+     the field-safe "my own POs" list; `/po/api/engineers` reads LIVE portal field
+     staff (env.DB) so the assign-dropdown needs no PO-side engineer list/sync.
+     `PO_START=10011` (first allocated number). Vehicles read from the portal DB.
+   - **Pages (all portal HTML, `authFetch('/po/api/*')`, `PurchaseOrders`-gated,
+     carry a subtle "Portal PO · V1" bottom-right marker):** `po-office.html`
+     (office board: log/filters/dashboard/raise/price-edit/CSV/print),
+     `po-raise.html` (engineer raise form), `po-stats.html`, `po-summary.html`,
+     `po-accounts.html` (supplier aging), `po-jobs.html` (job costs),
+     `po-admin.html` (system config + suppliers/subcontractors/trades/sites/
+     closures — the obsolete Engineers/Office-Users token-link tabs were dropped).
+     CSV + print are done CLIENT-side (no un-authenticated new tab).
+   - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
+     field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
+     FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a
+     "no access" message. (Was: redirected to the standalone worker via
+     /po-config. Pre-migration launcher is at commit 1a4269c:po.html — that's the
+     revert target.) **NB the old `po.html` was a launcher; overwriting it once
+     locked engineers out — never reuse a live filename, always route via po.html.**
+   - **Not ported (unused/optional):** the weekly PO summary email (Jamie doesn't
+     use it) and the old token-URL engineer/office-user management (portal login
+     replaces it). `/po-config` + `profile.poUrl` are now dead for the PO flow.
+   - Everything else (costing.js/timesheets.js/fleet.js reading `PO_DB` po_log)
+     is unaffected — they read the same DB directly.
+   HISTORICAL (standalone worker, now retired):
+   single-file worker (own D1 `mostlane-po`; legacy KV
    bindings unused). Identity = personal URLs per user (profile.poUrl,
    released via /po-config; portal 🧾 button). Patched previously: 🏠 back
    button; portal sync (PORTAL_DB binding mirrors portal sites+users,
