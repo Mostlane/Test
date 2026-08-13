@@ -370,6 +370,7 @@ function worstStatus(e){
 /* ===== State ===== */
 let allData = [];       // full set (normalised)
 let currentData = [];   // filtered / searched view
+let selectedCode = null; // store code of the highlighted row (survives re-renders)
 let editMode = false;
 let activeStoreType = 'ALL';
 const activeCategories = new Set();
@@ -920,6 +921,12 @@ function renderTable(d){
   tb.appendChild(frag);
   document.getElementById('loadedCount').textContent = d.length;
   if (editMode) enableEditing(true);
+  // Re-apply the row highlight so it survives a re-render (e.g. after adding a
+  // document). Drops silently if the selected row filtered out of view.
+  if (selectedCode){
+    const sel = tb.querySelector(`tr[data-code="${window.CSS && CSS.escape ? CSS.escape(selectedCode) : selectedCode}"]`);
+    if (sel) sel.classList.add('row-sel'); else selectedCode = null;
+  }
 }
 
 /* apply filters + re-render */
@@ -1704,7 +1711,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // (clicking the already-selected row clears it).
       const already = tr.classList.contains('row-sel');
       document.querySelectorAll('tr.row-sel').forEach(r=>r.classList.remove('row-sel'));
-      if (!already) tr.classList.add('row-sel');
+      if (!already){ tr.classList.add('row-sel'); selectedCode = tr.dataset.code; }
+      else selectedCode = null;
       return;
     }
   });
@@ -1715,7 +1723,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('click', (ev)=>{
     if (ev.target.closest('td.site')) return;       // row-select handles this
     if (ev.target.closest('tr.row-sel')) return;    // click inside the selected row → keep it
+    if (ev.target.closest('.modal')) return;        // clicks inside a dialog (e.g. the upload modal) don't clear it
     document.querySelectorAll('tr.row-sel').forEach(r=>r.classList.remove('row-sel'));
+    selectedCode = null;
   });
 
   // Drag a file onto any store row → upload against that site.
