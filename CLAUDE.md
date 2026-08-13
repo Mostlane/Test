@@ -1016,6 +1016,23 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     annual miles over allowedMiles × excessPence). Returned in /fleet/vehicles +
     /fleet/fuel/stats for FullAccess only; shown on the deep-dive ("Cost to run
     /year") and the fuel page's per-vehicle table with a `projected` badge.
+- **Van-check defects on the vehicle card (Aug 2026)** — a reported fault now
+  shows prominently on vehicles.html. `/fleet/vehicles` computes per-van
+  outstanding defects via **`vanCheckDefects(env,tid,resolved)`**: ANY van-check
+  answer of `defect`/`missing` OR the driver's `safe_to_drive=0`, aggregated per
+  reg (returns `defectItems`/`defectChecks`/`defectNotSafe`/`defectSince`). The
+  model is **explicit-resolve, not auto-clear** (Jamie's rule): a fault stays
+  flagged even after a later clean check until an admin taps **✓ Mark defects
+  resolved**, which stamps a per-reg "resolved as of now" time in app_config
+  **`fleet:defectsclear:<tid>`** (`{REGNORM:ISO}`) via **POST /fleet/defects-resolve**
+  `{reg}` (any Vehicles user) — checks completed on/before that time are treated
+  as dealt-with; a NEW defect reported afterwards re-flags the van. Front-end
+  (vehicles.html): a red **⚠ Defect reported** tag (+ **🚫 Not safe to drive**
+  when flagged) on the card + deep-dive, a **Vans with faults** summary tile
+  (hidden when zero), and the **✓ Mark defects resolved** button on the card and
+  in the deep-dive's red banner (which also links to vehicle-checks.html to see
+  what was reported). `hasDefect(v)`/`defectTags(v)`/`resolveDefects(reg)` are the
+  helpers; no schema change (app_config only).
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed
