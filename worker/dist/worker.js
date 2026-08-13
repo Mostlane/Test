@@ -8791,6 +8791,79 @@ async function photoIndex(env, tid) {
   }
   return out;
 }
+var prettySlot = (id) => String(id || "other").replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Other";
+async function vanCheckSlotLabels(env, tid) {
+  const map = {};
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "vancheck:settings").first();
+    if (row && row.value) {
+      const s = JSON.parse(row.value) || {};
+      for (const sl of Array.isArray(s.photoSlots) ? s.photoSlots : []) if (sl && sl.id) map[sl.id] = sl.label || prettySlot(sl.id);
+    }
+  } catch {
+  }
+  return map;
+}
+async function vanCheckPhotos(env, tid, rk, names, slotLabels) {
+  const out = [];
+  let rows = [];
+  try {
+    rows = (await env.DB.prepare(
+      "SELECT username, checked_at, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all()).results || [];
+  } catch {
+    return out;
+  }
+  rows.sort((a, b) => new Date(b.checked_at || 0) - new Date(a.checked_at || 0));
+  for (const r of rows) {
+    if (regKey(r.vehicle || "") !== rk) continue;
+    let items = {};
+    try {
+      items = r.items ? JSON.parse(r.items) : {};
+    } catch {
+    }
+    if (items.skipped) continue;
+    const at = r.checked_at || "";
+    const by = names && names[r.username] || r.username || "";
+    const slot = items.slotPhotos && typeof items.slotPhotos === "object" ? items.slotPhotos : {};
+    const seen = /* @__PURE__ */ new Set();
+    for (const [slotId, key] of Object.entries(slot)) {
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, source: "vancheck", categoryId: slotId, category: slotLabels && slotLabels[slotId] || prettySlot(slotId), by, at });
+    }
+    for (const key of Array.isArray(items.photos) ? items.photos : []) {
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, source: "vancheck", categoryId: "other", category: "Other / damage", by, at });
+    }
+  }
+  return out;
+}
+async function vanCheckPhotoCounts(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {};
+      try {
+        items = r.items ? JSON.parse(r.items) : {};
+      } catch {
+      }
+      if (items.skipped) continue;
+      const keys = new Set([...Object.values(items.slotPhotos || {}), ...Array.isArray(items.photos) ? items.photos : []].filter(Boolean));
+      if (keys.size) out[regKey(r.vehicle)] = (out[regKey(r.vehicle)] || 0) + keys.size;
+    }
+  } catch {
+  }
+  return out;
+}
+function galleryPhotoUrl(env, origin, key) {
+  if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
+  return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
+}
 async function handle20(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -8968,6 +9041,7 @@ async function handle20(request, env, ctx, url, sess) {
     const miles = await latestMileage(env, tid);
     const photos = await photoIndex(env, tid);
     const covers = await coverMap(env, tid);
+    const vcCounts = await vanCheckPhotoCounts(env, tid);
     await ensureHandoverTable(env);
     const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
     const lastHo = {}, pendHo = {};
@@ -9000,7 +9074,8 @@ async function handle20(request, env, ctx, url, sess) {
       const sv = serviceView(v, cm);
       const pics = photos[dn(v.reg)] || [];
       let coverKey = covers[dn(v.reg)];
-      if (!coverKey || !pics.some((p) => p.key === coverKey)) coverKey = pics.length ? pics[0].key : "";
+      const coverValid = coverKey && (String(coverKey).startsWith("vancheck/") || pics.some((p) => p.key === coverKey));
+      if (!coverValid) coverKey = pics.length ? pics[0].key : "";
       return {
         reg: v.reg,
         make: v.make,
@@ -9024,8 +9099,8 @@ async function handle20(request, env, ctx, url, sess) {
         currentMiles: cm ? cm.miles : null,
         milesAt: cm ? cm.at : "",
         specs: parseJson(v.specs, []),
-        photoCount: pics.length,
-        photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : "",
+        photoCount: pics.length + (vcCounts[dn(v.reg)] || 0),
+        photoUrl: coverKey ? await galleryPhotoUrl(env, url.origin, coverKey) : "",
         lastHandoverId: (lastHo[dn(v.reg)] || {}).id || null,
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
@@ -9919,9 +9994,13 @@ async function handle20(request, env, ctx, url, sess) {
     if (!reg) return jr3({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
     const idx = (await photoIndex(env, tid))[rk] || [];
+    const names = await nameMap(env, tid);
+    const slotLabels = await vanCheckSlotLabels(env, tid);
+    const vc = await vanCheckPhotos(env, tid, rk, names, slotLabels);
     const covers = await coverMap(env, tid);
     let coverKey = covers[rk];
-    if (!coverKey || !idx.some((p) => p.key === coverKey)) coverKey = idx.length ? idx[0].key : "";
+    const allKeys = /* @__PURE__ */ new Set([...idx.map((p) => p.key), ...vc.map((p) => p.key)]);
+    if (!coverKey || !allKeys.has(coverKey)) coverKey = idx.length ? idx[0].key : "";
     const photos = [];
     for (const p of idx) {
       photos.push({
@@ -9929,8 +10008,26 @@ async function handle20(request, env, ctx, url, sess) {
         name: p.name,
         by: p.by,
         at: p.at,
+        source: "upload",
+        categoryId: "upload",
+        category: "Uploaded",
+        canDelete: true,
         cover: p.key === coverKey,
         url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
+      });
+    }
+    for (const p of vc) {
+      photos.push({
+        key: p.key,
+        name: "",
+        by: p.by,
+        at: p.at,
+        source: "vancheck",
+        categoryId: p.categoryId,
+        category: p.category,
+        canDelete: false,
+        cover: p.key === coverKey,
+        url: url.origin + "/asset-image?key=" + encodeURIComponent(p.key)
       });
     }
     return jr3({ ok: true, photos, cover: coverKey }, headers);
@@ -9958,7 +10055,7 @@ async function handle20(request, env, ctx, url, sess) {
     const b = await readJson4(request);
     const reg = String(b.reg || "").trim();
     const key = String(b.key || "");
-    if (!reg || !key || !key.startsWith("vehiclephotos/")) return jr3({ error: "reg and key required" }, headers, 400);
+    if (!reg || !key || !(key.startsWith("vehiclephotos/") || key.startsWith("vancheck/"))) return jr3({ error: "reg and key required" }, headers, 400);
     const covers = await coverMap(env, tid);
     covers[regKey(reg)] = key;
     await saveCoverMap(env, tid, covers);
