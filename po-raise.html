@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=3"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Raise a PO — Mostlane Portal</title>
+  <style>
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #e6e8eb;
+  color: #1a1a1a;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; top: 0; z-index: 10;
+}
+.topbar .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 15px; }
+.topbar .brand img { height: 32px; width: auto; background: #fff; padding: 4px 8px; border-radius: 6px; }
+.topbar .backbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  border-radius: 10px; background: rgba(255,255,255,0.15);
+  color: #fff; text-decoration: none;
+  transition: background 0.15s, transform 0.15s;
+}
+.topbar .backbtn:hover { background: rgba(255,255,255,0.28); transform: translateX(-1px); }
+.topbar .backbtn:active { transform: translateX(0); }
+.topbar .backbtn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.topbar nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.topbar nav a {
+  color: #fff; text-decoration: none; font-size: 13px; font-weight: 500;
+  padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.1);
+  transition: background 0.15s;
+}
+.topbar nav a:hover, .topbar nav a.active { background: rgba(255,255,255,0.25); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 16px 14px 60px; }
+.wrap-narrow { max-width: 560px; margin: 0 auto; padding: 16px 14px 60px; }
+h1 { font-size: 22px; font-weight: 600; color: #003366; margin: 0 0 16px; }
+h2 { font-size: 17px; font-weight: 600; color: #003366; margin: 0 0 12px; }
+h3 { font-size: 14px; font-weight: 600; color: #003366; margin: 0 0 10px; }
+p { margin: 0 0 12px; }
+.muted { color: #5a6677; font-size: 13px; }
+.card {
+  background: #ffffff; border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  box-shadow: 0 2px 10px rgba(0, 30, 80, 0.06); border: 1px solid #e3e7ee;
+}
+label { display: block; font-size: 13px; font-weight: 600; color: #003366; margin-bottom: 6px; }
+input, select, textarea {
+  width: 100%; padding: 12px 14px; border: 1px solid #c9d2dd; border-radius: 10px;
+  font-size: 16px; font-family: inherit; background: #fff; color: #1a1a1a;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: #1A4F8F; box-shadow: 0 0 0 3px rgba(26, 79, 143, 0.12);
+}
+textarea { min-height: 90px; resize: vertical; }
+.field { margin-bottom: 14px; }
+button, .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+  color: #fff; border: none; border-radius: 12px;
+  font-weight: 600; font-size: 15px; font-family: inherit;
+  cursor: pointer; text-decoration: none;
+  box-shadow: 0 3px 8px rgba(0,30,80,0.20), inset 0 1px 2px rgba(255,255,255,0.15);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(0,30,80,0.28), inset 0 1px 2px rgba(255,255,255,0.20); }
+button:active, .btn:active { transform: translateY(0); }
+button.ghost, .btn.ghost {
+  background: #fff; color: #003366; border: 1px solid #c9d2dd;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+button.ghost:hover { background: #f5f7fb; transform: translateY(-1px); }
+button.danger { background: linear-gradient(180deg, #c0392b 0%, #962d22 100%); }
+button.big { padding: 18px 24px; font-size: 16px; width: 100%; }
+button.small { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: #5a6677; text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 8px; border-bottom: 2px solid #003366; }
+td { padding: 12px 8px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+tr:hover td { background: #f8fafd; }
+.badge { display: inline-block; padding: 3px 9px; font-size: 12px; font-weight: 600; border-radius: 20px; }
+.badge.review { background: #fff4d6; color: #8a6100; }
+.badge.ok { background: #d6f5dd; color: #1e6c33; }
+.badge.engineer { background: #d6e4f5; color: #1A4F8F; }
+.badge.office { background: #ececf0; color: #555; }
+.badge.danger-badge { background: #fdeeec; color: #962d22; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (min-width: 700px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+.stat { background: #fff; border: 1px solid #e3e7ee; padding: 14px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,30,80,0.04); }
+.stat .v { font-size: 26px; font-weight: 700; color: #003366; line-height: 1.1; }
+.stat .l { font-size: 12px; color: #5a6677; margin-top: 4px; font-weight: 500; }
+.attention-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 700px) { .attention-grid { grid-template-columns: repeat(6, 1fr); } }
+.att { background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; padding: 12px 14px; cursor: pointer; text-align: left; transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s; }
+.att:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,30,80,0.12); border-color: #c9d2dd; }
+.att .v { font-size: 24px; font-weight: 700; line-height: 1; }
+.att .l { font-size: 11px; color: #5a6677; margin-top: 5px; font-weight: 600; }
+.att.zero { opacity: 0.5; }
+.att.zero:hover { opacity: 0.8; }
+.alert { padding: 14px; border-radius: 10px; margin-bottom: 14px; border-left: 4px solid #003366; background: #f0f5fc; font-size: 14px; color: #1a1a1a; }
+.alert.warn { border-color: #c0392b; background: #fdeeec; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.po-display { font-size: 64px; font-weight: 700; color: #003366; letter-spacing: -0.02em; line-height: 1; text-align: center; }
+.filter-bar { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 14px; }
+@media (min-width: 700px) { .filter-bar { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+.filter-bar input, .filter-bar select { font-size: 14px; padding: 9px 12px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; background: #fff; padding: 6px; border-radius: 12px; border: 1px solid #e3e7ee; overflow-x: auto; }
+.tab { padding: 9px 14px; cursor: pointer; font-size: 13px; font-weight: 600; color: #5a6677; border-radius: 8px; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.tab.active { background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%); color: #fff; }
+.tab:hover:not(.active) { background: #f0f5fc; color: #003366; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 500px) { .grid-2 { grid-template-columns: 1fr; } }
+.table-scroll { overflow-x: auto; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f0f5fc; border: 1px solid #d6e4f5; border-radius: 20px; font-size: 13px; color: #003366; }
+.chip button { padding: 0; width: 18px; height: 18px; line-height: 1; background: transparent; box-shadow: none; color: #5a6677; font-size: 14px; border-radius: 50%; }
+.chip button:hover { background: #d6e4f5; transform: none; box-shadow: none; }
+.modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0, 20, 40, 0.5); z-index: 100; justify-content: center; align-items: center; padding: 16px; }
+.modal-backdrop.show { display: flex; }
+.modal { background: #fff; border-radius: 14px; padding: 20px; max-width: 500px; width: 100%; max-height: 92vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,30,80,0.25); }
+.bar-chart { display: flex; flex-direction: column; gap: 8px; }
+.bar-row { display: grid; grid-template-columns: 140px 1fr 50px; gap: 10px; align-items: center; font-size: 13px; }
+@media (max-width: 500px) { .bar-row { grid-template-columns: 100px 1fr 40px; font-size: 12px; } }
+.bar-row .name { color: #003366; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .bar { background: #e3e7ee; height: 22px; border-radius: 6px; position: relative; overflow: hidden; }
+.bar-row .bar .fill { height: 100%; background: linear-gradient(90deg, #1A4F8F, #003468); border-radius: 6px; transition: width 0.4s ease; }
+.bar-row .count { font-weight: 600; color: #003366; text-align: right; }
+.fade-in { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.empty { text-align: center; padding: 40px 20px; color: #5a6677; font-size: 14px; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; background: #f0f5fc; padding: 2px 6px; border-radius: 4px; color: #003366; }
+.ac-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: #fff; border: 1px solid #c9d2dd; border-top: none;
+  border-radius: 0 0 10px 10px; max-height: 280px; overflow-y: auto;
+  box-shadow: 0 4px 14px rgba(0,30,80,0.12);
+}
+.ac-item { padding: 10px 14px; cursor: pointer; font-size: 15px; color: #1a1a1a; border-bottom: 1px solid #f0f5fc; }
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.active { background: #f0f5fc; color: #003366; }
+.ac-item strong { color: #1A4F8F; font-weight: 700; background: #fff4d6; }
+.ac-empty { padding: 14px; color: #5a6677; font-size: 13px; font-style: italic; }
+.my-po { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #eef1f5; align-items: center; }
+.my-po:last-child { border-bottom: none; }
+.my-po-num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 700; color: #003366; font-size: 15px; min-width: 60px; }
+.my-po-detail { flex: 1; font-size: 14px; }
+
+  #poGate{max-width:560px;margin:40px auto;padding:0 16px}</style>
+</head>
+<body>
+  <header class="page" style="background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px">
+    <a class="ml-back" href="main.html" title="Back" style="color:#fff">‹ Back</a>
+    <h1 style="font-size:17px;margin:0;flex:1;color:#fff">🧾 Raise a PO</h1>
+  </header>
+  <div id="poGate" class="muted">Checking access…</div>
+  <div id="poApp" style="display:none">
+  <div class="wrap-narrow">
+    <div id="status-area"></div>
+    <div id="form-area" style="display:none">
+      <div class="card fade-in">
+        <h1 style="margin-bottom:4px">Raise a PO</h1>
+        <p class="muted">Outside office hours only. Enter a site or an incident number, plus supplier and description.</p>
+        <div id="prefill-note" style="display:none;margin-top:12px;padding:10px 12px;border-radius:10px;background:#d6f5dd;color:#1e6c33;font-size:13px;font-weight:600"></div>
+        <div class="field" style="position:relative;margin-top:16px">
+          <label>Site <span style="font-weight:400;color:#5a6677">(or a company vehicle)</span></label>
+          <input id="site" type="text" placeholder="Start typing a site or vehicle reg..." autocomplete="off" oninput="onSiteInput()" onfocus="filterSites()" onblur="setTimeout(hideSites,200)">
+          <div id="site-dropdown" class="ac-dropdown" style="display:none"></div>
+          <input id="vehicle_reg" type="hidden">
+        </div>
+        <div class="field">
+          <label>Incident number <span style="font-weight:400;color:#5a6677">(for incident jobs — use instead of, or as well as, a site)</span></label>
+          <input id="incident_no" type="text" placeholder="e.g. INC123456" autocomplete="off">
+          <input id="job_id" type="hidden"><input id="job_ref" type="hidden">
+        </div>
+        <div class="field" style="position:relative">
+          <label>Supplier</label>
+          <input id="supplier" type="text" placeholder="Start typing..." autocomplete="off" oninput="filterSuppliers()" onfocus="filterSuppliers()" onblur="setTimeout(hideSuppliers,200)">
+          <div id="supplier-dropdown" class="ac-dropdown" style="display:none"></div>
+        </div>
+        <div class="field">
+          <label>Description</label>
+          <textarea id="description" placeholder="What's being purchased"></textarea>
+        </div>
+        <button class="big" onclick="submitPO(this)">Issue PO Number</button>
+      </div>
+      <div class="card fade-in" id="my-pos-card" style="display:none">
+        <h2>My Recent POs</h2>
+        <div id="my-pos-list"></div>
+      </div>
+    </div>
+    <div id="result-area" style="display:none"></div>
+  </div>
+  </div>
+<script>
+const API = window.MOSTLANE_API;
+function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
+async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{}; if(!(u.StaffType==="field"||u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="You don’t have access to raise POs."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
+let SUPPLIERS = [];
+let SITES = [];
+let VEHICLES = [];
+async function init() {
+  const [status, suppliers, sites, vehicles] = await Promise.all([
+    authFetch('/po/api/status').then(r => r.json()),
+    authFetch('/po/api/suppliers').then(r => r.json()),
+    authFetch('/po/api/sites').then(r => r.json()),
+    authFetch('/po/api/vehicles').then(r => r.json()).catch(() => [])
+  ]);
+  SUPPLIERS = suppliers;
+  SITES = sites;
+  VEHICLES = Array.isArray(vehicles) ? vehicles : [];
+  const statusArea = document.getElementById('status-area');
+  if (status.mode === 'disabled') { statusArea.innerHTML = '<div class="card fade-in"><div class="alert warn">' + escapeHtml(status.message) + '</div></div>'; loadMyPOs(true); return; }
+  if (status.mode === 'office_hours') {
+    statusArea.innerHTML = '<div class="card fade-in" style="text-align:center;padding:36px 20px"><h2>Office is open</h2><p class="muted" style="margin-bottom:18px">' + escapeHtml(status.message) + '</p><a href="tel:02380262000" class="btn">📞 Call 02380 262000</a></div>';
+    loadMyPOs(true);
+    return;
+  }
+  document.getElementById('form-area').style.display = 'block';
+  prefillFromJobLink();
+  loadMyPOs(false);
+}
+// The portal's "Raise PO for this job" link opens this page with the job
+// encoded on the fragment as #mlpo=<base64 JSON>. Fill only empty fields —
+// never overwrite what the engineer has already typed — and leave supplier
+// and description to them. Any bad or missing payload just leaves it blank.
+function prefillFromJobLink() {
+  const m = location.hash.match(/mlpo=([^&]+)/);
+  if (!m) return;
+  try {
+    let raw = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (raw.length % 4) raw += '=';
+    const bin = atob(raw);
+    let json;
+    try {
+      json = new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+    } catch (e) {
+      json = decodeURIComponent(escape(bin));
+    }
+    const d = JSON.parse(json);
+    const siteField = document.getElementById('site');
+    const incidentField = document.getElementById('incident_no');
+    let filled = false;
+    if (d.site && siteField && !siteField.value) { siteField.value = d.site; filled = true; }
+    if (d.jobRef && incidentField && !incidentField.value) { incidentField.value = d.jobRef; filled = true; }
+    // The job link travels with the PO even if the visible fields were already
+    // filled in, so the portal can always cost this PO against the job.
+    const jobIdField = document.getElementById('job_id');
+    const jobRefField = document.getElementById('job_ref');
+    if (d.jobId && jobIdField) { jobIdField.value = d.jobId; filled = true; }
+    if (d.jobRef && jobRefField) { jobRefField.value = d.jobRef; }
+    if (filled) {
+      const note = document.getElementById('prefill-note');
+      if (note) {
+        const label = d.jobRef || d.site || '';
+        note.textContent = label ? ('✓ Pre-filled from job ' + label) : '✓ Pre-filled from job';
+        note.style.display = 'block';
+      }
+    }
+  } catch (e) { /* malformed payload — leave the form blank */ }
+}
+// Typing by hand clears any vehicle tag, so a PO can't keep a stale van
+// attached after the engineer edits the box.
+let pickedVehicleLabel = null;
+function onSiteInput() {
+  const input = document.getElementById('site');
+  if (pickedVehicleLabel && input.value !== pickedVehicleLabel) {
+    document.getElementById('vehicle_reg').value = '';
+    pickedVehicleLabel = null;
+  }
+  filterSites();
+}
+function filterSites() {
+  const input = document.getElementById('site');
+  const dd = document.getElementById('site-dropdown');
+  const q = input.value.trim().toLowerCase();
+  if (!q) { dd.style.display = 'none'; return; }
+  const sites = SITES.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  // Vehicles match on reg or make/model, and show alongside the sites
+  const norm = q.replace(/\s+/g, '');
+  const vehicles = VEHICLES.filter(v =>
+    v.reg.toLowerCase().replace(/\s+/g, '').includes(norm) || (v.desc || '').toLowerCase().includes(q)
+  ).slice(0, 6);
+  if (!sites.length && !vehicles.length) {
+    dd.innerHTML = '<div class="ac-empty">No match — your entry will be saved as a new site for review</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  const vHtml = vehicles.map(v =>
+    '<div class="ac-item" onmousedown="pickVehicle(\''+escapeJsAttr(v.reg)+'\',\''+escapeJsAttr(v.desc || '')+'\')">'
+    + '🚐 ' + highlight(v.reg, q) + (v.desc ? ' <span class="muted">— ' + escapeHtml(v.desc) + '</span>' : '')
+    + '</div>').join('');
+  const sHtml = sites.map(s => '<div class="ac-item" onmousedown="pickSite(\''+escapeJsAttr(s.name)+'\')">'+highlight(s.name, q)+'</div>').join('');
+  dd.innerHTML = vHtml + sHtml;
+  dd.style.display = 'block';
+}
+// Picking a van stamps vehicle_reg and puts a readable label in the site box,
+// so the PO still reads sensibly in the log, reports and exports.
+function pickVehicle(reg, desc) {
+  const label = 'Vehicle ' + reg + (desc ? ' (' + desc + ')' : '');
+  document.getElementById('site').value = label;
+  document.getElementById('vehicle_reg').value = reg;
+  pickedVehicleLabel = label;
+  hideSites();
+}
+function pickSite(name) { document.getElementById('site').value = name; document.getElementById('vehicle_reg').value = ''; pickedVehicleLabel = null; hideSites(); }
+function hideSites() { document.getElementById('site-dropdown').style.display = 'none'; }
+function filterSuppliers() {
+  const input = document.getElementById('supplier');
+  const dd = document.getElementById('supplier-dropdown');
+  const q = input.value.trim().toLowerCase();
+  if (!q) { dd.style.display = 'none'; return; }
+  const matches = SUPPLIERS.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { dd.innerHTML = '<div class="ac-empty">No suppliers match — pick one from the list</div>'; dd.style.display = 'block'; return; }
+  dd.innerHTML = matches.map(s => '<div class="ac-item" onmousedown="pickSupplier(\''+escapeJsAttr(s.name)+'\')">'+highlight(s.name, q)+'</div>').join('');
+  dd.style.display = 'block';
+}
+function highlight(text, q) {
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return escapeHtml(text);
+  return escapeHtml(text.slice(0,i)) + '<strong>' + escapeHtml(text.slice(i,i+q.length)) + '</strong>' + escapeHtml(text.slice(i+q.length));
+}
+function pickSupplier(name) {
+  document.getElementById('supplier').value = name;
+  hideSuppliers();
+}
+function hideSuppliers() { document.getElementById('supplier-dropdown').style.display = 'none'; }
+async function loadMyPOs(officeHours) {
+  try {
+    const params = new URLSearchParams();
+    params.set('engineer', null);
+    params.set('hide_subcontractor', '1');
+    const pos = await authFetch('/po/api/my-pos').then(r => r.json());
+    if (!pos.length) return;
+    const card = document.getElementById('my-pos-card');
+    const list = document.getElementById('my-pos-list');
+    if (!card || !list) return;
+    card.style.display = 'block';
+    list.innerHTML = pos.slice(0, 20).map(p => {
+      const dStr = fmtDateTime(p.issued_at);
+      const where = p.incident_no ? ('🎫 ' + escapeHtml(p.incident_no) + (p.site ? ' · ' + escapeHtml(p.site) : '')) : escapeHtml(p.site || '—');
+      return '<div class="my-po"><div class="my-po-num">'+p.po_number+'</div><div class="my-po-detail"><div><strong>'+escapeHtml(p.supplier || '—')+'</strong> · <span class="muted">'+where+'</span></div><div class="muted" style="font-size:12px;margin-top:2px">'+dStr+'</div></div></div>';
+    }).join('');
+    if (officeHours) {
+      document.getElementById('status-area').appendChild(card);
+    }
+  } catch (e) { console.error('loadMyPOs failed', e); }
+}
+let submittingEngineerPO = false;
+async function submitPO(btn) {
+  if (submittingEngineerPO) return;
+  const site = document.getElementById('site').value.trim();
+  const incident = document.getElementById('incident_no').value.trim();
+  const supplier = document.getElementById('supplier').value.trim();
+  const description = document.getElementById('description').value.trim();
+  if (!site && !incident) { alert('Enter a site or an incident number'); return; }
+  if (!supplier) { alert('Supplier is required'); return; }
+  if (!description) { alert('Description is required'); return; }
+  const valid = SUPPLIERS.some(s => s.name === supplier);
+  if (!valid) { alert('Please pick a supplier from the dropdown list'); return; }
+  submittingEngineerPO = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Issuing...'; }
+  try {
+    const res = await authFetch('/po/api/pos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ engineer_slug: null, engineer_name: null, source: 'engineer', site, incident_no: incident, supplier, description,
+        job_id: (document.getElementById('job_id') || {}).value || null,
+        job_ref: (document.getElementById('job_ref') || {}).value || null,
+        vehicle_reg: (document.getElementById('vehicle_reg') || {}).value || null }) }).then(r => r.json());
+    if (res.error) { alert(res.error); if (btn) { btn.disabled = false; btn.textContent = 'Issue PO Number'; } submittingEngineerPO = false; return; }
+    document.getElementById('form-area').style.display = 'none';
+    document.getElementById('result-area').style.display = 'block';
+    document.getElementById('result-area').innerHTML = `
+      <div class="card fade-in" style="text-align:center;padding:40px 20px">
+        <p class="muted" style="text-transform:uppercase;font-size:12px;letter-spacing:0.08em;margin-bottom:8px">PO Number Issued</p>
+        <div class="po-display">${res.po_number}</div>
+        <div style="margin:24px 0;color:#5a6677;font-size:14px;line-height:1.7">
+          <strong style="color:#003366">${incident ? '🎫 ' + escapeHtml(incident) + (site ? ' · ' + escapeHtml(site) : '') : escapeHtml(site)}</strong><br>
+          ${escapeHtml(supplier)}<br><span style="font-size:13px">${escapeHtml(description)}</span>
+        </div>
+        <button class="ghost" onclick="location.reload()">Raise Another</button>
+      </div>`;
+  } catch (err) { alert('Error: ' + err.message); if (btn) { btn.disabled = false; btn.textContent = 'Issue PO Number'; } submittingEngineerPO = false; }
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+function escapeJsAttr(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+function fmtDate(v) {
+  if (!v) return '';
+  const s = String(v);
+  if (s.length === 10 && s.charAt(4) === '-') return s.slice(8,10) + '-' + s.slice(5,7) + '-' + s.slice(2,4);
+  const d = new Date(v);
+  if (isNaN(d)) return s;
+  const p = n => (n < 10 ? '0' : '') + n;
+  return p(d.getDate()) + '-' + p(d.getMonth() + 1) + '-' + String(d.getFullYear()).slice(2);
+}
+function fmtDateTime(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d)) return String(v);
+  const p = n => (n < 10 ? '0' : '') + n;
+  return fmtDate(d) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+boot();
+
+</script>
+</body></html>

@@ -98,6 +98,14 @@ export async function handle(request, env, ctx, url, sess) {
       return jr(res, res.error ? 400 : 200);
     }
 
+    // A field engineer can see THEIR OWN recent POs (never the whole log).
+    if (path === "/api/my-pos" && method === "GET") {
+      const p = new URLSearchParams(q);
+      p.set("engineer", userSlug(sess));
+      p.set("hide_subcontractor", "1");
+      return jr(await getPOs(db, p));
+    }
+
     // ── Everything past here is office/admin only ──
     if (!office) return error("Not allowed", 403, env, request);
 

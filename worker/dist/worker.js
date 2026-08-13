@@ -13548,6 +13548,12 @@ async function handle25(request, env, ctx, url, sess) {
       const res = await issuePO(db, b);
       return jr7(res, res.error ? 400 : 200);
     }
+    if (path === "/api/my-pos" && method === "GET") {
+      const p = new URLSearchParams(q);
+      p.set("engineer", userSlug(sess));
+      p.set("hide_subcontractor", "1");
+      return jr7(await getPOs(db, p));
+    }
     if (!office) return error("Not allowed", 403, env, request);
     if (path === "/api/pos" && method === "GET") return jr7(await getPOs(db, q));
     if (path.startsWith("/api/pos/") && method === "PATCH") {
