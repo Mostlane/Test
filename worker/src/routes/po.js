@@ -59,8 +59,11 @@ export async function handle(request, env, ctx, url, sess) {
   // Permissions come from the user_permissions table; office = can manage POs,
   // field engineers = may raise (out of hours) but never see the office surface.
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes";
   const field = staffTypeOf(sess.user) === "field";
+  // Field engineers are ALWAYS the restricted (raise-only) role, even if they
+  // hold the PurchaseOrders permission — that perm just means "can use POs".
+  // Only FullAccess, or PurchaseOrders on a NON-field (office) account, is office.
+  const office = perms.FullAccess === "Yes" || (perms.PurchaseOrders === "Yes" && !field);
   if (!office && !field) return error("Not allowed", 403, env, request);
   const path = url.pathname.replace(/^\/po/, "") || "/";
   const method = request.method.toUpperCase();

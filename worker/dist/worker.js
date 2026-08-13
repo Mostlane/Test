@@ -13604,8 +13604,8 @@ async function handle25(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes";
   const field = staffTypeOf2(sess.user) === "field";
+  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
   if (!office && !field) return error("Not allowed", 403, env, request);
   const path = url.pathname.replace(/^\/po/, "") || "/";
   const method = request.method.toUpperCase();
