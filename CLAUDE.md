@@ -612,6 +612,22 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   FullAccess) fires this week's reminder to all still-outstanding drivers on
   demand (no time-gate/dedupe) — "🔔 Remind now" button on van-checks.html;
   shares `remindDrivers()` with the cron. `sendWeeklyReminders` is the cron path.
+  **Per-driver on/off + global pause (Aug 2026 — sending controls):** an admin
+  controls WHO is in the weekly cycle without touching the notification centre.
+  A **per-driver opt-out** list lives in app_config **`vancheck:optout:<tid>`**
+  (JSON array of usernames); `getOptedOut(env,tid)` returns the Set. A driver
+  switched **Off** is dropped from `remindDrivers` (no cron/Remind-now push), from
+  `/vancheck/attention` (`mineDue`=false, and excluded from admin `missing`), and
+  shown "Off — not required" on the weekly grid — but can still submit a check.
+  **POST /vancheck/driver-toggle** `{username, enabled}` (Vehicles|FullAccess)
+  adds/removes them; **GET /vancheck/week** now returns `enabled` per row +
+  `globallyPaused`. The **global "bypass"** (mute reminders for EVERYONE) is the
+  vehicle-check suppression rule with no user/key — surfaced on van-checks.html as
+  a banner (⏸ Pause all / ▶ Resume) via **POST /vancheck/pause-all** `{paused}`
+  (`isGloballyPaused(rules)` detects it; add/remove through lib/suppress
+  getRules/saveRules), so the blunt on/off is controllable in one place instead of
+  buried in the notification centre. Front-end: van-checks.html grid has an
+  On✓/Off toggle column + the pause banner.
 - `fleet.js` — the whole Vehicles/Fleet backend (gate: FullAccess|Vehicles).
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);

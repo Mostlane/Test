@@ -8050,6 +8050,19 @@ async function mintRef(db, docType, site) {
 
 // src/routes/vancheck.js
 var SETTINGS_KEY2 = "vancheck:settings";
+var OPTOUT_KEY = "vancheck:optout";
+async function getOptedOut(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, OPTOUT_KEY).first();
+    const a = row && row.value ? JSON.parse(row.value) : [];
+    return new Set(Array.isArray(a) ? a.map(String) : []);
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+function isGloballyPaused(rules) {
+  return (rules || []).some((r) => r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === ""));
+}
 var DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },
@@ -8305,18 +8318,21 @@ async function handle16(request, env, ctx, url, sess) {
     ).bind(db.tenantId, week).all();
     const byUser = {};
     for (const c of checks || []) byUser[c.username] = shapeCheck(c);
+    const off = await getOptedOut(env, db.tenantId);
     const rows = (drivers || []).map((u) => ({
       username: u.username,
       name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username,
       vehicle: u.vehicle_assigned,
+      enabled: !off.has(u.username),
       check: byUser[u.username] || null
     }));
     for (const c of checks || []) {
       if (!rows.some((r) => r.username === c.username))
-        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", check: shapeCheck(c) });
+        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), check: shapeCheck(c) });
     }
     const dueAt = deadlineFor(week, s);
-    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows }, {}, env, request);
+    const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
+    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
   }
   if (path === "/vancheck/remind-now" && method === "POST") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
@@ -8371,14 +8387,35 @@ async function handle16(request, env, ctx, url, sess) {
     await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
     return json({ ok: true, week: wk }, {}, env, request);
   }
+  if (path === "/vancheck/driver-toggle" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const off = await getOptedOut(env, db.tenantId);
+    if (b.enabled === false) off.add(who);
+    else off.delete(who);
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, OPTOUT_KEY, JSON.stringify([...off])).run();
+    return json({ ok: true, username: who, enabled: b.enabled !== false }, {}, env, request);
+  }
+  if (path === "/vancheck/pause-all" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    let rules = await getRules(env, tenantId);
+    rules = rules.filter((r) => !(r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === "")));
+    if (b.paused === true) rules.push({ type: "vehicle-check" });
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, paused: b.paused === true }, {}, env, request);
+  }
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);
     const week = mondayOf3(londonDate2());
     const dueAt = deadlineFor(week, s);
     const overdue = Date.now() > Date.parse(dueAt);
     const myVehicle = sess.user.vehicle_assigned || "";
+    const off = await getOptedOut(env, db.tenantId);
     let mineDue = false;
-    if (myVehicle) {
+    if (myVehicle && !off.has(me)) {
       const mine = await db.prepare("SELECT week FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, me, week).first();
       mineDue = !mine;
     }
@@ -8396,7 +8433,7 @@ async function handle16(request, env, ctx, url, sess) {
         "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
       ).bind(db.tenantId, week).all();
       const doneSet = new Set((done || []).map((r) => r.username));
-      missing = (drivers || []).filter((u) => !doneSet.has(u.username)).map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
+      missing = (drivers || []).filter((u) => !doneSet.has(u.username) && !off.has(u.username)).map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
     }
     return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing }, {}, env, request);
   }
@@ -8419,10 +8456,12 @@ async function remindDrivers(env, tid, week, payload) {
     "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
   ).bind(tid, week).all();
   const handled = new Set((checks || []).map((c) => c.username));
+  const off = await getOptedOut(env, tid);
   const rules = await getRules(env, tid);
   const recipients = [];
   for (const drv of drivers || []) {
     if (handled.has(drv.username)) continue;
+    if (off.has(drv.username)) continue;
     if (isSuppressed(rules, "vehicle-check", drv.username, week)) continue;
     await sendToUser(env, tid, drv.username, payload);
     recipients.push(drv.username);
