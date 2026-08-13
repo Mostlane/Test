@@ -39,6 +39,32 @@ async function withAttachmentUrls(env, origin, atts) {
   return out;
 }
 
+// Build a PORTRAIT A4 PDF from rasterised page images (data:image/jpeg base64),
+// one image per page, with a small footer on every page: the reference number
+// on the left and "Page X of Y" on the right (no date / title / URL). Returns a
+// Uint8Array, or null if no usable images.
+const RA_PAGE_H = 842, RA_PAGE_W = 595, RA_FOOTER = 22, RA_CONTENT_H = RA_PAGE_H - RA_FOOTER;
+function buildRaPdf(pages, ref) {
+  const imgs = [];
+  for (const durl of (Array.isArray(pages) ? pages : []).slice(0, 40)) {
+    const m = /^data:image\/jpe?g;base64,(.+)$/.exec(String(durl || ""));
+    if (!m) continue;
+    let bin; try { bin = atob(m[1]); } catch { continue; }
+    const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    imgs.push(u8);
+  }
+  if (!imgs.length) return null;
+  const pdf = new PdfDoc();
+  const N = imgs.length;
+  imgs.forEach((u8, i) => {
+    if (i > 0) pdf.newPage();
+    pdf.image(u8, 0, 0, RA_PAGE_W, RA_CONTENT_H);                          // content fills the top, leaving the footer strip
+    if (ref) pdf.text(24, RA_PAGE_H - 8, String(ref), { size: 8, grey: true });
+    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 8, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
+  });
+  return pdf.bytes();
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -133,18 +159,8 @@ export async function handle(request, env, ctx, url, sess) {
     const reqs = parseArr(row.sign_requests);
     const mine = reqs.find(s => s.username === me);
     if (!mine) return error("This document wasn't sent to you.", 403, env, request);
-    const pdf = new PdfDoc();
-    let first = true, n = 0;
-    for (const durl of pages.slice(0, 30)) {
-      const m = /^data:image\/jpe?g;base64,(.+)$/.exec(String(durl || ""));
-      if (!m) continue;
-      let bin; try { bin = atob(m[1]); } catch { continue; }
-      const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      if (!first) pdf.newPage(); first = false; n++;
-      pdf.image(u8, 0, 0, 595, 842);   // full-bleed A4 portrait
-    }
-    if (!n) return error("No usable page images.", 400, env, request);
-    const out = pdf.bytes();
+    const out = buildRaPdf(pages, row.ref);
+    if (!out) return error("No usable page images.", 400, env, request);
     const safe = String(row.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
     const key = `staffdocs/${db.tenantId}/user/${me}/Risk Assessments/${Date.now()}-RA-${safe}.pdf`;
     await env.JOB_FILES.put(key, out, {
@@ -158,6 +174,28 @@ export async function handle(request, env, ctx, url, sess) {
     await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(JSON.stringify(reqs), new Date().toISOString(), db.tenantId, id).run();
     return json({ ok: true }, {}, env, request);
+  }
+  // ── Produce the downloadable PDF (portrait, ref + Page X of Y footer) ────────
+  // The page rasterises the document and posts the images; we return the PDF
+  // bytes. Allowed for an H&S user OR a signer of this document.
+  if (path === "/hs/doc/pdf" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const pages = Array.isArray(b.pages) ? b.pages : [];
+    if (!id || !pages.length) return error("id and pages required", 400, env, request);
+    const row = await db.prepare("SELECT id, ref, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    const isHS = perms.HSPlan === "Yes" || perms.FullAccess === "Yes";
+    const isSigner = parseArr(row.sign_requests).some(s => s.username === me);
+    if (!isHS && !isSigner) return error("Not allowed.", 403, env, request);
+    const out = buildRaPdf(pages, row.ref);
+    if (!out) return error("No usable page images.", 400, env, request);
+    const safe = String(row.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
+    return new Response(out, { status: 200, headers: {
+      ...corsHeaders(env, request),
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="RA-${safe}.pdf"`
+    }});
   }
 
   // ── Everything below needs H&S access ───────────────────────────────────────

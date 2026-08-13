@@ -9,6 +9,7 @@
   <script src="hs-rams-library.js?v=2"></script>
   <script src="hs-rams-render.js?v=1"></script>
   <script src="html2canvas.min.js?v=1"></script>
+  <script src="hs-pdf-capture.js?v=1"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -78,7 +79,7 @@
         <b style="color:#0a7d33;">✓ Thank you — your signature has been saved.</b>
         <p class="muted" style="margin:6px 0 0;">Your name and signature now appear on the document's sign-off.</p>
         <p class="muted" id="fileMsg" style="margin:6px 0 0;"></p>
-        <button class="btn ghost small" style="margin-top:8px;" onclick="window.print()">🖨️ Print / Save PDF</button>
+        <button class="btn ghost small" id="dlBtn" style="margin-top:8px;" onclick="downloadPdf()">⬇ Download PDF</button>
       </div>
     </div>
   </div>
@@ -149,37 +150,35 @@
     } catch (e) { g("signMsg").className = "msg err"; g("signMsg").textContent = "Couldn't save — " + e.message; g("signBtn").disabled = false; }
   }
 
-  // Wait for all images in an element to finish loading before rasterising.
-  function waitImgs(el) {
-    const imgs = [...el.querySelectorAll("img")];
-    return Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = im.onerror = res; })));
-  }
-  // Rasterise the finished document to A4-portrait page images (colour-faithful —
-  // it's a screenshot of the rendered doc) and file it as a PDF in My Documents.
+  // File a colour-faithful copy of the finished document into My Documents.
   async function fileMyCopy() {
     const el = g("docBody");
-    if (!window.html2canvas || !el) return;
+    if (!window.HSCaptureDoc || !el) return;
     g("fileMsg").textContent = "Filing a copy to your My Documents…";
     try {
-      await waitImgs(el);
-      const canvas = await html2canvas(el, { useCORS: true, backgroundColor: "#ffffff", scale: 2, logging: false });
-      const cw = canvas.width;
-      const pageH = Math.max(1, Math.round(cw * (842 / 595)));   // A4 portrait aspect
-      const pages = [];
-      for (let y = 0; y < canvas.height; y += pageH) {
-        const h = Math.min(pageH, canvas.height - y);
-        const pc = document.createElement("canvas"); pc.width = cw; pc.height = pageH;
-        const cx = pc.getContext("2d"); cx.fillStyle = "#ffffff"; cx.fillRect(0, 0, cw, pageH);
-        cx.drawImage(canvas, 0, y, cw, h, 0, 0, cw, h);
-        pages.push(pc.toDataURL("image/jpeg", 0.82));
-      }
+      const pages = await window.HSCaptureDoc(el);
       const r = await authFetch("/hs/doc/file-signed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: CUR_ID, pages }) }).then(r => r.json());
       g("fileMsg").innerHTML = r && r.ok
         ? '✓ A copy has been saved to your <b>My Documents → Risk Assessments</b>.'
-        : 'Signed — but the My Documents copy couldn’t be filed. You can still print/save it below.';
+        : 'Signed — but the My Documents copy couldn’t be filed. You can still download it below.';
     } catch (e) {
-      g("fileMsg").textContent = "Signed — but the My Documents copy couldn’t be filed. You can still print/save it below.";
+      g("fileMsg").textContent = "Signed — but the My Documents copy couldn’t be filed. You can still download it below.";
     }
+  }
+  // Download the generated PDF (portrait, ref + Page X of Y footer).
+  async function downloadPdf() {
+    const el = g("docBody"); if (!el) return;
+    const btn = g("dlBtn"); btn.disabled = true; const old = btn.textContent; btn.textContent = "Preparing…";
+    try {
+      const pages = await window.HSCaptureDoc(el);
+      const res = await authFetch("/hs/doc/pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: CUR_ID, pages }) });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "Risk-Assessment.pdf"; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { alert("Couldn't produce the PDF — please try again."); }
+    finally { btn.disabled = false; btn.textContent = old; }
   }
 
   async function loadList() {
