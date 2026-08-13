@@ -50,6 +50,10 @@
     .doc ul { margin:6px 0; padding-left:20px; font-size:14px; } .doc ul li { margin:3px 0; }
     .doc .sig img { max-height:70px; border-bottom:1px solid #333; }
     .doc .foot { margin-top:18px; font-size:12px; color:#556; border-top:1px solid #ddd; padding-top:8px; }
+    .chips { display:flex; flex-wrap:wrap; gap:6px; }
+    .chip { display:inline-flex; align-items:center; gap:6px; background:#eef3fb; border:1px solid #cdd9ea; color:#22415f; border-radius:16px; padding:4px 6px 4px 11px; font-size:13px; }
+    .chip button { border:none; background:#c9d6e8; color:#22415f; width:17px; height:17px; border-radius:50%; cursor:pointer; font-size:12px; line-height:1; padding:0; }
+    .chip button:hover { background:#b23; color:#fff; }
     @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; max-width:none; } }
   </style>
   <style id="printOrient">@page { size: A4 portrait; margin: 12mm; }</style>
@@ -194,6 +198,8 @@
       <h2 id="ramsFormTitle">New Risk Assessment</h2>
       <div class="card">
         <h3 style="margin-top:0;">Activity details</h3>
+        <label>Document number <span class="muted" style="font-weight:400;font-size:11px;">— leave blank to auto-number (RA…)</span></label>
+        <input type="text" id="r_ref" placeholder="Auto (RA…)" style="max-width:220px;">
         <div class="grid2">
           <div><label>Title / activity *</label><input type="text" id="r_task"></div>
           <div><label>Project / site</label><input type="text" id="r_site"></div>
@@ -222,6 +228,17 @@
         <h3 style="margin-top:0;">Hazards &amp; risk rating</h3>
         <div id="r_assembled"><p class="muted">Select some work above to pull in hazards, or add one manually.</p></div>
         <button class="btn ghost small" type="button" onclick="addCustomHazard()">+ Add custom hazard</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Required PPE</h3>
+        <p class="muted" style="font-size:12.5px;margin-top:0;">Auto-suggested from the hazards above — add or remove to suit. This is the list that prints on the document.</p>
+        <div id="r_ppe" class="chips"><span class="muted" style="font-size:13px;">No PPE yet.</span></div>
+        <div class="row" style="margin-top:8px;align-items:center;gap:6px;flex-wrap:wrap;">
+          <input type="text" id="r_ppe_add" list="ppeSuggest" placeholder="Add PPE…" style="max-width:240px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addPPEFromInput();}">
+          <button class="btn ghost small" type="button" onclick="addPPEFromInput()">+ Add</button>
+          <button class="btn grey small" type="button" onclick="resyncPPE()" title="Replace the list with the PPE the selected hazards call for">↻ Re-sync from hazards</button>
+          <datalist id="ppeSuggest"></datalist>
+        </div>
       </div>
       <div class="card">
         <h3 style="margin-top:0;">Assessor sign-off</h3>
@@ -698,6 +715,10 @@
   // ── RAMS — Risk Assessment Builder ───────────────────────────────────────────
   const HS = window.HS_RAMS;
   let ramsHazards = [];
+  // Required-PPE list: auto-suggested from the selected hazards, but fully
+  // editable. Once the user edits it (ppeTouched) we stop auto-overwriting it;
+  // "Re-sync from hazards" resets that.
+  let ramsPPE = [], ppeTouched = false;
   const bandCol = b => b === "High" ? "#b00020" : b === "Medium" ? "#b26b00" : "#0a7d33";
   const bandBg = b => b === "High" ? "#fdecea" : b === "Medium" ? "#fff6e5" : "#e6f6ec";
   function riskPill(sev, lik) {
@@ -771,15 +792,34 @@
         </div>
         <div style="margin:6px 0;">Residual risk: ${riskPill(h.sevWith, h.likWith)}</div>
       </div>`).join("");
-    const ppe = aggregate("ppe"), inj = aggregate("injuries");
+    const inj = aggregate("injuries");
     const summary = `<div class="card" style="background:#f3f6fb;margin:8px 0 0;">
       <b>Auto-suggested from these hazards</b>
-      <div style="font-size:13px;margin-top:4px;"><b>Required PPE:</b> ${ppe.length?esc(ppe.join(", ")):"—"}</div>
-      <div style="font-size:13px;"><b>Likely harm(s):</b> ${inj.length?esc(inj.join(", ")):"—"}</div>
-      <p class="muted" style="font-size:12px;margin:4px 0 0;">These flow onto the document; Persons affected &amp; Likely harm(s) above auto-fill from these if left blank.</p></div>`;
+      <div style="font-size:13px;margin-top:4px;"><b>Likely harm(s):</b> ${inj.length?esc(inj.join(", ")):"—"}</div>
+      <p class="muted" style="font-size:12px;margin:4px 0 0;">Persons affected &amp; Likely harm(s) above auto-fill from these if left blank. Required PPE is managed in its own section below.</p></div>`;
     g("r_assembled").innerHTML = blocks + summary;
     autofillFromHazards();
+    if (!ppeTouched) { ramsPPE = aggregate("ppe"); renderPPE(); }   // keep PPE in step until the user edits it
   }
+  // ── Required-PPE editor ──────────────────────────────────────────────────────
+  function ppeSuggestions() {
+    const s = new Set(RAMS_PPE);
+    Object.values(HS.hazards || {}).forEach(h => (h.ppe || []).forEach(p => p && s.add(p)));
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }
+  function buildPpeDatalist() { const dl = g("ppeSuggest"); if (dl) dl.innerHTML = ppeSuggestions().map(p => `<option value="${esc(p)}">`).join(""); }
+  function renderPPE() {
+    const box = g("r_ppe");
+    if (!ramsPPE.length) { box.innerHTML = '<span class="muted" style="font-size:13px;">No PPE yet.</span>'; return; }
+    box.innerHTML = ramsPPE.map((p, i) => `<span class="chip">${esc(p)}<button type="button" title="Remove" onclick="rmPPE(${i})">✕</button></span>`).join("");
+  }
+  function addPPE(val) {
+    const v = String(val || "").trim(); if (!v) return;
+    if (!ramsPPE.some(p => p.toLowerCase() === v.toLowerCase())) { ramsPPE.push(v); ppeTouched = true; renderPPE(); }
+  }
+  function addPPEFromInput() { const inp = g("r_ppe_add"); addPPE(inp.value); inp.value = ""; inp.focus(); }
+  function rmPPE(i) { ramsPPE.splice(i, 1); ppeTouched = true; renderPPE(); }
+  function resyncPPE() { ramsPPE = aggregate("ppe"); ppeTouched = false; renderPPE(); }
   function ramsAckRow(a = {}) {
     const idx = g("r_acks").children.length;
     const div = document.createElement("div");
@@ -795,18 +835,20 @@
   }
   function addAck(){ ramsAckRow(); }
   function newRams() {
-    editId = null; ramsHazards = [];
+    editId = null; ramsHazards = []; ramsPPE = []; ppeTouched = false;
     g("ramsFormTitle").textContent = "New Risk Assessment";
-    ["r_task","r_site","r_location","r_desc","r_equipment","r_supporting","r_persons","r_harms","r_totalaffected","r_frequency","r_duration","r_assessor"].forEach(i => g(i).value = "");
+    ["r_ref","r_task","r_site","r_location","r_desc","r_equipment","r_supporting","r_persons","r_harms","r_totalaffected","r_frequency","r_duration","r_assessor"].forEach(i => g(i).value = "");
     const today = new Date(); g("r_date").value = today.toISOString().slice(0,10);
     g("r_review").value = new Date(today.getTime() + 365*86400000).toISOString().slice(0,10);
-    renderTree(); renderAssembled(); g("r_acks").innerHTML = ""; g("ramsMsg").textContent = "";
+    buildPpeDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = ""; g("ramsMsg").textContent = "";
     show("formRams");
     setTimeout(() => initSig("r_bysig",""), 30);
   }
   function fillRams(doc) {
     const x = doc.data || {};
     g("ramsFormTitle").textContent = "Edit Risk Assessment — " + (doc.ref || "");
+    g("r_ref").value = doc.ref || "";
+    ramsPPE = (x.ppe || []).slice(); ppeTouched = true;   // respect the saved list
     g("r_task").value = x.task || doc.site || ""; g("r_site").value = x.site || "";
     g("r_location").value = x.location || ""; g("r_desc").value = x.description || "";
     g("r_equipment").value = x.equipment || ""; g("r_supporting").value = x.supporting || "";
@@ -818,7 +860,7 @@
       sevWithout:h.sevWithout||3, likWithout:h.likWithout||3,
       controls:(h.controls||[]).map(c => typeof c === "string" ? { level:"admin", text:c } : { level:c.level||"admin", text:c.text||"" }),
       sevWith:h.sevWith||3, likWith:h.likWith||1, custom:!h.id }));
-    renderTree(); renderAssembled(); g("r_acks").innerHTML = "";
+    buildPpeDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = "";
     show("formRams");
     setTimeout(() => { initSig("r_bysig", x.assessorSignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); }, 30);
   }
@@ -835,7 +877,7 @@
         sevWithout:Number(h.sevWithout), likWithout:Number(h.likWithout),
         controls:(h.controls||[]).map(c => ({ level:c.level||"admin", text:(c.text||"").trim() })).filter(c => c.text),
         sevWith:Number(h.sevWith), likWith:Number(h.likWith) })).filter(h => h.name),
-      ppe: aggregate("ppe"),
+      ppe: ramsPPE.slice(),
       assessorSignature: sigVal("r_bysig"), acks,
     };
   }
@@ -845,10 +887,11 @@
     if (!data.task) { msg.className = "msg err"; msg.textContent = "Task / activity is required."; return; }
     g("ramsSave").disabled = g("ramsSaveView").disabled = true; msg.textContent = "Saving…";
     try {
-      const body = { doc_type:"rams", site:(data.site || data.task), data, ...(editId ? { id: editId } : {}) };
+      const body = { doc_type:"rams", site:(data.site || data.task), ref:g("r_ref").value.trim(), data, ...(editId ? { id: editId } : {}) };
       const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "save failed");
-      const id = editId || r.id;
+      const id = editId || r.id; editId = id;
+      if (r.ref) { g("r_ref").value = r.ref; g("ramsFormTitle").textContent = "Edit Risk Assessment — " + r.ref; }
       msg.className = "msg ok"; msg.textContent = "Saved" + (r.ref ? " as " + r.ref : "") + ".";
       if (openAfter) openDoc(id); else showList("rams");
     } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't save — " + e.message; }
