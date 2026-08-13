@@ -54,6 +54,11 @@
     .chip { display:inline-flex; align-items:center; gap:6px; background:#eef3fb; border:1px solid #cdd9ea; color:#22415f; border-radius:16px; padding:4px 6px 4px 11px; font-size:13px; }
     .chip button { border:none; background:#c9d6e8; color:#22415f; width:17px; height:17px; border-radius:50%; cursor:pointer; font-size:12px; line-height:1; padding:0; }
     .chip button:hover { background:#b23; color:#fff; }
+    .haz.dragging { opacity:.5; }
+    .hazbar { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+    .hazbar .dh { cursor:grab; font-size:16px; color:#8aa; user-select:none; padding:2px 4px; }
+    .hazbar .dh:active { cursor:grabbing; }
+    .hazbar .hzpos { font-weight:700; color:#557; font-size:12px; background:#eef3fb; border-radius:10px; padding:1px 8px; }
     @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; max-width:none; } }
   </style>
   <style id="printOrient">@page { size: A4 portrait; margin: 12mm; }</style>
@@ -227,7 +232,13 @@
       <div class="card">
         <h3 style="margin-top:0;">Hazards &amp; risk rating</h3>
         <div id="r_assembled"><p class="muted">Select some work above to pull in hazards, or add one manually.</p></div>
-        <button class="btn ghost small" type="button" onclick="addCustomHazard()">+ Add custom hazard</button>
+        <div class="row" style="align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;">
+          <input type="text" id="r_haz_add" list="hazSuggest" placeholder="Add a hazard… (search the library or type your own)" style="max-width:340px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addHazardFromInput();}">
+          <button class="btn ghost small" type="button" onclick="addHazardFromInput()">+ Add hazard</button>
+          <button class="btn grey small" type="button" onclick="addCustomHazard()">+ Blank hazard</button>
+          <datalist id="hazSuggest"></datalist>
+        </div>
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">Drag the ⠿ handle (or use ↑/↓) to set the order — the document follows it.</p>
       </div>
       <div class="card">
         <h3 style="margin-top:0;">Required PPE</h3>
@@ -758,6 +769,41 @@
   }
   function addCustomHazard() { ramsHazards.push({ id:"", name:"", persons:"", injuries:[], ppe:[], sevWithout:3, likWithout:3, controls:[{level:"admin",text:""}], sevWith:3, likWith:1, custom:true }); renderAssembled(); }
   function rmHazard(i) { ramsHazards.splice(i, 1); renderAssembled(); }
+  // Reorder hazards — the whole document (risk summary, control measures,
+  // residual ratings) follows the order set here. Drag the ⠿ handle (desktop)
+  // or use the ↑/↓ buttons (works on touch too).
+  function moveHazard(from, to) {
+    to = Math.max(0, Math.min(ramsHazards.length - 1, to));
+    if (from === to || from < 0 || from >= ramsHazards.length) return;
+    const [it] = ramsHazards.splice(from, 1);
+    ramsHazards.splice(to, 0, it);
+    renderAssembled();
+  }
+  let hazDragFrom = -1;
+  function hazStart(e, i) { hazDragFrom = i; try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(i)); } catch (_) {} }
+  function hazOver(e) { e.preventDefault(); }
+  function hazDrop(e, j) { e.preventDefault(); if (hazDragFrom > -1 && hazDragFrom !== j) moveHazard(hazDragFrom, j); hazDragFrom = -1; }
+  function hazEndDrag() { hazDragFrom = -1; }
+  // Add-a-hazard autosuggest: pick a library hazard by name (comes in pre-rated
+  // with its controls/PPE) or type a new one to add it as a custom hazard.
+  function buildHazDatalist() {
+    const dl = g("hazSuggest"); if (!dl) return;
+    const names = [...new Set(Object.values(HS.hazards || {}).map(h => h.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join("");
+  }
+  function addHazardFromInput() {
+    const inp = g("r_haz_add"); const v = (inp.value || "").trim();
+    if (!v) { addCustomHazard(); return; }
+    const entry = Object.entries(HS.hazards || {}).find(([id, t]) => String(t.name || "").toLowerCase() === v.toLowerCase());
+    if (entry) {
+      const [id, t] = entry;
+      if (ramsHazards.some(h => h.id === id)) { inp.value = ""; g("ramsMsg").className = "msg"; g("ramsMsg").textContent = "“" + t.name + "” is already added."; return; }
+      ramsHazards.push(hazardFromLib(id, t));
+    } else {
+      ramsHazards.push({ id:"", name:v, persons:"", injuries:[], ppe:[], sevWithout:3, likWithout:3, controls:[{level:"admin",text:""}], sevWith:3, likWith:1, custom:true });
+    }
+    inp.value = ""; renderAssembled(); inp.focus();
+  }
   function hzSet(i, f, v) { ramsHazards[i][f] = v; if (/^(sev|lik)/.test(f)) renderAssembled(); }
   function ctrlSet(i, j, f, v) { ramsHazards[i].controls[j][f] = v; }
   function addCtrl(i) { ramsHazards[i].controls.push({level:"admin",text:""}); renderAssembled(); }
@@ -770,9 +816,17 @@
   }
   function renderAssembled() {
     if (!ramsHazards.length) { g("r_assembled").innerHTML = `<p class="muted">Select some work above to pull in hazards, or add one manually.</p>`; return; }
+    const last = ramsHazards.length - 1;
     const blocks = ramsHazards.map((h, i) => `
-      <div class="sub">
-        <button class="btn red small rm noprint" type="button" onclick="rmHazard(${i})">✕</button>
+      <div class="sub haz" data-i="${i}" ondragover="hazOver(event)" ondrop="hazDrop(event,${i})">
+        <div class="hazbar noprint">
+          <span class="dh" title="Drag to reorder" draggable="true" ondragstart="hazStart(event,${i})" ondragend="hazEndDrag()">⠿</span>
+          <span class="hzpos">${i + 1}</span>
+          <span style="flex:1"></span>
+          <button class="btn grey small" type="button" title="Move up" onclick="moveHazard(${i},${i - 1})" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button class="btn grey small" type="button" title="Move down" onclick="moveHazard(${i},${i + 1})" ${i === last ? "disabled" : ""}>↓</button>
+          <button class="btn red small" type="button" title="Remove" onclick="rmHazard(${i})">✕</button>
+        </div>
         <label>Hazard</label><input type="text" value="${esc(h.name)}" oninput="hzSet(${i},'name',this.value)">
         <label>Persons affected</label><input type="text" value="${esc(h.persons)}" oninput="hzSet(${i},'persons',this.value)">
         <div class="grid2">
@@ -840,7 +894,7 @@
     ["r_ref","r_task","r_site","r_location","r_desc","r_equipment","r_supporting","r_persons","r_harms","r_totalaffected","r_frequency","r_duration","r_assessor"].forEach(i => g(i).value = "");
     const today = new Date(); g("r_date").value = today.toISOString().slice(0,10);
     g("r_review").value = new Date(today.getTime() + 365*86400000).toISOString().slice(0,10);
-    buildPpeDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = ""; g("ramsMsg").textContent = "";
+    buildPpeDatalist(); buildHazDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = ""; g("ramsMsg").textContent = "";
     show("formRams");
     setTimeout(() => initSig("r_bysig",""), 30);
   }
@@ -860,7 +914,7 @@
       sevWithout:h.sevWithout||3, likWithout:h.likWithout||3,
       controls:(h.controls||[]).map(c => typeof c === "string" ? { level:"admin", text:c } : { level:c.level||"admin", text:c.text||"" }),
       sevWith:h.sevWith||3, likWith:h.likWith||1, custom:!h.id }));
-    buildPpeDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = "";
+    buildPpeDatalist(); buildHazDatalist(); renderTree(); renderAssembled(); renderPPE(); g("r_acks").innerHTML = "";
     show("formRams");
     setTimeout(() => { initSig("r_bysig", x.assessorSignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); }, 30);
   }
