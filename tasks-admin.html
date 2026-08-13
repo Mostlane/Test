@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage Tasks — Mostlane</title>
+  <script src="/portal-config.js?v=3"></script>
+  <link rel="manifest" href="/manifest.json">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; --bad:#dc2626; --warn:#d97706; --ok:#15803d; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f6;color:#1f2a37;}
+    header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:19px;margin:0;flex:1;}
+    .ml-back{color:#fff;text-decoration:none;font-weight:600;font-size:15px;}
+    .btn{border:none;border-radius:9px;padding:9px 14px;font:600 13.5px 'Segoe UI';cursor:pointer;text-decoration:none;display:inline-block;}
+    .btn.small{padding:7px 11px;font-size:12.5px;}
+    .btn.primary{background:#003b82;color:#fff;} .btn.grey{background:rgba(255,255,255,.16);color:#fff;}
+    .btn.ghost{background:#eef2f6;color:#1f2a44;} .btn.danger{background:#dc2626;color:#fff;} .btn.green{background:#16a34a;color:#fff;}
+    .wrap{max-width:880px;margin:0 auto;padding:16px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 3px 12px rgba(0,30,80,.06);}
+    label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:10px 0 4px;}
+    input,select,textarea{width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:14px;background:#fff;}
+    textarea{min-height:60px;resize:vertical;}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .assignees{max-height:180px;overflow:auto;border:1px solid #cbd5e1;border-radius:9px;padding:8px;}
+    .assignees label{display:flex;align-items:center;gap:8px;margin:0;padding:4px 2px;font-weight:500;color:#1f2a37;cursor:pointer;}
+    .assignees input{width:auto;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;margin:2px 4px 2px 0;}
+    .pill.due{background:#fef3c7;color:#92400e;} .pill.overdue{background:#fee2e2;color:#b91c1c;} .pill.done{background:#dcfce7;color:#166534;}
+    .pill.noaccess{background:#fee2e2;color:#b91c1c;}
+    .task-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+    .task-head h3{margin:0;font-size:16px;color:var(--navy);}
+    .muted{color:var(--muted);font-size:12.5px;}
+    .person{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #f0f3f7;}
+    .person b{font-size:13.5px;}
+    .backdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;z-index:50;}
+    .backdrop.open{display:flex;}
+    .modal{background:#fff;border-radius:16px;max-width:560px;width:100%;padding:20px;}
+    .modal h2{margin:0 0 6px;color:var(--navy);font-size:19px;}
+    .mfoot{display:flex;justify-content:space-between;gap:10px;margin-top:16px;}
+    .empty{text-align:center;color:var(--muted);padding:36px 10px;}
+    .hint{font-size:12px;color:var(--muted);margin-top:4px;}
+    .warnbox{background:#fef3c7;border:1px solid #f59e0b;border-radius:9px;padding:8px 10px;font-size:12.5px;color:#92400e;margin-top:8px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="my-tasks.html" title="Back">‹ Back</a>
+    <h1>🗂 Manage Tasks</h1>
+    <button class="btn grey small" onclick="openEdit()">＋ New task</button>
+  </header>
+  <div class="wrap">
+    <p class="muted" style="margin:0 0 12px;">Recurring jobs for your team. Set who does them and when they're due. Link a portal area so they <b>auto-tick</b> when the person does the job — and so you can grant the access they need.</p>
+    <div id="list"><div class="empty">Loading…</div></div>
+  </div>
+
+  <!-- Create / edit -->
+  <div class="backdrop" id="editBackdrop">
+    <div class="modal">
+      <h2 id="editTitle">New task</h2>
+      <input type="hidden" id="fId">
+      <label>Title</label>
+      <input id="fTitle" placeholder="e.g. Check the shared inbox">
+      <label>Details (optional)</label>
+      <textarea id="fDetail" placeholder="Any instructions…"></textarea>
+      <div class="two">
+        <div><label>Repeats</label>
+          <select id="fRec" onchange="recFields()">
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week</option>
+            <option value="monthly">Every month</option>
+            <option value="quarterly">Every quarter</option>
+            <option value="yearly">Every year</option>
+            <option value="once">One-off</option>
+          </select>
+        </div>
+        <div><label>Due by (time)</label><input id="fTime" type="time" value="17:00"></div>
+      </div>
+      <div id="recExtra"></div>
+      <label>Assign to</label>
+      <input id="uSearch" placeholder="Search people…" oninput="renderUsers()" style="margin-bottom:6px;">
+      <div class="assignees" id="fAssignees"></div>
+      <label>Linked portal area (optional)</label>
+      <select id="fArea" onchange="areaChanged()"></select>
+      <div class="hint">Used to auto-tick the task and to check the person has access.</div>
+      <label id="autoWrap" style="display:none;"><input type="checkbox" id="fAuto" checked style="width:auto;margin-right:7px;">Auto-tick when they do this in the portal</label>
+      <label style="margin-top:10px;"><input type="checkbox" id="fActive" checked style="width:auto;margin-right:7px;">Active</label>
+      <div class="mfoot">
+        <button class="btn danger small" id="delBtn" onclick="doDelete()" style="display:none;">🗑 Delete</button>
+        <div style="display:flex;gap:10px;margin-left:auto;">
+          <button class="btn ghost small" onclick="closeEdit()">Cancel</button>
+          <button class="btn primary small" onclick="save()">Save task</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+    const tok = () => localStorage.getItem("mostlaneToken");
+    function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+    function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+    const g = id => document.getElementById(id);
+    const WD=["","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+    const MO=["","January","February","March","April","May","June","July","August","September","October","November","December"];
+    let USERS=[], AREAS=[], EDIT=null;
+    const uName=u=>((u.FirstName||"")+" "+(u.LastName||"")).trim()||u.Username;
+
+    async function boot(){
+      try{ const me=await aFetch("/auth/me").then(r=>r.json()); if(!me.ok||me.user.FullAccess!=="Yes"){ alert("This page needs Full Access."); location.href="/main.html"; return; } }
+      catch(e){ location.href="/main.html"; return; }
+      try{ const u=await aFetch("/users").then(r=>r.json()); USERS=(u.Users||u.users||[]).filter(x=>x.Username && (x.Status===undefined||x.Status===""||x.Status==="Active")); }catch(e){}
+      try{ const m=await aFetch("/tasks/meta").then(r=>r.json()); AREAS=m.areas||[]; }catch(e){}
+      g("fArea").innerHTML=AREAS.map(a=>'<option value="'+esc(a.key)+'">'+esc(a.label)+'</option>').join("");
+      load();
+    }
+
+    function recFields(){
+      const r=g("fRec").value; let h="";
+      if(r==="weekly") h='<label>Day of week</label><select id="fDow">'+[1,2,3,4,5,6,7].map(d=>'<option value="'+d+'">'+WD[d]+'</option>').join("")+'</select>';
+      else if(r==="monthly"||r==="quarterly") h='<label>Day of the '+(r==="monthly"?"month":"quarter’s first month")+' (1–28)</label><input id="fDom" type="number" min="1" max="28" value="1">';
+      else if(r==="yearly") h='<div class="two"><div><label>Month</label><select id="fMonth">'+[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>'<option value="'+m+'">'+MO[m]+'</option>').join("")+'</select></div><div><label>Day (1–28)</label><input id="fDom" type="number" min="1" max="28" value="1"></div></div>';
+      else if(r==="once") h='<label>Date</label><input id="fDate" type="date">';
+      g("recExtra").innerHTML=h;
+    }
+    function renderUsers(){
+      const q=(g("uSearch").value||"").toLowerCase();
+      const chosen=new Set(currentAssignees());
+      const list=USERS.filter(u=>!q||uName(u).toLowerCase().includes(q)||u.Username.toLowerCase().includes(q));
+      g("fAssignees").innerHTML=list.map(u=>'<label><input type="checkbox" value="'+esc(u.Username)+'"'+(chosen.has(u.Username)?" checked":"")+'>'+esc(uName(u))+'</label>').join("")||'<div class="muted">No people.</div>';
+    }
+    function currentAssignees(){ return [...g("fAssignees").querySelectorAll("input:checked")].map(x=>x.value); }
+    function areaChanged(){
+      const a=AREAS.find(x=>x.key===g("fArea").value);
+      g("autoWrap").style.display=(a&&a.auto)?"block":"none";
+    }
+
+    function openEdit(t){
+      EDIT=t||null;
+      g("editTitle").textContent=t?"Edit task":"New task";
+      g("fId").value=t?t.id:"";
+      g("fTitle").value=t?t.title:"";
+      g("fDetail").value=t?t.detail:"";
+      g("fRec").value=t?t.recurrence:"daily";
+      g("fTime").value=t?(t.dueTime||"17:00"):"17:00";
+      recFields();
+      if(t){ if(t.dueDow&&g("fDow"))g("fDow").value=t.dueDow; if(t.dueDom&&g("fDom"))g("fDom").value=t.dueDom; if(t.dueMonth&&g("fMonth"))g("fMonth").value=t.dueMonth; if(t.dueDate&&g("fDate"))g("fDate").value=t.dueDate; }
+      g("uSearch").value="";
+      // Pre-tick assignees
+      g("fAssignees").innerHTML="";
+      renderUsers();
+      if(t){ (t.assignees||[]).forEach(u=>{ const cb=[...g("fAssignees").querySelectorAll("input")].find(x=>x.value===u); if(cb)cb.checked=true; else { /* user not in active list: add a row */ g("fAssignees").insertAdjacentHTML("afterbegin",'<label><input type="checkbox" value="'+esc(u)+'" checked>'+esc(u)+'</label>'); } }); }
+      g("fArea").value=t?(t.area||""):"";
+      areaChanged();
+      g("fAuto").checked=t?!!t.autoMatch:true;
+      g("fActive").checked=t?t.active!==false:true;
+      g("delBtn").style.display=t?"":"none";
+      g("editBackdrop").classList.add("open");
+    }
+    function closeEdit(){ g("editBackdrop").classList.remove("open"); }
+    window.openEdit=openEdit; window.closeEdit=closeEdit; window.recFields=recFields; window.renderUsers=renderUsers; window.areaChanged=areaChanged;
+
+    async function save(){
+      const body={
+        id:g("fId").value||undefined,
+        title:g("fTitle").value.trim(),
+        detail:g("fDetail").value,
+        recurrence:g("fRec").value,
+        dueTime:g("fTime").value,
+        assignees:currentAssignees(),
+        area:g("fArea").value,
+        autoComplete:g("fAuto").checked,
+        active:g("fActive").checked,
+      };
+      if(g("fDow")) body.dueDow=Number(g("fDow").value);
+      if(g("fDom")) body.dueDom=Number(g("fDom").value);
+      if(g("fMonth")) body.dueMonth=Number(g("fMonth").value);
+      if(g("fDate")) body.dueDate=g("fDate").value;
+      if(!body.title){ alert("Give the task a title."); return; }
+      if(!body.assignees.length){ alert("Pick at least one person."); return; }
+      const r=await aFetch("/tasks/save",{method:"POST",body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>({}));
+      if(!r.ok){ alert(r.error||"Couldn't save."); return; }
+      closeEdit(); load();
+    }
+    window.save=save;
+    async function doDelete(){
+      if(!g("fId").value||!confirm("Delete this task for everyone?")) return;
+      await aFetch("/tasks/delete",{method:"POST",body:JSON.stringify({id:g("fId").value})}).then(r=>r.json());
+      closeEdit(); load();
+    }
+    window.doDelete=doDelete;
+
+    function schedule(t){
+      const by=" by "+(t.dueTime||"17:00");
+      switch(t.recurrence){
+        case "weekly": return "Every "+(WD[t.dueDow]||"Friday")+by;
+        case "monthly": return "Day "+(t.dueDom||1)+" each month"+by;
+        case "quarterly": return "Day "+(t.dueDom||1)+" each quarter"+by;
+        case "yearly": return (MO[t.dueMonth]||"January")+" "+(t.dueDom||1)+" each year"+by;
+        case "once": return "One-off"+(t.dueDate?" — "+t.dueDate:"")+by;
+        default: return "Every day"+by;
+      }
+    }
+    function personRow(t,p){
+      let pill="";
+      if(!t.active) pill='<span class="pill">Paused</span>';
+      else if(p.status){ const s=p.status;
+        pill=s.done?'<span class="pill done">✓ '+(s.auto?"auto":"done")+'</span>':s.overdue?'<span class="pill overdue">overdue</span>':'<span class="pill due">due</span>';
+      }
+      let access="";
+      if(t.area && !p.hasAccess){
+        access='<span class="pill noaccess">⚠ no '+esc(t.areaLabel||t.area)+' access</span>'+
+          '<button class="btn green small" onclick="grant(\''+esc(p.username)+'\',\''+esc(t.area)+'\')">Grant access</button>';
+      }
+      return '<div class="person"><b>'+esc(p.username)+'</b>'+pill+access+'</div>';
+    }
+    function taskCard(t){
+      const area=t.area?'<span class="muted"> · 🔗 '+esc(t.areaLabel||t.area)+(t.autoMatch?' (auto-tick)':'')+'</span>':"";
+      return '<div class="card"><div class="task-head"><div><h3>'+esc(t.title)+(t.active?"":' <span class="pill">Paused</span>')+'</h3>'+
+        '<div class="muted">'+esc(schedule(t))+area+'</div></div>'+
+        '<button class="btn ghost small" onclick=\'openEditId("'+t.id+'")\'>Edit</button></div>'+
+        (t.detail?'<div class="muted" style="margin:6px 0 2px;">'+esc(t.detail)+'</div>':"")+
+        (t.people||[]).map(p=>personRow(t,p)).join("")+'</div>';
+    }
+    let TASKS=[];
+    function openEditId(id){ const t=TASKS.find(x=>x.id===id); if(t)openEdit(t); }
+    window.openEditId=openEditId;
+
+    async function load(){
+      let d;
+      try{ d=await aFetch("/tasks/admin").then(r=>r.json()); }catch(e){ g("list").innerHTML='<div class="empty">⚠️ Couldn\'t load.</div>'; return; }
+      if(!d.ok){ g("list").innerHTML='<div class="empty">'+esc(d.error||"Couldn't load.")+'</div>'; return; }
+      TASKS=d.tasks||[];
+      g("list").innerHTML=TASKS.length?TASKS.map(taskCard).join(""):'<div class="empty">No tasks yet. Tap ＋ New task to create one.</div>';
+    }
+    async function grant(username, permission){
+      if(!confirm("Grant "+username+" access to this area?\n\nThey'll need to log out and back in for it to take effect.")) return;
+      const r=await aFetch("/tasks/grant",{method:"POST",body:JSON.stringify({username,permission})}).then(r=>r.json()).catch(()=>({}));
+      if(!r.ok){ alert(r.error||"Couldn't grant."); return; }
+      alert(r.note||"Granted."); load();
+    }
+    window.grant=grant;
+    boot();
+  </script>
+</body>
+</html>

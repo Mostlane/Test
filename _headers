@@ -107,6 +107,10 @@
   Cache-Control: no-cache
 /cctv.html
   Cache-Control: no-cache
+/my-tasks.html
+  Cache-Control: no-cache
+/tasks-admin.html
+  Cache-Control: no-cache
 /office-timesheet.html
   Cache-Control: no-cache
 /users-admin.html

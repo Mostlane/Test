@@ -364,6 +364,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
   <span class="emoji">📈</span> Labour Planning
 </a>
 -->
+    <a class="button visible" href="my-tasks.html" id="MyTasks"><span class="emoji">✅</span> My Tasks</a>
     <a class="button visible" href="my-documents.html" id="MyDocs"><span class="emoji">📄</span> My Documents</a>
     <a class="button visible" href="personalise.html" id="Personalise"><span class="emoji">⚙️</span> Settings</a>
     <a class="button visible" id="Help" href="help.html"><span class="emoji">❓</span> Help</a>
@@ -1284,6 +1285,28 @@ const MAP = window.ML_PERM_MAP || {
     };
     window.MostlaneHub = HUB;
 
+    // ── Widget: Tasks — my recurring tasks (always shown, even at zero) ───────
+    HUB.register({
+      id: "tasks", emoji: "✅", title: "My tasks",
+      can: function () { return true; },
+      load: function (card) {
+        return jget("/tasks/attention").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var out = d.outstanding || 0, od = d.overdue || 0;
+          var rows = "";
+          if (od) rows += metric("Overdue", od, "bad");
+          if (out - od > 0) rows += metric("Due (not yet overdue)", out - od, "warn");
+          card.innerHTML = cardHtml({
+            emoji: "✅", title: "My tasks",
+            big: out, sub: out === 1 ? "task outstanding" : "tasks outstanding",
+            tone: od ? "bad" : (out ? "warn" : ""),
+            ok: out ? "" : (d.total ? "All your tasks are done — nice one." : "No tasks assigned to you."),
+            rows: rows, actions: act("my-tasks.html", "Open my tasks", true)
+          });
+        });
+      }
+    });
+
     // ── Widget: Weekly van checks (Vehicles | FullAccess) ────────────────────
     HUB.register({
       id: "vancheck",
@@ -1618,6 +1641,8 @@ const MAP = window.ML_PERM_MAP || {
     function kpiSpecs(p) {
       var yr = new Date().getFullYear();
       var all = [
+        { ok: true, emoji: "✅", href: "my-tasks.html", get: "/tasks/attention",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: d.outstanding || 0, label: (d.overdue ? d.overdue + " overdue · " : "") + "tasks to do", bad: (d.overdue || 0) > 0 }; } },
         { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-main.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var open = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")); }); var od = j.filter(function (x) { return x.sla && x.sla.state === "BREACHED"; }); return { n: open.length, label: od.length ? "open · " + od.length + " overdue" : "open jobs", bad: od.length > 0 }; } },
         { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚐", href: "van-checks.html", get: "/vancheck/week",
