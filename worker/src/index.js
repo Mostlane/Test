@@ -295,6 +295,9 @@ const PUBLIC_ROUTES = [
   ["POST", "/compliance/file"],
   // DVR camera snapshots loaded by <img> tags — signed URL, verified in-handler.
   ["GET", "/cctv/snapshot"],
+  // H&S document attachments (appended to the PDF) streamed for <img>/links —
+  // signed URL, verified in-handler.
+  ["GET", "/hs/attachment"],
 ];
 
 function isPublic(method, pathname) {

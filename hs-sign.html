@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=3"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign a Risk Assessment — Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <script src="hs-rams-library.js?v=2"></script>
+  <script src="hs-rams-render.js?v=1"></script>
+  <style>
+    :root { --brand:#003366; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:900px; margin:16px auto 60px; padding:0 14px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:10px 14px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.small { padding:6px 10px; font-size:13px; }
+    .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .muted { color:#6b7a90; } .hide { display:none !important; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px; margin-bottom:14px; }
+    label.chk { display:flex; align-items:flex-start; gap:8px; font-weight:500; margin:6px 0; font-size:14px; }
+    label.chk input { width:auto; margin-top:3px; }
+    .sigwrap { border:1px dashed #9fb0c3; border-radius:10px; background:#fbfdff; }
+    canvas.sig { width:100%; height:150px; touch-action:none; display:block; border-radius:10px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .msg { margin:8px 0; font-size:14px; } .msg.err { color:#b00020; } .msg.ok { color:#0a7d33; }
+    /* Printable document (shared render output) */
+    .doc { background:#fff; color:#111; padding:26px; border:1px solid var(--line); border-radius:10px; margin:0 auto 16px; }
+    .doc h2 { text-align:center; margin:0 0 2px; } .doc .ref { text-align:center; color:#334; margin:0 0 16px; font-weight:700; }
+    .doc h3 { background:#eef2f7; padding:6px 10px; border-radius:6px; margin:16px 0 8px; font-size:14px; }
+    .doc .kv { display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; font-size:14px; }
+    .doc .kv div b { color:#334; }
+    .doc ul { margin:6px 0; padding-left:20px; font-size:14px; } .doc ul li { margin:3px 0; }
+    .doc .foot { margin-top:18px; font-size:12px; color:#556; border-top:1px solid #ddd; padding-top:8px; }
+    table.list { width:100%; border-collapse:collapse; background:#fff; }
+    table.list td { padding:10px; border-top:1px solid #f0f3f7; font-size:13.5px; }
+    @media print { header.page,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; } @page { size:A4 landscape; margin:12mm; } }
+  </style>
+</head>
+<body>
+  <header class="page noprint">
+    <button class="btn grey small" onclick="location.href='main.html'">🏠</button>
+    <h1>Risk assessment — read &amp; sign</h1>
+  </header>
+  <div class="wrap">
+    <p class="msg" id="topMsg"></p>
+
+    <!-- LIST MODE: no ?id -> pick from my pending docs -->
+    <div id="listMode" class="hide">
+      <div class="card">
+        <h3 style="margin-top:0;">Documents awaiting your signature</h3>
+        <table class="list"><tbody id="listRows"><tr><td class="muted">Loading…</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <!-- SIGN MODE: a specific doc -->
+    <div id="signMode" class="hide">
+      <div class="doc" id="docBody"></div>
+
+      <div class="card noprint" id="signCard">
+        <h3 style="margin-top:0;">Sign this risk assessment</h3>
+        <label class="chk"><input type="checkbox" id="ackChk"> I have read and understood this risk assessment.</label>
+        <label style="display:block;font-size:13px;font-weight:600;margin:10px 0 4px;">Your signature</label>
+        <div class="sigwrap"><canvas class="sig" id="signPad"></canvas></div>
+        <div class="row" style="margin-top:8px;">
+          <button class="btn grey small" type="button" onclick="clearSig('signPad')">Clear signature</button>
+          <button class="btn" id="signBtn" onclick="submitSign()">✔ Sign &amp; submit</button>
+        </div>
+        <p class="msg" id="signMsg"></p>
+      </div>
+
+      <div class="card noprint hide" id="doneCard" style="border-color:#0a7d33;">
+        <b style="color:#0a7d33;">✓ Thank you — your signature has been saved.</b>
+        <p class="muted" style="margin:6px 0 0;">Your name and signature now appear on the document's sign-off. You can print/save a copy below.</p>
+        <button class="btn ghost small" style="margin-top:8px;" onclick="window.print()">🖨️ Print / Save PDF</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  const fmtDate = s => { if(!s) return ""; const d=new Date(s); return isNaN(d)? s : d.toLocaleDateString("en-GB"); };
+  const token = localStorage.getItem("mostlaneToken");
+  if (!token) { location.href = "login.html"; }
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + token });
+    return fetch(API + path, opts);
+  }
+
+  // ── Signature pad (same behaviour as hs-docs.html) ──────────────────────────
+  const pads = {};
+  function initSig(canvasId, existing) {
+    const c = g(canvasId); if (!c) return;
+    const ratio = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * ratio; c.height = 150 * ratio;
+    const ctx = c.getContext("2d"); ctx.scale(ratio, ratio); ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#111";
+    let drawing = false, dirty = false;
+    if (existing) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, rect.width, 150); img.src = existing; dirty = true; }
+    const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+    const start = e => { drawing = true; dirty = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); };
+    const move = e => { if (!drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); };
+    const end = () => { drawing = false; };
+    c.addEventListener("mousedown", start); c.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
+    c.addEventListener("touchstart", start, {passive:false}); c.addEventListener("touchmove", move, {passive:false}); c.addEventListener("touchend", end);
+    pads[canvasId] = { get: () => dirty ? c.toDataURL("image/png") : "", clear: () => { ctx.clearRect(0,0,c.width,c.height); dirty = false; } };
+  }
+  function clearSig(id){ pads[id] && pads[id].clear(); }
+  const sigVal = id => pads[id] ? pads[id].get() : "";
+
+  let CUR_ID = null;
+
+  async function loadOne(id) {
+    CUR_ID = id;
+    g("topMsg").textContent = "";
+    try {
+      const d = await authFetch("/hs/sign?id=" + encodeURIComponent(id)).then(r => r.json());
+      if (!d.ok) { g("topMsg").className = "msg err"; g("topMsg").textContent = d.error || "Couldn't load that document."; return; }
+      if (d.doc.doc_type !== "rams") { g("topMsg").className = "msg err"; g("topMsg").textContent = "This document type can't be signed here."; return; }
+      g("signMode").classList.remove("hide");
+      g("docBody").innerHTML = window.HSRamsRender(d.doc);
+      const already = d.myStatus === "signed";
+      if (already) { g("signCard").classList.add("hide"); g("doneCard").classList.remove("hide"); }
+      else { setTimeout(() => initSig("signPad", ""), 30); }
+    } catch (e) { g("topMsg").className = "msg err"; g("topMsg").textContent = "Couldn't load — try again."; }
+  }
+
+  async function submitSign() {
+    if (!g("ackChk").checked) { g("signMsg").className = "msg err"; g("signMsg").textContent = "Please tick to confirm you've read and understood it."; return; }
+    const signature = sigVal("signPad");
+    if (!signature) { g("signMsg").className = "msg err"; g("signMsg").textContent = "Please draw your signature."; return; }
+    g("signBtn").disabled = true; g("signMsg").className = "msg"; g("signMsg").textContent = "Saving…";
+    try {
+      const r = await authFetch("/hs/sign", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: CUR_ID, signature }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "failed");
+      // Reload so the signed name+signature now show on the document.
+      await loadOne(CUR_ID);
+      g("signCard").classList.add("hide"); g("doneCard").classList.remove("hide");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) { g("signMsg").className = "msg err"; g("signMsg").textContent = "Couldn't save — " + e.message; g("signBtn").disabled = false; }
+  }
+
+  async function loadList() {
+    g("listMode").classList.remove("hide");
+    try {
+      const d = await authFetch("/hs/to-sign").then(r => r.json());
+      const items = (d && d.items) || [];
+      if (!items.length) { g("listRows").innerHTML = `<tr><td class="muted">Nothing to sign right now.</td></tr>`; return; }
+      g("listRows").innerHTML = items.map(x => `
+        <tr>
+          <td><b>${esc(x.ref || "Risk assessment")}</b><br><span class="muted">${esc(x.site || "")}</span></td>
+          <td style="text-align:right;"><button class="btn ghost small" onclick="location.href='hs-sign.html?id=${encodeURIComponent(x.id)}'">Open &amp; sign</button></td>
+        </tr>`).join("");
+    } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
+  }
+
+  (function init() {
+    const id = new URLSearchParams(location.search).get("id");
+    if (id) loadOne(id); else loadList();
+  })();
+</script>
+</body>
+</html>
