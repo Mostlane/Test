@@ -1328,10 +1328,24 @@ mileage… — never message bodies/secrets, joined with " · "). Viewer
 **activity-log.html** (FullAccess): person/period/actions-vs-views filters,
 text search, **big FRIENDLY map (~130 endpoints — fleet/vancheck/office/costing/
 messages/push/… ; add new endpoints there so nothing shows a raw "POST /…")**,
-each action shows a plain-English label **+ "on <Page>"** (from `ref`) and a
+each action shows a plain-English label **+ its subject inline** (from the detail,
+e.g. "Updated a site — **0125 Lee-On Solent**") **+ "on <Page>"** (from `ref`) and a
 humanised detail line (`niceDetail`/`DKEY`: `reg=`→"Vehicle", `cost=`→"£"…).
+**Every message is CLICKABLE** (`linkFor`): to the page it was fired from (`ref`)
+else an action→page map — so you can jump straight to the thing that changed.
+**Before → after notes:** a handler can attach an **`X-Audit-Note`** response header
+(URI-encoded) with a ready-made human line; index.js's audit middleware stores it
+verbatim as `detail` (in preference to the raw body fields). Wired into
+**`/update-site`** so a rename logs `0125 Lee-On Solent — name "0125 Lee-on-Solent"
+→ "0125 Lee-On Solent"` (compares the merged-over old row; also covers number/
+postcode/address/phone/contact). `niceDetail` passes any `→` fragment through as-is.
+**Burst grouping:** consecutive events by the SAME user with the SAME friendly
+action (views grouped per-user) collapse into ONE expandable `<details>` group once
+a run hits **3+** (e.g. "📍 Updated a site × 200"), with a time span — so one busy
+user updating hundreds of sites never buries everyone else; short runs stay inline.
 Failed actions flagged red. Linked from Users Admin + Device Management top bar —
-deliberately NO menu tile. 12-month retention.
+deliberately NO menu tile. 12-month retention. **To add before→after to another
+endpoint:** set the `X-Audit-Note` header on its response (see sites.js update-site).
 
 ## Personalisation
 personalise.html (🎨 tile + sidebar; theme.html is now only a redirect — the

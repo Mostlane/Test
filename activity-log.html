@@ -26,9 +26,24 @@
     .kind.view { background:#eef1f4; color:#667085; }
     .kind.fail { background:#fdeaea; color:#b00020; }
     .what { color:#16202e; margin-top:2px; }
+    .msg { color:#16202e; text-decoration:none; }
+    a.msg { color:#0b4fa0; }
+    a.msg:hover { text-decoration:underline; }
+    .msg.nolink { color:#16202e; }
     .onpage { color:#5b6b7c; font-weight:600; font-size:13px; }
     .det { color:#6b7889; font-size:13px; margin-top:2px; word-break:break-word; }
-    @media (max-width:640px){ .row { flex-direction:column; gap:4px; } .row .when { width:auto; } }
+    /* Collapsed bursts */
+    details.group { border-top:1px solid #f0f3f7; }
+    details.group:first-child { border-top:none; }
+    details.group > summary { list-style:none; cursor:pointer; display:flex; gap:12px; align-items:flex-start; padding:10px 14px; background:#f7f9fc; font-size:13.5px; }
+    details.group > summary::-webkit-details-marker { display:none; }
+    details.group[open] > summary { background:#eef3fb; border-bottom:1px solid #e2e8f0; }
+    details.group .expand { color:#8895a6; font-size:12px; font-weight:600; }
+    details.group[open] .expand { display:none; }
+    details.group .gbody .row { padding-left:30px; background:#fff; }
+    details.group .gbody .row:first-child { border-top:none; }
+    @media (max-width:640px){ .row { flex-direction:column; gap:4px; } .row .when { width:auto; }
+      details.group > summary { flex-direction:column; gap:4px; } details.group > summary .when { width:auto; } }
   </style>
 </head>
 <body>
@@ -140,7 +155,8 @@
       [/^POST \/sla\/shift/,              "🕐 SLA shift clock action"],
       [/^POST \/sla\/vehicle-check/,      "🚐 Submitted a vehicle check"],
       [/^POST \/sla/,                     "🚨 SLA action"],
-      [/^POST \/(add|update)-site/,       "📍 Saved a site"],
+      [/^POST \/update-site/,             "📍 Updated a site"],
+      [/^POST \/add-site/,                "📍 Added a site"],
       [/^POST \/sites\/street-images/,    "🖼️ Refreshed site photos"],
       [/^POST \/import-sites/,            "📥 Imported sites"],
       [/^POST \/customers\/delete/,       "🗑️ Deleted a customer"],
@@ -244,7 +260,10 @@
     function niceDetail(det) {
       if (!det) return "";
       if (det === "(file upload)") return "📎 with a file attached";
+      // A handler-supplied "before → after" note is already human — show it as-is.
+      if (det.indexOf("→") >= 0) return det;
       return det.split(" · ").map(part => {
+        if (part.indexOf("→") >= 0) return part;        // change note fragment — leave alone
         const i = part.indexOf("=");
         if (i < 0) return part;
         const k = part.slice(0, i), v = part.slice(i + 1);
@@ -255,6 +274,45 @@
         if (lbl === "#") return "#" + v;
         return lbl + " " + v;
       }).filter(Boolean).join(" · ");
+    }
+    // Parse the raw "k=v · k=v" detail into an object (for subject + link building).
+    function parseDetail(det) {
+      const o = {};
+      if (!det || det.indexOf("→") >= 0) return o;      // notes aren't key=value
+      det.split(" · ").forEach(p => { const i = p.indexOf("="); if (i > 0) o[p.slice(0, i)] = p.slice(i + 1); });
+      return o;
+    }
+    // The main "thing" an action was about, to read like a sentence subject.
+    function subjectOf(r) {
+      if (r.method === "VIEW") return "";
+      const d = parseDetail(r.detail);
+      const v = d.siteName || d.site || d.name || d.label || d.title || d.reg || d.to || d.toUser
+        || d.Username || d.username || d.u || d.description || d.reason || (d.id ? "#" + d.id : "");
+      return v ? String(v).slice(0, 48) : "";
+    }
+    // Where a row links to — prefer the page it was fired from, else map the action
+    // to the page where you'd go to see/act on it. Everything ends up clickable.
+    const ACTION_PAGE = [
+      [/\/(add|update)-site|\/sites\b|\/customers/, "sites.html"],
+      [/\/sites\/register|\/costing/, "job-costing.html"],
+      [/\/fleet\/|\/vancheck\//, "vehicles.html"],
+      [/\/key\b|\/keys\b/, "keys.html"],
+      [/\/holiday\//, "holiday-admin.html"],
+      [/\/asset\b|\/asset\/|\/transfer\b|-asset-image/, "assets-admin.html"],
+      [/\/sla\b|\/sla\//, "sla-main.html"],
+      [/\/memos\//, "notification-centre.html"],
+      [/\/ts\//, "timesheets-admin.html"],
+      [/\/office\//, "office-timesheet.html"],
+      [/\/(users|user)\b|\/device\//, "users-admin.html"],
+      [/\/theme\b|\/theme\//, "personalise.html"],
+      [/\/notify\//, "notification-centre.html"],
+    ];
+    function linkFor(r) {
+      if (r.ref && PAGE_NAMES[r.ref]) return r.ref;     // the page they were on — the best target
+      if (r.method === "VIEW") { const pg = r.path.slice(1); return PAGE_NAMES[pg] ? pg : ""; }
+      const key = r.method + " " + r.path;
+      for (const [re, page] of ACTION_PAGE) if (re.test(key)) return page;
+      return r.ref || "";
     }
     const PAGE_NAMES = {
       "main.html": "the Menu", "holiday.html": "Holiday", "holiday-admin.html": "Holiday Admin",
@@ -299,30 +357,78 @@
       } catch (e) { g("list").innerHTML = "<div class='row muted'>Couldn't load the log — is the latest portal API deployed?</div>"; }
     }
 
+    const fmtWhen = at => at ? new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "";
+    const fmtTime = at => at ? new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+    const kindHtml = r => r.method === "VIEW"
+      ? '<span class="kind view">viewed</span>'
+      : (r.status >= 400 ? '<span class="kind fail">failed (' + r.status + ")</span>" : '<span class="kind action">action</span>');
+
+    // The inner content of one event row (the clickable message + its detail line).
+    function rowInner(r) {
+      const subject = subjectOf(r);
+      const on = (r.method !== "VIEW" && r.ref && pageName(r.ref)) ? pageName(r.ref) : "";
+      const msg = esc(describe(r)) + (subject ? ` — <b>${esc(subject)}</b>` : "") + (on ? ` <span class="onpage">on ${esc(on)}</span>` : "");
+      const nd = r.method === "VIEW" ? "" : niceDetail(r.detail);
+      const det = (nd && nd !== subject) ? nd : "";
+      const href = linkFor(r);
+      const what = href ? `<a class="msg" href="${esc(href)}">${msg}</a>` : `<span class="msg nolink">${msg}</span>`;
+      return `<div class="what">${what}</div>${det ? `<div class="det">${esc(det)}</div>` : ""}`;
+    }
+    function rowHtml(r) {
+      return `<div class="row">
+        <div class="when">${esc(fmtWhen(r.at))}</div>
+        <div style="flex:1;">
+          <span class="who">${esc(nameOf(r.username) || r.username)}</span> ${kindHtml(r)}
+          ${rowInner(r)}
+        </div>
+      </div>`;
+    }
+
+    // A run of the same person doing the same kind of thing back-to-back (e.g.
+    // updating 200 sites) collapses into ONE expandable group — so a busy user
+    // doesn't bury everyone else. Grouped by user + friendly action (views by user).
+    const GROUP_MIN = 3;
+    const verbKey = r => r.username + "|" + (r.method === "VIEW" ? "·view" : describe(r));
+
     function render() {
       const q = g("fSearch").value.trim().toLowerCase();
       const rows = LOG.filter(r => !q ||
-        (describe(r) + " " + r.path + " " + (r.detail || "") + " " + niceDetail(r.detail) + " " + pageName(r.ref) + " " + r.username + " " + nameOf(r.username)).toLowerCase().includes(q));
+        (describe(r) + " " + r.path + " " + (r.detail || "") + " " + niceDetail(r.detail) + " " + subjectOf(r) + " " + pageName(r.ref) + " " + r.username + " " + nameOf(r.username)).toLowerCase().includes(q));
       g("countLbl").textContent = rows.length ? rows.length + (rows.length === 1000 ? "+ events (newest 1000)" : " event" + (rows.length === 1 ? "" : "s")) : "";
       if (!rows.length) { g("list").innerHTML = "<div class='row muted'>Nothing recorded for these filters.</div>"; return; }
-      g("list").innerHTML = rows.map(r => {
-        const when = r.at ? new Date(r.at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "";
-        const failed = r.method !== "VIEW" && r.status >= 400;
-        const kind = r.method === "VIEW"
-          ? '<span class="kind view">viewed</span>'
-          : failed ? '<span class="kind fail">failed (' + r.status + ")</span>" : '<span class="kind action">action</span>';
-        const det = r.method === "VIEW" ? "" : niceDetail(r.detail);
-        // Where it happened — from the referring page (actions only; a VIEW already names the page).
-        const on = (r.method !== "VIEW" && r.ref) ? pageName(r.ref) : "";
-        return `<div class="row">
-          <div class="when">${esc(when)}</div>
-          <div style="flex:1;">
-            <span class="who">${esc(nameOf(r.username) || r.username)}</span> ${kind}
-            <div class="what">${esc(describe(r))}${on ? ` <span class="onpage">on ${esc(on)}</span>` : ""}</div>
-            ${det ? `<div class="det">${esc(det)}</div>` : ""}
-          </div>
-        </div>`;
-      }).join("");
+
+      const out = [];
+      let i = 0;
+      while (i < rows.length) {
+        const key = verbKey(rows[i]);
+        let j = i + 1;
+        while (j < rows.length && verbKey(rows[j]) === key) j++;
+        const run = rows.slice(i, j);
+        if (run.length >= GROUP_MIN) {
+          const r0 = run[0], who = nameOf(r0.username) || r0.username;
+          const isView = r0.method === "VIEW";
+          const verb = isView ? "Opened pages" : esc(describe(r0));
+          // newest-first, so run[last] is the oldest — show the span oldest → newest.
+          const span = fmtTime(run[run.length - 1].at) + "–" + fmtTime(run[0].at);
+          const day = new Date(r0.at).toLocaleDateString("en-GB", { dateStyle: "medium" });
+          out.push(
+            `<details class="group">
+              <summary>
+                <div class="when">${esc(day)}<br>${esc(span)}</div>
+                <div style="flex:1;">
+                  <span class="who">${esc(who)}</span> ${kindHtml(r0)}
+                  <div class="what"><span class="msg nolink">${verb} <b>× ${run.length}</b></span> <span class="expand">tap to expand ▾</span></div>
+                </div>
+              </summary>
+              <div class="gbody">${run.map(rowHtml).join("")}</div>
+            </details>`
+          );
+        } else {
+          run.forEach(r => out.push(rowHtml(r)));
+        }
+        i = j;
+      }
+      g("list").innerHTML = out.join("");
     }
 
     g("fUser").addEventListener("change", load);
