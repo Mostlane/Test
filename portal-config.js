@@ -754,7 +754,7 @@
             o.innerHTML = '<div class="oc-card"><div class="oc-big">🕘</div><h2>You didn\'t clock out</h2>'
               + '<p>On <b>' + niceDay(pa.date) + '</b> your timer was still running, so it was automatically stopped at <b>' + (pa.stoppedAtHM || "19:00") + '</b>.</p>'
               + '<p>What time did you actually finish that day?</p>'
-              + '<input type="time" id="ocFinishTime" value="17:00" style="font-size:22px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:10px;text-align:center;margin-bottom:14px;">'
+              + '<input type="time" id="ocFinishTime" value="16:30" style="font-size:22px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:10px;text-align:center;margin-bottom:14px;">'
               + '<button class="oc-cta" id="ocConfirmBtn">✔ Confirm finish time</button>'
               + '<p class="oc-note" style="color:#8a94a3;font-size:12px;margin:10px 0 0;">This goes onto the office timesheet against that day.</p></div>';
           } else if (m === "start") {
