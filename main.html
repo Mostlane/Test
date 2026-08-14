@@ -712,24 +712,34 @@ const MAP = window.ML_PERM_MAP || {
           saveMenuOrder();
         }
 
+        function clearHold() { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } }
         grid.addEventListener("pointerdown", e => {
           const tile = e.target.closest(".button");
           if (!tile || tile.id === "backToMyDay") return;
           if (editing) { e.preventDefault(); startDrag(tile, e.clientX, e.clientY); return; }
           startX = e.clientX; startY = e.clientY;
+          clearHold();
           holdTimer = setTimeout(() => {
             holdTimer = null;
             enterEdit();
             startDrag(tile, startX, startY);
-          }, 2500);   // long, deliberate hold (2.5s) so a slow tap never accidentally enters arrange mode
+          }, 5000);   // long, deliberate STATIONARY hold (5s) so normal use never enters arrange mode
         });
-        grid.addEventListener("pointermove", e => {
-          if (holdTimer && (Math.abs(e.clientX - startX) > 18 || Math.abs(e.clientY - startY) > 18)) {
-            clearTimeout(holdTimer); holdTimer = null;   // real movement = scroll, not a hold
-            // (18px tolerance: a finger drifts a little over a 2.5s hold; a scroll moves far)
-          }
-        });
-        window.addEventListener("pointerup", () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } });
+        // Cancel the pending hold on ANY sign that this isn't a still press:
+        //  • pointermove / touchmove beyond a small threshold (a scroll/drag)
+        //  • the page scrolling at all
+        //  • the browser cancelling the gesture (Android claims the touch for a
+        //    scroll → pointercancel, often with NO pointermove/up — that was the
+        //    bug: the timer survived the scroll and fired mid-scroll).
+        const movedFar = (x, y) => Math.abs(x - startX) > 12 || Math.abs(y - startY) > 12;
+        grid.addEventListener("pointermove", e => { if (holdTimer && movedFar(e.clientX, e.clientY)) clearHold(); });
+        document.addEventListener("touchmove", e => {
+          if (!holdTimer) return;
+          const t = e.touches && e.touches[0]; if (t && movedFar(t.clientX, t.clientY)) clearHold();
+        }, { passive: true });
+        window.addEventListener("pointerup", clearHold);
+        window.addEventListener("pointercancel", clearHold);
+        window.addEventListener("scroll", clearHold, { passive: true, capture: true });
         grid.addEventListener("contextmenu", e => { if (editing || holdTimer) e.preventDefault(); });
         // Block navigation on the tile that was just long-pressed / dragged.
         grid.addEventListener("click", e => {
