@@ -14918,18 +14918,18 @@ function md5Hex(bytes) {
 
 // src/routes/tasks.js
 var TASK_AREAS = [
-  { key: "", label: "\u2014 none (manual only) \u2014", auto: "" },
-  { key: "Vehicles", label: "Vehicles / van checks", auto: "/vancheck/submit" },
-  { key: "HolidayAdmin", label: "Holiday approvals", auto: "/holiday/approve" },
-  { key: "SLA", label: "SLA jobs", auto: "/sla/jobs" },
-  { key: "SLAAdmin", label: "SLA jobs (admin)", auto: "/sla/jobs" },
-  { key: "PurchaseOrders", label: "Purchase orders", auto: "/po/api/pos" },
-  { key: "Compliance", label: "Compliance certificates", auto: "/compliance/" },
-  { key: "Assets", label: "Plant & equipment", auto: "/asset/" },
-  { key: "AssetAdmin", label: "Plant & equipment (admin)", auto: "/asset/" },
-  { key: "Sites", label: "Sites", auto: "/update-site" },
-  { key: "TimesheetAdmin", label: "Timesheets (admin)", auto: "/ts/admin/save" },
-  { key: "Users", label: "Users admin", auto: "/users" }
+  { key: "", label: "\u2014 none (manual only) \u2014", auto: "", page: "" },
+  { key: "Vehicles", label: "Vehicles / van checks", auto: "/vancheck/submit", page: "vehicles.html" },
+  { key: "HolidayAdmin", label: "Holiday approvals", auto: "/holiday/approve", page: "holiday-admin.html" },
+  { key: "SLA", label: "SLA jobs", auto: "/sla/jobs", page: "sla-main.html" },
+  { key: "SLAAdmin", label: "SLA jobs (admin)", auto: "/sla/jobs", page: "sla-main.html" },
+  { key: "PurchaseOrders", label: "Purchase orders", auto: "/po/api/pos", page: "po-office.html" },
+  { key: "Compliance", label: "Compliance certificates", auto: "/compliance/", page: "compliance.html" },
+  { key: "Assets", label: "Plant & equipment", auto: "/asset/", page: "my-assets.html" },
+  { key: "AssetAdmin", label: "Plant & equipment (admin)", auto: "/asset/", page: "assets-admin.html" },
+  { key: "Sites", label: "Sites", auto: "/update-site", page: "sites.html" },
+  { key: "TimesheetAdmin", label: "Timesheets (admin)", auto: "/ts/admin/save", page: "timesheets-admin.html" },
+  { key: "Users", label: "Users admin", auto: "/users", page: "users-admin.html" }
 ];
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
@@ -15066,6 +15066,8 @@ function shapeTask(t) {
     area: t.area || "",
     autoMatch: t.auto_match || "",
     active: t.active !== 0,
+    areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
+    areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
     createdBy: t.created_by || ""
   };
 }

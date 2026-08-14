@@ -25,19 +25,22 @@ import { sendToUser } from "./push.js";
 // Areas a task can be linked to = a permission the assignee needs, plus the
 // audit path fragment that means "they did the job" (for auto-completion).
 // label is what the Full-Access user picks from the dropdown.
+// key = the permission the assignee needs; auto = the audit path fragment that
+// means "they did the job" (auto-complete); page = where clicking the task takes
+// them to actually do it.
 export const TASK_AREAS = [
-  { key: "",              label: "— none (manual only) —",           auto: "" },
-  { key: "Vehicles",      label: "Vehicles / van checks",           auto: "/vancheck/submit" },
-  { key: "HolidayAdmin",  label: "Holiday approvals",               auto: "/holiday/approve" },
-  { key: "SLA",           label: "SLA jobs",                        auto: "/sla/jobs" },
-  { key: "SLAAdmin",      label: "SLA jobs (admin)",                auto: "/sla/jobs" },
-  { key: "PurchaseOrders",label: "Purchase orders",                 auto: "/po/api/pos" },
-  { key: "Compliance",    label: "Compliance certificates",         auto: "/compliance/" },
-  { key: "Assets",        label: "Plant & equipment",               auto: "/asset/" },
-  { key: "AssetAdmin",    label: "Plant & equipment (admin)",       auto: "/asset/" },
-  { key: "Sites",         label: "Sites",                           auto: "/update-site" },
-  { key: "TimesheetAdmin",label: "Timesheets (admin)",              auto: "/ts/admin/save" },
-  { key: "Users",         label: "Users admin",                     auto: "/users" },
+  { key: "",              label: "— none (manual only) —",           auto: "",                page: "" },
+  { key: "Vehicles",      label: "Vehicles / van checks",           auto: "/vancheck/submit", page: "vehicles.html" },
+  { key: "HolidayAdmin",  label: "Holiday approvals",               auto: "/holiday/approve", page: "holiday-admin.html" },
+  { key: "SLA",           label: "SLA jobs",                        auto: "/sla/jobs",        page: "sla-main.html" },
+  { key: "SLAAdmin",      label: "SLA jobs (admin)",                auto: "/sla/jobs",        page: "sla-main.html" },
+  { key: "PurchaseOrders",label: "Purchase orders",                 auto: "/po/api/pos",      page: "po-office.html" },
+  { key: "Compliance",    label: "Compliance certificates",         auto: "/compliance/",     page: "compliance.html" },
+  { key: "Assets",        label: "Plant & equipment",               auto: "/asset/",          page: "my-assets.html" },
+  { key: "AssetAdmin",    label: "Plant & equipment (admin)",       auto: "/asset/",          page: "assets-admin.html" },
+  { key: "Sites",         label: "Sites",                           auto: "/update-site",     page: "sites.html" },
+  { key: "TimesheetAdmin",label: "Timesheets (admin)",              auto: "/ts/admin/save",   page: "timesheets-admin.html" },
+  { key: "Users",         label: "Users admin",                     auto: "/users",           page: "users-admin.html" },
 ];
 const AREA_BY_KEY = {}; for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 
@@ -133,6 +136,8 @@ function shapeTask(t) {
     recurrence: t.recurrence, dueTime: t.due_time || "17:00", dueDow: t.due_dow || null,
     dueDom: t.due_dom || null, dueMonth: t.due_month || null, dueDate: t.due_date || "",
     area: t.area || "", autoMatch: t.auto_match || "", active: t.active !== 0,
+    areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
+    areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
     createdBy: t.created_by || "",
   };
 }
