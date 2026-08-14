@@ -54,6 +54,10 @@
   .jpill i{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .jpill button{border:none;background:none;color:#8aa2c0;font-size:16px;padding:0 7px;cursor:pointer;line-height:1}
   .joblist input.jobs{flex:1;min-width:150px;width:auto}
+  .card.hol{background:#f0fdf4;border-color:#bbf7d0}
+  .card.hol .dhead{background:#f0fdf4}
+  .holtag{margin-left:auto;background:#16a34a;color:#fff;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:700;white-space:nowrap}
+  .holbanner{background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:9px;padding:7px 10px;font-size:13px;font-weight:600;margin-bottom:8px}
   .flab{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin:12px 0 5px 3px}
   .row{margin:0}
   /* deduction + assigned chips */
@@ -143,7 +147,8 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, SITES=[];
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[];
+function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
 
 function claimedMiles(miles){
   if(!(ME&&ME.radius)||!(miles>0))return miles;
@@ -261,8 +266,20 @@ function render(){
     }
     const card=document.createElement("div");
     const isToday=date===today;
-    card.className="card"+(i>=5?" wknd":"")+(isToday&&!locked?" open":"");
     card.dataset.date=date;
+    // Approved holiday auto-shows. A FULL day is a holiday-only card (no work
+    // inputs); a half day keeps the inputs with a banner.
+    const hol=HOL[date]||null;
+    const dLabel=new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+    if(hol && hol.half!=="AM" && hol.half!=="PM"){
+      card.className="card hol"+(i>=5?" wknd":"");
+      card.innerHTML=`<div class="dhead" style="cursor:default">
+        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${dLabel}</span></span>
+        <span class="holtag">🌴 ${esc(holName(hol.type))}</span></div>`;
+      host.appendChild(card);
+      continue;
+    }
+    card.className="card"+(hol?" hashalf":"")+(i>=5?" wknd":"")+(isToday&&!locked?" open":"");
     const deds=[];
     if(ME&&ME.commute) deds.push(`<span class="ded" title="Set by the office — not editable">🚐 −${ME.commuteMins}m travel ×2</span>`);
     if(ME&&ME.lunch) deds.push(`<span class="ded lunch" title="Deducted on days of ${ME.lunchThresholdH}h or more">🥪 −${ME.lunchMins}m lunch</span>`);
@@ -274,6 +291,7 @@ function render(){
         <span class="sum"></span><span class="chev">›</span>
       </button>
       <div class="cbody">
+        ${hol?`<div class="holbanner">🌴 ${esc(holName(hol.type))} (${hol.half} half) — booked leave</div>`:""}
         ${booked.length?`<div class="flab">You're booked on — tap to add</div><div class="booked">${booked.map((b,ix)=>`<button type="button" class="bk" data-ix="${ix}" title="${esc(b.label)}">${b.time?`<span class="t">${esc(b.time)}</span>`:""}${esc(b.label.length>34?b.label.slice(0,33)+"…":b.label)}</button>`).join("")}</div>`:""}
         <div class="times2">
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
@@ -612,6 +630,7 @@ async function load(){
     INVOICE=(wkR&&wkR.invoice)||null;
     ASSIGNED=(asR&&asR.byDay)||{};
     AUTO=(wkR&&wkR.auto)||{};
+    HOL=(wkR&&wkR.holidays)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
     return;

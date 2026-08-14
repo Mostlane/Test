@@ -207,6 +207,17 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,
   approve/reject (type override), staff self-cancel (notifies admin), bank
   holidays (GOV.UK import) + shutdown + worked-credit, batch system days.
+  **Approved leave auto-flows to timesheets + scheduler (Aug 2026):** exported
+  helper **`approvedLeaveInRange(env,tid,from,to,username?)`** expands each
+  approved booking's start→end into per-day markers `{username:{date:{type,half}}}`;
+  **GET /holiday/calendar?from=&to=** (any logged-in user) returns it for the SLA
+  scheduler. timesheets.js `holidayDaysFor()` (uses the helper) adds `holidays`
+  to **GET /ts/my** + **/ts/admin/overview**; engineer-timesheet.html renders a
+  full holiday day as a green holiday-only card (half-days keep inputs + a banner)
+  and timesheets-admin.html shows a 🌴 chip per day. sla-scheduler.html loads
+  /holiday/calendar for a ±window around the date (`holidayMap`, `holFor`) and
+  shades/badges any engineer's day/week cell they're on leave — so you never
+  schedule someone who's off.
   **"Used" is USED-TO-DATE (Aug 2026):** `computeUsage()` (shared by
   /holiday/summary + /holiday/admin-summary) counts a bank-holiday/shutdown
   system day toward `used` only once its date has PASSED; the full-year figure is

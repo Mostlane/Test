@@ -1252,6 +1252,27 @@ async function handle4(request, env, ctx, url, sess) {
 }
 
 // src/routes/holidays.js
+async function approvedLeaveInRange(env, tid, from, to, username) {
+  const out = {};
+  try {
+    const sql = "SELECT username, start_date, end_date, type, half FROM holidays WHERE tenant_id=? AND status='Approved' AND start_date<=? AND end_date>=?" + (username ? " AND username=?" : "");
+    const binds = username ? [tid, to, from, username] : [tid, to, from];
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    for (const r of results || []) {
+      if (!r.start_date || !r.end_date) continue;
+      let d = /* @__PURE__ */ new Date(r.start_date + "T12:00:00Z");
+      const end = /* @__PURE__ */ new Date(r.end_date + "T12:00:00Z");
+      let guard = 0;
+      while (d <= end && guard++ < 400) {
+        const ds = d.toISOString().slice(0, 10);
+        if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
+    }
+  } catch {
+  }
+  return out;
+}
 async function handle5(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -1524,6 +1545,16 @@ async function handle5(request, env, ctx, url, sess) {
   if (path === "/holiday/all" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     return json3(await listHolidayRequestsForYear());
+  }
+  if (path === "/holiday/calendar" && method === "GET") {
+    if (!sess) return text("Not authenticated", 401);
+    const q = url.searchParams;
+    const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const from = iso(q.get("from")) || today;
+    const to = iso(q.get("to")) || from;
+    const days = await approvedLeaveInRange(env, tenantId, from, to);
+    return json3({ ok: true, from, to, days });
   }
   if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -3014,6 +3045,11 @@ ${xrefAt}
 };
 
 // src/routes/timesheets.js
+async function holidayDaysFor(env, tid, username, monday) {
+  const end = weekDays(monday)[6];
+  const map = await approvedLeaveInRange(env, tid, monday, end, username);
+  return map[username] || {};
+}
 var CFG_KEY = (tid) => `engts:cfg:${tid}`;
 var INV_PREFIX = (tid) => `invoices/${tid}/`;
 var isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
@@ -3774,12 +3810,14 @@ async function handle7(request, env, ctx, url, sess) {
     const { days, savedAt } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
+    const holidays = await holidayDaysFor(env, tid, me, monday);
     return json({
       ok: true,
       week: monday,
       days,
       savedAt,
       auto,
+      holidays,
       totals: weekTotals(days, eff),
       invoice: inv ? {
         number: inv.number,
@@ -4286,6 +4324,7 @@ async function handle7(request, env, ctx, url, sess) {
       }
       const invBy = {};
       for (const r of invs || []) invBy[r.username] = r;
+      const leaveAll = await approvedLeaveInRange(env, tid, monday, weekDays(monday)[6]);
       const out = [];
       for (const u of users || []) {
         const eff = effectiveCfg(cfg, u);
@@ -4315,6 +4354,7 @@ async function handle7(request, env, ctx, url, sess) {
           perDay,
           savedAt: d.at,
           totals: weekTotals(d.days, eff),
+          holidays: leaveAll[u.username] || {},
           invoice: inv ? {
             id: inv.id,
             number: inv.number,
