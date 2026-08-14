@@ -62,10 +62,14 @@ async function hasOfficePerm(env, tenantId, username) {
 // permission is now the single switch — tick it in Users Admin and the clock
 // gate appears on any desktop that person uses. deviceId is still recorded on
 // each segment for the audit trail.
+// The office-wide timesheet (everyone's clocked hours) is FULL ACCESS ONLY.
+// Office users see only their own hours via /office/my ("My Hours").
 async function isTimesheetAdmin(env, tenantId, username) {
   const p = await permissionsFor(env, tenantId, username);
-  return p.FullAccess === "Yes" || p.OfficeTimesheet === "Yes";
+  return p.FullAccess === "Yes";
 }
+// Staff kept OFF the office timesheet (owners / non-clocking) — never listed.
+const TIMESHEET_EXCLUDE = new Set(["jamie line", "greg line", "joe line"]);
 
 // ── 19:00 auto-stop ──────────────────────────────────────────────────────────
 // Anyone still clocked in past 19:00 UK time is stopped automatically, the
@@ -316,11 +320,14 @@ export async function handle(request, env, ctx, url, sess) {
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
 
     const map = {};
-    const ensure = u => (map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false }));
-    for (const u of permUsers || []) ensure(u.username);
+    const excluded = u => TIMESHEET_EXCLUDE.has(String(u || "").trim().toLowerCase())
+      || TIMESHEET_EXCLUDE.has(String(nameOf[u] || "").trim().toLowerCase());
+    const ensure = u => (map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, openDays: {}, total: 0, open: false }));
+    for (const u of permUsers || []) { if (!excluded(u.username)) ensure(u.username); }
     for (const r of results || []) {
+      if (excluded(r.username)) continue;
       const e = ensure(r.username);
-      if (isOpenRow(r)) { e.open = true; continue; }   // running — flagged, not counted
+      if (isOpenRow(r)) { e.open = true; e.openDays[r.date] = true; continue; }   // running — flagged per day, not counted
       const sec = segSeconds(r);
       e.days[r.date] = (e.days[r.date] || 0) + sec;
       e.total += sec;

@@ -364,6 +364,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button" href="eicr-check.html" id="EicrCheck"><span class="emoji">⚡</span> EICR Check</a>
     <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
+    <a class="button" href="office-my-hours.html" id="MyHours"><span class="emoji">🕒</span> My Hours</a>
     <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Timesheet</a>
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
@@ -442,10 +443,14 @@ const MAP = window.ML_PERM_MAP || {
   Customers: ["Sites", "AddSite"],
   PurchaseOrders2: ["PurchaseOrders"],
   SiteLog: ["SiteLog"],
-  // Merged "Timesheet" tile — office + van timesheets. Visible to holders of
-  // either OfficeTimesheet or Vehicles (van pay). applyGate points it at the
-  // page the user can actually open; each page cross-links to the other.
-  OfficeTimesheet: ["OfficeTimesheet", "Vehicles"],
+  // "My Hours" — an office-clock user's OWN clocked hours (office-my-hours.html).
+  // Every office user who clocks in/out sees this (Full Access too).
+  MyHours: ["OfficeClock", "OfficeTimesheet"],
+  // "Timesheet" — the office-WIDE hours (everyone) is FULL ACCESS ONLY, so the
+  // MAP lists only Vehicles (van timesheet); Full Access sees it via fullAccess
+  // and applyGate points them at office-timesheet.html. An OfficeTimesheet-only
+  // office user no longer sees this tile — they use "My Hours" instead.
+  OfficeTimesheet: ["Vehicles"],
   // Engineer weekly timesheet (times + jobs; invoices/mileage if self-employed)
   EngTimesheet: ["EngTimesheet"],
   // Office view of the engineer timesheets + invoices + deduction settings
@@ -519,7 +524,7 @@ const MAP = window.ML_PERM_MAP || {
           if (!btn) return;
           for (const [perm, href] of choices) { if (has(perm)) { btn.href = href; return; } }
         };
-        setHref("OfficeTimesheet", [["OfficeTimesheet", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]]);
+        setHref("OfficeTimesheet", [["FullAccess", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]]);
         setHref("Users",          [["Users", "users-admin.html"],              ["DeviceAdmin", "device-admin.html"]]);
         setHref("Projects",       [["Projects", "projects.html"],              ["ProjectsAdmin", "projects-admin.html"]]);
 

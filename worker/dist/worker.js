@@ -7293,8 +7293,9 @@ async function hasOfficePerm(env, tenantId, username) {
 }
 async function isTimesheetAdmin(env, tenantId, username) {
   const p = await permissionsFor(env, tenantId, username);
-  return p.FullAccess === "Yes" || p.OfficeTimesheet === "Yes";
+  return p.FullAccess === "Yes";
 }
+var TIMESHEET_EXCLUDE = /* @__PURE__ */ new Set(["jamie line", "greg line", "joe line"]);
 var AUTO_BY = "auto-stop";
 var CUTOFF_HM = "19:00";
 function londonHM(d) {
@@ -7523,12 +7524,17 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure6 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure6(u.username);
+    const excluded = (u) => TIMESHEET_EXCLUDE.has(String(u || "").trim().toLowerCase()) || TIMESHEET_EXCLUDE.has(String(nameOf[u] || "").trim().toLowerCase());
+    const ensure6 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, openDays: {}, total: 0, open: false });
+    for (const u of permUsers || []) {
+      if (!excluded(u.username)) ensure6(u.username);
+    }
     for (const r of results || []) {
+      if (excluded(r.username)) continue;
       const e = ensure6(r.username);
       if (isOpenRow(r)) {
         e.open = true;
+        e.openDays[r.date] = true;
         continue;
       }
       const sec = segSeconds(r);
