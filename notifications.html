@@ -76,7 +76,11 @@ async function refresh(){
     hint.textContent="Notifications are turned off for this site in your device settings — allow them there, then reload this page.";
     return;
   }
-  if(s.on){ state.textContent="On for this device ✓"; state.className="state on"; disable.style.display=""; test.style.display=""; }
+  if(s.on){
+    state.textContent="On for this device ✓"; state.className="state on"; disable.style.display=""; test.style.display="";
+    if (MostlanePush.isIOS && MostlanePush.isIOS() && MostlanePush.isStandalone && MostlanePush.isStandalone())
+      hint.textContent="Tip: iPhone won't show a banner while Mostlane is open in front of you. After tapping Send test, lock your phone (or swipe to another app) and the notification will appear on your Lock Screen / in Notification Centre.";
+  }
   else { state.textContent="Off for this device."; enable.style.display=""; }
 }
 
@@ -91,7 +95,26 @@ g("enable").addEventListener("click", async () => {
   refresh();
 });
 g("disable").addEventListener("click", async () => { await MostlanePush.disable(); toast("Notifications off for this device"); refresh(); });
-g("test").addEventListener("click", async () => { const r = await MostlanePush.test(); toast(r.ok ? "Test sent — watch for the notification" : (r.error || "Test failed")); });
+g("test").addEventListener("click", async () => {
+  const btn = g("test");
+  // On an installed iPhone/iPad PWA, iOS does NOT show a banner while the app is
+  // in the FOREGROUND — so count down and prompt the user to lock the phone, then
+  // fire the push so it lands on the Lock Screen. Desktop/Android send instantly.
+  const iosPwa = MostlanePush.isIOS && MostlanePush.isIOS() && MostlanePush.isStandalone && MostlanePush.isStandalone();
+  if (iosPwa) {
+    let n = 5; btn.disabled = true;
+    toast("🔒 Lock your phone now — test arrives in " + n + "s");
+    const iv = setInterval(() => {
+      n--;
+      if (n > 0) { toast("🔒 Lock your phone — " + n + "s"); return; }
+      clearInterval(iv);
+      MostlanePush.test().then(r => { btn.disabled = false; if (!r || !r.ok) toast((r && r.error) || "Test failed"); });
+    }, 1000);
+  } else {
+    const r = await MostlanePush.test();
+    toast(r.ok ? "Test sent — watch for the notification" : (r.error || "Test failed"));
+  }
+});
 
 refresh();
 </script>

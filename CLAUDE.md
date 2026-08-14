@@ -1998,6 +1998,18 @@ engineer-report, hours-dashboard.html, add-site chain (Zapier), theme.html
 files to this public repo.
 
 ## Known quirks
+- **iOS PWA Web Push shows NOTHING while the app is in the FOREGROUND.** A push
+  that the server sent fine (push_subscriptions.last_ok updates on a 201, and a
+  user_notifications feed row is written) will NOT pop a banner if the installed
+  PWA is open in front of the user — iOS suppresses its own app's banners.
+  Symptom: "I sent a test and got nothing" even though the send succeeded. First
+  check last_ok + a feed row before suspecting the backend; then have them lock
+  the phone / background the app so the push lands on the Lock Screen. The
+  notifications.html "Send test" runs a 5-second lock-your-phone countdown on an
+  installed iPhone/iPad for exactly this reason. Also: don't churn the SW
+  CACHE_NAME needlessly — every bump forces an SW update, and rapid updates can
+  briefly disturb iOS push; HTML pages are network-first so they refresh without
+  a bump, and external JS is stale-while-revalidate (or use a `?v=` query bump).
 - Cloudflare blocks worker→worker fetch on *.workers.dev (error 1042) — use
   browser-side fetch, or custom domains (api.site-log.co.uk works).
 - Users must log out/in for new permissions to reach their session.
