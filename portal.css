@@ -1,0 +1,125 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Mostlane portal — shared design tokens + baseline polish.
+   Loaded BEFORE each page's own <style> block, so page CSS always wins where
+   they disagree: this file provides the common ground (tokens, focus states,
+   selection, scrollbars, motion) and a small set of .ml-* components for new
+   work, without changing any existing page's layout.
+   Include as:  <link rel="stylesheet" href="/portal.css?v=1">
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Brand */
+  --ml-navy: #003366;
+  --ml-blue: #1A4F8F;
+  --ml-blue-deep: #003468;
+  --ml-accent: #003b82;
+
+  /* Surfaces + lines */
+  --ml-bg: #eef1f5;
+  --ml-card: #ffffff;
+  --ml-line: #e2e8f0;
+  --ml-line-strong: #d7dee6;
+
+  /* Text */
+  --ml-ink: #16202e;
+  --ml-muted: #64748b;
+
+  /* Status */
+  --ml-ok: #15803d;      --ml-ok-bg: #dcfce7;    --ml-ok-soft: #f0fdf4;
+  --ml-warn: #d97706;    --ml-warn-bg: #fef3c7;  --ml-warn-soft: #fffbeb;
+  --ml-bad: #dc2626;     --ml-bad-bg: #fee2e2;   --ml-bad-soft: #fef2f2;
+
+  /* Shape */
+  --ml-radius: 12px;
+  --ml-radius-lg: 16px;
+  --ml-shadow: 0 2px 10px rgba(6, 24, 54, .07);
+  --ml-shadow-lg: 0 10px 30px rgba(6, 24, 54, .14);
+
+  /* Type */
+  --ml-font: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+}
+
+/* ── Baseline polish (safe everywhere) ───────────────────────────────────── */
+
+html { -webkit-text-size-adjust: 100%; }
+body { -webkit-tap-highlight-color: transparent; text-rendering: optimizeLegibility; }
+
+::selection { background: rgba(26, 79, 143, .18); }
+
+/* Keyboard focus is visible and consistent; mouse clicks stay clean. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--ml-blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Form controls inherit the portal type instead of browser defaults. */
+button, input, select, textarea { font-family: inherit; }
+
+/* Buttons + links get a gentle, uniform press/hover feel. */
+button, .btn, a.button {
+  transition: filter .12s ease, transform .06s ease, box-shadow .12s ease;
+}
+button:not(:disabled):active, .btn:not(:disabled):active { transform: translateY(1px); }
+button:not(:disabled):hover, .btn:not(:disabled):hover { filter: brightness(.97); }
+
+/* Slim, tidy scrollbars on desktop. */
+@media (pointer: fine) {
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c3ced9; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: #9fb2c8; }
+}
+
+/* Respect reduced-motion everywhere, once. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ── Shared components (opt-in .ml-* classes for new/migrated markup) ────── */
+
+.ml-card {
+  background: var(--ml-card);
+  border: 1px solid var(--ml-line-strong);
+  border-radius: var(--ml-radius-lg);
+  box-shadow: var(--ml-shadow);
+  padding: 14px 16px;
+}
+
+.ml-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: 700 12px/1.4 var(--ml-font);
+  white-space: nowrap;
+}
+.ml-pill.ok   { background: var(--ml-ok-bg);   color: #166534; }
+.ml-pill.warn { background: var(--ml-warn-bg); color: #92400e; }
+.ml-pill.bad  { background: var(--ml-bad-bg);  color: #b91c1c; }
+.ml-pill.info { background: #e0e7ff;           color: #3730a3; }
+
+.ml-btn {
+  display: inline-block;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font: 600 13.5px var(--ml-font);
+  cursor: pointer;
+  text-decoration: none;
+  background: #eef2f6;
+  color: #1f2a44;
+}
+.ml-btn.primary { background: var(--ml-accent); color: #fff; }
+.ml-btn.danger  { background: var(--ml-bad);   color: #fff; }
+.ml-btn.good    { background: #16a34a;         color: #fff; }
+.ml-btn:disabled { opacity: .55; cursor: default; }
+
+/* Friendly empty state — use instead of a blank table/list. */
+.ml-empty {
+  text-align: center;
+  color: var(--ml-muted);
+  padding: 34px 14px;
+  font: 600 14px var(--ml-font);
+}
+.ml-empty .big { font-size: 30px; display: block; margin-bottom: 8px; }
