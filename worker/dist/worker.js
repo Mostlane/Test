@@ -8047,12 +8047,15 @@ async function handle15(request, env, ctx, url, sess) {
     const row = await db.prepare("SELECT id, ref, sign_requests FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
     if (!row) return error("Document not found", 404, env, request);
     const reqs = parseArr(row.sign_requests);
-    const mine = reqs.find((s) => s.username === me);
-    if (!mine) return error("This document wasn't sent to you.", 403, env, request);
+    const isHS = perms.HSPlan === "Yes" || perms.FullAccess === "Yes";
+    const target = b.username && isHS ? String(b.username) : me;
+    const mine = reqs.find((s) => s.username === target);
+    if (!mine) return error(target === me ? "This document wasn't sent to you." : "That person isn't on this document's sign-off list.", 403, env, request);
+    if (target !== me && mine.status !== "signed") return error("They haven't signed yet \u2014 a copy is only filed once signed.", 400, env, request);
     const out = buildRaPdf(pages, row.ref);
     if (!out) return error("No usable page images.", 400, env, request);
     const safe = String(row.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
-    const key = `staffdocs/${db.tenantId}/user/${me}/Risk Assessments/${Date.now()}-RA-${safe}.pdf`;
+    const key = `staffdocs/${db.tenantId}/user/${target}/Risk Assessments/${Date.now()}-RA-${safe}.pdf`;
     await env.JOB_FILES.put(key, out, {
       httpMetadata: { contentType: "application/pdf" },
       customMetadata: { name: ("Risk Assessment " + (row.ref || "")).trim() + ".pdf", by: me, at: (/* @__PURE__ */ new Date()).toISOString() }
@@ -8066,7 +8069,7 @@ async function handle15(request, env, ctx, url, sess) {
     mine.docKey = key;
     mine.filedAt = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare("UPDATE hs_documents SET sign_requests=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(reqs), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, id).run();
-    return json({ ok: true }, {}, env, request);
+    return json({ ok: true, username: target }, {}, env, request);
   }
   if (path === "/hs/doc/pdf" && method === "POST") {
     const b = await request.json().catch(() => ({}));
