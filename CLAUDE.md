@@ -1253,7 +1253,11 @@ cards so it's legible over any personalised background. **Framework:**
 `window.MostlaneHub` — `HUB.register({id,emoji,title,can(perms),load(card),wide?})`
 then `HUB.run(perms)` (reads the cached `mostlanePermissions` blob, instant, no
 network wait). A widget filtered out by `can(perms)` never renders; if NO widget
-is eligible the whole `#hubDash` stays hidden. Each `load()` fetches its own data
+is eligible the whole `#hubDash` stays hidden. **The whole dashboard is
+office/admin only** — `HUB.run` bails immediately for field engineers
+(`isFieldUser(perms)`: StaffType field, or the SLA/Story heuristic when blank —
+mirrors applyGate), so field users never see ANY stat regardless of a widget's
+own `can`. Each `load()` fetches its own data
 (via a timeout-raced `jfetch`, since API calls bypass the SW) and fills its card;
 a throwing/timed-out widget removes its own card. **DESKTOP ONLY** (CSS: shown via
 `.hub-on` under `@media(min-width:1000px) body.pnav-on`, same condition as the
