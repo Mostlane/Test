@@ -1231,6 +1231,14 @@ const MAP = window.ML_PERM_MAP || {
     var _cache = {};
     function jget(path) { if (!_cache[path]) _cache[path] = jfetch(path); return _cache[path]; }
     function yes(v) { return String(v || "").toLowerCase() === "yes"; }
+    // The whole dashboard is an OFFICE/ADMIN surface — field engineers never see
+    // any stats. Mirrors main.html's applyGate field-user test (StaffType, or the
+    // SLA/Story heuristic when StaffType is blank).
+    function isFieldUser(p) {
+      if (yes(p.FullAccess)) return false;
+      var stx = String(p.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+      return stx === "field" || (stx !== "office" && (yes(p.SLA) || yes(p.StoryMode)));
+    }
     // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = no date).
     function daysUntil(s) {
       if (!s) return null;
@@ -1268,6 +1276,7 @@ const MAP = window.ML_PERM_MAP || {
         var host = document.getElementById("hubGrid");
         var dash = document.getElementById("hubDash");
         if (!host || !dash || host.dataset.done) return;
+        if (isFieldUser(perms)) return;   // field engineers see no dashboard at all
         var eligible = this.widgets.filter(function (w) { try { return w.can(perms); } catch (e) { return false; } });
         if (!eligible.length) return;
         // The overview ("first") card renders at the top; the rest keep order.
