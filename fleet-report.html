@@ -61,6 +61,10 @@
   .notes{background:#fff;border-radius:10px;padding:16px 18px;font-size:12.5px;color:#475569;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.06)}
   .pool{background:var(--pool-bg);border:1px solid var(--pool-border);border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:13px}
   .muted{color:#94a3b8}
+  /* Saved-reports list grouped under month/year banners. */
+  .rpt-month{background:#003468;color:#fff;font-weight:800;padding:7px 12px;border-radius:8px;margin:16px 0 2px;font-size:14px}
+  .rpt-month:first-child{margin-top:4px}
+  .rpt-row{display:flex;gap:10px;align-items:center;padding:8px 4px;border-top:1px solid #eef}
 </style>
 </head>
 <body>
@@ -333,12 +337,26 @@ async function loadPastReports(){
   try{
     const d=await authFetch("/fleet/reports").then(r=>r.json());
     if(!d.ok){ el.innerHTML='<span class="muted">Couldn\'t load.</span>'; return; }
-    if(!d.reports.length){ el.innerHTML='<span class="muted">No saved reports yet — generate one below and press “Save to portal”.</span>'; return; }
-    el.innerHTML=d.reports.map(r=>`<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eef">
-        <div style="flex:1"><b>${esc(r.title)}</b><br><span class="muted" style="font-size:12px">${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}</span></div>
-        <a class="btn grey" style="text-decoration:none;padding:7px 12px" href="${esc(r.url)}" target="_blank" rel="noopener">Open</a>
-        <button class="btn grey" style="padding:7px 12px;color:#dc2626" data-del="${esc(r.key)}">Delete</button>
-      </div>`).join("");
+    if(!d.reports.length){ el.innerHTML='<span class="muted">No saved reports yet — generate one and it saves here automatically.</span>'; return; }
+    // Group by the month/year the report covers (weekStart), newest month first,
+    // so a long history is easy to scan under clear banners.
+    const groups={};
+    for(const r of d.reports){
+      const basis=(r.weekStart||r.at||"").slice(0,10);
+      const dt=basis?new Date(basis+"T12:00:00Z"):null;
+      const key=(dt&&!isNaN(dt))?`${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,"0")}`:"0000-00";
+      (groups[key]=groups[key]||[]).push(r);
+    }
+    const monthName=k=>{ if(k==="0000-00")return "Undated"; const p=k.split("-"); return new Date(Date.UTC(+p[0],+p[1]-1,1)).toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
+    const keys=Object.keys(groups).sort().reverse();
+    el.innerHTML=keys.map(k=>{
+      const rows=groups[k].map(r=>`<div class="rpt-row">
+          <div style="flex:1"><b>${esc(r.title)}</b><br><span class="muted" style="font-size:12px">Saved ${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}</span></div>
+          <a class="btn grey" style="text-decoration:none;padding:7px 12px" href="${esc(r.url)}" target="_blank" rel="noopener">Open</a>
+          <button class="btn grey" style="padding:7px 12px;color:#dc2626" data-del="${esc(r.key)}">Delete</button>
+        </div>`).join("");
+      return `<div class="rpt-month">${esc(monthName(k))} <span style="font-weight:400;opacity:.75">(${groups[k].length})</span></div>${rows}`;
+    }).join("");
     el.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>deleteReport(b.getAttribute("data-del"))));
   }catch(e){ el.innerHTML='<span class="muted">Couldn\'t load.</span>'; }
 }
@@ -356,9 +374,10 @@ function buildStandalone(){
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(L.title)}</title><style>${css}</style></head><body><div id="report">${L.inner}</div>`+
     `<`+`script>function tog(id){var el=document.getElementById(id);if(el)el.classList.toggle('open');}window.tog=tog;<`+`/script></body></html>`;
 }
-async function saveReport(){
+async function saveReport(opts){
   if(!window.__lastReport){ return; }
-  const msg=$("saveMsg"); if(msg)msg.textContent="Saving…";
+  const auto=opts&&opts.auto===true;
+  const msg=$("saveMsg"); if(msg)msg.textContent = auto?"Saving to portal…":"Saving…";
   try{
     const form=new FormData();
     form.append("html", new Blob([buildStandalone()],{type:"text/html"}), "report.html");
@@ -366,7 +385,8 @@ async function saveReport(){
     form.append("weekStart", window.__lastReport.weekStart);
     form.append("weekEnd", window.__lastReport.weekEnd);
     const r=await authFetch("/fleet/report",{method:"POST",body:form}).then(r=>r.json());
-    if(msg)msg.textContent = r.ok ? "✓ Saved to portal" : ("Save failed — "+(r.error||""));
+    if(msg)msg.textContent = r.ok ? (auto?"✓ Saved automatically":"✓ Saved to portal") : ("Save failed — "+(r.error||""));
+    if(r&&r.ok) loadPastReports();   // refresh the saved list (under its month banner)
   }catch(e){ if($("saveMsg"))$("saveMsg").textContent="Save failed"; }
 }
 window.saveReport=saveReport;
@@ -477,6 +497,7 @@ async function generate(){
     renderReport({vehicles,scores,weeks,vanByWeek,minD,maxD,dmap});
     $("genPane").style.display="none";
     window.scrollTo(0,0);
+    saveReport({auto:true});   // every generated report saves to the portal automatically
   }catch(e){ console.error(e); $("status").textContent="Couldn't build the report: "+(e.message||e); $("genBtn").disabled=false; }
 }
 
@@ -615,7 +636,7 @@ function renderReport(R){
   const poolUI=buildPoolAllocUI(R);
 
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button class="btn" onclick="saveReport()">💾 Save to portal</button>
+    <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again</button>
     <button class="btn grey" onclick="downloadReport()">⬇️ Export HTML file</button>
     <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
     <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>
