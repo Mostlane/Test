@@ -342,6 +342,16 @@
   }
   // Jump the grid to a filtered view (banner segments link here).
   window.jumpFilter=function(f){ const s=$("filterActive"); if(s){ s.value=f; renderFleet(); } try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){} };
+  // The exact renewal issue(s) for a van, so the banner pinpoints (e.g.
+  // "MOT overdue" / "tax due in 12 days" / "handover pending") rather than a
+  // vague "MOT / tax / handover". Returns [] when nothing is outstanding.
+  function renewalReason(v){
+    const out=[]; const m=daysTo(v.motDue), t=daysTo(v.taxDue);
+    if(m!=null&&m<0) out.push("MOT overdue"); else if(m!=null&&m<=30) out.push(m===0?"MOT due today":`MOT due in ${m} day${m===1?"":"s"}`);
+    if(t!=null&&t<0) out.push("tax overdue"); else if(t!=null&&t<=30) out.push(t===0?"tax due today":`tax due in ${t} day${t===1?"":"s"}`);
+    if(v.pendingHandover) out.push("handover pending");
+    return out;
+  }
   // Green "all clear" / red "needs attention" banner naming exactly what's
   // outstanding across the fleet (faults, services due/overdue, MOT/tax/handover).
   function renderBanner(){
@@ -349,12 +359,14 @@
     const on=v=>v.active!==false;
     const faults=FLEET.filter(v=>on(v)&&hasDefect(v));
     const svc=FLEET.filter(v=>on(v)&&(v.serviceStatus==="warn"||v.serviceStatus==="bad"));
-    const other=FLEET.filter(v=>on(v)&&svc.indexOf(v)<0&&((daysTo(v.motDue)!=null&&daysTo(v.motDue)<=30)||(daysTo(v.taxDue)!=null&&daysTo(v.taxDue)<=30)||!!v.pendingHandover));
+    const other=FLEET.filter(v=>on(v)&&svc.indexOf(v)<0&&renewalReason(v).length);
     const regs=arr=>arr.map(v=>v.reg||"?").join(", ");
     const parts=[];
     if(faults.length) parts.push(`<a class="fb-seg" onclick="jumpFilter('faults')">🔧 ${faults.length} van${faults.length>1?"s":""} with a fault <small>(${esc(regs(faults))})</small></a>`);
     if(svc.length){ const od=svc.filter(v=>v.serviceStatus==="bad").length; const lbl=od?`${svc.length} service${svc.length>1?"s":""} due — ${od} overdue`:`${svc.length} service${svc.length>1?"s":""} due`; parts.push(`<a class="fb-seg" onclick="jumpFilter('due')">🛠 ${lbl} <small>(${esc(regs(svc))})</small></a>`); }
-    if(other.length) parts.push(`<a class="fb-seg" onclick="jumpFilter('attention')">📋 ${other.length} MOT / tax / handover <small>(${esc(regs(other))})</small></a>`);
+    // Renewals: one PINPOINTED segment per van naming its exact issue(s) — not a
+    // vague "MOT / tax / handover" that could be any of them.
+    other.forEach(v=>{ parts.push(`<a class="fb-seg" onclick="jumpFilter('attention')">📋 <b>${esc(v.reg||"?")}</b> — ${esc(renewalReason(v).join(", "))}</a>`); });
     b.style.display="";
     if(!parts.length){ b.className="fleet-banner ok"; b.innerHTML="✓ Fleet all clear — no faults, services or renewals outstanding."; }
     else { b.className="fleet-banner bad"; b.innerHTML=`<span class="fb-title">⚠ Fleet needs attention:</span>`+parts.join(""); }
