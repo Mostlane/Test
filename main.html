@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <script src="/portal-config.js?v=4"></script>
+  <script src="/portal-config.js?v=5"></script>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -446,11 +446,11 @@ const MAP = window.ML_PERM_MAP || {
   // "My Hours" — an office-clock user's OWN clocked hours (office-my-hours.html).
   // Every office user who clocks in/out sees this (Full Access too).
   MyHours: ["OfficeClock", "OfficeTimesheet"],
-  // "Timesheet" — the office-WIDE hours (everyone) is FULL ACCESS ONLY, so the
-  // MAP lists only Vehicles (van timesheet); Full Access sees it via fullAccess
-  // and applyGate points them at office-timesheet.html. An OfficeTimesheet-only
-  // office user no longer sees this tile — they use "My Hours" instead.
-  OfficeTimesheet: ["Vehicles"],
+  // "Timesheet" — the office-WIDE hours (office-timesheet.html) is FULL ACCESS
+  // ONLY. Office / Vehicles users never see this tile; office users use "My
+  // Hours" instead, and Vehicles users reach the van (door-to-door) timesheet
+  // from a "Van Timesheet" button on the Vehicles page.
+  OfficeTimesheet: ["__fullOnly"],
   // Engineer weekly timesheet (times + jobs; invoices/mileage if self-employed)
   EngTimesheet: ["EngTimesheet"],
   // Office view of the engineer timesheets + invoices + deduction settings
@@ -524,7 +524,7 @@ const MAP = window.ML_PERM_MAP || {
           if (!btn) return;
           for (const [perm, href] of choices) { if (has(perm)) { btn.href = href; return; } }
         };
-        setHref("OfficeTimesheet", [["FullAccess", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]]);
+        setHref("OfficeTimesheet", [["FullAccess", "office-timesheet.html"]]);   // Full Access only → office-wide timesheet
         setHref("Users",          [["Users", "users-admin.html"],              ["DeviceAdmin", "device-admin.html"]]);
         setHref("Projects",       [["Projects", "projects.html"],              ["ProjectsAdmin", "projects-admin.html"]]);
 
