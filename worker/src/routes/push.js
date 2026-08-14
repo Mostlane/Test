@@ -46,7 +46,12 @@ export async function ensureFeedTable(env) {
     url TEXT,
     tag TEXT,
     created_at TEXT,
+    seen_at TEXT,
     read_at TEXT)`).run();
+  // Facebook-style two states: seen_at = the red badge (cleared when the bell is
+  // opened), read_at = the bold/blue-dot (cleared per item when it's clicked).
+  // Self-migrating for a table created before seen_at existed.
+  try { await env.DB.prepare("ALTER TABLE user_notifications ADD COLUMN seen_at TEXT").run(); } catch {}
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_usernotif ON user_notifications(tenant_id, username, id)").run(); } catch {}
   FEED_READY = true;
 }

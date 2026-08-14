@@ -1166,7 +1166,12 @@ async function ensureFeedTable(env) {
     url TEXT,
     tag TEXT,
     created_at TEXT,
+    seen_at TEXT,
     read_at TEXT)`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE user_notifications ADD COLUMN seen_at TEXT").run();
+  } catch {
+  }
   try {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_usernotif ON user_notifications(tenant_id, username, id)").run();
   } catch {
@@ -7158,7 +7163,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (!sess) return error("Not authenticated", 401, env, request);
     await ensureFeedTable(env);
     const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
   }
@@ -7179,7 +7184,7 @@ async function handle10(request, env, ctx, url, sess) {
       read: !!r.read_at
     }));
     const cRow = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
   }
@@ -7188,12 +7193,14 @@ async function handle10(request, env, ctx, url, sess) {
     await ensureFeedTable(env);
     const b = await request.json().catch(() => ({}));
     const at = (/* @__PURE__ */ new Date()).toISOString();
-    if (b.all) {
-      await db.prepare("UPDATE user_notifications SET read_at=? WHERE tenant_id=? AND username=? AND read_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
+    if (b.seen) {
+      await db.prepare("UPDATE user_notifications SET seen_at=? WHERE tenant_id=? AND username=? AND seen_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
+    } else if (b.all) {
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND username=? AND (read_at IS NULL OR seen_at IS NULL)").bind(at, at, db.tenantId, sess.user.username).run();
     } else if (b.id != null) {
-      await db.prepare("UPDATE user_notifications SET read_at=? WHERE id=? AND tenant_id=? AND username=? AND read_at IS NULL").bind(at, Number(b.id), db.tenantId, sess.user.username).run();
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE id=? AND tenant_id=? AND username=?").bind(at, at, Number(b.id), db.tenantId, sess.user.username).run();
     } else {
-      return error("Send id or all:true", 400, env, request);
+      return error("Send seen:true, id, or all:true", 400, env, request);
     }
     return json({ ok: true }, {}, env, request);
   }
