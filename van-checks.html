@@ -38,8 +38,12 @@
     .viewer { position:fixed; inset:0; background:rgba(0,0,0,.9); z-index:2000; display:none; align-items:center; justify-content:center; }
     .viewer.open { display:flex; } .viewer img { max-width:94%; max-height:90%; border-radius:8px; }
     .msg { font-size:13.5px; margin:8px 0 0; } .msg.err { color:var(--bad); } .msg.ok { color:var(--ok); }
-    .itemrow { display:flex; gap:7px; align-items:center; margin-bottom:6px; }
-    .itemrow input.ir-label { flex:1; min-width:0; padding:8px; }
+    .itemrow { display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin-bottom:6px; }
+    /* The question keeps a sensible minimum width so ticking "Alert if" (which
+       reveals the answer select) can never squeeze it to nothing — the alert
+       controls wrap to the next line instead of hiding the question. */
+    .itemrow input.ir-label { flex:1 1 200px; min-width:150px; padding:8px; }
+    .itemrow .rm { margin-left:auto; }
     .itemrow .ir-alertwrap { display:flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:#5b6b7b; white-space:nowrap; }
     .itemrow select { padding:7px; border:1px solid #ccd5dd; border-radius:8px; font-size:13px; font-family:inherit; }
     .itemrow .rm { background:#fdecea; color:var(--bad); border:none; border-radius:8px; width:30px; height:34px; font-size:14px; cursor:pointer; flex:none; }
