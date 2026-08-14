@@ -309,6 +309,30 @@
     }
   } catch (e) {}
 
+  // ── Back buttons go BACK ONE PAGE ───────────────────────────────────────────
+  // Every standard back button (.ml-back) should return to the PREVIOUS page the
+  // user was actually on — not a fixed parent. We intercept the click and use the
+  // browser history when we arrived from within the portal; otherwise (direct
+  // load, PWA cold-start, or an external referrer) we fall back to the button's
+  // own href so the user is never stranded. One handler covers every page.
+  (function backOnePage() {
+    function fromPortal() {
+      try { return !!document.referrer && new URL(document.referrer).origin === location.origin; }
+      catch (e) { return false; }
+    }
+    document.addEventListener("click", function (e) {
+      // Leave modifier / middle clicks (open-in-new-tab) alone.
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      var a = e.target && e.target.closest ? e.target.closest(".ml-back") : null;
+      if (!a) return;
+      if (window.history.length > 1 && fromPortal()) {
+        e.preventDefault();
+        window.history.back();
+      }
+      // else: fall through — the href navigates to the sensible parent.
+    }, true);
+  })();
+
   // ── View As (owner only) ────────────────────────────────────────────────────
   // Jamie can open a real session as any user to see exactly what they see.
   // The server locks /auth/impersonate to the owner account and audits each use.
