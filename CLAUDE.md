@@ -207,6 +207,27 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,
   approve/reject (type override), staff self-cancel (notifies admin), bank
   holidays (GOV.UK import) + shutdown + worked-credit, batch system days.
+  **"Used" is USED-TO-DATE (Aug 2026):** `computeUsage()` (shared by
+  /holiday/summary + /holiday/admin-summary) counts a bank-holiday/shutdown
+  system day toward `used` only once its date has PASSED; the full-year figure is
+  `committed` (remaining = allowance − committed). **Duplicate-day safeguard:** a
+  system day (bank/shutdown) whose date is already covered by an approved paid
+  Holiday booking is NOT charged again (`bookedHolidayDates` → skip) — a holiday
+  on a bank holiday only ever costs one day. Both summaries return a per-person
+  breakdown `{booked, bankHolidays, shutdown, committed, usedToDate}` (system days
+  split by `kind`; `sysOut` now exposes `kind`). **Wall chart (holiday-admin.html):**
+  each name shows a summary (`N booked · N bank · N shutdown · N left` from BALMAP),
+  and clicking a name highlights that row — persisting across month navigation
+  (`SELECT­ED_USER` + `applyWallSel`, re-applied in loadWall); click again to clear.
+  **Timetastic re-sync (Aug 2026):** the live 2025/2026 leave + allowances were
+  reconciled to the Timetastic full export — the `H-TT-<bookingId>` rows were
+  replaced from the export (real leave only: Holiday/Unpaid/Compassionate→Other),
+  per-year `holiday_allowance` set from the export's per-year columns. Bank
+  holidays/shutdown stay portal-generated system days; **2026-01-02 was reclassified
+  from bank holiday → company shutdown** (config + system days) to match Timetastic.
+  NB bank holidays are still generated UNIFORMLY per active user, so owners (Greg/
+  Jamie) whose Timetastic bank-holiday count differs are over-deducted — per-person
+  bank holidays would need the export's bank rows imported + auto-gen disabled.
 - `assets.js` — assets CRUD + images (R2 ASSET_BUCKET=mostlane-asset-images;
   /asset-image + /asset-thumb by key), transfer workflow (request → accept
   with signature + condition photos both sides → formal TRANSFER_NOTE,
