@@ -9177,6 +9177,13 @@ async function vanCheckPhotoCounts(env, tid) {
   return out;
 }
 var DEFECTCLR_KEY = (tid) => `fleet:defectsclear:${tid}`;
+var VCACK_KEY = (tid) => `fleet:vcack:${tid}`;
+var VC_WINDOW_MS = 7 * 864e5;
+function vanCheckState(lastAt, ack) {
+  if (lastAt && Date.now() - new Date(lastAt).getTime() <= VC_WINDOW_MS) return { state: "ok", at: lastAt, ackBy: "" };
+  if (ack && ack.at && Date.now() - new Date(ack.at).getTime() <= VC_WINDOW_MS) return { state: "ack", at: lastAt || "", ackBy: ack.by || "" };
+  return { state: "due", at: lastAt || "", ackBy: "" };
+}
 async function vanCheckDefects(env, tid, resolved) {
   const out = {};
   try {
@@ -9423,6 +9430,12 @@ async function handle20(request, env, ctx, url, sess) {
     }
     const defects = await vanCheckDefects(env, tid, defResolved);
     const lastVc = await lastVanCheckMap(env, tid);
+    let vcAck = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first();
+      if (row && row.value) vcAck = JSON.parse(row.value) || {};
+    } catch {
+    }
     await ensureHandoverTable(env);
     const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
     const lastHo = {}, pendHo = {};
@@ -9492,7 +9505,9 @@ async function handle20(request, env, ctx, url, sess) {
         defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
         defectSince: (defects[dn(v.reg)] || {}).since || "",
         lastVanCheckAt: lastVc[dn(v.reg)] || "",
-        // newest van check (for the "checked in last 7 days" card badge)
+        // newest van check date
+        vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
+        // card status bar: ok | ack | due
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0
@@ -10191,6 +10206,22 @@ async function handle20(request, env, ctx, url, sess) {
     map[rk] = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
     return jr3({ ok: true, reg, resolvedAt: map[rk] }, headers);
+  }
+  if (sub === "/vancheck-ack" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    let map = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first();
+      if (row && row.value) map = JSON.parse(row.value) || {};
+    } catch {
+    }
+    if (b.clear) delete map[rk];
+    else map[rk] = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess && sess.user && sess.user.username || "" };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VCACK_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, reg, ack: map[rk] || null }, headers);
   }
   if (sub === "/handover/request" && method === "POST") {
     await ensureHandoverTable(env);
