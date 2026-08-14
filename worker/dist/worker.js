@@ -15738,6 +15738,29 @@ var index_default = {
       sess = await requireSession(env, request);
       if (!sess) return error("Not authenticated", 401, env, request);
     }
+    if (url.pathname === "/batch" && request.method === "POST") {
+      if (!sess) return error("Not authenticated", 401, env, request);
+      const b = await request.json().catch(() => ({}));
+      const paths = (Array.isArray(b.paths) ? b.paths : []).map(String).filter((p) => p.startsWith("/")).slice(0, 20);
+      const results = {};
+      await Promise.all(paths.map(async (p) => {
+        try {
+          const subUrl = new URL(url.origin + p);
+          if (subUrl.pathname === "/batch") throw new Error("no nesting");
+          const m = ROUTES.filter(([, prefix2]) => subUrl.pathname === prefix2 || subUrl.pathname.startsWith(prefix2 + "/") || subUrl.pathname.startsWith(prefix2)).sort((a2, b2) => b2[1].length - a2[1].length)[0];
+          if (!m) {
+            results[p] = { error: "Not found" };
+            return;
+          }
+          const subReq = new Request(subUrl.toString(), { method: "GET", headers: request.headers });
+          const resp = await m[2](subReq, env, ctx, subUrl, sess);
+          results[p] = await resp.json().catch(() => ({ error: "bad response" }));
+        } catch (e) {
+          results[p] = { error: String(e && e.message || e) };
+        }
+      }));
+      return json({ ok: true, results }, {}, env, request);
+    }
     const match = ROUTES.filter(([, prefix2]) => url.pathname === prefix2 || url.pathname.startsWith(prefix2 + "/") || url.pathname.startsWith(prefix2)).sort((a, b) => b[1].length - a[1].length)[0];
     if (!match) return error("Not found: " + url.pathname, 404, env, request);
     const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;

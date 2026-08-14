@@ -2,7 +2,7 @@
 // Single canonical SW (scope "/"). Registering this replaces any earlier SW at
 // the same scope (the old push-only service-worker.js), so there's just one.
 
-const CACHE_NAME = "mostlane-v73";
+const CACHE_NAME = "mostlane-v74";
 
 // Precache the shell so the app can at least boot on a dead/flaky connection.
 const CORE_ASSETS = [
@@ -14,7 +14,8 @@ const CORE_ASSETS = [
   "/offline.html",
   "/Mostlane_Embossed.png",
   "/icons/icon-192.png",
-  "/pwa.js"
+  "/pwa.js",
+  "/portal.css?v=1"
 ];
 
 self.addEventListener("install", (e) => {

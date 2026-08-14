@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Van Checks — Weekly</title>
   <script src="/portal-config.js?v=5"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
@@ -261,7 +262,11 @@
     }
   }
   async function setPaused(paused) {
-    if (paused && !confirm("Pause weekly van-check reminders for EVERYONE?\n\nNo Monday/deadline nudges and no home-screen prompt will be sent until you resume. Drivers can still do a check manually.")) return;
+    if (paused) {
+      const msg = "Pause weekly van-check reminders for EVERYONE?\n\nNo Monday/deadline nudges and no home-screen prompt will be sent until you resume. Drivers can still do a check manually.";
+      const ok = window.MLUI ? await MLUI.confirm(msg, { title: "Pause all reminders", okLabel: "⏸ Pause all", danger: true }) : confirm(msg);
+      if (!ok) return;
+    }
     try {
       const r = await authFetch("/vancheck/pause-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused }) }).then(r => r.json());
       if (!r.ok) { alert(r.error || "Couldn't update."); return; }

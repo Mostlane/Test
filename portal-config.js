@@ -333,6 +333,98 @@
     }, true);
   })();
 
+  // ── MLUI: styled toasts + confirm dialog (portal-wide) ──────────────────────
+  // window.alert() everywhere becomes a clean branded toast (non-blocking; a
+  // toast raised just before a redirect survives onto the next page), and
+  // window.MLUI.confirm(msg, {title, okLabel, danger}) is a Promise-based
+  // styled replacement for confirm() that pages adopt call-site by call-site
+  // (native confirm stays available — it's synchronous, so it can't be swapped
+  // globally without rewriting callers).
+  (function mlui() {
+    var PENDING_KEY = "mlToastPending";
+    function ensureCss() {
+      if (document.getElementById("mlui-css")) return;
+      var s = document.createElement("style");
+      s.id = "mlui-css";
+      s.textContent =
+        "#mlToastHost{position:fixed;left:0;right:0;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:2147482000;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;}" +
+        ".ml-toast{pointer-events:auto;max-width:min(92vw,460px);background:#0f172a;color:#fff;border-radius:12px;padding:12px 18px;font:600 14px/1.45 'Segoe UI',system-ui,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.35);opacity:0;transform:translateY(8px);transition:opacity .22s,transform .22s;cursor:pointer;white-space:pre-line;text-align:center;}" +
+        ".ml-toast.on{opacity:1;transform:none;}" +
+        ".ml-toast.ok{background:#14532d;}" +
+        ".ml-toast.err{background:#7f1d1d;}" +
+        ".ml-confirm-ov{position:fixed;inset:0;z-index:2147482001;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:18px;}" +
+        ".ml-confirm{background:#fff;border-radius:16px;max-width:420px;width:100%;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.35);font-family:'Segoe UI',system-ui,sans-serif;}" +
+        ".ml-confirm h3{margin:0 0 8px;font-size:17px;color:#003366;}" +
+        ".ml-confirm p{margin:0;font-size:14.5px;line-height:1.55;color:#334155;white-space:pre-line;}" +
+        ".ml-confirm .mlc-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}" +
+        ".ml-confirm button{border:none;border-radius:10px;padding:10px 16px;font:600 14px 'Segoe UI',system-ui;cursor:pointer;}" +
+        ".ml-confirm .mlc-cancel{background:#eef2f6;color:#1f2a44;}" +
+        ".ml-confirm .mlc-ok{background:#003b82;color:#fff;}" +
+        ".ml-confirm .mlc-ok.danger{background:#dc2626;}";
+      (document.head || document.documentElement).appendChild(s);
+    }
+    var earlyQueue = [];
+    function show(msg, type) {
+      if (!document.body) { earlyQueue.push([msg, type]); return; }
+      ensureCss();
+      var host = document.getElementById("mlToastHost");
+      if (!host) { host = document.createElement("div"); host.id = "mlToastHost"; document.body.appendChild(host); }
+      var t = document.createElement("div");
+      t.className = "ml-toast" + (type ? " " + type : "");
+      t.textContent = msg;
+      host.appendChild(t);
+      requestAnimationFrame(function () { t.classList.add("on"); });
+      var gone = false;
+      var kill = function () { if (gone) return; gone = true; t.classList.remove("on"); setTimeout(function () { t.remove(); }, 250); };
+      t.addEventListener("click", kill);
+      setTimeout(kill, Math.min(9000, 3200 + msg.length * 30));
+    }
+    function toast(msg, type) {
+      msg = String(msg == null ? "" : msg);
+      if (!msg) return;
+      // Survive an immediate redirect: stash the toast; the next page re-shows
+      // it if we unloaded within ~1.5s, else the stash is cleared below.
+      try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ msg: msg, type: type || "", at: Date.now() })); } catch (e) {}
+      setTimeout(function () { try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {} }, 1500);
+      show(msg, type);
+    }
+    function confirmBox(msg, opts) {
+      opts = opts || {};
+      ensureCss();
+      return new Promise(function (resolve) {
+        var ov = document.createElement("div");
+        ov.className = "ml-confirm-ov";
+        ov.innerHTML = '<div class="ml-confirm" role="dialog" aria-modal="true"><h3 style="display:none"></h3><p></p>' +
+          '<div class="mlc-btns"><button type="button" class="mlc-cancel"></button>' +
+          '<button type="button" class="mlc-ok' + (opts.danger ? " danger" : "") + '"></button></div></div>';
+        if (opts.title) { var h = ov.querySelector("h3"); h.style.display = ""; h.textContent = opts.title; }
+        ov.querySelector("p").textContent = String(msg == null ? "" : msg);
+        ov.querySelector(".mlc-cancel").textContent = opts.cancelLabel || "Cancel";
+        ov.querySelector(".mlc-ok").textContent = opts.okLabel || "OK";
+        var done = function (v) { ov.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
+        var onKey = function (e) { if (e.key === "Escape") { e.preventDefault(); done(false); } };
+        ov.querySelector(".mlc-cancel").addEventListener("click", function () { done(false); });
+        ov.querySelector(".mlc-ok").addEventListener("click", function () { done(true); });
+        ov.addEventListener("click", function (e) { if (e.target === ov) done(false); });
+        document.addEventListener("keydown", onKey, true);
+        document.body.appendChild(ov);
+        try { ov.querySelector(".mlc-ok").focus(); } catch (e) {}
+      });
+    }
+    function boot() {
+      earlyQueue.splice(0).forEach(function (a) { show(a[0], a[1]); });
+      try {
+        var p = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
+        sessionStorage.removeItem(PENDING_KEY);
+        if (p && p.msg && Date.now() - (p.at || 0) < 5000) show(p.msg, p.type);
+      } catch (e) {}
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+    else boot();
+    window.MLUI = { toast: toast, confirm: confirmBox };
+    window.alert = function (m) { toast(m); };
+  })();
+
   // ── View As (owner only) ────────────────────────────────────────────────────
   // Jamie can open a real session as any user to see exactly what they see.
   // The server locks /auth/impersonate to the owner account and audits each use.
@@ -634,7 +726,9 @@
       function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
       function navInner() {
-        var out = "";
+        var out = '<div class="pn-grp"><a class="pn-item pn-search" href="#" title="Quick search (Ctrl+K)">'
+          + '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
+          + '<span class="pn-label">Search <span class="pn-kbd">Ctrl K</span></span></a></div>';
         NAV.forEach(function (grp) {
           var items = grp.items.filter(allowed);
           if (!items.length) return;
@@ -685,6 +779,8 @@
         el.addEventListener("click", function (e) {
           var launch = e.target.closest ? e.target.closest("[data-launch]") : null;
           if (launch) { e.preventDefault(); doLaunch(launch.getAttribute("data-launch")); }
+          var srch = e.target.closest ? e.target.closest(".pn-search") : null;
+          if (srch) { e.preventDefault(); openPalette(); }
         });
         document.getElementById("pnavLogout").addEventListener("click", function () {
           localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html";
@@ -695,7 +791,118 @@
         });
         try { initOfficeClock(); } catch (e) {}
         try { if (yes(perms.FullAccess)) refreshMenuConfig(); } catch (e) {}
+        try { initPalette(); } catch (e) {}
       }
+
+      // ── Command palette (Ctrl+K / Cmd+K, desktop) ──────────────────────────
+      // Type to jump anywhere: portal pages (permission-filtered, same list as
+      // the sidebar), live site search (→ site folder) and vehicles (→ the
+      // van's deep-dive). Arrow keys + Enter, Esc closes.
+      var openPalette = function () {};
+      function initPalette() {
+        if (window.__mlPalette) return;
+        window.__mlPalette = true;
+        var st = document.createElement("style");
+        st.textContent =
+          ".pn-kbd{margin-left:auto;font:600 10px/1 'Segoe UI',system-ui;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:2px 6px;color:#cbd9ec;}" +
+          "#mlPalOv{position:fixed;inset:0;z-index:2147481000;background:rgba(10,20,40,.45);backdrop-filter:blur(2px);display:none;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;}" +
+          "#mlPalOv.on{display:flex;}" +
+          "#mlPal{background:#fff;border-radius:16px;width:100%;max-width:560px;box-shadow:0 24px 70px rgba(0,0,0,.4);overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;}" +
+          "#mlPal input{width:100%;border:none;outline:none;padding:16px 18px;font:600 16px 'Segoe UI',system-ui;color:#16202e;border-bottom:1px solid #e2e8f0;box-sizing:border-box;}" +
+          "#mlPalList{max-height:46vh;overflow:auto;padding:6px;}" +
+          ".mlp-it{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;font-size:14px;color:#16202e;}" +
+          ".mlp-it .em{width:22px;text-align:center;flex:none;}" +
+          ".mlp-it .hint{margin-left:auto;color:#94a3b8;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;flex:none;}" +
+          ".mlp-it.sel{background:#eef4fc;}" +
+          ".mlp-none{padding:18px;text-align:center;color:#94a3b8;font-size:13.5px;}";
+        document.head.appendChild(st);
+        var ov = document.createElement("div");
+        ov.id = "mlPalOv";
+        ov.innerHTML = '<div id="mlPal"><input id="mlPalIn" placeholder="Jump to a page, site or vehicle…" autocomplete="off"><div id="mlPalList"></div></div>';
+        document.body.appendChild(ov);
+        var input = ov.querySelector("#mlPalIn"), listEl = ov.querySelector("#mlPalList");
+        var API = window.MOSTLANE_API, token = function () { return localStorage.getItem("mostlaneToken"); };
+        var GRP_EMOJI = { }; // page rows use a generic emoji; data rows get their own
+        var vehicles = null, siteHits = [], siteTimer = null, results = [], sel = 0, curQ = "";
+
+        function pageItems() {
+          var out = [];
+          NAV.forEach(function (grp) {
+            grp.items.filter(allowed).forEach(function (it) {
+              out.push({ em: "📄", label: it.label, hint: grp.title, href: it.launch ? null : "/" + resolveHref(it), launch: it.launch || null });
+            });
+          });
+          return out;
+        }
+        function loadVehicles() {
+          if (vehicles !== null) return;
+          vehicles = [];
+          if (!(yes(perms.FullAccess) || yes(perms.Vehicles))) return;
+          fetch(API + "/fleet/vehicles", { headers: { Authorization: "Bearer " + token() } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              vehicles = ((d && d.vehicles) || []).map(function (v) {
+                return { em: "🚐", label: v.reg + (v.driver ? " — " + v.driver : ""), hint: "Vehicle", href: "/vehicles.html?veh=" + encodeURIComponent(v.reg) };
+              });
+              render(curQ);
+            }).catch(function () {});
+        }
+        function searchSites(q) {
+          clearTimeout(siteTimer);
+          if (q.length < 2) { siteHits = []; return; }
+          siteTimer = setTimeout(function () {
+            fetch(API + "/ts/sites?q=" + encodeURIComponent(q), { headers: { Authorization: "Bearer " + token() } })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                siteHits = ((d && d.sites) || []).filter(function (s) { return s.code; }).slice(0, 6).map(function (s) {
+                  return { em: "📍", label: s.name + (s.postcode ? " · " + s.postcode : ""), hint: "Site folder", href: "/site-folder.html?site=" + encodeURIComponent(s.code) };
+                });
+                render(curQ);
+              }).catch(function () {});
+          }, 220);
+        }
+        function render(q) {
+          curQ = q;
+          var ql = q.toLowerCase().trim();
+          var pages = pageItems().filter(function (it) { return !ql || it.label.toLowerCase().indexOf(ql) !== -1 || it.hint.toLowerCase().indexOf(ql) !== -1; });
+          var vs = (vehicles || []).filter(function (v) { return ql && v.label.toLowerCase().indexOf(ql) !== -1; });
+          results = pages.slice(0, ql ? 8 : 14).concat(vs.slice(0, 5)).concat(ql ? siteHits : []);
+          sel = 0;
+          if (!results.length) { listEl.innerHTML = '<div class="mlp-none">Nothing matches — try a page name, site or reg.</div>'; return; }
+          listEl.innerHTML = results.map(function (it, i) {
+            return '<div class="mlp-it' + (i === sel ? " sel" : "") + '" data-i="' + i + '"><span class="em">' + it.em + "</span><span>" + esc(it.label) + '</span><span class="hint">' + esc(it.hint) + "</span></div>";
+          }).join("");
+        }
+        function go(it) {
+          if (!it) return;
+          close();
+          if (it.launch) doLaunch(it.launch);
+          else if (it.href) location.href = it.href;
+        }
+        function openPal() { ov.classList.add("on"); input.value = ""; siteHits = []; loadVehicles(); render(""); setTimeout(function () { input.focus(); }, 30); }
+        function close() { ov.classList.remove("on"); }
+        openPalette = openPal;
+        input.addEventListener("input", function () { searchSites(input.value); render(input.value); });
+        input.addEventListener("keydown", function (e) {
+          if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(results.length - 1, sel + 1); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); }
+          else if (e.key === "Enter") { e.preventDefault(); go(results[sel]); return; }
+          else return;
+          var kids = listEl.querySelectorAll(".mlp-it");
+          for (var i = 0; i < kids.length; i++) kids[i].classList.toggle("sel", i === sel);
+          if (kids[sel]) kids[sel].scrollIntoView({ block: "nearest" });
+        });
+        listEl.addEventListener("click", function (e) {
+          var row = e.target.closest ? e.target.closest(".mlp-it") : null;
+          if (row) go(results[+row.getAttribute("data-i")]);
+        });
+        ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+        document.addEventListener("keydown", function (e) {
+          if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "k") { e.preventDefault(); ov.classList.contains("on") ? close() : openPal(); }
+          else if (e.key === "Escape" && ov.classList.contains("on")) { e.preventDefault(); close(); }
+        });
+      }
+
       function rebuild() {
         var nav = document.getElementById("pnavNav");
         if (nav) nav.innerHTML = navInner();

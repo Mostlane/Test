@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <script src="/portal-config.js?v=5"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
   <title>Mostlane • Vehicles</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -329,6 +330,8 @@
       // KPI lands here on the Needs-attention view).
       try{ const f=new URLSearchParams(location.search).get("filter"); const sel=$("filterActive"); if(f && sel && [...sel.options].some(o=>o.value===f)) sel.value=f; }catch(e){}
       updateSummary(); renderFleet();
+      // ?veh=REG (command palette) → open that van's deep-dive straight away.
+      try{ const vq=new URLSearchParams(location.search).get("veh"); if(vq){ const norm=s=>String(s||"").replace(/\s+/g,"").toUpperCase(); const hit=FLEET.find(v=>norm(v.reg)===norm(vq)); if(hit) openVehicle(hit.reg); } }catch(e){}
       $("statusLine").textContent=FLEET.length?("Fleet loaded ("+FLEET.length+").") : "No vehicles yet — use “Add vehicle”.";
     }catch(e){ console.error(e); $("statusLine").textContent="Failed to load fleet."; }
   }
@@ -392,7 +395,9 @@
   }
   // Mark all of a van's reported defects resolved (clears the card flag).
   async function resolveDefects(reg){
-    if(!confirm("Mark all reported defects for "+reg+" as resolved?\n\nThe warning clears until a new defect is reported in a future van check.")) return;
+    const msg="Mark all reported defects for "+reg+" as resolved?\n\nThe warning clears until a new defect is reported in a future van check.";
+    const ok=window.MLUI?await MLUI.confirm(msg,{title:"Resolve defects",okLabel:"✓ Mark resolved"}):confirm(msg);
+    if(!ok) return;
     try{
       const r=await aFetch("/fleet/defects-resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg})}).then(r=>r.json());
       if(!r||!r.ok){ alert((r&&r.error)||"Could not mark resolved."); return; }
