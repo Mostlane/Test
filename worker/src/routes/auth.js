@@ -238,8 +238,17 @@ function shapeUser(u, perms) {
     // "office" | "field" (default field) — drives whether the user lands in the
     // office menu (main.html) or the engineer app (route.html / You).
     StaffType: staffTypeOf(u),
+    // Areas of responsibility (profile.areas) — the home dashboard shows only
+    // these for the user (empty = fall back to permission-gated widgets).
+    Areas: areasOf(u),
     ...perms,
   };
+}
+function areasOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : (u.profile || {});
+    return Array.isArray(p && p.areas) ? p.areas.map(String) : [];
+  } catch { return []; }
 }
 
 // Read staffType out of the user's profile JSON; default "field" (matches

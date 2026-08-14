@@ -458,8 +458,19 @@ function shapeUser(u, perms) {
     // "office" | "field" (default field) — drives whether the user lands in the
     // office menu (main.html) or the engineer app (route.html / You).
     StaffType: staffTypeOf(u),
+    // Areas of responsibility (profile.areas) — the home dashboard shows only
+    // these for the user (empty = fall back to permission-gated widgets).
+    Areas: areasOf(u),
     ...perms
   };
+}
+function areasOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return Array.isArray(p && p.areas) ? p.areas.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 function staffTypeOf(u) {
   try {
@@ -612,6 +623,30 @@ async function handle2(request, env, ctx, url, sess) {
     }
     return json({ ok: true, count: list.length }, {}, env, request);
   }
+  if (path === "/users/areas-meta" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    return json({ ok: true, areas: USER_AREAS }, {}, env, request);
+  }
+  if (path === "/users/set-areas" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.Username) return error("Username required", 400, env, request);
+    const valid = new Set(USER_AREAS.map((a) => a.key));
+    const areas = (Array.isArray(b.Areas) ? b.Areas : []).map(String).filter((k) => valid.has(k));
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
+    if (!row) return error("User not found", 404, env, request);
+    let profile = {};
+    try {
+      profile = row.profile ? JSON.parse(row.profile) : {};
+    } catch {
+      profile = {};
+    }
+    profile.areas = areas;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, b.Username).run();
+    return json({ ok: true, Areas: areas }, {}, env, request);
+  }
   if (path === "/users" && request.method === "POST") {
     const gate = await requireAdmin(env, request);
     if (gate.err) return gate.err;
@@ -731,6 +766,17 @@ async function handle2(request, env, ctx, url, sess) {
   }
   return error("Unknown user route", 404, env, request);
 }
+var USER_AREAS = [
+  { key: "vehicles", label: "Vehicles / van checks", perm: "Vehicles" },
+  { key: "sla", label: "SLA jobs", perm: "SLA" },
+  { key: "holidays", label: "Holidays", perm: "HolidayAdmin" },
+  { key: "equipment", label: "Plant & equipment", perm: "AssetAdmin" },
+  { key: "compliance", label: "Compliance", perm: "Compliance" },
+  { key: "purchaseorders", label: "Purchase orders", perm: "PurchaseOrders" },
+  { key: "memos", label: "Company memos", perm: "FullAccess" },
+  { key: "timesheets", label: "Engineer timesheets", perm: "TimesheetAdmin" },
+  { key: "messages", label: "Messages", perm: "" }
+];
 var PERMISSION_KEYS = [
   "FullAccess",
   "Users",
@@ -800,6 +846,7 @@ function shapeUser2(u, perms) {
     // profile blob so no schema change is needed). Everything sorts by these.
     StaffType: profile.staffType === "office" ? "office" : "field",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
+    Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     Profile: profile,
     ...perms
   };

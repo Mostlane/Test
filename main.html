@@ -225,6 +225,16 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 .kpi .ke { font-size:15px; }
 .kpi .kl { font-size:12px; color:#5b6b78; font-weight:600; margin-top:5px; line-height:1.2; }
 .kpi.bad .kn { color:#dc2626; } .kpi.warn .kn { color:#d97706; } .kpi.ok .kn { color:#15803d; }
+.kpi.ok { background:#f0fdf4; border-color:#bbf7d0; }
+/* Positive "all clear" reinforcement — a clean green card + a caught-up banner. */
+.hub-card.clear { background:linear-gradient(180deg,#f6fffa,#eefdf3); border-color:#bbf7d0; }
+.hub-card.clear .hc-stat .big { color:#15803d; }
+.hub-card.clear .hub-ok { font-size:14px; }
+#hubAllClear { display:none; align-items:center; gap:8px; background:linear-gradient(90deg,#dcfce7,#f0fdf4);
+  border:1px solid #86efac; color:#14532d; border-radius:14px; padding:12px 16px; margin:0 0 12px;
+  font:600 14.5px 'Segoe UI',system-ui,sans-serif; box-shadow:0 3px 12px rgba(0,80,30,.08); }
+#hubAllClear b { font-weight:800; }
+#hubDash.all-clear .hub-card.overview { background:linear-gradient(180deg,#f6fffa,#eefdf3); border-color:#bbf7d0; }
   </style>
   <!-- PWA CORE -->
 <link rel="manifest" href="/manifest.json">
@@ -287,6 +297,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
        widget the user can see has loaded (see the hub script near the page end). -->
   <div id="hubDash">
     <span class="hub-h">🏠 Your dashboard</span>
+    <div id="hubAllClear" style="display:none">🎉 <b>You're all caught up.</b> Nothing needs your attention right now — nice work.</div>
     <div id="hubGrid"></div>
   </div>
 
@@ -1264,6 +1275,9 @@ const MAP = window.ML_PERM_MAP || {
       if (o.ok) h += '<div class="hub-ok">✓ ' + esc(o.ok) + '</div>';
       if (o.rows) h += o.rows;
       if (o.actions) h += '<div class="hub-actions">' + o.actions + '</div>';
+      // Clear = a positive "✓" line and nothing amber/red. HUB.run reads this
+      // hidden marker to green the card + decide the "all up to date" banner.
+      if (!o.tone && o.ok) h += '<i data-clear hidden></i>';
       return h;
     }
     function act(href, label, primary) { return '<a class="hub-btn ' + (primary ? "primary" : "ghost") + '" href="' + href + '">' + esc(label) + '</a>'; }
@@ -1277,22 +1291,50 @@ const MAP = window.ML_PERM_MAP || {
         var dash = document.getElementById("hubDash");
         if (!host || !dash || host.dataset.done) return;
         if (isFieldUser(perms)) return;   // field engineers see no dashboard at all
-        var eligible = this.widgets.filter(function (w) { try { return w.can(perms); } catch (e) { return false; } });
+        this._perms = perms;
+        // Areas of responsibility (from /auth/me). When set, the dashboard shows
+        // ONLY those areas (My tasks + the overview always). Empty = all the areas
+        // the user can access (permission-gated).
+        var areas = Array.isArray(perms.Areas) ? perms.Areas : [];
+        var eligible = this.widgets.filter(function (w) {
+          try {
+            if (!w.can(perms)) return false;
+            if (w.always || w.first) return true;           // My tasks + overview
+            if (areas.length) return w.area && areas.indexOf(w.area) >= 0;
+            return true;
+          } catch (e) { return false; }
+        });
         if (!eligible.length) return;
         // The overview ("first") card renders at the top; the rest keep order.
         eligible.sort(function (a, b) { return (b.first ? 1 : 0) - (a.first ? 1 : 0); });
         host.dataset.done = "1";
         host.innerHTML = "";
         dash.classList.add("hub-on");   // CSS reveals it on desktop only
+        var pending = eligible.length;
+        function settle() {
+          if (--pending > 0) return;
+          if (!host.children.length) { dash.classList.remove("hub-on"); return; }
+          // Positive reinforcement: if every card came back clear, celebrate it.
+          var cards = host.querySelectorAll(".hub-card");
+          var anyAttention = false;
+          for (var i = 0; i < cards.length; i++) if (cards[i].dataset.state === "attention") anyAttention = true;
+          var banner = document.getElementById("hubAllClear");
+          if (!anyAttention && cards.length) { if (banner) banner.style.display = "flex"; dash.classList.add("all-clear"); }
+          else { if (banner) banner.style.display = "none"; dash.classList.remove("all-clear"); }
+        }
         eligible.forEach(function (w) {
           var card = document.createElement("div");
           card.className = "hub-card" + (w.wide ? " wide" : "") + (w.cls ? " " + w.cls : "");
           card.innerHTML = '<div class="hc-top"><span class="hc-emoji">' + w.emoji + '</span><h3>' + esc(w.title) + '</h3></div><div class="hub-skel">Loading…</div>';
           host.appendChild(card);
-          Promise.resolve().then(function () { return w.load(card); }).catch(function () {
-            card.remove();
-            if (!host.children.length) dash.classList.remove("hub-on");
-          });
+          Promise.resolve().then(function () { return w.load(card); }).then(function () {
+            // A card is "clear" when it rendered a positive ✓ line and no
+            // warning/alert. cardHtml drops a hidden marker for the clear state.
+            var clear = !!card.querySelector("[data-clear]") && !card.querySelector(".hub-alert");
+            card.dataset.state = clear ? "clear" : "attention";
+            if (clear) card.classList.add("clear");
+            settle();
+          }).catch(function () { card.remove(); settle(); });
         });
       }
     };
@@ -1300,7 +1342,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Tasks — my recurring tasks (always shown, even at zero) ───────
     HUB.register({
-      id: "tasks", emoji: "✅", title: "My tasks",
+      id: "tasks", emoji: "✅", title: "My tasks", always: true,
       can: function (p) { return String(p.StaffType || "").toLowerCase() !== "field"; },
       load: function (card) {
         return jget("/tasks/attention").then(function (d) {
@@ -1323,6 +1365,7 @@ const MAP = window.ML_PERM_MAP || {
     // ── Widget: Weekly van checks (Vehicles | FullAccess) ────────────────────
     HUB.register({
       id: "vancheck",
+      area: "vehicles",
       emoji: "🚐",
       title: "Van checks",
       can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
@@ -1377,6 +1420,8 @@ const MAP = window.ML_PERM_MAP || {
             '<a class="hub-btn ghost" href="van-checks.html">Open van checks</a>' +
             (outstanding.length ? '<button class="hub-btn primary" id="hubVcRemind">🔔 Remind now (' + outstanding.length + ')</button>' : '') +
             '</div>';
+          // Clear marker (this widget builds custom HTML, not cardHtml).
+          if (!outstanding.length && !defects.length && !d.globallyPaused) html += '<i data-clear hidden></i>';
           card.innerHTML = html;
 
           var rb = document.getElementById("hubVcRemind");
@@ -1392,7 +1437,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Fleet — MOT / tax / service due + pending handovers ──────────
     HUB.register({
-      id: "fleet", emoji: "🚗", title: "Fleet",
+      id: "fleet", emoji: "🚗", title: "Fleet", area: "vehicles",
       can: function (p) { return yes(p.FullAccess) || yes(p.Vehicles); },
       load: function (card) {
         return jget("/fleet/vehicles").then(function (d) {
@@ -1423,7 +1468,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: SLA jobs — open / needs scheduling / overdue / unassigned ────
     HUB.register({
-      id: "sla", emoji: "🚨", title: "SLA jobs",
+      id: "sla", emoji: "🚨", title: "SLA jobs", area: "sla",
       can: function (p) { return yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin); },
       load: function (card) {
         return jget("/sla/jobs").then(function (jobs) {
@@ -1451,7 +1496,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Holidays — requests awaiting approval + staff cancellations ──
     HUB.register({
-      id: "holidays", emoji: "🌴", title: "Holidays",
+      id: "holidays", emoji: "🌴", title: "Holidays", area: "holidays",
       can: function (p) { return yes(p.FullAccess) || yes(p.HolidayAdmin); },
       load: function (card) {
         var yr = new Date().getFullYear();
@@ -1475,7 +1520,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Equipment — transfer requests to action + decisions ──────────
     HUB.register({
-      id: "equipment", emoji: "⚙️", title: "Equipment",
+      id: "equipment", emoji: "⚙️", title: "Equipment", area: "equipment",
       can: function (p) { return yes(p.FullAccess) || yes(p.AssetAdmin); },
       load: function (card) {
         return jget("/asset/requests/attention").then(function (d) {
@@ -1497,7 +1542,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Compliance — certificates overdue / due soon (Co-op chart) ───
     HUB.register({
-      id: "compliance", emoji: "✔️", title: "Compliance",
+      id: "compliance", emoji: "✔️", title: "Compliance", area: "compliance",
       can: function (p) { return yes(p.FullAccess) || yes(p.Compliance); },
       load: function (card) {
         return jget("/compliance/stores").then(function (d) {
@@ -1528,7 +1573,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Purchase orders — POs raised but not yet priced, + review flags ─
     HUB.register({
-      id: "po", emoji: "🧾", title: "Purchase orders",
+      id: "po", emoji: "🧾", title: "Purchase orders", area: "purchaseorders",
       can: function (p) { return yes(p.FullAccess) || yes(p.PurchaseOrders); },
       load: function (card) {
         return jget("/po/api/dashboard").then(function (d) {
@@ -1551,7 +1596,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Company memos — sent memos still awaiting signatures ──────────
     HUB.register({
-      id: "memos", emoji: "📢", title: "Company memos",
+      id: "memos", emoji: "📢", title: "Company memos", area: "memos",
       can: function (p) { return yes(p.FullAccess); },
       load: function (card) {
         return jget("/memos/list").then(function (d) {
@@ -1574,7 +1619,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Engineer timesheets — invoices to process + this week's subs ──
     HUB.register({
-      id: "timesheets", emoji: "⏱️", title: "Engineer timesheets",
+      id: "timesheets", emoji: "⏱️", title: "Engineer timesheets", area: "timesheets",
       can: function (p) { return yes(p.FullAccess) || yes(p.TimesheetAdmin); },
       load: function (card) {
         return jget("/ts/admin/overview").then(function (d) {
@@ -1599,7 +1644,7 @@ const MAP = window.ML_PERM_MAP || {
 
     // ── Widget: Messages — unread office chats (opens the chat bubble) ────────
     HUB.register({
-      id: "messages", emoji: "💬", title: "Messages",
+      id: "messages", emoji: "💬", title: "Messages", area: "messages",
       can: function (p) { return String(p.StaffType || "").toLowerCase() !== "field"; },
       load: function (card) {
         return jget("/messages/unread").then(function (d) {
@@ -1624,26 +1669,30 @@ const MAP = window.ML_PERM_MAP || {
       id: "overview", emoji: "📊", title: "How are we doing", first: true, wide: true, cls: "overview",
       can: function (p) { return kpiSpecs(p).length > 0; },
       load: function (card) {
-        var specs = kpiSpecs(readPerms());
+        var specs = kpiSpecs(HUB._perms || readPerms());
         if (!specs.length) throw new Error("none");
         card.innerHTML = '<div class="hc-top"><span class="hc-emoji">📊</span><h3>How are we doing</h3></div><div class="hub-kpis"></div>';
         var box = card.querySelector(".hub-kpis");
         var slots = {};
         // Fixed-order placeholder slots so tiles don't jump around as they load.
         specs.forEach(function (s, i) { var sl = document.createElement("span"); sl.style.display = "contents"; box.appendChild(sl); slots[i] = sl; });
-        var settled = 0, shown = 0;
+        var settled = 0, shown = 0, attention = 0;
         return new Promise(function (resolve, reject) {
           specs.forEach(function (s, i) {
             jget(s.get).then(function (d) {
               var r = s.calc(d); if (!r) return;
               var tone = r.n === 0 ? "ok" : (r.bad ? "bad" : "warn");
+              if (r.n > 0) attention++;
               var inner = '<div class="krow"><span class="ke">' + s.emoji + '</span><span class="kn">' + r.n + '</span></div><div class="kl">' + esc(r.label) + '</div>';
               slots[i].innerHTML = s.onclick
                 ? '<div class="kpi ' + tone + '" onclick="' + s.onclick + '">' + inner + '</div>'
                 : '<a class="kpi ' + tone + '" href="' + s.href + '">' + inner + '</a>';
               shown++;
             }).catch(function () {}).then(function () {
-              settled++; if (settled === specs.length) { shown ? resolve() : reject(new Error("empty")); }
+              settled++; if (settled === specs.length) {
+                if (!attention && shown) box.insertAdjacentHTML("beforebegin", '<div class="hub-ok" style="margin:0 0 8px">✓ Everything in your areas is up to date.</div><i data-clear hidden></i>');
+                shown ? resolve() : reject(new Error("empty"));
+              }
             });
           });
         });
@@ -1651,35 +1700,55 @@ const MAP = window.ML_PERM_MAP || {
     });
 
     // The KPI sources: which areas the overview can summarise for this user.
+    // `always` = shown regardless of responsibilities (My tasks); every other
+    // spec carries an `area` so the overview can be limited to the user's areas.
     function kpiSpecs(p) {
       var yr = new Date().getFullYear();
+      var areas = Array.isArray(p.Areas) ? p.Areas : [];
       var all = [
-        { ok: String(p.StaffType || "").toLowerCase() !== "field", emoji: "✅", href: "my-tasks.html", get: "/tasks/attention",
+        { always: true, ok: String(p.StaffType || "").toLowerCase() !== "field", emoji: "✅", href: "my-tasks.html", get: "/tasks/attention",
           calc: function (d) { if (!d || !d.ok) return null; return { n: d.outstanding || 0, label: (d.overdue ? d.overdue + " overdue · " : "") + "tasks to do", bad: (d.overdue || 0) > 0 }; } },
-        { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-main.html", get: "/sla/jobs",
+        { area: "sla", ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-main.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var open = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")); }); var od = j.filter(function (x) { return x.sla && x.sla.state === "BREACHED"; }); return { n: open.length, label: od.length ? "open · " + od.length + " overdue" : "open jobs", bad: od.length > 0 }; } },
-        { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚐", href: "van-checks.html", get: "/vancheck/week",
+        { area: "vehicles", ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚐", href: "van-checks.html", get: "/vancheck/week",
           calc: function (d) { if (!d || !d.ok) return null; var out = (d.rows || []).filter(function (r) { return r.enabled !== false && !r.check; }).length; return { n: out, label: "van checks due", bad: false }; } },
-        { ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚗", href: "vehicles.html?filter=attention", get: "/fleet/vehicles",
+        { area: "vehicles", ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚗", href: "vehicles.html?filter=attention", get: "/fleet/vehicles",
           calc: function (d) { if (!d || !d.ok) return null; var f = {}; (d.vehicles || []).filter(function (v) { return v.active !== false; }).forEach(function (v) { var m = daysUntil(v.motDue), t = daysUntil(v.taxDue); if ((m != null && m <= 30) || (t != null && t <= 30) || v.serviceStatus === "bad" || v.serviceStatus === "warn" || v.pendingHandover) f[v.reg] = 1; }); return { n: Object.keys(f).length, label: "vans to attend", bad: false }; } },
-        { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-scheduler.html", get: "/sla/jobs",
+        { area: "sla", ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-scheduler.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var n = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")) && !x.scheduledAt; }).length; return { n: n, label: "to schedule", bad: false }; } },
-        { ok: yes(p.FullAccess) || yes(p.PurchaseOrders), emoji: "🧾", href: "po-office.html", get: "/po/api/dashboard",
+        { area: "equipment", ok: yes(p.FullAccess) || yes(p.AssetAdmin), emoji: "⚙️", href: "asset-requests.html", get: "/asset/requests/attention",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: d.toAction || 0, label: "equipment to action", bad: false }; } },
+        { area: "purchaseorders", ok: yes(p.FullAccess) || yes(p.PurchaseOrders), emoji: "🧾", href: "po-office.html", get: "/po/api/dashboard",
           calc: function (d) { if (!d || d.uncosted == null) return null; return { n: d.uncosted, label: "POs to price", bad: false }; } },
-        { ok: yes(p.FullAccess) || yes(p.HolidayAdmin), emoji: "🌴", href: "holiday-admin.html", get: "/holiday/all?year=" + yr,
+        { area: "holidays", ok: yes(p.FullAccess) || yes(p.HolidayAdmin), emoji: "🌴", href: "holiday-admin.html", get: "/holiday/all?year=" + yr,
           calc: function (a) { if (!Array.isArray(a)) return null; return { n: a.filter(function (h) { return h.status === "Pending"; }).length, label: "holidays to approve", bad: false }; } },
-        { ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "compliance.html", get: "/compliance/stores",
+        { area: "compliance", ok: yes(p.FullAccess) || yes(p.Compliance), emoji: "✔️", href: "compliance.html", get: "/compliance/stores",
           calc: function (d) { if (!d || !d.ok) return null; var od = 0; (d.stores || []).forEach(function (s) { if (s.active === 0) return; var due = s.due || {}; Object.keys(due).forEach(function (t) { var n = daysUntil(due[t]); if (n != null && n < 0) od++; }); }); return { n: od, label: "certs overdue", bad: od > 0 }; } },
-        { ok: yes(p.FullAccess), emoji: "📢", href: "notification-centre.html", get: "/memos/list",
+        { area: "memos", ok: yes(p.FullAccess), emoji: "📢", href: "notification-centre.html", get: "/memos/list",
           calc: function (d) { if (!d || !d.ok) return null; var n = (d.memos || []).filter(function (m) { return m.status === "sent" && (m.total - m.signed) > 0; }).length; return { n: n, label: "memos unsigned", bad: false }; } },
-        { ok: String(p.StaffType || "").toLowerCase() !== "field", emoji: "💬", onclick: "var l=document.getElementById('mlchat-launch');if(l){l.click();}", get: "/messages/unread",
+        { area: "timesheets", ok: yes(p.FullAccess) || yes(p.TimesheetAdmin), emoji: "⏱️", href: "timesheets-admin.html", get: "/ts/admin/overview",
+          calc: function (d) { if (!d || !d.ok) return null; return { n: (d.users || []).filter(function (u) { return u.invoice; }).length, label: "invoices to process", bad: false }; } },
+        { area: "messages", ok: String(p.StaffType || "").toLowerCase() !== "field", emoji: "💬", onclick: "var l=document.getElementById('mlchat-launch');if(l){l.click();}", get: "/messages/unread",
           calc: function (d) { if (!d || !d.ok) return null; return { n: d.unread || 0, label: "unread messages", bad: false }; } }
       ];
-      return all.filter(function (s) { return s.ok; });
+      return all.filter(function (s) {
+        if (!s.ok) return false;
+        if (s.always) return true;
+        if (areas.length) return s.area && areas.indexOf(s.area) >= 0;   // limit to the user's areas
+        return true;   // no areas set → permission-gated (every area they can see)
+      });
     }
 
-    // ── Boot: render from cached permissions (instant), then hide if none. ───
-    function boot() { HUB.run(readPerms()); }
+    // ── Boot: fetch the user's areas of responsibility (authoritative, from
+    //    mostlane-api), then render. Falls back to cached perms if it fails. ──
+    function boot() {
+      var perms = readPerms();
+      if (isFieldUser(perms)) return;   // quick bail before any fetch
+      jget("/auth/me").then(function (d) {
+        var u = (d && d.user) || {};
+        HUB.run(Object.assign({}, perms, u));   // authoritative Areas + StaffType win
+      }).catch(function () { HUB.run(perms); });
+    }
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
   })();
