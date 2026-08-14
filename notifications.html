@@ -43,6 +43,7 @@
     <p id="state" class="state off">Checking…</p>
     <div class="row">
       <button class="btn primary" id="enable" style="display:none;">Turn on notifications</button>
+      <button class="btn" id="reregister" style="display:none;">🔄 Re-register this device</button>
       <button class="btn" id="disable" style="display:none;">Turn off</button>
       <button class="btn" id="test" style="display:none;">Send test</button>
     </div>
@@ -58,8 +59,8 @@ function toast(m){ const t=g("toast"); t.textContent=m; t.style.display="block";
 
 async function refresh(){
   const s = await MostlanePush.state();
-  const state=g("state"), enable=g("enable"), disable=g("disable"), test=g("test"), hint=g("hint");
-  enable.style.display="none"; disable.style.display="none"; test.style.display="none"; hint.textContent="";
+  const state=g("state"), enable=g("enable"), disable=g("disable"), test=g("test"), hint=g("hint"), reregister=g("reregister");
+  enable.style.display="none"; disable.style.display="none"; test.style.display="none"; reregister.style.display="none"; hint.textContent="";
   state.className="state off";
   if(!s.supported){
     state.textContent="Not supported on this browser."; state.className="state warn";
@@ -77,7 +78,7 @@ async function refresh(){
     return;
   }
   if(s.on){
-    state.textContent="On for this device ✓"; state.className="state on"; disable.style.display=""; test.style.display="";
+    state.textContent="On for this device ✓"; state.className="state on"; disable.style.display=""; test.style.display=""; reregister.style.display="";
     if (MostlanePush.isIOS && MostlanePush.isIOS() && MostlanePush.isStandalone && MostlanePush.isStandalone())
       hint.textContent="Tip: iPhone won't show a banner while Mostlane is open in front of you. After tapping Send test, lock your phone (or swipe to another app) and the notification will appear on your Lock Screen / in Notification Centre.";
   }
@@ -95,6 +96,19 @@ g("enable").addEventListener("click", async () => {
   refresh();
 });
 g("disable").addEventListener("click", async () => { await MostlanePush.disable(); toast("Notifications off for this device"); refresh(); });
+// Re-register: fully unsubscribe then subscribe again, rebuilding this device's
+// push link from scratch. The reliable fix if pushes stop arriving after an app
+// update (the subscription is remade against the current service worker).
+g("reregister").addEventListener("click", async () => {
+  const btn = g("reregister"); btn.disabled = true;
+  toast("Re-registering this device…");
+  try {
+    await MostlanePush.disable();
+    const r = await MostlanePush.enable();
+    toast(r && r.ok ? "✅ Re-registered — now send a test (lock your phone first)" : "Couldn't re-register (" + ((r && r.error) || "error") + ")");
+  } catch (e) { toast("Couldn't re-register"); }
+  btn.disabled = false; refresh();
+});
 g("test").addEventListener("click", async () => {
   const btn = g("test");
   // On an installed iPhone/iPad PWA, iOS does NOT show a banner while the app is
