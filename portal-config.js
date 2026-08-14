@@ -1095,7 +1095,7 @@
       if (yes(p.StoryMode)) return;                         // guided My Day users stay out of the bubble
       if (document.querySelector('script[data-mlchat]') || document.getElementById("mlchat-launch")) return;
       var s = document.createElement("script");
-      s.src = "/chat-widget.js?v=3";
+      s.src = "/chat-widget.js?v=4";
       s.async = true; s.setAttribute("data-mlchat", "1");
       (document.body || document.documentElement).appendChild(s);
     } catch (e) {}

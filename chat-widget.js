@@ -117,6 +117,34 @@
     panel.style.bottom = (84 + off) + "px";
   }
 
+  // Keep the panel (and its input) inside the VISIBLE viewport when the on-screen
+  // keyboard opens. On mobile the keyboard shrinks the *visual* viewport but not
+  // the *layout* viewport that position:fixed is measured against, so a
+  // bottom-anchored panel's input ends up hidden behind the keyboard. When a
+  // keyboard is detected we pin the panel to the visible band via the
+  // VisualViewport API; otherwise we restore the normal CSS layout.
+  function fitViewport() {
+    var vv = window.visualViewport;
+    var mobile = window.innerWidth <= 520;
+    if (!vv || !mobile || !open) {
+      panel.style.top = ""; panel.style.height = ""; panel.style.maxHeight = "";
+      positionForVaBar();
+      return;
+    }
+    var kb = window.innerHeight - vv.height - vv.offsetTop;   // ≈ keyboard height
+    if (kb > 110) {
+      var topGap = 8, botGap = 6;
+      panel.style.top = (vv.offsetTop + topGap) + "px";
+      panel.style.bottom = "auto";
+      panel.style.maxHeight = "none";
+      panel.style.height = Math.max(220, vv.height - topGap - botGap) + "px";
+      scrollDown();
+    } else {
+      panel.style.top = ""; panel.style.height = ""; panel.style.maxHeight = ""; panel.style.bottom = "";
+      positionForVaBar();
+    }
+  }
+
   // ── State ─────────────────────────────────────────────────────────────────
   var open = false, view = "list", curWith = "", curGroup = "", curKey = "", lastId = 0, sending = false;
   var readUpTo = 0, myLastId = 0, lastTypingPing = 0;
@@ -387,6 +415,15 @@
     inp.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     });
+    // Adapt to the on-screen keyboard: the visual viewport resizes when it opens
+    // (iOS fires it a little late, hence the small focus/blur delay).
+    inp.addEventListener("focus", function () { setTimeout(fitViewport, 300); });
+    inp.addEventListener("blur", function () { setTimeout(fitViewport, 120); });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", fitViewport);
+      window.visualViewport.addEventListener("scroll", fitViewport);
+    }
+    window.addEventListener("orientationchange", function () { setTimeout(fitViewport, 300); });
     // Re-check the View-As bar occasionally (it mounts after us sometimes).
     setTimeout(positionForVaBar, 400);
     document.addEventListener("visibilitychange", function () { if (!document.hidden) { refreshBadge(); if (open && view === "thread") pollThreadDelta(); } });
