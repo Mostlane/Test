@@ -11,6 +11,7 @@ import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { getRules, saveRules } from "../lib/suppress.js";
+import { ensureFeedTable } from "./push.js";
 
 const SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
 
@@ -241,6 +242,51 @@ export async function handle(request, env, ctx, url, sess) {
       " ORDER BY id DESC LIMIT 1000"
     ).bind(...binds).all();
     return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+
+  /* ── Notification feed (the "bell") — any logged-in user, own rows only ── */
+  // GET /notify/feed        → recent notifications + unread count (opens the panel)
+  // GET /notify/feed/count  → just the unread count (cheap badge poll)
+  // POST /notify/feed/read  → { id } marks one read, { all:true } marks all read
+  if (path === "/notify/feed/count" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const row = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, unread: (row && row.n) || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
+    const { results } = await db.prepare(
+      "SELECT id, title, body, url, tag, created_at, read_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
+    ).bind(db.tenantId, sess.user.username, limit).all();
+    const items = (results || []).map(r => ({
+      id: r.id, title: r.title || "", body: r.body || "", url: r.url || "",
+      tag: r.tag || "", at: r.created_at, read: !!r.read_at
+    }));
+    const cRow = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, items, unread: (cRow && cRow.n) || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed/read" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const b = await request.json().catch(() => ({}));
+    const at = new Date().toISOString();
+    if (b.all) {
+      await db.prepare("UPDATE user_notifications SET read_at=? WHERE tenant_id=? AND username=? AND read_at IS NULL")
+        .bind(at, db.tenantId, sess.user.username).run();
+    } else if (b.id != null) {
+      await db.prepare("UPDATE user_notifications SET read_at=? WHERE id=? AND tenant_id=? AND username=? AND read_at IS NULL")
+        .bind(at, Number(b.id), db.tenantId, sess.user.username).run();
+    } else {
+      return error("Send id or all:true", 400, env, request);
+    }
+    return json({ ok: true }, {}, env, request);
   }
 
   /* ── Notification suppression (admin mutes a pop-up + its red badge) ── */

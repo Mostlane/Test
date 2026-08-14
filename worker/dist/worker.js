@@ -1154,7 +1154,51 @@ async function ensureTable(env) {
     created_at TEXT,
     last_ok TEXT)`).run();
 }
+var FEED_READY = false;
+async function ensureFeedTable(env) {
+  if (FEED_READY) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL,
+    title TEXT,
+    body TEXT,
+    url TEXT,
+    tag TEXT,
+    created_at TEXT,
+    read_at TEXT)`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_usernotif ON user_notifications(tenant_id, username, id)").run();
+  } catch {
+  }
+  FEED_READY = true;
+}
+async function recordNotification(env, tenantId, username, payload) {
+  try {
+    const p = payload || {};
+    const tag = String(p.tag || "");
+    if (/^(msg:|grp:)/.test(tag)) return;
+    if (!p.title && !p.body) return;
+    await ensureFeedTable(env);
+    await env.DB.prepare(
+      "INSERT INTO user_notifications (tenant_id, username, title, body, url, tag, created_at) VALUES (?,?,?,?,?,?,?)"
+    ).bind(
+      tenantId,
+      username,
+      String(p.title || "").slice(0, 200),
+      String(p.body || "").slice(0, 600),
+      String(p.url || "").slice(0, 300),
+      tag.slice(0, 60),
+      (/* @__PURE__ */ new Date()).toISOString()
+    ).run();
+    await env.DB.prepare(
+      "DELETE FROM user_notifications WHERE tenant_id=? AND username=? AND id NOT IN (SELECT id FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT 120)"
+    ).bind(tenantId, username, tenantId, username).run();
+  } catch {
+  }
+}
 async function sendToUser(env, tenantId, username, payload) {
+  await recordNotification(env, tenantId, username, payload);
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
   await ensureTable(env);
   const { results } = await env.DB.prepare(
@@ -7109,6 +7153,49 @@ async function handle10(request, env, ctx, url, sess) {
       "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
     ).bind(...binds).all();
     return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+  if (path === "/notify/feed/count" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const row = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
+    const { results } = await db.prepare(
+      "SELECT id, title, body, url, tag, created_at, read_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
+    ).bind(db.tenantId, sess.user.username, limit).all();
+    const items = (results || []).map((r) => ({
+      id: r.id,
+      title: r.title || "",
+      body: r.body || "",
+      url: r.url || "",
+      tag: r.tag || "",
+      at: r.created_at,
+      read: !!r.read_at
+    }));
+    const cRow = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed/read" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const b = await request.json().catch(() => ({}));
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    if (b.all) {
+      await db.prepare("UPDATE user_notifications SET read_at=? WHERE tenant_id=? AND username=? AND read_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
+    } else if (b.id != null) {
+      await db.prepare("UPDATE user_notifications SET read_at=? WHERE id=? AND tenant_id=? AND username=? AND read_at IS NULL").bind(at, Number(b.id), db.tenantId, sess.user.username).run();
+    } else {
+      return error("Send id or all:true", 400, env, request);
+    }
+    return json({ ok: true }, {}, env, request);
   }
   if (path === "/notify/suppress" && method === "GET") {
     const sess2 = await requireSession(env, request);
@@ -15677,6 +15764,8 @@ var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
 var AUDIT_SKIP = [
   "/notify/log",
   // the notification log logging itself
+  "/notify/feed",
+  // the bell feed (read markers churn on every open)
   "/prefs",
   // seen/snooze marker churn
   "/device/check-device",

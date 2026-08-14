@@ -1180,4 +1180,148 @@
         }).catch(function () {});
     } catch (e) {}
   })();
+
+  // ── Notification bell (Facebook-style feed) ─────────────────────────────────
+  // A small bell, top-right on every portal page, that anyone can open at any
+  // time to see their past notifications (holiday decisions, job updates, memos,
+  // van scores, equipment, …). Each one links straight to the thing it's about
+  // (the signed document, the job, the request). The feed is written server-side
+  // for every push event, so it's complete even if the phone never turned push
+  // on. Chat messages are deliberately NOT here — they have the 💬 chat bell.
+  (function notifBell() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
+        "memo-sign.html", "hs-sign.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var p = {};
+      try { p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+      if (String(p.StoryMode || "").toLowerCase() === "yes") return;   // guided My Day users stay minimal
+
+      function bf(path, init) {
+        init = init || {};
+        init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {});
+        if (init.body) init.headers["Content-Type"] = "application/json";
+        return nativeFetch(API + path, init);
+      }
+      function esc(x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+      function ago(iso) {
+        try {
+          var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+          if (s < 60) return "just now";
+          if (s < 3600) return Math.floor(s / 60) + "m";
+          if (s < 86400) return Math.floor(s / 3600) + "h";
+          if (s < 604800) return Math.floor(s / 86400) + "d";
+          return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+        } catch (e) { return ""; }
+      }
+      function iconFor(n) {
+        var t = (n.tag || "").toLowerCase() + " " + (n.url || "").toLowerCase() + " " + (n.title || "").toLowerCase();
+        if (/holiday/.test(t)) return "🌴";
+        if (/vancheck|van-check|van check/.test(t)) return "🚐";
+        if (/handover/.test(t)) return "🤝";
+        if (/score/.test(t)) return "🚚";
+        if (/task/.test(t)) return "✅";
+        if (/memo/.test(t)) return "📢";
+        if (/asset|equipment|transfer|confirm/.test(t)) return "📦";
+        if (/hold|safety|risk|job|sla|engineer/.test(t)) return "🧰";
+        return "🔔";
+      }
+
+      function build() {
+        if (document.getElementById("mlBell")) return;
+        var wrap = document.createElement("div");
+        wrap.id = "mlBell";
+        wrap.style.cssText = "position:fixed;top:calc(8px + env(safe-area-inset-top,0px));right:10px;z-index:99000;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;";
+        wrap.innerHTML =
+          '<button id="mlBellBtn" aria-label="Notifications" style="position:relative;width:42px;height:42px;border-radius:50%;border:none;background:rgba(255,255,255,.92);box-shadow:0 3px 12px rgba(0,20,60,.28);cursor:pointer;font-size:20px;line-height:42px;padding:0;backdrop-filter:blur(4px);">🔔' +
+          '<span id="mlBellBadge" style="display:none;position:absolute;top:-3px;right:-3px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#e53935;color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 0 2px #fff;"></span>' +
+          '</button>' +
+          '<div id="mlBellPanel" style="display:none;position:absolute;top:50px;right:0;width:min(360px,calc(100vw - 20px));max-height:min(72vh,560px);overflow:auto;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,20,60,.32);border:1px solid #e6ebf1;-webkit-overflow-scrolling:touch;">' +
+          '<div style="position:sticky;top:0;background:#fff;padding:13px 16px;border-bottom:1px solid #eef1f4;display:flex;align-items:center;justify-content:space-between;z-index:1;">' +
+          '<strong style="color:#0a2a52;font-size:15px;">Notifications</strong>' +
+          '<button id="mlBellRead" style="border:none;background:none;color:#1565c0;font-size:12.5px;cursor:pointer;padding:2px 4px;">Mark all read</button></div>' +
+          '<div id="mlBellList"><div style="padding:22px 16px;color:#8a97a6;font-size:13px;text-align:center;">Loading…</div></div>' +
+          '</div>';
+        (document.body || document.documentElement).appendChild(wrap);
+
+        var btn = wrap.querySelector("#mlBellBtn");
+        var badge = wrap.querySelector("#mlBellBadge");
+        var panel = wrap.querySelector("#mlBellPanel");
+        var list = wrap.querySelector("#mlBellList");
+        var readBtn = wrap.querySelector("#mlBellRead");
+        var open = false;
+
+        function setBadge(n) {
+          n = Number(n) || 0;
+          if (n > 0) { badge.textContent = n > 99 ? "99+" : n; badge.style.display = "block"; }
+          else badge.style.display = "none";
+        }
+        function pollCount() {
+          if (open) return;
+          bf("/notify/feed/count").then(function (r) { return r.json(); })
+            .then(function (d) { if (d && d.ok) setBadge(d.unread); }).catch(function () {});
+        }
+        function render(items) {
+          if (!items || !items.length) {
+            list.innerHTML = '<div style="padding:26px 16px;color:#8a97a6;font-size:13px;text-align:center;">No notifications yet.<br>You\'ll see updates here as they happen.</div>';
+            return;
+          }
+          list.innerHTML = items.map(function (n) {
+            var bg = n.read ? "#fff" : "#eef6ff";
+            var href = n.url ? esc(n.url) : "";
+            var dot = n.read ? "" : '<span style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:#1e88e5;transform:translateY(-50%);"></span>';
+            return '<a class="mlBellItem" data-id="' + n.id + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + ';">' +
+              dot +
+              '<span style="font-size:20px;line-height:1.2;flex:0 0 auto;">' + iconFor(n) + '</span>' +
+              '<span style="flex:1;min-width:0;">' +
+              '<span style="display:block;font-weight:600;color:#12233d;font-size:13.5px;">' + esc(n.title || "Notification") + '</span>' +
+              (n.body ? '<span style="display:block;color:#55647a;font-size:12.5px;margin-top:1px;">' + esc(n.body) + '</span>' : '') +
+              '<span style="display:block;color:#98a4b3;font-size:11px;margin-top:3px;">' + ago(n.at) + '</span>' +
+              '</span></a>';
+          }).join("");
+          Array.prototype.forEach.call(list.querySelectorAll(".mlBellItem"), function (a) {
+            a.addEventListener("click", function (e) {
+              var href = a.getAttribute("href");
+              if (!href) { e.preventDefault(); }   // no target — just a record
+            });
+          });
+        }
+        function openPanel() {
+          open = true;
+          panel.style.display = "block";
+          list.innerHTML = '<div style="padding:22px 16px;color:#8a97a6;font-size:13px;text-align:center;">Loading…</div>';
+          bf("/notify/feed?limit=40").then(function (r) { return r.json(); })
+            .then(function (d) {
+              render(d && d.items);
+              // opening the bell counts as "seen" — clear the red count
+              if (d && d.unread) { setBadge(0); bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ all: true }) }).catch(function () {}); }
+              else setBadge(0);
+            }).catch(function () {
+              list.innerHTML = '<div style="padding:22px 16px;color:#c0392b;font-size:13px;text-align:center;">Couldn\'t load notifications.</div>';
+            });
+        }
+        function closePanel() { open = false; panel.style.display = "none"; }
+
+        btn.addEventListener("click", function (e) { e.stopPropagation(); if (open) closePanel(); else openPanel(); });
+        readBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ all: true }) }).catch(function () {});
+          setBadge(0);
+          Array.prototype.forEach.call(list.querySelectorAll(".mlBellItem"), function (a) { a.style.background = "#fff"; var d = a.querySelector("span[style*='border-radius:50%']"); if (d) d.style.display = "none"; });
+        });
+        document.addEventListener("click", function (e) { if (open && !wrap.contains(e.target)) closePanel(); });
+        window.addEventListener("pageshow", pollCount);
+
+        pollCount();
+        setInterval(pollCount, 45000);
+      }
+
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build);
+      else build();
+    } catch (e) {}
+  })();
 })();

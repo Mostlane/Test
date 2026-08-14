@@ -1402,6 +1402,26 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
 
 ## Notifications system
+- **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected
+  portal-wide by portal-config.js (`notifBell()`, fixed top-right, `#mlBell`),
+  for EVERY logged-in user (field engineers too; skipped only on auth/sign/
+  my-day pages + Story users). A durable per-user history of every notification:
+  each event that fires a push is ALSO written to a feed row, so the bell is
+  complete even if the phone never enabled push. **Mechanism:** `push.js
+  sendToUser()` calls **`recordNotification(env,tid,user,{title,body,url,tag})`**
+  FIRST (before the VAPID/subscription early-returns), writing to table
+  **user_notifications** (self-migrating; id/tenant/username/title/body/url/tag/
+  created_at/read_at; capped to newest 120/user). `sendToPermission` fans out →
+  one row per recipient automatically. **Chat messages are EXCLUDED** (tag
+  `msg:`/`grp:` skipped — they have the 💬 chat-widget bell). Each feed item links
+  to its push `url` (the job, the signed memo, the holiday, the van score…) so
+  clicking takes the user straight to the thing. Routes (portal.js, any session,
+  own rows only; audit-skipped): **GET /notify/feed?limit=** (items + unread),
+  **GET /notify/feed/count** (cheap badge poll, every 45s), **POST
+  /notify/feed/read** `{id}` or `{all:true}`. Opening the panel marks all read
+  (clears the red badge); a "Mark all read" button too. Icons derived client-side
+  from tag/url/title (`iconFor`). NB the bell is the read-back history; the
+  blocking attention gate + red tile badges are unchanged and separate.
 - Red badges on tiles (main.html) + sidebar (portal-config) from
   /asset/transfers/pending-count, /holiday/my (unseen decisions),
   /holiday/all (pending + staff cancellations). "Seen" markers are per-USER

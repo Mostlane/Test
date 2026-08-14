@@ -28,10 +28,60 @@ async function ensureTable(env) {
     last_ok TEXT)`).run();
 }
 
+// ── Notification feed (the "bell") ──────────────────────────────────────────
+// A durable, per-user history of every notification (the same {title,body,url}
+// a push carries). Written by recordNotification() from sendToUser() so it
+// captures EVERY event — even for users who never turned push on — and read by
+// the bell UI (routes/portal.js /notify/feed*). Chat messages are excluded
+// (they have their own chat-widget bell).
+let FEED_READY = false;
+export async function ensureFeedTable(env) {
+  if (FEED_READY) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL,
+    title TEXT,
+    body TEXT,
+    url TEXT,
+    tag TEXT,
+    created_at TEXT,
+    read_at TEXT)`).run();
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_usernotif ON user_notifications(tenant_id, username, id)").run(); } catch {}
+  FEED_READY = true;
+}
+
+// Add one row to a user's notification feed. Best-effort (never throws into the
+// caller). Skips chat pushes (tag msg:/grp:) — those live in the chat bell.
+export async function recordNotification(env, tenantId, username, payload) {
+  try {
+    const p = payload || {};
+    const tag = String(p.tag || "");
+    if (/^(msg:|grp:)/.test(tag)) return;
+    if (!p.title && !p.body) return;
+    await ensureFeedTable(env);
+    await env.DB.prepare(
+      "INSERT INTO user_notifications (tenant_id, username, title, body, url, tag, created_at) VALUES (?,?,?,?,?,?,?)"
+    ).bind(tenantId, username,
+      String(p.title || "").slice(0, 200),
+      String(p.body || "").slice(0, 600),
+      String(p.url || "").slice(0, 300),
+      tag.slice(0, 60),
+      new Date().toISOString()).run();
+    // Cap the history at the newest 120 per user so it never grows unbounded.
+    await env.DB.prepare(
+      "DELETE FROM user_notifications WHERE tenant_id=? AND username=? AND id NOT IN (SELECT id FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT 120)"
+    ).bind(tenantId, username, tenantId, username).run();
+  } catch { /* feed is best-effort — never break the push path */ }
+}
+
 // Send a { title, body, url } payload to every device a user has registered.
 // Prunes subscriptions the push service reports as gone (404/410). Best-effort;
 // returns { sent, failed, gone }. Safe to call from ctx.waitUntil().
 export async function sendToUser(env, tenantId, username, payload) {
+  // Record to the bell feed FIRST — independent of whether push is configured or
+  // this user has any device subscribed, so the history is always complete.
+  await recordNotification(env, tenantId, username, payload);
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
   await ensureTable(env);
   const { results } = await env.DB.prepare(
