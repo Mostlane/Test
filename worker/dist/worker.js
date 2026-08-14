@@ -1203,7 +1203,11 @@ async function recordNotification(env, tenantId, username, payload) {
   }
 }
 async function sendToUser(env, tenantId, username, payload) {
+  const result = await pushToUser(env, tenantId, username, payload);
   await recordNotification(env, tenantId, username, payload);
+  return result;
+}
+async function pushToUser(env, tenantId, username, payload) {
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
   await ensureTable(env);
   const { results } = await env.DB.prepare(

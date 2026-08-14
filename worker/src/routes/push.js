@@ -83,10 +83,16 @@ export async function recordNotification(env, tenantId, username, payload) {
 // Send a { title, body, url } payload to every device a user has registered.
 // Prunes subscriptions the push service reports as gone (404/410). Best-effort;
 // returns { sent, failed, gone }. Safe to call from ctx.waitUntil().
+//
+// The actual push send (pushToUser) runs FIRST and is byte-for-byte the
+// pre-bell code path — nothing about the bell feed can delay or affect it. The
+// feed row is written strictly AFTER, as a pure best-effort add-on.
 export async function sendToUser(env, tenantId, username, payload) {
-  // Record to the bell feed FIRST — independent of whether push is configured or
-  // this user has any device subscribed, so the history is always complete.
+  const result = await pushToUser(env, tenantId, username, payload);
   await recordNotification(env, tenantId, username, payload);
+  return result;
+}
+async function pushToUser(env, tenantId, username, payload) {
   if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
   await ensureTable(env);
   const { results } = await env.DB.prepare(
