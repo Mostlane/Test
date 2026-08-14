@@ -13850,13 +13850,13 @@ async function handle24(request, env, ctx, url, sess) {
       }
     }
     const { results } = scheme === "coop" ? await env.DB.prepare(
-      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active, cs.meta,
+      `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active, cs.meta, cs.site_number,
                   s.site_name AS sname, s.postcode AS spost
              FROM compliance_stores cs
              LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND s.site_number = cs.code
             WHERE cs.tenant_id = ? AND cs.scheme = ?`
     ).bind(tid, scheme).all() : await env.DB.prepare(
-      `SELECT code, category, name AS cname, postcode AS cpost, due, active, meta,
+      `SELECT code, category, name AS cname, postcode AS cpost, due, active, meta, site_number,
                   NULL AS sname, NULL AS spost
              FROM compliance_stores WHERE tenant_id = ? AND scheme = ?`
     ).bind(tid, scheme).all();
@@ -13885,6 +13885,7 @@ async function handle24(request, env, ctx, url, sess) {
         name: r.sname || r.cname || "",
         postcode: r.spost || r.cpost || "",
         category: r.category || "",
+        siteNumber: r.site_number || (scheme === "coop" ? r.code : ""),
         hasSite: !!r.sname,
         active: r.active == null ? 1 : r.active,
         due,
@@ -14000,12 +14001,14 @@ async function handle24(request, env, ctx, url, sess) {
     const category = b.category != null ? String(b.category).slice(0, 60) : row ? row.category : null;
     const name = b.name != null ? String(b.name).slice(0, 200) : row ? row.name : null;
     const postcode = b.postcode != null ? String(b.postcode).slice(0, 20) : row ? row.postcode : null;
+    const explicitSite = (b.siteNumber != null ? String(b.siteNumber) : b.site_number != null ? String(b.site_number) : "").trim();
+    const siteNo = explicitSite || (scheme === "coop" ? code : null);
     await env.DB.prepare(
       `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, site_number, updated_at)
        VALUES (?,?,?,?,?,?,?,1,?,?)
-       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(compliance_stores.site_number, excluded.site_number), updated_at=excluded.updated_at`
-    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), scheme === "coop" ? code : null, at).run();
-    return jr6({ ok: true, code, due }, headers);
+       ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(excluded.site_number, compliance_stores.site_number), updated_at=excluded.updated_at`
+    ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), siteNo, at).run();
+    return jr6({ ok: true, code, due, siteNumber: siteNo }, headers);
   }
   if (sub === "/store-meta" && method === "POST") {
     if (!canWrite) return jr6({ error: "Compliance access required" }, headers, 403);
