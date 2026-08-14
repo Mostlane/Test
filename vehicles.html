@@ -391,7 +391,9 @@
   }
   // Mark all of a van's reported defects resolved (clears the card flag).
   async function resolveDefects(reg){
-    if(!confirm("Mark all reported defects for "+reg+" as resolved?\n\nThe warning clears until a new defect is reported in a future van check.")) return;
+    const msg="Mark all reported defects for "+reg+" as resolved?\n\nThe warning clears until a new defect is reported in a future van check.";
+    const ok=window.MLUI?await MLUI.confirm(msg,{title:"Resolve defects",okLabel:"✓ Mark resolved"}):confirm(msg);
+    if(!ok) return;
     try{
       const r=await aFetch("/fleet/defects-resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg})}).then(r=>r.json());
       if(!r||!r.ok){ alert((r&&r.error)||"Could not mark resolved."); return; }

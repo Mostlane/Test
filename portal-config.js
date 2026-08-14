@@ -333,6 +333,98 @@
     }, true);
   })();
 
+  // ── MLUI: styled toasts + confirm dialog (portal-wide) ──────────────────────
+  // window.alert() everywhere becomes a clean branded toast (non-blocking; a
+  // toast raised just before a redirect survives onto the next page), and
+  // window.MLUI.confirm(msg, {title, okLabel, danger}) is a Promise-based
+  // styled replacement for confirm() that pages adopt call-site by call-site
+  // (native confirm stays available — it's synchronous, so it can't be swapped
+  // globally without rewriting callers).
+  (function mlui() {
+    var PENDING_KEY = "mlToastPending";
+    function ensureCss() {
+      if (document.getElementById("mlui-css")) return;
+      var s = document.createElement("style");
+      s.id = "mlui-css";
+      s.textContent =
+        "#mlToastHost{position:fixed;left:0;right:0;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:2147482000;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;}" +
+        ".ml-toast{pointer-events:auto;max-width:min(92vw,460px);background:#0f172a;color:#fff;border-radius:12px;padding:12px 18px;font:600 14px/1.45 'Segoe UI',system-ui,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.35);opacity:0;transform:translateY(8px);transition:opacity .22s,transform .22s;cursor:pointer;white-space:pre-line;text-align:center;}" +
+        ".ml-toast.on{opacity:1;transform:none;}" +
+        ".ml-toast.ok{background:#14532d;}" +
+        ".ml-toast.err{background:#7f1d1d;}" +
+        ".ml-confirm-ov{position:fixed;inset:0;z-index:2147482001;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:18px;}" +
+        ".ml-confirm{background:#fff;border-radius:16px;max-width:420px;width:100%;padding:20px 22px;box-shadow:0 18px 50px rgba(0,0,0,.35);font-family:'Segoe UI',system-ui,sans-serif;}" +
+        ".ml-confirm h3{margin:0 0 8px;font-size:17px;color:#003366;}" +
+        ".ml-confirm p{margin:0;font-size:14.5px;line-height:1.55;color:#334155;white-space:pre-line;}" +
+        ".ml-confirm .mlc-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}" +
+        ".ml-confirm button{border:none;border-radius:10px;padding:10px 16px;font:600 14px 'Segoe UI',system-ui;cursor:pointer;}" +
+        ".ml-confirm .mlc-cancel{background:#eef2f6;color:#1f2a44;}" +
+        ".ml-confirm .mlc-ok{background:#003b82;color:#fff;}" +
+        ".ml-confirm .mlc-ok.danger{background:#dc2626;}";
+      (document.head || document.documentElement).appendChild(s);
+    }
+    var earlyQueue = [];
+    function show(msg, type) {
+      if (!document.body) { earlyQueue.push([msg, type]); return; }
+      ensureCss();
+      var host = document.getElementById("mlToastHost");
+      if (!host) { host = document.createElement("div"); host.id = "mlToastHost"; document.body.appendChild(host); }
+      var t = document.createElement("div");
+      t.className = "ml-toast" + (type ? " " + type : "");
+      t.textContent = msg;
+      host.appendChild(t);
+      requestAnimationFrame(function () { t.classList.add("on"); });
+      var gone = false;
+      var kill = function () { if (gone) return; gone = true; t.classList.remove("on"); setTimeout(function () { t.remove(); }, 250); };
+      t.addEventListener("click", kill);
+      setTimeout(kill, Math.min(9000, 3200 + msg.length * 30));
+    }
+    function toast(msg, type) {
+      msg = String(msg == null ? "" : msg);
+      if (!msg) return;
+      // Survive an immediate redirect: stash the toast; the next page re-shows
+      // it if we unloaded within ~1.5s, else the stash is cleared below.
+      try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ msg: msg, type: type || "", at: Date.now() })); } catch (e) {}
+      setTimeout(function () { try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {} }, 1500);
+      show(msg, type);
+    }
+    function confirmBox(msg, opts) {
+      opts = opts || {};
+      ensureCss();
+      return new Promise(function (resolve) {
+        var ov = document.createElement("div");
+        ov.className = "ml-confirm-ov";
+        ov.innerHTML = '<div class="ml-confirm" role="dialog" aria-modal="true"><h3 style="display:none"></h3><p></p>' +
+          '<div class="mlc-btns"><button type="button" class="mlc-cancel"></button>' +
+          '<button type="button" class="mlc-ok' + (opts.danger ? " danger" : "") + '"></button></div></div>';
+        if (opts.title) { var h = ov.querySelector("h3"); h.style.display = ""; h.textContent = opts.title; }
+        ov.querySelector("p").textContent = String(msg == null ? "" : msg);
+        ov.querySelector(".mlc-cancel").textContent = opts.cancelLabel || "Cancel";
+        ov.querySelector(".mlc-ok").textContent = opts.okLabel || "OK";
+        var done = function (v) { ov.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
+        var onKey = function (e) { if (e.key === "Escape") { e.preventDefault(); done(false); } };
+        ov.querySelector(".mlc-cancel").addEventListener("click", function () { done(false); });
+        ov.querySelector(".mlc-ok").addEventListener("click", function () { done(true); });
+        ov.addEventListener("click", function (e) { if (e.target === ov) done(false); });
+        document.addEventListener("keydown", onKey, true);
+        document.body.appendChild(ov);
+        try { ov.querySelector(".mlc-ok").focus(); } catch (e) {}
+      });
+    }
+    function boot() {
+      earlyQueue.splice(0).forEach(function (a) { show(a[0], a[1]); });
+      try {
+        var p = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null");
+        sessionStorage.removeItem(PENDING_KEY);
+        if (p && p.msg && Date.now() - (p.at || 0) < 5000) show(p.msg, p.type);
+      } catch (e) {}
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+    else boot();
+    window.MLUI = { toast: toast, confirm: confirmBox };
+    window.alert = function (m) { toast(m); };
+  })();
+
   // ── View As (owner only) ────────────────────────────────────────────────────
   // Jamie can open a real session as any user to see exactly what they see.
   // The server locks /auth/impersonate to the owner account and audits each use.

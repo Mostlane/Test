@@ -188,7 +188,9 @@
     }
     window.save=save;
     async function doDelete(){
-      if(!g("fId").value||!confirm("Delete this task for everyone?")) return;
+      if(!g("fId").value) return;
+      const okDel=window.MLUI?await MLUI.confirm("Delete this task for everyone?",{title:"Delete task",okLabel:"🗑 Delete",danger:true}):confirm("Delete this task for everyone?");
+      if(!okDel) return;
       await aFetch("/tasks/delete",{method:"POST",body:JSON.stringify({id:g("fId").value})}).then(r=>r.json());
       closeEdit(); load();
     }
@@ -238,7 +240,9 @@
       g("list").innerHTML=TASKS.length?TASKS.map(taskCard).join(""):'<div class="empty">No tasks yet. Tap ＋ New task to create one.</div>';
     }
     async function grant(username, permission){
-      if(!confirm("Grant "+username+" access to this area?\n\nThey'll need to log out and back in for it to take effect.")) return;
+      const gmsg="Grant "+username+" access to this area?\n\nThey'll need to log out and back in for it to take effect.";
+      const okGrant=window.MLUI?await MLUI.confirm(gmsg,{title:"Grant access",okLabel:"Grant access"}):confirm(gmsg);
+      if(!okGrant) return;
       const r=await aFetch("/tasks/grant",{method:"POST",body:JSON.stringify({username,permission})}).then(r=>r.json()).catch(()=>({}));
       if(!r.ok){ alert(r.error||"Couldn't grant."); return; }
       alert(r.note||"Granted."); load();
