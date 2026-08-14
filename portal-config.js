@@ -1272,13 +1272,14 @@
           }
           list.innerHTML = items.map(function (n) {
             var bg = n.read ? "#fff" : "#eef6ff";
+            var tw = n.read ? "600" : "700";
             var href = n.url ? esc(n.url) : "";
-            var dot = n.read ? "" : '<span style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:#1e88e5;transform:translateY(-50%);"></span>';
+            var dot = n.read ? "" : '<span class="mlBellDot" style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:#1e88e5;transform:translateY(-50%);"></span>';
             return '<a class="mlBellItem" data-id="' + n.id + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + ';">' +
               dot +
               '<span style="font-size:20px;line-height:1.2;flex:0 0 auto;">' + iconFor(n) + '</span>' +
               '<span style="flex:1;min-width:0;">' +
-              '<span style="display:block;font-weight:600;color:#12233d;font-size:13.5px;">' + esc(n.title || "Notification") + '</span>' +
+              '<span class="mlBellTitle" style="display:block;font-weight:' + tw + ';color:#12233d;font-size:13.5px;">' + esc(n.title || "Notification") + '</span>' +
               (n.body ? '<span style="display:block;color:#55647a;font-size:12.5px;margin-top:1px;">' + esc(n.body) + '</span>' : '') +
               '<span style="display:block;color:#98a4b3;font-size:11px;margin-top:3px;">' + ago(n.at) + '</span>' +
               '</span></a>';
@@ -1286,6 +1287,13 @@
           Array.prototype.forEach.call(list.querySelectorAll(".mlBellItem"), function (a) {
             a.addEventListener("click", function (e) {
               var href = a.getAttribute("href");
+              var id = a.getAttribute("data-id");
+              // Clicking an item marks THAT one read (un-bolds it) — keepalive so
+              // it still lands while the browser navigates away.
+              if (id) bf("/notify/feed/read", { method: "POST", keepalive: true, body: JSON.stringify({ id: Number(id) }) }).catch(function () {});
+              a.style.background = "#fff";
+              var dt = a.querySelector(".mlBellDot"); if (dt) dt.style.display = "none";
+              var tt = a.querySelector(".mlBellTitle"); if (tt) tt.style.fontWeight = "600";
               if (!href) { e.preventDefault(); }   // no target — just a record
             });
           });
@@ -1297,8 +1305,9 @@
           bf("/notify/feed?limit=40").then(function (r) { return r.json(); })
             .then(function (d) {
               render(d && d.items);
-              // opening the bell counts as "seen" — clear the red count
-              if (d && d.unread) { setBadge(0); bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ all: true }) }).catch(function () {}); }
+              // opening the bell counts as "seen" — clear the red count, but the
+              // items stay bold until each is clicked (Facebook-style).
+              if (d && d.unread) { setBadge(0); bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ seen: true }) }).catch(function () {}); }
               else setBadge(0);
             }).catch(function () {
               list.innerHTML = '<div style="padding:22px 16px;color:#c0392b;font-size:13px;text-align:center;">Couldn\'t load notifications.</div>';
@@ -1311,7 +1320,11 @@
           e.stopPropagation();
           bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ all: true }) }).catch(function () {});
           setBadge(0);
-          Array.prototype.forEach.call(list.querySelectorAll(".mlBellItem"), function (a) { a.style.background = "#fff"; var d = a.querySelector("span[style*='border-radius:50%']"); if (d) d.style.display = "none"; });
+          Array.prototype.forEach.call(list.querySelectorAll(".mlBellItem"), function (a) {
+            a.style.background = "#fff";
+            var d = a.querySelector(".mlBellDot"); if (d) d.style.display = "none";
+            var t = a.querySelector(".mlBellTitle"); if (t) t.style.fontWeight = "600";
+          });
         });
         document.addEventListener("click", function (e) { if (open && !wrap.contains(e.target)) closePanel(); });
         window.addEventListener("pageshow", pollCount);

@@ -245,14 +245,17 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   /* ── Notification feed (the "bell") — any logged-in user, own rows only ── */
-  // GET /notify/feed        → recent notifications + unread count (opens the panel)
-  // GET /notify/feed/count  → just the unread count (cheap badge poll)
-  // POST /notify/feed/read  → { id } marks one read, { all:true } marks all read
+  // Facebook-style two states:
+  //   seen_at → the RED BADGE. Cleared when the bell is opened ({ seen:true }).
+  //   read_at → the BOLD / blue dot. Cleared per item when it's clicked ({ id }).
+  // GET /notify/feed        → recent notifications (read flag per item) + unseen count
+  // GET /notify/feed/count  → just the unseen count (cheap badge poll)
+  // POST /notify/feed/read  → { seen:true } clear badge · { id } read one · { all:true } read+seen all
   if (path === "/notify/feed/count" && method === "GET") {
     if (!sess) return error("Not authenticated", 401, env, request);
     await ensureFeedTable(env);
     const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, unread: (row && row.n) || 0 }, {}, env, request);
   }
@@ -268,7 +271,7 @@ export async function handle(request, env, ctx, url, sess) {
       tag: r.tag || "", at: r.created_at, read: !!r.read_at
     }));
     const cRow = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND read_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, items, unread: (cRow && cRow.n) || 0 }, {}, env, request);
   }
@@ -277,14 +280,20 @@ export async function handle(request, env, ctx, url, sess) {
     await ensureFeedTable(env);
     const b = await request.json().catch(() => ({}));
     const at = new Date().toISOString();
-    if (b.all) {
-      await db.prepare("UPDATE user_notifications SET read_at=? WHERE tenant_id=? AND username=? AND read_at IS NULL")
+    if (b.seen) {
+      // Opening the bell — clear the red badge, but leave items bold (unread).
+      await db.prepare("UPDATE user_notifications SET seen_at=? WHERE tenant_id=? AND username=? AND seen_at IS NULL")
         .bind(at, db.tenantId, sess.user.username).run();
+    } else if (b.all) {
+      // "Mark all read" — clears both bold and the badge.
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND username=? AND (read_at IS NULL OR seen_at IS NULL)")
+        .bind(at, at, db.tenantId, sess.user.username).run();
     } else if (b.id != null) {
-      await db.prepare("UPDATE user_notifications SET read_at=? WHERE id=? AND tenant_id=? AND username=? AND read_at IS NULL")
-        .bind(at, Number(b.id), db.tenantId, sess.user.username).run();
+      // Clicking one item — mark it read (and seen).
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE id=? AND tenant_id=? AND username=?")
+        .bind(at, at, Number(b.id), db.tenantId, sess.user.username).run();
     } else {
-      return error("Send id or all:true", 400, env, request);
+      return error("Send seen:true, id, or all:true", 400, env, request);
     }
     return json({ ok: true }, {}, env, request);
   }
