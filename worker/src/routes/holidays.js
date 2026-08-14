@@ -142,6 +142,53 @@ export async function handle(request, env, ctx, url, sess) {
     return (results || []).map(sysOut);
   }
 
+  // The weekday dates a person's APPROVED paid Holiday already covers — used to
+  // stop a bank-holiday / shutdown deducting a SECOND day for a day they've
+  // already booked as leave (Jamie's "only ever one day's allowance" rule).
+  function bookedHolidayDates(all, username) {
+    const set = new Set();
+    for (const h of all) {
+      if (h.username !== username || h.status !== "Approved") continue;
+      if (h.type === "Other" || h.type === "Unpaid") continue;   // only paid Holiday occupies the day
+      if (!h.start) continue;
+      const s = new Date(h.start + "T00:00:00Z"), e = new Date((h.end || h.start) + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay(); if (wd === 0 || wd === 6) continue;
+        set.add(d.toISOString().slice(0, 10));
+      }
+    }
+    return set;
+  }
+  // One person's usage for the year, with the duplicate-day safeguard + a
+  // used-to-date figure + a booked/bank/shutdown breakdown for the wall chart.
+  function computeUsage(all, sys, username, allowance, todayISO) {
+    let booked = 0, bookedTD = 0;
+    for (const h of all) {
+      if (h.username !== username || h.status !== "Approved") continue;
+      if (h.type === "Other" || h.type === "Unpaid") continue;
+      const d = h.days || 0; booked += d;
+      if ((h.start || "") <= todayISO) bookedTD += d;   // it has started → counts to date
+    }
+    const covered = bookedHolidayDates(all, username);
+    let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
+    for (const s of sys) {
+      if (s.username !== username) continue;
+      if (!isWeekdayISO(s.date)) continue;
+      if (s.worked === true || s.status === "Credited") { credited += (s.days || 1); continue; }
+      if (covered.has(s.date)) continue;                // SAFEGUARD: holiday already charged this day
+      const passed = (s.date || "") <= todayISO;
+      if (s.kind === "shutdown") { shut += (s.days || 1); if (passed) shutTD += (s.days || 1); }
+      else { bank += (s.days || 1); if (passed) bankTD += (s.days || 1); }
+    }
+    const committed = booked + bank + shut - credited;         // full-year commitment (what remaining reflects)
+    const usedToDate = bookedTD + bankTD + shutTD - credited;  // consumed so far
+    return {
+      allowance, booked, bank, shutdown: shut, credited,
+      committed, used: committed, usedToDate,
+      remaining: Math.round((allowance - committed) * 100) / 100
+    };
+  }
+
   // ─── Endpoints ────────────────────────────────────────────
 
   // POST /holiday/request
@@ -244,28 +291,16 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
     const allowance = await getUserAllowance(user);
-    const all = await listHolidayRequestsForYear();
-    let approvedHoliday = 0;
-    for (const h of all) {
-      // Approved "Other" leave is agreed as NOT coming off the allowance.
-      // Only paid Holiday comes off the allowance — "Other" (agreed) and
-      // "Unpaid" don't (matches Timetastic, which deducted 0 for unpaid).
-      if (h.username === user && h.status === "Approved" && h.type !== "Other" && h.type !== "Unpaid") approvedHoliday += (h.days || 0);
-    }
-    const sys = await listSystemRecordsForYear();
-    let sysDeducted = 0, sysCredited = 0;
-    for (const s of sys) {
-      if (s.username !== user) continue;
-      if (!isWeekdayISO(s.date)) continue;
-      if (s.worked === true || s.status === "Credited") sysCredited += (s.days || 1);
-      else sysDeducted += (s.days || 1);
-    }
-    const used = approvedHoliday + sysDeducted - sysCredited;
-    const cfg = await getYearConfig();
+    const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
+    const today = new Date().toISOString().slice(0, 10);
+    const u = computeUsage(all, sys, user, allowance, today);
     return json({
-      allowance, used, remaining: allowance - used,
+      allowance,
+      used: u.usedToDate,                 // headline = used TO DATE
+      committed: u.committed,             // full-year commitment
+      remaining: u.remaining,
       accrualMode: !!cfg.accrualMode,
-      breakdown: { approvedHoliday, sysDeducted, sysCredited }
+      breakdown: { booked: u.booked, bankHolidays: u.bank, shutdown: u.shutdown, usedToDate: u.usedToDate, committed: u.committed }
     });
   }
 
@@ -388,20 +423,18 @@ export async function handle(request, env, ctx, url, sess) {
     const [all, sys, allowMap, dflt] = await Promise.all([
       listHolidayRequestsForYear(), listSystemRecordsForYear(), listAllowancesMap(), getDefaultAllowance()
     ]);
+    const today = new Date().toISOString().slice(0, 10);
     const list = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
       const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
-      let approvedHoliday = 0;
-      for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other" && h.type !== "Unpaid") approvedHoliday += (h.days || 0);
-      let sysDeducted = 0, sysCredited = 0;
-      for (const s of sys) {
-        if (s.username !== u) continue;
-        if (!isWeekdayISO(s.date)) continue;
-        if (s.worked === true || s.status === "Credited") sysCredited += (s.days || 1);
-        else sysDeducted += (s.days || 1);
-      }
-      const used = approvedHoliday + sysDeducted - sysCredited;
-      list.push({ username: u, name: u.replace(".", " "), allowance, used, remaining: allowance - used });
+      const c = computeUsage(all, sys, u, allowance, today);
+      list.push({
+        username: u, name: u.replace(".", " "), allowance,
+        used: c.usedToDate,             // used TO DATE
+        committed: c.committed,         // full-year commitment
+        remaining: c.remaining,
+        booked: c.booked, bankHolidays: c.bank, shutdown: c.shutdown
+      });
     }
     return json({ year, engineers: list });
   }
@@ -501,7 +534,7 @@ function reqOut(r) {
 
 function sysOut(r) {
   return {
-    id: r.id, username: r.username, engineer: r.engineer, year: r.year,
+    id: r.id, kind: r.kind, username: r.username, engineer: r.engineer, year: r.year,
     date: r.date, label: r.label, days: r.days, category: r.category,
     worked: !!r.worked, status: r.status, createdAt: r.created_at,
     updatedBy: r.updated_by, updatedAt: r.updated_at
