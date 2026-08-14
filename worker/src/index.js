@@ -188,6 +188,7 @@ export default {
 const AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
 const AUDIT_SKIP = [
   "/notify/log",          // the notification log logging itself
+  "/notify/feed",         // the bell feed (read markers churn on every open)
   "/prefs",               // seen/snooze marker churn
   "/device/check-device", // runs on every page load — a check, not an action
   "/audit",               // this system's own endpoints
