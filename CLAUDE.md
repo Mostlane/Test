@@ -83,9 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=3`)
-All 90+ pages reference `?v=3` (cache-bust). If a portal-config change must
-reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=4`)
+All pages reference `?v=4` (cache-bust; bumped from ?v=3 on 14 Aug to force the
+Timesheet/My-Hours menu-gating fix onto stubborn phone caches). If a
+portal-config change must reach stubborn phone caches again, bump to ?v=5
+across all pages with sed. Provides:
 - `window.MOSTLANE_API` = https://mostlane-api.jamie-def.workers.dev
 - Legacy-host fetch bridge: rewrites calls to the migrated old workers
   (login, mostlane-users, mostlane-holidays, mostlane-assets, mostlane-sla
