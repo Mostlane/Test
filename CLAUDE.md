@@ -612,6 +612,22 @@ reach stubborn phone caches, bump to ?v=4 across all pages with sed. Provides:
   FullAccess) fires this week's reminder to all still-outstanding drivers on
   demand (no time-gate/dedupe) — "🔔 Remind now" button on van-checks.html;
   shares `remindDrivers()` with the cron. `sendWeeklyReminders` is the cron path.
+  **Per-driver on/off + global pause (Aug 2026 — sending controls):** an admin
+  controls WHO is in the weekly cycle without touching the notification centre.
+  A **per-driver opt-out** list lives in app_config **`vancheck:optout:<tid>`**
+  (JSON array of usernames); `getOptedOut(env,tid)` returns the Set. A driver
+  switched **Off** is dropped from `remindDrivers` (no cron/Remind-now push), from
+  `/vancheck/attention` (`mineDue`=false, and excluded from admin `missing`), and
+  shown "Off — not required" on the weekly grid — but can still submit a check.
+  **POST /vancheck/driver-toggle** `{username, enabled}` (Vehicles|FullAccess)
+  adds/removes them; **GET /vancheck/week** now returns `enabled` per row +
+  `globallyPaused`. The **global "bypass"** (mute reminders for EVERYONE) is the
+  vehicle-check suppression rule with no user/key — surfaced on van-checks.html as
+  a banner (⏸ Pause all / ▶ Resume) via **POST /vancheck/pause-all** `{paused}`
+  (`isGloballyPaused(rules)` detects it; add/remove through lib/suppress
+  getRules/saveRules), so the blunt on/off is controllable in one place instead of
+  buried in the notification centre. Front-end: van-checks.html grid has an
+  On✓/Off toggle column + the pause banner.
 - `fleet.js` — the whole Vehicles/Fleet backend (gate: FullAccess|Vehicles).
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
@@ -1016,6 +1032,23 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     annual miles over allowedMiles × excessPence). Returned in /fleet/vehicles +
     /fleet/fuel/stats for FullAccess only; shown on the deep-dive ("Cost to run
     /year") and the fuel page's per-vehicle table with a `projected` badge.
+- **Van-check defects on the vehicle card (Aug 2026)** — a reported fault now
+  shows prominently on vehicles.html. `/fleet/vehicles` computes per-van
+  outstanding defects via **`vanCheckDefects(env,tid,resolved)`**: ANY van-check
+  answer of `defect`/`missing` OR the driver's `safe_to_drive=0`, aggregated per
+  reg (returns `defectItems`/`defectChecks`/`defectNotSafe`/`defectSince`). The
+  model is **explicit-resolve, not auto-clear** (Jamie's rule): a fault stays
+  flagged even after a later clean check until an admin taps **✓ Mark defects
+  resolved**, which stamps a per-reg "resolved as of now" time in app_config
+  **`fleet:defectsclear:<tid>`** (`{REGNORM:ISO}`) via **POST /fleet/defects-resolve**
+  `{reg}` (any Vehicles user) — checks completed on/before that time are treated
+  as dealt-with; a NEW defect reported afterwards re-flags the van. Front-end
+  (vehicles.html): a red **⚠ Defect reported** tag (+ **🚫 Not safe to drive**
+  when flagged) on the card + deep-dive, a **Vans with faults** summary tile
+  (hidden when zero), and the **✓ Mark defects resolved** button on the card and
+  in the deep-dive's red banner (which also links to vehicle-checks.html to see
+  what was reported). `hasDefect(v)`/`defectTags(v)`/`resolveDefects(reg)` are the
+  helpers; no schema change (app_config only).
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed
@@ -1209,6 +1242,92 @@ travel caps), devices(device_token→person_id), visits. R2 (JOB_FILES): `fleetr
 `vehicledocs/<tid>/<REG>/…`, `vehiclephotos/<tid>/<REG>/…`; staff docs via
 hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
+
+## Home hub / dashboard (main.html — Aug 2026, extensible)
+The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
+set of at-a-glance widgets** — the start of "the hub of everything" (each user
+sees only the areas they have permission for). It's separate from the blocking
+attention gate: the hub is a persistent dashboard, not a snooze-able popup.
+Renders on BOTH mobile (above the tiles) and desktop (below the greeting); white
+cards so it's legible over any personalised background. **Framework:**
+`window.MostlaneHub` — `HUB.register({id,emoji,title,can(perms),load(card),wide?})`
+then `HUB.run(perms)` (reads the cached `mostlanePermissions` blob, instant, no
+network wait). A widget filtered out by `can(perms)` never renders; if NO widget
+is eligible the whole `#hubDash` stays hidden. **The whole dashboard is
+office/admin only** — `HUB.run` bails immediately for field engineers
+(`isFieldUser(perms)`: StaffType field, or the SLA/Story heuristic when blank —
+mirrors applyGate), so field users never see ANY stat regardless of a widget's
+own `can`. Each `load()` fetches its own data
+(via a timeout-raced `jfetch`, since API calls bypass the SW) and fills its card;
+a throwing/timed-out widget removes its own card. **DESKTOP ONLY** (CSS: shown via
+`.hub-on` under `@media(min-width:1000px) body.pnav-on`, same condition as the
+greeting card) — mobile keeps the tiles + attention gate as its home. Shared
+render helpers `cardHtml({emoji,title,when,big,sub,tone,ok,rows,actions})`,
+`metric(label,n,tone)`, `act(href,label,primary)`, `daysUntil(YYYY-MM-DD)`.
+**Add a new area** = one `HUB.register({id,emoji,title,can,load})` call. A
+`first:true` widget sorts to the top; `wide:true` spans both columns; `cls`
+adds a card class. **Shared fetch cache `jget(path)`** memoises GETs so the
+overview strip and a detail card reading the same endpoint fetch it ONCE
+(verified: PO dashboard hit once for both its KPI + card). Reads perms via
+`readPerms()` (cached blob).
+**Overview card ("How are we doing", `first`+`wide`+`cls:"overview"`):** a
+KPI strip at the top — one clickable headline number per area the user can see
+(`kpiSpecs(perms)`): open SLA jobs (·N overdue), van checks due, vans to attend,
+jobs to schedule, POs to price, holidays to approve, certs overdue, memos
+unsigned, unread messages. Tiles render progressively (fixed-order slots) and
+reuse the detail cards' fetches; a slow/failed area just drops its tile.
+Current detail widgets (each permission-gated):
+  - **Van checks** (FullAccess|Vehicles): GET /vancheck/week → done/N progress
+    bar, outstanding chips, red defect/alert rows, "⏸ Reminders paused" pill,
+    **Open van checks** + **🔔 Remind now** (POST /vancheck/remind-now).
+  - **Fleet** (FullAccess|Vehicles): GET /fleet/vehicles → count of vans with MOT
+    /tax due-or-overdue (`daysUntil` <0 / ≤30), service warn/bad, pending handovers.
+  - **SLA jobs** (FullAccess|SLA|SLAAdmin): GET /sla/jobs → open (status not
+    complete/closed/done), needs-scheduling (no `scheduledAt`), overdue
+    (`sla.state==="BREACHED"`), unassigned. Open board + Scheduler.
+  - **Holidays** (FullAccess|HolidayAdmin): GET /holiday/all?year= → Pending +
+    staff self-cancellations. Open holiday admin.
+  - **Equipment** (FullAccess|AssetAdmin): GET /asset/requests/attention →
+    toAction + decided. Open requests + My equipment.
+  - **Compliance** (FullAccess|Compliance): GET /compliance/stores → certs overdue
+    / due within 30 days (per-type `due` dates). Open compliance.
+  - **Purchase orders** (FullAccess|PurchaseOrders): GET /po/api/dashboard →
+    uncosted (to price) + needs_review/flagged/credit_due/unmatched_site. Open
+    PO system (po-office.html).
+  - **Company memos** (FullAccess): GET /memos/list → sent memos with
+    signed<total (per-memo signed/total rows). Open memos (notification-centre).
+  - **Engineer timesheets** (FullAccess|TimesheetAdmin): GET /ts/admin/overview →
+    invoices to process + timesheets started this week. Open timesheets-admin.
+  - **Messages** (StaffType≠field): GET /messages/unread → unread count; action
+    clicks the chat bubble launcher (#mlchat-launch) rather than a page.
+  - **My tasks** (ALWAYS shown, `can:()=>true`): GET /tasks/attention → outstanding
+    (+ overdue red). Also an overview KPI (always present). Open my-tasks.html.
+Help + CLAUDE.md must list new widgets as they're added.
+
+## Admin task list (routes/tasks.js + my-tasks.html + tasks-admin.html)
+Recurring jobs a **Full-Access** user sets for staff, with a deadline day/time,
+surfaced as a home-page stat (always shown, even at zero) and auto-ticked when
+the person does the linked portal action. Tables (self-migrating): **admin_tasks**
+(defs: title, detail, assignees JSON, recurrence, due_time/due_dow/due_dom/
+due_month/due_date, area, auto_match, active) + **admin_task_done** (manual
+completions, PK task_id+username+period_key). **Recurrence**: daily/weekly/
+monthly/quarterly/yearly/once; `occurrence(task,now)` computes the current
+period key + London-wall-clock deadline instant + period start (DOM capped at 28).
+**Multiple assignees** per task; each ticks their own occurrence. **Auto-complete
+(computed live, no stored state)**: a task's `area` (a permission key from
+`TASK_AREAS`) carries a default audit-path fragment (`auto_match`, e.g. Vehicles →
+`/vancheck/submit`); `autoDone()` checks audit_log for a successful entry by that
+user matching the fragment since the period start → counts as done. **Access
+flagging + grant**: /tasks/admin returns each assignee's `hasAccess` for the
+task's linked area; tasks-admin.html shows "⚠ no <area> access" + a **Grant
+access** button → POST /tasks/grant sets user_permissions=Yes (note: user must
+re-login). Routes: GET /tasks/mine, GET /tasks/attention (hub), POST
+/tasks/complete {id,undo}, GET /tasks/admin (Full), POST /tasks/save (Full),
+POST /tasks/delete (Full), POST /tasks/grant (Full), GET /tasks/meta (Full).
+**Daily push reminder**: `sweepTaskReminders(env)` on the 5-min cron self-gates to
+~08:00 London, deduped per day (app_config `tasks:reminded:<tid>`), pushes each
+user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like Help)
+→ my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
 
 ## Notifications system
 - Red badges on tiles (main.html) + sidebar (portal-config) from

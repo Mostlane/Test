@@ -240,6 +240,43 @@ async function vanCheckPhotoCounts(env, tid) {
   } catch {}
   return out;
 }
+// Outstanding van-check defects per vehicle. A defect stays flagged until an
+// admin explicitly "marks it resolved" (a per-reg resolved-as-of timestamp in
+// app_config fleet:defectsclear:<tid>) — even a later clean check does NOT clear
+// it, matching Jamie's rule. "Defect" = ANY checklist answer of "defect" or
+// equipment answer of "missing", OR the driver flagged the van not-safe-to-drive.
+// Returns { REGNORM: { items, checks, notSafe, since, latest } }.
+const DEFECTCLR_KEY = tid => `fleet:defectsclear:${tid}`;
+async function vanCheckDefects(env, tid, resolved) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle);
+      const clearAt = (resolved && resolved[rk]) || "";
+      // Skip checks completed on/before the last "resolved" mark for this van.
+      if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
+      const answers = items.answers || {};
+      const defItems = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing").length;
+      const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
+      if (!defItems && !notSafe) continue;
+      const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
+      cur.items += defItems;
+      cur.checks += 1;
+      if (notSafe) cur.notSafe = true;
+      const at = r.checked_at || "";
+      if (at) {
+        if (!cur.since || new Date(at) < new Date(cur.since)) cur.since = at;
+        if (!cur.latest || new Date(at) > new Date(cur.latest)) cur.latest = at;
+      }
+    }
+  } catch {}
+  return out;
+}
 // Serving URL for a gallery photo: uploaded vehicle photos are signed
 // (/fleet/vehicle-photo); van-check photos use the public /asset-image route.
 function galleryPhotoUrl(env, origin, key) {
@@ -432,6 +469,10 @@ export async function handle(request, env, ctx, url, sess) {
     const photos = await photoIndex(env, tid);
     const covers = await coverMap(env, tid);
     const vcCounts = await vanCheckPhotoCounts(env, tid);   // van-check photos folded into the badge
+    // Outstanding van-check defects (until an admin marks the van resolved).
+    let defResolved = {};
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) defResolved = JSON.parse(row.value) || {}; } catch {}
+    const defects = await vanCheckDefects(env, tid, defResolved);
     // Handover state per reg: latest completed (for the card's direct link) +
     // whether one is still pending (a badge / "awaiting handover" hint).
     await ensureHandoverTable(env);
@@ -485,6 +526,11 @@ export async function handle(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
+        // Outstanding van-check defects (stay flagged until an admin resolves).
+        defectItems: (defects[dn(v.reg)] || {}).items || 0,
+        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
+        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
+        defectSince: (defects[dn(v.reg)] || {}).since || "",
         // Money views — Full Access only.
         finance: money ? financeOf(v) : undefined,
         runningCost: money ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : undefined
@@ -1113,6 +1159,23 @@ export async function handle(request, env, ctx, url, sess) {
     }
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
     return jr({ ok: true, reg, checks }, headers);
+  }
+
+  // ── Mark a van's reported defects resolved (clears the card flag) ─────────
+  // Stamps a per-reg "resolved as of now" time; any van-check defect completed
+  // on/before it is treated as dealt-with. A NEW defect reported afterwards
+  // re-flags the van. Any Vehicles user can resolve.
+  if (sub === "/defects-resolve" && method === "POST") {
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim();
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    let map = {};
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) map = JSON.parse(row.value) || {}; } catch {}
+    map[rk] = new Date().toISOString();
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
+    return jr({ ok: true, reg, resolvedAt: map[rk] }, headers);
   }
 
   // ── Van handover: request (from assign popup) → pushes the new driver ──────

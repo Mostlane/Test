@@ -68,7 +68,7 @@
       <div style="page-break-before:always;"></div>
       <h3>APPENDIX — ATTACHMENTS</h3>
       ${files.length ? `<ul>${files.map(f => `<li><a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name || "file")}</a></li>`).join("")}</ul>` : ""}
-      ${imgs.map(im => `<figure style="margin:10px 0;page-break-inside:avoid;"><img src="${esc(im.url)}" alt="${esc(im.name||"")}" style="max-width:100%;border:1px solid #ccc;border-radius:4px;"><figcaption style="font-size:11px;color:#667;margin-top:3px;">${esc(im.name||"")}</figcaption></figure>`).join("")}
+      ${imgs.map(im => `<figure style="margin:10px 0;page-break-inside:avoid;"><img class="ml-att-img" src="${esc(im.url)}" alt="${esc(im.name||"")}" style="max-width:100%;border:1px solid #ccc;border-radius:4px;"><figcaption style="font-size:11px;color:#667;margin-top:3px;">${esc(im.name||"")}</figcaption></figure>`).join("")}
     ` : "";
 
     return `

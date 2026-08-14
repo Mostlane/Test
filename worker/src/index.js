@@ -44,7 +44,9 @@ import * as costing from "./routes/costing.js";    // DONE  (site register, labo
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
+import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
+import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -100,6 +102,7 @@ const ROUTES = [
   ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
   ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
+  ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -171,6 +174,8 @@ export default {
       // close sessions a scan-out ended, and feed project scans into the
       // engineer timesheet. Idempotent; fails soft when SiteLog is unset/down.
       ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
+      // Daily task reminder — self-gates to ~08:00 London, deduped per day.
+      ctx.waitUntil(sweepTaskReminders(env).catch(e => console.error("scheduled task reminder:", e)));
     }
   },
 };

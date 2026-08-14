@@ -7684,8 +7684,9 @@ async function withAttachmentUrls(env, origin, atts) {
 }
 var RA_PAGE_H = 842;
 var RA_PAGE_W = 595;
-var RA_FOOTER = 22;
-var RA_CONTENT_H = RA_PAGE_H - RA_FOOTER;
+var RA_MARGIN_TOP = 28;
+var RA_MARGIN_BOT = 30;
+var RA_CONTENT_H = RA_PAGE_H - RA_MARGIN_TOP - RA_MARGIN_BOT;
 function buildRaPdf(pages, ref) {
   const imgs = [];
   for (const durl of (Array.isArray(pages) ? pages : []).slice(0, 40)) {
@@ -7706,9 +7707,9 @@ function buildRaPdf(pages, ref) {
   const N = imgs.length;
   imgs.forEach((u8, i) => {
     if (i > 0) pdf.newPage();
-    pdf.image(u8, 0, 0, RA_PAGE_W, RA_CONTENT_H);
-    if (ref) pdf.text(24, RA_PAGE_H - 8, String(ref), { size: 8, grey: true });
-    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 8, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
+    pdf.image(u8, 0, RA_MARGIN_TOP, RA_PAGE_W, RA_CONTENT_H);
+    if (ref) pdf.text(24, RA_PAGE_H - 11, String(ref), { size: 8, grey: true });
+    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 11, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
   });
   return pdf.bytes();
 }
@@ -8049,6 +8050,19 @@ async function mintRef(db, docType, site) {
 
 // src/routes/vancheck.js
 var SETTINGS_KEY2 = "vancheck:settings";
+var OPTOUT_KEY = "vancheck:optout";
+async function getOptedOut(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, OPTOUT_KEY).first();
+    const a = row && row.value ? JSON.parse(row.value) : [];
+    return new Set(Array.isArray(a) ? a.map(String) : []);
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+function isGloballyPaused(rules) {
+  return (rules || []).some((r) => r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === ""));
+}
 var DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },
@@ -8304,18 +8318,21 @@ async function handle16(request, env, ctx, url, sess) {
     ).bind(db.tenantId, week).all();
     const byUser = {};
     for (const c of checks || []) byUser[c.username] = shapeCheck(c);
+    const off = await getOptedOut(env, db.tenantId);
     const rows = (drivers || []).map((u) => ({
       username: u.username,
       name: `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username,
       vehicle: u.vehicle_assigned,
+      enabled: !off.has(u.username),
       check: byUser[u.username] || null
     }));
     for (const c of checks || []) {
       if (!rows.some((r) => r.username === c.username))
-        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", check: shapeCheck(c) });
+        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), check: shapeCheck(c) });
     }
     const dueAt = deadlineFor(week, s);
-    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows }, {}, env, request);
+    const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
+    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
   }
   if (path === "/vancheck/remind-now" && method === "POST") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
@@ -8370,14 +8387,35 @@ async function handle16(request, env, ctx, url, sess) {
     await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
     return json({ ok: true, week: wk }, {}, env, request);
   }
+  if (path === "/vancheck/driver-toggle" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const off = await getOptedOut(env, db.tenantId);
+    if (b.enabled === false) off.add(who);
+    else off.delete(who);
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, OPTOUT_KEY, JSON.stringify([...off])).run();
+    return json({ ok: true, username: who, enabled: b.enabled !== false }, {}, env, request);
+  }
+  if (path === "/vancheck/pause-all" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    let rules = await getRules(env, tenantId);
+    rules = rules.filter((r) => !(r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === "")));
+    if (b.paused === true) rules.push({ type: "vehicle-check" });
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, paused: b.paused === true }, {}, env, request);
+  }
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);
     const week = mondayOf3(londonDate2());
     const dueAt = deadlineFor(week, s);
     const overdue = Date.now() > Date.parse(dueAt);
     const myVehicle = sess.user.vehicle_assigned || "";
+    const off = await getOptedOut(env, db.tenantId);
     let mineDue = false;
-    if (myVehicle) {
+    if (myVehicle && !off.has(me)) {
       const mine = await db.prepare("SELECT week FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, me, week).first();
       mineDue = !mine;
     }
@@ -8395,7 +8433,7 @@ async function handle16(request, env, ctx, url, sess) {
         "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
       ).bind(db.tenantId, week).all();
       const doneSet = new Set((done || []).map((r) => r.username));
-      missing = (drivers || []).filter((u) => !doneSet.has(u.username)).map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
+      missing = (drivers || []).filter((u) => !doneSet.has(u.username) && !off.has(u.username)).map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
     }
     return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing }, {}, env, request);
   }
@@ -8418,10 +8456,12 @@ async function remindDrivers(env, tid, week, payload) {
     "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
   ).bind(tid, week).all();
   const handled = new Set((checks || []).map((c) => c.username));
+  const off = await getOptedOut(env, tid);
   const rules = await getRules(env, tid);
   const recipients = [];
   for (const drv of drivers || []) {
     if (handled.has(drv.username)) continue;
+    if (off.has(drv.username)) continue;
     if (isSuppressed(rules, "vehicle-check", drv.username, week)) continue;
     await sendToUser(env, tid, drv.username, payload);
     recipients.push(drv.username);
@@ -9136,6 +9176,41 @@ async function vanCheckPhotoCounts(env, tid) {
   }
   return out;
 }
+var DEFECTCLR_KEY = (tid) => `fleet:defectsclear:${tid}`;
+async function vanCheckDefects(env, tid, resolved) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {};
+      try {
+        items = r.items ? JSON.parse(r.items) : {};
+      } catch {
+      }
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle);
+      const clearAt = resolved && resolved[rk] || "";
+      if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
+      const answers = items.answers || {};
+      const defItems = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing").length;
+      const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
+      if (!defItems && !notSafe) continue;
+      const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
+      cur.items += defItems;
+      cur.checks += 1;
+      if (notSafe) cur.notSafe = true;
+      const at = r.checked_at || "";
+      if (at) {
+        if (!cur.since || new Date(at) < new Date(cur.since)) cur.since = at;
+        if (!cur.latest || new Date(at) > new Date(cur.latest)) cur.latest = at;
+      }
+    }
+  } catch {
+  }
+  return out;
+}
 function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
@@ -9318,6 +9393,13 @@ async function handle20(request, env, ctx, url, sess) {
     const photos = await photoIndex(env, tid);
     const covers = await coverMap(env, tid);
     const vcCounts = await vanCheckPhotoCounts(env, tid);
+    let defResolved = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
+      if (row && row.value) defResolved = JSON.parse(row.value) || {};
+    } catch {
+    }
+    const defects = await vanCheckDefects(env, tid, defResolved);
     await ensureHandoverTable(env);
     const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
     const lastHo = {}, pendHo = {};
@@ -9381,6 +9463,11 @@ async function handle20(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
+        // Outstanding van-check defects (stay flagged until an admin resolves).
+        defectItems: (defects[dn(v.reg)] || {}).items || 0,
+        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
+        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
+        defectSince: (defects[dn(v.reg)] || {}).since || "",
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0
@@ -10064,6 +10151,21 @@ async function handle20(request, env, ctx, url, sess) {
     }
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
     return jr3({ ok: true, reg, checks }, headers);
+  }
+  if (sub === "/defects-resolve" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    let map = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
+      if (row && row.value) map = JSON.parse(row.value) || {};
+    } catch {
+    }
+    map[rk] = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, reg, resolvedAt: map[rk] }, headers);
   }
   if (sub === "/handover/request" && method === "POST") {
     await ensureHandoverTable(env);
@@ -13880,8 +13982,8 @@ async function handle25(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes";
   const field = staffTypeOf2(sess.user) === "field";
+  const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;
   if (!office && !field) return error("Not allowed", 403, env, request);
   const path = url.pathname.replace(/^\/po/, "") || "/";
   const method = request.method.toUpperCase();
@@ -14814,6 +14916,349 @@ function md5Hex(bytes) {
   return hex(a) + hex(b) + hex(c) + hex(d);
 }
 
+// src/routes/tasks.js
+var TASK_AREAS = [
+  { key: "", label: "\u2014 none (manual only) \u2014", auto: "", page: "" },
+  { key: "Vehicles", label: "Vehicles / van checks", auto: "/vancheck/submit", page: "vehicles.html" },
+  { key: "HolidayAdmin", label: "Holiday approvals", auto: "/holiday/approve", page: "holiday-admin.html" },
+  { key: "SLA", label: "SLA jobs", auto: "/sla/jobs", page: "sla-main.html" },
+  { key: "SLAAdmin", label: "SLA jobs (admin)", auto: "/sla/jobs", page: "sla-main.html" },
+  { key: "PurchaseOrders", label: "Purchase orders", auto: "/po/api/pos", page: "po-office.html" },
+  { key: "Compliance", label: "Compliance certificates", auto: "/compliance/", page: "compliance.html" },
+  { key: "Assets", label: "Plant & equipment", auto: "/asset/", page: "my-assets.html" },
+  { key: "AssetAdmin", label: "Plant & equipment (admin)", auto: "/asset/", page: "assets-admin.html" },
+  { key: "Sites", label: "Sites", auto: "/update-site", page: "sites.html" },
+  { key: "TimesheetAdmin", label: "Timesheets (admin)", auto: "/ts/admin/save", page: "timesheets-admin.html" },
+  { key: "Users", label: "Users admin", auto: "/users", page: "users-admin.html" }
+];
+var AREA_BY_KEY = {};
+for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
+var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
+async function ensureTables2(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
+    id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
+    recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
+    area TEXT, auto_match TEXT, active INTEGER DEFAULT 1,
+    created_by TEXT, created_at TEXT, updated_at TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_task_done (
+    tenant_id TEXT, task_id TEXT, username TEXT, period_key TEXT, done_at TEXT, done_by TEXT,
+    PRIMARY KEY (task_id, username, period_key))`).run();
+}
+function lonYMD(d) {
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+}
+function lonHM(d) {
+  return d.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" });
+}
+function lonToISO(ymd, hm) {
+  for (const off of ["+01:00", "+00:00"]) {
+    const dt = /* @__PURE__ */ new Date(`${ymd}T${hm}:00${off}`);
+    if (!isNaN(dt) && lonYMD(dt) === ymd && lonHM(dt) === hm) return dt.toISOString();
+  }
+  return (/* @__PURE__ */ new Date(`${ymd}T${hm}:00Z`)).toISOString();
+}
+function addDaysYMD(ymd, n) {
+  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function mondayOf5(ymd) {
+  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+  return d.toISOString().slice(0, 10);
+}
+var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
+function occurrence(task, now) {
+  const today = lonYMD(now);
+  const [Y, M] = today.split("-").map(Number);
+  const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
+  let periodKey, startYMD, dueYMD;
+  const pad = (n) => String(n).padStart(2, "0");
+  switch (task.recurrence) {
+    case "weekly": {
+      const mon = mondayOf5(today);
+      periodKey = "W:" + mon;
+      startYMD = mon;
+      const dow = Math.min(7, Math.max(1, Number(task.due_dow) || 5));
+      dueYMD = addDaysYMD(mon, dow - 1);
+      break;
+    }
+    case "monthly": {
+      const ym = today.slice(0, 7);
+      periodKey = "M:" + ym;
+      startYMD = ym + "-01";
+      dueYMD = ym + "-" + pad(clampDom(task.due_dom));
+      break;
+    }
+    case "quarterly": {
+      const q = Math.floor((M - 1) / 3), qMonth = q * 3 + 1;
+      periodKey = "Q:" + Y + "-" + (q + 1);
+      startYMD = `${Y}-${pad(qMonth)}-01`;
+      dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
+      break;
+    }
+    case "yearly": {
+      periodKey = "Y:" + Y;
+      startYMD = `${Y}-01-01`;
+      const mm = Math.min(12, Math.max(1, Number(task.due_month) || 1));
+      dueYMD = `${Y}-${pad(mm)}-${pad(clampDom(task.due_dom))}`;
+      break;
+    }
+    case "once": {
+      const dd = task.due_date || today;
+      periodKey = "once";
+      startYMD = (task.created_at || dd).slice(0, 10);
+      dueYMD = dd;
+      break;
+    }
+    default: {
+      periodKey = today;
+      startYMD = today;
+      dueYMD = today;
+    }
+  }
+  return { periodKey, dueAt: lonToISO(dueYMD, hm), startAt: lonToISO(startYMD, "00:00") };
+}
+function parseAssignees(t) {
+  try {
+    const a = JSON.parse(t.assignees || "[]");
+    return Array.isArray(a) ? a.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+async function autoDone(env, tid, task, user, startAt) {
+  if (!task.auto_match) return false;
+  try {
+    const row = await env.DB.prepare(
+      "SELECT 1 FROM audit_log WHERE tenant_id=? AND username=? AND path LIKE ? AND at>=? AND status<400 LIMIT 1"
+    ).bind(tid, user, "%" + task.auto_match + "%", startAt).first();
+    return !!row;
+  } catch {
+    return false;
+  }
+}
+async function statusFor(env, tid, task, user, now, doneMap) {
+  const occ = occurrence(task, now);
+  const manual = doneMap ? doneMap[task.id + "|" + user + "|" + occ.periodKey] : await env.DB.prepare(
+    "SELECT done_at FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?"
+  ).bind(tid, task.id, user, occ.periodKey).first().then((r) => r && r.done_at);
+  let doneAt = manual || null, auto = false;
+  if (!doneAt && await autoDone(env, tid, task, user, occ.startAt)) {
+    doneAt = "auto";
+    auto = true;
+  }
+  const done = !!doneAt;
+  return { periodKey: occ.periodKey, dueAt: occ.dueAt, done, auto, doneAt: auto ? null : doneAt, overdue: !done && Date.now() > Date.parse(occ.dueAt) };
+}
+function shapeTask(t) {
+  return {
+    id: t.id,
+    title: t.title,
+    detail: t.detail || "",
+    assignees: parseAssignees(t),
+    recurrence: t.recurrence,
+    dueTime: t.due_time || "17:00",
+    dueDow: t.due_dow || null,
+    dueDom: t.due_dom || null,
+    dueMonth: t.due_month || null,
+    dueDate: t.due_date || "",
+    area: t.area || "",
+    autoMatch: t.auto_match || "",
+    active: t.active !== 0,
+    areaLabel: (AREA_BY_KEY[t.area || ""] || {}).label || "",
+    areaPage: (AREA_BY_KEY[t.area || ""] || {}).page || "",
+    createdBy: t.created_by || ""
+  };
+}
+async function handle27(request, env, ctx, url, sess) {
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const me = sess.user.username;
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
+  await ensureTables2(env);
+  const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
+  const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
+  if (sub === "/mine" && method === "GET") {
+    const now = /* @__PURE__ */ new Date();
+    const mine = (await activeTasks()).filter((t) => parseAssignees(t).includes(me));
+    const out = [];
+    for (const t of mine) {
+      const st = await statusFor(env, tid, t, me, now);
+      out.push({ ...shapeTask(t), status: st });
+    }
+    out.sort((a, b) => a.status.done - b.status.done || new Date(a.status.dueAt) - new Date(b.status.dueAt));
+    return json({ ok: true, tasks: out }, {}, env, request);
+  }
+  if (sub === "/attention" && method === "GET") {
+    const now = /* @__PURE__ */ new Date();
+    const mine = (await activeTasks()).filter((t) => parseAssignees(t).includes(me));
+    let outstanding = 0, overdue = 0;
+    for (const t of mine) {
+      const st = await statusFor(env, tid, t, me, now);
+      if (!st.done) {
+        outstanding++;
+        if (st.overdue) overdue++;
+      }
+    }
+    return json({ ok: true, outstanding, overdue, total: mine.length }, {}, env, request);
+  }
+  if (sub === "/complete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const t = await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!t) return error("Task not found", 404, env, request);
+    if (!parseAssignees(t).includes(me)) return error("This task isn't assigned to you.", 403, env, request);
+    const occ = occurrence(t, /* @__PURE__ */ new Date());
+    if (b.undo) {
+      await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=? AND username=? AND period_key=?").bind(tid, id, me, occ.periodKey).run();
+    } else {
+      await env.DB.prepare(
+        "INSERT INTO admin_task_done (tenant_id, task_id, username, period_key, done_at, done_by) VALUES (?,?,?,?,?,?) ON CONFLICT(task_id, username, period_key) DO UPDATE SET done_at=excluded.done_at"
+      ).bind(tid, id, me, occ.periodKey, (/* @__PURE__ */ new Date()).toISOString(), me).run();
+    }
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/meta" && method === "GET") {
+    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    return json({ ok: true, areas: TASK_AREAS, recurrence: RECURRENCE }, {}, env, request);
+  }
+  if (sub === "/admin" && method === "GET") {
+    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    const now = /* @__PURE__ */ new Date();
+    const { results: rows } = await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? ORDER BY created_at DESC").bind(tid).all();
+    const users = /* @__PURE__ */ new Set();
+    for (const t of rows || []) parseAssignees(t).forEach((u) => users.add(u));
+    const permCache = {};
+    for (const u of users) permCache[u] = await permissionsFor(env, tid, u);
+    const out = [];
+    for (const t of rows || []) {
+      const assignees = parseAssignees(t);
+      const area = t.area || "";
+      const people = [];
+      for (const u of assignees) {
+        const st = t.active ? await statusFor(env, tid, t, u, now) : null;
+        const p = permCache[u] || {};
+        const hasAccess = !area || p.FullAccess === "Yes" || p[area] === "Yes";
+        people.push({ username: u, status: st, hasAccess });
+      }
+      out.push({ ...shapeTask(t), people, areaLabel: (AREA_BY_KEY[area] || {}).label || area });
+    }
+    return json({ ok: true, tasks: out, areas: TASK_AREAS }, {}, env, request);
+  }
+  if (sub === "/save" && method === "POST") {
+    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const title = String(b.title || "").trim();
+    if (!title) return error("A title is required.", 400, env, request);
+    const recurrence = RECURRENCE.includes(b.recurrence) ? b.recurrence : "daily";
+    const assignees = (Array.isArray(b.assignees) ? b.assignees : []).map((u) => String(u || "").trim()).filter(Boolean);
+    if (!assignees.length) return error("Pick at least one person.", 400, env, request);
+    const area = AREA_BY_KEY[String(b.area || "")] ? String(b.area) : "";
+    const autoMatch = b.autoComplete === false ? "" : b.autoMatch != null ? String(b.autoMatch) : (AREA_BY_KEY[area] || {}).auto || "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const dueTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime || "") ? b.dueTime : "17:00";
+    const id = String(b.id || "") || crypto.randomUUID();
+    const existing = b.id ? await env.DB.prepare("SELECT created_at, created_by FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
+    await env.DB.prepare(`INSERT INTO admin_tasks
+      (id, tenant_id, title, detail, assignees, recurrence, due_time, due_dow, due_dom, due_month, due_date, area, auto_match, active, created_by, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET title=excluded.title, detail=excluded.detail, assignees=excluded.assignees,
+        recurrence=excluded.recurrence, due_time=excluded.due_time, due_dow=excluded.due_dow, due_dom=excluded.due_dom,
+        due_month=excluded.due_month, due_date=excluded.due_date, area=excluded.area, auto_match=excluded.auto_match,
+        active=excluded.active, updated_at=excluded.updated_at`).bind(
+      id,
+      tid,
+      title,
+      String(b.detail || "").slice(0, 2e3),
+      JSON.stringify(assignees),
+      recurrence,
+      dueTime,
+      b.dueDow != null ? Number(b.dueDow) : null,
+      b.dueDom != null ? Number(b.dueDom) : null,
+      b.dueMonth != null ? Number(b.dueMonth) : null,
+      b.dueDate ? String(b.dueDate).slice(0, 10) : null,
+      area,
+      autoMatch,
+      b.active === false ? 0 : 1,
+      existing && existing.created_by || me,
+      existing && existing.created_at || now,
+      now
+    ).run();
+    if (ctx && ctx.waitUntil) ctx.waitUntil(Promise.all(assignees.map((u) => sendToUser(env, tid, u, { title: "New task assigned", body: title, url: "/my-tasks.html", tag: "task" }).catch(() => {
+    }))));
+    return json({ ok: true, id }, {}, env, request);
+  }
+  if (sub === "/delete" && method === "POST") {
+    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).run();
+    await env.DB.prepare("DELETE FROM admin_task_done WHERE tenant_id=? AND task_id=?").bind(tid, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/grant" && method === "POST") {
+    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const username = String(b.username || "").trim();
+    const permission = String(b.permission || "").trim();
+    if (!username || !AREA_BY_KEY[permission] || !permission) return error("username and a valid area permission are required.", 400, env, request);
+    await env.DB.prepare(
+      "INSERT INTO user_permissions (username, permission, value, tenant_id) VALUES (?,?,?,?) ON CONFLICT(username, permission) DO UPDATE SET value=excluded.value"
+    ).bind(username, permission, 1, tid).run();
+    return json({ ok: true, note: "Granted. The user must log out and back in for it to take effect." }, {}, env, request);
+  }
+  return error("Unknown tasks route", 404, env, request);
+}
+async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
+  const lonHour = Number(now.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  if (lonHour !== 8) return { ran: false, reason: "not-8am" };
+  const today = lonYMD(now);
+  let tenants = [];
+  try {
+    tenants = ((await env.DB.prepare("SELECT DISTINCT tenant_id FROM admin_tasks WHERE active=1").all()).results || []).map((r) => r.tenant_id);
+  } catch {
+    return { ran: false, reason: "no-table" };
+  }
+  const out = [];
+  for (const tid of tenants) {
+    const key = `tasks:reminded:${tid}`;
+    let slots = [];
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      if (row && row.value) slots = JSON.parse(row.value) || [];
+    } catch {
+    }
+    if (slots.includes(today)) {
+      out.push({ tid, skipped: true });
+      continue;
+    }
+    const { results: rows } = await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all();
+    const perUser = {};
+    for (const t of rows || []) {
+      for (const u of parseAssignees(t)) {
+        const st = await statusFor(env, tid, t, u, now);
+        if (!st.done) {
+          perUser[u] = perUser[u] || { n: 0, overdue: 0 };
+          perUser[u].n++;
+          if (st.overdue) perUser[u].overdue++;
+        }
+      }
+    }
+    for (const [u, c] of Object.entries(perUser)) {
+      const body = c.overdue ? `You have ${c.n} task${c.n === 1 ? "" : "s"} due (${c.overdue} overdue).` : `You have ${c.n} task${c.n === 1 ? "" : "s"} due today.`;
+      await sendToUser(env, tid, u, { title: "Your tasks", body, url: "/my-tasks.html", tag: "tasks-daily" }).catch(() => {
+      });
+    }
+    slots.push(today);
+    slots = slots.slice(-14);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(slots)).run();
+    out.push({ tid, reminded: Object.keys(perUser).length });
+  }
+  return { ran: true, tenants: out };
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -14893,8 +15338,10 @@ var ROUTES = [
   // weekly van checks (form, grid, deadline badges)
   ["*", "/po", handle25],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle26]
+  ["*", "/cctv", handle26],
   // CCTV Wall: DVR site config + snapshot proxy
+  ["*", "/tasks", handle27]
+  // recurring admin task list (deadlines, auto-complete, per-user stat)
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -14935,6 +15382,7 @@ var index_default = {
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
+      ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
     }
   }
 };

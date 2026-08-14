@@ -17,10 +17,24 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
-import { getRules, isSuppressed } from "../lib/suppress.js";
+import { getRules, saveRules, isSuppressed } from "../lib/suppress.js";
 import { sendToUser } from "./push.js";
 
 const SETTINGS_KEY = "vancheck:settings";
+const OPTOUT_KEY = "vancheck:optout";   // JSON array of usernames taken OUT of the weekly van-check cycle
+
+// Drivers an admin has switched OFF: not required to check, no reminders, no
+// blocking home-page gate, shown as "Off" on the weekly grid. Returns a Set of
+// usernames. Uses env.DB so both the request handler and the cron can call it.
+async function getOptedOut(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, OPTOUT_KEY).first();
+    const a = row && row.value ? JSON.parse(row.value) : [];
+    return new Set(Array.isArray(a) ? a.map(String) : []);
+  } catch { return new Set(); }
+}
+// Is the whole van-check type paused for everyone (the blunt "bypass")?
+function isGloballyPaused(rules) { return (rules || []).some(r => r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === "")); }
 const DEFAULT_CHECKLIST = [
   { id: "lights", label: "Lights & indicators working" },
   { id: "tyres", label: "Tyres & wheels (tread, pressure, damage)" },
@@ -284,19 +298,22 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(db.tenantId, week).all();
     const byUser = {};
     for (const c of checks || []) byUser[c.username] = shapeCheck(c);
+    const off = await getOptedOut(env, db.tenantId);           // drivers switched OFF
     const rows = (drivers || []).map(u => ({
       username: u.username,
       name: (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username,
       vehicle: u.vehicle_assigned,
+      enabled: !off.has(u.username),
       check: byUser[u.username] || null,
     }));
     // Checks from people without an allocated vehicle still show (e.g. spare van).
     for (const c of checks || []) {
       if (!rows.some(r => r.username === c.username))
-        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", check: shapeCheck(c) });
+        rows.push({ username: c.username, name: c.username, vehicle: c.vehicle || "", enabled: !off.has(c.username), check: shapeCheck(c) });
     }
     const dueAt = deadlineFor(week, s);
-    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows }, {}, env, request);
+    const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
+    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
   }
 
   // ── Admin: fire this week's reminder to everyone still outstanding, NOW ──────
@@ -354,6 +371,34 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week: wk }, {}, env, request);
   }
 
+  // ── Admin: turn a driver's weekly van check ON/OFF ──────────────────────────
+  // OFF = not required, no reminders, no blocking home gate; they can still
+  // submit a check if they want. Stored as an opt-out list in app_config.
+  if (path === "/vancheck/driver-toggle" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const off = await getOptedOut(env, db.tenantId);
+    if (b.enabled === false) off.add(who); else off.delete(who);
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(db.tenantId, OPTOUT_KEY, JSON.stringify([...off])).run();
+    return json({ ok: true, username: who, enabled: b.enabled !== false }, {}, env, request);
+  }
+
+  // ── Admin: pause / resume ALL van-check reminders (the blunt "bypass") ───────
+  // Adds or removes the global vehicle-check suppression rule — the same one the
+  // notification centre sets — surfaced here so it's controllable in one place.
+  if (path === "/vancheck/pause-all" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    let rules = await getRules(env, tenantId);
+    rules = rules.filter(r => !(r.type === "vehicle-check" && (r.user == null || r.user === "") && (r.key == null || r.key === "")));
+    if (b.paused === true) rules.push({ type: "vehicle-check" });   // global (no user/key)
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, paused: b.paused === true }, {}, env, request);
+  }
+
   // ── Attention (badges + gate) ───────────────────────────────────────────────
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);
@@ -361,8 +406,9 @@ export async function handle(request, env, ctx, url, sess) {
     const dueAt = deadlineFor(week, s);
     const overdue = Date.now() > Date.parse(dueAt);
     const myVehicle = sess.user.vehicle_assigned || "";
+    const off = await getOptedOut(env, db.tenantId);
     let mineDue = false;
-    if (myVehicle) {
+    if (myVehicle && !off.has(me)) {
       const mine = await db.prepare("SELECT week FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
         .bind(db.tenantId, me, week).first();
       mineDue = !mine;
@@ -383,7 +429,7 @@ export async function handle(request, env, ctx, url, sess) {
         "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
       ).bind(db.tenantId, week).all();
       const doneSet = new Set((done || []).map(r => r.username));
-      missing = (drivers || []).filter(u => !doneSet.has(u.username))
+      missing = (drivers || []).filter(u => !doneSet.has(u.username) && !off.has(u.username))
         .map(u => (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username);
     }
     return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing }, {}, env, request);
@@ -419,10 +465,12 @@ async function remindDrivers(env, tid, week, payload) {
     "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
   ).bind(tid, week).all();
   const handled = new Set((checks || []).map(c => c.username));
+  const off = await getOptedOut(env, tid);
   const rules = await getRules(env, tid);
   const recipients = [];
   for (const drv of drivers || []) {
     if (handled.has(drv.username)) continue;
+    if (off.has(drv.username)) continue;                       // driver switched off
     if (isSuppressed(rules, "vehicle-check", drv.username, week)) continue;
     await sendToUser(env, tid, drv.username, payload);
     recipients.push(drv.username);

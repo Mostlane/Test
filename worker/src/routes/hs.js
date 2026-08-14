@@ -43,7 +43,9 @@ async function withAttachmentUrls(env, origin, atts) {
 // one image per page, with a small footer on every page: the reference number
 // on the left and "Page X of Y" on the right (no date / title / URL). Returns a
 // Uint8Array, or null if no usable images.
-const RA_PAGE_H = 842, RA_PAGE_W = 595, RA_FOOTER = 22, RA_CONTENT_H = RA_PAGE_H - RA_FOOTER;
+// MUST match hs-pdf-capture.js CONTENT box: a clear zone top & bottom, content
+// inset between, footer in the bottom margin.
+const RA_PAGE_H = 842, RA_PAGE_W = 595, RA_MARGIN_TOP = 28, RA_MARGIN_BOT = 30, RA_CONTENT_H = RA_PAGE_H - RA_MARGIN_TOP - RA_MARGIN_BOT;
 function buildRaPdf(pages, ref) {
   const imgs = [];
   for (const durl of (Array.isArray(pages) ? pages : []).slice(0, 40)) {
@@ -58,9 +60,9 @@ function buildRaPdf(pages, ref) {
   const N = imgs.length;
   imgs.forEach((u8, i) => {
     if (i > 0) pdf.newPage();
-    pdf.image(u8, 0, 0, RA_PAGE_W, RA_CONTENT_H);                          // content fills the top, leaving the footer strip
-    if (ref) pdf.text(24, RA_PAGE_H - 8, String(ref), { size: 8, grey: true });
-    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 8, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
+    pdf.image(u8, 0, RA_MARGIN_TOP, RA_PAGE_W, RA_CONTENT_H);              // inset: clear zone top & bottom
+    if (ref) pdf.text(24, RA_PAGE_H - 11, String(ref), { size: 8, grey: true });
+    pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 11, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
   });
   return pdf.bytes();
 }

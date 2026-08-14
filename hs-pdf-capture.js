@@ -2,21 +2,22 @@
 // PORTRAIT A4 page images (colour-faithful — it's a screenshot of the DOM), to
 // be posted to the worker which wraps them into a PDF with a ref + page footer.
 //
-// Pagination is CONTENT-AWARE: instead of slicing the tall canvas at fixed
-// heights (which cut table rows / sections in half), we measure the safe break
-// lines in the DOM (the top & bottom of every row and block) and end each page
-// at the last safe line that still fits — so nothing is cut mid-row. Each page
-// image is padded to the full A4 content aspect so the worker's footer sits in
-// the reserved strip and the placement never distorts.
+//  • Content-aware pagination: pages end at a safe break line (the top/bottom of
+//    a row or block), so table rows and sections are never cut in half.
+//  • A clear zone is kept at the top and bottom of every page (the worker insets
+//    the image with margins) so nothing sits hard against the edge.
+//  • Attachment images are capped to one page's height before capture, so a tall
+//    photo fits on its own page instead of being split across pages.
+//
 //   window.HSCaptureDoc(el) -> Promise<string[]>   (data:image/jpeg;base64 pages)
+//
+// The CONTENT box below MUST match the worker's buildRaPdf placement.
 (function () {
-  const PAGE_H = 842, PAGE_W = 595, FOOTER = 22, CONTENT_H = PAGE_H - FOOTER;
+  const PAGE_W = 595, PAGE_H = 842, MARGIN_TOP = 28, MARGIN_BOT = 30, CONTENT_H = PAGE_H - MARGIN_TOP - MARGIN_BOT;
   function waitImgs(el) {
     const imgs = [...el.querySelectorAll("img")];
     return Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = im.onerror = res; })));
   }
-  // Safe break lines (DOM px from the element top): the top & bottom edge of
-  // every row/block — cutting on one of these never splits a row or heading.
   function breakLines(el) {
     const top0 = el.getBoundingClientRect().top;
     const set = new Set([0]);
@@ -30,13 +31,27 @@
   window.HSCaptureDoc = async function (el) {
     if (!window.html2canvas || !el) throw new Error("Capture unavailable");
     await waitImgs(el);
+    // Cap attachment images so each fits within one page's content area (never
+    // split across pages). Applied before measuring/capturing; restored after.
+    const rectW = el.getBoundingClientRect().width || el.clientWidth || PAGE_W;
+    const onePageDomH = Math.floor(rectW * (CONTENT_H / PAGE_W) * 0.94);
+    const atts = [...el.querySelectorAll(".ml-att-img")];
+    const saved = atts.map(a => a.style.maxHeight);
+    atts.forEach(a => { a.style.maxHeight = onePageDomH + "px"; });
+    void el.offsetHeight;   // force reflow so break lines reflect the capped sizes
+
     const domH = el.scrollHeight;
     const breaksDom = breakLines(el);
-    const canvas = await window.html2canvas(el, { useCORS: true, backgroundColor: "#ffffff", scale: 2, logging: false });
+    let canvas;
+    try {
+      canvas = await window.html2canvas(el, { useCORS: true, backgroundColor: "#ffffff", scale: 2, logging: false });
+    } finally {
+      atts.forEach((a, i) => { a.style.maxHeight = saved[i]; });
+    }
     const cw = canvas.width, H = canvas.height;
     const scaleY = H / domH;
     const breaks = [...breaksDom].filter(y => y >= 0 && y <= domH).map(y => Math.round(y * scaleY)).sort((a, b) => a - b);
-    const maxPageH = Math.max(1, Math.round(cw * (CONTENT_H / PAGE_W)));   // A4 content px per page (aspect-locked)
+    const maxPageH = Math.max(1, Math.round(cw * (CONTENT_H / PAGE_W)));   // A4 content px per page (aspect-locked to the worker box)
     const pages = [];
     let start = 0, guard = 0;
     while (start < H && guard++ < 400) {

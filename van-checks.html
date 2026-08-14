@@ -73,13 +73,14 @@
         <span class="muted" id="dueLabel"></span>
       </div>
     </div>
+    <div class="card" id="pauseBanner" style="display:none;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:#fef3c7;border:1px solid #f59e0b;"></div>
     <div class="card" style="padding:0; overflow-x:auto;">
       <table class="list">
-        <thead><tr><th>Driver</th><th>Vehicle</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
-        <tbody id="rows"><tr><td colspan="5" class="muted" style="padding:14px;">Loading…</td></tr></tbody>
+        <thead><tr><th>Driver</th><th>Vehicle</th><th>Status</th><th>Submitted</th><th>Weekly check</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="6" class="muted" style="padding:14px;">Loading…</td></tr></tbody>
       </table>
     </div>
-    <p class="muted" style="font-size:12.5px;">Drivers = active users with a vehicle allocated in Users Admin. A Story Mode weekly check counts as done too. Drivers do their check at <b>/van-check.html</b> (🚐 tile / red alert).</p>
+    <p class="muted" style="font-size:12.5px;">Drivers = active users with a vehicle allocated in Users Admin. A Story Mode weekly check counts as done too. Drivers do their check at <b>/van-check.html</b> (🚐 tile / red alert). Switch a driver <b>Off</b> to take them out of the weekly cycle — no reminders, no home-screen prompt (they can still do a check if they want).</p>
   </div>
 
   <!-- View a check -->
@@ -208,37 +209,80 @@
 
   async function load() {
     g("wkLabel").textContent = "w/c " + new Date(WEEK + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"long" });
-    g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>Loading…</td></tr>";
+    g("rows").innerHTML = "<tr><td colspan='6' class='muted' style='padding:14px;'>Loading…</td></tr>";
     let d;
     try { d = await authFetch("/vancheck/week?week=" + WEEK).then(r => r.json()); }
-    catch (e) { g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>⚠️ Couldn't load.</td></tr>"; return; }
-    if (!d.ok) { g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>" + esc(d.error || "Couldn't load.") + "</td></tr>"; return; }
+    catch (e) { g("rows").innerHTML = "<tr><td colspan='6' class='muted' style='padding:14px;'>⚠️ Couldn't load.</td></tr>"; return; }
+    if (!d.ok) { g("rows").innerHTML = "<tr><td colspan='6' class='muted' style='padding:14px;'>" + esc(d.error || "Couldn't load.") + "</td></tr>"; return; }
     DATA = d;
     g("dueLabel").textContent = "Due by " + fmtDT(d.dueAt) + (d.overdue ? " — deadline passed" : "");
-    if (!d.rows.length) { g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>No drivers — allocate vehicles to people in Users Admin.</td></tr>"; return; }
+    renderPauseBanner(!!d.globallyPaused);
+    if (!d.rows.length) { g("rows").innerHTML = "<tr><td colspan='6' class='muted' style='padding:14px;'>No drivers — allocate vehicles to people in Users Admin.</td></tr>"; return; }
     g("rows").innerHTML = d.rows.map(r => {
       const c = r.check;
+      const enabled = r.enabled !== false;
       let status;
-      if (!c) status = `<span class="pill missing">${d.overdue ? "MISSING — overdue" : "Not done yet"}</span>`;
+      if (!enabled) status = `<span class="pill" style="background:#e5e7eb;color:#4b5563;">Off — not required</span>`;
+      else if (!c) status = `<span class="pill missing">${d.overdue ? "MISSING — overdue" : "Not done yet"}</span>`;
       else if (c.skipped) status = `<span class="pill" style="background:#e0e7ff;color:#3730a3;">Skipped this week${c.skippedBy ? " by " + esc(c.skippedBy) : ""}</span>`;
       else if (c.safeToDrive === false) status = `<span class="pill unsafe">NOT SAFE</span>`;
       else if (c.defectCount) status = `<span class="pill defect">${c.defectCount} issue${c.defectCount === 1 ? "" : "s"}</span>`;
       else status = `<span class="pill done">✓ OK</span>`;
       const alertPill = (c && c.alerts && c.alerts.length) ? ` <span class="pill" style="background:#fee2e2;color:#b91c1c;">⚠ ${c.alerts.length}</span>` : "";
-      return `<tr>
+      const toggle = enabled
+        ? `<button class="btn ghost small" data-toggle="${esc(r.username)}" data-enable="0" title="Take this driver out of the weekly van-check cycle">On ✓</button>`
+        : `<button class="btn small" style="background:#e5e7eb;color:#374151;" data-toggle="${esc(r.username)}" data-enable="1" title="Put this driver back into the weekly van-check cycle">Off</button>`;
+      return `<tr${enabled ? "" : ' style="opacity:.62;"'}>
         <td><b>${esc(r.name)}</b></td>
         <td>${esc((c && c.vehicle) || r.vehicle || "—")}</td>
         <td>${status}${alertPill}</td>
-        <td class="muted">${c ? esc(fmtDT(c.checkedAt)) + (c.source === "story" ? " · via My Day" : "") : "—"}</td>
-        <td style="text-align:right;">${c ? `<button class="btn ghost small" data-view="${esc(r.username)}">Open</button>` : ""}</td>
+        <td class="muted">${c && !c.skipped ? esc(fmtDT(c.checkedAt)) + (c.source === "story" ? " · via My Day" : "") : "—"}</td>
+        <td>${toggle}</td>
+        <td style="text-align:right;">${c && !c.skipped ? `<button class="btn ghost small" data-view="${esc(r.username)}">Open</button>` : ""}</td>
       </tr>`;
     }).join("");
+  }
+
+  // Global pause ("bypass") banner — surfaces the blunt on/off that silences
+  // reminders for EVERYONE, so the per-driver toggles aren't quietly overridden.
+  function renderPauseBanner(paused) {
+    const el = g("pauseBanner");
+    if (paused) {
+      el.style.display = "flex";
+      el.innerHTML = `<span style="font-weight:600;">⏸ Van-check reminders are paused for <u>everyone</u>. Nobody is being nudged, even drivers switched On.</span>
+        <button class="btn small" id="resumeAllBtn" style="background:#16a34a;color:#fff;">▶ Resume reminders</button>`;
+      g("resumeAllBtn").onclick = () => setPaused(false);
+    } else {
+      el.style.display = "flex";
+      el.style.background = "transparent"; el.style.border = "0"; el.style.padding = "0 2px";
+      el.innerHTML = `<span class="muted" style="font-size:12.5px;">Reminders are active (Monday 07:00 + a chase before the deadline). Switch individual drivers Off in the table, or pause everyone here.</span>
+        <button class="btn ghost small" id="pauseAllBtn">⏸ Pause all reminders</button>`;
+      g("pauseAllBtn").onclick = () => setPaused(true);
+    }
+  }
+  async function setPaused(paused) {
+    if (paused && !confirm("Pause weekly van-check reminders for EVERYONE?\n\nNo Monday/deadline nudges and no home-screen prompt will be sent until you resume. Drivers can still do a check manually.")) return;
+    try {
+      const r = await authFetch("/vancheck/pause-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused }) }).then(r => r.json());
+      if (!r.ok) { alert(r.error || "Couldn't update."); return; }
+      // Reset any inline styling before re-render.
+      const el = g("pauseBanner"); el.style.background = ""; el.style.border = ""; el.style.padding = "";
+      renderPauseBanner(paused);
+    } catch (e) { alert("Couldn't update."); }
+  }
+  async function toggleDriver(username, enable) {
+    try {
+      const r = await authFetch("/vancheck/driver-toggle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, enabled: enable }) }).then(r => r.json());
+      if (!r.ok) { alert(r.error || "Couldn't update."); return; }
+      load();
+    } catch (e) { alert("Couldn't update."); }
   }
   g("prevWk").onclick = () => { WEEK = addDays(WEEK, -7); load(); };
   g("nextWk").onclick = () => { WEEK = addDays(WEEK, 7); load(); };
 
   document.addEventListener("click", e => {
     if (e.target.dataset.view) openCheck(e.target.dataset.view);
+    if (e.target.dataset.toggle) toggleDriver(e.target.dataset.toggle, e.target.dataset.enable === "1");
     if (e.target.closest && e.target.closest("[data-img]")) { g("viewerImg").src = e.target.closest("[data-img]").dataset.img; g("viewer").classList.add("open"); }
   });
 
