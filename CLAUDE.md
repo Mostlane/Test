@@ -1105,6 +1105,22 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   button is now "💾 Save again" (re-save after edits). The saved-reports list
   (loadPastReports) is **grouped under month/year banners** (`.rpt-month`, keyed
   by weekStart's month, newest first) so a long history is easy to scan.
+  **Send van driver scores to engineers (Aug 2026):** scores in the report are
+  keyed by reg; each vehicle carries `driverUser` (the assigned engineer). After
+  a report generates, a **"📤 Send Van Scores to engineers" modal** auto-pops
+  (also a header button) listing each engineer that has a score — checkbox
+  (pre-ticked) + colour-coded score — and **POST /fleet/scores/send**
+  `{weekStart,weekEnd,scores:[{username,reg,score}]}` (Vehicles) files each to
+  **table `driver_scores`** (PK tenant+username+week_start, re-send updates) and
+  **push-notifies** each engineer (sendToUser → /my-van-scores.html). Engineers
+  see their OWN history at **my-van-scores.html** (hero = latest, grouped by year)
+  via **GET /fleet/scores/mine** (any session, own rows only — placed BEFORE the
+  fleet canFleet gate so field users without Vehicles perm can read it). A field
+  notice: **route.html** shows a dismissible "new van score" banner when **GET
+  /fleet/scores/unseen** `{latest}` beats the local `mlVanScoreSeen` marker
+  (my-van-scores + the ✕ write it, mirrored to /prefs `vanScoreSeen`). Pool vans
+  (no single assigned engineer) are excluded from the recipient list. The page is
+  deliberately NOT a menu tile (only reached via the notification/banner).
   Pool vans: mark a reg "🚚 Fleet/pool" → per-day allocate-to-driver dropdowns
   saved to `/fleet/pool-alloc` (app_config `fleet:poolalloc:<tid>`,
   key `REG|YYYY-MM-DD`→username); the van timesheet uses these per-day.

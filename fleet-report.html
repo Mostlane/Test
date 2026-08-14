@@ -391,6 +391,65 @@ async function saveReport(opts){
 }
 window.saveReport=saveReport;
 
+/* ═══ Send van driver scores to engineers ═══
+   Each vehicle with an ASSIGNED engineer (driverUser) + a score becomes a
+   pickable recipient. Sending pushes them and files the score to their history. */
+function scoreRecipients(){
+  const R=window.__reportData; if(!R) return [];
+  const seen=new Set(), out=[];
+  for(const v of R.vehicles||[]){
+    if(v.isPool||!v.driverUser) continue;            // need one real assigned engineer
+    const sc=R.scores?R.scores[v.reg]:null; if(sc==null) continue;
+    if(seen.has(v.driverUser)) continue; seen.add(v.driverUser);
+    out.push({username:v.driverUser, name:v.driver||v.driverUser, reg:v.reg, score:sc});
+  }
+  return out;
+}
+function scoreColour(s){ return s>=85?'#0a8a35':s>=70?'#b45309':'#d11f2a'; }
+function openSendScores(){
+  closeSendScores();
+  const R=window.__reportData; const recs=scoreRecipients(); window.__scoreRecs=recs;
+  const range=R?fmtRange(R.minD,R.maxD):'';
+  const rows=recs.length?recs.map((r,i)=>`
+    <label style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-top:1px solid #eef;cursor:pointer">
+      <input type="checkbox" class="ss-ck" data-i="${i}" checked style="width:18px;height:18px;flex:none">
+      <span style="flex:1;min-width:0"><b>${esc(r.name)}</b><br><span style="color:#64748b;font-size:12px">${esc(r.reg)}</span></span>
+      <span style="font-weight:800;font-size:17px;color:${scoreColour(r.score)}">${r.score}</span>
+    </label>`).join(''):'<p style="color:#64748b;font-size:14px">No engineer scores to send — a report needs an <b>assigned driver</b> and a driver-score PDF.</p>';
+  const host=document.createElement('div'); host.id='sendScoresModal';
+  host.style.cssText='position:fixed;inset:0;background:rgba(8,18,34,.55);z-index:3000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px;font-family:inherit';
+  host.innerHTML=`<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:18px;margin-top:4vh;color:#0f172a">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <h2 style="margin:0;font-size:18px">📤 Send Van Scores to engineers</h2>
+      <button onclick="closeSendScores()" style="border:none;background:#e2e8f0;border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit">✕</button>
+    </div>
+    <p style="color:#475569;font-size:13px;margin:6px 0 2px">${esc(range)}</p>
+    <p style="color:#475569;font-size:12px;margin:0 0 4px">Each ticked engineer gets a push notification and can view their own score history.</p>
+    <div style="max-height:48vh;overflow:auto;margin:4px 0">${rows}</div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <button onclick="sendScores(this)" ${recs.length?'':'disabled'} style="background:#003468;color:#fff;border:none;border-radius:9px;padding:10px 16px;font-weight:700;cursor:pointer;font:inherit;${recs.length?'':'opacity:.5'}">Send scores</button>
+      <button onclick="closeSendScores()" style="background:#e2e8f0;border:none;border-radius:9px;padding:10px 16px;cursor:pointer;font:inherit">Not now</button>
+      <span id="ssMsg" style="font-size:13px;color:#475569"></span>
+    </div></div>`;
+  host.addEventListener('click',e=>{ if(e.target===host) closeSendScores(); });
+  document.body.appendChild(host);
+}
+function closeSendScores(){ const m=document.getElementById('sendScoresModal'); if(m)m.remove(); }
+async function sendScores(btn){
+  const R=window.__reportData; const recs=window.__scoreRecs||[];
+  const picks=[...document.querySelectorAll('#sendScoresModal .ss-ck:checked')].map(c=>recs[+c.dataset.i]).filter(Boolean);
+  const msg=document.getElementById('ssMsg');
+  if(!picks.length){ if(msg)msg.textContent='Tick at least one engineer.'; return; }
+  if(btn)btn.disabled=true; if(msg)msg.textContent='Sending…';
+  try{
+    const body={ weekStart:R.minD, weekEnd:R.maxD, scores:picks.map(p=>({username:p.username,reg:p.reg,score:p.score})) };
+    const r=await authFetch('/fleet/scores/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+    if(r&&r.ok){ if(msg)msg.textContent='✓ Sent to '+r.sent+' engineer'+(r.sent===1?'':'s'); setTimeout(closeSendScores,1200); }
+    else { if(btn)btn.disabled=false; if(msg)msg.textContent='Send failed'+(r&&r.error?' — '+r.error:''); }
+  }catch(e){ if(btn)btn.disabled=false; if(msg)msg.textContent='Send failed'; }
+}
+window.openSendScores=openSendScores; window.closeSendScores=closeSendScores; window.sendScores=sendScores;
+
 // Download the report as a self-contained interactive .html file (same content
 // that gets saved to the portal — CSS inlined + the collapsible sections work
 // offline). No server round-trip; saves straight to the user's device.
@@ -498,6 +557,7 @@ async function generate(){
     $("genPane").style.display="none";
     window.scrollTo(0,0);
     saveReport({auto:true});   // every generated report saves to the portal automatically
+    if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
   }catch(e){ console.error(e); $("status").textContent="Couldn't build the report: "+(e.message||e); $("genBtn").disabled=false; }
 }
 
@@ -637,6 +697,7 @@ function renderReport(R){
 
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again</button>
+    <button class="btn" onclick="openSendScores()">📤 Send van scores</button>
     <button class="btn grey" onclick="downloadReport()">⬇️ Export HTML file</button>
     <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
     <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>

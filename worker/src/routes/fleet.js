@@ -128,6 +128,22 @@ async function handoverTemplate(env, tid) {
   } catch {}
   return DEFAULT_HANDOVER;
 }
+// Driver van-scores sent to engineers from a fleet report. One row per
+// engineer+week (a re-send updates it). Engineers see their own history.
+async function ensureScoresTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS driver_scores (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    week_end TEXT,
+    reg TEXT,
+    score INTEGER,
+    sent_by TEXT,
+    sent_at TEXT,
+    PRIMARY KEY (tenant_id, username, week_start)
+  )`).run();
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_dscores_user ON driver_scores(tenant_id,username,week_start)").run(); } catch {}
+}
 async function ensureHandoverTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_handovers (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
@@ -370,6 +386,23 @@ export async function handle(request, env, ctx, url, sess) {
       ...headers, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
       "Content-Disposition": "inline", "Cache-Control": "private, max-age=3600"
     }});
+  }
+
+  // Engineer's OWN van scores — any logged-in user (no Vehicles permission
+  // needed), returns ONLY the caller's own rows. Placed before the fleet gate.
+  if ((sub === "/scores/mine" || sub === "/scores/unseen") && method === "GET") {
+    if (!sess) return jr({ error: "Not authenticated" }, headers, 401);
+    await ensureScoresTable(env);
+    const me = sess.user.username;
+    if (sub === "/scores/unseen") {
+      const row = await env.DB.prepare("SELECT COUNT(*) AS n, MAX(sent_at) AS latest FROM driver_scores WHERE tenant_id=? AND username=?").bind(tid, me).first();
+      return jr({ ok: true, count: (row && row.n) || 0, latest: (row && row.latest) || "" }, headers);
+    }
+    const { results } = await env.DB.prepare(
+      "SELECT week_start, week_end, reg, score, sent_at FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
+    ).bind(tid, me).all();
+    const scores = (results || []).map(r => ({ weekStart: r.week_start, weekEnd: r.week_end || "", reg: r.reg || "", score: r.score, sentAt: r.sent_at || "" }));
+    return jr({ ok: true, scores }, headers);
   }
 
   // Everything else needs a fleet-permitted session.
@@ -1238,6 +1271,41 @@ export async function handle(request, env, ctx, url, sess) {
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(tid, VCACK_KEY(tid), JSON.stringify(map)).run();
     return jr({ ok: true, reg, ack: map[rk] || null }, headers);
+  }
+
+  // ── Send van driver scores to engineers (from a fleet report) ───────────────
+  // Body { weekStart, weekEnd, scores:[{username, reg, score}] }. Stores each and
+  // pushes the engineer. Any Vehicles user can send.
+  if (sub === "/scores/send" && method === "POST") {
+    await ensureScoresTable(env);
+    const b = await readJson(request);
+    const weekStart = String(b.weekStart || "").slice(0, 10);
+    const weekEnd = String(b.weekEnd || "").slice(0, 10);
+    const list = Array.isArray(b.scores) ? b.scores : [];
+    if (!weekStart || !list.length) return jr({ error: "weekStart and scores[] required" }, headers, 400);
+    const at = new Date().toISOString();
+    const by = (sess && sess.user && sess.user.username) || "";
+    const rangeLabel = weekEnd && weekEnd !== weekStart ? `${weekStart} → ${weekEnd}` : weekStart;
+    let sent = 0;
+    for (const s of list) {
+      const username = String(s.username || "").trim();
+      const score = s.score == null ? null : Math.max(0, Math.min(100, Math.round(Number(s.score))));
+      if (!username || score == null || !isFinite(score)) continue;
+      const reg = String(s.reg || "").trim();
+      await env.DB.prepare(
+        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at)
+         VALUES (?,?,?,?,?,?,?,?)
+         ON CONFLICT(tenant_id, username, week_start) DO UPDATE SET
+           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score, sent_by=excluded.sent_by, sent_at=excluded.sent_at`
+      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at).run();
+      sent++;
+      if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
+        title: "🚐 Your van driving score",
+        body: `Your driving score for ${rangeLabel} is ${score}/100. Tap to see your history.`,
+        url: "/my-van-scores.html", tag: "van-score"
+      }).catch(() => {}));
+    }
+    return jr({ ok: true, sent }, headers);
   }
 
   // ── Van handover: request (from assign popup) → pushes the new driver ──────
