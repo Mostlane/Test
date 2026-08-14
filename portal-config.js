@@ -726,7 +726,9 @@
       function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
       function navInner() {
-        var out = "";
+        var out = '<div class="pn-grp"><a class="pn-item pn-search" href="#" title="Quick search (Ctrl+K)">'
+          + '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
+          + '<span class="pn-label">Search <span class="pn-kbd">Ctrl K</span></span></a></div>';
         NAV.forEach(function (grp) {
           var items = grp.items.filter(allowed);
           if (!items.length) return;
@@ -777,6 +779,8 @@
         el.addEventListener("click", function (e) {
           var launch = e.target.closest ? e.target.closest("[data-launch]") : null;
           if (launch) { e.preventDefault(); doLaunch(launch.getAttribute("data-launch")); }
+          var srch = e.target.closest ? e.target.closest(".pn-search") : null;
+          if (srch) { e.preventDefault(); openPalette(); }
         });
         document.getElementById("pnavLogout").addEventListener("click", function () {
           localStorage.removeItem("mostlaneToken"); localStorage.removeItem("mostlaneViewAsReal"); sessionStorage.clear(); location.href = "/login.html";
@@ -787,7 +791,118 @@
         });
         try { initOfficeClock(); } catch (e) {}
         try { if (yes(perms.FullAccess)) refreshMenuConfig(); } catch (e) {}
+        try { initPalette(); } catch (e) {}
       }
+
+      // ── Command palette (Ctrl+K / Cmd+K, desktop) ──────────────────────────
+      // Type to jump anywhere: portal pages (permission-filtered, same list as
+      // the sidebar), live site search (→ site folder) and vehicles (→ the
+      // van's deep-dive). Arrow keys + Enter, Esc closes.
+      var openPalette = function () {};
+      function initPalette() {
+        if (window.__mlPalette) return;
+        window.__mlPalette = true;
+        var st = document.createElement("style");
+        st.textContent =
+          ".pn-kbd{margin-left:auto;font:600 10px/1 'Segoe UI',system-ui;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);border-radius:5px;padding:2px 6px;color:#cbd9ec;}" +
+          "#mlPalOv{position:fixed;inset:0;z-index:2147481000;background:rgba(10,20,40,.45);backdrop-filter:blur(2px);display:none;align-items:flex-start;justify-content:center;padding:12vh 16px 16px;}" +
+          "#mlPalOv.on{display:flex;}" +
+          "#mlPal{background:#fff;border-radius:16px;width:100%;max-width:560px;box-shadow:0 24px 70px rgba(0,0,0,.4);overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;}" +
+          "#mlPal input{width:100%;border:none;outline:none;padding:16px 18px;font:600 16px 'Segoe UI',system-ui;color:#16202e;border-bottom:1px solid #e2e8f0;box-sizing:border-box;}" +
+          "#mlPalList{max-height:46vh;overflow:auto;padding:6px;}" +
+          ".mlp-it{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;cursor:pointer;font-size:14px;color:#16202e;}" +
+          ".mlp-it .em{width:22px;text-align:center;flex:none;}" +
+          ".mlp-it .hint{margin-left:auto;color:#94a3b8;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;flex:none;}" +
+          ".mlp-it.sel{background:#eef4fc;}" +
+          ".mlp-none{padding:18px;text-align:center;color:#94a3b8;font-size:13.5px;}";
+        document.head.appendChild(st);
+        var ov = document.createElement("div");
+        ov.id = "mlPalOv";
+        ov.innerHTML = '<div id="mlPal"><input id="mlPalIn" placeholder="Jump to a page, site or vehicle…" autocomplete="off"><div id="mlPalList"></div></div>';
+        document.body.appendChild(ov);
+        var input = ov.querySelector("#mlPalIn"), listEl = ov.querySelector("#mlPalList");
+        var API = window.MOSTLANE_API, token = function () { return localStorage.getItem("mostlaneToken"); };
+        var GRP_EMOJI = { }; // page rows use a generic emoji; data rows get their own
+        var vehicles = null, siteHits = [], siteTimer = null, results = [], sel = 0, curQ = "";
+
+        function pageItems() {
+          var out = [];
+          NAV.forEach(function (grp) {
+            grp.items.filter(allowed).forEach(function (it) {
+              out.push({ em: "📄", label: it.label, hint: grp.title, href: it.launch ? null : "/" + resolveHref(it), launch: it.launch || null });
+            });
+          });
+          return out;
+        }
+        function loadVehicles() {
+          if (vehicles !== null) return;
+          vehicles = [];
+          if (!(yes(perms.FullAccess) || yes(perms.Vehicles))) return;
+          fetch(API + "/fleet/vehicles", { headers: { Authorization: "Bearer " + token() } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              vehicles = ((d && d.vehicles) || []).map(function (v) {
+                return { em: "🚐", label: v.reg + (v.driver ? " — " + v.driver : ""), hint: "Vehicle", href: "/vehicles.html?veh=" + encodeURIComponent(v.reg) };
+              });
+              render(curQ);
+            }).catch(function () {});
+        }
+        function searchSites(q) {
+          clearTimeout(siteTimer);
+          if (q.length < 2) { siteHits = []; return; }
+          siteTimer = setTimeout(function () {
+            fetch(API + "/ts/sites?q=" + encodeURIComponent(q), { headers: { Authorization: "Bearer " + token() } })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                siteHits = ((d && d.sites) || []).filter(function (s) { return s.code; }).slice(0, 6).map(function (s) {
+                  return { em: "📍", label: s.name + (s.postcode ? " · " + s.postcode : ""), hint: "Site folder", href: "/site-folder.html?site=" + encodeURIComponent(s.code) };
+                });
+                render(curQ);
+              }).catch(function () {});
+          }, 220);
+        }
+        function render(q) {
+          curQ = q;
+          var ql = q.toLowerCase().trim();
+          var pages = pageItems().filter(function (it) { return !ql || it.label.toLowerCase().indexOf(ql) !== -1 || it.hint.toLowerCase().indexOf(ql) !== -1; });
+          var vs = (vehicles || []).filter(function (v) { return ql && v.label.toLowerCase().indexOf(ql) !== -1; });
+          results = pages.slice(0, ql ? 8 : 14).concat(vs.slice(0, 5)).concat(ql ? siteHits : []);
+          sel = 0;
+          if (!results.length) { listEl.innerHTML = '<div class="mlp-none">Nothing matches — try a page name, site or reg.</div>'; return; }
+          listEl.innerHTML = results.map(function (it, i) {
+            return '<div class="mlp-it' + (i === sel ? " sel" : "") + '" data-i="' + i + '"><span class="em">' + it.em + "</span><span>" + esc(it.label) + '</span><span class="hint">' + esc(it.hint) + "</span></div>";
+          }).join("");
+        }
+        function go(it) {
+          if (!it) return;
+          close();
+          if (it.launch) doLaunch(it.launch);
+          else if (it.href) location.href = it.href;
+        }
+        function openPal() { ov.classList.add("on"); input.value = ""; siteHits = []; loadVehicles(); render(""); setTimeout(function () { input.focus(); }, 30); }
+        function close() { ov.classList.remove("on"); }
+        openPalette = openPal;
+        input.addEventListener("input", function () { searchSites(input.value); render(input.value); });
+        input.addEventListener("keydown", function (e) {
+          if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(results.length - 1, sel + 1); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); }
+          else if (e.key === "Enter") { e.preventDefault(); go(results[sel]); return; }
+          else return;
+          var kids = listEl.querySelectorAll(".mlp-it");
+          for (var i = 0; i < kids.length; i++) kids[i].classList.toggle("sel", i === sel);
+          if (kids[sel]) kids[sel].scrollIntoView({ block: "nearest" });
+        });
+        listEl.addEventListener("click", function (e) {
+          var row = e.target.closest ? e.target.closest(".mlp-it") : null;
+          if (row) go(results[+row.getAttribute("data-i")]);
+        });
+        ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+        document.addEventListener("keydown", function (e) {
+          if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === "k") { e.preventDefault(); ov.classList.contains("on") ? close() : openPal(); }
+          else if (e.key === "Escape" && ov.classList.contains("on")) { e.preventDefault(); close(); }
+        });
+      }
+
       function rebuild() {
         var nav = document.getElementById("pnavNav");
         if (nav) nav.innerHTML = navInner();

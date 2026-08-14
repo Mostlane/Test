@@ -329,6 +329,8 @@
       // KPI lands here on the Needs-attention view).
       try{ const f=new URLSearchParams(location.search).get("filter"); const sel=$("filterActive"); if(f && sel && [...sel.options].some(o=>o.value===f)) sel.value=f; }catch(e){}
       updateSummary(); renderFleet();
+      // ?veh=REG (command palette) → open that van's deep-dive straight away.
+      try{ const vq=new URLSearchParams(location.search).get("veh"); if(vq){ const norm=s=>String(s||"").replace(/\s+/g,"").toUpperCase(); const hit=FLEET.find(v=>norm(v.reg)===norm(vq)); if(hit) openVehicle(hit.reg); } }catch(e){}
       $("statusLine").textContent=FLEET.length?("Fleet loaded ("+FLEET.length+").") : "No vehicles yet — use “Add vehicle”.";
     }catch(e){ console.error(e); $("statusLine").textContent="Failed to load fleet."; }
   }
