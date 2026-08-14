@@ -44,7 +44,14 @@
     table.wall th, table.wall td { border-right:1px solid #f0f3f7; border-bottom:1px solid #f0f3f7; padding:0; }
     table.wall thead th { background:#f6f8fa; font-size:10.5px; color:#667085; padding:5px 0 4px; min-width:26px; text-align:center; font-weight:600; position:sticky; top:0; }
     table.wall thead th.dow { font-size:9px; color:#9aa6b2; font-weight:500; }
-    table.wall td.name, table.wall th.name { position:sticky; left:0; background:#fff; z-index:2; min-width:130px; max-width:160px; padding:7px 10px; font-size:13px; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; box-shadow:2px 0 4px rgba(0,0,0,.04); }
+    table.wall td.name, table.wall th.name { position:sticky; left:0; background:#fff; z-index:2; min-width:210px; max-width:240px; padding:7px 10px; font-size:13px; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; box-shadow:2px 0 4px rgba(0,0,0,.04); }
+    table.wall td.name { cursor:pointer; }
+    table.wall td.name .nnm { font-weight:600; }
+    table.wall td.name .nbd { font-size:10px; color:#667085; font-weight:500; margin-top:2px; }
+    /* Selected person's row stays highlighted while scrolling months. */
+    table.wall tr.sel td { background:#fff7e0 !important; }
+    table.wall tr.sel td.name { background:#ffe6ad !important; }
+    table.wall tr.sel td.name .nbd { color:#7a5b00; }
     table.wall thead th.name { background:#f6f8fa; z-index:3; }
     table.wall td.day { height:34px; min-width:26px; }
     td.day.wkend { background:#f3f5f8; }
@@ -254,8 +261,12 @@
     let CFGDATA = {};         // year config (accrualMode etc)
     const fmtDays = n => { n = Number(n) || 0; if (n === 0.5) return "\u00bd day"; if (n % 1 === 0.5) return Math.floor(n) + "\u00bd days"; return n + " day" + (n === 1 ? "" : "s"); };
     const halfLbl = h => h === "AM" ? "morning" : h === "PM" ? "afternoon" : "half day";
-    let BALMAP = {};          // username -> {allowance, used}
+    let BALMAP = {};          // username -> {allowance, used, committed, remaining, booked, bankHolidays, shutdown}
+    let SELECTED_USER = "";   // wall-chart highlighted person (persists across month nav)
     const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+    function applyWallSel() {
+      document.querySelectorAll("#wallTbl tr[data-user]").forEach(tr => tr.classList.toggle("sel", tr.getAttribute("data-user") === SELECTED_USER));
+    }
 
     // Wall-chart view preference: month wall or year calendar, per user.
     const AVIEW_KEY = "mostlaneHolAdminView:" + meUser;
@@ -512,8 +523,11 @@
       showDayPop(t, html);
     });
 
+    // Compact number: 5, 2½ …
+    const nDay = n => { n = Number(n) || 0; return n % 1 === 0.5 ? (n < 1 ? "½" : Math.floor(n) + "½") : String(n); };
     async function loadWall() {
       g("wcTitle").textContent = new Date(YEAR, MONTH - 1, 1).toLocaleDateString("en-GB", { month:"long", year:"numeric" });
+      if (!Object.keys(BALMAP).length) { try { await loadBalances(); } catch (e) {} }   // summary needs the balances
       let cal;
       try { cal = await fetchCal(YEAR, MONTH); }
       catch (e) { delete CAL_CACHE[YEAR + "-" + MONTH]; g("wallTbl").innerHTML = "<tr><td class='muted' style='padding:14px'>Couldn't load the calendar.</td></tr>"; return; }
@@ -548,7 +562,10 @@
 
       let body = "<tbody>";
       for (const eng of engineers) {
-        body += `<tr><td class="name" title="${esc(eng.username)}">${esc(NAMES[eng.username] || eng.name || eng.username)}</td>`;
+        const b = BALMAP[eng.username];
+        const bd = b ? `<div class="nbd">${nDay(b.booked)} booked · ${nDay(b.bankHolidays)} bank · ${nDay(b.shutdown)} shutdown · <b>${nDay(b.remaining)} left</b></div>` : "";
+        const selCls = eng.username === SELECTED_USER ? " sel" : "";
+        body += `<tr data-user="${esc(eng.username)}" class="${selCls.trim()}"><td class="name" data-user="${esc(eng.username)}" title="${esc(eng.username)}"><div class="nnm">${esc(NAMES[eng.username] || eng.name || eng.username)}</div>${bd}</td>`;
         for (let d = 1; d <= days; d++) {
           const di = `${YEAR}-${pad(MONTH)}-${pad(d)}`;
           const dt = new Date(Date.UTC(YEAR, MONTH - 1, d));
@@ -575,6 +592,13 @@
     document.addEventListener("click", async e => {
       const t = e.target;
       const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+      // Click a person's name (not a holiday block) → highlight/clear their row.
+      const nameCell = t.closest && t.closest("#wallTbl td.name");
+      if (nameCell && nameCell.dataset.user) {
+        SELECTED_USER = (SELECTED_USER === nameCell.dataset.user) ? "" : nameCell.dataset.user;
+        applyWallSel();
+        return;
+      }
       if (t.dataset.wcRevoke) {
         if (confirm("Cancel this approved holiday? The days go back to their allowance.")) {
           await post("/holiday/cancel-approved", { id: t.dataset.wcRevoke }); loadAll();
@@ -597,7 +621,7 @@
       catch (e) { balLoaded = false; g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
       const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
       BALMAP = {};
-      list.forEach(e => { BALMAP[e.username] = { allowance: e.allowance, used: e.used }; });
+      list.forEach(e => { BALMAP[e.username] = { allowance: e.allowance, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown }; });
       g("balBody").innerHTML = list.map(e => `
         <tr>
           <td>${esc(NAMES[e.username] || e.name || e.username)}</td>
