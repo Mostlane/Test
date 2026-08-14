@@ -1098,6 +1098,13 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   XLS + driver-score PDF, parsed client-side): `/fleet/report` POST (save
   standalone HTML to R2) / `/fleet/reports` GET / `/fleet/report-delete`;
   `/fleet/drivers` GET/POST (remembered reg→driver overrides for the report).
+  **Auto-save (Aug 2026):** every generated report saves to the portal
+  automatically (generate() calls saveReport({auto:true})); the POST **dedupes by
+  week range** (deletes any earlier report with the same weekStart+weekEnd) so
+  regenerating a week UPDATES it instead of piling up duplicates. The manual
+  button is now "💾 Save again" (re-save after edits). The saved-reports list
+  (loadPastReports) is **grouped under month/year banners** (`.rpt-month`, keyed
+  by weekStart's month, newest first) so a long history is easy to scan.
   Pool vans: mark a reg "🚚 Fleet/pool" → per-day allocate-to-driver dropdowns
   saved to `/fleet/pool-alloc` (app_config `fleet:poolalloc:<tid>`,
   key `REG|YYYY-MM-DD`→username); the van timesheet uses these per-day.

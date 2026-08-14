@@ -9323,13 +9323,29 @@ async function handle20(request, env, ctx, url, sess) {
     const file = form.get("html");
     if (!file) return jr3({ error: "Missing report" }, headers, 400);
     const weekStart = String(form.get("weekStart") || "");
+    const weekEnd = String(form.get("weekEnd") || "");
+    if (weekStart || weekEnd) {
+      try {
+        const listed = await env.JOB_FILES.list({ prefix: prefix(tid), include: ["customMetadata"] });
+        for (const o of listed.objects || []) {
+          const m = o.customMetadata || {};
+          if ((m.weekStart || "") === weekStart && (m.weekEnd || "") === weekEnd) {
+            try {
+              await env.JOB_FILES.delete(o.key);
+            } catch {
+            }
+          }
+        }
+      } catch {
+      }
+    }
     const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
     await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
       customMetadata: {
         title: String(form.get("title") || "Fleet report").slice(0, 160),
         weekStart,
-        weekEnd: String(form.get("weekEnd") || ""),
+        weekEnd,
         by: sess.user.username,
         at: (/* @__PURE__ */ new Date()).toISOString()
       }
