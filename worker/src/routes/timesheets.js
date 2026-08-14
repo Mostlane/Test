@@ -39,6 +39,15 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
+import { approvedLeaveInRange } from "./holidays.js";
+
+// Approved leave for a Mon–Sun week as { "YYYY-MM-DD": {type, half} } for one
+// user — an approved holiday auto-shows on the timesheet without any entry.
+async function holidayDaysFor(env, tid, username, monday) {
+  const end = weekDays(monday)[6];
+  const map = await approvedLeaveInRange(env, tid, monday, end, username);
+  return map[username] || {};
+}
 
 const CFG_KEY = tid => `engts:cfg:${tid}`;
 const INV_PREFIX = tid => `invoices/${tid}/`;
@@ -706,7 +715,8 @@ export async function handle(request, env, ctx, url, sess) {
     const { days, savedAt } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
-    return json({ ok: true, week: monday, days, savedAt, auto, totals: weekTotals(days, eff),
+    const holidays = await holidayDaysFor(env, tid, me, monday);
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, totals: weekTotals(days, eff),
       invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
@@ -1153,6 +1163,7 @@ export async function handle(request, env, ctx, url, sess) {
       const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
       const dataBy = {}; for (const r of rows || []) { try { dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at }; } catch {} }
       const invBy = {}; for (const r of invs || []) invBy[r.username] = r;
+      const leaveAll = await approvedLeaveInRange(env, tid, monday, weekDays(monday)[6]);   // approved holidays this week
       const out = [];
       for (const u of users || []) {
         const eff = effectiveCfg(cfg, u);
@@ -1177,6 +1188,7 @@ export async function handle(request, env, ctx, url, sess) {
         out.push({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
           days: d.days, perDay, savedAt: d.at, totals: weekTotals(d.days, eff),
+          holidays: leaveAll[u.username] || {},
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null });
       }

@@ -22,6 +22,33 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { sendToUser, sendToPermission } from "./push.js";
 
+// ── Shared: approved leave as per-day markers ────────────────────────────────
+// Used by the engineer timesheet + the SLA scheduler so an approved holiday
+// automatically appears on both. Expands each approved booking's start→end
+// range into individual dates within [from,to]. `username` optional (one user).
+// Returns { username: { "YYYY-MM-DD": { type, half } } }.
+export async function approvedLeaveInRange(env, tid, from, to, username) {
+  const out = {};
+  try {
+    const sql = "SELECT username, start_date, end_date, type, half FROM holidays " +
+      "WHERE tenant_id=? AND status='Approved' AND start_date<=? AND end_date>=?" + (username ? " AND username=?" : "");
+    const binds = username ? [tid, to, from, username] : [tid, to, from];
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    for (const r of results || []) {
+      if (!r.start_date || !r.end_date) continue;
+      let d = new Date(r.start_date + "T12:00:00Z");
+      const end = new Date(r.end_date + "T12:00:00Z");
+      let guard = 0;
+      while (d <= end && guard++ < 400) {
+        const ds = d.toISOString().slice(0, 10);
+        if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
+        d.setUTCDate(d.getUTCDate() + 1);
+      }
+    }
+  } catch { /* fail soft → no leave overlay */ }
+  return out;
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   // Tenant is always server-derived (session, or request host for the
@@ -308,6 +335,19 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/holiday/all" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     return json(await listHolidayRequestsForYear());
+  }
+
+  // GET /holiday/calendar?from=&to=  — approved leave per user per day, for the
+  // SLA scheduler to overlay who's off. Any logged-in office user may read it.
+  if (path === "/holiday/calendar" && method === "GET") {
+    if (!sess) return text("Not authenticated", 401);
+    const q = url.searchParams;
+    const iso = s => (/^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "");
+    const today = new Date().toISOString().slice(0, 10);
+    const from = iso(q.get("from")) || today;
+    const to = iso(q.get("to")) || from;
+    const days = await approvedLeaveInRange(env, tenantId, from, to);
+    return json({ ok: true, from, to, days });
   }
 
   // POST /holiday/approve | /holiday/reject  (admin)

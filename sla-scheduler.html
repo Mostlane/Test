@@ -111,6 +111,10 @@
     .week-grid{display:grid;grid-template-columns:84px repeat(7,1fr);border-top:1px solid var(--border);font-size:11px;min-height:320px;}
     .week-day-header{padding:4px 6px;border-left:1px solid var(--border);border-bottom:1px solid var(--border);background:#f9fafb;text-align:center;font-weight:600;}
     .week-engineer-cell{border-left:1px solid var(--border);border-bottom:1px solid var(--border);position:relative;min-height:60px;background:#fff;}
+    .week-engineer-cell.on-holiday{background:repeating-linear-gradient(45deg,#f0fdf4,#f0fdf4 8px,#dcfce7 8px,#dcfce7 16px);}
+    .hol-badge{display:inline-block;background:#16a34a;color:#fff;border-radius:6px;padding:2px 6px;font-size:10.5px;font-weight:700;margin:2px;}
+    .day-row.on-holiday .day-track{background:repeating-linear-gradient(45deg,#f0fdf4,#f0fdf4 10px,#dcfce7 10px,#dcfce7 20px);}
+    .hol-badge-inline{display:inline-block;background:#16a34a;color:#fff;border-radius:999px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle;}
     .week-job-chip{
       background:#e0f2fe;border:1px solid #60a5fa;border-radius:999px;padding:2px 6px;
       font-size:10px;margin:2px;display:inline-block;cursor:pointer;max-width:100%;
@@ -384,6 +388,31 @@ async function loadJobs(){
     .filter(j => !["Complete","Closed Jobs","Invoiced"].includes(j.status));
 }
 
+// Approved holidays overlaid on the board so you never schedule someone on leave.
+// Keyed by lowercased username → { "YYYY-MM-DD": {type, half} }. Loaded for a
+// wide window around the current date; refetched + re-rendered on navigation.
+let holidayMap = {}, holFrom = "", holTo = "";
+function ymd(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function holFor(username, dateObj){ const m=holidayMap[String(username||"").toLowerCase()]; return m ? m[ymd(dateObj)] : null; }
+async function loadHolidays(){
+  const from = new Date(selectedDate); from.setDate(from.getDate()-60);
+  const to = new Date(selectedDate); to.setDate(to.getDate()+90);
+  holFrom = ymd(from); holTo = ymd(to);
+  try{
+    const d = await authFetch("/holiday/calendar?from="+holFrom+"&to="+holTo).then(r=>r.json());
+    const out = {};
+    const days = (d && d.days) || {};
+    for(const [u, dates] of Object.entries(days)) out[String(u).toLowerCase()] = dates;
+    holidayMap = out;
+  }catch(e){ holidayMap = {}; }
+}
+// Ensure holidays cover the date about to be shown; refetch (then re-render) if not.
+function ensureHolidays(){
+  const cur = ymd(selectedDate);
+  if(!holFrom || cur < holFrom || cur > holTo){ loadHolidays().then(render); return false; }
+  return true;
+}
+
 function getFilteredEngineers(){
   if(engineerFilter === "all") return engineers;
   return engineers.filter(e => e.username === engineerFilter);
@@ -395,6 +424,7 @@ function render(){
   if(loadingEl) loadingEl.style.display = "none";
   const wrapper = $("schedulerWrapper");
   if(!wrapper) return;
+  ensureHolidays();   // refetch + re-render if the visible date moved outside the window
   const prevInner = wrapper.querySelector(".day-timeline");
   const keepInner = prevInner ? prevInner.scrollLeft : 0;
   wrapper.innerHTML = "";
@@ -510,6 +540,8 @@ function renderDayView(container){
     const name = document.createElement("div");
     name.className = "day-name";
     name.textContent = engineer.name;
+    const holD = holFor(engineer.username, dayDate);
+    if(holD){ row.classList.add("on-holiday"); const bd=document.createElement("span"); bd.className="hol-badge-inline"; bd.textContent="🌴 "+(holD.half?holD.half+" leave":"Holiday"); name.appendChild(bd); }
     row.appendChild(name);
 
     const track = document.createElement("div");
@@ -608,6 +640,17 @@ function renderWeekView(container){
       dayCell.className = "week-engineer-cell";
       const date = new Date(monday);
       date.setDate(monday.getDate()+i);
+
+      // Approved holiday overlay — shade the cell + badge so it's obvious the
+      // engineer is off (and you shouldn't schedule them here).
+      const hol = holFor(engineer.username, date);
+      if(hol){
+        dayCell.classList.add("on-holiday");
+        const b = document.createElement("div");
+        b.className = "hol-badge";
+        b.textContent = "🌴 " + (hol.half ? hol.half + " leave" : (hol.type==="Unpaid"?"Unpaid":hol.type==="Other"?"Leave":"Holiday"));
+        dayCell.appendChild(b);
+      }
 
       jobs
         .filter(j => j.scheduledAt && j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
@@ -1081,6 +1124,7 @@ async function init(){
       sel.appendChild(opt);
     });
     await loadJobs();
+    await loadHolidays();
     render();
     setStatus("Scheduler ready");
     if(location.hash === "#map") openMap();
