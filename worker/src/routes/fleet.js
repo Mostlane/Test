@@ -277,6 +277,24 @@ async function vanCheckDefects(env, tid, resolved) {
   } catch {}
   return out;
 }
+// Newest van-check date per vehicle (any outcome — this is "was it checked",
+// not "did it pass"). Skipped weeks don't count as a real check.
+async function lastVanCheckMap(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, checked_at, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle); const at = r.checked_at || "";
+      if (!at) continue;
+      if (!out[rk] || new Date(at) > new Date(out[rk])) out[rk] = at;
+    }
+  } catch {}
+  return out;
+}
 // Serving URL for a gallery photo: uploaded vehicle photos are signed
 // (/fleet/vehicle-photo); van-check photos use the public /asset-image route.
 function galleryPhotoUrl(env, origin, key) {
@@ -473,6 +491,7 @@ export async function handle(request, env, ctx, url, sess) {
     let defResolved = {};
     try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) defResolved = JSON.parse(row.value) || {}; } catch {}
     const defects = await vanCheckDefects(env, tid, defResolved);
+    const lastVc = await lastVanCheckMap(env, tid);   // newest van-check date per reg (card badge)
     // Handover state per reg: latest completed (for the card's direct link) +
     // whether one is still pending (a badge / "awaiting handover" hint).
     await ensureHandoverTable(env);
@@ -531,6 +550,7 @@ export async function handle(request, env, ctx, url, sess) {
         defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
         defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
         defectSince: (defects[dn(v.reg)] || {}).since || "",
+        lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check (for the "checked in last 7 days" card badge)
         // Money views — Full Access only.
         finance: money ? financeOf(v) : undefined,
         runningCost: money ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : undefined
@@ -1368,11 +1388,13 @@ export async function handle(request, env, ctx, url, sess) {
     let coverKey = covers[rk];
     const allKeys = new Set([...idx.map(p => p.key), ...vc.map(p => p.key)]);
     if (!coverKey || !allKeys.has(coverKey)) coverKey = idx.length ? idx[0].key : "";
+    // Deleting a photo is Full-Access only (matches the /vehicle-photo-delete gate).
+    const canDel = await canMoney(env, tid, sess);
     const photos = [];
     for (const p of idx) {
       photos.push({
         key: p.key, name: p.name, by: p.by, at: p.at, source: "upload",
-        categoryId: "upload", category: "Uploaded", canDelete: true, cover: p.key === coverKey,
+        categoryId: "upload", category: "Uploaded", canDelete: canDel, cover: p.key === coverKey,
         url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
       });
     }
@@ -1411,6 +1433,8 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true }, headers);
   }
   if (sub === "/vehicle-photo-delete" && method === "POST") {
+    // Deleting a vehicle photo is Full-Access only (any Vehicles user can view/add).
+    if (!(await canMoney(env, tid, sess))) return jr({ error: "Full Access required to delete photos" }, headers, 403);
     const b = await readJson(request); const key = String(b.key || "");
     if (!key || !key.startsWith("vehiclephotos/")) return jr({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
