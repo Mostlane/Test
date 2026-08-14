@@ -93,11 +93,20 @@
       const tick=canTick
         ? '<button class="tickbtn'+(s.done?" on":"")+'" title="'+(s.done?"Tick off":"Mark done")+'" onclick="toggle(\''+t.id+'\','+(s.done?"true":"false")+')">'+(s.done?"✓":"")+'</button>'
         : '<div class="tickbtn on" title="Completed automatically">✓</div>';
+      // A task linked to a portal section opens straight there. The whole title
+      // becomes the link, plus an explicit "Go to" button.
+      const title=t.areaPage
+        ? '<h3><a href="'+esc(t.areaPage)+'" style="color:var(--navy);text-decoration:none;">'+esc(t.title)+' ↗</a></h3>'
+        : '<h3>'+esc(t.title)+'</h3>';
+      const goBtn=t.areaPage
+        ? '<a class="btn primary small" href="'+esc(t.areaPage)+'" style="margin-top:8px;">➜ Go to '+esc(t.areaLabel||"section")+'</a>'
+        : "";
       return '<div class="card"><div class="task">'+tick+
-        '<div class="body"><h3>'+esc(t.title)+'</h3>'+
+        '<div class="body">'+title+
         '<div class="meta">'+esc(schedule(t))+'</div>'+pill+
         (t.detail?'<div class="detail">'+esc(t.detail)+'</div>':"")+
         (t.autoMatch&&!s.done?'<div class="auto-note">⤿ Auto-ticks when you do this in the portal</div>':"")+
+        (goBtn?'<div>'+goBtn+'</div>':"")+
         '</div></div></div>';
     }
     async function toggle(id, isDone){
