@@ -1253,7 +1253,22 @@ cards so it's legible over any personalised background. **Framework:**
 `window.MostlaneHub` — `HUB.register({id,emoji,title,can(perms),load(card),wide?})`
 then `HUB.run(perms)` (reads the cached `mostlanePermissions` blob, instant, no
 network wait). A widget filtered out by `can(perms)` never renders; if NO widget
-is eligible the whole `#hubDash` stays hidden. **The whole dashboard is
+is eligible the whole `#hubDash` stays hidden. **Areas of responsibility
+(personalised home):** each office user has `profile.areas` (a set of area
+domain keys — set in Users Admin's "🏠 Responsible for" picker, saved via the
+normal user save; also a dedicated POST /users/set-areas + GET /users/areas-meta
+exist). `/auth/me` + `/users` return `Areas`. `HUB.run` fetches `/auth/me` (via
+`boot`) for the authoritative `Areas`; when non-empty the dashboard shows **only**
+widgets whose `area` matches (My tasks `always:true` + the overview `first` always
+show; the overview's KPI strip is area-filtered too). Empty `areas` → falls back
+to permission-gating (every area they can access). Each widget carries an `area`
+domain key (vehicles/sla/holidays/equipment/compliance/purchaseorders/memos/
+timesheets/messages), matching users.js `USER_AREAS`. **Positive "all up to date"
+state:** a clear widget (a `cardHtml` with a `✓` line and no amber/red — it drops
+a hidden `[data-clear]` marker; the custom-HTML van-check + overview widgets add
+their own) gets a green `.clear` card; when EVERY shown card is clear, the
+`#hubAllClear` "🎉 You're all caught up" banner shows + the overview greens.
+**The whole dashboard is
 office/admin only** — `HUB.run` bails immediately for field engineers
 (`isFieldUser(perms)`: StaffType field, or the SLA/Story heuristic when blank —
 mirrors applyGate), so field users never see ANY stat regardless of a widget's

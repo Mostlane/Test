@@ -264,6 +264,11 @@
 
       <!-- PERMISSIONS -->
       <div class="section" data-sec="perms">
+        <div class="permsec" style="margin-bottom:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;">
+          <h4 style="margin:0 0 4px;">🏠 Responsible for (home dashboard)</h4>
+          <p class="muted" style="margin:0 0 8px;font-size:12.5px;">Tick the areas this person is responsible for. Their home page shows <b>only</b> these — a clean, focused summary of what they need to watch. Leave all unticked to show every area they have permission for. <b>They also need the matching permission below</b> for an area's data to load.</p>
+          <div id="areaGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 14px;"></div>
+        </div>
         <div class="permwrap" id="permGrid"></div>
       </div>
 
@@ -398,6 +403,24 @@
     const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
     const g = id => document.getElementById(id);
 
+    // ── Areas of responsibility (home dashboard) ───────────────────────────
+    // key = the home dashboard's area domain (see main.html widgets).
+    const AREAS = [
+      {key:"vehicles",label:"Vehicles / van checks"},
+      {key:"sla",label:"SLA jobs"},
+      {key:"holidays",label:"Holidays"},
+      {key:"equipment",label:"Plant & equipment"},
+      {key:"compliance",label:"Compliance"},
+      {key:"purchaseorders",label:"Purchase orders"},
+      {key:"memos",label:"Company memos"},
+      {key:"timesheets",label:"Engineer timesheets"},
+      {key:"messages",label:"Messages"},
+    ];
+    function renderAreas(){
+      g("areaGrid").innerHTML = AREAS.map(a =>
+        `<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#14532d;cursor:pointer;padding:2px 0;">`
+        + `<input type="checkbox" data-area="${a.key}" style="width:auto;margin:0;"> ${a.label}</label>`).join("");
+    }
     // ── Permission switches ────────────────────────────────────────────────
     function permRow(perm){
       return `<div class="togrow"><span class="tlabel">${PERM_LABELS[perm] || perm}</span>`
@@ -427,6 +450,7 @@
       faSnapshot = null;
     }
     renderPerms();
+    renderAreas();
 
     if (/REPLACE-ME/.test(API || "")) g("configNotice").style.display = "block";
     if (!token) location.href = "login.html";
@@ -697,6 +721,9 @@
       faSnapshot = null;
       gridToggles().forEach(cb => cb.disabled = false);
       document.querySelectorAll("[data-perm]").forEach(cb => { cb.checked = user ? user[cb.dataset.perm] === "Yes" : false; });
+      // Areas of responsibility (profile.areas, surfaced as user.Areas).
+      const myAreas = new Set((user && Array.isArray(user.Areas) ? user.Areas : (user?.Profile?.areas || [])).map(String));
+      document.querySelectorAll("[data-area]").forEach(cb => { cb.checked = myAreas.has(cb.dataset.area); });
       if (g("faToggle").checked) lockFullAccess();
       g("panelMsg").textContent = "";
       g("overlay").classList.add("open");
@@ -739,6 +766,8 @@
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
       profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
+      // Areas of responsibility → profile.areas (drives the home dashboard).
+      profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
       body.Profile = profile;
       // Full access + Story Mode read straight from their switches. Area
       // permissions use the remembered underlying state while Full access has

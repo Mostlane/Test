@@ -168,6 +168,32 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, count: list.length }, {}, env, request);
   }
 
+  // GET /users/areas-meta — the pickable "areas of responsibility" (admin).
+  if (path === "/users/areas-meta" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    return json({ ok: true, areas: USER_AREAS }, {}, env, request);
+  }
+
+  // POST /users/set-areas  (admin) — set one user's areas of responsibility.
+  // Body: { Username, Areas:[keys] }. Merges into profile.areas only (other
+  // profile keys survive), so it never wipes theme/prefs/staffType etc.
+  if (path === "/users/set-areas" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.Username) return error("Username required", 400, env, request);
+    const valid = new Set(USER_AREAS.map(a => a.key));
+    const areas = (Array.isArray(b.Areas) ? b.Areas : []).map(String).filter(k => valid.has(k));
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
+    if (!row) return error("User not found", 404, env, request);
+    let profile = {}; try { profile = row.profile ? JSON.parse(row.profile) : {}; } catch { profile = {}; }
+    profile.areas = areas;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?")
+      .bind(JSON.stringify(profile), db.tenantId, b.Username).run();
+    return json({ ok: true, Areas: areas }, {}, env, request);
+  }
+
   // POST /users  (create or update — admin only)
   if (path === "/users" && request.method === "POST") {
     const gate = await requireAdmin(env, request);
@@ -309,6 +335,21 @@ export async function handle(request, env, ctx, url, sess) {
   return error("Unknown user route", 404, env, request);
 }
 
+// Areas of responsibility an admin can assign to an office user (Users Admin).
+// The `key` matches the home dashboard's widget `area` domain so the home page
+// can show only the areas a user owns. `perm` is the permission that area needs
+// (surfaced as an access flag/grant, like tasks).
+const USER_AREAS = [
+  { key: "vehicles",       label: "Vehicles / van checks", perm: "Vehicles" },
+  { key: "sla",            label: "SLA jobs",              perm: "SLA" },
+  { key: "holidays",       label: "Holidays",              perm: "HolidayAdmin" },
+  { key: "equipment",      label: "Plant & equipment",     perm: "AssetAdmin" },
+  { key: "compliance",     label: "Compliance",            perm: "Compliance" },
+  { key: "purchaseorders", label: "Purchase orders",       perm: "PurchaseOrders" },
+  { key: "memos",          label: "Company memos",         perm: "FullAccess" },
+  { key: "timesheets",     label: "Engineer timesheets",   perm: "TimesheetAdmin" },
+  { key: "messages",       label: "Messages",              perm: "" },
+];
 const PERMISSION_KEYS = [
   "FullAccess", "Users", "DeviceAdmin", "CheckInOut", "Vehicles", "Holiday",
   "HolidayAdmin", "EngineersHoursMenu", "HoursDashboard", "PurchaseOrders",
@@ -351,6 +392,7 @@ function shapeUser(u, perms) {
     // profile blob so no schema change is needed). Everything sorts by these.
     StaffType: profile.staffType === "office" ? "office" : "field",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
+    Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
     Profile: profile,
     ...perms,
   };
