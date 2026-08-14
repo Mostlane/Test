@@ -227,6 +227,7 @@
       <!-- Edit cluster -->
       <button id="editBtn" class="btn">✏️ Edit</button>
       <button id="saveBtn" class="btn" style="display:none;">Save Changes</button>
+      <button id="addFromSitesBtn" class="btn" style="display:none;">🔗 Add from Sites</button>
       <button id="addSiteBtn" class="btn" style="display:none;">＋ Add Site</button>
       <button id="deleteSiteBtn" class="btn" style="display:none;">🗑 Delete Site</button>
     </div>
@@ -1003,7 +1004,7 @@ function setView(mode){
   // leaving/entering closed view always drops edit mode
   if (editMode){ editMode = false; enableEditing(false);
     document.getElementById('editBtn').style.display = canEditCompliance() ? 'inline-flex' : 'none';
-    ['saveBtn','addSiteBtn','deleteSiteBtn'].forEach(id=>document.getElementById(id).style.display='none');
+    ['saveBtn','addSiteBtn','addFromSitesBtn','deleteSiteBtn'].forEach(id=>document.getElementById(id).style.display='none');
   }
   // reset the DUE quick-filters when switching
   document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
@@ -1107,6 +1108,7 @@ async function loadFromPortal(){
       siteName: s.name || '',
       postcode: s.postcode || '',
       storeType: s.category || '',
+      siteNumber: s.siteNumber || '',
       hasSite: !!s.hasSite,
       active: s.active == null ? 1 : s.active,
       meta: s.meta || {},
@@ -1249,6 +1251,114 @@ async function saveEditInstant(row){
   } finally {
     row.style.opacity = "1";
   }
+}
+
+/* Add from Sites — pick an EXISTING portal FBC site and link it into the
+   Fareham chart. Fareham stores use their own 0001-style code, so the picked
+   site's number is stored explicitly (site_number) — that's the bridge to the
+   site's Site Documents. Config-driven; mirrors eicr-portal.html's copy. */
+const AFS_CFG = {
+  clients: { fbc:"FBC", general:"General" },
+  codeIsSiteNumber: false, askType: true, defaultType: "Other",
+  emptyMsg: "No eligible FBC sites to add — every one is already on the chart."
+};
+function afsKey(num){ return AFS_CFG.codeIsSiteNumber ? pad4(num) : String(num||'').trim(); }
+function openAddFromSitesModal(){
+  if (!canEditCompliance()) return alert("You don't have permission to add compliance sites.");
+  const cfg = AFS_CFG;
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Add from Sites</h2>
+      <p style="margin:.2em 0 .6em;color:#556;font-size:14px;">Pick a site you already have in the portal. It's linked to that site, so its certificates show under the site's <b>Site Documents</b> automatically.</p>
+      ${cfg.askType ? '<label style="font-size:13px;color:#556;">Type for new sites (optional)</label><input id="afsType" type="text" placeholder="e.g. Office / Depot / Toilets" autocomplete="off" style="margin-bottom:8px;" />' : ''}
+      <input id="afsSearch" type="text" placeholder="Search name or number…" autocomplete="off" />
+      <div id="afsList" style="max-height:46vh;overflow:auto;margin-top:8px;border:1px solid #e3e8ee;border-radius:10px;">
+        <div style="padding:14px;color:#889;">Loading your sites…</div>
+      </div>
+      <div class="actions">
+        <button class="btn" style="background:#ccc;color:#000;" id="afs_cancel">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display = 'block';
+  modal.querySelector('#afs_cancel').onclick = ()=> modal.remove();
+  modal.onclick = (e)=>{ if (e.target === modal) modal.remove(); };
+
+  const listEl = modal.querySelector('#afsList');
+  const searchEl = modal.querySelector('#afsSearch');
+  const typeEl = modal.querySelector('#afsType');
+  let sites = [];
+
+  const existing = new Set((allData || []).map(e =>
+    afsKey(cfg.codeIsSiteNumber ? e.storeCode : (e.siteNumber || ''))
+  ));
+
+  function render(){
+    const q = (searchEl.value || '').trim().toLowerCase();
+    const rows = sites.filter(s =>
+      !q || (s.siteName||'').toLowerCase().includes(q) || (s.siteNumber||'').toLowerCase().includes(q)
+    );
+    if (!rows.length){ listEl.innerHTML = '<div style="padding:14px;color:#889;">'+(sites.length?'No matches.':cfg.emptyMsg)+'</div>'; return; }
+    listEl.innerHTML = rows.map(s => {
+      const num = String(s.siteNumber||'').trim();
+      const label = cfg.clients[(s.client||'').toLowerCase()] || '';
+      return `<button type="button" class="afs-row" data-num="${num}"
+        style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid #eef1f4;background:#fff;cursor:pointer;">
+        <b style="min-width:52px;color:#0a66c2;">${num}</b>
+        <span style="flex:1;">${(s.siteName||'(no name)')}</span>
+        <span style="color:#889;font-size:12px;">${s.postcode||''}${label?' · '+label:''}</span>
+      </button>`;
+    }).join('');
+    listEl.querySelectorAll('.afs-row').forEach(b => b.onclick = ()=> addOne(b.dataset.num, b));
+  }
+
+  async function addOne(num, btn){
+    const s = sites.find(x => String(x.siteNumber||'').trim() === num);
+    if (!s) return;
+    btn.disabled = true; btn.style.opacity = '.6';
+    try{
+      let code = num;
+      if (!cfg.codeIsSiteNumber){
+        const nc = await (await authFetch('/compliance/next-code')).json().catch(()=>({}));
+        code = nc && nc.code ? nc.code : '';
+        if (!code){ alert('Could not allocate a code.'); btn.disabled=false; btn.style.opacity='1'; return; }
+      }
+      const category = cfg.codeIsSiteNumber
+        ? (cfg.clients[(s.client||'').toLowerCase()] || cfg.defaultType)
+        : ((typeEl && typeEl.value.trim()) || cfg.defaultType);
+      const res = await authFetch('/compliance/store', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ code, name: s.siteName || '', postcode: s.postcode || '', category, siteNumber: num })
+      });
+      const out = await res.json().catch(()=>({}));
+      if (res.ok && out.ok){
+        existing.add(afsKey(num));
+        sites = sites.filter(x => String(x.siteNumber||'').trim() !== num);
+        render();
+        await loadFromPortal();
+      } else {
+        alert((out && out.error) || 'Could not add that site.');
+        btn.disabled = false; btn.style.opacity = '1';
+      }
+    }catch(e){
+      console.error(e); alert('Could not add that site.');
+      btn.disabled = false; btn.style.opacity = '1';
+    }
+  }
+
+  searchEl.oninput = render;
+  authFetch('/get-sites?category=all')
+    .then(r => r.json())
+    .then(arr => {
+      sites = (Array.isArray(arr) ? arr : [])
+        .filter(s => cfg.clients[(s.client||'').toLowerCase()] && String(s.siteNumber||'').trim() && !existing.has(afsKey(s.siteNumber)))
+        .sort((a,b) => String(a.siteNumber).localeCompare(String(b.siteNumber), undefined, { numeric:true }));
+      render();
+      searchEl.focus();
+    })
+    .catch(e => { console.error(e); listEl.innerHTML = '<div style="padding:14px;color:#c00;">Could not load your sites.</div>'; });
 }
 
 /* Add Site modal (Fareham — auto-numbered code, Type description, 5 dates) */
@@ -1707,6 +1817,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const editBtn = document.getElementById('editBtn');
   const saveBtn = document.getElementById('saveBtn');
   const addBtn  = document.getElementById('addSiteBtn');
+  const addFromBtn = document.getElementById('addFromSitesBtn');
   const delBtn  = document.getElementById('deleteSiteBtn');
 
   // Only Compliance / Full-Access users can edit; everyone else just views.
@@ -1719,6 +1830,7 @@ document.addEventListener('DOMContentLoaded', () => {
     editBtn.style.display = "none";
     saveBtn.style.display = "inline-flex";
     addBtn.style.display  = "inline-flex";
+    addFromBtn.style.display = "inline-flex";
     delBtn.style.display  = "inline-flex";
   };
 
@@ -1732,11 +1844,13 @@ document.addEventListener('DOMContentLoaded', () => {
     editBtn.style.display = "inline-flex";
     saveBtn.style.display = "none";
     addBtn.style.display  = "none";
+    addFromBtn.style.display = "none";
     delBtn.style.display  = "none";
     // do NOT auto reload so the green banner persists
   };
 
   addBtn.onclick = openAddSiteModal;
+  addFromBtn.onclick = openAddFromSitesModal;
   delBtn.onclick = openDeleteSiteModal;
 
   const tb = document.getElementById('tableBody');

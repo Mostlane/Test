@@ -1106,6 +1106,7 @@ async function loadFromPortal(){
       siteName: s.name || '',
       postcode: s.postcode || '',
       storeType: s.category || '',
+      siteNumber: s.siteNumber || code,
       hasSite: !!s.hasSite,
       active: s.active == null ? 1 : s.active,
       fiveYear: d.fiveYear || '', pat: d.pat || '', em: d.em || '',
@@ -1333,19 +1334,29 @@ function openAddSiteModal(){
   };
 }
 
-/* Add from Sites modal — pick an EXISTING portal site and link it into the
-   Co-op compliance chart. For coop the store code IS the site number, so the
-   worker stamps site_number=code and the store's documents automatically show
-   in that site's Site Documents. Nothing new is created in Sites. */
-const SITE_CLIENT_LABEL = { retail:"Retail", cobra:"Cobra", els:"ELS", els_private:"ELS Private", wenzels:"Wenzel's" };
+/* Add from Sites — pick an EXISTING portal site and link it into this
+   compliance chart. Co-op: the store code IS the site number, so the worker
+   stamps site_number=code. Other schemes (Fareham) get a fresh chart code but
+   the picked site number is stored explicitly, so either way the store's certs
+   show under that site's Site Documents automatically. Config-driven so the
+   same code runs on both eicr-portal.html (coop) and fareham.html.
+   AFS_CFG per page: clients{client:label}, codeIsSiteNumber, askType, defaultType. */
+const AFS_CFG = {
+  clients: { retail:"Retail", cobra:"Cobra", els:"ELS", els_private:"ELS Private", wenzels:"Wenzel's", general:"General" },
+  codeIsSiteNumber: true, askType: false, defaultType: "Retail",
+  emptyMsg: "No eligible sites to add — every one is already on the chart."
+};
+function afsKey(num){ return AFS_CFG.codeIsSiteNumber ? pad4(num) : String(num||'').trim(); }
 function openAddFromSitesModal(){
   if (!canEditCompliance()) return alert("You don't have permission to add compliance sites.");
+  const cfg = AFS_CFG;
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
     <div class="modal-content">
       <h2>Add from Sites</h2>
-      <p style="margin:.2em 0 .6em;color:#556;font-size:14px;">Pick a site you already have in the portal. It's linked by site number, so its certificates show under the site's <b>Site Documents</b> automatically.</p>
+      <p style="margin:.2em 0 .6em;color:#556;font-size:14px;">Pick a site you already have in the portal. It's linked to that site, so its certificates show under the site's <b>Site Documents</b> automatically.</p>
+      ${cfg.askType ? '<label style="font-size:13px;color:#556;">Type for new sites (optional)</label><input id="afsType" type="text" placeholder="e.g. Office / Depot / Toilets" autocomplete="off" style="margin-bottom:8px;" />' : ''}
       <input id="afsSearch" type="text" placeholder="Search name or number…" autocomplete="off" />
       <div id="afsList" style="max-height:46vh;overflow:auto;margin-top:8px;border:1px solid #e3e8ee;border-radius:10px;">
         <div style="padding:14px;color:#889;">Loading your sites…</div>
@@ -1361,20 +1372,24 @@ function openAddFromSitesModal(){
 
   const listEl = modal.querySelector('#afsList');
   const searchEl = modal.querySelector('#afsSearch');
+  const typeEl = modal.querySelector('#afsType');
   let sites = [];
 
-  // Codes already in the chart (any status) — so we never offer a duplicate.
-  const existing = new Set((allData || []).map(e => pad4(e.storeCode)));
+  // Site numbers already linked into the chart (any status) — never offer a dup.
+  // Coop matches on the store code (=site number); other schemes on site_number.
+  const existing = new Set((allData || []).map(e =>
+    afsKey(cfg.codeIsSiteNumber ? e.storeCode : (e.siteNumber || ''))
+  ));
 
   function render(){
     const q = (searchEl.value || '').trim().toLowerCase();
     const rows = sites.filter(s =>
       !q || (s.siteName||'').toLowerCase().includes(q) || (s.siteNumber||'').toLowerCase().includes(q)
     );
-    if (!rows.length){ listEl.innerHTML = '<div style="padding:14px;color:#889;">'+(sites.length?'No matches.':'No eligible sites to add — every Co-op site is already on the chart.')+'</div>'; return; }
+    if (!rows.length){ listEl.innerHTML = '<div style="padding:14px;color:#889;">'+(sites.length?'No matches.':cfg.emptyMsg)+'</div>'; return; }
     listEl.innerHTML = rows.map(s => {
       const num = String(s.siteNumber||'').trim();
-      const label = SITE_CLIENT_LABEL[(s.client||'').toLowerCase()] || '';
+      const label = cfg.clients[(s.client||'').toLowerCase()] || '';
       return `<button type="button" class="afs-row" data-num="${num}"
         style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid #eef1f4;background:#fff;cursor:pointer;">
         <b style="min-width:52px;color:#0a66c2;">${num}</b>
@@ -1389,15 +1404,25 @@ function openAddFromSitesModal(){
     const s = sites.find(x => String(x.siteNumber||'').trim() === num);
     if (!s) return;
     btn.disabled = true; btn.style.opacity = '.6';
-    const category = SITE_CLIENT_LABEL[(s.client||'').toLowerCase()] || 'Retail';
     try{
+      let code = num;
+      if (!cfg.codeIsSiteNumber){
+        // Fresh chart code for this scheme (0001-style) — fetch each time so a
+        // run of adds numbers sequentially.
+        const nc = await (await authFetch('/compliance/next-code')).json().catch(()=>({}));
+        code = nc && nc.code ? nc.code : '';
+        if (!code){ alert('Could not allocate a code.'); btn.disabled=false; btn.style.opacity='1'; return; }
+      }
+      const category = cfg.codeIsSiteNumber
+        ? (cfg.clients[(s.client||'').toLowerCase()] || cfg.defaultType)
+        : ((typeEl && typeEl.value.trim()) || cfg.defaultType);
       const res = await authFetch('/compliance/store', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ code: num, name: s.siteName || '', postcode: s.postcode || '', category })
+        body: JSON.stringify({ code, name: s.siteName || '', postcode: s.postcode || '', category, siteNumber: num })
       });
       const out = await res.json().catch(()=>({}));
       if (res.ok && out.ok){
-        existing.add(pad4(num));
+        existing.add(afsKey(num));
         sites = sites.filter(x => String(x.siteNumber||'').trim() !== num);
         render();
         await loadFromPortal();
@@ -1415,10 +1440,9 @@ function openAddFromSitesModal(){
   authFetch('/get-sites?category=all')
     .then(r => r.json())
     .then(arr => {
-      // Co-op store types only (exclude Fareham/projects/general), and drop any
-      // site already on the chart.
+      // Only this scheme's site types, with a real number, not already on the chart.
       sites = (Array.isArray(arr) ? arr : [])
-        .filter(s => SITE_CLIENT_LABEL[(s.client||'').toLowerCase()] && String(s.siteNumber||'').trim() && !existing.has(pad4(s.siteNumber)))
+        .filter(s => cfg.clients[(s.client||'').toLowerCase()] && String(s.siteNumber||'').trim() && !existing.has(afsKey(s.siteNumber)))
         .sort((a,b) => String(a.siteNumber).localeCompare(String(b.siteNumber), undefined, { numeric:true }));
       render();
       searchEl.focus();
