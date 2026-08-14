@@ -1572,6 +1572,37 @@ Gated per user by ThemeColour / ThemeBackground permissions (Users Admin →
 Personalisation group; FullAccess implies both). Server-side filtering means
 revoking a permission reverts that user on their next page load.
 
+## Portal polish layer (Aug 2026)
+One pass to make everything feel like one product:
+- **POST /batch** (index.js, session-gated): `{paths:[…≤20 GETs]}` dispatched
+  through the normal route table in ONE round trip — each sub-handler's own
+  permission checks still run; per-path fail-soft. The home hub's `jget()`
+  coalesces same-tick cache misses into one /batch (per-path fallback to
+  individual fetches). Hub cards load with shimmer skeletons (`.hub-skel .sk`)
+  and an all-failed state shows a "↻ Try again" card.
+- **MLUI (portal-config.js)**: `window.alert()` portal-wide is now a branded
+  toast (bottom-centre, auto-dismiss; a toast fired just before a redirect
+  survives onto the next page via sessionStorage `mlToastPending`).
+  `MLUI.confirm(msg,{title,okLabel,danger})` = Promise-based styled dialog —
+  adopt call-site by call-site (native `confirm()` is synchronous, can't be
+  globally swapped). Converted: vehicles resolve-defects, van-checks pause-all,
+  tasks-admin delete/grant. Pattern:
+  `const ok = window.MLUI ? await MLUI.confirm(...) : confirm(...);`.
+- **/portal.css?v=1**: shared design tokens (`--ml-*`) + baseline polish
+  (focus-visible rings, uniform button hover/press, tidy desktop scrollbars,
+  ::selection, reduced-motion) + opt-in `.ml-card/.ml-pill/.ml-btn/.ml-empty`.
+  Loaded BEFORE each page's own <style> (page CSS wins) on the 22 top pages.
+  **Include it on every NEW page.**
+- **Command palette** (portal-config, desktop): Ctrl/Cmd+K or the Search row
+  at the top of the sidebar. Jumps to pages (sidebar's permission-filtered NAV),
+  vehicles by reg (→ `vehicles.html?veh=REG` opens the deep-dive) and live site
+  search via /ts/sites (→ site-folder.html?site=CODE). Sidebar already
+  highlights the current page (`.pn-item.active`).
+- **Dead-page cleanup**: 35 retired/unreferenced pages deleted (zero inbound
+  links verified across html/js/worker at deletion time). Deliberate redirect
+  stubs KEPT: theme.html, sites-register.html, po.html (router). SW cache
+  bumped to `mostlane-v71`; portal.css added to the precache shell.
+
 ## Help section
 help.html — ❓ tile (always visible, incl. Story users) + sidebar item. 50+
 task-level SOP guides in a GROUPS array (incl. a **"Vehicles & fleet"** group:
