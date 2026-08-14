@@ -166,7 +166,9 @@
       const rows = data.users.map(u => {
         const cells = days.map((d,i) => {
           const sec = u.days[d] || 0; dayTotals[i] += sec;
-          return `<td class="day${sec?" has":""}">${hm(sec)}</td>`;
+          const running = u.openDays && u.openDays[d];
+          if (running && !sec) return `<td class="day running"><span class="pill">running</span></td>`;
+          return `<td class="day${sec?" has":""}">${hm(sec)}${running?' <span class="pill">running</span>':""}</td>`;
         }).join("");
         grand += u.total;
         const open = u.open ? `<span class="pill">running</span>` : "";

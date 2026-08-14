@@ -533,10 +533,10 @@
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
         { title: "Time & HR", items: [
-          { label: "Timesheet", href: "office-timesheet.html", icon: "timesheet", perms: ["OfficeTimesheet", "Vehicles"], hrefBy: [["OfficeTimesheet", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]], match: ["office-timesheet.html", "van-timesheet.html"] },
+          { label: "Timesheet", href: "office-timesheet.html", icon: "timesheet", perms: ["Vehicles"], hrefBy: [["FullAccess", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]], match: ["office-timesheet.html", "van-timesheet.html"] },
           { label: "My Timesheet", href: "engineer-timesheet.html", icon: "timesheet", perms: ["EngTimesheet"], match: ["engineer-timesheet.html"] },
           { label: "Engineer Timesheets", href: "timesheets-admin.html", icon: "timesheet", perms: ["TimesheetAdmin"], match: ["timesheets-admin.html"] },
-          { label: "My Hours", href: "office-my-hours.html", icon: "clock", perms: ["OfficeClock"] },
+          { label: "My Hours", href: "office-my-hours.html", icon: "clock", perms: ["OfficeClock", "OfficeTimesheet"] },
           { label: "Holiday", href: "holiday.html", icon: "holiday", perms: ["Holiday"] },
           { label: "Holiday Admin", href: "holiday-admin.html", icon: "holidayAdmin", perms: ["HolidayAdmin"], match: ["holiday-admin.html", "holiday-config.html"] },
           { label: "Weekly Summary", href: "weekly.html", icon: "weekly", perms: ["Weekly"] },
