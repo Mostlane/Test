@@ -247,6 +247,18 @@ async function vanCheckPhotoCounts(env, tid) {
 // equipment answer of "missing", OR the driver flagged the van not-safe-to-drive.
 // Returns { REGNORM: { items, checks, notSafe, since, latest } }.
 const DEFECTCLR_KEY = tid => `fleet:defectsclear:${tid}`;
+// Acknowledged "missed van check" per vehicle: { REGNORM: { at, by } }. Valid for
+// the same 7-day window as the green check, so a genuine one-off miss can be
+// waved through and the red bar returns next week if it's still not done.
+const VCACK_KEY = tid => `fleet:vcack:${tid}`;
+const VC_WINDOW_MS = 7 * 86400000;
+// Van-check bar state for a card: ok (checked ≤7d) | ack (missed but acknowledged
+// ≤7d) | due (missed, needs a check or an acknowledge).
+function vanCheckState(lastAt, ack) {
+  if (lastAt && (Date.now() - new Date(lastAt).getTime()) <= VC_WINDOW_MS) return { state: "ok", at: lastAt, ackBy: "" };
+  if (ack && ack.at && (Date.now() - new Date(ack.at).getTime()) <= VC_WINDOW_MS) return { state: "ack", at: lastAt || "", ackBy: ack.by || "" };
+  return { state: "due", at: lastAt || "", ackBy: "" };
+}
 async function vanCheckDefects(env, tid, resolved) {
   const out = {};
   try {
@@ -491,7 +503,9 @@ export async function handle(request, env, ctx, url, sess) {
     let defResolved = {};
     try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) defResolved = JSON.parse(row.value) || {}; } catch {}
     const defects = await vanCheckDefects(env, tid, defResolved);
-    const lastVc = await lastVanCheckMap(env, tid);   // newest van-check date per reg (card badge)
+    const lastVc = await lastVanCheckMap(env, tid);   // newest van-check date per reg (card bar)
+    let vcAck = {};
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first(); if (row && row.value) vcAck = JSON.parse(row.value) || {}; } catch {}
     // Handover state per reg: latest completed (for the card's direct link) +
     // whether one is still pending (a badge / "awaiting handover" hint).
     await ensureHandoverTable(env);
@@ -550,7 +564,8 @@ export async function handle(request, env, ctx, url, sess) {
         defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
         defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
         defectSince: (defects[dn(v.reg)] || {}).since || "",
-        lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check (for the "checked in last 7 days" card badge)
+        lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check date
+        vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),   // card status bar: ok | ack | due
         // Money views — Full Access only.
         finance: money ? financeOf(v) : undefined,
         runningCost: money ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : undefined
@@ -1196,6 +1211,20 @@ export async function handle(request, env, ctx, url, sess) {
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
     return jr({ ok: true, reg, resolvedAt: map[rk] }, headers);
+  }
+
+  // ── Acknowledge a MISSED van check (waves the red bar for ~7 days) ──────────
+  if (sub === "/vancheck-ack" && method === "POST") {
+    const b = await readJson(request); const reg = String(b.reg || "").trim();
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    let map = {};
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first(); if (row && row.value) map = JSON.parse(row.value) || {}; } catch {}
+    if (b.clear) delete map[rk];
+    else map[rk] = { at: new Date().toISOString(), by: (sess && sess.user && sess.user.username) || "" };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, VCACK_KEY(tid), JSON.stringify(map)).run();
+    return jr({ ok: true, reg, ack: map[rk] || null }, headers);
   }
 
   // ── Van handover: request (from assign popup) → pushes the new driver ──────
