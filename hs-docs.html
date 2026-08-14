@@ -1132,11 +1132,18 @@
         <button class="btn red small" type="button" onclick="deleteAttachment('${esc(a.key)}')">✕</button>
       </div>`).join("") : '<span class="muted">None yet.</span>';
     const reqs = doc.signRequests || [];
-    g("signList").innerHTML = reqs.length ? reqs.map(s =>
-      `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:3px 0;">
-        <span style="font-size:13px;">${esc(s.name || s.username)} — ${s.status==="signed"?`<b style="color:#0a7d33;">✓ signed ${esc(s.signedAt?new Date(s.signedAt).toLocaleDateString("en-GB"):"")}</b>`:'<span style="color:#b26b00;">⏳ awaiting</span>'}</span>
+    g("signList").innerHTML = reqs.length ? reqs.map(s => {
+      // Signed but no docKey = their My Documents copy was never filed (their
+      // browser dropped the step) — offer a one-tap re-file from here.
+      const filed = s.status==="signed"
+        ? (s.docKey ? ' <span class="muted" style="font-size:11.5px;">· 📄 in their My Documents</span>'
+                    : ` <button class="btn small" type="button" style="background:#d97706;color:#fff;" onclick="refileSigned('${esc(s.username)}')">📄 File copy to their My Documents</button>`)
+        : "";
+      return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:3px 0;flex-wrap:wrap;">
+        <span style="font-size:13px;">${esc(s.name || s.username)} — ${s.status==="signed"?`<b style="color:#0a7d33;">✓ signed ${esc(s.signedAt?new Date(s.signedAt).toLocaleDateString("en-GB"):"")}</b>`:'<span style="color:#b26b00;">⏳ awaiting</span>'}${filed}</span>
         <button class="btn grey small" type="button" title="Remove" onclick="cancelSign('${esc(s.username)}')">✕</button>
-      </div>`).join("") : '<span class="muted">No one sent yet.</span>';
+      </div>`;
+    }).join("") : '<span class="muted">No one sent yet.</span>';
   }
   async function uploadAttachment() {
     const f = g("attFile").files[0]; if (!f) { g("attMsg").textContent = "Choose a file first."; return; }
@@ -1169,6 +1176,21 @@
       await openDoc(DOC_CUR.id);
     } catch (e) { g("signMsg").textContent = "Failed — " + e.message; }
     finally { g("signSendBtn").disabled = false; }
+  }
+  // Admin recovery: rasterise the signed document HERE and file the PDF into
+  // the signer's My Documents (their browser never completed that step).
+  async function refileSigned(username) {
+    if (!DOC_CUR) return;
+    const el = g("docBody");
+    if (!window.HSCaptureDoc || !el) { alert("Can't capture the document on this device."); return; }
+    alert("Filing a copy to " + username + "'s My Documents…");
+    try {
+      const pages = await window.HSCaptureDoc(el);
+      const r = await authFetch("/hs/doc/file-signed", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: DOC_CUR.id, pages, username }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "failed");
+      alert("✓ Filed to " + username + "'s My Documents → Risk Assessments.");
+      await openDoc(DOC_CUR.id);
+    } catch (e) { alert("Couldn't file the copy — " + e.message); }
   }
   async function cancelSign(username) {
     if (!DOC_CUR || !confirm("Remove this person from the sign-off list?\n\nIf they've already signed, their completed copy will also be removed from their My Documents.")) return;
