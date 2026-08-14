@@ -111,7 +111,9 @@
     async function boot(){
       try{ const me=await aFetch("/auth/me").then(r=>r.json()); if(!me.ok||me.user.FullAccess!=="Yes"){ alert("This page needs Full Access."); location.href="/main.html"; return; } }
       catch(e){ location.href="/main.html"; return; }
-      try{ const u=await aFetch("/users").then(r=>r.json()); USERS=(u.Users||u.users||[]).filter(x=>x.Username && (x.Status===undefined||x.Status===""||x.Status==="Active")); }catch(e){}
+      // Tasks are an OFFICE feature — the assignee picker lists office staff only
+      // (StaffType defaults to "field"; only "office" users are pickable).
+      try{ const u=await aFetch("/users").then(r=>r.json()); USERS=(u.Users||u.users||[]).filter(x=>x.Username && (x.Status===undefined||x.Status===""||x.Status==="Active") && String(x.StaffType||"").toLowerCase()==="office"); }catch(e){}
       try{ const m=await aFetch("/tasks/meta").then(r=>r.json()); AREAS=m.areas||[]; }catch(e){}
       g("fArea").innerHTML=AREAS.map(a=>'<option value="'+esc(a.key)+'">'+esc(a.label)+'</option>').join("");
       load();
