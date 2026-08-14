@@ -497,6 +497,10 @@ const MAP = window.ML_PERM_MAP || {
           || (stx !== "office" && (String(user.SLA || "").toLowerCase() === "yes" || isStory)));
         const vc = document.getElementById("VanCheck");
         if (vc) vc.classList.toggle("visible", isFieldUser);
+        // My Tasks is an OFFICE feature — hide the tile from field engineers
+        // (it's hardcoded "visible", so switch it off for them here).
+        const mt = document.getElementById("MyTasks");
+        if (mt) mt.classList.toggle("visible", !isFieldUser);
 
         const has = k => fullAccess || String(user[k] || "").toLowerCase() === "yes";
         const setHref = (id, choices) => {
@@ -1288,7 +1292,7 @@ const MAP = window.ML_PERM_MAP || {
     // ── Widget: Tasks — my recurring tasks (always shown, even at zero) ───────
     HUB.register({
       id: "tasks", emoji: "✅", title: "My tasks",
-      can: function () { return true; },
+      can: function (p) { return String(p.StaffType || "").toLowerCase() !== "field"; },
       load: function (card) {
         return jget("/tasks/attention").then(function (d) {
           if (!d || !d.ok) throw new Error("bad");
@@ -1641,7 +1645,7 @@ const MAP = window.ML_PERM_MAP || {
     function kpiSpecs(p) {
       var yr = new Date().getFullYear();
       var all = [
-        { ok: true, emoji: "✅", href: "my-tasks.html", get: "/tasks/attention",
+        { ok: String(p.StaffType || "").toLowerCase() !== "field", emoji: "✅", href: "my-tasks.html", get: "/tasks/attention",
           calc: function (d) { if (!d || !d.ok) return null; return { n: d.outstanding || 0, label: (d.overdue ? d.overdue + " overdue · " : "") + "tasks to do", bad: (d.overdue || 0) > 0 }; } },
         { ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-main.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var open = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")); }); var od = j.filter(function (x) { return x.sla && x.sla.state === "BREACHED"; }); return { n: open.length, label: od.length ? "open · " + od.length + " overdue" : "open jobs", bad: od.length > 0 }; } },
