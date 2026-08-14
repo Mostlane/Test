@@ -9211,6 +9211,28 @@ async function vanCheckDefects(env, tid, resolved) {
   }
   return out;
 }
+async function lastVanCheckMap(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, checked_at, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {};
+      try {
+        items = r.items ? JSON.parse(r.items) : {};
+      } catch {
+      }
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle);
+      const at = r.checked_at || "";
+      if (!at) continue;
+      if (!out[rk] || new Date(at) > new Date(out[rk])) out[rk] = at;
+    }
+  } catch {
+  }
+  return out;
+}
 function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
@@ -9400,6 +9422,7 @@ async function handle20(request, env, ctx, url, sess) {
     } catch {
     }
     const defects = await vanCheckDefects(env, tid, defResolved);
+    const lastVc = await lastVanCheckMap(env, tid);
     await ensureHandoverTable(env);
     const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
     const lastHo = {}, pendHo = {};
@@ -9468,6 +9491,8 @@ async function handle20(request, env, ctx, url, sess) {
         defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
         defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
         defectSince: (defects[dn(v.reg)] || {}).since || "",
+        lastVanCheckAt: lastVc[dn(v.reg)] || "",
+        // newest van check (for the "checked in last 7 days" card badge)
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0
@@ -10379,6 +10404,7 @@ async function handle20(request, env, ctx, url, sess) {
     let coverKey = covers[rk];
     const allKeys = /* @__PURE__ */ new Set([...idx.map((p) => p.key), ...vc.map((p) => p.key)]);
     if (!coverKey || !allKeys.has(coverKey)) coverKey = idx.length ? idx[0].key : "";
+    const canDel = await canMoney(env, tid, sess);
     const photos = [];
     for (const p of idx) {
       photos.push({
@@ -10389,7 +10415,7 @@ async function handle20(request, env, ctx, url, sess) {
         source: "upload",
         categoryId: "upload",
         category: "Uploaded",
-        canDelete: true,
+        canDelete: canDel,
         cover: p.key === coverKey,
         url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
       });
@@ -10440,6 +10466,7 @@ async function handle20(request, env, ctx, url, sess) {
     return jr3({ ok: true }, headers);
   }
   if (sub === "/vehicle-photo-delete" && method === "POST") {
+    if (!await canMoney(env, tid, sess)) return jr3({ error: "Full Access required to delete photos" }, headers, 403);
     const b = await readJson4(request);
     const key = String(b.key || "");
     if (!key || !key.startsWith("vehiclephotos/")) return jr3({ error: "Bad key" }, headers, 400);

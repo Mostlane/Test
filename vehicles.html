@@ -36,6 +36,23 @@
   .scard .val{font-size:24px;font-weight:700;margin-top:2px;}
   .scard .note{font-size:12px;color:var(--muted);margin-top:2px;}
   .scard.alert .val{color:#dc2626;}
+  /* Faults card: bright red when there's a fault, green when all clear. */
+  .scard.fault-bad{background:#c62828;border-color:#b71c1c;}
+  .scard.fault-bad .lbl,.scard.fault-bad .val,.scard.fault-bad .note{color:#fff;}
+  .scard.fault-ok{background:#128a3a;border-color:#0f7a33;}
+  .scard.fault-ok .lbl,.scard.fault-ok .val,.scard.fault-ok .note{color:#fff;}
+  /* Fleet-status banner across the top. */
+  .fleet-banner{border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:15px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;line-height:1.35;}
+  .fleet-banner.ok{background:#128a3a;color:#fff;font-weight:700;}
+  .fleet-banner.bad{background:#c62828;color:#fff;}
+  .fleet-banner .fb-title{font-weight:800;margin-right:4px;}
+  .fleet-banner .fb-seg{color:#fff;text-decoration:none;cursor:pointer;border-bottom:1px dashed rgba(255,255,255,.65);font-weight:600;white-space:nowrap;}
+  .fleet-banner .fb-seg:hover{border-bottom-style:solid;}
+  .fleet-banner .fb-seg small{opacity:.85;font-weight:400;}
+  /* Per-card "van check in last 7 days" badge. */
+  .vcbadge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;}
+  .vcbadge.ok{background:#dcfce7;color:#166534;}
+  .vcbadge.bad{background:#fee2e2;color:#b91c1c;}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;}
@@ -113,12 +130,14 @@
   </header>
 
   <div class="wrap">
+    <div class="fleet-banner ok" id="fleetBanner" style="display:none"></div>
     <div class="toolbar">
       <div class="field"><label>Search</label><input id="searchInput" placeholder="Reg, driver, model…" oninput="renderFleet()"></div>
       <div class="field"><label>Show</label>
         <select id="filterActive" onchange="renderFleet()">
           <option value="all">All vehicles</option>
           <option value="attention">Needs attention</option>
+          <option value="faults">Faults reported</option>
           <option value="active">Active only</option>
           <option value="inactive">Inactive only</option>
           <option value="due">Service due / overdue</option>
@@ -314,8 +333,31 @@
     $("sumUnassigned").textContent=FLEET.filter(v=>!v.driver).length;
     $("sumDue").textContent=FLEET.filter(v=>v.serviceStatus==="warn"||v.serviceStatus==="bad").length;
     const faults=FLEET.filter(v=>hasDefect(v)).length;
+    const fc=$("sumFaultCard"); fc.style.display="";       // always shown now (green when clear)
     $("sumFault").textContent=faults;
-    $("sumFaultCard").style.display=faults?"":"none";
+    fc.classList.remove("alert","fault-bad","fault-ok");
+    fc.classList.add(faults?"fault-bad":"fault-ok");
+    const note=fc.querySelector(".note"); if(note) note.textContent = faults ? "Van-check defects to resolve" : "No outstanding faults";
+    renderBanner();
+  }
+  // Jump the grid to a filtered view (banner segments link here).
+  window.jumpFilter=function(f){ const s=$("filterActive"); if(s){ s.value=f; renderFleet(); } try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){} };
+  // Green "all clear" / red "needs attention" banner naming exactly what's
+  // outstanding across the fleet (faults, services due/overdue, MOT/tax/handover).
+  function renderBanner(){
+    const b=$("fleetBanner"); if(!b) return;
+    const on=v=>v.active!==false;
+    const faults=FLEET.filter(v=>on(v)&&hasDefect(v));
+    const svc=FLEET.filter(v=>on(v)&&(v.serviceStatus==="warn"||v.serviceStatus==="bad"));
+    const other=FLEET.filter(v=>on(v)&&svc.indexOf(v)<0&&((daysTo(v.motDue)!=null&&daysTo(v.motDue)<=30)||(daysTo(v.taxDue)!=null&&daysTo(v.taxDue)<=30)||!!v.pendingHandover));
+    const regs=arr=>arr.map(v=>v.reg||"?").join(", ");
+    const parts=[];
+    if(faults.length) parts.push(`<a class="fb-seg" onclick="jumpFilter('faults')">🔧 ${faults.length} van${faults.length>1?"s":""} with a fault <small>(${esc(regs(faults))})</small></a>`);
+    if(svc.length){ const od=svc.filter(v=>v.serviceStatus==="bad").length; const lbl=od?`${svc.length} service${svc.length>1?"s":""} due — ${od} overdue`:`${svc.length} service${svc.length>1?"s":""} due`; parts.push(`<a class="fb-seg" onclick="jumpFilter('due')">🛠 ${lbl} <small>(${esc(regs(svc))})</small></a>`); }
+    if(other.length) parts.push(`<a class="fb-seg" onclick="jumpFilter('attention')">📋 ${other.length} MOT / tax / handover <small>(${esc(regs(other))})</small></a>`);
+    b.style.display="";
+    if(!parts.length){ b.className="fleet-banner ok"; b.innerHTML="✓ Fleet all clear — no faults, services or renewals outstanding."; }
+    else { b.className="fleet-banner bad"; b.innerHTML=`<span class="fb-title">⚠ Fleet needs attention:</span>`+parts.join(""); }
   }
 
   // A van has an outstanding fault if a van-check reported a defect/missing item
@@ -375,6 +417,16 @@
     return (m!=null&&m<=30)||(t!=null&&t<=30)||v.serviceStatus==="warn"||v.serviceStatus==="bad"||!!v.pendingHandover;
   }
 
+  // Green ✓ if this van was checked in the last 7 days, red if not. Auto-linked
+  // to the weekly van-check records (lastVanCheckAt). Inactive vans show nothing.
+  function vanCheckBadge(v){
+    if(v.active===false) return "";
+    const at=v.lastVanCheckAt||"";
+    const days = at ? (Date.now()-new Date(at).getTime())/86400000 : null;
+    if(days!=null && days>=0 && days<=7) return `<span class="vcbadge ok" title="Last van check ${esc(fmtDMY(at))}">✓ Van check in last 7 days</span>`;
+    return `<span class="vcbadge bad" title="${at?('Last check '+esc(fmtDMY(at))):'No van check on record'}">⚠ No van check in last 7 days</span>`;
+  }
+
   function renderFleet(){
     const grid=$("fleetGrid"); grid.innerHTML="";
     const qv=($("searchInput").value||"").toLowerCase();
@@ -388,6 +440,7 @@
     if(filt==="active") list=list.filter(v=>v.active!==false);
     if(filt==="inactive") list=list.filter(v=>v.active===false);
     if(filt==="due") list=list.filter(v=>v.serviceStatus==="warn"||v.serviceStatus==="bad");
+    if(filt==="faults") list=list.filter(hasDefect);
     if(!list.length){ grid.innerHTML=`<div class="hint">No vehicles found.</div>`; return; }
     // Order comes from the server (manual drag order); no client re-sort here.
     const dragOff = !!qv || filt!=="all";   // reordering only makes sense on the full, unfiltered list
@@ -417,7 +470,7 @@
           <span>${v.active===false?"Inactive":"Active"}</span>
         </div>
         <div>${odo}${v.currentMpg!=null?`<span class="odo" style="margin-left:14px">⛽ ${Number(v.currentMpg).toFixed(1)} <small>Current MPG</small></span>`:""}</div>
-        <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
+        <div class="tags">${vanCheckBadge(v)}${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
         <div class="card-actions">
           ${hasDefect(v)?`<button class="btn small" style="background:#dc2626;border-color:#dc2626;color:#fff" onclick="resolveDefects('${esc(reg)}')">✓ Mark defects resolved</button>`:""}
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
