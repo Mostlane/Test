@@ -213,7 +213,11 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
 .hub-btn.primary { background:#003b82; color:#fff; }
 .hub-btn.ghost { background:#eef2f6; color:#1f2a44; }
 .hub-btn:disabled { opacity:.6; cursor:default; }
-.hub-skel { color:#8a97a6; font-size:13px; }
+/* Skeleton loading state — soft shimmering placeholder blocks instead of text. */
+.hub-skel .sk { border-radius:8px; background:linear-gradient(90deg,#eef2f6 25%,#f7fafc 45%,#eef2f6 65%); background-size:200% 100%; animation:hubShimmer 1.2s ease-in-out infinite; }
+@keyframes hubShimmer { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@media (prefers-reduced-motion:reduce){ .hub-skel .sk { animation:none; } }
+.hub-retry { background:#fff; border:1px solid #d7dee6; border-radius:14px; padding:16px; text-align:center; color:#5b6b78; font:600 13.5px 'Segoe UI',system-ui,sans-serif; grid-column:1 / -1; }
 /* Overview "How are we doing" card — a prominent full-width KPI strip at the top. */
 .hub-card.overview { background:linear-gradient(180deg,#ffffff,#f5f8fc); border-color:#c9d6e5; }
 .hub-kpis { display:flex; flex-wrap:wrap; gap:10px; }
@@ -1254,8 +1258,35 @@ const MAP = window.ML_PERM_MAP || {
     }
     // Memoised GET — the overview strip and each detail card share ONE fetch per
     // endpoint (both read the same numbers, so we never hit an endpoint twice).
-    var _cache = {};
-    function jget(path) { if (!_cache[path]) _cache[path] = jfetch(path); return _cache[path]; }
+    // Cache misses requested in the same tick COALESCE into a single POST /batch
+    // (one round trip for the whole dashboard); each path falls back to its own
+    // fetch if the batch — or its slice of it — fails, so nothing regresses.
+    var _cache = {}, _pending = null;
+    function jget(path) {
+      if (_cache[path]) return _cache[path];
+      _cache[path] = new Promise(function (resolve, reject) {
+        if (!_pending) { _pending = { paths: [], settle: {} }; setTimeout(flushBatch, 15); }
+        _pending.paths.push(path);
+        _pending.settle[path] = { resolve: resolve, reject: reject };
+      });
+      return _cache[path];
+    }
+    function flushBatch() {
+      var batch = _pending; _pending = null;
+      if (!batch || !batch.paths.length) return;
+      var solo = function (p) { jfetch(p).then(batch.settle[p].resolve, batch.settle[p].reject); };
+      if (batch.paths.length === 1) { solo(batch.paths[0]); return; }
+      jfetch("/batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: batch.paths }) }, 9000)
+        .then(function (d) {
+          var results = (d && d.results) || {};
+          batch.paths.forEach(function (p) {
+            var r = results[p];
+            var failed = r === undefined || (r && typeof r === "object" && !Array.isArray(r) && r.error && Object.keys(r).length === 1);
+            if (failed) solo(p); else batch.settle[p].resolve(r);
+          });
+        })
+        .catch(function () { batch.paths.forEach(solo); });
+    }
     function yes(v) { return String(v || "").toLowerCase() === "yes"; }
     // The whole dashboard is an OFFICE/ADMIN surface — field engineers never see
     // any stats. Mirrors main.html's applyGate field-user test (StaffType, or the
@@ -1325,10 +1356,16 @@ const MAP = window.ML_PERM_MAP || {
         host.dataset.done = "1";
         host.innerHTML = "";
         dash.classList.add("hub-on");   // CSS reveals it on desktop only
-        var pending = eligible.length;
+        var pending = eligible.length, failed = 0;
         function settle() {
           if (--pending > 0) return;
-          if (!host.children.length) { dash.classList.remove("hub-on"); return; }
+          if (!host.children.length) {
+            // Everything failed (offline / API down): a friendly retry beats a blank page.
+            if (failed) {
+              host.innerHTML = '<div class="hub-retry">⚠️ Couldn\'t load your dashboard just now.<br><br><button class="hub-btn primary" onclick="var h=document.getElementById(\'hubGrid\');h.removeAttribute(\'data-done\');h.innerHTML=\'\';window.MostlaneHub.run(window.MostlaneHub._perms||{});">↻ Try again</button></div>';
+            } else dash.classList.remove("hub-on");
+            return;
+          }
           // Positive reinforcement: if every card came back clear, celebrate it.
           var cards = host.querySelectorAll(".hub-card");
           var anyAttention = false;
@@ -1340,7 +1377,8 @@ const MAP = window.ML_PERM_MAP || {
         eligible.forEach(function (w) {
           var card = document.createElement("div");
           card.className = "hub-card" + (w.wide ? " wide" : "") + (w.cls ? " " + w.cls : "");
-          card.innerHTML = '<div class="hc-top"><span class="hc-emoji">' + w.emoji + '</span><h3>' + esc(w.title) + '</h3></div><div class="hub-skel">Loading…</div>';
+          card.innerHTML = '<div class="hc-top"><span class="hc-emoji">' + w.emoji + '</span><h3>' + esc(w.title) + '</h3></div>' +
+            '<div class="hub-skel"><div class="sk" style="width:44%;height:26px;margin:2px 0 10px"></div><div class="sk" style="width:100%;height:10px;margin-bottom:8px"></div><div class="sk" style="width:70%;height:10px"></div></div>';
           host.appendChild(card);
           Promise.resolve().then(function () { return w.load(card); }).then(function () {
             // A card is "clear" when it rendered a positive ✓ line and no
@@ -1349,7 +1387,7 @@ const MAP = window.ML_PERM_MAP || {
             card.dataset.state = clear ? "clear" : "attention";
             if (clear) card.classList.add("clear");
             settle();
-          }).catch(function () { card.remove(); settle(); });
+          }).catch(function () { failed++; card.remove(); settle(); });
         });
       }
     };
