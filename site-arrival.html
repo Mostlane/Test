@@ -40,6 +40,22 @@
     .msg.ok{ color:#0e7a3b; } .msg.err{ color:#b91c1c; }
     .hide{ display:none; }
     a.linkback{ text-decoration:none; color:var(--ml-blue); font-size:14px; cursor:pointer; }
+    .doc-item{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #eef1f5; }
+    .doc-item:last-child{ border-bottom:none; }
+    .doc-ic{ font-size:20px; flex:none; }
+    .doc-bd{ flex:1; min-width:0; }
+    .doc-nm{ font-weight:600; font-size:14px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .doc-meta{ font-size:12px; color:var(--muted); }
+    .doc-acts{ display:flex; gap:6px; flex:none; }
+    .doc-acts button{ border:1px solid var(--border); background:#fff; border-radius:8px; padding:6px 9px; font-size:12px; font-weight:600; cursor:pointer; color:#334155; }
+    .doc-acts button.del{ color:#b91c1c; border-color:#f3c4c4; }
+    .ackchip{ font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:999px; background:#fff3cd; color:#7a5b00; flex:none; }
+    .docup{ margin-top:12px; background:#f7fafc; border:1px dashed #c7d2e0; border-radius:12px; padding:12px; }
+    .docup-row{ display:flex; gap:8px; margin-bottom:8px; }
+    .docup-row:last-child{ margin-bottom:0; }
+    .docup select, .docup input[type=text]{ flex:1; min-width:0; border:1px solid var(--border); border-radius:9px; padding:9px 10px; font-size:14px; }
+    .ackrow{ display:flex; align-items:center; gap:7px; font-size:13.5px; color:#334155; font-weight:500; margin:0; }
+    .ackrow input{ width:17px; height:17px; }
   </style>
 </head>
 <body>
@@ -101,6 +117,30 @@
         <div class="none hide" id="pvNone">No arrival rules set for this site yet.</div>
       </div>
     </div>
+
+    <!-- Per-site documents -->
+    <div id="docsSection" style="margin-top:20px;border-top:1px solid #eef1f5;padding-top:16px;">
+      <h3 style="color:#003b82;font-size:15px;margin:0 0 3px;">📎 Documents for this site</h3>
+      <p class="muted" style="margin:0 0 12px;">RAMS, inductions, drawings — shown to anyone who checks in here. Tick <b>Must acknowledge</b> to make them confirm they've read it first.</p>
+      <div id="docList"><p class="muted">Loading documents…</p></div>
+      <div class="docup">
+        <div class="docup-row">
+          <input type="file" id="docFile" />
+        </div>
+        <div class="docup-row">
+          <select id="docCat">
+            <option>RAMS (H&amp;S)</option><option>Induction</option><option>Drawing</option>
+            <option>Certificate</option><option>Other</option>
+          </select>
+          <input type="text" id="docTitle" placeholder="Title (optional)" />
+        </div>
+        <div class="docup-row" style="align-items:center;justify-content:space-between;">
+          <label class="ackrow"><input type="checkbox" id="docAck" /> Must acknowledge before check-in</label>
+          <button class="btn primary" id="docUpBtn">Upload</button>
+        </div>
+      </div>
+      <div class="msg" id="docMsg"></div>
+    </div>
   </div>
 </div>
 
@@ -147,10 +187,86 @@ function openSite(id){
   $("rules").value = rulesToLines(current.site_rules).join("\n");
   $("editMsg").textContent = "";
   updatePreview();
+  loadDocs();
   $("defaultCard").style.display = "none";
   $("listCard").style.display = "none";
   $("editCard").classList.remove("hide");
   window.scrollTo(0,0);
+}
+
+// ── Per-site documents ──────────────────────────────────────────────────────
+function fmtSize(b){ b = Number(b)||0; return b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(0)+" KB" : (b/1048576).toFixed(1)+" MB"; }
+async function loadDocs(){
+  if (!current) return;
+  $("docList").innerHTML = '<p class="muted">Loading documents…</p>';
+  try {
+    const j = await (await authFetch(API + "/sitelog/site-documents/list?site=" + encodeURIComponent(current.site_name), { cache:"no-store" })).json();
+    const docs = (j && j.documents) || [];
+    if (!docs.length){ $("docList").innerHTML = '<p class="muted" style="margin:0;">No documents yet for this site.</p>'; return; }
+    $("docList").innerHTML = docs.map(d => {
+      const ack = Number(d.require_ack) ? '<span class="ackchip">must ack · '+(d.ack_count||0)+'</span>' : '';
+      return '<div class="doc-item" data-id="'+esc(d.id)+'">' +
+        '<span class="doc-ic">'+(/pdf/i.test(d.content_type||'')?'📄':'📎')+'</span>' +
+        '<span class="doc-bd"><span class="doc-nm">'+esc(d.title||d.file_name)+'</span>' +
+        '<span class="doc-meta">'+esc(d.category||'Other')+' · '+fmtSize(d.size_bytes)+'</span></span>' +
+        ack +
+        '<span class="doc-acts">' +
+          '<button class="open" data-id="'+esc(d.id)+'" data-name="'+esc(d.file_name)+'">Open</button>' +
+          '<button class="ackt" data-id="'+esc(d.id)+'" data-ack="'+(Number(d.require_ack)?1:0)+'">'+(Number(d.require_ack)?'Ack off':'Ack on')+'</button>' +
+          '<button class="del" data-id="'+esc(d.id)+'">Delete</button>' +
+        '</span></div>';
+    }).join("");
+    [].forEach.call($("docList").querySelectorAll(".open"), b => b.onclick = () => openDoc(b.dataset.id, b.dataset.name));
+    [].forEach.call($("docList").querySelectorAll(".ackt"), b => b.onclick = () => toggleAck(b.dataset.id, b.dataset.ack === "1"));
+    [].forEach.call($("docList").querySelectorAll(".del"), b => b.onclick = () => deleteDoc(b.dataset.id));
+  } catch (e) {
+    $("docList").innerHTML = '<p class="msg err" style="margin:0;">Couldn\'t load documents.</p>';
+  }
+}
+async function openDoc(id, name){
+  try {
+    const res = await authFetch(API + "/sitelog/site-documents/file?id=" + encodeURIComponent(id));
+    if (!res.ok) { $("docMsg").className="msg err"; $("docMsg").textContent="Couldn't open the file."; return; }
+    const blob = await res.blob();
+    const u = URL.createObjectURL(blob);
+    window.open(u, "_blank");
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  } catch (e) { $("docMsg").className="msg err"; $("docMsg").textContent="Couldn't open the file."; }
+}
+async function toggleAck(id, currentlyOn){
+  await authFetch(API + "/sitelog/site-documents/update", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, requireAck: currentlyOn ? 0 : 1 }) }).catch(()=>{});
+  loadDocs();
+}
+async function deleteDoc(id){
+  const ok = window.MLUI ? await MLUI.confirm("Delete this document? Visitors will no longer see it.", { title:"Delete document", okLabel:"Delete", danger:true }) : confirm("Delete this document?");
+  if (!ok) return;
+  await authFetch(API + "/sitelog/site-documents/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).catch(()=>{});
+  loadDocs();
+}
+async function uploadDoc(){
+  if (!current) return;
+  const f = $("docFile").files && $("docFile").files[0];
+  if (!f){ $("docMsg").className="msg err"; $("docMsg").textContent="Choose a file first."; return; }
+  const btn = $("docUpBtn"); btn.disabled = true;
+  $("docMsg").className="msg"; $("docMsg").textContent="Uploading…";
+  const fd = new FormData();
+  fd.append("file", f);
+  fd.append("site", current.site_name);
+  fd.append("category", $("docCat").value);
+  fd.append("title", $("docTitle").value.trim());
+  fd.append("requireAck", $("docAck").checked ? "1" : "0");
+  try {
+    const res = await authFetch(API + "/sitelog/site-documents/upload", { method:"POST", body: fd });   // multipart — let the browser set the boundary
+    const out = await res.json().catch(()=>({}));
+    if (res.ok && out.ok){
+      $("docMsg").className="msg ok"; $("docMsg").textContent="✓ Uploaded.";
+      $("docFile").value = ""; $("docTitle").value = ""; $("docAck").checked = false;
+      loadDocs();
+    } else {
+      $("docMsg").className="msg err"; $("docMsg").textContent = (out && out.error) || "Upload failed.";
+    }
+  } catch (e) { $("docMsg").className="msg err"; $("docMsg").textContent="Upload failed — check your connection."; }
+  btn.disabled = false;
 }
 function closeSite(){ $("editCard").classList.add("hide"); $("listCard").style.display = ""; $("defaultCard").style.display = ""; }
 
@@ -261,6 +377,7 @@ $("cancelBtn").addEventListener("click", closeSite);
 $("backToList").addEventListener("click", closeSite);
 $("saveDefBtn").addEventListener("click", saveDefault);
 $("applyAllBtn").addEventListener("click", applyAll);
+$("docUpBtn").addEventListener("click", uploadDoc);
 load();
 </script>
 </body>
