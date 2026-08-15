@@ -140,7 +140,27 @@ across all pages with sed. Provides:
   chatWidget no longer skips staffType field — only the field-app pages + Story
   users are skipped), so engineers chat via the 💬 bubble on main.html and other
   portal pages instead of a dedicated Inbox tab. Field-user landing on login is
-  still route.html. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
+  still route.html. **Engineer day flow (Aug 2026):** the main.html **SLA tile is
+  repointed to route.html for FIELD users** (applyGate; office/admins keep
+  sla-main.html), and **route.html auto-forwards to engineer-jobs.html while the
+  engineer is mid-shift** (`onShift()` = clock_on_at && !clock_off_at) — tap SLA
+  before starting → the day page; once started → straight to the jobs list.
+  `route.html?stay=1` bypasses the forward (every tabbar/`.eng-back` Route link on
+  route/engineer-jobs/inbox/you now carries `?stay=1` so deliberate navigation
+  always works). **engineer-jobs.html has the live day bar for EVERY engineer**
+  (was Story-Mode-only): `init()`'s non-story branch runs
+  `loadShift().then(renderDayBar+applyDayGate)`, so the top of the jobs list shows
+  ▶ Start my day / 🟢 On shift + **■ End my day** / ✔ Day ended (Story users keep
+  their "Open My Day" link; applyDayGate still no-ops for non-story). **Protected
+  clock-off:** `/shift/clock-off` (sla.js) refuses with **409 + `outstanding` list**
+  while the engineer still has unfinished jobs today — assigned+released jobs whose
+  per-engineer `effStatus` is active (Travelling/In Progress) or scheduled TODAY and
+  not finished/parked (finished = Complete/Closed/Invoiced/Cancelled/`done` custom
+  categories; parked = On Hold/Quote/Order — those need their packs via the
+  cross-job guard instead). `{force:true}` bypasses for FullAccess|SLAAdmin only;
+  the check fails OPEN on an internal error so clock-off is never impossible. Both
+  clockOff() clients (route.html endDay + engineer-jobs.html) surface the 409 with
+  the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
   localStorage `mlUnschedOpen`). Its week list runs **Mon–Sun** (startOfWeek is
   Monday-based). The **🗺️ map overlay** (`openDayMap`) fetches all the engineer's

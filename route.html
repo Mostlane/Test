@@ -134,7 +134,7 @@
   </div></div>
 
   <nav class="tabbar">
-    <a href="route.html" class="on"><span class="ic">🧭</span>Route</a>
+    <a href="route.html?stay=1" class="on"><span class="ic">🧭</span>Route</a>
     <a href="engineer-jobs.html"><span class="ic">📋</span>Jobs</a>
     <a href="po.html" id="tabPO"><span class="ic">🧾</span>PO</a>
     <a href="main.html"><span class="ic">▦</span>Menu</a>
@@ -386,12 +386,29 @@
     var endMileage=(m&&!isNaN(+m))?Math.round(+m):null;
     var fuel=prompt("Fuel added today? (£ or litres — optional)")||"";
     var gps=await getGps();
-    try{ await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal(),opId:opId()})}); }catch(e){}
+    // The server refuses clock-off while jobs are outstanding (409) — show
+    // WHICH jobs instead of pretending the day ended.
+    try{
+      var r=await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal(),opId:opId()})});
+      var d=await r.json().catch(function(){return {};});
+      if(!r.ok){
+        var list=(d.outstanding||[]).map(function(o){return "• "+o.ref+" — "+o.status;}).join("\n");
+        alert((d.error||"You can't end your day yet.")+(list?"\n\n"+list:""));
+        return;
+      }
+    }catch(e){ alert("Couldn't end your day — no signal? Try again."); return; }
     await loadAll(); render(); toast("Clocked off — have a good evening");
   }
 
   (async function boot(){
-    try{ await loadAll(); render(); }
+    try{
+      await loadAll();
+      // Day-aware entry: once the day is STARTED, the engineer's world is the
+      // jobs list — every entry (SLA tile, login landing) forwards there. The
+      // Route tab opens this page with ?stay=1 to see the route/map mid-day.
+      if(onShift() && !new URLSearchParams(location.search).has("stay")){ location.replace("engineer-jobs.html"); return; }
+      render();
+    }
     catch(err){ $("loading").innerHTML="Couldn't load your day.<br><small>"+esc(err.message)+"</small>"; }
   })();
 })();
