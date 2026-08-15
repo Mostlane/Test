@@ -80,6 +80,7 @@
   </script>
   <div class="wrap">
     <div class="due" id="dueBox" style="display:none;"></div>
+    <div id="customPrompt" style="display:none;"></div>
 
     <div class="card donebox" id="doneBox" style="display:none;">
       <div class="big">✅</div>
@@ -159,21 +160,38 @@
     }, 350);
   }
 
+  const CUSTOM_ID = new URLSearchParams(location.search).get("custom") || "";
   (async () => {
     let d;
-    try { d = await authFetch("/vancheck/config").then(r => r.json()); }
+    try { d = await authFetch(CUSTOM_ID ? ("/vancheck/custom-get?id=" + encodeURIComponent(CUSTOM_ID)) : "/vancheck/config").then(r => r.json()); }
     catch (e) { document.querySelector(".wrap").innerHTML = "<p class='muted'>Couldn't load — check your connection and try again.</p>"; return; }
-    if (!d.ok) { location.href = "/main.html"; return; }
+    if (!d.ok) { document.querySelector(".wrap").innerHTML = "<p class='muted'>" + esc(d.error || "Couldn't load this check.") + "</p>"; return; }
     CFG = d;
     // Auto-fill the engineer's assigned registration: prefer the server's
     // vehicle_assigned, fall back to the reg cached at login (VehicleAssigned).
     try { CFG.vehicle = CFG.vehicle || localStorage.getItem("mostlaneVehicle") || sessionStorage.getItem("mostlaneVehicle") || ""; } catch (e) {}
     const dueBox = g("dueBox");
-    const dueTxt = new Date(d.deadline.dueAt).toLocaleString("en-GB", { weekday:"long", hour:"2-digit", minute:"2-digit" });
     dueBox.style.display = "block";
-    if (d.myCheck) { dueBox.className = "due ok"; dueBox.textContent = "✅ This week's check is done."; }
-    else if (d.deadline.overdue) { dueBox.className = "due late"; dueBox.textContent = "⚠️ OVERDUE — this week's check was due by " + dueTxt + ". Do it now."; }
-    else { dueBox.className = "due warn"; dueBox.textContent = "🕒 Due by " + dueTxt + " this week."; }
+    if (CUSTOM_ID) {
+      // One-off custom check sent by the office.
+      try { document.querySelector("header.page h1").textContent = "🧩 " + (d.name || "Custom Van Check"); } catch (e) {}
+      if (d.myCheck) { dueBox.className = "due ok"; dueBox.textContent = "✅ This custom check is done."; }
+      else { dueBox.className = "due warn"; dueBox.textContent = "🧩 Custom check: " + (d.name || "") + " — please complete it."; }
+    } else {
+      const dueTxt = new Date(d.deadline.dueAt).toLocaleString("en-GB", { weekday:"long", hour:"2-digit", minute:"2-digit" });
+      if (d.myCheck) { dueBox.className = "due ok"; dueBox.textContent = "✅ This week's check is done."; }
+      else if (d.deadline.overdue) { dueBox.className = "due late"; dueBox.textContent = "⚠️ OVERDUE — this week's check was due by " + dueTxt + ". Do it now."; }
+      else { dueBox.className = "due warn"; dueBox.textContent = "🕒 Due by " + dueTxt + " this week."; }
+      // Show any one-off custom checks the office has sent this driver.
+      const cc = d.customChecks || [];
+      if (cc.length) {
+        g("customPrompt").style.display = "block";
+        g("customPrompt").innerHTML = '<div class="card" style="background:#eef4ff;border:1px solid #b6ccf0;">'
+          + '<b>🧩 Custom check' + (cc.length > 1 ? "s" : "") + ' to complete</b>'
+          + cc.map(c => '<div style="margin-top:6px;"><a class="btn small" href="van-check.html?custom=' + encodeURIComponent(c.id) + '" style="text-decoration:none;">' + esc(c.name) + ' →</a></div>').join("")
+          + '</div>';
+      }
+    }
     // Restore an unsaved draft for THIS week (crash/kill recovery).
     const draft = await draftGet();
     if (draft && draft.week === d.week && !(d.myCheck && d.myCheck.source === "portal")) {
@@ -337,6 +355,7 @@
     try {
       const r = await authFetch("/vancheck/submit", { method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
+          customId: CUSTOM_ID || undefined,
           vehicle: g("f_vehicle").value.trim(), mileage: g("f_mileage").value.trim(),
           answers, defectNotes,
           photoSlots: Object.fromEntries(Object.entries(slotPhotos).map(([k, p]) => [k, p.data || p.key])),
