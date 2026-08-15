@@ -673,28 +673,35 @@ async function submitVehicleCheck(){
   if(cb) cb();
 }
 
+// Day-start check: OFF for now (Jamie wants a plain start/stop clock). Flip to
+// true later to reintroduce the vehicle check as part of "Start my day".
+const DAY_START_CHECK = false;
 async function clockOn(){
-  const st = await vehicleCheckStatus();
-  if(st === "enforce"){ openVehicleCheck(doClockOn); return; }   // must do it (past Wed 12:00)
-  if(st === "prompt"){
-    if(confirm("Your weekly vehicle check isn't done yet (due Wednesday lunchtime). Do it now?")){ openVehicleCheck(doClockOn); return; }
+  if(DAY_START_CHECK){
+    const st = await vehicleCheckStatus();
+    if(st === "enforce"){ openVehicleCheck(doClockOn); return; }   // must do it (past Wed 12:00)
+    if(st === "prompt"){
+      if(confirm("Your weekly vehicle check isn't done yet (due Wednesday lunchtime). Do it now?")){ openVehicleCheck(doClockOn); return; }
+    }
   }
   doClockOn();
 }
 async function doClockOn(){
   const engineer = getEngineer();
-  const m = prompt("Start mileage on the van? (optional)");
-  const startMileage = (m && !isNaN(+m)) ? Math.round(+m) : null;
   const gps = await getGps();
   await fetch(`${SLA_API}/shift/clock-on`, { method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ engineer, gps, startMileage, date: todayLocal() }) });
+    body: JSON.stringify({ engineer, gps, startMileage: null, date: todayLocal() }) });
   await loadShift(); renderDayBar(); applyDayGate();
 }
 async function clockOff(){
   const engineer = getEngineer();
-  const m = prompt("End mileage on the van? (optional)");
-  const endMileage = (m && !isNaN(+m)) ? Math.round(+m) : null;
-  const fuel = prompt("Fuel added today? (£ or litres — optional)") || "";
+  // Are-you-sure before the clock stops — and the day can be resumed from the
+  // "Day ended" bar if an emergency job comes in later.
+  const sure = window.MLUI
+    ? await MLUI.confirm("End your day now? If another job comes in later you can restart the clock from this page.", { title:"End my day", okLabel:"■ End my day", danger:true })
+    : confirm("End your day now?");
+  if(!sure) return;
+  const endMileage = null, fuel = "";
   const gps = await getGps();
   // The server refuses (409) while jobs are outstanding — show WHICH ones.
   try{
@@ -710,8 +717,28 @@ async function clockOff(){
   await loadShift(); renderDayBar(); applyDayGate();
   alert("Clocked off — have a good evening 👋");
 }
+async function resumeDay(){
+  const sure = window.MLUI
+    ? await MLUI.confirm("Restart the clock and carry on your day?", { title:"Resume my day", okLabel:"▶ Resume" })
+    : confirm("Resume your day?");
+  if(!sure) return;
+  try{
+    const res = await fetch(`${SLA_API}/shift/resume`, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ engineer: getEngineer(), date: todayLocal() }) });
+    if(!res.ok) throw 0;
+  }catch(e){ alert("Couldn't resume your day — no signal? Try again."); return; }
+  await loadShift(); renderDayBar(); applyDayGate();
+  alert("Back on the clock 💪");
+}
+let dayTimerInt = null;
+function fmtElapsed(iso){
+  let s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return h + ":" + String(m).padStart(2,"0") + ":" + String(sec).padStart(2,"0");
+}
 function renderDayBar(){
   const bar = $("dayBar");
+  if(dayTimerInt){ clearInterval(dayTimerInt); dayTimerInt = null; }
   // The day bar shows for EVERY engineer (was Story-Mode-only): start the day
   // here or on Route, and — crucially — END the day from the jobs list, which
   // the server only allows once every job is finished.
@@ -726,15 +753,21 @@ function renderDayBar(){
   } else if(!s.clock_off_at){
     bar.innerHTML =
       `<div style="padding:12px 14px;border-radius:12px;background:#0e7a3b;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-         <div style="font-weight:700;">🟢 On shift since ${fmtTime(s.clock_on_at)}${s.start_mileage!=null?` · ${s.start_mileage} mi`:""}</div>
+         <div style="font-weight:700;">🟢 On shift <span id="dayTimer" style="font-variant-numeric:tabular-nums;font-family:ui-monospace,'SF Mono',Menlo,monospace;"></span><span style="font-weight:600;font-size:12.5px;opacity:.85;"> · since ${fmtTime(s.clock_on_at)}</span></div>
          <button class="btn" style="background:#fff;color:#0e7a3b;font-weight:700;" onclick="clockOff()">■ End my day</button>
        </div>`;
+    const t = document.getElementById("dayTimer");
+    const tick = () => { if(t) t.textContent = fmtElapsed(s.clock_on_at); };
+    tick(); dayTimerInt = setInterval(tick, 1000);
   } else {
     const mi = (s.start_mileage!=null && s.end_mileage!=null) ? (s.end_mileage - s.start_mileage) : null;
     bar.innerHTML =
-      `<div style="padding:12px 14px;border-radius:12px;background:#374151;color:#fff;">
-         <div style="font-weight:700;">✔ Day ended ${fmtTime(s.clock_off_at)}</div>
-         <div style="font-size:13px;opacity:.9;margin-top:2px;">On ${fmtTime(s.clock_on_at)} → Off ${fmtTime(s.clock_off_at)}${mi!=null?` · ${mi} miles`:""}${s.fuel?` · fuel ${s.fuel}`:""}</div>
+      `<div style="padding:12px 14px;border-radius:12px;background:#374151;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+         <div>
+           <div style="font-weight:700;">✔ Day ended ${fmtTime(s.clock_off_at)}</div>
+           <div style="font-size:13px;opacity:.9;margin-top:2px;">On ${fmtTime(s.clock_on_at)} → Off ${fmtTime(s.clock_off_at)}${mi!=null?` · ${mi} miles`:""}${s.fuel?` · fuel ${s.fuel}`:""}</div>
+         </div>
+         <button class="btn" style="background:#fff;color:#374151;font-weight:700;" onclick="resumeDay()">▶ Resume my day</button>
        </div>`;
   }
 }

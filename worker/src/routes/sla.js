@@ -569,9 +569,25 @@ export async function handle(request, env, ctx, url, sess) {
         }
       } catch (e) { /* the check must never make clock-off impossible on an internal error */ }
     }
+    // COALESCE keeps the first press's mileage/fuel when a resumed day is
+    // ended again without re-typing them.
     await db.prepare(
-      "UPDATE shifts SET clock_off_at=?, clock_off_gps=?, end_mileage=?, fuel=? WHERE tenant_id=? AND username=? AND date=?"
+      "UPDATE shifts SET clock_off_at=?, clock_off_gps=COALESCE(?, clock_off_gps), end_mileage=COALESCE(?, end_mileage), fuel=COALESCE(?, fuel) WHERE tenant_id=? AND username=? AND date=?"
     ).bind(new Date().toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();
+    return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
+  }
+  /* POST /sla/shift/resume — reopen a finished day (emergency call-out after
+     clocking off): clears clock_off_at so the timer runs again from the
+     original start. The earlier clock-off press stays in the audit log. */
+  if (subpath === "/shift/resume" && method === "POST") {
+    const b = await readJson(request);
+    if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
+    const date = b.date || todayStr();
+    const row = await getShift(env, tenantId, b.engineer, date);
+    if (!row || !row.clock_on_at) return jsonResponse({ error: "No day to resume — start your day instead." }, headers, 404);
+    await db.prepare(
+      "UPDATE shifts SET clock_off_at=NULL WHERE tenant_id=? AND username=? AND date=?"
+    ).bind(db.tenantId, b.engineer, date).run();
     return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
   }
   /* GET /sla/shifts  -> list recorded day sessions (office view), filterable */

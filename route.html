@@ -242,7 +242,7 @@
       +'<div class="miniline">'+(n?(n===1?'On site · <b>'+esc(jobName(jobs[0]))+'</b>':'<b>'+n+' jobs</b> booked today'):'No jobs booked yet today')+'</div>'
       +(vcState==="done"?'<div class="miniline">✅ Van check done this week</div>':'')
       +'<button class="btn primary wide" style="margin-top:12px" id="startBtn">▶ Start my day</button>'
-      +'<div class="miniline" style="justify-content:center;margin-top:8px">Captures your GPS + van check + start mileage.</div></div>'
+      +'<div class="miniline" style="justify-content:center;margin-top:8px">Starts the clock — captures your GPS and start time.</div></div>'
       +'<div class="eyebrow">Today\'s map</div><div id="map"></div>'+legend()
       +historyCard();
     $("startBtn").onclick=function(){ startDay(); };
@@ -305,8 +305,11 @@
       +'<div class="s"><div class="n">'+(mi!=null?mi:"—")+'</div><div class="l">Miles</div></div></div>'
       +(shift.start_mileage!=null?'<div class="miniline" style="margin-top:12px">Start '+shift.start_mileage.toLocaleString()+(shift.end_mileage!=null?' → end '+shift.end_mileage.toLocaleString():'')+' mi</div>':'')
       +(shift.fuel?'<div class="miniline">Fuel: '+esc(shift.fuel)+'</div>':'')
-      +'<div class="miniline">On '+fmtTime(shift.clock_on_at)+' → Off '+fmtTime(shift.clock_off_at)+'</div></div>'
+      +'<div class="miniline">On '+fmtTime(shift.clock_on_at)+' → Off '+fmtTime(shift.clock_off_at)+'</div>'
+      +'<button class="btn primary wide" style="margin-top:12px" id="resumeBtn">▶ Resume my day</button>'
+      +'<div class="miniline" style="justify-content:center;margin-top:6px">Emergency job come in? Restart the clock and carry on.</div></div>'
       +historyCard();
+    var rb=$("resumeBtn"); if(rb) rb.onclick=function(){ resumeDay(); };
   }
   function hoursOnShift(){ if(!shift||!shift.clock_on_at||!shift.clock_off_at) return "—"; var h=(new Date(shift.clock_off_at)-new Date(shift.clock_on_at))/3600000; return (Math.round(h*10)/10)+"h"; }
 
@@ -372,9 +375,12 @@
     vcState="done"; $("vcModal").classList.remove("show");
     await doClockOn(m); toast("Van check done — you're clocked on");
   };
+  // Day-start check: OFF for now (plain start/stop clock). Flip to true later
+  // to reintroduce the van check as part of "Start my day".
+  var DAY_START_CHECK = false;
   async function startDay(){
-    if(vcState==="overdue"){ openVc(); return; }   // only force the van check once its deadline has passed
-    var m=prompt("Start mileage on the van? (optional)"); await doClockOn((m&&!isNaN(+m))?Math.round(+m):null); toast("Clocked on — have a good day");
+    if(DAY_START_CHECK && vcState==="overdue"){ openVc(); return; }   // only force the van check once its deadline has passed
+    await doClockOn(null); toast("Clocked on — have a good day");
   }
   async function doClockOn(startMileage){
     var gps=await getGps();
@@ -382,9 +388,11 @@
     await loadAll(); render();
   }
   async function endDay(){
-    var m=prompt("End mileage on the van? (optional)"); if(m===null&&!confirm("End your day now?")) return;
-    var endMileage=(m&&!isNaN(+m))?Math.round(+m):null;
-    var fuel=prompt("Fuel added today? (£ or litres — optional)")||"";
+    var sure = window.MLUI
+      ? await MLUI.confirm("End your day now? If another job comes in later you can restart the clock.", { title:"End my day", okLabel:"■ End my day", danger:true })
+      : confirm("End your day now?");
+    if(!sure) return;
+    var endMileage=null, fuel="";
     var gps=await getGps();
     // The server refuses clock-off while jobs are outstanding (409) — show
     // WHICH jobs instead of pretending the day ended.
@@ -398,6 +406,18 @@
       }
     }catch(e){ alert("Couldn't end your day — no signal? Try again."); return; }
     await loadAll(); render(); toast("Clocked off — have a good evening");
+  }
+  async function resumeDay(){
+    var sure = window.MLUI
+      ? await MLUI.confirm("Restart the clock and carry on your day?", { title:"Resume my day", okLabel:"▶ Resume" })
+      : confirm("Resume your day?");
+    if(!sure) return;
+    try{
+      var r=await jfetch("/shift/resume",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,date:todayLocal(),opId:opId()})});
+      if(!r.ok) throw 0;
+    }catch(e){ alert("Couldn't resume your day — no signal? Try again."); return; }
+    // Back on the clock — the mid-shift world is the jobs list.
+    location.replace("engineer-jobs.html");
   }
 
   (async function boot(){

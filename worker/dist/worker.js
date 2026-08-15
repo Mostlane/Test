@@ -4970,8 +4970,19 @@ async function handle8(request, env, ctx, url, sess) {
       }
     }
     await db.prepare(
-      "UPDATE shifts SET clock_off_at=?, clock_off_gps=?, end_mileage=?, fuel=? WHERE tenant_id=? AND username=? AND date=?"
+      "UPDATE shifts SET clock_off_at=?, clock_off_gps=COALESCE(?, clock_off_gps), end_mileage=COALESCE(?, end_mileage), fuel=COALESCE(?, fuel) WHERE tenant_id=? AND username=? AND date=?"
     ).bind((/* @__PURE__ */ new Date()).toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();
+    return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
+  }
+  if (subpath === "/shift/resume" && method === "POST") {
+    const b = await readJson2(request);
+    if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
+    const date = b.date || todayStr();
+    const row = await getShift(env, tenantId, b.engineer, date);
+    if (!row || !row.clock_on_at) return jsonResponse({ error: "No day to resume \u2014 start your day instead." }, headers, 404);
+    await db.prepare(
+      "UPDATE shifts SET clock_off_at=NULL WHERE tenant_id=? AND username=? AND date=?"
+    ).bind(db.tenantId, b.engineer, date).run();
     return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
   }
   if (subpath === "/shifts" && method === "GET") {
