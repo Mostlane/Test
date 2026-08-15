@@ -151,7 +151,20 @@ across all pages with sed. Provides:
   (was Story-Mode-only): `init()`'s non-story branch runs
   `loadShift().then(renderDayBar+applyDayGate)`, so the top of the jobs list shows
   ▶ Start my day / 🟢 On shift + **■ End my day** / ✔ Day ended (Story users keep
-  their "Open My Day" link; applyDayGate still no-ops for non-story). **Protected
+  their "Open My Day" link; applyDayGate still no-ops for non-story).
+  **Simple start/stop + live timer + resume (Aug 2026, Jamie's spec):** Start is a
+  ONE-TAP clock (no mileage/fuel prompts, no vehicle-check intro — the check gate
+  is kept but OFF behind a `DAY_START_CHECK=false` flag in BOTH engineer-jobs.html
+  and route.html, to reintroduce later as "the daily check"). The on-shift bar
+  shows a **live ticking H:MM:SS timer** (`fmtElapsed`/`dayTimerInt`, cleared on
+  re-render). **End my day asks "Are you sure?"** (MLUI.confirm, danger) before
+  posting; a blocked (409) or cancelled press is still audit-logged server-side.
+  The ✔ Day-ended bar has **▶ Resume my day** (also on route.html's "That's a
+  wrap" screen, which forwards to engineer-jobs on resume) → **POST /shift/resume**
+  (sla.js): clears `clock_off_at` on today's shift so the timer runs on from the
+  original start — for emergency call-outs after clocking off. Clock-off's UPDATE
+  now COALESCEs gps/end_mileage/fuel so a resume→re-end never wipes the first
+  press's values. **Protected
   clock-off:** `/shift/clock-off` (sla.js) refuses with **409 + `outstanding` list**
   while the engineer still has unfinished jobs today — assigned+released jobs whose
   per-engineer `effStatus` is active (Travelling/In Progress) or scheduled TODAY and
