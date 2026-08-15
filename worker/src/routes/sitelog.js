@@ -12,6 +12,7 @@
 
 import { corsHeaders, json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
+import * as sitelogApi from "./sitelog-api.js";
 
 const SITELOG_API = "https://api.site-log.co.uk";
 const SCAN_URL = "https://site-log.co.uk/scan.html";
@@ -65,7 +66,14 @@ export async function handle(request, env, ctx, url, sess) {
 
   let res;
   try {
-    res = await fetch(target, init);
+    if (env.SITELOG_DB) {
+      // SiteLog now lives in this worker — run it directly against the bound DB,
+      // no round-trip to api.site-log.co.uk. (Fails soft to the remote fetch
+      // below if the binding isn't present yet.)
+      res = await sitelogApi.handle(new Request(target, init), env, ctx);
+    } else {
+      res = await fetch(target, init);
+    }
   } catch (e) {
     return error("SiteLog API unreachable: " + e.message, 502, env, request);
   }

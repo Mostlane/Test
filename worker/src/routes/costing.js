@@ -36,6 +36,26 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { poOrderSiteNames } from "./timesheets.js";
+import * as sitelogApi from "./sitelog-api.js";
+
+// Fetch a SiteLog admin endpoint. When the SiteLog DB is bound into this worker
+// (post-migration) run the ported backend directly — no api.site-log.co.uk
+// round-trip; otherwise fall back to the custom-domain fetch. Same shape either
+// way so the callers are unchanged. `pathQuery` e.g. "/job-costing?from=…&to=…".
+async function sitelogAdminFetch(env, pathQuery, ms) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
+  if (env.SITELOG_DB) {
+    // Ported backend, in-process. Belt-and-braces during rollout: if it errors
+    // or returns non-ok, fall through to the still-running remote worker so
+    // costing can never break because of the migration.
+    try {
+      const res = await sitelogApi.handle(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      if (res && res.ok) return res;
+    } catch (e) { /* fall through to remote */ }
+  }
+  return fetchWithTimeout(target, { headers: { "x-admin-secret": secret } }, ms || 8000);
+}
 
 const UNALLOC_MIN = 15;   // minutes of uncovered day window before we flag it
 const CLAIM_GAP_MIN = 30; // claimed-vs-captured difference before we flag it
@@ -883,13 +903,20 @@ function parseLatLngPair(latIn, lngIn) {
 async function pushSiteToSiteLog(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
-    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
     const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()).trim() || "Projects";
-    const res = await fetch(base + "/bulk-add-sites", {
+    const init = {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
       body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
-    });
+    };
+    let res;
+    if (env.SITELOG_DB) {
+      try { res = await sitelogApi.handle(new Request(target, init), env); } catch (e) { res = null; }
+      if (!res || !res.ok) res = await fetch(target, init);   // safety net during rollout
+    } else {
+      res = await fetch(target, init);
+    }
     return res.ok;
   } catch { return false; }
 }
@@ -914,11 +941,10 @@ async function fetchSitelogCosting(env, from, to) {
   _slDiag = "";
   const secret = env.SITELOG_ADMIN_SECRET;
   if (!secret) { _slDiag = "secret-unset"; return null; }
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
-  const url = base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+  const pathQuery = "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetchWithTimeout(url, { headers: { "x-admin-secret": secret } }, 8000);
+      const res = await sitelogAdminFetch(env, pathQuery, 8000);
       if (!res.ok) { _slDiag = "http-" + res.status; continue; }   // transient 5xx → retry once
       const j = await res.json();
       if (j && j.ok && Array.isArray(j.sites)) { _slDiag = ""; return j.sites; }
@@ -934,16 +960,14 @@ async function fetchSitelogCosting(env, from, to) {
 async function fetchSitelogVisits(env, from, to) {
   const secret = env.SITELOG_ADMIN_SECRET;
   if (!secret) return null;
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
-  const headers = { "x-admin-secret": secret };
   const seen = new Set();
   const out = [];
   let before = null, got = false;
   try {
     for (let page = 0; page < 30; page++) {   // ≤15k visits
-      let u = base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
-      if (before) u += "&before=" + encodeURIComponent(before);
-      const res = await fetchWithTimeout(u, { headers }, 8000);
+      let pq = "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+      if (before) pq += "&before=" + encodeURIComponent(before);
+      const res = await sitelogAdminFetch(env, pq, 8000);
       if (!res.ok) return got ? out : null;
       const j = await res.json();
       const rows = Array.isArray(j.visits) ? j.visits : [];

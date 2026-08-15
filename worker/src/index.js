@@ -26,7 +26,8 @@ import * as assets from "./routes/assets.js";      // DONE  (replaces mostlane-a
 import * as sla from "./routes/sla.js";            // DONE  (replaces mostlane-sla)
 import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-sites + adds customers)
 import * as portal from "./routes/portal.js";      // DONE  (settings, on-call rota, daily logs)
-import * as sitelog from "./routes/sitelog.js";    // DONE  (server-side proxy to api.site-log.co.uk)
+import * as sitelog from "./routes/sitelog.js";    // DONE  (portal↔SiteLog bridge: launch token + admin proxy → local module or remote)
+import * as sitelogApi from "./routes/sitelog-api.js"; // DONE  (ported SiteLog backend: scanner API on api.site-log.co.uk + daily auto-close)
 import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
@@ -110,6 +111,15 @@ const ROUTES = [
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // ── SiteLog scanner API (host-dispatch) ────────────────────────────────
+    // The ported SiteLog backend answers the scanner's own domain. Inert until
+    // the api.site-log.co.uk custom domain is moved onto this worker (Stage 2);
+    // before that this worker never receives that host, so it's a no-op. The
+    // ported handler does its own CORS/preflight for the site-log.co.uk origins.
+    if (url.hostname === "api.site-log.co.uk") {
+      return sitelogApi.handle(request, env, ctx);
+    }
 
     if (request.method === "OPTIONS") return preflight(env, request);
 
@@ -202,6 +212,11 @@ export default {
       ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
       // Daily task reminder — self-gates to ~08:00 London, deduped per day.
       ctx.waitUntil(sweepTaskReminders(env).catch(e => console.error("scheduled task reminder:", e)));
+      // SiteLog auto-close of open visits (was the standalone worker's daily
+      // cron). Idempotent — only closes prior-day still-open visits — so it's
+      // safe running hourly and safe alongside the old worker's cron until the
+      // scanner is cut over. Only runs once the SiteLog DB is bound.
+      if (env.SITELOG_DB) ctx.waitUntil(sitelogApi.sweepAutoClose(env).catch(e => console.error("scheduled sitelog auto-close:", e)));
     }
   },
 };
