@@ -102,6 +102,46 @@ async function getSettings(db) {
   if (!Array.isArray(out.alertUsers)) out.alertUsers = []; // who to push when an "Alert if" answer is given
   return out;
 }
+
+// ── Custom van checks: saved reusable templates + one-off sends ──────────────
+// Templates live in app_config; a "send" snapshots the template into a row of
+// the self-migrating custom_van_checks table, one per driver (pending → done).
+const CUSTOM_TPL_KEY = tid => `vancheck:customtpls:${tid}`;
+const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+function normSlots(arr) {
+  const out = [], seen = new Set();
+  for (const i of Array.isArray(arr) ? arr : []) {
+    const label = String(i && i.label || "").trim(); if (!label) continue;
+    let id = slug(i.id) || slug(label) || ("slot" + (out.length + 1));
+    while (seen.has(id)) id = id + "_" + (out.length + 1);
+    seen.add(id);
+    out.push({ id, label, required: i.required !== false });
+  }
+  return out;
+}
+async function getCustomTpls(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CUSTOM_TPL_KEY(db.tenantId)).first();
+  try { const v = JSON.parse(row && row.value || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+async function saveCustomTpls(db, list) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, CUSTOM_TPL_KEY(db.tenantId), JSON.stringify(list)).run();
+}
+async function ensureCustomTable(db) {
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS custom_van_checks (
+      id TEXT PRIMARY KEY, tenant_id TEXT, username TEXT, reg TEXT, tpl_id TEXT, name TEXT,
+      items TEXT, status TEXT, sent_by TEXT, sent_at TEXT, submitted_at TEXT)`).run();
+  } catch {}
+}
+async function nameMap(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) out[u.username] = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+  } catch {}
+  return out;
+}
 // Normalise a checklist/equipment item, keeping an optional "Alert if" rule.
 // failVal = the answer that flags an issue for this list ("defect" / "missing").
 function normAlertItem(i, failVal) {
@@ -201,6 +241,102 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, settings: s }, {}, env, request);
   }
 
+  // ── Custom van checks — saved templates (Vehicles|FullAccess) ───────────────
+  if (path === "/vancheck/custom-templates" && method === "GET") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    return json({ ok: true, templates: await getCustomTpls(db) }, {}, env, request);
+  }
+  if (path === "/vancheck/custom-templates" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const name = String(b.name || "").trim();
+    if (!name) return error("A template name is required.", 400, env, request);
+    const checklist = (Array.isArray(b.checklist) ? b.checklist : []).map(i => normAlertItem(i, "defect")).filter(i => i.label);
+    const equipment = (Array.isArray(b.equipment) ? b.equipment : []).map(i => normAlertItem(i, "missing")).filter(i => i.label);
+    const photoSlots = normSlots(b.photoSlots);
+    if (!checklist.length && !equipment.length && !photoSlots.length)
+      return error("Add at least one checklist item, equipment item or photo.", 400, env, request);
+    const list = await getCustomTpls(db);
+    const id = (b.id && list.some(t => t.id === b.id)) ? b.id : ("cvt-" + crypto.randomUUID().slice(0, 8));
+    const tpl = { id, name, checklist, equipment, photoSlots };
+    const idx = list.findIndex(t => t.id === id);
+    if (idx >= 0) list[idx] = tpl; else list.push(tpl);
+    await saveCustomTpls(db, list);
+    return json({ ok: true, template: tpl, templates: list }, {}, env, request);
+  }
+  if (path === "/vancheck/custom-templates/delete" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const list = (await getCustomTpls(db)).filter(t => t.id !== String(b.id || ""));
+    await saveCustomTpls(db, list);
+    return json({ ok: true, templates: list }, {}, env, request);
+  }
+  // Send a saved template to specific drivers — one pending check each + push.
+  if (path === "/vancheck/custom-send" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    await ensureCustomTable(db);
+    const b = await request.json().catch(() => ({}));
+    const tpl = (await getCustomTpls(db)).find(t => t.id === String(b.tplId || ""));
+    if (!tpl) return error("Template not found.", 404, env, request);
+    const usernames = [...new Set((Array.isArray(b.usernames) ? b.usernames : []).map(u => String(u || "").trim()).filter(Boolean))];
+    if (!usernames.length) return error("Pick at least one driver.", 400, env, request);
+    const { results: urows } = await db.prepare("SELECT username, vehicle_assigned FROM users WHERE tenant_id=?").bind(db.tenantId).all();
+    const regOf = {}; for (const u of urows || []) regOf[u.username] = u.vehicle_assigned || "";
+    const items = JSON.stringify({ checklist: tpl.checklist, equipment: tpl.equipment, photoSlots: tpl.photoSlots });
+    const now = new Date().toISOString();
+    const created = [];
+    for (const un of usernames) {
+      const id = "cvc-" + crypto.randomUUID().slice(0, 12);
+      await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+        .bind(id, db.tenantId, un, regOf[un] || "", tpl.id, tpl.name, items, "pending", me, now).run();
+      created.push({ id, username: un });
+      if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
+        title: "Van check to complete", body: `Please complete the "${tpl.name}" van check.`,
+        url: "/van-check.html?custom=" + id, tag: "custom-vancheck"
+      }));
+    }
+    return json({ ok: true, created }, {}, env, request);
+  }
+  // Admin dashboard: every sent custom check + who's done.
+  if (path === "/vancheck/custom-status" && method === "GET") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    await ensureCustomTable(db);
+    const names = await nameMap(env, db.tenantId);
+    const { results } = await db.prepare("SELECT id, username, reg, name, status, sent_at, submitted_at FROM custom_van_checks WHERE tenant_id=? ORDER BY sent_at DESC LIMIT 300").bind(db.tenantId).all();
+    const items = (results || []).map(r => ({ ...r, name_of: names[r.username] || r.username }));
+    return json({ ok: true, items }, {}, env, request);
+  }
+  if (path === "/vancheck/custom-cancel" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    await ensureCustomTable(db);
+    const b = await request.json().catch(() => ({}));
+    await db.prepare("DELETE FROM custom_van_checks WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, String(b.id || "")).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  // Driver: my pending custom checks (drives a prompt on van-check.html).
+  if (path === "/vancheck/custom-mine" && method === "GET") {
+    await ensureCustomTable(db);
+    const { results } = await db.prepare("SELECT id, name, sent_at FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
+    return json({ ok: true, items: results || [] }, {}, env, request);
+  }
+  // Driver/admin: load a custom check in the same shape /vancheck/config uses,
+  // so van-check.html renders it with the existing form.
+  if (path === "/vancheck/custom-get" && method === "GET") {
+    await ensureCustomTable(db);
+    const id = url.searchParams.get("id");
+    const row = await db.prepare("SELECT * FROM custom_van_checks WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Custom check not found.", 404, env, request);
+    if (row.username !== me && !(await canViewAll())) return error("This check wasn't sent to you.", 403, env, request);
+    let it = {}; try { it = JSON.parse(row.items || "{}"); } catch {}
+    return json({
+      ok: true, custom: true, customId: row.id, name: row.name, status: row.status,
+      week: row.id, vehicle: row.reg || sess.user.vehicle_assigned || "",
+      deadline: { dueAt: new Date(Date.now() + 7 * 86400000).toISOString(), overdue: false },
+      checklist: it.checklist || [], equipment: it.equipment || [], photoSlots: it.photoSlots || [],
+      myCheck: row.status === "done" ? { source: "portal", vehicle: row.reg || "", defectCount: 0, safeToDrive: true } : null,
+    }, {}, env, request);
+  }
+
   // ── My config (drives the form + prefill) ───────────────────────────────────
   if (path === "/vancheck/config" && method === "GET") {
     const s = await getSettings(db);
@@ -208,6 +344,8 @@ export async function handle(request, env, ctx, url, sess) {
     const mine = await db.prepare("SELECT * FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
       .bind(db.tenantId, me, week).first();
     const dueAt = deadlineFor(week, s);
+    await ensureCustomTable(db);
+    const { results: customChecks } = await db.prepare("SELECT id, name, sent_at FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
     return json({
       ok: true, week, vehicle: sess.user.vehicle_assigned || "",
       deadline: { dow: s.dueDow, time: s.dueTime, dueAt, overdue: Date.now() > Date.parse(dueAt) },
@@ -215,24 +353,46 @@ export async function handle(request, env, ctx, url, sess) {
       equipment: s.equipment || [],
       photoSlots: s.photoSlots,
       myCheck: shapeCheck(mine),
+      customChecks: customChecks || [],   // one-off custom checks the office has sent me
     }, {}, env, request);
   }
 
   // ── Submit my check ─────────────────────────────────────────────────────────
   if (path === "/vancheck/submit" && method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const week = mondayOf(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate());
+    // Custom (one-off) check: identified by customId. It uses its OWN snapshot of
+    // items (not the weekly settings) and is stored under a distinct week key so
+    // it never collides with the weekly check.
+    const customId = String(b.customId || "");
+    let customRow = null;
+    if (customId) {
+      await ensureCustomTable(db);
+      customRow = await db.prepare("SELECT * FROM custom_van_checks WHERE tenant_id=? AND id=? AND username=?").bind(db.tenantId, customId, me).first();
+      if (!customRow) return error("Custom check not found.", 404, env, request);
+    }
+    const week = customId ? customId : mondayOf(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate());
     const vehicle = String(b.vehicle || sess.user.vehicle_assigned || "").trim();
     if (!vehicle) return error("No vehicle — enter the reg or ask the office to allocate one to you.", 400, env, request);
     const answers = (b.answers && typeof b.answers === "object") ? b.answers : {};
-    if (!Object.keys(answers).length) return error("Complete the checklist first.", 400, env, request);
+    // Weekly checks always have a checklist; a custom check might be photos-only,
+    // so only require answers when the (custom) template actually has items.
+    if (!customId && !Object.keys(answers).length) return error("Complete the checklist first.", 400, env, request);
     const defectNotes = (b.defectNotes && typeof b.defectNotes === "object") ? b.defectNotes : {};
 
     // Photos. Named slots (oil level, each tyre, cab…) come as
     // photoSlots {slotId: dataURL|existingKey}; extras as photos[]. Each data
     // URL -> R2 (4MB cap), same serving path as assets. Required slots are
     // enforced server-side.
-    const s2 = await getSettings(db);
+    // For a custom check the items come from its snapshot (no weekly settings /
+    // alert users); otherwise the live weekly settings.
+    let customItems = null;
+    if (customRow) { try { customItems = JSON.parse(customRow.items || "{}"); } catch { customItems = {}; } }
+    const s2 = customRow
+      ? { checklist: customItems.checklist || [], equipment: customItems.equipment || [], photoSlots: customItems.photoSlots || [], alertUsers: [] }
+      : await getSettings(db);
+    // Custom check WITH checklist/equipment items still needs its answers.
+    if (customRow && ((s2.checklist.length + s2.equipment.length) > 0) && !Object.keys(answers).length)
+      return error("Complete the checklist first.", 400, env, request);
     const userDir = me.replace(/[^A-Za-z0-9._-]/g, "_");
     let n = 0;
     async function storeOne(p, tag) {
@@ -262,10 +422,15 @@ export async function handle(request, env, ctx, url, sess) {
 
     // "Alert if" rules → store fired alerts on the record + push the chosen users.
     const alerts = evalAlerts(answers, s2);
+    // A custom check carries its own item labels so any viewer can resolve them
+    // without the weekly settings, and a `custom` marker so it's tagged/badged.
+    const custom = customRow
+      ? { id: customRow.id, name: customRow.name, checklist: s2.checklist, equipment: s2.equipment, photoSlots: s2.photoSlots }
+      : undefined;
     const items = JSON.stringify({
       answers, defectNotes, photos: photoKeys, slotPhotos,
       mileage: String(b.mileage || "").trim(), source: "portal",
-      alerts,
+      alerts, ...(custom ? { custom } : {}),
     });
     const now = new Date().toISOString();
     await db.prepare(`
@@ -275,6 +440,7 @@ export async function handle(request, env, ctx, url, sess) {
         vehicle=excluded.vehicle, checked_at=excluded.checked_at,
         safe_to_drive=excluded.safe_to_drive, items=excluded.items, note=excluded.note
     `).bind(db.tenantId, me, week, vehicle, now, b.safeToDrive === false ? 0 : 1, items, String(b.note || "").trim()).run();
+    if (customRow) await db.prepare("UPDATE custom_van_checks SET status='done', submitted_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, customRow.id).run();
     if (alerts.length && (s2.alertUsers || []).length) {
       const who = (`${sess.user.first_name || ""} ${sess.user.last_name || ""}`.trim()) || me;
       const body = `${who} — ${vehicle}: ` + alerts.map(a => `${a.label}: ${answerWord(a.answer)}`).join(", ");
@@ -432,7 +598,10 @@ export async function handle(request, env, ctx, url, sess) {
       missing = (drivers || []).filter(u => !doneSet.has(u.username) && !off.has(u.username))
         .map(u => (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username);
     }
-    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing }, {}, env, request);
+    await ensureCustomTable(db);
+    const cp = await db.prepare("SELECT COUNT(*) AS n FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending'").bind(db.tenantId, me).first();
+    const customPending = cp ? Number(cp.n) || 0 : 0;
+    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending }, {}, env, request);
   }
 
   return error("Unknown van-check route", 404, env, request);

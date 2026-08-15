@@ -59,6 +59,7 @@
     <a class="ml-back" data-role="home" href="/vehicles.html" style="text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Checks</h1>
     <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
+    <button class="btn grey small" id="customBtn">🧩 Custom checks</button>
     <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
     <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
   </header>
@@ -147,6 +148,58 @@
       <div class="row" style="margin-top:10px;justify-content:space-between;">
         <button class="btn ghost small" id="hReset">Reset to defaults</button>
         <button class="btn green" id="hSave">Save template</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom (one-off) van checks -->
+  <div class="overlay" id="customModal">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">🧩 Custom van checks</h2>
+        <button class="btn grey small" onclick="document.getElementById('customModal').classList.remove('open')">✕</button>
+      </div>
+
+      <!-- LIST view -->
+      <div id="c_view_list">
+        <p class="ahint">Build a reusable check (e.g. “Winter tyre check”, “Pre-MOT”) and send it to specific drivers — it doesn’t touch the weekly check. Results show in the van’s Checks history, tagged “custom”.</p>
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <label style="margin:0;">Saved templates</label>
+          <button class="btn small" onclick="customNew()">＋ New template</button>
+        </div>
+        <div id="c_tplList" style="margin-top:6px;"></div>
+        <label style="margin-top:16px;">Recently sent</label>
+        <div id="c_sentList"></div>
+      </div>
+
+      <!-- EDIT view -->
+      <div id="c_view_edit" style="display:none;">
+        <label>Template name</label>
+        <input type="text" id="c_name" placeholder="e.g. Winter tyre check">
+        <label style="margin-top:14px;">Checklist (driver taps OK / Defect)</label>
+        <div id="c_checkRows"></div>
+        <button type="button" class="addbtn" onclick="addItemRow('c_checkRows','check')">＋ Add check</button>
+        <label style="margin-top:14px;">Equipment on board (Present / Missing; leave empty for none)</label>
+        <div id="c_equipRows"></div>
+        <button type="button" class="addbtn" onclick="addItemRow('c_equipRows','equip')">＋ Add equipment</button>
+        <label style="margin-top:14px;">Photos — one per line (add <b>?</b> at the end to make one optional)</label>
+        <textarea id="c_slots" style="min-height:100px; font-size:14px;"></textarea>
+        <p class="msg" id="cMsg"></p>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn green" onclick="customSaveTpl()">Save template</button>
+          <button class="btn grey" onclick="showCustomView('list')">Cancel</button>
+        </div>
+      </div>
+
+      <!-- SEND view -->
+      <div id="c_view_send" style="display:none;">
+        <p>Send <b id="c_sendName"></b> to these drivers:</p>
+        <div class="userpick" id="c_drivers"></div>
+        <p class="msg" id="cSendMsg"></p>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn green" onclick="customSendGo()">📨 Send check</button>
+          <button class="btn grey" onclick="showCustomView('list')">Cancel</button>
+        </div>
       </div>
     </div>
   </div>
@@ -421,6 +474,77 @@
       m.className = "msg ok"; m.textContent = "Saved ✓ — applies to every handover from now.";
     } catch (e) { m.className = "msg err"; m.textContent = e.message; }
   };
+
+  // ── Custom (one-off) van checks ──
+  let CUSTOM_TPLS = [], C_EDIT_ID = null, C_SEND_TPL = null;
+  function showCustomView(v) { ["list", "edit", "send"].forEach(x => g("c_view_" + x).style.display = x === v ? "" : "none"); }
+  async function openCustom() {
+    g("customModal").classList.add("open");
+    showCustomView("list");
+    g("c_tplList").innerHTML = '<span class="muted">Loading…</span>';
+    await Promise.all([loadCustomTpls(), loadUsers()]);
+  }
+  async function loadCustomTpls() {
+    try { const d = await authFetch("/vancheck/custom-templates").then(r => r.json()); CUSTOM_TPLS = d.templates || []; } catch (e) { CUSTOM_TPLS = []; }
+    renderCustomList();
+  }
+  function renderCustomList() {
+    g("c_tplList").innerHTML = CUSTOM_TPLS.length ? CUSTOM_TPLS.map(t => `
+      <div class="itemrow" style="justify-content:space-between;align-items:center;">
+        <b style="flex:1;">${esc(t.name)}</b>
+        <span class="muted" style="font-size:12px;">${(t.checklist || []).length}c · ${(t.equipment || []).length}e · ${(t.photoSlots || []).length}📷</span>
+        <button class="btn small" onclick="customSend('${esc(t.id)}')">Send</button>
+        <button class="btn grey small" onclick="customEdit('${esc(t.id)}')">Edit</button>
+        <button class="btn red small" onclick="customDelete('${esc(t.id)}')">🗑</button>
+      </div>`).join("") : '<span class="muted">No custom templates yet — make one with “＋ New template”.</span>';
+    loadCustomStatus();
+  }
+  function customNew() { C_EDIT_ID = null; g("c_name").value = ""; renderItemRows("c_checkRows", "check", []); renderItemRows("c_equipRows", "equip", []); g("c_slots").value = ""; g("cMsg").textContent = ""; showCustomView("edit"); }
+  function customEdit(id) { const t = CUSTOM_TPLS.find(x => x.id === id); if (!t) return; C_EDIT_ID = id; g("c_name").value = t.name; renderItemRows("c_checkRows", "check", t.checklist || []); renderItemRows("c_equipRows", "equip", t.equipment || []); g("c_slots").value = slotsToText(t.photoSlots); g("cMsg").textContent = ""; showCustomView("edit"); }
+  async function customSaveTpl() {
+    const m = g("cMsg"); m.className = "msg";
+    const name = g("c_name").value.trim();
+    if (!name) { m.className = "msg err"; m.textContent = "Give the template a name."; return; }
+    const checklist = collectItemRows("c_checkRows"), equipment = collectItemRows("c_equipRows"), photoSlots = textToSlots(g("c_slots").value);
+    if (!checklist.length && !equipment.length && !photoSlots.length) { m.className = "msg err"; m.textContent = "Add at least one check, equipment item or photo."; return; }
+    m.textContent = "Saving…";
+    try {
+      const r = await authFetch("/vancheck/custom-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: C_EDIT_ID, name, checklist, equipment, photoSlots }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      CUSTOM_TPLS = r.templates || CUSTOM_TPLS; renderCustomList(); showCustomView("list");
+    } catch (e) { m.className = "msg err"; m.textContent = "Failed — " + e.message; }
+  }
+  async function customDelete(id) {
+    if (!confirm("Delete this custom template? (Checks already sent are kept.)")) return;
+    try { const r = await authFetch("/vancheck/custom-templates/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(r => r.json()); CUSTOM_TPLS = r.templates || []; renderCustomList(); } catch (e) {}
+  }
+  function customSend(id) { const t = CUSTOM_TPLS.find(x => x.id === id); if (!t) return; C_SEND_TPL = t; g("c_sendName").textContent = t.name; renderUserPicker("c_drivers", []); g("cSendMsg").textContent = ""; showCustomView("send"); }
+  async function customSendGo() {
+    const m = g("cSendMsg"); m.className = "msg";
+    const usernames = collectUserPicker("c_drivers");
+    if (!usernames.length) { m.className = "msg err"; m.textContent = "Pick at least one driver."; return; }
+    m.textContent = "Sending…";
+    try {
+      const r = await authFetch("/vancheck/custom-send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tplId: C_SEND_TPL.id, usernames }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "send failed");
+      m.className = "msg ok"; m.textContent = "Sent to " + (r.created || []).length + " driver(s) ✓";
+      setTimeout(() => showCustomView("list"), 1000);
+    } catch (e) { m.className = "msg err"; m.textContent = "Failed — " + e.message; }
+  }
+  async function loadCustomStatus() {
+    try {
+      const d = await authFetch("/vancheck/custom-status").then(r => r.json());
+      const items = d.items || [];
+      g("c_sentList").innerHTML = items.length ? items.slice(0, 40).map(x => `
+        <div class="itemrow" style="justify-content:space-between;align-items:center;">
+          <span style="flex:1;font-size:13px;">${esc(x.name)} → <b>${esc(x.name_of)}</b></span>
+          <span style="font-size:12px;">${x.status === "done" ? '<b style="color:#16a34a;">✓ done</b>' : '<span style="color:#b26b00;">⏳ pending</span>'}</span>
+          ${x.status === "pending" ? `<button class="btn grey small" title="Cancel" onclick="customCancel('${esc(x.id)}')">✕</button>` : ""}
+        </div>`).join("") : '<span class="muted">Nothing sent yet.</span>';
+    } catch (e) {}
+  }
+  async function customCancel(id) { try { await authFetch("/vancheck/custom-cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(r => r.json()); loadCustomStatus(); } catch (e) {} }
+  g("customBtn").onclick = openCustom;
 </script>
 </body>
 </html>

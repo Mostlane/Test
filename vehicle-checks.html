@@ -186,7 +186,8 @@
       const safe = c.safeToDrive===false?'<span class="pill bad">Not safe</span>':'<span class="pill ok">Safe</span>';
       const dcount = c.defectCount?`<span class="pill warn">${c.defectCount} issue${c.defectCount===1?"":"s"}</span>`:"";
       const al = (c.alerts&&c.alerts.length)?`<span class="pill alert">⚠ ${c.alerts.length}</span>`:"";
-      return `<div class="row" onclick="openCheck(${i})"><span class="d">${fmtDMY(c.checkedAt)}</span><span class="who">${esc(c.name)}</span>${al}${dcount}${safe}<span class="go">›</span></div>`;
+      const cust = c.custom?`<span class="pill" style="background:#e0e7ff;color:#3730a3;" title="${esc(c.custom.name||'')}">🧩 Custom</span>`:"";
+      return `<div class="row" onclick="openCheck(${i})"><span class="d">${fmtDMY(c.checkedAt)}</span><span class="who">${esc(c.name)}</span>${cust}${al}${dcount}${safe}<span class="go">›</span></div>`;
     });
   }
 
@@ -264,10 +265,12 @@
 
   function openCheck(i){
     const c=CHECKS[i]; if(!c)return;
-    const vcLabels=[...(VC.checklist||[]),...(VC.equipment||[])];   // checklist + equipment labels
+    // A custom check carries its OWN item labels; otherwise use the weekly template.
+    const vcLabels = c.custom ? [...(c.custom.checklist||[]),...(c.custom.equipment||[])] : [...(VC.checklist||[]),...(VC.equipment||[])];
     const checks=Object.keys(c.answers||{}).map(id=>`<div class="chk"><span>${esc(labelFor(vcLabels,id))}</span><span>${answerChip(c.answers[id])}${c.defectNotes&&c.defectNotes[id]?` <span class="n">${esc(c.defectNotes[id])}</span>`:""}</span></div>`).join("");
+    const title = c.custom ? `🧩 Custom check · ${esc(c.custom.name||"")} · ${fmtDMY(c.checkedAt)}` : `Van check · ${fmtDMY(c.checkedAt)}`;
     showDetail(`
-      <div class="mhead"><h3>Van check · ${fmtDMY(c.checkedAt)}</h3><button class="btn small" onclick="closeDetail()">✕ Close</button></div>
+      <div class="mhead"><h3>${title}</h3><button class="btn small" onclick="closeDetail()">✕ Close</button></div>
       ${alertBanner(c)}
       <div class="mbody">
         <div class="drow"><span class="k">Driver</span><span class="v">${esc(c.name)}</span></div>

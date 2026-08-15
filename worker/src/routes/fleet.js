@@ -1236,6 +1236,7 @@ export async function handle(request, env, ctx, url, sess) {
         defectCount: defects.length, note: r.note || "", mileage: items.mileage || "",
         answers, defectNotes: items.defectNotes || {}, slotPhotos: slot, photos,
         alerts: items.alerts || [],
+        custom: items.custom || null,   // one-off custom check: carries its own item labels
       });
     }
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
