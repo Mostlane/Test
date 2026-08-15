@@ -204,6 +204,7 @@
     <a class="ml-back" href="main.html" title="Back to Menu">‹ Back</a>
     <div class="title">Site Manager</div>
     <button class="btn outline" id="btnTidy" type="button" style="display:none">🧹 Tidy &amp; merge</button>
+    <a class="btn outline" id="btnArrival" href="site-arrival.html" style="display:none">📋 Visitor arrival &amp; docs</a>
     <a class="btn outline" href="job-costing.html">📊 Job costing</a>
   </div>
   <div class="controls">
@@ -1230,6 +1231,9 @@ btnRecalc.onclick = async () => {
   document.getElementById("closeTidy").onclick=function(){ tidyModalEl.classList.remove("active"); };
   var btnTidyEl=document.getElementById("btnTidy");
   if(btnTidyEl && TIDY_ADMIN){ btnTidyEl.style.display=""; btnTidyEl.onclick=openTidy; }
+  // Visitor arrival & documents (SiteLog) — Full Access only, matching that page.
+  var btnArrivalEl=document.getElementById("btnArrival");
+  if(btnArrivalEl && TIDY_PERMS.FullAccess==="Yes"){ btnArrivalEl.style.display=""; }
 
   async function loadCandidates(){
     var host=document.getElementById("candList"); host.textContent="Loading…";
