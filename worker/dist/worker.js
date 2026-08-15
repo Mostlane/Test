@@ -7826,6 +7826,15 @@ function readDidCookie(request) {
 function didSetCookie(token) {
   return { "Set-Cookie": "ml_did=" + token + "; Max-Age=63072000; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" };
 }
+async function getArrivalDefaultRules(env) {
+  try {
+    const row = await env.SITELOG_DB.prepare("SELECT value FROM config WHERE key = 'arrival_default_rules'").first();
+    if (!row || !row.value) return [];
+    return String(row.value).split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+  } catch {
+    return [];
+  }
+}
 async function handle11(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") {
@@ -8103,6 +8112,42 @@ async function handle11(request, env, ctx) {
       ).bind(siteName, Number(radius ?? 500), siteRules ?? null, id).run();
     }
     return json3({ ok: true });
+  }
+  if (url.pathname === "/arrival-config" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const defaultRules = await getArrivalDefaultRules(env);
+    const counts = await env.SITELOG_DB.prepare(
+      "SELECT COUNT(*) AS total, SUM(CASE WHEN site_rules IS NOT NULL AND TRIM(site_rules)!='' THEN 1 ELSE 0 END) AS withOwn FROM sites WHERE COALESCE(archived,0)=0"
+    ).first();
+    return json3({
+      ok: true,
+      defaultRules,
+      totalSites: counts && counts.total || 0,
+      sitesWithOwnRules: counts && counts.withOwn || 0
+    });
+  }
+  if (url.pathname === "/arrival-config" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const body = await readBody(request);
+    const lines = Array.isArray(body.rules) ? body.rules : String(body.text ?? body.rules ?? "").split("\n");
+    const value = lines.map((r) => String(r).trim()).filter((r) => r.length > 0).join("\n");
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO config (key, value) VALUES ('arrival_default_rules', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).bind(value).run();
+    return json3({ ok: true, defaultRules: value ? value.split("\n") : [] });
+  }
+  if (url.pathname === "/arrival-config/apply" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const body = await readBody(request);
+    const onlyBlank = body.onlyBlank !== false;
+    const rules = (await getArrivalDefaultRules(env)).join("\n");
+    const sql = onlyBlank ? "UPDATE sites SET site_rules = ? WHERE COALESCE(archived,0)=0 AND (site_rules IS NULL OR TRIM(site_rules)='')" : "UPDATE sites SET site_rules = ? WHERE COALESCE(archived,0)=0";
+    const res = await env.SITELOG_DB.prepare(sql).bind(rules).run();
+    const changes = res && res.meta && res.meta.changes || 0;
+    return json3({ ok: true, updated: changes, onlyBlank });
   }
   if (url.pathname === "/toggle-site" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -8925,7 +8970,8 @@ async function handle11(request, env, ctx) {
     }
     const siteCode = matchedSite.site_name;
     const rulesRaw = matchedSite.site_rules || "";
-    const siteRules = rulesRaw.split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+    let siteRules = rulesRaw.split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+    if (!siteRules.length) siteRules = await getArrivalDefaultRules(env);
     const device = await env.SITELOG_DB.prepare(
       "SELECT * FROM devices WHERE device_token = ?"
     ).bind(deviceToken).first();

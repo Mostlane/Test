@@ -516,6 +516,16 @@ function didSetCookie(token) {
   return { "Set-Cookie": "ml_did=" + token + "; Max-Age=63072000; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" };
 }
 
+// Default arrival rules (config key) — shown on any site that has no rules of
+// its own. Stored newline-separated in the SiteLog `config` key/value table.
+async function getArrivalDefaultRules(env) {
+  try {
+    const row = await env.SITELOG_DB.prepare("SELECT value FROM config WHERE key = 'arrival_default_rules'").first();
+    if (!row || !row.value) return [];
+    return String(row.value).split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+  } catch { return []; }
+}
+
 // Ported SiteLog backend, now living inside mostlane-api. Faithful copy of the
 // standalone worker (Mostlane/SiteLog worker.js) with env.DB → env.SITELOG_DB
 // and env.ADMIN_SECRET → env.SITELOG_ADMIN_SECRET. Exposed as handle() (the full
@@ -927,6 +937,55 @@ export async function handle(request, env, ctx) {
       }
 
       return json({ ok: true });
+    }
+
+    // GET /arrival-config — the DEFAULT arrival rules + coverage counts (admin).
+    if (url.pathname === "/arrival-config" && request.method === "GET") {
+      const guard = requireAdmin();
+      if (guard) return guard;
+      const defaultRules = await getArrivalDefaultRules(env);
+      const counts = await env.SITELOG_DB.prepare(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN site_rules IS NOT NULL AND TRIM(site_rules)!='' THEN 1 ELSE 0 END) AS withOwn FROM sites WHERE COALESCE(archived,0)=0"
+      ).first();
+      return json({
+        ok: true, defaultRules,
+        totalSites: (counts && counts.total) || 0,
+        sitesWithOwnRules: (counts && counts.withOwn) || 0
+      });
+    }
+
+    // POST /arrival-config — set the default arrival rules (admin).
+    // Body { rules: [..] } or { text: "line\nline" }.
+    if (url.pathname === "/arrival-config" && request.method === "POST") {
+      const guard = requireAdmin();
+      if (guard) return guard;
+      const body = await readBody(request);
+      const lines = Array.isArray(body.rules)
+        ? body.rules
+        : String(body.text ?? body.rules ?? "").split("\n");
+      const value = lines.map((r) => String(r).trim()).filter((r) => r.length > 0).join("\n");
+      await env.SITELOG_DB.prepare(
+        "INSERT INTO config (key, value) VALUES ('arrival_default_rules', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).bind(value).run();
+      return json({ ok: true, defaultRules: value ? value.split("\n") : [] });
+    }
+
+    // POST /arrival-config/apply — stamp the default onto sites in one go, so
+    // every known site shows it (admin). Body { onlyBlank: true } (default) only
+    // fills sites that have no rules of their own; { onlyBlank: false } overwrites
+    // every non-archived site with the default.
+    if (url.pathname === "/arrival-config/apply" && request.method === "POST") {
+      const guard = requireAdmin();
+      if (guard) return guard;
+      const body = await readBody(request);
+      const onlyBlank = body.onlyBlank !== false;
+      const rules = (await getArrivalDefaultRules(env)).join("\n");
+      const sql = onlyBlank
+        ? "UPDATE sites SET site_rules = ? WHERE COALESCE(archived,0)=0 AND (site_rules IS NULL OR TRIM(site_rules)='')"
+        : "UPDATE sites SET site_rules = ? WHERE COALESCE(archived,0)=0";
+      const res = await env.SITELOG_DB.prepare(sql).bind(rules).run();
+      const changes = (res && res.meta && res.meta.changes) || 0;
+      return json({ ok: true, updated: changes, onlyBlank });
     }
 
     // POST /toggle-site
@@ -2033,10 +2092,14 @@ export async function handle(request, env, ctx) {
 
       const siteCode = matchedSite.site_name;
       const rulesRaw = matchedSite.site_rules || "";
-      const siteRules = rulesRaw
+      let siteRules = rulesRaw
         .split("\n")
         .map((r) => r.trim())
         .filter((r) => r.length > 0);
+      // A site with no rules of its own falls back to the portal-set DEFAULT
+      // arrival rules (config key arrival_default_rules), so every site shows
+      // something on arrival without setting each one individually.
+      if (!siteRules.length) siteRules = await getArrivalDefaultRules(env);
 
       const device = await env.SITELOG_DB.prepare(
         "SELECT * FROM devices WHERE device_token = ?"
