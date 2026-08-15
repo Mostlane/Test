@@ -233,6 +233,38 @@ async function canViewSiteDocs(env, personId, siteName) {
   return !!open;
 }
 
+// Compulsory site documents (require_ack = 1) at a site that this person has NOT
+// yet acknowledged. Drives the "read & understood before check-in" gate — once
+// a person has acked a document, it never blocks them again. Returns [] when the
+// person is unknown or the site has none outstanding.
+async function pendingCompulsoryDocs(env, personId, siteName) {
+  if (!personId || !siteName) return [];
+  try {
+    const rows = await env.SITELOG_DB.prepare(`
+      SELECT sd.id, sd.title, sd.file_name, sd.category
+      FROM site_documents sd
+      JOIN sites s ON s.site_name = sd.site_name AND COALESCE(s.archived,0) = 0
+      WHERE sd.site_name = ? AND COALESCE(sd.archived,0) = 0 AND sd.require_ack = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM site_document_acks a WHERE a.document_id = sd.id AND a.person_id = ?
+        )
+      ORDER BY sd.category ASC, sd.uploaded_at ASC
+    `).bind(siteName, personId).all();
+    return rows.results || [];
+  } catch { return []; }
+}
+
+// Is this document one a device holder is allowed to read/ack at check-in time
+// (a compulsory require_ack doc at a live site)? Lets someone read + sign a
+// mandatory document BEFORE their visit opens, without an existing open visit.
+async function isCompulsoryDoc(env, docId) {
+  if (!docId) return null;
+  const doc = await env.SITELOG_DB.prepare(
+    "SELECT * FROM site_documents WHERE id = ? AND COALESCE(archived,0)=0 AND require_ack = 1"
+  ).bind(docId).first();
+  return doc || null;
+}
+
 async function handleTravelIn(env, visitId, personId, siteLat, siteLng) {
   try {
     const person = await env.SITELOG_DB.prepare(
@@ -1604,6 +1636,18 @@ export async function handle(request, env, ctx) {
         if (openVisit) targetId = openVisit.id;
       }
 
+      // Compulsory-document gate: a brand-new check-in at a site with
+      // unacknowledged require_ack documents is refused until they're signed.
+      // The scanner acks them (POST /site-documents/ack) then retries; once a
+      // person has acknowledged a document it never blocks them again. Existing
+      // open visits (targetId set) are already past this, so they're not gated.
+      if (!targetId) {
+        const pending = await pendingCompulsoryDocs(env, device.person_id, site);
+        if (pending.length) {
+          return json({ ok: false, status: "must_acknowledge", site, documents: pending }, 409);
+        }
+      }
+
       let travelIn = null;
 
       if (targetId) {
@@ -2160,12 +2204,16 @@ export async function handle(request, env, ctx) {
         });
       }
 
+      // Compulsory documents this person must read & acknowledge before they can
+      // check in here for the first time (empty once they've acknowledged).
+      const mustAck = await pendingCompulsoryDocs(env, device.person_id, siteCode);
       return json({
         status: "confirm_check_in",
         site: siteCode,
         firstName: person?.first_name || null,
         company: person?.company || null,
-        siteRules
+        siteRules,
+        mustAck
       });
     }
 
@@ -3166,9 +3214,13 @@ export async function handle(request, env, ctx) {
       if (!deviceToken || !id) return json({ ok: false, error: "Missing fields" }, 400);
       const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
       if (!dev || !dev.person_id) return json({ ok: false, error: "Unknown device" }, 401);
-      const doc = await env.SITELOG_DB.prepare("SELECT site_name FROM site_documents WHERE id = ?").bind(id).first();
+      const doc = await env.SITELOG_DB.prepare("SELECT site_name, require_ack FROM site_documents WHERE id = ?").bind(id).first();
       if (!doc) return json({ ok: false, error: "Document not found" }, 404);
-      if (!(await canViewSiteDocs(env, dev.person_id, doc.site_name))) return json({ ok: false, error: "Not permitted" }, 403);
+      // Permitted if they can normally view the site's docs (open visit /
+      // doc_access_always) OR the doc is compulsory (require_ack) — so a mandatory
+      // document can be read & signed at the check-in gate, before the visit opens.
+      const ackPermitted = Number(doc.require_ack) === 1 || (await canViewSiteDocs(env, dev.person_id, doc.site_name));
+      if (!ackPermitted) return json({ ok: false, error: "Not permitted" }, 403);
       const person = await env.SITELOG_DB.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(dev.person_id).first();
       const name = person ? `${person.first_name || ""} ${person.last_name || ""}`.trim() : "";
       const existing = await env.SITELOG_DB.prepare(
@@ -3197,7 +3249,10 @@ export async function handle(request, env, ctx) {
         const deviceToken = url.searchParams.get("deviceToken") || "";
         if (deviceToken) {
           const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
-          if (dev && dev.person_id) ok = await canViewSiteDocs(env, dev.person_id, doc.site_name);
+          // A compulsory (require_ack) document is readable by any registered
+          // device at the check-in gate — they must read it to sign it, before
+          // their visit opens. Other docs still need an open visit / doc_access.
+          if (dev && dev.person_id) ok = Number(doc.require_ack) === 1 || (await canViewSiteDocs(env, dev.person_id, doc.site_name));
         }
       }
       if (!ok) return new Response("Unauthorised", { status: 401, headers: corsFor(request) });

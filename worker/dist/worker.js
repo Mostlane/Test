@@ -7605,6 +7605,24 @@ async function canViewSiteDocs(env, personId, siteName) {
   ).bind(personId, siteName).first();
   return !!open;
 }
+async function pendingCompulsoryDocs(env, personId, siteName) {
+  if (!personId || !siteName) return [];
+  try {
+    const rows = await env.SITELOG_DB.prepare(`
+      SELECT sd.id, sd.title, sd.file_name, sd.category
+      FROM site_documents sd
+      JOIN sites s ON s.site_name = sd.site_name AND COALESCE(s.archived,0) = 0
+      WHERE sd.site_name = ? AND COALESCE(sd.archived,0) = 0 AND sd.require_ack = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM site_document_acks a WHERE a.document_id = sd.id AND a.person_id = ?
+        )
+      ORDER BY sd.category ASC, sd.uploaded_at ASC
+    `).bind(siteName, personId).all();
+    return rows.results || [];
+  } catch {
+    return [];
+  }
+}
 async function handleTravelIn(env, visitId, personId, siteLat, siteLng) {
   try {
     const person = await env.SITELOG_DB.prepare(
@@ -8617,6 +8635,12 @@ async function handle11(request, env, ctx) {
         `).bind(device.person_id, site).first();
       if (openVisit) targetId = openVisit.id;
     }
+    if (!targetId) {
+      const pending = await pendingCompulsoryDocs(env, device.person_id, site);
+      if (pending.length) {
+        return json3({ ok: false, status: "must_acknowledge", site, documents: pending }, 409);
+      }
+    }
     let travelIn = null;
     if (targetId) {
       await env.SITELOG_DB.prepare(
@@ -9041,12 +9065,14 @@ async function handle11(request, env, ctx) {
         company: person?.company || null
       });
     }
+    const mustAck = await pendingCompulsoryDocs(env, device.person_id, siteCode);
     return json3({
       status: "confirm_check_in",
       site: siteCode,
       firstName: person?.first_name || null,
       company: person?.company || null,
-      siteRules
+      siteRules,
+      mustAck
     });
   }
   if (url.pathname === "/companies" && request.method === "GET") {
@@ -9874,9 +9900,10 @@ async function handle11(request, env, ctx) {
     if (!deviceToken || !id) return json3({ ok: false, error: "Missing fields" }, 400);
     const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
     if (!dev || !dev.person_id) return json3({ ok: false, error: "Unknown device" }, 401);
-    const doc = await env.SITELOG_DB.prepare("SELECT site_name FROM site_documents WHERE id = ?").bind(id).first();
+    const doc = await env.SITELOG_DB.prepare("SELECT site_name, require_ack FROM site_documents WHERE id = ?").bind(id).first();
     if (!doc) return json3({ ok: false, error: "Document not found" }, 404);
-    if (!await canViewSiteDocs(env, dev.person_id, doc.site_name)) return json3({ ok: false, error: "Not permitted" }, 403);
+    const ackPermitted = Number(doc.require_ack) === 1 || await canViewSiteDocs(env, dev.person_id, doc.site_name);
+    if (!ackPermitted) return json3({ ok: false, error: "Not permitted" }, 403);
     const person = await env.SITELOG_DB.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(dev.person_id).first();
     const name = person ? `${person.first_name || ""} ${person.last_name || ""}`.trim() : "";
     const existing = await env.SITELOG_DB.prepare(
@@ -9901,7 +9928,7 @@ async function handle11(request, env, ctx) {
       const deviceToken = url.searchParams.get("deviceToken") || "";
       if (deviceToken) {
         const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
-        if (dev && dev.person_id) ok = await canViewSiteDocs(env, dev.person_id, doc.site_name);
+        if (dev && dev.person_id) ok = Number(doc.require_ack) === 1 || await canViewSiteDocs(env, dev.person_id, doc.site_name);
       }
     }
     if (!ok) return new Response("Unauthorised", { status: 401, headers: corsFor(request) });
