@@ -49,6 +49,13 @@ bucket_name = "mostlane-job-files"
 binding = "ASSET_BUCKET"
 bucket_name = "mostlane-asset-images"
 
+# SiteLog's document library (site RAMS / inductions / drawings shown to visitors
+# on arrival). Binding it lets the portal manage those documents in-process via
+# the ported SiteLog backend (src/routes/sitelog-api.js /site-documents/*).
+[[r2_buckets]]
+binding = "DOCS_BUCKET"
+bucket_name = "sitelog-documents"
+
 # ── Non-secret configuration ────────────────────────────────────────
 [vars]
 ALLOWED_ORIGINS = "*"
