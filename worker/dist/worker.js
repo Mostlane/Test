@@ -2979,17 +2979,22 @@ function jpegInfo(bytes) {
   return { w: 1, h: 1, comps: 3 };
 }
 var PdfDoc = class {
-  constructor() {
+  // Pages default to A4 (595×842) but any page may carry its own size —
+  // newPage(w, h) — e.g. the continuous single-tall-page RA copies.
+  constructor(w, h) {
     this.pages = [];
     this.images = [];
-    this.newPage();
+    this.newPage(w, h);
   }
-  newPage() {
-    this.pages.push([]);
+  newPage(w, h) {
+    this.pages.push({ ops: [], w: w || PAGE_W, h: h || PAGE_H });
     return this;
   }
-  get _ops() {
+  get _page() {
     return this.pages[this.pages.length - 1];
+  }
+  get _ops() {
+    return this._page.ops;
   }
   // Draw a JPEG image. (x, yTop) = top-left corner from the page top; w/h in pt.
   // Bytes must be a baseline JPEG (DCTDecode). Registers one XObject reused across
@@ -2997,7 +3002,7 @@ var PdfDoc = class {
   image(bytes, x, yTop, w, h) {
     const idx = this.images.length;
     this.images.push(bytes);
-    const y = PAGE_H - yTop - h;
+    const y = this._page.h - yTop - h;
     this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
     return this;
   }
@@ -3008,12 +3013,12 @@ var PdfDoc = class {
     const grey = opt.grey ? "0.45 g " : "";
     let tx = x;
     if (opt.alignRight) tx = x - textWidth(str, size);
-    const y = PAGE_H - yTop;
+    const y = this._page.h - yTop;
     this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
     return this;
   }
   hr(x1, yTop, x2, opt = {}) {
-    const y = PAGE_H - yTop;
+    const y = this._page.h - yTop;
     const grey = opt.grey ? "0.75 G " : "0.2 G ";
     this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
     return this;
@@ -3045,14 +3050,14 @@ stream
         sAfter: "\nendstream"
       });
     }
-    for (const ops of this.pages) {
-      const stream = ops.join("\n");
+    for (const pg of this.pages) {
+      const stream = pg.ops.join("\n");
       objs.push({ s: `<< /Length ${enc3.encode(stream).length} >>
 stream
 ${stream}
 endstream` });
       const cid = objs.length;
-      objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjRes} >> /Contents ${cid} 0 R >>` });
+      objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pg.w} ${pg.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjRes} >> /Contents ${cid} 0 R >>` });
     }
     const chunks = [];
     let len = 0;
@@ -7957,6 +7962,51 @@ function buildRaPdf(pages, ref) {
   });
   return pdf.bytes();
 }
+var RA_CONT_MAX_H = 13500;
+function buildRaContinuousPdf(pages, ref) {
+  const slices = [];
+  for (const durl of (Array.isArray(pages) ? pages : []).slice(0, 60)) {
+    const m = /^data:image\/jpe?g;base64,(.+)$/.exec(String(durl || ""));
+    if (!m) continue;
+    let bin;
+    try {
+      bin = atob(m[1]);
+    } catch {
+      continue;
+    }
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const d = jpegInfo(u8);
+    if (!d || !d.w || !d.h) continue;
+    slices.push({ u8, hPt: RA_PAGE_W * (d.h / d.w) });
+  }
+  if (!slices.length) return null;
+  const M_TOP = 18, M_BOT = 26;
+  const chunks = [[]];
+  let h = 0;
+  for (const s of slices) {
+    if (h + s.hPt > RA_CONT_MAX_H - M_TOP - M_BOT && chunks[chunks.length - 1].length) {
+      chunks.push([]);
+      h = 0;
+    }
+    chunks[chunks.length - 1].push(s);
+    h += s.hPt;
+  }
+  let pdf = null;
+  chunks.forEach((chunk, ci) => {
+    const pageH = M_TOP + chunk.reduce((a, s) => a + s.hPt, 0) + M_BOT;
+    if (!pdf) pdf = new PdfDoc(RA_PAGE_W, pageH);
+    else pdf.newPage(RA_PAGE_W, pageH);
+    let y = M_TOP;
+    for (const s of chunk) {
+      pdf.image(s.u8, 0, y, RA_PAGE_W, s.hPt);
+      y += s.hPt;
+    }
+    if (ref) pdf.text(24, pageH - 10, String(ref), { size: 8, grey: true });
+    if (chunks.length > 1) pdf.text(RA_PAGE_W - 24, pageH - 10, `Part ${ci + 1} of ${chunks.length}`, { size: 8, grey: true, alignRight: true });
+  });
+  return pdf.bytes();
+}
 async function handle15(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -8056,7 +8106,7 @@ async function handle15(request, env, ctx, url, sess) {
     const mine = reqs.find((s) => s.username === target);
     if (!mine) return error(target === me ? "This document wasn't sent to you." : "That person isn't on this document's sign-off list.", 403, env, request);
     if (target !== me && mine.status !== "signed") return error("They haven't signed yet \u2014 a copy is only filed once signed.", 400, env, request);
-    const out = buildRaPdf(pages, row.ref);
+    const out = b.continuous ? buildRaContinuousPdf(pages, row.ref) : buildRaPdf(pages, row.ref);
     if (!out) return error("No usable page images.", 400, env, request);
     const safe = String(row.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
     const key = `staffdocs/${db.tenantId}/user/${target}/Risk Assessments/${Date.now()}-RA-${safe}.pdf`;

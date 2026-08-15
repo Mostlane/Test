@@ -74,9 +74,12 @@ export function jpegInfo(bytes) {
 }
 
 export class PdfDoc {
-  constructor() { this.pages = []; this.images = []; this.newPage(); }
-  newPage() { this.pages.push([]); return this; }
-  get _ops() { return this.pages[this.pages.length - 1]; }
+  // Pages default to A4 (595×842) but any page may carry its own size —
+  // newPage(w, h) — e.g. the continuous single-tall-page RA copies.
+  constructor(w, h) { this.pages = []; this.images = []; this.newPage(w, h); }
+  newPage(w, h) { this.pages.push({ ops: [], w: w || PAGE_W, h: h || PAGE_H }); return this; }
+  get _page() { return this.pages[this.pages.length - 1]; }
+  get _ops() { return this._page.ops; }
 
   // Draw a JPEG image. (x, yTop) = top-left corner from the page top; w/h in pt.
   // Bytes must be a baseline JPEG (DCTDecode). Registers one XObject reused across
@@ -84,7 +87,7 @@ export class PdfDoc {
   image(bytes, x, yTop, w, h) {
     const idx = this.images.length;
     this.images.push(bytes);
-    const y = PAGE_H - yTop - h;   // PDF origin is bottom-left
+    const y = this._page.h - yTop - h;   // PDF origin is bottom-left
     this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
     return this;
   }
@@ -96,13 +99,13 @@ export class PdfDoc {
     const grey = opt.grey ? "0.45 g " : "";
     let tx = x;
     if (opt.alignRight) tx = x - textWidth(str, size);
-    const y = PAGE_H - yTop;
+    const y = this._page.h - yTop;
     this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
     return this;
   }
 
   hr(x1, yTop, x2, opt = {}) {
-    const y = PAGE_H - yTop;
+    const y = this._page.h - yTop;
     const grey = opt.grey ? "0.75 G " : "0.2 G ";
     this._ops.push(`${grey}${(opt.w || 0.75)} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
     return this;
@@ -139,11 +142,11 @@ export class PdfDoc {
         raw: m.bytes, sAfter: "\nendstream"
       });
     }
-    for (const ops of this.pages) {
-      const stream = ops.join("\n");
+    for (const pg of this.pages) {
+      const stream = pg.ops.join("\n");
       objs.push({ s: `<< /Length ${enc.encode(stream).length} >>\nstream\n${stream}\nendstream` });          // content
       const cid = objs.length;   // 1-indexed object number of the content just pushed
-      objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] ` +
+      objs.push({ s: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pg.w} ${pg.h}] ` +
         `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>${xobjRes} >> /Contents ${cid} 0 R >>` });             // page
     }
 
