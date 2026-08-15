@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=5"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Site Arrival Setup</title>
+  <link rel="stylesheet" href="/portal.css?v=1" />
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --green:#0e7a3b; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:680px; margin:18px auto 48px; padding:0 12px; }
+    .card{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+    h1{ margin:0; font-size:20px; color:var(--ml-blue); }
+    .muted{ color:var(--muted); font-size:13px; }
+    input[type=search]{ width:100%; box-sizing:border-box; border:1px solid var(--border); border-radius:10px; padding:11px 12px; font-size:15px; outline:none; }
+    .site-row{ display:flex; gap:10px; align-items:center; width:100%; text-align:left; padding:12px 4px; border:0; border-bottom:1px solid #eef1f5; background:#fff; cursor:pointer; font-size:15px; }
+    .site-row:last-child{ border-bottom:none; }
+    .site-row .nm{ flex:1; min-width:0; color:#0f172a; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pill{ flex:none; font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; }
+    .pill.has{ background:#dff5e6; color:#0e7a3b; }
+    .pill.no{ background:#f1f4f7; color:#8a94a2; }
+    label{ display:block; font-weight:600; color:var(--ml-blue); font-size:13.5px; margin:14px 0 5px; }
+    textarea{ width:100%; box-sizing:border-box; min-height:150px; border:1px solid var(--border); border-radius:10px; padding:11px 12px; font-size:15px; font-family:inherit; line-height:1.5; resize:vertical; outline:none; }
+    .btn{ border:none; border-radius:11px; padding:13px 18px; font-size:15px; font-weight:700; cursor:pointer; }
+    .btn.primary{ background:linear-gradient(90deg,#003b82,#1e66ff); color:#fff; }
+    .btn.ghost{ background:#eef1f5; color:#334155; }
+    .row-actions{ display:flex; gap:10px; margin-top:14px; }
+    .preview{ margin-top:16px; border:1px dashed #c7d2e0; border-radius:14px; padding:16px; background:#f7fafc; }
+    .preview .ph{ font-size:12px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#8a94a2; margin-bottom:10px; }
+    .preview .rules-card{ background:#fff; border-radius:14px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,.08); max-width:340px; margin:0 auto; }
+    .preview .rules-card h3{ margin:0 0 4px; font-size:16px; color:#003b82; }
+    .preview .rules-card .site{ font-size:13px; color:#6b7280; margin-bottom:12px; }
+    .preview ul{ margin:0; padding-left:20px; }
+    .preview li{ margin:6px 0; font-size:14px; }
+    .preview .none{ color:#8a94a2; font-size:13px; font-style:italic; }
+    .msg{ font-size:13px; margin-top:10px; min-height:16px; }
+    .msg.ok{ color:#0e7a3b; } .msg.err{ color:#b91c1c; }
+    .hide{ display:none; }
+    a.linkback{ text-decoration:none; color:var(--ml-blue); font-size:14px; cursor:pointer; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>📋 Site Arrival Setup</h1>
+      <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+    </header>
+    <p class="muted" style="margin:0;">Set what someone sees when they arrive and check in on a site with SiteLog. These <b>arrival rules</b> are shown to <b>everyone</b> who scans in there — your engineers and visiting subcontractors alike — right on the check-in screen.</p>
+  </div>
+
+  <div class="card" id="gateMsg" style="display:none;">
+    <p class="muted" style="margin:0;">This page needs <b>Full Access</b>. Ask an admin if you need it.</p>
+  </div>
+
+  <!-- List view -->
+  <div class="card" id="listCard" style="display:none;">
+    <input type="search" id="search" placeholder="Search sites…" autocomplete="off" />
+    <div id="list" style="margin-top:10px;"><p class="muted">Loading sites…</p></div>
+  </div>
+
+  <!-- Editor view -->
+  <div class="card hide" id="editCard">
+    <a class="linkback" id="backToList">‹ All sites</a>
+    <h2 id="editTitle" style="color:#003b82;font-size:18px;margin:10px 0 2px;"></h2>
+    <p class="muted" id="editSub" style="margin:0;"></p>
+
+    <label for="rules">Rules a visitor sees on arrival <span class="muted" style="font-weight:400;">— one per line</span></label>
+    <textarea id="rules" placeholder="e.g.&#10;Report to site office on arrival&#10;Hi-vis and hard hat must be worn&#10;Speed limit 5mph on site&#10;No smoking anywhere on site"></textarea>
+
+    <div class="row-actions">
+      <button class="btn primary" id="saveBtn">Save</button>
+      <button class="btn ghost" id="cancelBtn">Cancel</button>
+    </div>
+    <div class="msg" id="editMsg"></div>
+
+    <div class="preview">
+      <div class="ph">What the visitor sees</div>
+      <div class="rules-card">
+        <h3>Welcome — please note:</h3>
+        <div class="site" id="pvSite"></div>
+        <ul id="pvRules"></ul>
+        <div class="none hide" id="pvNone">No arrival rules set for this site yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.MOSTLANE_API;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+function authFetch(url, init = {}){
+  init.headers = new Headers(init.headers || {});
+  const t = localStorage.getItem("mostlaneToken");
+  if (t && !init.headers.has("Authorization")) init.headers.set("Authorization", "Bearer " + t);
+  return fetch(url, init);
+}
+function perms(){ try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch { return {}; } }
+function isFull(){ return String(perms().FullAccess || "").toLowerCase() === "yes"; }
+
+let SITES = [];
+let current = null;
+
+function rulesToLines(raw){ return String(raw || "").split("\n").map(r => r.trim()).filter(Boolean); }
+
+function renderList(){
+  const q = ($("search").value || "").trim().toLowerCase();
+  const rows = SITES
+    .filter(s => !s._archived)
+    .filter(s => !q || (s.site_name || "").toLowerCase().includes(q))
+    .sort((a,b) => String(a.site_name||"").localeCompare(String(b.site_name||"")));
+  if (!rows.length){ $("list").innerHTML = '<p class="muted">'+(SITES.length?'No matches.':'No sites found.')+'</p>'; return; }
+  $("list").innerHTML = rows.map(s => {
+    const has = rulesToLines(s.site_rules).length;
+    return '<button type="button" class="site-row" data-id="'+esc(s.id)+'">' +
+      '<span class="nm">'+esc(s.site_name||'(unnamed)')+'</span>' +
+      '<span class="pill '+(has?'has':'no')+'">'+(has? (has+' rule'+(has>1?'s':'')) : 'no rules')+'</span>' +
+      '</button>';
+  }).join("");
+  [].forEach.call($("list").querySelectorAll(".site-row"), b => b.onclick = () => openSite(b.dataset.id));
+}
+
+function openSite(id){
+  current = SITES.find(s => String(s.id) === String(id));
+  if (!current) return;
+  $("editTitle").textContent = current.site_name || "(unnamed)";
+  $("editSub").textContent = "Arrival rules shown on check-in";
+  $("rules").value = rulesToLines(current.site_rules).join("\n");
+  $("editMsg").textContent = "";
+  updatePreview();
+  $("listCard").style.display = "none";
+  $("editCard").classList.remove("hide");
+  window.scrollTo(0,0);
+}
+function closeSite(){ $("editCard").classList.add("hide"); $("listCard").style.display = ""; }
+
+function updatePreview(){
+  const lines = rulesToLines($("rules").value);
+  $("pvSite").textContent = current ? (current.site_name || "") : "";
+  if (lines.length){
+    $("pvRules").innerHTML = lines.map(l => "<li>"+esc(l)+"</li>").join("");
+    $("pvNone").classList.add("hide"); $("pvRules").classList.remove("hide");
+  } else {
+    $("pvRules").innerHTML = ""; $("pvNone").classList.remove("hide");
+  }
+}
+
+async function save(){
+  if (!current) return;
+  const btn = $("saveBtn"); btn.disabled = true;
+  $("editMsg").className = "msg"; $("editMsg").textContent = "Saving…";
+  const siteRules = rulesToLines($("rules").value).join("\n");
+  try {
+    const res = await authFetch(API + "/sitelog/update-site", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: current.id, siteName: current.site_name, radius: current.radius_m, siteRules, category: current.category })
+    });
+    const out = await res.json().catch(()=>({}));
+    if (res.ok && out.ok !== false){
+      current.site_rules = siteRules;              // reflect locally
+      $("editMsg").className = "msg ok"; $("editMsg").textContent = "✓ Saved — visitors will see this on arrival.";
+      renderList();
+    } else {
+      $("editMsg").className = "msg err"; $("editMsg").textContent = (out && out.error) || "Couldn't save.";
+    }
+  } catch (e) {
+    $("editMsg").className = "msg err"; $("editMsg").textContent = "Couldn't save — check your connection.";
+  }
+  btn.disabled = false;
+}
+
+async function load(){
+  if (!isFull()){ $("gateMsg").style.display = ""; return; }
+  $("listCard").style.display = "";
+  try {
+    const res = await authFetch(API + "/sitelog/sites", { cache: "no-store" });
+    const j = await res.json();
+    SITES = (j && j.sites) || [];
+    SITES.forEach(s => { s._archived = !!(s.archived && Number(s.archived)); });
+    renderList();
+  } catch (e) {
+    $("list").innerHTML = '<p class="msg err">Couldn\'t load sites. If this persists, the SiteLog connection may be down.</p>';
+  }
+}
+
+$("search").addEventListener("input", renderList);
+$("rules").addEventListener("input", updatePreview);
+$("saveBtn").addEventListener("click", save);
+$("cancelBtn").addEventListener("click", closeSite);
+$("backToList").addEventListener("click", closeSite);
+load();
+</script>
+</body>
+</html>
