@@ -102,7 +102,7 @@
   <div class="card">
     <header class="main-header">
       <div class="head-left">
-        <a class="eng-back" href="route.html" title="Back">‹ Back</a>
+        <a class="eng-back" href="route.html?stay=1" title="Back">‹ Back</a>
         <div>
           <h1>My jobs</h1>
           <div class="sub" id="userLabel">Engineer</div>
@@ -696,19 +696,31 @@ async function clockOff(){
   const endMileage = (m && !isNaN(+m)) ? Math.round(+m) : null;
   const fuel = prompt("Fuel added today? (£ or litres — optional)") || "";
   const gps = await getGps();
-  await fetch(`${SLA_API}/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ engineer, gps, endMileage, fuel, date: todayLocal() }) });
+  // The server refuses (409) while jobs are outstanding — show WHICH ones.
+  try{
+    const res = await fetch(`${SLA_API}/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ engineer, gps, endMileage, fuel, date: todayLocal() }) });
+    const d = await res.json().catch(()=>({}));
+    if(!res.ok){
+      const list = (d.outstanding||[]).map(o=>"• "+o.ref+" — "+o.status).join("\n");
+      alert((d.error||"You can't end your day yet.")+(list?"\n\n"+list:""));
+      return;
+    }
+  }catch(e){ alert("Couldn't end your day — no signal? Try again."); return; }
   await loadShift(); renderDayBar(); applyDayGate();
+  alert("Clocked off — have a good evening 👋");
 }
 function renderDayBar(){
   const bar = $("dayBar");
-  if(!isStoryMode()){ bar.style.display="none"; return; }
+  // The day bar shows for EVERY engineer (was Story-Mode-only): start the day
+  // here or on Route, and — crucially — END the day from the jobs list, which
+  // the server only allows once every job is finished.
   bar.style.display="block";
   const s = todayShift;
   if(!s || !s.clock_on_at){
     bar.innerHTML =
       `<div style="padding:16px;border-radius:12px;background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;text-align:center;">
-         <div style="font-weight:700;font-size:16px;margin-bottom:10px;">⚡ Story Mode — start your day to see your jobs</div>
+         <div style="font-weight:700;font-size:16px;margin-bottom:10px;">${isStoryMode()?"⚡ Story Mode — start your day to see your jobs":"⚡ Ready to go?"}</div>
          <button class="btn" style="background:#fff;color:#003b82;font-weight:700;" onclick="clockOn()">▶ Start my day</button>
        </div>`;
   } else if(!s.clock_off_at){
@@ -959,6 +971,10 @@ function init(){
       `<a href="my-day.html" style="display:block;text-decoration:none;padding:14px;border-radius:12px;background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;text-align:center;font-weight:700;">
          ⚡ Open My Day — start &amp; work your day here →
        </a>`;
+  } else {
+    // Every other engineer gets the live day bar (start / end my day) here too —
+    // this page is the working jobs list, so the End-day control lives at the top.
+    loadShift().then(() => { renderDayBar(); applyDayGate(); }).catch(()=>{});
   }
 
   const prevBtn = $("prevWeekBtn");
@@ -1015,7 +1031,7 @@ function init(){
 window.addEventListener("DOMContentLoaded", init);
 </script>
   <nav class="tabbar">
-    <a href="route.html"><span class="ic">🧭</span>Route</a>
+    <a href="route.html?stay=1"><span class="ic">🧭</span>Route</a>
     <a href="engineer-jobs.html" class="on"><span class="ic">📋</span>Jobs</a>
     <a href="po.html" id="tabPO"><span class="ic">🧾</span>PO</a>
     <a href="main.html"><span class="ic">▦</span>Menu</a>

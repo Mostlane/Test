@@ -4932,6 +4932,43 @@ async function handle8(request, env, ctx, url, sess) {
     const b = await readJson2(request);
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
+    const engNorm = normId(b.engineer);
+    let force = false;
+    if (b.force === true) {
+      const p = await permissionsFor(env, tenantId, sess.user.username);
+      force = p.FullAccess === "Yes" || p.SLAAdmin === "Yes";
+    }
+    if (!force) {
+      try {
+        const all = await listJobs(env, tenantId);
+        const doneNames = new Set((await getCategories(env, tenantId)).filter((c) => c.done).map((c) => String(c.name).toLowerCase()));
+        const finished = (s) => {
+          const v = String(s || "").toLowerCase();
+          return v === "complete" || v === "closed jobs" || v === "closed" || v === "invoiced" || v === "cancelled" || doneNames.has(v);
+        };
+        const parked = (s) => {
+          const v = String(s || "").toLowerCase();
+          return v === "on hold" || v === "quote" || v === "order";
+        };
+        const outstanding = [];
+        for (const j of all) {
+          if (!assignedList(j).some((a) => normId(a) === engNorm)) continue;
+          if (!releaseVisibleNow(j, all)) continue;
+          const st = String(effStatus(j, engNorm) || "");
+          if (finished(st) || parked(st)) continue;
+          const active = /^(travelling|in progress)$/i.test(st);
+          const today = j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
+          if (active || today) outstanding.push({ id: j.id, ref: j.helpdeskRef || j.id, status: st });
+        }
+        if (outstanding.length) {
+          return jsonResponse({
+            error: "You still have " + outstanding.length + " unfinished job" + (outstanding.length === 1 ? "" : "s") + " today \u2014 finish them before ending your day.",
+            outstanding
+          }, headers, 409);
+        }
+      } catch (e) {
+      }
+    }
     await db.prepare(
       "UPDATE shifts SET clock_off_at=?, clock_off_gps=?, end_mileage=?, fuel=? WHERE tenant_id=? AND username=? AND date=?"
     ).bind((/* @__PURE__ */ new Date()).toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();

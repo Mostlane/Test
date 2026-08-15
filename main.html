@@ -522,6 +522,10 @@ const MAP = window.ML_PERM_MAP || {
         // (it's hardcoded "visible", so switch it off for them here).
         const mt = document.getElementById("MyTasks");
         if (mt) mt.classList.toggle("visible", !isFieldUser);
+        // Field users: SLA goes straight to their day (route.html) — no office
+        // board bounce. route.html forwards on to the jobs list once the day
+        // has started, so the tile is day-aware end to end.
+        if (isFieldUser) { const slaT = document.getElementById("SLA"); if (slaT) slaT.href = "route.html"; }
 
         const has = k => fullAccess || String(user[k] || "").toLowerCase() === "yes";
         const setHref = (id, choices) => {
