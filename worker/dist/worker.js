@@ -7345,10 +7345,2520 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// src/routes/sitelog-api.js
+var ALLOWED_ORIGINS = [
+  "https://site-log.co.uk",
+  "https://www.site-log.co.uk",
+  "https://mostlane.github.io"
+];
+function corsFor(request) {
+  const origin = request.headers.get("Origin") || "";
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    "Access-Control-Allow-Origin": allow,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, x-admin-secret",
+    "Access-Control-Allow-Credentials": "true",
+    "Vary": "Origin",
+    "Access-Control-Max-Age": "86400"
+  };
+}
+var OFFICE_LAT = 50.8573;
+var OFFICE_LNG = -1.2343;
+var geocodeCache = /* @__PURE__ */ new Map();
+var offlineSchemaReady = false;
+async function ensureOfflineSchema(env) {
+  if (offlineSchemaReady) return;
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN offline_synced INTEGER DEFAULT 0").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN unmatched_site INTEGER DEFAULT 0").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN provided_site_name TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN manual_entry INTEGER DEFAULT 0").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN fuel_rate REAL").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN is_main INTEGER DEFAULT 0").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN portal_username TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN fuel_paid INTEGER").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN travel_time_paid INTEGER").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare(
+      "UPDATE people SET fuel_paid = CASE WHEN travel_status = 'paid' THEN 1 ELSE 0 END, travel_time_paid = CASE WHEN travel_status = 'paid' THEN 1 ELSE 0 END WHERE fuel_paid IS NULL"
+    ).run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE sites ADD COLUMN category TEXT DEFAULT 'Projects'").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE devices ADD COLUMN last_seen TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE documents ADD COLUMN doc_number TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE documents ADD COLUMN doc_seq INTEGER").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("CREATE TABLE IF NOT EXISTS document_links (id TEXT PRIMARY KEY, document_id TEXT, person_id TEXT, person_name TEXT, linked_at TEXT)").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN transferred_to TEXT").run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare(
+      "CREATE TABLE IF NOT EXISTS pending_events (id TEXT PRIMARY KEY, device_token TEXT, lat REAL, lng REAL, accuracy REAL, site_code TEXT, intent TEXT, occurred_at TEXT, synced_at TEXT, resolved INTEGER DEFAULT 0)"
+    ).run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare(
+      "CREATE TABLE IF NOT EXISTS site_documents (id TEXT PRIMARY KEY, site_name TEXT, category TEXT, title TEXT, file_name TEXT, content_type TEXT, size_bytes INTEGER, r2_key TEXT, require_ack INTEGER DEFAULT 0, uploaded_by TEXT, uploaded_at TEXT, archived INTEGER DEFAULT 0)"
+    ).run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare(
+      "CREATE TABLE IF NOT EXISTS site_document_acks (id TEXT PRIMARY KEY, document_id TEXT, person_id TEXT, person_name TEXT, company TEXT, acked_at TEXT)"
+    ).run();
+  } catch (e) {
+  }
+  try {
+    await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN doc_access_always INTEGER DEFAULT 0").run();
+  } catch (e) {
+  }
+  offlineSchemaReady = true;
+}
+function toSqlUtc(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+}
+async function touchDevice(env, deviceToken) {
+  if (!deviceToken) return;
+  const now = (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace("T", " ");
+  try {
+    await env.SITELOG_DB.prepare("UPDATE devices SET last_seen = ? WHERE device_token = ?").bind(now, deviceToken).run();
+  } catch (e) {
+  }
+}
+function b64uToBytes(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function verifyPortalToken(env, token) {
+  try {
+    if (!env.PORTAL_BRIDGE_SECRET) return null;
+    const parts = String(token).split(".");
+    if (parts.length !== 3 || parts[0] !== "v1") return null;
+    const signed = parts[0] + "." + parts[1];
+    const enc3 = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      enc3.encode(env.PORTAL_BRIDGE_SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+    const ok = await crypto.subtle.verify("HMAC", key, b64uToBytes(parts[2]), enc3.encode(signed));
+    if (!ok) return null;
+    const payload = JSON.parse(new TextDecoder().decode(b64uToBytes(parts[1])));
+    if (payload.exp && Date.now() > Number(payload.exp)) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+async function getTravelData(env, fromLat, fromLng, toLat, toLng) {
+  try {
+    const apiKey = env.GOOGLE_MAPS_KEY || "";
+    if (!apiKey) return null;
+    const url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(fromLat + "," + fromLng) + "&destinations=" + encodeURIComponent(toLat + "," + toLng) + "&mode=driving&key=" + encodeURIComponent(apiKey);
+    const res = await fetch(url);
+    const data = await res.json();
+    const el = data?.rows?.[0]?.elements?.[0];
+    if (!el || el.status !== "OK") return null;
+    return {
+      miles: Math.round(el.distance.value / 1609.344 * 10) / 10,
+      mins: Math.round(el.duration.value / 60),
+      duration_text: el.duration?.text || "",
+      distance_text: el.distance?.text || ""
+    };
+  } catch (e) {
+    return null;
+  }
+}
+async function getGeocode(env, address) {
+  try {
+    const apiKey = env.GOOGLE_MAPS_KEY || "";
+    if (!apiKey) return null;
+    const cacheKey = String(address).trim().toLowerCase();
+    if (geocodeCache.has(cacheKey)) {
+      const entry = geocodeCache.get(cacheKey);
+      if (Date.now() - entry.t < 864e5) return entry.v;
+    }
+    const url = "https://maps.googleapis.com/maps/api/geocode/json?address=" + encodeURIComponent(address) + "&region=uk&key=" + encodeURIComponent(apiKey);
+    const res = await fetch(url);
+    const data = await res.json();
+    const result = data?.results?.[0];
+    if (!result || !result.geometry?.location) return null;
+    const out = {
+      lat: result.geometry.location.lat,
+      lng: result.geometry.location.lng,
+      formatted: result.formatted_address || ""
+    };
+    geocodeCache.set(cacheKey, { v: out, t: Date.now() });
+    if (geocodeCache.size > 200) {
+      const firstKey = geocodeCache.keys().next().value;
+      geocodeCache.delete(firstKey);
+    }
+    return out;
+  } catch (e) {
+    return null;
+  }
+}
+function travelAllowanceOn(person) {
+  if (!person) return false;
+  const fuel = person.fuel_paid != null ? Number(person.fuel_paid) : person.travel_status === "paid" ? 1 : 0;
+  const time = person.travel_time_paid != null ? Number(person.travel_time_paid) : person.travel_status === "paid" ? 1 : 0;
+  return fuel === 1 || time === 1;
+}
+async function canViewSiteDocs(env, personId, siteName) {
+  if (!personId || !siteName) return false;
+  const site = await env.SITELOG_DB.prepare(
+    "SELECT COALESCE(archived,0) AS archived FROM sites WHERE site_name = ?"
+  ).bind(siteName).first();
+  if (!site || Number(site.archived) === 1) return false;
+  const person = await env.SITELOG_DB.prepare(
+    "SELECT COALESCE(doc_access_always,0) AS always FROM people WHERE id = ?"
+  ).bind(personId).first();
+  if (person && Number(person.always) === 1) return true;
+  const open = await env.SITELOG_DB.prepare(
+    "SELECT 1 FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL LIMIT 1"
+  ).bind(personId, siteName).first();
+  return !!open;
+}
+async function handleTravelIn(env, visitId, personId, siteLat, siteLng) {
+  try {
+    const person = await env.SITELOG_DB.prepare(
+      "SELECT travel_status, fuel_paid, travel_time_paid FROM people WHERE id = ?"
+    ).bind(personId).first();
+    if (!person || !travelAllowanceOn(person)) return null;
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const earlier = await env.SITELOG_DB.prepare(
+      "SELECT COUNT(*) as cnt FROM visits WHERE person_id = ? AND date(check_in_at) = ? AND id != ?"
+    ).bind(personId, today, visitId).first();
+    if (earlier && earlier.cnt > 0) return null;
+    const travel = await getTravelData(env, OFFICE_LAT, OFFICE_LNG, siteLat, siteLng);
+    if (!travel) return null;
+    await env.SITELOG_DB.prepare(
+      "UPDATE visits SET travel_in_miles = ?, travel_in_mins = ?, is_first_of_day = 1 WHERE id = ?"
+    ).bind(travel.miles, travel.mins, visitId).run();
+    return travel;
+  } catch (e) {
+    return null;
+  }
+}
+async function handleTravelOut(env, visitId, personId, siteLat, siteLng) {
+  try {
+    const person = await env.SITELOG_DB.prepare(
+      "SELECT travel_status, fuel_paid, travel_time_paid FROM people WHERE id = ?"
+    ).bind(personId).first();
+    if (!person || !travelAllowanceOn(person)) return null;
+    const travel = await getTravelData(env, siteLat, siteLng, OFFICE_LAT, OFFICE_LNG);
+    if (!travel) return null;
+    await env.SITELOG_DB.prepare(
+      "UPDATE visits SET travel_out_miles = ?, travel_out_mins = ? WHERE id = ?"
+    ).bind(travel.miles, travel.mins, visitId).run();
+    return travel;
+  } catch (e) {
+    return null;
+  }
+}
+function londonNowParts(date = /* @__PURE__ */ new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+    dateKey: `${get("year")}-${get("month")}-${get("day")}`,
+    hhmm: `${get("hour")}:${get("minute")}`
+  };
+}
+function londonDateKeyFromUtcString(utcString) {
+  const d = new Date(utcString);
+  const p = londonNowParts(d);
+  return p.dateKey;
+}
+function londonLocalToUtcIso(londonDateKey, hhmm = "16:00:00") {
+  const [year, month, day] = londonDateKey.split("-").map(Number);
+  const [hour, minute, second = 0] = hhmm.split(":").map(Number);
+  let utc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  for (let i = 0; i < 3; i++) {
+    const parts = londonNowParts(utc);
+    const actualMinutes = Number(parts.hour) * 60 + Number(parts.minute);
+    const wantedMinutes = hour * 60 + minute;
+    const diffMinutes = actualMinutes - wantedMinutes;
+    utc = new Date(utc.getTime() - diffMinutes * 60 * 1e3);
+  }
+  return utc.toISOString();
+}
+function forcedCheckoutSql(checkInAt, visitDateKey, nowMs) {
+  const checkInMs = Date.parse(String(checkInAt).replace(" ", "T") + "Z");
+  const dayCutoffMs = Date.parse(londonLocalToUtcIso(visitDateKey, "16:00:00"));
+  let forcedMs = dayCutoffMs;
+  if (Number.isFinite(checkInMs) && checkInMs >= dayCutoffMs) {
+    forcedMs = checkInMs + 12 * 60 * 60 * 1e3;
+  }
+  if (Number.isFinite(nowMs)) forcedMs = Math.min(forcedMs, nowMs);
+  return toSqlUtc(forcedMs);
+}
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function isValidDateTimeString(str) {
+  if (typeof str !== "string") return false;
+  const d = new Date(str);
+  return !isNaN(d.getTime());
+}
+function isValidDateKey(str) {
+  if (typeof str !== "string") return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  const d = /* @__PURE__ */ new Date(str + "T00:00:00Z");
+  return !isNaN(d.getTime());
+}
+function isFiniteNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n);
+}
+function parseLatLng(str) {
+  if (typeof str !== "string") return null;
+  const parts = str.split(",");
+  if (parts.length !== 2) return null;
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+function constantTimeEqual(a, b) {
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+function jcParseStoredTs(ts) {
+  if (ts == null || ts === "") return null;
+  if (ts instanceof Date) return isNaN(ts.getTime()) ? null : ts;
+  if (typeof ts === "number") {
+    const d2 = new Date(ts);
+    return isNaN(d2.getTime()) ? null : d2;
+  }
+  let s = String(ts).trim();
+  if (/^\d{12,}$/.test(s)) {
+    const d2 = new Date(Number(s));
+    return isNaN(d2.getTime()) ? null : d2;
+  }
+  s = s.replace(" ", "T");
+  const hasTz = /[zZ]$/.test(s) || /[+\-]\d{2}:?\d{2}$/.test(s);
+  if (!hasTz) s += "Z";
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+function jcMinutesBetween(a, b) {
+  const s = jcParseStoredTs(a);
+  if (!s) return 0;
+  const e = b ? jcParseStoredTs(b) : /* @__PURE__ */ new Date();
+  if (!e) return 0;
+  return Math.max(0, Math.round((e - s) / 6e4));
+}
+function jcNameOf(v) {
+  return ((v.first_name || "") + " " + (v.last_name || "")).trim();
+}
+function jcRateIsSet(v) {
+  return v != null && String(v).trim() !== "";
+}
+function jcLondonDayKey(ts) {
+  if (!ts) return "";
+  const dt = jcParseStoredTs(ts);
+  if (!dt) return String(ts).slice(0, 10);
+  return dt.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+}
+function jcFuelPaid(eng) {
+  if (!eng) return false;
+  if (eng.fuel_paid != null) return Number(eng.fuel_paid) === 1;
+  return eng.travel_status === "paid";
+}
+function jcTimePaid(eng) {
+  if (!eng) return false;
+  if (eng.travel_time_paid != null) return Number(eng.travel_time_paid) === 1;
+  return eng.travel_status === "paid";
+}
+function jcCalcPaidMins(actualMins, actualMiles, eng, legType) {
+  if (!eng || !(actualMins > 0)) return 0;
+  if (legType === "inter") return actualMins;
+  if (!jcTimePaid(eng)) return 0;
+  const capType = eng.travel_cap_type;
+  const capVal = parseFloat(eng.travel_cap_value) || 0;
+  if (!capType || capType === "none") return actualMins;
+  if (capType === "time") return Math.max(0, actualMins - capVal);
+  if (capType === "distance" && actualMiles > 0) {
+    const unpaidMins = Math.round(Math.min(capVal, actualMiles) / actualMiles * actualMins);
+    return Math.max(0, actualMins - unpaidMins);
+  }
+  return 0;
+}
+function jcCalcPaidMiles(actualMiles, eng, legType) {
+  if (!eng || !jcFuelPaid(eng) || !(actualMiles > 0)) return 0;
+  if (legType === "inter") return actualMiles;
+  const capType = eng.travel_cap_type;
+  const capVal = parseFloat(eng.travel_cap_value) || 0;
+  if (capType === "distance") return Math.max(0, actualMiles - capVal);
+  return actualMiles;
+}
+function jcInLegType(v) {
+  return Number(v.is_first_of_day || 0) === 1 ? "first" : "inter";
+}
+function jcCostVisits(visits, eng) {
+  const hasRate = !!(eng && jcRateIsSet(eng.hourly_rate));
+  const rate = hasRate ? Number(eng.hourly_rate) : 0;
+  const fuelRate = jcFuelPaid(eng) && eng && eng.fuel_rate != null && Number(eng.fuel_rate) > 0 ? Number(eng.fuel_rate) : 0;
+  let workMins = 0, travelMins = 0, miles = 0, openCount = 0, costedVisits = 0, autoCount = 0;
+  visits.forEach((v) => {
+    if (!v.check_out_at) {
+      openCount++;
+      return;
+    }
+    workMins += jcMinutesBetween(v.check_in_at, v.check_out_at);
+    costedVisits++;
+    if (Number(v.auto_checkout || 0) === 1 && !v.transferred_to) autoCount++;
+    if (v.travel_in_mins != null) travelMins += jcCalcPaidMins(v.travel_in_mins, v.travel_in_miles, eng, jcInLegType(v));
+    if (v.travel_out_mins != null) travelMins += jcCalcPaidMins(v.travel_out_mins, v.travel_out_miles, eng, "out");
+    if (v.travel_in_miles != null) miles += jcCalcPaidMiles(v.travel_in_miles, eng, jcInLegType(v));
+    if (v.travel_out_miles != null) miles += jcCalcPaidMiles(v.travel_out_miles, eng, "out");
+  });
+  const workH = workMins / 60, travelH = travelMins / 60;
+  const labour = workH * rate, travelCost = travelH * rate, fuelCost = miles * fuelRate;
+  return {
+    rate,
+    hasRate,
+    workH,
+    travelH,
+    miles,
+    openCount,
+    costedVisits,
+    autoCount,
+    labour,
+    travelCost,
+    fuelCost,
+    total: labour + travelCost + fuelCost
+  };
+}
+function readDidCookie(request) {
+  const c = request.headers.get("Cookie") || "";
+  const m = c.match(/(?:^|;\s*)ml_did=([^;]+)/);
+  return m ? m[1] : "";
+}
+function didSetCookie(token) {
+  return { "Set-Cookie": "ml_did=" + token + "; Max-Age=63072000; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" };
+}
+async function handle11(request, env, ctx) {
+  const url = new URL(request.url);
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsFor(request) });
+  }
+  function json3(data, status = 200, extraHeaders) {
+    const base = corsFor(request);
+    const headers = extraHeaders ? { ...base, ...extraHeaders } : base;
+    return Response.json(data, { status, headers });
+  }
+  async function readBody(req) {
+    const ct = (req.headers.get("content-type") || "").toLowerCase();
+    if (ct.includes("application/json")) {
+      try {
+        return await req.json();
+      } catch {
+        return {};
+      }
+    }
+    if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
+      const form = await req.formData();
+      const obj = {};
+      for (const [k, v] of form.entries()) obj[k] = v;
+      return obj;
+    }
+    try {
+      return await req.json();
+    } catch {
+      return {};
+    }
+  }
+  function isAdminAuthorised() {
+    const secret = env.SITELOG_ADMIN_SECRET || "";
+    if (!secret) return false;
+    const header = request.headers.get("x-admin-secret") ?? "";
+    if (!header) return false;
+    return constantTimeEqual(header, secret);
+  }
+  function requireAdmin2() {
+    if (!isAdminAuthorised()) {
+      return json3({ ok: false, error: "Unauthorised" }, 401);
+    }
+    return null;
+  }
+  if (url.pathname === "/admin-auth" && request.method === "POST") {
+    const secret = env.SITELOG_ADMIN_SECRET || "";
+    if (!secret) return json3({ ok: false, error: "Admin secret not configured" }, 500);
+    const headerSecret = request.headers.get("x-admin-secret") ?? "";
+    let bodySecret = "";
+    try {
+      const body = await readBody(request);
+      bodySecret = (body.password ?? body.adminSecret ?? body.secret ?? "").toString();
+    } catch {
+      bodySecret = "";
+    }
+    const valid = constantTimeEqual(headerSecret, secret) || constantTimeEqual(bodySecret, secret);
+    if (!valid) return json3({ ok: false, error: "Invalid password" }, 401);
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/portal-link" && request.method === "POST") {
+    const body = await readBody(request);
+    const token = (body.token ?? body.pt ?? "").toString();
+    const deviceToken = (body.deviceToken ?? body.device_token ?? readDidCookie(request) ?? "").toString().trim();
+    if (!token || !deviceToken) return json3({ ok: false, error: "token and deviceToken required" }, 400);
+    const payload = await verifyPortalToken(env, token);
+    if (!payload) return json3({ ok: false, error: "invalid or expired token" }, 401);
+    const portalUser = String(payload.u || "").trim();
+    if (!portalUser) return json3({ ok: false, error: "no portal user in token" }, 400);
+    const first = String(payload.f || "").trim().slice(0, 80);
+    const last = String(payload.l || "").trim().slice(0, 80);
+    const company = String(payload.c || "Mostlane").trim().slice(0, 120) || "Mostlane";
+    try {
+      let person = await env.SITELOG_DB.prepare(
+        "SELECT id FROM people WHERE portal_username = ? LIMIT 1"
+      ).bind(portalUser).first();
+      if (!person) person = await env.SITELOG_DB.prepare(
+        "SELECT p.id FROM devices d JOIN people p ON p.id = d.person_id WHERE d.device_token = ? LIMIT 1"
+      ).bind(deviceToken).first();
+      if (!person && (first || last)) person = await env.SITELOG_DB.prepare(
+        "SELECT id FROM people WHERE lower(first_name)=lower(?) AND lower(last_name)=lower(?) LIMIT 1"
+      ).bind(first, last).first();
+      let personId = person ? person.id : null;
+      if (!personId) {
+        personId = crypto.randomUUID();
+        await env.SITELOG_DB.prepare(
+          "INSERT INTO people (id, first_name, last_name, company, archived, hourly_rate, portal_username) VALUES (?,?,?,?,0,0,?)"
+        ).bind(personId, first, last, company, portalUser).run();
+      } else {
+        await env.SITELOG_DB.prepare(
+          "UPDATE people SET portal_username=?, first_name=COALESCE(NULLIF(?,''),first_name), last_name=COALESCE(NULLIF(?,''),last_name), company=COALESCE(company,?) WHERE id=?"
+        ).bind(portalUser, first, last, company, personId).run();
+      }
+      const dev = await env.SITELOG_DB.prepare(
+        "SELECT person_id FROM devices WHERE device_token = ? LIMIT 1"
+      ).bind(deviceToken).first();
+      if (dev) {
+        if (dev.person_id !== personId) await env.SITELOG_DB.prepare(
+          "UPDATE devices SET person_id=? WHERE device_token=?"
+        ).bind(personId, deviceToken).run();
+      } else {
+        await env.SITELOG_DB.prepare(
+          "INSERT INTO devices (device_token, person_id) VALUES (?, ?)"
+        ).bind(deviceToken, personId).run();
+      }
+      return json3({ ok: true, personId, portalUsername: portalUser }, 200, didSetCookie(deviceToken));
+    } catch (err) {
+      console.error("portal-link failed:", err);
+      return json3({ ok: false, error: "link failed" }, 500);
+    }
+  }
+  if ((url.pathname === "/register" || url.pathname === "/signup" || url.pathname === "/add-person") && request.method === "POST") {
+    const body = await readBody(request);
+    const deviceToken = (body.deviceToken ?? body.device_token ?? body.device ?? body.device_id ?? readDidCookie(request) ?? "").toString().trim();
+    const firstName = (body.firstName ?? body.first_name ?? body.first ?? "").toString().trim().slice(0, 80);
+    const lastName = (body.lastName ?? body.last_name ?? body.last ?? "").toString().trim().slice(0, 80);
+    const company = (body.company ?? "").toString().trim().slice(0, 120) || null;
+    const purpose = (body.purpose ?? "").toString().trim().slice(0, 60) || null;
+    if (!deviceToken || deviceToken.length > 128) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!firstName && !lastName) return json3({ ok: false, error: "Missing name" }, 400);
+    try {
+      const existing = await env.SITELOG_DB.prepare(`
+          SELECT p.id as person_id, p.first_name, p.last_name, p.company, p.purpose, COALESCE(p.archived,0) as archived
+          FROM devices d
+          JOIN people p ON p.id = d.person_id
+          WHERE d.device_token = ?
+          LIMIT 1
+        `).bind(deviceToken).first();
+      if (existing) {
+        await env.SITELOG_DB.prepare(`
+            UPDATE people
+            SET first_name = ?, last_name = ?, company = COALESCE(?, company), purpose = COALESCE(?, purpose)
+            WHERE id = ?
+          `).bind(firstName, lastName, company, purpose, existing.person_id).run();
+        return json3({
+          ok: true,
+          status: "already_registered",
+          personId: existing.person_id
+        }, 200, didSetCookie(deviceToken));
+      }
+      const personId = crypto.randomUUID();
+      await env.SITELOG_DB.prepare(`
+          INSERT INTO people (id, first_name, last_name, company, purpose, archived, hourly_rate)
+          VALUES (?, ?, ?, ?, ?, 0, 0)
+        `).bind(personId, firstName, lastName, company, purpose).run();
+      await env.SITELOG_DB.prepare(`
+          INSERT INTO devices (device_token, person_id)
+          VALUES (?, ?)
+        `).bind(deviceToken, personId).run();
+      return json3({ ok: true, status: "registered", personId }, 200, didSetCookie(deviceToken));
+    } catch (err) {
+      console.error("register failed:", err);
+      return json3({
+        ok: false,
+        error: "Registration failed"
+      }, 500);
+    }
+  }
+  if (url.pathname === "/transfer-request" && request.method === "POST") {
+    const body = await readBody(request);
+    const { deviceToken, firstName, lastName, company } = body;
+    if (!deviceToken || !firstName || !lastName || !company) {
+      return json3({ ok: false, error: "Missing required fields" }, 400);
+    }
+    if (String(deviceToken).length > 128) {
+      return json3({ ok: false, error: "Invalid deviceToken" }, 400);
+    }
+    const existing = await env.SITELOG_DB.prepare(
+      "SELECT id FROM device_transfers WHERE new_device_token = ? AND status = 'pending'"
+    ).bind(deviceToken).first();
+    if (existing) return json3({ ok: true, already_pending: true });
+    const tempPersonId = crypto.randomUUID();
+    const transferId = crypto.randomUUID();
+    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO people (id, first_name, last_name, company, is_transfer_pending) VALUES (?, ?, ?, ?, 1)"
+    ).bind(
+      tempPersonId,
+      String(firstName).trim().slice(0, 80),
+      String(lastName).trim().slice(0, 80),
+      String(company).trim().slice(0, 120)
+    ).run();
+    await env.SITELOG_DB.prepare(
+      "INSERT OR REPLACE INTO devices (device_token, person_id) VALUES (?, ?)"
+    ).bind(deviceToken, tempPersonId).run();
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO device_transfers (id, new_device_token, first_name, last_name, company, status, temp_person_id, requested_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)"
+    ).bind(
+      transferId,
+      deviceToken,
+      firstName.trim(),
+      lastName.trim(),
+      company.trim(),
+      tempPersonId,
+      now
+    ).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/pending-transfers" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const transfers = await env.SITELOG_DB.prepare(
+      "SELECT dt.*, (SELECT COUNT(*) FROM visits v WHERE v.person_id = dt.temp_person_id) as visit_count FROM device_transfers dt WHERE dt.status = 'pending' ORDER BY dt.requested_at DESC"
+    ).all();
+    return json3({ ok: true, transfers: transfers.results || [] });
+  }
+  if (url.pathname === "/all-engineers-for-transfer" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const engineers = await env.SITELOG_DB.prepare(
+      "SELECT id, first_name, last_name, company FROM people WHERE (is_transfer_pending = 0 OR is_transfer_pending IS NULL) AND (archived = 0 OR archived IS NULL) ORDER BY last_name, first_name"
+    ).all();
+    return json3({ ok: true, engineers: engineers.results || [] });
+  }
+  if (url.pathname === "/approve-transfer" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { transferId, targetPersonId } = await readBody(request);
+    if (!transferId || !targetPersonId) {
+      return json3({ ok: false, error: "Missing transferId or targetPersonId" }, 400);
+    }
+    const transfer = await env.SITELOG_DB.prepare(
+      "SELECT * FROM device_transfers WHERE id = ? AND status = 'pending'"
+    ).bind(transferId).first();
+    if (!transfer) {
+      return json3({ ok: false, error: "Transfer not found or already resolved" }, 404);
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    await env.SITELOG_DB.prepare("UPDATE visits SET person_id = ? WHERE person_id = ?").bind(targetPersonId, transfer.temp_person_id).run();
+    await env.SITELOG_DB.prepare("DELETE FROM devices WHERE person_id = ?").bind(targetPersonId).run();
+    await env.SITELOG_DB.prepare("INSERT OR REPLACE INTO devices (device_token, person_id) VALUES (?, ?)").bind(transfer.new_device_token, targetPersonId).run();
+    await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(transfer.temp_person_id).run();
+    await env.SITELOG_DB.prepare(
+      "UPDATE device_transfers SET status = 'approved', target_person_id = ?, resolved_at = ? WHERE id = ?"
+    ).bind(targetPersonId, now, transferId).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/reject-transfer" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { transferId } = await readBody(request);
+    if (!transferId) return json3({ ok: false, error: "Missing transferId" }, 400);
+    const transfer = await env.SITELOG_DB.prepare(
+      "SELECT * FROM device_transfers WHERE id = ? AND status = 'pending'"
+    ).bind(transferId).first();
+    if (!transfer) return json3({ ok: false, error: "Transfer not found" }, 404);
+    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    await env.SITELOG_DB.prepare("DELETE FROM devices WHERE device_token = ?").bind(transfer.new_device_token).run();
+    await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(transfer.temp_person_id).run();
+    await env.SITELOG_DB.prepare(
+      "UPDATE device_transfers SET status = 'rejected', resolved_at = ? WHERE id = ?"
+    ).bind(now, transferId).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/sites" && request.method === "GET") {
+    await ensureOfflineSchema(env);
+    const rows = await env.SITELOG_DB.prepare(
+      "SELECT * FROM sites ORDER BY site_name ASC"
+    ).all();
+    return json3({ sites: rows.results || [] });
+  }
+  if (url.pathname === "/update-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const { id, siteName, radius, siteRules, category } = await readBody(request);
+    if (!id) return json3({ error: "Missing id" }, 400);
+    if (!siteName) return json3({ error: "Missing siteName" }, 400);
+    if (category !== void 0) {
+      await env.SITELOG_DB.prepare(
+        "UPDATE sites SET site_name = ?, radius_m = ?, site_rules = ?, category = ? WHERE id = ?"
+      ).bind(siteName, Number(radius ?? 500), siteRules ?? null, String(category || "").trim() || "Projects", id).run();
+    } else {
+      await env.SITELOG_DB.prepare(
+        "UPDATE sites SET site_name = ?, radius_m = ?, site_rules = ? WHERE id = ?"
+      ).bind(siteName, Number(radius ?? 500), siteRules ?? null, id).run();
+    }
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/toggle-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { id } = await readBody(request);
+    if (!id) return json3({ error: "Missing id" }, 400);
+    const site = await env.SITELOG_DB.prepare(
+      "SELECT archived FROM sites WHERE id = ?"
+    ).bind(id).first();
+    if (!site) return json3({ error: "Site not found" }, 404);
+    const newState = site.archived ? 0 : 1;
+    await env.SITELOG_DB.prepare(
+      "UPDATE sites SET archived = ? WHERE id = ?"
+    ).bind(newState, id).run();
+    return json3({ ok: true, archived: newState });
+  }
+  if (url.pathname === "/engineers" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT id, first_name, last_name, company, purpose,
+               COALESCE(archived,0) as archived,
+               COALESCE(hourly_rate,0) as hourly_rate,
+               COALESCE(travel_status,'not_configured') as travel_status,
+               COALESCE(fuel_paid, CASE WHEN travel_status='paid' THEN 1 ELSE 0 END) as fuel_paid,
+               COALESCE(travel_time_paid, CASE WHEN travel_status='paid' THEN 1 ELSE 0 END) as travel_time_paid,
+               travel_cap_type, travel_cap_value, fuel_rate,
+               COALESCE(is_main,0) as is_main,
+               portal_username,
+               COALESCE(doc_access_always,0) as doc_access_always,
+               (SELECT COUNT(*) FROM visits WHERE visits.person_id = people.id) AS visit_count,
+               (SELECT COUNT(*) FROM devices WHERE devices.person_id = people.id) AS device_count,
+               (SELECT MAX(last_seen) FROM devices WHERE devices.person_id = people.id) AS device_last_seen
+        FROM people
+        ORDER BY first_name ASC, last_name ASC
+      `).all();
+    return json3({ engineers: rows.results || [] });
+  }
+  if (url.pathname === "/add-engineer" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const firstName = (body.firstName ?? body.first_name ?? "").toString().trim().slice(0, 80);
+    const lastName = (body.lastName ?? body.last_name ?? "").toString().trim().slice(0, 80);
+    const company = (body.company ?? "").toString().trim().slice(0, 120) || null;
+    const purpose = (body.purpose ?? "").toString().trim().slice(0, 60) || null;
+    const rateIn = body.hourlyRate ?? body.hourly_rate;
+    const hourlyRate = rateIn === "" || rateIn == null || Number.isNaN(Number(rateIn)) ? null : Number(rateIn);
+    const isMain = body.isMain ?? body.is_main ? 1 : 0;
+    if (!firstName && !lastName) return json3({ ok: false, error: "Enter a name" }, 400);
+    const id = crypto.randomUUID();
+    await env.SITELOG_DB.prepare(`
+        INSERT INTO people (id, first_name, last_name, company, purpose, archived, hourly_rate, is_main)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+      `).bind(id, firstName, lastName, company, purpose, hourlyRate, isMain).run();
+    return json3({ ok: true, id });
+  }
+  if (url.pathname === "/update-engineer" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const id = body?.id;
+    if (!id) return json3({ error: "Missing id" }, 400);
+    const firstName = body.firstName ?? body.first_name ?? null;
+    const lastName = body.lastName ?? body.last_name ?? null;
+    const company = body.company ?? null;
+    const purpose = body.purpose ?? null;
+    const rateIn = body.hourlyRate ?? body.hourly_rate;
+    const hourlyRate = rateIn === "" || rateIn == null || Number.isNaN(Number(rateIn)) ? null : Number(rateIn);
+    const fuelPaidIn = body.fuelPaid;
+    const travelTimePaidIn = body.travelTimePaid;
+    const hasNewTravelFlags = fuelPaidIn !== void 0 || travelTimePaidIn !== void 0;
+    const travelStatus = body.travelStatus ?? null;
+    const travelCapType = body.travelCapType ?? null;
+    const travelCapValue = body.travelCapValue != null && body.travelCapValue !== "" ? Number(body.travelCapValue) : null;
+    const fuelIn = body.fuelRate ?? body.fuel_rate;
+    const fuelRate = fuelIn === "" || fuelIn == null || Number.isNaN(Number(fuelIn)) ? null : Number(fuelIn);
+    const isMainIn = body.isMain ?? body.is_main;
+    const docAlwaysIn = body.docAccessAlways ?? body.doc_access_always;
+    const sets = [];
+    const binds = [];
+    if (firstName !== null) {
+      sets.push("first_name = ?");
+      binds.push(firstName);
+    }
+    if (lastName !== null) {
+      sets.push("last_name = ?");
+      binds.push(lastName);
+    }
+    if (company !== null) {
+      sets.push("company = ?");
+      binds.push(company);
+    }
+    if (purpose !== null) {
+      sets.push("purpose = ?");
+      binds.push(purpose);
+    }
+    if (rateIn !== void 0) {
+      sets.push("hourly_rate = ?");
+      binds.push(hourlyRate ?? 0);
+    }
+    if (hasNewTravelFlags) {
+      const fuelPaid = fuelPaidIn ? 1 : 0;
+      const travelTimePaid = travelTimePaidIn ? 1 : 0;
+      sets.push("fuel_paid = ?");
+      binds.push(fuelPaid);
+      sets.push("travel_time_paid = ?");
+      binds.push(travelTimePaid);
+      sets.push("travel_status = ?");
+      binds.push(fuelPaid || travelTimePaid ? "paid" : "not_configured");
+      sets.push("travel_cap_type = ?");
+      binds.push(travelCapType);
+      sets.push("travel_cap_value = ?");
+      binds.push(Number.isFinite(travelCapValue) ? travelCapValue : null);
+    } else if (travelStatus !== null) {
+      const on = travelStatus === "paid" ? 1 : 0;
+      sets.push("fuel_paid = ?");
+      binds.push(on);
+      sets.push("travel_time_paid = ?");
+      binds.push(on);
+      sets.push("travel_status = ?");
+      binds.push(travelStatus);
+      sets.push("travel_cap_type = ?");
+      binds.push(travelCapType);
+      sets.push("travel_cap_value = ?");
+      binds.push(Number.isFinite(travelCapValue) ? travelCapValue : null);
+    }
+    if (fuelIn !== void 0) {
+      sets.push("fuel_rate = ?");
+      binds.push(fuelRate);
+    }
+    if (isMainIn !== void 0) {
+      sets.push("is_main = ?");
+      binds.push(isMainIn ? 1 : 0);
+    }
+    if (docAlwaysIn !== void 0) {
+      sets.push("doc_access_always = ?");
+      binds.push(docAlwaysIn ? 1 : 0);
+    }
+    const portalUserIn = body.portalUsername ?? body.portal_username;
+    if (portalUserIn !== void 0) {
+      const pu = String(portalUserIn || "").trim();
+      if (pu) {
+        try {
+          await env.SITELOG_DB.prepare("UPDATE people SET portal_username = NULL WHERE portal_username = ? AND id != ?").bind(pu, id).run();
+        } catch (e) {
+        }
+      }
+      sets.push("portal_username = ?");
+      binds.push(pu || null);
+    }
+    if (!sets.length) return json3({ ok: true, note: "No fields to update" });
+    binds.push(id);
+    await env.SITELOG_DB.prepare(
+      `UPDATE people SET ${sets.join(", ")} WHERE id = ?`
+    ).bind(...binds).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/toggle-engineer" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { id } = await readBody(request);
+    if (!id) return json3({ error: "Missing id" }, 400);
+    const person = await env.SITELOG_DB.prepare(
+      "SELECT COALESCE(archived,0) as archived FROM people WHERE id = ?"
+    ).bind(id).first();
+    if (!person) return json3({ error: "Engineer not found" }, 404);
+    const newState = person.archived ? 0 : 1;
+    await env.SITELOG_DB.prepare(
+      "UPDATE people SET archived = ? WHERE id = ?"
+    ).bind(newState, id).run();
+    return json3({ ok: true, archived: newState });
+  }
+  if (url.pathname === "/delete-engineer" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { id } = await readBody(request);
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    const visitCount = await env.SITELOG_DB.prepare(
+      "SELECT COUNT(*) as cnt FROM visits WHERE person_id = ?"
+    ).bind(id).first();
+    if (visitCount && visitCount.cnt > 0) {
+      await env.SITELOG_DB.prepare(
+        "UPDATE people SET archived = 1 WHERE id = ?"
+      ).bind(id).run();
+      await env.SITELOG_DB.prepare(
+        "DELETE FROM devices WHERE person_id = ?"
+      ).bind(id).run();
+      return json3({ ok: true, message: "Archived and device links removed." });
+    }
+    await env.SITELOG_DB.prepare("DELETE FROM devices WHERE person_id = ?").bind(id).run();
+    await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(id).run();
+    return json3({ ok: true, message: "Engineer deleted." });
+  }
+  if (url.pathname === "/merge-people" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const primaryId = body?.primaryId;
+    const mergeIds = Array.isArray(body?.mergeIds) ? [...new Set(body.mergeIds.filter((x) => x && x !== primaryId))] : [];
+    if (!primaryId) return json3({ ok: false, error: "Missing primaryId" }, 400);
+    if (!mergeIds.length) return json3({ ok: false, error: "No people to merge" }, 400);
+    const primary = await env.SITELOG_DB.prepare("SELECT id FROM people WHERE id = ?").bind(primaryId).first();
+    if (!primary) return json3({ ok: false, error: "Primary person not found" }, 404);
+    const placeholders = mergeIds.map(() => "?").join(",");
+    const moved = await env.SITELOG_DB.prepare(
+      `UPDATE visits SET person_id = ? WHERE person_id IN (${placeholders})`
+    ).bind(primaryId, ...mergeIds).run();
+    await env.SITELOG_DB.prepare(
+      `UPDATE devices SET person_id = ? WHERE person_id IN (${placeholders})`
+    ).bind(primaryId, ...mergeIds).run();
+    try {
+      await env.SITELOG_DB.prepare(
+        `UPDATE document_attendees SET person_id = ? WHERE person_id IN (${placeholders})`
+      ).bind(primaryId, ...mergeIds).run();
+    } catch (e) {
+    }
+    await env.SITELOG_DB.prepare(
+      `DELETE FROM people WHERE id IN (${placeholders})`
+    ).bind(...mergeIds).run();
+    const visitsMoved = moved && moved.meta && moved.meta.changes || 0;
+    return json3({ ok: true, merged: mergeIds.length, visitsMoved });
+  }
+  if (url.pathname === "/reset-device" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { personId } = await readBody(request);
+    if (!personId) return json3({ ok: false, error: "Missing personId" }, 400);
+    const result = await env.SITELOG_DB.prepare(
+      "DELETE FROM devices WHERE person_id = ?"
+    ).bind(personId).run();
+    return json3({ ok: true, removedDevices: result.meta.changes });
+  }
+  if (url.pathname === "/add-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const { siteName, lat, lng, radius, category } = await readBody(request);
+    if (!siteName || lat == null || lng == null) {
+      return json3({ error: "Missing siteName/lat/lng" }, 400);
+    }
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      return json3({ error: "lat/lng must be numbers" }, 400);
+    }
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived, category) VALUES (?, ?, ?, ?, ?, 0, ?)"
+    ).bind(
+      crypto.randomUUID(),
+      siteName,
+      Number(lat),
+      Number(lng),
+      Number(radius ?? 500),
+      String(category || "").trim() || "Projects"
+    ).run();
+    return json3({ ok: true, siteName });
+  }
+  if (url.pathname === "/bulk-add-sites" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const incoming = Array.isArray(body.sites) ? body.sites : [];
+    if (!incoming.length) return json3({ ok: false, error: "No sites provided" }, 400);
+    const existing = await env.SITELOG_DB.prepare("SELECT site_name FROM sites").all();
+    const have = new Set((existing.results || []).map((r) => String(r.site_name || "").trim().toLowerCase()));
+    const stmts = [];
+    let skipped = 0;
+    const insert = env.SITELOG_DB.prepare(
+      "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived, category) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    );
+    for (const s of incoming) {
+      const name = String(s.siteName ?? s.n ?? "").trim();
+      const lat = s.lat, lng = s.lng ?? s.lon;
+      const key = name.toLowerCase();
+      if (!name || !isFiniteNumber(lat) || !isFiniteNumber(lng) || have.has(key)) {
+        skipped++;
+        continue;
+      }
+      have.add(key);
+      stmts.push(insert.bind(
+        crypto.randomUUID(),
+        name,
+        Number(lat),
+        Number(lng),
+        Number(s.radius ?? 500),
+        s.archived ?? s.arch ? 1 : 0,
+        String(s.category ?? s.cat ?? "").trim() || "Projects"
+      ));
+    }
+    if (stmts.length) await env.SITELOG_DB.batch(stmts);
+    return json3({ ok: true, added: stmts.length, skipped });
+  }
+  if (url.pathname === "/manual-checkout" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { visitId, manualTime } = await readBody(request);
+    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    if (manualTime !== void 0 && manualTime !== "" && !isValidDateTimeString(manualTime)) {
+      return json3({ ok: false, error: "Invalid manualTime format" }, 400);
+    }
+    if (manualTime) {
+      const vrow = await env.SITELOG_DB.prepare(
+        "SELECT check_in_at FROM visits WHERE id = ?"
+      ).bind(visitId).first();
+      if (vrow && vrow.check_in_at && new Date(manualTime) <= new Date(vrow.check_in_at)) {
+        return json3({ ok: false, error: "Sign-out time must be after sign-in time" }, 400);
+      }
+    }
+    let checkoutTimeSQL = "CURRENT_TIMESTAMP";
+    let bindValues = [visitId];
+    if (manualTime) {
+      checkoutTimeSQL = "?";
+      bindValues = [manualTime, visitId];
+    }
+    const sql = `UPDATE visits SET check_out_at = ${checkoutTimeSQL}, auto_checkout = 0 WHERE id = ? AND check_out_at IS NULL`;
+    const result = await env.SITELOG_DB.prepare(sql).bind(...bindValues).run();
+    if (result.meta.changes === 0) {
+      return json3({ ok: false, error: "Visit not found or already checked out" }, 400);
+    }
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/add-visit" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const { personId, site, checkInAt, checkOutAt } = await readBody(request);
+    if (!personId || !site || !checkInAt) {
+      return json3({ ok: false, error: "Missing person, site or start time" }, 400);
+    }
+    const siteName = String(site).trim().slice(0, 120);
+    if (!siteName) return json3({ ok: false, error: "Missing site" }, 400);
+    if (!isValidDateTimeString(checkInAt)) return json3({ ok: false, error: "Invalid start time" }, 400);
+    if (checkOutAt && !isValidDateTimeString(checkOutAt)) return json3({ ok: false, error: "Invalid end time" }, 400);
+    if (checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
+      return json3({ ok: false, error: "End time must be after start time" }, 400);
+    }
+    const person = await env.SITELOG_DB.prepare("SELECT id FROM people WHERE id = ?").bind(personId).first();
+    if (!person) return json3({ ok: false, error: "Person not found" }, 404);
+    const id = crypto.randomUUID();
+    await env.SITELOG_DB.prepare(`
+        INSERT INTO visits
+          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, manual_entry, check_in_at, check_out_at)
+        VALUES (?, ?, ?, NULL, NULL, NULL, 1, 0, 1, 1, 1, ?, ?)
+      `).bind(id, personId, siteName, checkInAt, checkOutAt ?? null).run();
+    return json3({ ok: true, visitId: id });
+  }
+  if (url.pathname === "/update-visit-times" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { visitId, checkInAt, checkOutAt } = await readBody(request);
+    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    if (!checkInAt || !isValidDateTimeString(checkInAt)) {
+      return json3({ ok: false, error: "Invalid checkInAt" }, 400);
+    }
+    if (checkOutAt && !isValidDateTimeString(checkOutAt)) {
+      return json3({ ok: false, error: "Invalid checkOutAt" }, 400);
+    }
+    if (checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
+      return json3({ ok: false, error: "check_out_at must be after check_in_at" }, 400);
+    }
+    await env.SITELOG_DB.prepare(
+      "UPDATE visits SET check_in_at = ?, check_out_at = ? WHERE id = ?"
+    ).bind(checkInAt, checkOutAt ?? null, visitId).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/confirm-checkout" && request.method === "POST") {
+    const { visitId } = await readBody(request);
+    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    const result = await env.SITELOG_DB.prepare(`
+        UPDATE visits
+        SET check_out_at = MAX(check_in_at, COALESCE(check_out_at, CURRENT_TIMESTAMP)),
+            auto_checkout = 0,
+            sign_out_confirmed = 1
+        WHERE id = ?
+      `).bind(visitId).run();
+    if (result.meta.changes === 0) {
+      return json3({ ok: false, error: "Visit not found" }, 400);
+    }
+    let travelOut = null;
+    try {
+      const visit = await env.SITELOG_DB.prepare(
+        "SELECT person_id, site_code FROM visits WHERE id = ?"
+      ).bind(visitId).first();
+      if (visit) {
+        const siteRow = await env.SITELOG_DB.prepare(
+          "SELECT lat, lng FROM sites WHERE site_name = ?"
+        ).bind(visit.site_code).first();
+        if (siteRow) {
+          travelOut = await handleTravelOut(
+            env,
+            visitId,
+            visit.person_id,
+            siteRow.lat,
+            siteRow.lng
+          );
+        }
+      }
+    } catch (e) {
+    }
+    return json3({ ok: true, status: "checked_out", travel: travelOut });
+  }
+  if (url.pathname === "/confirm-checkin" && request.method === "POST") {
+    const { deviceToken, lat, lng, accuracy, site, visitId } = await readBody(request);
+    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!site) return json3({ ok: false, error: "Missing site" }, 400);
+    const siteCheck = await env.SITELOG_DB.prepare(`
+        SELECT id, lat, lng
+        FROM sites
+        WHERE site_name = ? AND COALESCE(archived,0) = 0
+        LIMIT 1
+      `).bind(site).first();
+    if (!siteCheck) {
+      return json3({ ok: false, error: "Site not found or archived" }, 404);
+    }
+    if (lat != null && lat !== "" && !isFiniteNumber(lat)) {
+      return json3({ ok: false, error: "Invalid lat" }, 400);
+    }
+    if (lng != null && lng !== "" && !isFiniteNumber(lng)) {
+      return json3({ ok: false, error: "Invalid lng" }, 400);
+    }
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(deviceToken).first();
+    if (!device) return json3({ ok: false, error: "Device not registered" }, 404);
+    const person = await env.SITELOG_DB.prepare(
+      "SELECT first_name, company FROM people WHERE id = ?"
+    ).bind(device.person_id).first();
+    let targetId = visitId || null;
+    const siteRow = await env.SITELOG_DB.prepare(
+      "SELECT lat, lng FROM sites WHERE site_name = ?"
+    ).bind(site).first();
+    if (!targetId) {
+      const openVisit = await env.SITELOG_DB.prepare(`
+          SELECT id
+          FROM visits
+          WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL
+          ORDER BY check_in_at DESC
+          LIMIT 1
+        `).bind(device.person_id, site).first();
+      if (openVisit) targetId = openVisit.id;
+    }
+    let travelIn = null;
+    if (targetId) {
+      await env.SITELOG_DB.prepare(
+        "UPDATE visits SET sign_in_confirmed = 1, hs_ack = 1 WHERE id = ?"
+      ).bind(targetId).run();
+      try {
+        if (siteRow) {
+          travelIn = await handleTravelIn(
+            env,
+            targetId,
+            device.person_id,
+            siteRow.lat,
+            siteRow.lng
+          );
+        }
+      } catch (e) {
+      }
+      return json3({
+        ok: true,
+        status: "checked_in",
+        site,
+        firstName: person?.first_name || null,
+        company: person?.company || null,
+        travel: travelIn
+      });
+    }
+    const newVisitId = crypto.randomUUID();
+    let transferTravel = null;
+    let transferredFrom = null;
+    const nowMs = Date.now();
+    const nowSql = toSqlUtc(nowMs);
+    try {
+      const openA = await env.SITELOG_DB.prepare(`
+          SELECT id, site_code, check_in_at, lat, lng FROM visits
+          WHERE person_id = ? AND check_out_at IS NULL AND site_code != ?
+          ORDER BY check_in_at DESC LIMIT 1
+        `).bind(device.person_id, site).first();
+      if (openA) {
+        transferredFrom = openA.site_code;
+        if (siteRow) {
+          let aLat = isFiniteNumber(openA.lat) ? Number(openA.lat) : null;
+          let aLng = isFiniteNumber(openA.lng) ? Number(openA.lng) : null;
+          if (aLat === null || aLng === null) {
+            const aSite = await env.SITELOG_DB.prepare(
+              "SELECT lat, lng FROM sites WHERE site_name = ?"
+            ).bind(openA.site_code).first();
+            if (aSite) {
+              aLat = aSite.lat;
+              aLng = aSite.lng;
+            }
+          }
+          if (aLat !== null && aLng !== null) {
+            transferTravel = await getTravelData(env, aLat, aLng, siteRow.lat, siteRow.lng);
+          }
+        }
+        const aInMs = Date.parse(String(openA.check_in_at).replace(" ", "T") + "Z");
+        let leftSql = nowSql;
+        if (transferTravel && Number.isFinite(aInMs) && transferTravel.mins * 6e4 < nowMs - aInMs) {
+          leftSql = toSqlUtc(nowMs - transferTravel.mins * 6e4);
+        } else {
+          transferTravel = null;
+        }
+        await env.SITELOG_DB.prepare(`
+            UPDATE visits SET check_out_at = MAX(check_in_at, ?), auto_checkout = 1, sign_out_confirmed = 0, transferred_to = ?
+            WHERE id = ? AND check_out_at IS NULL
+          `).bind(leftSql, site, openA.id).run();
+      }
+    } catch (e) {
+    }
+    await env.SITELOG_DB.prepare(`
+        INSERT INTO visits
+          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, check_in_at, travel_in_miles, travel_in_mins)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, ?, ?, ?)
+      `).bind(
+      newVisitId,
+      device.person_id,
+      site,
+      lat ?? null,
+      lng ?? null,
+      accuracy ?? null,
+      nowSql,
+      transferTravel ? transferTravel.miles : null,
+      transferTravel ? transferTravel.mins : null
+    ).run();
+    try {
+      if (transferTravel) {
+        travelIn = transferTravel;
+      } else if (siteRow) {
+        travelIn = await handleTravelIn(
+          env,
+          newVisitId,
+          device.person_id,
+          siteRow.lat,
+          siteRow.lng
+        );
+      }
+    } catch (e) {
+    }
+    return json3({
+      ok: true,
+      status: "checked_in",
+      site,
+      firstName: person?.first_name || null,
+      company: person?.company || null,
+      travel: travelIn,
+      transferFrom: transferredFrom
+    });
+  }
+  if (url.pathname === "/checkin-unmatched" && request.method === "POST") {
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const deviceToken = (body.deviceToken || readDidCookie(request) || "").toString().trim();
+    const siteName = (body.siteName || "").toString().trim().slice(0, 120);
+    const lat = body.lat, lng = body.lng, accuracy = body.accuracy;
+    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!siteName) return json3({ ok: false, error: "Please enter a site name" }, 400);
+    if (lat != null && lat !== "" && !isFiniteNumber(lat)) return json3({ ok: false, error: "Invalid lat" }, 400);
+    if (lng != null && lng !== "" && !isFiniteNumber(lng)) return json3({ ok: false, error: "Invalid lng" }, 400);
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(deviceToken).first();
+    if (!device) return json3({ ok: false, error: "Device not registered" }, 404);
+    const person = await env.SITELOG_DB.prepare(
+      "SELECT first_name, company FROM people WHERE id = ?"
+    ).bind(device.person_id).first();
+    await env.SITELOG_DB.prepare(`
+        INSERT INTO visits
+          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, unmatched_site, provided_site_name)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, 1, ?)
+      `).bind(
+      crypto.randomUUID(),
+      device.person_id,
+      siteName,
+      isFiniteNumber(lat) ? Number(lat) : null,
+      isFiniteNumber(lng) ? Number(lng) : null,
+      isFiniteNumber(accuracy) ? Number(accuracy) : null,
+      siteName
+    ).run();
+    return json3({
+      ok: true,
+      status: "checked_in",
+      site: siteName,
+      unmatched: true,
+      firstName: person?.first_name || null,
+      company: person?.company || null
+    });
+  }
+  if (url.pathname === "/resolve-unmatched" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const { visitId, mode, siteName, radius, existingSiteName } = await readBody(request);
+    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    const visit = await env.SITELOG_DB.prepare(
+      "SELECT id, lat, lng FROM visits WHERE id = ?"
+    ).bind(visitId).first();
+    if (!visit) return json3({ ok: false, error: "Visit not found" }, 404);
+    if (mode === "create") {
+      const name = (siteName || "").toString().trim().slice(0, 120);
+      if (!name) return json3({ ok: false, error: "Missing site name" }, 400);
+      if (!isFiniteNumber(visit.lat) || !isFiniteNumber(visit.lng)) {
+        return json3({ ok: false, error: "This visit has no captured location, so a site can't be created from it. Link to an existing site instead." }, 400);
+      }
+      const existing = await env.SITELOG_DB.prepare(
+        "SELECT id FROM sites WHERE site_name = ?"
+      ).bind(name).first();
+      if (!existing) {
+        await env.SITELOG_DB.prepare(
+          "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived) VALUES (?, ?, ?, ?, ?, 0)"
+        ).bind(crypto.randomUUID(), name, Number(visit.lat), Number(visit.lng), Number(radius ?? 500)).run();
+      }
+      await env.SITELOG_DB.prepare(
+        "UPDATE visits SET site_code = ?, unmatched_site = 0 WHERE id = ?"
+      ).bind(name, visitId).run();
+      return json3({ ok: true, site: name, created: !existing });
+    }
+    if (mode === "link") {
+      const name = (existingSiteName || "").toString().trim();
+      if (!name) return json3({ ok: false, error: "Missing site to link to" }, 400);
+      const site = await env.SITELOG_DB.prepare(
+        "SELECT id FROM sites WHERE site_name = ?"
+      ).bind(name).first();
+      if (!site) return json3({ ok: false, error: "Site not found" }, 404);
+      await env.SITELOG_DB.prepare(
+        "UPDATE visits SET site_code = ?, unmatched_site = 0 WHERE id = ?"
+      ).bind(name, visitId).run();
+      return json3({ ok: true, site: name });
+    }
+    return json3({ ok: false, error: "Invalid mode" }, 400);
+  }
+  if (url.pathname === "/delete-visit" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { visitId } = await readBody(request);
+    if (!visitId) return json3({ error: "Missing visitId" }, 400);
+    await env.SITELOG_DB.prepare(
+      "DELETE FROM visits WHERE id = ?"
+    ).bind(visitId).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/sync-event" && request.method === "POST") {
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const deviceToken = (body.deviceToken || readDidCookie(request) || "").toString().trim();
+    const intent = body.intent === "out" ? "out" : "in";
+    const accuracy = isFiniteNumber(body.accuracy) ? Number(body.accuracy) : null;
+    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    await touchDevice(env, deviceToken);
+    const nowMs = Date.now();
+    const clientNowMs = typeof body.clientNow === "string" ? Date.parse(body.clientNow) : NaN;
+    let skewMs = 0;
+    if (Number.isFinite(clientNowMs)) {
+      const s = nowMs - clientNowMs;
+      if (Math.abs(s) > 60 * 1e3) {
+        const CAP = 2 * 24 * 60 * 60 * 1e3;
+        skewMs = Math.max(-CAP, Math.min(CAP, s));
+      }
+    }
+    const parsed = typeof body.occurredAt === "string" ? Date.parse(body.occurredAt) : NaN;
+    const correctedMs = Number.isFinite(parsed) ? parsed + skewMs : NaN;
+    const occurredMs = Number.isFinite(correctedMs) && correctedMs <= nowMs + 5 * 60 * 1e3 && correctedMs >= nowMs - 30 * 24 * 60 * 60 * 1e3 ? correctedMs : nowMs;
+    const occurredSql = toSqlUtc(occurredMs);
+    const lat = body.lat, lng = body.lng;
+    const latVal = isFiniteNumber(lat) ? Number(lat) : null;
+    const lngVal = isFiniteNumber(lng) ? Number(lng) : null;
+    let matchedSite = null;
+    if (latVal !== null && lngVal !== null && latVal >= -90 && latVal <= 90 && lngVal >= -180 && lngVal <= 180) {
+      const siteRows = await env.SITELOG_DB.prepare("SELECT * FROM sites WHERE COALESCE(archived,0) = 0").all();
+      let bestDist = null;
+      for (const s of siteRows.results || []) {
+        const d = haversineMeters(latVal, lngVal, Number(s.lat), Number(s.lng));
+        if (d <= Number(s.radius_m) && (bestDist === null || d < bestDist)) {
+          bestDist = d;
+          matchedSite = s;
+        }
+      }
+    }
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT * FROM devices WHERE device_token = ?"
+    ).bind(deviceToken).first();
+    const logPending = async (siteCode2, reason) => {
+      await env.SITELOG_DB.prepare(
+        "INSERT INTO pending_events (id, device_token, lat, lng, accuracy, site_code, intent, occurred_at, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+      ).bind(crypto.randomUUID(), deviceToken, latVal, lngVal, accuracy, siteCode2, intent, occurredSql).run();
+      return json3({ ok: true, status: "logged_pending", reason });
+    };
+    if (!device) return await logPending(matchedSite ? matchedSite.site_name : null, "unknown_device");
+    if (!matchedSite) return await logPending(null, "no_site_match");
+    const siteCode = matchedSite.site_name;
+    const openVisit = await env.SITELOG_DB.prepare(
+      "SELECT id, check_in_at FROM visits WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL ORDER BY check_in_at DESC"
+    ).bind(device.person_id, siteCode).first();
+    if (intent === "out") {
+      if (!openVisit) return await logPending(siteCode, "no_open_visit");
+      const outSql = occurredSql > String(openVisit.check_in_at) ? occurredSql : toSqlUtc(nowMs);
+      await env.SITELOG_DB.prepare(
+        "UPDATE visits SET check_out_at = ?, auto_checkout = 0, sign_out_confirmed = 1, offline_synced = 1 WHERE id = ? AND check_out_at IS NULL"
+      ).bind(outSql, openVisit.id).run();
+      return json3({ ok: true, status: "checked_out", site: siteCode, offline: true });
+    }
+    if (openVisit) return json3({ ok: true, status: "already_in", site: siteCode, offline: true });
+    const dupIn = await env.SITELOG_DB.prepare(
+      "SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_in_at = ? LIMIT 1"
+    ).bind(device.person_id, siteCode, occurredSql).first();
+    if (dupIn) return json3({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
+    let offTravel = null, offTransferFrom = null;
+    const openOther = await env.SITELOG_DB.prepare(
+      "SELECT id, site_code, check_in_at, lat, lng FROM visits WHERE person_id = ? AND check_out_at IS NULL AND site_code != ? AND check_in_at < ? ORDER BY check_in_at DESC LIMIT 1"
+    ).bind(device.person_id, siteCode, occurredSql).first();
+    if (openOther) {
+      offTransferFrom = openOther.site_code;
+      {
+        let aLat = isFiniteNumber(openOther.lat) ? Number(openOther.lat) : null;
+        let aLng = isFiniteNumber(openOther.lng) ? Number(openOther.lng) : null;
+        if (aLat === null || aLng === null) {
+          const aSite = await env.SITELOG_DB.prepare(
+            "SELECT lat, lng FROM sites WHERE site_name = ?"
+          ).bind(openOther.site_code).first();
+          if (aSite) {
+            aLat = aSite.lat;
+            aLng = aSite.lng;
+          }
+        }
+        if (aLat !== null && aLng !== null) offTravel = await getTravelData(env, aLat, aLng, matchedSite.lat, matchedSite.lng);
+      }
+      const aInMs = Date.parse(String(openOther.check_in_at).replace(" ", "T") + "Z");
+      let leftSql = occurredSql;
+      if (offTravel && Number.isFinite(aInMs) && offTravel.mins * 6e4 < occurredMs - aInMs) {
+        leftSql = toSqlUtc(occurredMs - offTravel.mins * 6e4);
+      } else {
+        offTravel = null;
+      }
+      await env.SITELOG_DB.prepare(
+        "UPDATE visits SET check_out_at = MAX(check_in_at, ?), auto_checkout = 1, sign_out_confirmed = 0, transferred_to = ? WHERE id = ? AND check_out_at IS NULL"
+      ).bind(leftSql, siteCode, openOther.id).run();
+    }
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO visits (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, offline_synced, check_in_at, travel_in_miles, travel_in_mins) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, 1, ?, ?, ?)"
+    ).bind(crypto.randomUUID(), device.person_id, siteCode, latVal, lngVal, accuracy, occurredSql, offTravel ? offTravel.miles : null, offTravel ? offTravel.mins : null).run();
+    return json3({ ok: true, status: "checked_in", site: siteCode, offline: true, transferFrom: offTransferFrom });
+  }
+  if (url.pathname === "/pending-events" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const rows = await env.SITELOG_DB.prepare(
+      "SELECT id, device_token, lat, lng, accuracy, site_code, intent, occurred_at, synced_at FROM pending_events WHERE COALESCE(resolved,0) = 0 ORDER BY occurred_at DESC LIMIT 200"
+    ).all();
+    return json3({ ok: true, events: rows.results || [] });
+  }
+  if (url.pathname === "/scan" && request.method === "POST") {
+    const body = await readBody(request);
+    const lat = body.lat, lng = body.lng, accuracy = body.accuracy;
+    const deviceToken = body.deviceToken || readDidCookie(request);
+    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      return json3({ ok: false, error: "Missing or invalid lat/lng" }, 400);
+    }
+    await touchDevice(env, deviceToken);
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+      return json3({ ok: false, error: "lat/lng out of range" }, 400);
+    }
+    const siteRows = await env.SITELOG_DB.prepare(
+      "SELECT * FROM sites WHERE COALESCE(archived,0) = 0"
+    ).all();
+    let matchedSite = null;
+    let bestDist = null;
+    for (const s of siteRows.results || []) {
+      const d = haversineMeters(latNum, lngNum, Number(s.lat), Number(s.lng));
+      if (d <= Number(s.radius_m) && (bestDist === null || d < bestDist)) {
+        bestDist = d;
+        matchedSite = s;
+      }
+    }
+    if (!matchedSite) {
+      const devNoSite = await env.SITELOG_DB.prepare(
+        "SELECT * FROM devices WHERE device_token = ?"
+      ).bind(deviceToken).first();
+      if (devNoSite) {
+        const openAny = await env.SITELOG_DB.prepare(
+          "SELECT id, site_code FROM visits WHERE person_id = ? AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1"
+        ).bind(devNoSite.person_id).first();
+        if (openAny) {
+          const perNoSite = await env.SITELOG_DB.prepare(
+            "SELECT first_name, company FROM people WHERE id = ?"
+          ).bind(devNoSite.person_id).first();
+          return json3({
+            status: "confirm_sign_out",
+            visitId: openAny.id,
+            site: openAny.site_code,
+            firstName: perNoSite?.first_name || null,
+            company: perNoSite?.company || null
+          });
+        }
+      }
+      let nearestSite = null;
+      let nearestDist = null;
+      for (const s of siteRows.results || []) {
+        const d = haversineMeters(latNum, lngNum, Number(s.lat), Number(s.lng));
+        if (nearestDist === null || d < nearestDist) {
+          nearestDist = d;
+          nearestSite = s;
+        }
+      }
+      if (!nearestSite) {
+        return json3({ status: "unknown_site", reason: "No active sites configured" });
+      }
+      return json3({
+        status: "unknown_site",
+        nearestSite: nearestSite.site_name,
+        distance_m: Math.round(nearestDist)
+      });
+    }
+    const siteCode = matchedSite.site_name;
+    const rulesRaw = matchedSite.site_rules || "";
+    const siteRules = rulesRaw.split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT * FROM devices WHERE device_token = ?"
+    ).bind(deviceToken).first();
+    if (!device) {
+      return json3({ status: "first_visit", site: siteCode, siteRules });
+    }
+    const isArchived = await env.SITELOG_DB.prepare(
+      "SELECT COALESCE(archived,0) as archived FROM people WHERE id = ?"
+    ).bind(device.person_id).first();
+    if (isArchived && isArchived.archived) {
+      return json3({ status: "blocked", reason: "engineer_archived" });
+    }
+    const person = await env.SITELOG_DB.prepare(
+      "SELECT first_name, company FROM people WHERE id = ?"
+    ).bind(device.person_id).first();
+    const allOpenVisits = await env.SITELOG_DB.prepare(
+      "SELECT id, site_code, check_in_at FROM visits WHERE person_id = ? AND check_out_at IS NULL"
+    ).bind(device.person_id).all();
+    const nowLondon = londonNowParts();
+    const nowDateKey = nowLondon.dateKey;
+    for (const v of allOpenVisits.results || []) {
+      const visitDateKey = londonDateKeyFromUtcString(v.check_in_at);
+      if (visitDateKey < nowDateKey) {
+        const forcedCheckoutUtc = forcedCheckoutSql(v.check_in_at, visitDateKey, Date.now());
+        await env.SITELOG_DB.prepare(`
+            UPDATE visits
+            SET check_out_at = MAX(check_in_at, ?), auto_checkout = 1
+            WHERE id = ? AND check_out_at IS NULL
+          `).bind(forcedCheckoutUtc, v.id).run();
+      }
+    }
+    const openVisit = await env.SITELOG_DB.prepare(`
+        SELECT *
+        FROM visits
+        WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL
+      `).bind(device.person_id, siteCode).first();
+    if (openVisit) {
+      return json3({
+        status: "confirm_sign_out",
+        visitId: openVisit.id,
+        site: siteCode,
+        firstName: person?.first_name || null,
+        company: person?.company || null
+      });
+    }
+    return json3({
+      status: "confirm_check_in",
+      site: siteCode,
+      firstName: person?.first_name || null,
+      company: person?.company || null,
+      siteRules
+    });
+  }
+  if (url.pathname === "/companies" && request.method === "GET") {
+    const rows = await env.SITELOG_DB.prepare(
+      "SELECT id, name FROM companies ORDER BY name ASC"
+    ).all();
+    return json3({ companies: rows.results || [] });
+  }
+  if (url.pathname === "/add-company" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { name } = await readBody(request);
+    if (!name || !name.trim()) {
+      return json3({ ok: false, error: "Missing company name" }, 400);
+    }
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO companies (id, name) VALUES (?, ?)"
+    ).bind(crypto.randomUUID(), name.trim()).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/delete-company" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const { id } = await readBody(request);
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    await env.SITELOG_DB.prepare(
+      "DELETE FROM site_company_map WHERE company_id = ?"
+    ).bind(id).run();
+    await env.SITELOG_DB.prepare(
+      "DELETE FROM companies WHERE id = ?"
+    ).bind(id).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/companies-for-site" && request.method === "GET") {
+    const siteName = url.searchParams.get("site");
+    if (!siteName) return json3({ error: "Missing site parameter" }, 400);
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT c.id, c.name
+        FROM sites s
+        JOIN site_company_map m ON m.site_id = s.id
+        JOIN companies c ON c.id = m.company_id
+        WHERE s.site_name = ?
+        ORDER BY c.name ASC
+      `).bind(siteName).all();
+    return json3({ companies: rows.results || [] });
+  }
+  if (url.pathname === "/update-site-companies" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const mappings = await readBody(request);
+    if (!mappings || typeof mappings !== "object") {
+      return json3({ ok: false, error: "Invalid payload" }, 400);
+    }
+    try {
+      const statements = [];
+      for (const siteId of Object.keys(mappings)) {
+        statements.push(
+          env.SITELOG_DB.prepare("DELETE FROM site_company_map WHERE site_id = ?").bind(siteId)
+        );
+        const companies = mappings[siteId];
+        if (!Array.isArray(companies)) continue;
+        for (const companyId of companies) {
+          statements.push(
+            env.SITELOG_DB.prepare("INSERT INTO site_company_map (site_id, company_id) VALUES (?, ?)").bind(siteId, companyId)
+          );
+        }
+      }
+      if (statements.length) await env.SITELOG_DB.batch(statements);
+      return json3({ ok: true });
+    } catch (err) {
+      console.error("update-site-companies failed:", err);
+      return json3({
+        ok: false,
+        error: "Database update failed"
+      }, 500);
+    }
+  }
+  if (url.pathname === "/site-occupants" && request.method === "GET") {
+    const siteName = url.searchParams.get("site");
+    if (!siteName) return json3({ error: "Missing site parameter" }, 400);
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT p.first_name, p.last_name, p.company, p.purpose, v.check_in_at
+        FROM visits v
+        JOIN people p ON v.person_id = p.id
+        WHERE v.site_code = ? AND v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0
+        ORDER BY v.check_in_at ASC
+      `).bind(siteName).all();
+    return json3({ occupants: rows.results || [] });
+  }
+  if (url.pathname === "/my-visits" && request.method === "GET") {
+    const deviceToken = url.searchParams.get("deviceToken");
+    const limit = Math.min(Number(url.searchParams.get("limit") || 60), 200);
+    if (!deviceToken) return json3({ error: "Missing deviceToken" }, 400);
+    const device = await env.SITELOG_DB.prepare(
+      "SELECT person_id FROM devices WHERE device_token = ?"
+    ).bind(deviceToken).first();
+    if (!device) return json3({ visits: [] });
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT id, site_code, check_in_at, check_out_at,
+               COALESCE(sign_in_confirmed,0) as sign_in_confirmed,
+               COALESCE(sign_out_confirmed,0) as sign_out_confirmed,
+               COALESCE(auto_checkout,0) as auto_checkout
+        FROM visits
+        WHERE person_id = ?
+        ORDER BY check_in_at DESC
+        LIMIT ?
+      `).bind(device.person_id, limit).all();
+    return json3({ visits: rows.results || [] });
+  }
+  if (url.pathname === "/me" && request.method === "GET") {
+    const deviceToken = url.searchParams.get("deviceToken");
+    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    const row = await env.SITELOG_DB.prepare(`
+        SELECT p.id AS person_id, p.first_name, p.last_name, p.company, p.purpose,
+               COALESCE(p.archived,0) AS archived,
+               COALESCE(p.is_transfer_pending,0) AS is_transfer_pending
+        FROM devices d
+        JOIN people p ON p.id = d.person_id
+        WHERE d.device_token = ?
+        LIMIT 1
+      `).bind(deviceToken).first();
+    if (!row) return json3({ ok: true, registered: false });
+    return json3({
+      ok: true,
+      registered: true,
+      personId: row.person_id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      company: row.company,
+      purpose: row.purpose,
+      archived: !!row.archived,
+      isTransferPending: !!row.is_transfer_pending
+    });
+  }
+  if (url.pathname === "/travel-time" && request.method === "GET") {
+    const orig = parseLatLng(url.searchParams.get("orig") || "");
+    const dest = parseLatLng(url.searchParams.get("dest") || "");
+    if (!orig || !dest) {
+      return json3({
+        ok: false,
+        error: "Invalid orig/dest. Expected 'lat,lng' with valid ranges."
+      }, 400);
+    }
+    const result = await getTravelData(env, orig.lat, orig.lng, dest.lat, dest.lng);
+    if (!result) {
+      return json3({ ok: false, error: "Travel data unavailable" }, 502);
+    }
+    return json3({
+      ok: true,
+      duration_text: result.duration_text,
+      distance_text: result.distance_text,
+      duration_mins: result.mins,
+      distance_miles: result.miles
+    });
+  }
+  if (url.pathname === "/geocode" && request.method === "GET") {
+    const address = (url.searchParams.get("address") || "").trim();
+    if (!address) return json3({ ok: false, error: "Missing address" }, 400);
+    if (address.length > 200) return json3({ ok: false, error: "Address too long" }, 400);
+    const result = await getGeocode(env, address);
+    if (!result) return json3({ ok: false, error: "Geocode failed" }, 502);
+    return json3({
+      ok: true,
+      lat: result.lat,
+      lng: result.lng,
+      formatted: result.formatted
+    });
+  }
+  if (url.pathname === "/log-failed-scan" && request.method === "POST") {
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/admin" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    if (from && !isValidDateKey(from)) {
+      return json3({ error: "Invalid 'from' date (expected YYYY-MM-DD)" }, 400);
+    }
+    if (to && !isValidDateKey(to)) {
+      return json3({ error: "Invalid 'to' date (expected YYYY-MM-DD)" }, 400);
+    }
+    let sql = `
+        SELECT v.id AS visit_id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
+               v.lat, v.lng, v.accuracy, v.hs_ack,
+               COALESCE(v.auto_checkout,0) AS auto_checkout,
+               COALESCE(v.sign_in_confirmed,0) AS sign_in_confirmed,
+               COALESCE(v.sign_out_confirmed,0) AS sign_out_confirmed,
+               v.travel_in_miles, v.travel_in_mins,
+               v.travel_out_miles, v.travel_out_mins,
+               v.transferred_to,
+               COALESCE(v.is_first_of_day,0) AS is_first_of_day,
+               COALESCE(v.offline_synced,0) AS offline_synced,
+               COALESCE(v.unmatched_site,0) AS unmatched_site,
+               COALESCE(v.manual_entry,0) AS manual_entry,
+               COALESCE(p.is_main,0) AS is_main,
+               v.provided_site_name,
+               CASE
+                 WHEN COALESCE(v.auto_checkout,0) = 1 THEN 'No Sign Out'
+                 WHEN v.check_out_at IS NOT NULL AND COALESCE(v.sign_out_confirmed,0) = 0 THEN 'Soft Sign Out'
+                 WHEN v.check_out_at IS NOT NULL THEN 'Signed Out'
+                 WHEN COALESCE(v.sign_in_confirmed,0) = 0 THEN 'Soft Sign In'
+                 ELSE 'Still Open'
+               END AS sign_out_status,
+               p.first_name, p.last_name, p.company, p.purpose, p.portal_username, d.device_token
+        FROM visits v
+        JOIN people p ON v.person_id = p.id
+        LEFT JOIN devices d ON d.person_id = p.id
+          AND d.rowid = (SELECT MIN(rowid) FROM devices WHERE person_id = p.id)
+        WHERE COALESCE(p.archived,0) = 0
+      `;
+    const params = [];
+    if (from) {
+      sql += " AND v.check_in_at >= ?";
+      params.push(londonLocalToUtcIso(from, "00:00:00"));
+    }
+    if (to) {
+      sql += " AND v.check_in_at <= ?";
+      params.push(londonLocalToUtcIso(to, "23:59:59"));
+    }
+    const before = url.searchParams.get("before");
+    if (before) {
+      sql += " AND v.check_in_at <= ?";
+      params.push(before);
+    }
+    sql += " ORDER BY v.check_in_at DESC LIMIT 500";
+    const stmt = env.SITELOG_DB.prepare(sql);
+    const rows = params.length ? await stmt.bind(...params).all() : await stmt.all();
+    return json3({ visits: rows.results || [] });
+  }
+  if (url.pathname === "/job-costing" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    if (from && !isValidDateKey(from)) return json3({ ok: false, error: "Invalid 'from' date (expected YYYY-MM-DD)" }, 400);
+    if (to && !isValidDateKey(to)) return json3({ ok: false, error: "Invalid 'to' date (expected YYYY-MM-DD)" }, 400);
+    const engRows = (await env.SITELOG_DB.prepare(`
+        SELECT id, first_name, last_name, company,
+               COALESCE(hourly_rate, NULL) as hourly_rate,
+               COALESCE(travel_status,'not_configured') as travel_status,
+               COALESCE(fuel_paid, CASE WHEN travel_status='paid' THEN 1 ELSE 0 END) as fuel_paid,
+               COALESCE(travel_time_paid, CASE WHEN travel_status='paid' THEN 1 ELSE 0 END) as travel_time_paid,
+               travel_cap_type, travel_cap_value, fuel_rate,
+               COALESCE(is_main,0) as is_main, portal_username
+        FROM people
+      `).all()).results || [];
+    const engById = /* @__PURE__ */ new Map();
+    engRows.forEach((e) => engById.set(String(e.id), e));
+    const findEng = (personId, name, company) => {
+      if (personId && engById.has(String(personId))) return engById.get(String(personId));
+      return engRows.find((e) => ((e.first_name || "").trim() + " " + (e.last_name || "").trim()).trim() === name && (e.company || "") === (company || "")) || null;
+    };
+    const SELECT = `
+        SELECT v.id AS visit_id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
+               COALESCE(v.auto_checkout,0) AS auto_checkout,
+               v.travel_in_miles, v.travel_in_mins, v.travel_out_miles, v.travel_out_mins,
+               v.transferred_to, COALESCE(v.is_first_of_day,0) AS is_first_of_day,
+               p.first_name, p.last_name, p.company, p.portal_username
+        FROM visits v
+        JOIN people p ON v.person_id = p.id
+        WHERE COALESCE(p.archived,0) = 0`;
+    const baseParams = [];
+    let where = "";
+    if (from) {
+      where += " AND v.check_in_at >= ?";
+      baseParams.push(londonLocalToUtcIso(from, "00:00:00"));
+    }
+    if (to) {
+      where += " AND v.check_in_at <= ?";
+      baseParams.push(londonLocalToUtcIso(to, "23:59:59"));
+    }
+    const PAGE = 1e3;
+    const seen = /* @__PURE__ */ new Set();
+    const visits = [];
+    let before = null;
+    for (let page = 0; page < 40; page++) {
+      let sql = SELECT + where;
+      const params = baseParams.slice();
+      if (before) {
+        sql += " AND v.check_in_at <= ?";
+        params.push(before);
+      }
+      sql += " ORDER BY v.check_in_at DESC LIMIT " + PAGE;
+      const res = await env.SITELOG_DB.prepare(sql).bind(...params).all();
+      const rows = res.results || [];
+      if (!rows.length) break;
+      let added = 0;
+      for (const r of rows) {
+        if (seen.has(r.visit_id)) continue;
+        seen.add(r.visit_id);
+        visits.push(r);
+        added++;
+      }
+      if (rows.length < PAGE) break;
+      before = rows[rows.length - 1].check_in_at;
+      if (added === 0) break;
+    }
+    const inRange = visits.filter((v) => {
+      const day = jcLondonDayKey(v.check_in_at);
+      if (from && day < from) return false;
+      if (to && day > to) return false;
+      return true;
+    });
+    const sites = {};
+    inRange.forEach((v) => {
+      const siteKey = (v.site_code || "").trim() || "";
+      const pKey = v.person_id || jcNameOf(v) || "Unknown";
+      sites[siteKey] = sites[siteKey] || {};
+      sites[siteKey][pKey] = sites[siteKey][pKey] || { personId: v.person_id || "", name: jcNameOf(v) || "Unknown", company: v.company || "", portalUsername: v.portal_username || null, visits: [] };
+      sites[siteKey][pKey].visits.push(v);
+    });
+    const out = Object.keys(sites).map((siteKey) => {
+      const people = Object.keys(sites[siteKey]).map((pKey) => {
+        const p = sites[siteKey][pKey];
+        const eng = findEng(p.visits[0].person_id, p.name, p.company);
+        const c = jcCostVisits(p.visits, eng);
+        return {
+          personId: p.personId,
+          portalUsername: eng && eng.portal_username || p.portalUsername || null,
+          name: p.name,
+          company: p.company,
+          engId: eng ? eng.id : "",
+          rate: c.rate,
+          hasRate: c.hasRate,
+          workH: c.workH,
+          travelH: c.travelH,
+          miles: c.miles,
+          labour: c.labour,
+          travelCost: c.travelCost,
+          fuelCost: c.fuelCost,
+          total: c.total,
+          costedVisits: c.costedVisits,
+          openCount: c.openCount,
+          autoCount: c.autoCount
+        };
+      }).sort((a, b) => b.total - a.total);
+      return {
+        siteCode: siteKey,
+        total: people.reduce((s, p) => s + p.total, 0),
+        labour: people.reduce((s, p) => s + p.labour, 0),
+        travelCost: people.reduce((s, p) => s + p.travelCost, 0),
+        fuelCost: people.reduce((s, p) => s + p.fuelCost, 0),
+        workH: people.reduce((s, p) => s + p.workH, 0),
+        travelH: people.reduce((s, p) => s + p.travelH, 0),
+        visits: people.reduce((s, p) => s + p.costedVisits, 0),
+        open: people.reduce((s, p) => s + p.openCount, 0),
+        auto: people.reduce((s, p) => s + p.autoCount, 0),
+        noRate: people.some((p) => !p.hasRate && p.costedVisits > 0),
+        people
+      };
+    }).sort((a, b) => b.total - a.total);
+    return json3({ ok: true, from: from || null, to: to || null, sites: out });
+  }
+  if (url.pathname === "/on-site" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const site = url.searchParams.get("site") || "";
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT v.id as visit_id, v.person_id, p.first_name, p.last_name, p.company
+        FROM visits v
+        JOIN people p ON v.person_id = p.id
+        WHERE v.site_code = ? AND v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0
+        ORDER BY p.first_name, p.last_name
+      `).bind(site).all();
+    const people = (rows.results || []).map((r) => ({
+      person_id: r.person_id || "",
+      name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+      company: r.company || ""
+    }));
+    return json3({ people });
+  }
+  if (url.pathname === "/documents/create" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const docId = crypto.randomUUID();
+    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const type = body.type || "";
+    const prefix2 = { induction: "IND", hwp: "HWP", tbt: "TBT" }[type] || "DOC";
+    const maxRow = await env.SITELOG_DB.prepare("SELECT MAX(doc_seq) AS m FROM documents WHERE type = ?").bind(type).first();
+    const docSeq = (maxRow && maxRow.m ? Number(maxRow.m) : 0) + 1;
+    const docNumber = prefix2 + "-" + String(docSeq).padStart(4, "0");
+    await env.SITELOG_DB.prepare(`
+        INSERT INTO documents
+          (id, type, template_version, status, site_name, site_address,
+           issued_by, issued_at, permit_no, valid_from,
+           manager_signature, manager_signed_at, form_data, created_at, doc_number, doc_seq)
+        VALUES (?,?,1,'issued',?,?,?,?,?,?,?,?,?,?,?,?)
+      `).bind(
+      docId,
+      body.type || "",
+      body.site_name || "",
+      body.site_address || "",
+      body.issued_by || "",
+      body.issued_at || now,
+      body.permit_no || null,
+      body.valid_from || null,
+      body.manager_signature || null,
+      body.manager_signature ? now : null,
+      JSON.stringify(body.form_data || {}),
+      now,
+      docNumber,
+      docSeq
+    ).run();
+    const attendees = Array.isArray(body.attendees) ? body.attendees : [];
+    for (let i = 0; i < attendees.length; i++) {
+      const a = attendees[i];
+      await env.SITELOG_DB.prepare(`
+          INSERT INTO document_attendees
+            (id, document_id, person_id, person_name, company, sign_order,
+             trade, contact_number, cscs_number, signature, signed_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        `).bind(
+        crypto.randomUUID(),
+        docId,
+        a.personId || null,
+        a.personName || "",
+        a.company || "",
+        i + 1,
+        a.trade || null,
+        a.contact || null,
+        a.cscs || null,
+        a.signature || null,
+        a.signature ? now : null
+      ).run();
+    }
+    return json3({ ok: true, id: docId });
+  }
+  if (url.pathname === "/documents/closeout" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const body = await readBody(request);
+    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    if (!body.docId) return json3({ ok: false, error: "Missing docId" }, 400);
+    await env.SITELOG_DB.prepare(`
+        UPDATE documents
+        SET status = 'closed',
+            completion_time = ?,
+            final_area_safe = ?,
+            manager_signature = ?,
+            manager_signed_at = ?,
+            closed_at = ?
+        WHERE id = ?
+      `).bind(
+      body.completionTime || null,
+      body.finalAreaSafe ?? null,
+      body.managerSignature || null,
+      now,
+      now,
+      body.docId
+    ).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/site-people" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const site = url.searchParams.get("site") || "";
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT p.id AS person_id, p.first_name, p.last_name, p.company,
+               MAX(v.check_in_at) AS last_seen,
+               MAX(CASE WHEN v.check_out_at IS NULL THEN 1 ELSE 0 END) AS on_now
+        FROM visits v JOIN people p ON v.person_id = p.id
+        WHERE v.site_code = ? AND COALESCE(p.archived,0) = 0
+        GROUP BY p.id
+        ORDER BY on_now DESC, last_seen DESC
+      `).bind(site).all();
+    const people = (rows.results || []).map((r) => ({
+      person_id: r.person_id || "",
+      name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+      company: r.company || "",
+      on_now: Number(r.on_now || 0) === 1
+    })).filter((p) => p.name);
+    return json3({ people });
+  }
+  if (url.pathname === "/my-documents" && request.method === "GET") {
+    await ensureOfflineSchema(env);
+    const deviceToken = url.searchParams.get("deviceToken") || "";
+    const site = url.searchParams.get("site") || "";
+    if (!deviceToken) return json3({ documents: [] });
+    const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
+    if (!dev || !dev.person_id) return json3({ documents: [] });
+    const wheres = ["d.id IN (SELECT document_id FROM document_attendees WHERE person_id = ? UNION SELECT document_id FROM document_links WHERE person_id = ?)"];
+    const binds = [dev.person_id, dev.person_id];
+    if (site) {
+      wheres.push("d.site_name = ?");
+      binds.push(site);
+    }
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT d.id, d.type, d.status, d.site_name, d.issued_at, d.doc_number, d.permit_no
+        FROM documents d
+        WHERE ${wheres.join(" AND ")}
+        ORDER BY d.issued_at DESC LIMIT 100
+      `).bind(...binds).all();
+    return json3({ documents: rows.results || [] });
+  }
+  if (url.pathname === "/documents" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const type = url.searchParams.get("type") || "";
+    const status = url.searchParams.get("status") || "";
+    const site = url.searchParams.get("site") || "";
+    const person = url.searchParams.get("person") || "";
+    const from = url.searchParams.get("from") || "";
+    const to = url.searchParams.get("to") || "";
+    let q = `
+        SELECT d.id, d.type, d.status, d.site_name, d.issued_at,
+               d.permit_no, d.closed_at, d.form_data, d.doc_number,
+               GROUP_CONCAT(da.person_name, ', ') AS attendee_names
+        FROM documents d
+        LEFT JOIN document_attendees da ON da.document_id = d.id
+      `;
+    const wheres = [];
+    const binds = [];
+    if (type) {
+      wheres.push("d.type = ?");
+      binds.push(type);
+    }
+    if (status) {
+      wheres.push("d.status = ?");
+      binds.push(status);
+    }
+    if (site) {
+      wheres.push("d.site_name = ?");
+      binds.push(site);
+    }
+    if (from) {
+      wheres.push("d.issued_at >= ?");
+      binds.push(from);
+    }
+    if (to) {
+      wheres.push("d.issued_at <= ?");
+      binds.push(to + " 23:59:59");
+    }
+    if (person) {
+      wheres.push("da.person_name LIKE ?");
+      binds.push("%" + person + "%");
+    }
+    if (wheres.length) q += " WHERE " + wheres.join(" AND ");
+    q += " GROUP BY d.id ORDER BY d.issued_at DESC LIMIT 200";
+    const rows = await env.SITELOG_DB.prepare(q).bind(...binds).all();
+    return json3({ documents: rows.results || [] });
+  }
+  if (url.pathname === "/documents/delete" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    const body = await readBody(request);
+    const id = body.id || body.docId;
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    await env.SITELOG_DB.prepare("DELETE FROM document_attendees WHERE document_id = ?").bind(id).run();
+    await env.SITELOG_DB.prepare("DELETE FROM document_links WHERE document_id = ?").bind(id).run();
+    await env.SITELOG_DB.prepare("DELETE FROM documents WHERE id = ?").bind(id).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/documents/link" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const docId = body.docId, personId = body.personId;
+    if (!docId || !personId) return json3({ ok: false, error: "Missing docId or personId" }, 400);
+    const existing = await env.SITELOG_DB.prepare(
+      "SELECT id FROM document_links WHERE document_id = ? AND person_id = ?"
+    ).bind(docId, personId).first();
+    const alreadyAttendee = await env.SITELOG_DB.prepare(
+      "SELECT id FROM document_attendees WHERE document_id = ? AND person_id = ?"
+    ).bind(docId, personId).first();
+    if (!existing && !alreadyAttendee) {
+      const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+      await env.SITELOG_DB.prepare(
+        "INSERT INTO document_links (id, document_id, person_id, person_name, linked_at) VALUES (?,?,?,?,?)"
+      ).bind(crypto.randomUUID(), docId, personId, body.personName || "", now).run();
+    }
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/documents/unlink" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    if (!body.docId || !body.personId) return json3({ ok: false, error: "Missing docId or personId" }, 400);
+    await env.SITELOG_DB.prepare(
+      "DELETE FROM document_links WHERE document_id = ? AND person_id = ?"
+    ).bind(body.docId, body.personId).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/documents/single" && request.method === "GET") {
+    const id = url.searchParams.get("id") || "";
+    if (!isAdminAuthorised()) {
+      const deviceToken = url.searchParams.get("deviceToken") || "";
+      const dev = deviceToken ? await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first() : null;
+      let allowed = false;
+      if (dev && dev.person_id) {
+        const onDoc = await env.SITELOG_DB.prepare(
+          "SELECT 1 FROM document_attendees WHERE document_id = ? AND person_id = ? UNION SELECT 1 FROM document_links WHERE document_id = ? AND person_id = ? LIMIT 1"
+        ).bind(id, dev.person_id, id, dev.person_id).first();
+        allowed = !!onDoc;
+      }
+      if (!allowed) return json3({ error: "Unauthorised" }, 401);
+    }
+    const doc = await env.SITELOG_DB.prepare(
+      "SELECT * FROM documents WHERE id = ?"
+    ).bind(id).first();
+    if (!doc) return json3({ error: "Not found" }, 404);
+    try {
+      doc.form_data = JSON.parse(doc.form_data || "{}");
+    } catch {
+      doc.form_data = {};
+    }
+    const atts = await env.SITELOG_DB.prepare(
+      "SELECT * FROM document_attendees WHERE document_id = ? ORDER BY sign_order"
+    ).bind(id).all();
+    doc.attendees = atts.results || [];
+    doc.attendee_names = doc.attendees.map((a) => a.person_name).join(", ");
+    let linked = [];
+    try {
+      const lr = await env.SITELOG_DB.prepare(
+        "SELECT person_id, person_name FROM document_links WHERE document_id = ?"
+      ).bind(id).all();
+      linked = lr.results || [];
+    } catch (e) {
+    }
+    doc.linked = linked;
+    return json3({ document: doc });
+  }
+  if (url.pathname === "/field-memory/save" && request.method === "POST") {
+    const body = await readBody(request);
+    const key = (body.key || "").trim();
+    const value = (body.value || "").trim();
+    const site = (body.site || "").trim();
+    if (!key || !value) {
+      return json3({ ok: false, error: "key and value required" }, 400);
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
+    const existing = await env.SITELOG_DB.prepare(`
+        SELECT id, use_count
+        FROM field_memory
+        WHERE field_key = ? AND COALESCE(site_name,'') = ? AND value = ?
+        LIMIT 1
+      `).bind(key, site, value).first();
+    if (existing) {
+      await env.SITELOG_DB.prepare(`
+          UPDATE field_memory
+          SET use_count = COALESCE(use_count,0) + 1,
+              last_used_at = ?
+          WHERE id = ?
+        `).bind(now, existing.id).run();
+    } else {
+      await env.SITELOG_DB.prepare(`
+          INSERT INTO field_memory
+            (id, field_key, site_name, value, use_count, last_used_at)
+          VALUES (?, ?, ?, ?, 1, ?)
+        `).bind(
+        crypto.randomUUID(),
+        key,
+        site || null,
+        value,
+        now
+      ).run();
+    }
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/field-memory/suggest" && request.method === "GET") {
+    const key = url.searchParams.get("key") || "";
+    const site = url.searchParams.get("site") || "";
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT value
+        FROM field_memory
+        WHERE field_key = ? AND (site_name = ? OR site_name IS NULL OR site_name = '')
+        ORDER BY (site_name IS NOT NULL AND site_name != '') DESC,
+                 use_count DESC,
+                 last_used_at DESC
+        LIMIT 6
+      `).bind(key, site).all();
+    const seen = /* @__PURE__ */ new Set();
+    const suggestions = (rows.results || []).filter((r) => {
+      if (seen.has(r.value)) return false;
+      seen.add(r.value);
+      return true;
+    }).map((r) => ({ value: r.value }));
+    return json3({ suggestions });
+  }
+  if (url.pathname === "/site-documents/upload" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    if (!env.DOCS_BUCKET) {
+      return json3({ ok: false, error: "File storage is not configured. Add an R2 bucket binding named DOCS_BUCKET to the worker." }, 500);
+    }
+    const form = await request.formData();
+    const file = form.get("file");
+    const site = (form.get("site") || "").toString().trim();
+    const category = (form.get("category") || "Other").toString().trim() || "Other";
+    const title = (form.get("title") || "").toString().trim();
+    const requireAck = form.get("requireAck") && form.get("requireAck") !== "0" ? 1 : 0;
+    const uploadedBy = (form.get("uploadedBy") || "Admin").toString();
+    if (!site) return json3({ ok: false, error: "Missing site" }, 400);
+    if (!file || typeof file === "string") return json3({ ok: false, error: "Missing file" }, 400);
+    const id = crypto.randomUUID();
+    const fileName = (file.name || "document").toString();
+    const contentType = file.type || "application/octet-stream";
+    const key = "site-docs/" + id + "/" + fileName;
+    const buf = await file.arrayBuffer();
+    await env.DOCS_BUCKET.put(key, buf, { httpMetadata: { contentType } });
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO site_documents (id, site_name, category, title, file_name, content_type, size_bytes, r2_key, require_ack, uploaded_by, uploaded_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
+    ).bind(id, site, category, title || fileName, fileName, contentType, buf.byteLength, key, requireAck, uploadedBy, toSqlUtc(Date.now())).run();
+    return json3({ ok: true, id });
+  }
+  if (url.pathname === "/site-documents/list" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const site = url.searchParams.get("site") || "";
+    const wheres = ["COALESCE(sd.archived,0) = 0"];
+    const binds = [];
+    if (site) {
+      wheres.push("sd.site_name = ?");
+      binds.push(site);
+    }
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT sd.id, sd.site_name, sd.category, sd.title, sd.file_name, sd.content_type,
+               sd.size_bytes, sd.require_ack, sd.uploaded_by, sd.uploaded_at,
+               (SELECT COUNT(*) FROM site_document_acks a WHERE a.document_id = sd.id) AS ack_count
+        FROM site_documents sd
+        JOIN sites s ON s.site_name = sd.site_name AND COALESCE(s.archived,0) = 0
+        WHERE ${wheres.join(" AND ")}
+        ORDER BY sd.category ASC, sd.uploaded_at DESC
+      `).bind(...binds).all();
+    return json3({ ok: true, documents: rows.results || [] });
+  }
+  if (url.pathname === "/site-documents/summary" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT sd.site_name AS site_name, COUNT(*) AS count
+        FROM site_documents sd
+        JOIN sites s ON s.site_name = sd.site_name AND COALESCE(s.archived,0) = 0
+        WHERE COALESCE(sd.archived,0) = 0
+        GROUP BY sd.site_name
+      `).all();
+    return json3({ ok: true, sites: rows.results || [] });
+  }
+  if (url.pathname === "/site-documents/update" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const id = body.id;
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    const sets = [], binds = [];
+    if (body.title != null) {
+      sets.push("title = ?");
+      binds.push(String(body.title));
+    }
+    if (body.category != null) {
+      sets.push("category = ?");
+      binds.push(String(body.category));
+    }
+    if (body.requireAck !== void 0) {
+      sets.push("require_ack = ?");
+      binds.push(body.requireAck && body.requireAck !== "0" ? 1 : 0);
+    }
+    if (!sets.length) return json3({ ok: true });
+    binds.push(id);
+    await env.SITELOG_DB.prepare(`UPDATE site_documents SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/site-documents/delete" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const id = body.id;
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    const row = await env.SITELOG_DB.prepare("SELECT r2_key FROM site_documents WHERE id = ?").bind(id).first();
+    if (row && row.r2_key && env.DOCS_BUCKET) {
+      try {
+        await env.DOCS_BUCKET.delete(row.r2_key);
+      } catch (e) {
+      }
+    }
+    await env.SITELOG_DB.prepare("DELETE FROM site_document_acks WHERE document_id = ?").bind(id).run();
+    await env.SITELOG_DB.prepare("DELETE FROM site_documents WHERE id = ?").bind(id).run();
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/site-documents/acks" && request.method === "GET") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const id = url.searchParams.get("id") || "";
+    const rows = await env.SITELOG_DB.prepare(
+      "SELECT person_name, company, acked_at FROM site_document_acks WHERE document_id = ? ORDER BY acked_at DESC"
+    ).bind(id).all();
+    return json3({ ok: true, acks: rows.results || [] });
+  }
+  if (url.pathname === "/site-documents/my" && request.method === "GET") {
+    await ensureOfflineSchema(env);
+    const deviceToken = url.searchParams.get("deviceToken") || "";
+    const site = url.searchParams.get("site") || "";
+    if (!deviceToken || !site) return json3({ documents: [] });
+    const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
+    if (!dev || !dev.person_id) return json3({ documents: [] });
+    if (!await canViewSiteDocs(env, dev.person_id, site)) return json3({ documents: [] });
+    const rows = await env.SITELOG_DB.prepare(`
+        SELECT sd.id, sd.category, sd.title, sd.file_name, sd.content_type, sd.size_bytes,
+               sd.require_ack, sd.uploaded_at,
+               (SELECT COUNT(*) FROM site_document_acks a WHERE a.document_id = sd.id AND a.person_id = ?) AS acked
+        FROM site_documents sd
+        JOIN sites s ON s.site_name = sd.site_name AND COALESCE(s.archived,0) = 0
+        WHERE sd.site_name = ? AND COALESCE(sd.archived,0) = 0
+        ORDER BY sd.category ASC, sd.uploaded_at DESC
+      `).bind(dev.person_id, site).all();
+    return json3({ documents: rows.results || [] });
+  }
+  if (url.pathname === "/site-documents/ack" && request.method === "POST") {
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const deviceToken = (body.deviceToken || "").toString();
+    const id = (body.id || "").toString();
+    if (!deviceToken || !id) return json3({ ok: false, error: "Missing fields" }, 400);
+    const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
+    if (!dev || !dev.person_id) return json3({ ok: false, error: "Unknown device" }, 401);
+    const doc = await env.SITELOG_DB.prepare("SELECT site_name FROM site_documents WHERE id = ?").bind(id).first();
+    if (!doc) return json3({ ok: false, error: "Document not found" }, 404);
+    if (!await canViewSiteDocs(env, dev.person_id, doc.site_name)) return json3({ ok: false, error: "Not permitted" }, 403);
+    const person = await env.SITELOG_DB.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(dev.person_id).first();
+    const name = person ? `${person.first_name || ""} ${person.last_name || ""}`.trim() : "";
+    const existing = await env.SITELOG_DB.prepare(
+      "SELECT id FROM site_document_acks WHERE document_id = ? AND person_id = ?"
+    ).bind(id, dev.person_id).first();
+    if (!existing) {
+      await env.SITELOG_DB.prepare(
+        "INSERT INTO site_document_acks (id, document_id, person_id, person_name, company, acked_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(crypto.randomUUID(), id, dev.person_id, name, person ? person.company || "" : "", toSqlUtc(Date.now())).run();
+    }
+    return json3({ ok: true });
+  }
+  if (url.pathname === "/site-documents/file" && request.method === "GET") {
+    await ensureOfflineSchema(env);
+    const id = url.searchParams.get("id") || "";
+    const download = url.searchParams.get("download") === "1";
+    if (!id) return new Response("Missing id", { status: 400, headers: corsFor(request) });
+    const doc = await env.SITELOG_DB.prepare("SELECT * FROM site_documents WHERE id = ?").bind(id).first();
+    if (!doc) return new Response("Not found", { status: 404, headers: corsFor(request) });
+    let ok = isAdminAuthorised();
+    if (!ok) {
+      const deviceToken = url.searchParams.get("deviceToken") || "";
+      if (deviceToken) {
+        const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
+        if (dev && dev.person_id) ok = await canViewSiteDocs(env, dev.person_id, doc.site_name);
+      }
+    }
+    if (!ok) return new Response("Unauthorised", { status: 401, headers: corsFor(request) });
+    if (!env.DOCS_BUCKET) return new Response("Storage not configured", { status: 500, headers: corsFor(request) });
+    const obj = await env.DOCS_BUCKET.get(doc.r2_key);
+    if (!obj) return new Response("File missing", { status: 404, headers: corsFor(request) });
+    const headers = corsFor(request);
+    headers["Content-Type"] = doc.content_type || "application/octet-stream";
+    const safeName4 = (doc.file_name || "document").replace(/["\\\r\n]/g, "");
+    headers["Content-Disposition"] = (download ? "attachment" : "inline") + '; filename="' + safeName4 + '"';
+    headers["Access-Control-Expose-Headers"] = "Content-Disposition";
+    headers["Cache-Control"] = "private, max-age=60";
+    return new Response(obj.body, { headers });
+  }
+  return new Response("Not found", { status: 404, headers: corsFor(request) });
+}
+async function sweepAutoClose(env) {
+  const now = londonNowParts();
+  const openVisits = await env.SITELOG_DB.prepare(
+    "SELECT id, check_in_at FROM visits WHERE check_out_at IS NULL"
+  ).all();
+  for (const v of openVisits.results || []) {
+    const visitDateKey = londonDateKeyFromUtcString(v.check_in_at);
+    if (visitDateKey < now.dateKey) {
+      const forcedCheckoutUtc = forcedCheckoutSql(v.check_in_at, visitDateKey, Date.now());
+      await env.SITELOG_DB.prepare(`
+            UPDATE visits
+            SET check_out_at = MAX(check_in_at, ?), auto_checkout = 1
+            WHERE id = ? AND check_out_at IS NULL
+          `).bind(forcedCheckoutUtc, v.id).run();
+    }
+  }
+}
+
 // src/routes/sitelog.js
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -7388,7 +9898,11 @@ async function handle11(request, env, ctx, url, sess) {
   }
   let res;
   try {
-    res = await fetch(target, init);
+    if (env.SITELOG_DB) {
+      res = await handle11(new Request(target, init), env, ctx);
+    } else {
+      res = await fetch(target, init);
+    }
   } catch (e) {
     return error("SiteLog API unreachable: " + e.message, 502, env, request);
   }
@@ -7563,7 +10077,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal };
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -7758,7 +10272,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -7876,7 +10390,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -8044,7 +10558,7 @@ function buildRaContinuousPdf(pages, ref) {
   });
   return pdf.bytes();
 }
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const q = url.searchParams;
@@ -8522,7 +11036,7 @@ function shapeCheck(r) {
     skippedBy: items.skippedBy || ""
   };
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -8856,7 +11370,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -9096,7 +11610,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -9209,7 +11723,7 @@ function redact(rows) {
     return o;
   });
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -9595,7 +12109,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle20(request, env, ctx, url, sess) {
+async function handle21(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -11580,7 +14094,7 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -11976,7 +14490,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
@@ -12170,11 +14684,23 @@ async function handle22(request, env, ctx, url, sess) {
 }
 
 // src/routes/costing.js
+async function sitelogAdminFetch(env, pathQuery, ms) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
+  if (env.SITELOG_DB) {
+    try {
+      const res = await handle11(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      if (res && res.ok) return res;
+    } catch (e) {
+    }
+  }
+  return fetchWithTimeout(target, { headers: { "x-admin-secret": secret } }, ms || 8e3);
+}
 var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
 var MAX_SEG_HOURS = 14;
 var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -13080,13 +15606,24 @@ function parseLatLngPair(latIn, lngIn) {
 async function pushSiteToSiteLog2(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
-    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
     const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
-    const res = await fetch(base + "/bulk-add-sites", {
+    const init = {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
       body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
-    });
+    };
+    let res;
+    if (env.SITELOG_DB) {
+      try {
+        res = await handle11(new Request(target, init), env);
+      } catch (e) {
+        res = null;
+      }
+      if (!res || !res.ok) res = await fetch(target, init);
+    } else {
+      res = await fetch(target, init);
+    }
     return res.ok;
   } catch {
     return false;
@@ -13109,11 +15646,10 @@ async function fetchSitelogCosting(env, from, to) {
     _slDiag = "secret-unset";
     return null;
   }
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
-  const url = base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+  const pathQuery = "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetchWithTimeout(url, { headers: { "x-admin-secret": secret } }, 8e3);
+      const res = await sitelogAdminFetch(env, pathQuery, 8e3);
       if (!res.ok) {
         _slDiag = "http-" + res.status;
         continue;
@@ -13134,16 +15670,14 @@ async function fetchSitelogCosting(env, from, to) {
 async function fetchSitelogVisits(env, from, to) {
   const secret = env.SITELOG_ADMIN_SECRET;
   if (!secret) return null;
-  const base = env.SITELOG_API || "https://api.site-log.co.uk";
-  const headers = { "x-admin-secret": secret };
   const seen = /* @__PURE__ */ new Set();
   const out = [];
   let before = null, got = false;
   try {
     for (let page = 0; page < 30; page++) {
-      let u = base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
-      if (before) u += "&before=" + encodeURIComponent(before);
-      const res = await fetchWithTimeout(u, { headers }, 8e3);
+      let pq = "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+      if (before) pq += "&before=" + encodeURIComponent(before);
+      const res = await sitelogAdminFetch(env, pq, 8e3);
       if (!res.ok) return got ? out : null;
       const j = await res.json();
       const rows = Array.isArray(j.visits) ? j.visits : [];
@@ -13847,7 +16381,7 @@ function importTokenOK(request, env) {
   for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
   return diff === 0;
 }
-async function handle24(request, env, ctx, url, sess) {
+async function handle25(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/compliance(?=\/|$)/, "") || "/";
@@ -14453,7 +16987,7 @@ async function getVehicles(env) {
     return [];
   }
 }
-async function handle25(request, env, ctx, url, sess) {
+async function handle26(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
@@ -15032,7 +17566,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -15546,7 +18080,7 @@ function shapeTask(t) {
     createdBy: t.created_by || ""
   };
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;
@@ -15754,18 +18288,18 @@ var ROUTES = [
   ["*", "/upload-asset-thumb", handle6],
   ["*", "/delete-asset-image", handle6],
   ["*", "/sla", handle8],
-  ["*", "/stats", handle17],
-  ["*", "/staff", handle18],
+  ["*", "/stats", handle18],
+  ["*", "/staff", handle19],
   // staff personal + company documents
-  ["*", "/privacy", handle19],
+  ["*", "/privacy", handle20],
   // GDPR data export + erasure
-  ["*", "/fleet", handle20],
+  ["*", "/fleet", handle21],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/messages", handle21],
+  ["*", "/messages", handle22],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle22],
+  ["*", "/memos", handle23],
   // company memos (draft/send/sign)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
@@ -15778,15 +18312,15 @@ var ROUTES = [
   ["*", "/import-sites", handle9],
   ["*", "/sites", handle9],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle23],
+  ["*", "/sites/register", handle24],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle23],
+  ["*", "/ledger", handle24],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle23],
+  ["*", "/costing", handle24],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle23],
+  ["*", "/exceptions", handle24],
   // needs-a-human-eye list
-  ["*", "/compliance", handle24],
+  ["*", "/compliance", handle25],
   // Southern Co-op compliance certs (R2 + D1)
   ["*", "/settings", handle10],
   ["*", "/oncall", handle10],
@@ -15799,23 +18333,23 @@ var ROUTES = [
   // Full-access menu visibility (shared)
   ["*", "/audit", handle10],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle11],
-  ["*", "/sitelog-launch", handle11],
-  ["*", "/office", handle12],
+  ["*", "/sitelog", handle12],
+  ["*", "/sitelog-launch", handle12],
+  ["*", "/office", handle13],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle13],
+  ["*", "/key", handle14],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle14],
+  ["*", "/theme", handle15],
   // per-user colour theme + background
-  ["*", "/hs/", handle15],
+  ["*", "/hs/", handle16],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle16],
+  ["*", "/vancheck", handle17],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle25],
+  ["*", "/po", handle26],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle26],
+  ["*", "/cctv", handle27],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle27]
+  ["*", "/tasks", handle28]
   // recurring admin task list (deadlines, auto-complete, per-user stat)
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -15823,6 +18357,9 @@ var ROUTES = [
 var index_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.hostname === "api.site-log.co.uk") {
+      return handle11(request, env, ctx);
+    }
     if (request.method === "OPTIONS") return preflight(env, request);
     if (url.pathname === "/" || url.pathname === "/health") {
       return json({ ok: true, service: "mostlane-portal", time: (/* @__PURE__ */ new Date()).toISOString() }, {}, env, request);
@@ -15881,6 +18418,7 @@ var index_default = {
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
       ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
+      if (env.SITELOG_DB) ctx.waitUntil(sweepAutoClose(env).catch((e) => console.error("scheduled sitelog auto-close:", e)));
     }
   }
 };

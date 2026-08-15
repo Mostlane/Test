@@ -30,6 +30,16 @@ binding = "PO_DB"
 database_name = "mostlane-po"
 database_id = "bcaf5f51-3085-4cdf-a993-42278893c313"
 
+# SiteLog's own D1 — the SiteLog backend now runs INSIDE this worker
+# (src/routes/sitelog-api.js). Binding it here means the portal reads SiteLog
+# labour/costing directly (no api.site-log.co.uk round-trip) and, once the
+# api.site-log.co.uk custom domain is moved onto this worker, the scanner runs
+# here too. The standalone SiteLog worker stays as a fallback until cut over.
+[[d1_databases]]
+binding = "SITELOG_DB"
+database_name = "sitelog"
+database_id = "1e891155-dd61-4e0e-90fe-ad5f4895f2c8"
+
 # ── R2 buckets ──────────────────────────────────────────────────────
 [[r2_buckets]]
 binding = "JOB_FILES"

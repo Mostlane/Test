@@ -1936,7 +1936,38 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
    before `async function ensureSchema(db)`) + a full pre-patched fallback file
    (3,128 lines, tail `//# sourceMappingURL=po-worker.js.map`). Live PO worker was
    the bundled build fetched via the Cloudflare connector (read-only) on 13 Aug.
-2. **SiteLog** — repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk;
+2. **SiteLog — MIGRATING IN-PORTAL (Aug 2026, Stage 1 done).** Like the PO
+   system, the SiteLog BACKEND now runs INSIDE `mostlane-api`:
+   **`worker/src/routes/sitelog-api.js`** is a faithful port of the standalone
+   `Mostlane/SiteLog worker.js` (3184 lines) with `env.DB`→**`env.SITELOG_DB`**
+   and `env.ADMIN_SECRET`→**`env.SITELOG_ADMIN_SECRET`**. It exports `handle()`
+   (the full API router) + `sweepAutoClose()` (the daily open-visit auto-close,
+   folded into mostlane-api's 5-min cron, gated `if(env.SITELOG_DB)` + hourly).
+   The **SiteLog D1 (`sitelog`, id 1e891155-…) is bound as `SITELOG_DB`** in
+   `worker/wrangler.toml` (so Workers Builds binds it automatically). Data was
+   NOT moved (stays in sitelog-db; that DB also holds unrelated legacy PO tables
+   — leave them alone).
+   - **Stage 1 (LIVE): portal reads SiteLog locally.** `routes/sitelog.js`
+     (admin proxy) and `routes/costing.js` (`sitelogAdminFetch` → /job-costing +
+     /admin, `pushSiteToSiteLog` → /bulk-add-sites) now call `sitelogApi.handle()`
+     in-process instead of fetching api.site-log.co.uk — **no round-trip, no
+     1042, no HMAC bridge for reads**. All paths **fail soft**: if `SITELOG_DB`
+     is unbound OR the local module errors/returns non-ok, they fall back to the
+     remote `api.site-log.co.uk` fetch (the standalone worker still runs). So the
+     scanner + old worker are UNTOUCHED and everything is reversible.
+   - **Stage 2 (TODO — scanner cutover):** move the **`api.site-log.co.uk`
+     custom domain** off the standalone worker onto `mostlane-api` (index.js host-
+     dispatches `url.hostname==="api.site-log.co.uk"` → `sitelogApi.handle`; inert
+     until the domain moves). Then add the scanner's other bindings to
+     mostlane-api: **`DOCS_BUCKET`** (R2, site-document files) + secret
+     **`GOOGLE_MAPS_KEY`** (travel/geocode) — NOT needed for Stage 1 (job-costing
+     reads pre-stored travel). Switch the standalone worker off; revert = move the
+     domain back. Scanner front-end (site-log.co.uk GitHub Pages, QR codes,
+     deviceToken model) is unchanged throughout — only its API base host moves.
+   - **Stage 3 (TODO):** rebuild admin.html/documents as portal pages
+     (FullAccess-gated) reading SITELOG_DB directly.
+   HISTORICAL (standalone worker, still the live scanner backend until Stage 2):
+   repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk;
    worker `worker.js` = **manual paste**, not auto-deployed; commit to
    Mostlane/SiteLog `main` as source-of-truth). Worker api.site-log.co.uk
    (secret ADMIN_SECRET = admin PIN + PORTAL_BRIDGE_SECRET matching mostlane-api;
