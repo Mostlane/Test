@@ -56,6 +56,20 @@
     <p class="muted" style="margin:0;">This page needs <b>Full Access</b>. Ask an admin if you need it.</p>
   </div>
 
+  <!-- Default view -->
+  <div class="card" id="defaultCard" style="display:none;">
+    <h2 style="color:#003b82;font-size:16px;margin:0 0 4px;">⭐ Default — shown on every site</h2>
+    <p class="muted" style="margin:0;">These rules show on <b>any site that doesn't have its own</b>. Set them once and they cover everywhere.</p>
+    <label for="defRules">Default arrival rules <span class="muted" style="font-weight:400;">— one per line</span></label>
+    <textarea id="defRules" placeholder="e.g.&#10;Report to site office / person in charge on arrival&#10;Hi-vis and safety boots must be worn&#10;Follow all site signage and one-way systems&#10;Report any hazard or accident immediately"></textarea>
+    <div class="row-actions">
+      <button class="btn primary" id="saveDefBtn">Save default</button>
+      <button class="btn ghost" id="applyAllBtn" title="Copy the default onto every site that has no rules of its own">Apply to all sites without their own</button>
+    </div>
+    <div class="msg" id="defMsg"></div>
+    <p class="muted" id="coverage" style="margin:8px 0 0;"></p>
+  </div>
+
   <!-- List view -->
   <div class="card" id="listCard" style="display:none;">
     <input type="search" id="search" placeholder="Search sites…" autocomplete="off" />
@@ -68,11 +82,12 @@
     <h2 id="editTitle" style="color:#003b82;font-size:18px;margin:10px 0 2px;"></h2>
     <p class="muted" id="editSub" style="margin:0;"></p>
 
-    <label for="rules">Rules a visitor sees on arrival <span class="muted" style="font-weight:400;">— one per line</span></label>
-    <textarea id="rules" placeholder="e.g.&#10;Report to site office on arrival&#10;Hi-vis and hard hat must be worn&#10;Speed limit 5mph on site&#10;No smoking anywhere on site"></textarea>
+    <label for="rules">This site's own rules <span class="muted" style="font-weight:400;">— one per line. Leave blank to use the default.</span></label>
+    <textarea id="rules" placeholder="Leave blank to use the default rules, or type rules just for this site…"></textarea>
 
     <div class="row-actions">
       <button class="btn primary" id="saveBtn">Save</button>
+      <button class="btn ghost" id="useDefaultBtn" title="Clear this site's own rules so it uses the default">Use the default</button>
       <button class="btn ghost" id="cancelBtn">Cancel</button>
     </div>
     <div class="msg" id="editMsg"></div>
@@ -104,6 +119,7 @@ function isFull(){ return String(perms().FullAccess || "").toLowerCase() === "ye
 
 let SITES = [];
 let current = null;
+let DEFAULTS = [];   // default arrival rules (array of lines)
 
 function rulesToLines(raw){ return String(raw || "").split("\n").map(r => r.trim()).filter(Boolean); }
 
@@ -116,10 +132,10 @@ function renderList(){
   if (!rows.length){ $("list").innerHTML = '<p class="muted">'+(SITES.length?'No matches.':'No sites found.')+'</p>'; return; }
   $("list").innerHTML = rows.map(s => {
     const has = rulesToLines(s.site_rules).length;
+    const pill = has ? '<span class="pill has">'+has+' custom rule'+(has>1?'s':'')+'</span>'
+                     : '<span class="pill no">uses default</span>';
     return '<button type="button" class="site-row" data-id="'+esc(s.id)+'">' +
-      '<span class="nm">'+esc(s.site_name||'(unnamed)')+'</span>' +
-      '<span class="pill '+(has?'has':'no')+'">'+(has? (has+' rule'+(has>1?'s':'')) : 'no rules')+'</span>' +
-      '</button>';
+      '<span class="nm">'+esc(s.site_name||'(unnamed)')+'</span>' + pill + '</button>';
   }).join("");
   [].forEach.call($("list").querySelectorAll(".site-row"), b => b.onclick = () => openSite(b.dataset.id));
 }
@@ -128,19 +144,24 @@ function openSite(id){
   current = SITES.find(s => String(s.id) === String(id));
   if (!current) return;
   $("editTitle").textContent = current.site_name || "(unnamed)";
-  $("editSub").textContent = "Arrival rules shown on check-in";
   $("rules").value = rulesToLines(current.site_rules).join("\n");
   $("editMsg").textContent = "";
   updatePreview();
+  $("defaultCard").style.display = "none";
   $("listCard").style.display = "none";
   $("editCard").classList.remove("hide");
   window.scrollTo(0,0);
 }
-function closeSite(){ $("editCard").classList.add("hide"); $("listCard").style.display = ""; }
+function closeSite(){ $("editCard").classList.add("hide"); $("listCard").style.display = ""; $("defaultCard").style.display = ""; }
 
+// Preview shows this site's own rules, or (when blank) the default — exactly
+// like the scanner: a site with no rules of its own falls back to the default.
 function updatePreview(){
-  const lines = rulesToLines($("rules").value);
-  $("pvSite").textContent = current ? (current.site_name || "") : "";
+  const own = rulesToLines($("rules").value);
+  const usingDefault = own.length === 0;
+  const lines = usingDefault ? DEFAULTS : own;
+  $("editSub").textContent = usingDefault ? "This site uses the DEFAULT rules" : "This site has its own rules";
+  $("pvSite").textContent = (current ? (current.site_name || "") : "") + (usingDefault ? " · default rules" : "");
   if (lines.length){
     $("pvRules").innerHTML = lines.map(l => "<li>"+esc(l)+"</li>").join("");
     $("pvNone").classList.add("hide"); $("pvRules").classList.remove("hide");
@@ -162,7 +183,8 @@ async function save(){
     const out = await res.json().catch(()=>({}));
     if (res.ok && out.ok !== false){
       current.site_rules = siteRules;              // reflect locally
-      $("editMsg").className = "msg ok"; $("editMsg").textContent = "✓ Saved — visitors will see this on arrival.";
+      $("editMsg").className = "msg ok";
+      $("editMsg").textContent = siteRules ? "✓ Saved — visitors will see this on arrival." : "✓ Saved — this site now uses the default.";
       renderList();
     } else {
       $("editMsg").className = "msg err"; $("editMsg").textContent = (out && out.error) || "Couldn't save.";
@@ -173,9 +195,53 @@ async function save(){
   btn.disabled = false;
 }
 
+// ── Default rules ──────────────────────────────────────────────────────────
+function renderCoverage(total, withOwn){
+  const usingDefault = Math.max(0, (total||0) - (withOwn||0));
+  $("coverage").textContent = total ? (total + " sites — " + withOwn + " with their own rules, " + usingDefault + " on the default.") : "";
+}
+async function saveDefault(){
+  const btn = $("saveDefBtn"); btn.disabled = true;
+  $("defMsg").className = "msg"; $("defMsg").textContent = "Saving…";
+  const text = rulesToLines($("defRules").value).join("\n");
+  try {
+    const res = await authFetch(API + "/sitelog/arrival-config", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text })
+    });
+    const out = await res.json().catch(()=>({}));
+    if (res.ok && out.ok){ DEFAULTS = out.defaultRules || []; $("defMsg").className = "msg ok"; $("defMsg").textContent = "✓ Default saved."; renderList(); }
+    else { $("defMsg").className = "msg err"; $("defMsg").textContent = (out && out.error) || "Couldn't save the default."; }
+  } catch (e) { $("defMsg").className = "msg err"; $("defMsg").textContent = "Couldn't save — check your connection."; }
+  btn.disabled = false;
+}
+async function applyAll(){
+  if (!DEFAULTS.length){ $("defMsg").className = "msg err"; $("defMsg").textContent = "Set and save a default first."; return; }
+  const ok = window.MLUI ? await MLUI.confirm("Copy the default rules onto every site that has no rules of its own?", { title: "Apply default", okLabel: "Apply" }) : confirm("Copy the default onto every site without its own rules?");
+  if (!ok) return;
+  const btn = $("applyAllBtn"); btn.disabled = true;
+  $("defMsg").className = "msg"; $("defMsg").textContent = "Applying…";
+  try {
+    const res = await authFetch(API + "/sitelog/arrival-config/apply", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ onlyBlank: true })
+    });
+    const out = await res.json().catch(()=>({}));
+    if (res.ok && out.ok){ $("defMsg").className = "msg ok"; $("defMsg").textContent = "✓ Applied to " + (out.updated||0) + " site" + ((out.updated===1)?"":"s") + "."; await load(); }
+    else { $("defMsg").className = "msg err"; $("defMsg").textContent = (out && out.error) || "Couldn't apply."; }
+  } catch (e) { $("defMsg").className = "msg err"; $("defMsg").textContent = "Couldn't apply — check your connection."; }
+  btn.disabled = false;
+}
+
 async function load(){
   if (!isFull()){ $("gateMsg").style.display = ""; return; }
-  $("listCard").style.display = "";
+  $("defaultCard").style.display = ""; $("listCard").style.display = "";
+  // Default rules + coverage
+  try {
+    const cfg = await (await authFetch(API + "/sitelog/arrival-config", { cache: "no-store" })).json();
+    DEFAULTS = (cfg && cfg.defaultRules) || [];
+    $("defRules").value = DEFAULTS.join("\n");
+    renderCoverage(cfg.totalSites, cfg.sitesWithOwnRules);
+  } catch (e) {}
+  // Sites
   try {
     const res = await authFetch(API + "/sitelog/sites", { cache: "no-store" });
     const j = await res.json();
@@ -190,8 +256,11 @@ async function load(){
 $("search").addEventListener("input", renderList);
 $("rules").addEventListener("input", updatePreview);
 $("saveBtn").addEventListener("click", save);
+$("useDefaultBtn").addEventListener("click", () => { $("rules").value = ""; updatePreview(); });
 $("cancelBtn").addEventListener("click", closeSite);
 $("backToList").addEventListener("click", closeSite);
+$("saveDefBtn").addEventListener("click", saveDefault);
+$("applyAllBtn").addEventListener("click", applyAll);
 load();
 </script>
 </body>
