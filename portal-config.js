@@ -525,7 +525,7 @@
           if (document.getElementById("mlVaBar")) return;
           var bar = document.createElement("div");
           bar.id = "mlVaBar";
-          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);";
+          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);transform:translateZ(0);-webkit-transform:translateZ(0);";
           var who = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
           var lbl = document.createElement("span");
           lbl.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
