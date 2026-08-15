@@ -6691,6 +6691,30 @@ async function handle9(request, env, ctx, url, sess) {
     }
     return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
   }
+  if (path === "/delete-site" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes")
+      return error("Deleting a site needs Full Access", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || b.client || "") + "").toLowerCase().trim();
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    const existing = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
+    if (!existing) return error("Site not found", 404, env, request);
+    let name = siteNumber;
+    try {
+      name = JSON.parse(existing.data).siteName || siteNumber;
+    } catch {
+    }
+    await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).run();
+    const res = json({ success: true, deleted: siteNumber }, {}, env, request);
+    try {
+      res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} \u2014 "${name}"`));
+    } catch {
+    }
+    return res;
+  }
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
     let site = await request.json().catch(() => ({}));
     const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
@@ -18538,6 +18562,7 @@ var ROUTES = [
   ["*", "/get-sites", handle9],
   ["*", "/add-site", handle9],
   ["*", "/update-site", handle9],
+  ["*", "/delete-site", handle9],
   ["*", "/next-project-job-number", handle9],
   ["*", "/upload-image", handle9],
   ["*", "/customers", handle9],
