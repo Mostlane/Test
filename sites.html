@@ -402,6 +402,7 @@ Fob – Main Gate
       <div class="row-actions">
         <button class="btn" id="btnLocate" type="button">Locate Postcode</button>
         <button class="btn" id="btnSave" type="button">Save Changes</button>
+        <button class="btn" id="btnDelete" type="button" style="display:none;background:#c0392b;border-color:#c0392b;color:#fff;">🗑 Delete site</button>
       </div>
     </div>
   </div>
@@ -958,6 +959,12 @@ preferredOrder.forEach(k => {
   function openEdit(site){
   currentEditing = structuredClone(site || { client: filterEl.value || "retail", active:true, siteNumber: undefined });
     modalTitle.textContent = site?.siteNumber ? `Edit ${site.siteNumber}` : "Add Site";
+    // Delete is Full Access only and only for an EXISTING site (never on Add).
+    try {
+      var _p = JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}");
+      var delBtn = document.getElementById("btnDelete");
+      if (delBtn) delBtn.style.display = (site && site.siteNumber && _p.FullAccess === "Yes") ? "" : "none";
+    } catch(e) {}
     editClient.value = (currentEditing.client||"retail").toLowerCase();
     editNumber.value = currentEditing.siteNumber || "";
     // Project mode → hide Site Number, show Job Number
@@ -1114,6 +1121,29 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       alert(e.message || "Save failed");
       statusEl.textContent = "Ready";
     }
+  };
+
+  // Delete this site (Full Access only; button hidden otherwise + on Add).
+  const btnDelete = document.getElementById("btnDelete");
+  if (btnDelete) btnDelete.onclick = async ()=>{
+    const client = (currentEditing.client || editClient.value || "").toLowerCase();
+    const siteNumber = String(currentEditing.siteNumber || editNumber.value || "").trim();
+    const name = currentEditing.siteName || editName.value || siteNumber;
+    if (!siteNumber){ alert("This site has no number, so it can't be deleted here."); return; }
+    const msg = 'Permanently delete "'+name+'"?\n\nThis removes it from your sites for everyone. For a temporary hide, switch it to Inactive instead.';
+    const ok = window.MLUI ? await MLUI.confirm(msg, { title:"Delete site", okLabel:"Delete", danger:true }) : confirm(msg);
+    if (!ok) return;
+    try{
+      statusEl.textContent = "Deleting...";
+      const r = await fetch(`${workerBase}/delete-site?category=`+encodeURIComponent(client), {
+        method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ siteNumber, client })
+      });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok || j.success === false) throw new Error(j.error || ("Delete failed (HTTP "+r.status+")"));
+      await fetchAllSites();
+      closeEdit();
+      statusEl.textContent = "Ready";
+    }catch(e){ console.error(e); alert(e.message || "Delete failed"); statusEl.textContent = "Ready"; }
   };
 
   // Live image preview inside the edit modal.

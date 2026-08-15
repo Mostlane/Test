@@ -77,6 +77,7 @@ const ROUTES = [
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
+  ["*", "/delete-site", sites.handle],
   ["*", "/next-project-job-number", sites.handle],
   ["*", "/upload-image", sites.handle],
   ["*", "/customers",  sites.handle],

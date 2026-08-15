@@ -16,6 +16,7 @@
 
 import { json, error } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { permissionsFor } from "../lib/auth.js";
 
 const OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
 
@@ -37,6 +38,33 @@ export async function handle(request, env, ctx, url, sess) {
       ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
     }
     return json((rows || []).map(r => JSON.parse(r.data)), {}, env, request);
+  }
+
+  // Delete a site outright (Full Access only — destructive). Removes the row
+  // from the register; historical jobs/costing/compliance keyed by number/name
+  // are independent and untouched. Body { siteNumber, client } (client also
+  // accepted via ?category=). For an Inactive/temporary hide, use the Active
+  // toggle instead — this is a permanent removal.
+  if (path === "/delete-site" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes")
+      return error("Deleting a site needs Full Access", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || b.client || "") + "").toLowerCase().trim();
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    const existing = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+      .bind(db.tenantId, client, siteNumber).first();
+    if (!existing) return error("Site not found", 404, env, request);
+    let name = siteNumber;
+    try { name = JSON.parse(existing.data).siteName || siteNumber; } catch {}
+    await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+      .bind(db.tenantId, client, siteNumber).run();
+    // Human before→after note for the activity log.
+    const res = json({ success: true, deleted: siteNumber }, {}, env, request);
+    try { res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} — "${name}"`)); } catch {}
+    return res;
   }
 
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
