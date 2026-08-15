@@ -16,7 +16,7 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
-import { PdfDoc } from "../lib/pdf.js";
+import { PdfDoc, jpegInfo } from "../lib/pdf.js";
 
 const PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
 
@@ -63,6 +63,44 @@ function buildRaPdf(pages, ref) {
     pdf.image(u8, 0, RA_MARGIN_TOP, RA_PAGE_W, RA_CONTENT_H);              // inset: clear zone top & bottom
     if (ref) pdf.text(24, RA_PAGE_H - 11, String(ref), { size: 8, grey: true });
     pdf.text(RA_PAGE_W - 24, RA_PAGE_H - 11, `Page ${i + 1} of ${N}`, { size: 8, grey: true, alignRight: true });
+  });
+  return pdf.bytes();
+}
+
+// Build a CONTINUOUS PDF — one long page (chunked only if enormous) — from
+// unpadded image slices, so the filed My Documents copy scrolls exactly like
+// the live document in the H&S section (no A4 page breaks). The printable
+// download (/hs/doc/pdf) stays paginated A4.
+const RA_CONT_MAX_H = 13500;   // stay under the common 14400pt viewer cap per page
+function buildRaContinuousPdf(pages, ref) {
+  const slices = [];
+  for (const durl of (Array.isArray(pages) ? pages : []).slice(0, 60)) {
+    const m = /^data:image\/jpe?g;base64,(.+)$/.exec(String(durl || ""));
+    if (!m) continue;
+    let bin; try { bin = atob(m[1]); } catch { continue; }
+    const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const d = jpegInfo(u8);
+    if (!d || !d.w || !d.h) continue;
+    slices.push({ u8, hPt: RA_PAGE_W * (d.h / d.w) });   // drawn full-width (595pt)
+  }
+  if (!slices.length) return null;
+  // Greedy-pack slices into as few tall pages as the viewer cap allows —
+  // normally everything fits on ONE continuous page.
+  const M_TOP = 18, M_BOT = 26;
+  const chunks = [[]];
+  let h = 0;
+  for (const s of slices) {
+    if (h + s.hPt > RA_CONT_MAX_H - M_TOP - M_BOT && chunks[chunks.length - 1].length) { chunks.push([]); h = 0; }
+    chunks[chunks.length - 1].push(s); h += s.hPt;
+  }
+  let pdf = null;
+  chunks.forEach((chunk, ci) => {
+    const pageH = M_TOP + chunk.reduce((a, s) => a + s.hPt, 0) + M_BOT;
+    if (!pdf) pdf = new PdfDoc(RA_PAGE_W, pageH); else pdf.newPage(RA_PAGE_W, pageH);
+    let y = M_TOP;
+    for (const s of chunk) { pdf.image(s.u8, 0, y, RA_PAGE_W, s.hPt); y += s.hPt; }
+    if (ref) pdf.text(24, pageH - 10, String(ref), { size: 8, grey: true });
+    if (chunks.length > 1) pdf.text(RA_PAGE_W - 24, pageH - 10, `Part ${ci + 1} of ${chunks.length}`, { size: 8, grey: true, alignRight: true });
   });
   return pdf.bytes();
 }
@@ -167,7 +205,9 @@ export async function handle(request, env, ctx, url, sess) {
     const mine = reqs.find(s => s.username === target);
     if (!mine) return error(target === me ? "This document wasn't sent to you." : "That person isn't on this document's sign-off list.", 403, env, request);
     if (target !== me && mine.status !== "signed") return error("They haven't signed yet — a copy is only filed once signed.", 400, env, request);
-    const out = buildRaPdf(pages, row.ref);
+    // Continuous (no page breaks) when the client sends unpadded slices; the
+    // legacy paginated build remains for old cached pages posting A4 slices.
+    const out = b.continuous ? buildRaContinuousPdf(pages, row.ref) : buildRaPdf(pages, row.ref);
     if (!out) return error("No usable page images.", 400, env, request);
     const safe = String(row.ref || "risk-assessment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 60);
     const key = `staffdocs/${db.tenantId}/user/${target}/Risk Assessments/${Date.now()}-RA-${safe}.pdf`;

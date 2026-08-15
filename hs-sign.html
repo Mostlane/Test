@@ -9,7 +9,7 @@
   <script src="hs-rams-library.js?v=2"></script>
   <script src="hs-rams-render.js?v=2"></script>
   <script src="html2canvas.min.js?v=1"></script>
-  <script src="hs-pdf-capture.js?v=3"></script>
+  <script src="hs-pdf-capture.js?v=4"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -169,8 +169,8 @@
     g("fileMsg").textContent = "Filing a copy to your My Documents…";
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const pages = await window.HSCaptureDoc(el);
-        const r = await authFetch("/hs/doc/file-signed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: CUR_ID, pages }) }).then(r => r.json());
+        const pages = await window.HSCaptureDoc(el, { continuous: true });
+        const r = await authFetch("/hs/doc/file-signed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: CUR_ID, pages, continuous: true }) }).then(r => r.json());
         if (r && r.ok) {
           g("fileMsg").innerHTML = '✓ A copy has been saved to your <b>My Documents → Risk Assessments</b>.';
           return;

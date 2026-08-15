@@ -28,8 +28,12 @@
     });
     return set;
   }
-  window.HSCaptureDoc = async function (el) {
+  // opts.continuous: return EXACT-height slices with no white padding — the
+  // worker stacks them onto one long PDF page so the filed copy scrolls like
+  // the live document (no A4 breaks). Default (no opts) keeps A4 page slices.
+  window.HSCaptureDoc = async function (el, opts) {
     if (!window.html2canvas || !el) throw new Error("Capture unavailable");
+    const continuous = !!(opts && opts.continuous);
     await waitImgs(el);
     // Cap attachment images so each fits within one page's content area (never
     // split across pages). Applied before measuring/capturing; restored after.
@@ -64,8 +68,11 @@
         if (end < 0) end = limit;   // a single element taller than a page — must hard-cut
       }
       const h = Math.min(end - start, maxPageH);
-      const pc = document.createElement("canvas"); pc.width = cw; pc.height = maxPageH;
-      const cx = pc.getContext("2d"); cx.fillStyle = "#ffffff"; cx.fillRect(0, 0, cw, maxPageH);
+      // Continuous slices are cut to their EXACT height (no white padding), so
+      // the worker can stack them seamlessly; A4 pages keep the padded box.
+      const sliceH = continuous ? h : maxPageH;
+      const pc = document.createElement("canvas"); pc.width = cw; pc.height = sliceH;
+      const cx = pc.getContext("2d"); cx.fillStyle = "#ffffff"; cx.fillRect(0, 0, cw, sliceH);
       cx.drawImage(canvas, 0, start, cw, h, 0, 0, cw, h);
       pages.push(pc.toDataURL("image/jpeg", 0.82));
       start = end;
