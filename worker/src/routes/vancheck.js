@@ -551,6 +551,70 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
   }
 
+  // ── Compliance matrix: engineer × week (missed weeks), follows the PERSON ────
+  // Returns each driver's status per week over a range, keyed by USERNAME (not
+  // reg) so a driver's record stays whole even when they change vans. One query
+  // over the whole range. Missed = an expected driver with no check that week.
+  if (path === "/vancheck/matrix" && method === "GET") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const curWeek = mondayOf(londonDate());
+    const toRaw = url.searchParams.get("to");
+    const fromRaw = url.searchParams.get("from");
+    const to = mondayOf(toRaw && /^\d{4}-\d{2}-\d{2}$/.test(toRaw) ? toRaw : curWeek);
+    let from = mondayOf(fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : addDays(to, -7 * 7)); // default 8 columns
+    // Oldest → newest, capped so a huge range can't run away.
+    const weeks = [];
+    let w = from;
+    while (w <= to && weeks.length < 80) { weeks.push(w); w = addDays(w, 7); }
+    if (!weeks.length) weeks.push(to);
+    from = weeks[0];
+    const s = await getSettings(db);
+    const off = await getOptedOut(env, db.tenantId);
+    const names = await nameMap(env, db.tenantId);
+    const { results: drivers } = await db.prepare(
+      "SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
+    ).bind(db.tenantId).all();
+    const { results: checks } = await db.prepare(
+      "SELECT * FROM vehicle_checks WHERE tenant_id=? AND week>=? AND week<=?"
+    ).bind(db.tenantId, from, to).all();
+    const rowMap = {};
+    for (const u of drivers || []) {
+      rowMap[u.username] = {
+        username: u.username,
+        name: (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username,
+        vehicle: u.vehicle_assigned || "",
+        expected: !off.has(u.username),
+        cells: {},
+      };
+    }
+    for (const c of checks || []) {
+      let r = rowMap[c.username];
+      if (!r) r = rowMap[c.username] = { username: c.username, name: names[c.username] || c.username, vehicle: "", expected: false, cells: {} };
+      const sc = shapeCheck(c);
+      r.cells[c.week] = {
+        status: sc.skipped ? "skipped" : ((sc.defectCount > 0 || (sc.alerts && sc.alerts.length) || sc.safeToDrive === false) ? "issue" : "done"),
+        reg: c.vehicle || sc.vehicle || "",
+        issues: sc.defectCount || 0,
+        safe: sc.safeToDrive,
+        skipped: !!sc.skipped,
+      };
+    }
+    const rows = Object.values(rowMap).map(r => {
+      const cellWeeks = Object.keys(r.cells).sort();
+      const earliest = cellWeeks.length ? cellWeeks[0] : null;   // don't flag weeks before this driver's first record in range
+      for (const wk of weeks) {
+        if (r.cells[wk]) continue;
+        r.cells[wk] = (r.expected && wk <= curWeek && (earliest === null || wk >= earliest)) ? { status: "missed" } : { status: "none" };
+      }
+      // Simple per-row tallies for the range shown.
+      let done = 0, missed = 0, issue = 0;
+      for (const wk of weeks) { const st = r.cells[wk].status; if (st === "done") done++; else if (st === "missed") missed++; else if (st === "issue") issue++; }
+      return { ...r, done, missed, issue };
+    });
+    rows.sort((a, b) => (a.expected === b.expected ? a.name.localeCompare(b.name) : (a.expected ? -1 : 1)));
+    return json({ ok: true, weeks, currentWeek: curWeek, from, to, rows, dueAt: deadlineFor(curWeek, s) }, {}, env, request);
+  }
+
   // ── Admin: fire this week's reminder to everyone still outstanding, NOW ──────
   // On-demand version of the scheduled nudge (no time-gate, no weekly dedupe).
   if (path === "/vancheck/remind-now" && method === "POST") {

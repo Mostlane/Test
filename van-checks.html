@@ -63,12 +63,31 @@
     .remrow select, .remrow input { padding:8px; border:1px solid #ccd5dd; border-radius:8px; font-size:13.5px; font-family:inherit; }
     .remrow .rm { background:#fdecea; color:var(--bad); border:none; border-radius:8px; width:30px; height:34px; font-size:14px; cursor:pointer; }
     .ahint { font-size:12px; color:#6b7a90; margin:2px 0 8px; }
+    /* By-engineer compliance matrix */
+    table.mtx { border-collapse:separate; border-spacing:3px; font-size:12px; }
+    table.mtx th { font-weight:600; color:#5b6b7b; padding:2px 4px; text-align:center; white-space:nowrap; font-size:11px; }
+    table.mtx th.eng { text-align:left; position:sticky; left:0; background:#fff; z-index:2; min-width:130px; }
+    table.mtx td.eng { text-align:left; position:sticky; left:0; background:#fff; z-index:1; white-space:nowrap; padding-right:8px; font-weight:600; }
+    table.mtx td.eng .sub { font-weight:400; color:#8a97a6; font-size:11px; }
+    .mtx-cell { display:inline-block; width:24px; height:24px; border-radius:6px; border:1px solid rgba(0,0,0,.06); vertical-align:middle; }
+    td.mc { text-align:center; padding:0; }
+    td.mc .mtx-cell { cursor:default; }
+    td.mc.clk .mtx-cell { cursor:pointer; }
+    .mtx-cell.done { background:#22c55e; }
+    .mtx-cell.issue { background:#f59e0b; }
+    .mtx-cell.missed { background:#ef4444; }
+    .mtx-cell.skipped { background:#a5b4fc; }
+    .mtx-cell.none { background:#eef1f4; border-style:dashed; }
+    .mtx-key { display:inline-flex; align-items:center; gap:5px; color:#5b6b7b; }
+    .mtx-key .mtx-cell { width:15px; height:15px; border-radius:4px; }
+    .mtx-cur { color:#003366; font-weight:700; }
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" data-role="home" href="/vehicles.html" style="text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Checks</h1>
+    <button class="btn grey small" id="matrixBtn">📅 By engineer</button>
     <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
     <button class="btn grey small" id="customBtn">🧩 Custom checks</button>
     <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
@@ -93,6 +112,32 @@
       </table>
     </div>
     <p class="muted" style="font-size:12.5px;">Drivers = active users with a vehicle allocated in Users Admin. A Story Mode weekly check counts as done too. Drivers do their check at <b>/van-check.html</b> (🚐 tile / red alert). Switch a driver <b>Off</b> to take them out of the weekly cycle — no reminders, no home-screen prompt (they can still do a check if they want).</p>
+
+    <!-- By-engineer compliance matrix (missed weeks) -->
+    <div class="card hide" id="matrixCard">
+      <div class="row" style="justify-content:space-between; align-items:flex-start;">
+        <div>
+          <b style="font-size:15px;">📅 By engineer — weekly compliance</b>
+          <div class="muted" style="font-size:12px; margin-top:2px;" id="mtxRange">Loading…</div>
+        </div>
+        <div class="row" style="gap:6px;">
+          <button class="btn ghost small" id="mtxEarlier">← Earlier weeks</button>
+          <button class="btn grey small" id="mtxReset">Recent</button>
+          <button class="btn grey small" id="mtxClose">Hide</button>
+        </div>
+      </div>
+      <div class="row" style="gap:12px; margin:8px 0 4px; font-size:11.5px; flex-wrap:wrap;">
+        <span class="mtx-key"><span class="mtx-cell done"></span> Done</span>
+        <span class="mtx-key"><span class="mtx-cell issue"></span> Issue reported</span>
+        <span class="mtx-key"><span class="mtx-cell missed"></span> Missed</span>
+        <span class="mtx-key"><span class="mtx-cell skipped"></span> Skipped</span>
+        <span class="mtx-key"><span class="mtx-cell none"></span> Not required / no record</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="mtx" id="mtxTable"><tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody></table>
+      </div>
+      <p class="muted" style="font-size:11.5px; margin:8px 0 0;">Follows the person, not the van — a driver who changes vehicle keeps one row. Hover/tap a cell for the van used and any issue. “Missed” shows only for weeks a driver was assigned a van. Page back with <b>Earlier weeks</b>.</p>
+    </div>
   </div>
 
   <!-- View a check -->
@@ -352,10 +397,66 @@
   g("prevWk").onclick = () => { WEEK = addDays(WEEK, -7); load(); };
   g("nextWk").onclick = () => { WEEK = addDays(WEEK, 7); load(); };
 
+  // ── By-engineer compliance matrix (missed weeks) ────────────────────────────
+  let MTX_FROM = null, MTX_TO = null;
+  function mtxFmt(w) { return new Date(w + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
+  g("matrixBtn").onclick = () => {
+    const card = g("matrixCard");
+    const showing = !card.classList.contains("hide");
+    if (showing) { card.classList.add("hide"); return; }
+    card.classList.remove("hide");
+    if (!MTX_TO) { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7 * 7); }
+    loadMatrix();
+    card.scrollIntoView({ behavior:"smooth", block:"start" });
+  };
+  g("mtxClose").onclick = () => g("matrixCard").classList.add("hide");
+  g("mtxEarlier").onclick = () => { MTX_FROM = addDays(MTX_FROM, -7 * 8); loadMatrix(); };
+  g("mtxReset").onclick = () => { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7 * 7); loadMatrix(); };
+
+  async function loadMatrix() {
+    g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody>';
+    let d;
+    try { d = await authFetch("/vancheck/matrix?from=" + MTX_FROM + "&to=" + MTX_TO).then(r => r.json()); }
+    catch (e) { g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">Couldn’t load — try again.</td></tr></tbody>'; return; }
+    if (!d || !d.ok) { g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">' + esc((d && d.error) || "Couldn’t load.") + '</td></tr></tbody>'; return; }
+    renderMatrix(d);
+  }
+  function renderMatrix(d) {
+    const weeks = d.weeks || [];
+    g("mtxRange").textContent = weeks.length
+      ? ("w/c " + mtxFmt(weeks[0]) + " → w/c " + mtxFmt(weeks[weeks.length - 1]) + " · " + weeks.length + " weeks")
+      : "";
+    const head = "<tr><th class='eng'>Engineer</th>" + weeks.map(w =>
+      `<th class="${w === d.currentWeek ? "mtx-cur" : ""}" title="w/c ${esc(w)}">${esc(mtxFmt(w))}</th>`).join("") + "</tr>";
+    const titleFor = (c) => {
+      if (c.status === "done") return "Done" + (c.reg ? " · " + c.reg : "");
+      if (c.status === "issue") return (c.skipped ? "Skipped" : (c.safe === false ? "NOT safe to drive" : (c.issues ? c.issues + " issue" + (c.issues === 1 ? "" : "s") : "Issue"))) + (c.reg ? " · " + c.reg : "");
+      if (c.status === "skipped") return "Skipped" + (c.reg ? " · " + c.reg : "");
+      if (c.status === "missed") return "No check this week";
+      return "Not required / no record";
+    };
+    const body = (d.rows || []).length
+      ? d.rows.map(r => {
+          const sub = r.expected ? (r.vehicle ? esc(r.vehicle) : "") : "no van now";
+          const cells = weeks.map(w => {
+            const c = r.cells[w] || { status:"none" };
+            const clk = (c.status === "done" || c.status === "issue" || c.status === "skipped") && c.reg;
+            const attr = clk ? ` data-reg="${esc(c.reg)}"` : "";
+            return `<td class="mc${clk ? " clk" : ""}"${attr} title="${esc(titleFor(c))}"><span class="mtx-cell ${c.status}"></span></td>`;
+          }).join("");
+          const tally = r.missed ? ` <span class="sub" style="color:#b00020;">${r.missed} missed</span>` : "";
+          return `<tr><td class="eng">${esc(r.name)}${sub ? ` <span class="sub">· ${sub}</span>` : ""}${tally}</td>${cells}</tr>`;
+        }).join("")
+      : `<tr><td class="muted" style="padding:14px;">No drivers to show.</td></tr>`;
+    g("mtxTable").innerHTML = "<thead>" + head + "</thead><tbody>" + body + "</tbody>";
+  }
+
   document.addEventListener("click", e => {
     if (e.target.dataset.view) openCheck(e.target.dataset.view);
     if (e.target.dataset.toggle) toggleDriver(e.target.dataset.toggle, e.target.dataset.enable === "1");
     if (e.target.closest && e.target.closest("[data-img]")) { g("viewerImg").src = e.target.closest("[data-img]").dataset.img; g("viewer").classList.add("open"); }
+    const mc = e.target.closest && e.target.closest("td.mc.clk");
+    if (mc && mc.dataset.reg) location.href = "/vehicle-checks.html?reg=" + encodeURIComponent(mc.dataset.reg);
   });
 
   function openCheck(username) {
