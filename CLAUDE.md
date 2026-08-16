@@ -1382,7 +1382,11 @@ contractor's tasks** (everyone else's untouched). The workbook's VBA
 **AI draft-from-a-document (Aug 2026):** a "🤖 Draft from a document" button on
 programmes.html opens a modal that reads a **specification/scope (PDF via PDF.js,
 .xlsx via xlsx-lite, or text/CSV) ENTIRELY IN THE BROWSER** (nothing uploaded —
-only the extracted text is sent) — or the office can paste the scope. **POST
+only the extracted text is sent) — or the office can paste the scope. A **"Notes
+for the AI"** box passes free-text steering (who's subcontracting which trade,
+timing/sequencing constraints) that is sent as **prioritised INSTRUCTIONS** ahead
+of the document in the prompt (`notes` in the POST body; the endpoint accepts a
+notes-only draft with no document too). **POST
 /prog/ai-draft** (Programmes|FullAccess) calls the **Anthropic Messages API**
 (`env.ANTHROPIC_API_KEY` secret; model `env.ANTHROPIC_MODEL` || `claude-opus-5`)
 with a **forced tool** (`build_programme` input_schema → structured JSON: title,
