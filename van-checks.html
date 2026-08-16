@@ -276,6 +276,11 @@
     </div>
   </div>
 
+  <!-- Full-Access: change a grid cell -->
+  <div class="overlay" id="mtxEditModal">
+    <div class="panel" style="max-width:420px;" id="mtxEditBody"></div>
+  </div>
+
   <div class="viewer" id="viewer" onclick="this.classList.remove('open')"><img id="viewerImg"></div>
 
 <script>
@@ -287,7 +292,7 @@
     return fetch(API + path, opts);
   }
   const fmtDT = s => s ? new Date(s).toLocaleString("en-GB", { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "—";
-  let WEEK = null, DATA = null, ME = null;
+  let WEEK = null, DATA = null, ME = null, IS_FULL = false;
 
   function mondayOf(d) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7)); return x.toISOString().slice(0, 10); }
   function addDays(d, n) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
@@ -297,6 +302,7 @@
       const me = await authFetch("/auth/me").then(r => r.json());
       if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Vehicles === "Yes")) { alert("This page needs Vehicles access."); location.href = "/main.html"; return; }
       ME = me.user;
+      IS_FULL = ME.FullAccess === "Yes";
       g("settingsBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
       g("hoTplBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
     } catch (e) { location.href = "/main.html"; return; }
@@ -410,7 +416,7 @@
   g("nextWk").onclick = () => { WEEK = addDays(WEEK, 7); load(); };
 
   // ── By-engineer compliance matrix (missed weeks) ────────────────────────────
-  let MTX_FROM = null, MTX_TO = null;
+  let MTX_FROM = null, MTX_TO = null, MTX_EDIT = null;
   function mtxFmt(w) { return new Date(w + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
   // Default view starts at LAST week (last week + this week) — page further back
   // with "Earlier weeks". Keeps historic weeks (before people were doing checks)
@@ -455,9 +461,12 @@
           const sub = r.expected ? (r.vehicle ? esc(r.vehicle) : "") : "no van now";
           const cells = weeks.map(w => {
             const c = r.cells[w] || { status:"none" };
-            const clk = (c.status === "done" || c.status === "issue" || c.status === "skipped") && c.reg;
-            const attr = clk ? ` data-reg="${esc(c.reg)}"` : "";
-            return `<td class="mc${clk ? " clk" : ""}"${attr} title="${esc(titleFor(c))}"><span class="mtx-cell ${c.status}"></span></td>`;
+            const openable = (c.status === "done" || c.status === "issue" || c.status === "skipped") && c.reg;
+            const editable = IS_FULL && (c.status === "skipped" || c.status === "missed" || c.status === "none") && w <= d.currentWeek;
+            const clk = openable || editable;
+            const attr = `data-user="${esc(r.username)}" data-name="${esc(r.name)}" data-week="${esc(w)}" data-status="${esc(c.status)}"${c.reg ? ` data-reg="${esc(c.reg)}"` : ""}`;
+            const tip = titleFor(c) + (editable ? " — tap to change" : (openable ? " — tap to open" : ""));
+            return `<td class="mc${clk ? " clk" : ""}" ${attr} title="${esc(tip)}"><span class="mtx-cell ${c.status}"></span></td>`;
           }).join("");
           const tally = r.missed ? ` <span class="sub" style="color:#b00020;">${r.missed} missed</span>` : "";
           return `<tr><td class="eng">${esc(r.name)}${sub ? ` <span class="sub">· ${sub}</span>` : ""}${tally}</td>${cells}</tr>`;
@@ -471,7 +480,55 @@
     if (e.target.dataset.toggle) toggleDriver(e.target.dataset.toggle, e.target.dataset.enable === "1");
     if (e.target.closest && e.target.closest("[data-img]")) { g("viewerImg").src = e.target.closest("[data-img]").dataset.img; g("viewer").classList.add("open"); }
     const mc = e.target.closest && e.target.closest("td.mc.clk");
-    if (mc && mc.dataset.reg) location.href = "/vehicle-checks.html?reg=" + encodeURIComponent(mc.dataset.reg);
+    if (mc) {
+      const st = mc.dataset.status;
+      if (IS_FULL && (st === "skipped" || st === "missed" || st === "none")) openMtxEdit(mc.dataset);
+      else if (mc.dataset.reg) location.href = "/vehicle-checks.html?reg=" + encodeURIComponent(mc.dataset.reg);
+    }
+  });
+
+  // ── Full-Access: change a grid cell (skip / remove skip), with a double-check ─
+  function openMtxEdit(ds) {
+    const st = ds.status, reg = ds.reg || "", who = ds.user, name = ds.name || who, week = ds.week;
+    const wLabel = mtxFmt(week);
+    const statusText = { done:"Done", issue:"Issue reported", missed:"Missed — no check", skipped:"Skipped (not required)", none:"No record" }[st] || st;
+    let actions = "";
+    if (reg && (st === "done" || st === "issue" || st === "skipped"))
+      actions += `<button class="btn ghost" data-mact="open">📋 Open van history${reg ? " (" + esc(reg) + ")" : ""}</button>`;
+    if (st === "skipped")
+      actions += `<button class="btn" data-mact="unskip">↩ Remove skip — make this week due again</button>`;
+    else if (st === "missed" || st === "none")
+      actions += `<button class="btn" style="background:#6366f1;" data-mact="skip">⏭ Mark as Skipped — not required this week</button>`;
+    g("mtxEditBody").innerHTML =
+      `<h3 style="margin:0 0 4px;">${esc(name)}</h3>`
+      + `<p class="muted" style="margin:0 0 12px; font-size:13px;">Week commencing <b>${esc(wLabel)}</b> · currently <b>${esc(statusText)}</b></p>`
+      + `<div style="display:flex; flex-direction:column; gap:8px;">${actions}`
+      + `<button class="btn grey" data-mact="cancel">Cancel</button></div>`
+      + `<p class="msg" id="mtxEditMsg"></p>`;
+    MTX_EDIT = { who, week, name, wLabel, reg };
+    g("mtxEditModal").classList.add("open");
+  }
+  g("mtxEditModal").addEventListener("click", async e => {
+    if (e.target === g("mtxEditModal")) { g("mtxEditModal").classList.remove("open"); return; }
+    const act = e.target.dataset.mact; if (!act || !MTX_EDIT) return;
+    if (act === "cancel") { g("mtxEditModal").classList.remove("open"); return; }
+    if (act === "open") { if (MTX_EDIT.reg) location.href = "/vehicle-checks.html?reg=" + encodeURIComponent(MTX_EDIT.reg); return; }
+    const { who, week, name, wLabel } = MTX_EDIT;
+    const isSkip = act === "skip";
+    const q = isSkip
+      ? `Mark ${name}'s van check for w/c ${wLabel} as SKIPPED (not required)? It will no longer show as missed.`
+      : `Remove the skip for ${name}, w/c ${wLabel}? Their van check becomes due again for that week.`;
+    const ok = window.MLUI ? await MLUI.confirm(q, { title: isSkip ? "Skip this week?" : "Remove skip?", okLabel: isSkip ? "Yes, skip it" : "Yes, remove", danger: !isSkip }) : confirm(q);
+    if (!ok) return;
+    const msg = g("mtxEditMsg"); if (msg) { msg.className = "msg"; msg.textContent = "Saving…"; }
+    try {
+      const r = await authFetch("/vancheck/grid-set", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ username: who, week, action: act }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "Couldn't save");
+      g("mtxEditModal").classList.remove("open");
+      loadMatrix();
+      if (week === WEEK) load();   // keep the weekly table in step if it's the same week
+    } catch (err) { if (msg) { msg.className = "msg err"; msg.textContent = err.message; } }
   });
 
   function openCheck(username) {

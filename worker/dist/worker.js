@@ -11770,6 +11770,41 @@ async function handle17(request, env, ctx, url, sess) {
     await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
     return json({ ok: true, week: wk }, {}, env, request);
   }
+  if (path === "/vancheck/grid-set" && method === "POST") {
+    if (!await isAdmin()) return error("Full Access only.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    const action = String(b.action || "");
+    if (!who) return error("username required", 400, env, request);
+    const wk = mondayOf3(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
+    let it = {};
+    if (existing) {
+      try {
+        it = existing.items ? JSON.parse(existing.items) : {};
+      } catch {
+      }
+    }
+    if (action === "skip") {
+      if (existing && !it.skipped) return json({ ok: false, error: "That week has a real check \u2014 open it instead." }, {}, env, request);
+      const veh = await db.prepare("SELECT vehicle_assigned FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, who).first();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const items = JSON.stringify({ skipped: true, skippedBy: me, skippedAt: now, source: "skip" });
+      await db.prepare(`
+        INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
+      `).bind(db.tenantId, who, wk, veh && veh.vehicle_assigned || "", now, null, items, "Skipped by " + me).run();
+      return json({ ok: true, week: wk, status: "skipped" }, {}, env, request);
+    }
+    if (action === "unskip") {
+      if (!existing) return json({ ok: true, week: wk, status: "none" }, {}, env, request);
+      if (!it.skipped) return json({ ok: false, error: "That is a real check, not a skip." }, {}, env, request);
+      await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
+      return json({ ok: true, week: wk, status: "none" }, {}, env, request);
+    }
+    return error("Unknown action", 400, env, request);
+  }
   if (path === "/vancheck/driver-toggle" && method === "POST") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
