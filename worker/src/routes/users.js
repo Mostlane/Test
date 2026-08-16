@@ -365,6 +365,7 @@ const PERMISSION_KEYS = [
   "AssetAdmin",    // plant & equipment admin: sees ALL transfer documents + All Assets
   "ThemeColour",     // personalisation: may pick a portal colour theme
   "ThemeBackground", // personalisation: may change the menu background
+  "Programmes",      // job programmes: build/issue/share programmes of works
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly

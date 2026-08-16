@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Programme builder — Mostlane</title>
+  <script src="/portal-config.js?v=5"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <link rel="manifest" href="/manifest.json">
+  <script src="auth.js"></script>
+  <script src="/programme-gantt.js?v=1"></script>
+  <style>
+    :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f6;color:#1f2a37;}
+    header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 60px 14px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    header.page h1{font-size:18px;margin:0;flex:1;min-width:150px;}
+    .ml-back{color:#fff;text-decoration:none;font-weight:600;font-size:15px;}
+    .btn{border:none;border-radius:9px;padding:9px 13px;font:600 13px 'Segoe UI';cursor:pointer;text-decoration:none;display:inline-block;}
+    .btn.primary{background:#003b82;color:#fff;} .btn.grey{background:rgba(255,255,255,.16);color:#fff;}
+    .btn.ghost{background:#eef2f6;color:#1f2a44;} .btn.danger{background:#dc2626;color:#fff;} .btn.green{background:#16a34a;color:#fff;}
+    .wrap{max-width:1400px;margin:0 auto;padding:14px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 3px 12px rgba(0,30,80,.06);}
+    label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:8px 0 3px;}
+    input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:14px;background:#fff;}
+    .meta{display:grid;grid-template-columns:2fr 1.4fr 1.4fr .9fr 1fr;gap:10px;}
+    @media(max-width:820px){.meta{grid-template-columns:1fr 1fr;}}
+    .statusline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:10px;}
+    .revpill{background:#dcfce7;color:#166534;border-radius:999px;padding:3px 10px;font-weight:700;font-size:12px;}
+    .revpill.none{background:#fef3c7;color:#92400e;}
+    #saveState{font-weight:600;}
+    .muted{color:var(--muted);font-size:12.5px;}
+    .backdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;z-index:60;}
+    .backdrop.open{display:flex;}
+    .modal{background:#fff;border-radius:16px;max-width:640px;width:100%;padding:18px 20px;}
+    .modal.wide{max-width:1100px;}
+    .modal h2{margin:0 0 8px;color:var(--navy);font-size:18px;}
+    .mfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:14px;flex-wrap:wrap;}
+    .sharerow{border-top:1px solid #f0f3f7;padding:9px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;}
+    .sharerow code{background:#f1f5f9;border-radius:6px;padding:2px 6px;font-size:11.5px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .sharerow .off{color:#b91c1c;font-weight:700;}
+    .sug{border-top:1px solid #f0f3f7;padding:10px 0;}
+    .sug h4{margin:0 0 3px;font-size:14px;color:var(--navy);}
+    .sug .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;margin-left:6px;}
+    .pill.open{background:#fef3c7;color:#92400e;} .pill.incorporated{background:#dcfce7;color:#166534;} .pill.dismissed{background:#e2e8f0;color:#475569;}
+    .difflist{font-size:13px;line-height:1.6;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;}
+    .difflist b.add{color:#166534;} .difflist b.rem{color:#b91c1c;} .difflist b.chg{color:#92400e;}
+    .empty{text-align:center;color:var(--muted);padding:22px 8px;}
+    @media print{header.page,.card.metaCard .btn,.statusline,#suggCard{display:none!important;} body{background:#fff;} .card{border:none;box-shadow:none;}}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="programmes.html" title="Back">‹ Back</a>
+    <h1 id="pageTitle">Programme builder</h1>
+    <button class="btn grey" onclick="openShare()">🔗 Share</button>
+    <button class="btn grey" onclick="window.print()">🖨 Print</button>
+    <button class="btn green" onclick="openIssue()">📤 Issue</button>
+  </header>
+
+  <div class="wrap">
+    <div class="card metaCard">
+      <div class="meta">
+        <div><label>Programme title</label><input id="fTitle" placeholder="e.g. Store 0125 refit — programme of works"></div>
+        <div><label>Client</label><input id="fClient" placeholder="Client name"></div>
+        <div><label>Site / project</label><input id="fSite" placeholder="Site"></div>
+        <div><label>Job ref</label><input id="fRef" placeholder="Ref"></div>
+        <div><label>Programme start</label><input id="fStart" type="date"></div>
+      </div>
+      <label>Notes (shown to the client under the programme)</label>
+      <textarea id="fNotes" rows="2" placeholder="Assumptions, exclusions, access requirements…"></textarea>
+      <div class="statusline">
+        <span id="revState" class="revpill none">Not issued yet</span>
+        <span class="muted">The client only ever sees <b>issued</b> revisions — your draft edits stay private until you press Issue.</span>
+        <span id="saveState" style="margin-left:auto;"></span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:10px;"><div id="gantt"></div></div>
+
+    <div class="card" id="suggCard">
+      <h3 style="margin:0 0 4px;color:var(--navy);font-size:16px;" id="suggestions">💬 Client suggestions</h3>
+      <p class="muted" style="margin:0 0 6px;">When a client suggests changes on a share link, their copy lands here. Your issued programme is never altered by a suggestion.</p>
+      <div id="sugList"><div class="empty">None yet.</div></div>
+    </div>
+  </div>
+
+  <!-- Share links -->
+  <div class="backdrop" id="shareBackdrop">
+    <div class="modal">
+      <h2>🔗 Share with a client</h2>
+      <p class="muted" style="margin:0;">They get a live page in their browser — no file, revocable any time. It shows the latest <b>issued</b> revision.</p>
+      <label>Who is this link for?</label><input id="shLabel" placeholder="e.g. John @ Southern Co-op">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+        <div><label>Access code (optional)</label><input id="shCode" placeholder="e.g. 4821" maxlength="20"></div>
+        <div><label>Expires after (days)</label><input id="shDays" type="number" min="0" placeholder="never"></div>
+        <div><label>Suggestions</label><select id="shSuggest"><option value="1">Allowed</option><option value="0">View only</option></select></div>
+      </div>
+      <div class="mfoot"><button class="btn ghost" onclick="closeM('shareBackdrop')">Close</button>
+        <button class="btn primary" onclick="createShare()">Create link</button></div>
+      <div id="shareList"></div>
+    </div>
+  </div>
+
+  <!-- Issue -->
+  <div class="backdrop" id="issueBackdrop">
+    <div class="modal">
+      <h2>📤 Issue this programme</h2>
+      <p class="muted" style="margin:0;">Freezes the current draft as the next official revision. Every share link updates to show it. Issued revisions can never be changed.</p>
+      <label>Revision note (optional)</label><input id="issueNote" placeholder="e.g. First issue / Client comments incorporated">
+      <div class="mfoot"><button class="btn ghost" onclick="closeM('issueBackdrop')">Cancel</button>
+        <button class="btn green" onclick="doIssue()">Issue now</button></div>
+    </div>
+  </div>
+
+  <!-- Suggestion review -->
+  <div class="backdrop" id="sugBackdrop">
+    <div class="modal wide">
+      <h2 id="sugTitle">Suggestion</h2>
+      <div id="sugDiff" class="difflist"></div>
+      <div style="border:1px solid var(--line);border-radius:12px;padding:8px;"><div id="sugGantt"></div></div>
+      <div class="mfoot">
+        <button class="btn ghost" onclick="closeM('sugBackdrop')">Close</button>
+        <button class="btn danger" onclick="decideSug('dismissed')">Dismiss</button>
+        <button class="btn grey" style="background:#475569;" onclick="loadSugIntoDraft()">↪ Load into my draft</button>
+        <button class="btn green" onclick="decideSug('incorporated')">✓ Mark incorporated</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+  const tok = () => localStorage.getItem("mostlaneToken");
+  function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+  const g = id => document.getElementById(id);
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  function closeM(id){ g(id).classList.remove("open"); }
+  function openM(id){ g(id).classList.add("open"); }
+
+  // Gate: Programmes | FullAccess (server enforces too).
+  (function(){
+    try{
+      const p = JSON.parse(localStorage.getItem("mostlanePermissions")||"{}");
+      if(p.FullAccess!=="Yes" && p.Programmes!=="Yes") location.replace("main.html");
+    }catch(e){}
+  })();
+
+  let PROG_ID = new URLSearchParams(location.search).get("id") || "";
+  let DATA = MLProg.blank();
+  let REVISIONS = [], SHARES = [], SUGGESTIONS = [];
+  let saveTimer = null, dirty = false, saving = false;
+
+  function fmtDT(iso){ if(!iso) return ""; const d=new Date(iso); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); }
+
+  function metaToData(){
+    DATA.title = g("fTitle").value; DATA.client = g("fClient").value;
+    DATA.site = g("fSite").value; DATA.ref = g("fRef").value;
+    DATA.startDate = g("fStart").value || DATA.startDate; DATA.notes = g("fNotes").value;
+  }
+  function dataToMeta(){
+    g("fTitle").value = DATA.title||""; g("fClient").value = DATA.client||"";
+    g("fSite").value = DATA.site||""; g("fRef").value = DATA.ref||"";
+    g("fStart").value = DATA.startDate||""; g("fNotes").value = DATA.notes||"";
+    g("pageTitle").textContent = DATA.title ? DATA.title : "Programme builder";
+  }
+
+  // EVERYTHING AUTOSAVES — debounced ~1s, keepalive flush on pagehide.
+  function queueSave(){ dirty = true; g("saveState").textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000); }
+  async function save(){
+    if(saving){ queueSave(); return; }
+    saving = true; dirty = false;
+    metaToData();
+    try{
+      const r = await aFetch("/prog/save",{method:"POST",body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA})});
+      const d = await r.json();
+      if(d.ok){
+        if(!PROG_ID){ PROG_ID = d.id; history.replaceState(null,"","programme-edit.html?id="+encodeURIComponent(PROG_ID)); }
+        g("saveState").textContent = "Saved ✓";
+      } else g("saveState").textContent = "⚠ "+(d.error||"Couldn't save");
+    }catch(e){ g("saveState").textContent = "⚠ Offline — retrying"; setTimeout(queueSave, 4000); }
+    saving = false;
+    if(dirty) queueSave();
+  }
+  window.addEventListener("pagehide", ()=>{
+    if(!dirty && !saveTimer) return;
+    metaToData();
+    try{ fetch(API+"/prog/save",{method:"POST",keepalive:true,headers:{Authorization:"Bearer "+tok(),"Content-Type":"application/json"},
+      body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA})}); }catch(e){}
+  });
+  ["fTitle","fClient","fSite","fRef","fStart","fNotes"].forEach(id => g(id).addEventListener("input", queueSave));
+  g("fStart").addEventListener("change", ()=>{ metaToData(); drawGantt(); queueSave(); });
+
+  function drawGantt(){ MLProg.render(g("gantt"), DATA, { editable:true, onChange: queueSave }); }
+
+  function renderRevState(){
+    const el = g("revState");
+    if(REVISIONS.length){ el.className="revpill"; el.textContent = "Rev "+REVISIONS[0].rev+" issued "+fmtDT(REVISIONS[0].issued_at); }
+    else { el.className="revpill none"; el.textContent = "Not issued yet"; }
+  }
+
+  function renderSuggestions(){
+    const host = g("sugList");
+    if(!SUGGESTIONS.length){ host.innerHTML = '<div class="empty">None yet.</div>'; return; }
+    host.innerHTML = SUGGESTIONS.map(s => `
+      <div class="sug">
+        <h4>${esc(s.author||"Client")} <span class="pill ${esc(s.status)}">${esc(s.status)}</span></h4>
+        <div class="muted">${fmtDT(s.created_at)} · against Rev ${esc(s.rev||"—")}${s.note?` · “${esc(s.note)}”`:""}</div>
+        <div style="margin-top:6px;"><button class="btn ghost" onclick="openSug('${esc(s.id)}')">Review</button></div>
+      </div>`).join("");
+  }
+
+  let SUG = null;
+  async function openSug(id){
+    const d = await (await aFetch("/prog/suggestion?id="+encodeURIComponent(id))).json();
+    if(!d.ok){ alert(d.error||"Couldn't open that suggestion."); return; }
+    SUG = d;
+    g("sugTitle").textContent = "Suggestion from "+(d.author||"Client")+(d.rev?" (against Rev "+d.rev+")":"");
+    // Diff vs the revision it was made against (fall back to the current draft).
+    let base = DATA;
+    const rev = REVISIONS.find(r => r.rev === d.rev);
+    if(rev){
+      const rd = await (await aFetch("/prog/revision?id="+encodeURIComponent(rev.id))).json();
+      if(rd.ok) base = rd.data;
+    }
+    const df = MLProg.diff(base, d.data);
+    const bits = [];
+    if(d.note) bits.push(`💬 <i>“${esc(d.note)}”</i>`);
+    df.added.forEach(n => bits.push(`<b class="add">＋ Added</b> ${esc(n)}`));
+    df.removed.forEach(n => bits.push(`<b class="rem">✕ Removed</b> ${esc(n)}`));
+    df.changed.forEach(c => bits.push(`<b class="chg">✎ Changed</b> ${esc(c.name)} — ${esc(c.what)}`));
+    g("sugDiff").innerHTML = bits.length ? bits.join("<br>") : "No row changes — see their copy below.";
+    MLProg.render(g("sugGantt"), d.data, { editable:false });
+    openM("sugBackdrop");
+  }
+  async function decideSug(status){
+    if(!SUG) return;
+    await aFetch("/prog/suggestion/decide",{method:"POST",body:JSON.stringify({id:SUG.id,status})});
+    closeM("sugBackdrop"); await reload();
+  }
+  async function loadSugIntoDraft(){
+    if(!SUG) return;
+    const ok = window.MLUI ? await MLUI.confirm("Replace your current draft with the client's copy? Your issued revisions are untouched — this only changes the working draft.",{title:"Load suggestion",okLabel:"Load it"}) : confirm("Replace your draft with the client's copy?");
+    if(!ok) return;
+    DATA = SUG.data || DATA;
+    dataToMeta(); drawGantt(); queueSave();
+    closeM("sugBackdrop");
+    alert("Loaded — review it, then Issue when you're happy.");
+  }
+
+  function openShare(){
+    if(!REVISIONS.length){ alert("Issue the programme first — a share link shows the latest issued revision."); return; }
+    renderShares(); openM("shareBackdrop");
+  }
+  function renderShares(){
+    const host = g("shareList");
+    if(!SHARES.length){ host.innerHTML=""; return; }
+    host.innerHTML = "<label style='margin-top:14px;'>Existing links</label>" + SHARES.map(s => {
+      const url = location.origin + "/programme-view.html?t=" + s.token;
+      const state = s.revoked ? '<span class="off">revoked</span>'
+        : (s.expires_at && new Date(s.expires_at) < new Date()) ? '<span class="off">expired</span>'
+        : `${s.opens||0} opens${s.last_opened_at?" · last "+fmtDT(s.last_opened_at):""}`;
+      return `<div class="sharerow">
+        <b>${esc(s.label||"Link")}</b>
+        ${s.access_code?`<span class="muted">code ${esc(s.access_code)}</span>`:""}
+        <span class="muted">${state}</span>
+        ${s.revoked?"":`<code>${esc(url)}</code>
+        <button class="btn ghost" onclick="copyLink('${esc(s.token)}')">Copy</button>
+        <button class="btn danger" onclick="revokeShare('${esc(s.token)}')">Revoke</button>`}
+      </div>`;
+    }).join("");
+  }
+  async function createShare(){
+    const r = await aFetch("/prog/share",{method:"POST",body:JSON.stringify({
+      progId: PROG_ID, label: g("shLabel").value.trim(),
+      accessCode: g("shCode").value.trim(), expiresDays: Number(g("shDays").value)||0,
+      allowSuggest: g("shSuggest").value === "1",
+    })});
+    const d = await r.json();
+    if(!d.ok){ alert(d.error||"Couldn't create the link."); return; }
+    await reload(); renderShares();
+    copyLink(d.token);
+  }
+  function copyLink(token){
+    const url = location.origin + "/programme-view.html?t=" + token;
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(
+      ()=>alert("Link copied — send it to your client 📋"),
+      ()=>prompt("Copy this link:", url));
+  }
+  async function revokeShare(token){
+    const ok = window.MLUI ? await MLUI.confirm("Switch this link off? The client will no longer be able to open it.",{title:"Revoke link",okLabel:"Revoke",danger:true}) : confirm("Revoke this link?");
+    if(!ok) return;
+    await aFetch("/prog/share/revoke",{method:"POST",body:JSON.stringify({token})});
+    await reload(); renderShares();
+  }
+
+  function openIssue(){ openM("issueBackdrop"); }
+  async function doIssue(){
+    clearTimeout(saveTimer); await save();
+    const r = await aFetch("/prog/issue",{method:"POST",body:JSON.stringify({id:PROG_ID, note:g("issueNote").value.trim()})});
+    const d = await r.json();
+    closeM("issueBackdrop");
+    if(!d.ok){ alert(d.error||"Couldn't issue."); return; }
+    await reload();
+    alert("Issued as Rev "+d.rev+" ✓ — every share link now shows it.");
+  }
+
+  async function reload(){
+    if(!PROG_ID) return;
+    const d = await (await aFetch("/prog/one?id="+encodeURIComponent(PROG_ID))).json();
+    if(!d.ok){ alert(d.error||"Programme not found"); location.href="programmes.html"; return; }
+    DATA = d.prog.data && d.prog.data.sections ? d.prog.data : MLProg.blank();
+    REVISIONS = d.revisions||[]; SHARES = d.shares||[]; SUGGESTIONS = d.suggestions||[];
+    dataToMeta(); drawGantt(); renderRevState(); renderSuggestions();
+  }
+
+  (async function boot(){
+    if(PROG_ID) await reload();
+    else { dataToMeta(); drawGantt(); }
+    if(location.hash === "#suggestions") g("suggestions").scrollIntoView();
+  })();
+</script>
+</body>
+</html>

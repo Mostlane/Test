@@ -775,3 +775,33 @@ CREATE TABLE IF NOT EXISTS compliance_review (
   updated_at TEXT,
   PRIMARY KEY (tenant_id, scheme, code, type)
 );
+
+-- Job programmes — programme of works built in the portal, shared with clients
+-- by revocable link. The client only ever sees ISSUED revisions (immutable);
+-- their "suggest changes" copies land in programme_suggestions.
+CREATE TABLE IF NOT EXISTS job_programmes (
+  id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
+  data TEXT,                            -- working draft JSON (sections/rows/dates)
+  created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS programme_revisions (
+  id TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT,
+  rev TEXT,                             -- A, B, C … (drawing-revision style)
+  data TEXT,                            -- frozen copy of the draft at issue time
+  note TEXT, issued_by TEXT, issued_at TEXT
+);
+CREATE TABLE IF NOT EXISTS programme_shares (
+  token TEXT PRIMARY KEY,               -- random hex; the client link's secret
+  tenant_id TEXT, prog_id TEXT, label TEXT,
+  access_code TEXT, expires_at TEXT, revoked INTEGER DEFAULT 0,
+  allow_suggest INTEGER DEFAULT 1, created_by TEXT, created_at TEXT,
+  last_opened_at TEXT, opens INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS programme_suggestions (
+  id TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, token TEXT,
+  rev TEXT,                             -- the revision the client marked up
+  author TEXT, note TEXT,
+  data TEXT,                            -- the client's full edited copy
+  status TEXT DEFAULT 'open',           -- open | incorporated | dismissed
+  created_at TEXT, decided_by TEXT, decided_at TEXT
+);

@@ -139,3 +139,11 @@
   Cache-Control: no-cache
 /compliance-review.html
   Cache-Control: no-cache
+/programmes.html
+  Cache-Control: no-cache
+/programme-edit.html
+  Cache-Control: no-cache
+/programme-view.html
+  Cache-Control: no-cache
+/programme-gantt.js
+  Cache-Control: no-cache

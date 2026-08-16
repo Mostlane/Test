@@ -46,6 +46,7 @@ import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op co
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
+import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -105,6 +106,7 @@ const ROUTES = [
   ["*", "/po",         po.handle],       // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
+  ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -349,6 +351,11 @@ const PUBLIC_ROUTES = [
   // H&S document attachments (appended to the PDF) streamed for <img>/links —
   // signed URL, verified in-handler.
   ["GET", "/hs/attachment"],
+  // Client programme share links (programme-view.html, no portal login) —
+  // share token + optional access code verified in-handler; serves only
+  // ISSUED revisions, never the working draft.
+  ["POST", "/prog/shared/open"],
+  ["POST", "/prog/shared/suggest"],
 ];
 
 function isPublic(method, pathname) {
