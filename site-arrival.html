@@ -10,7 +10,7 @@
   <style>
     :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --green:#0e7a3b; }
     html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
-    .shell{ max-width:680px; margin:18px auto 48px; padding:0 12px; }
+    .shell{ max-width:820px; margin:18px auto 48px; padding:0 12px; }
     .card{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
     header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
     h1{ margin:0; font-size:20px; color:var(--ml-blue); }
@@ -27,19 +27,51 @@
     .btn{ border:none; border-radius:11px; padding:13px 18px; font-size:15px; font-weight:700; cursor:pointer; }
     .btn.primary{ background:linear-gradient(90deg,#003b82,#1e66ff); color:#fff; }
     .btn.ghost{ background:#eef1f5; color:#334155; }
-    .row-actions{ display:flex; gap:10px; margin-top:14px; }
-    .preview{ margin-top:16px; border:1px dashed #c7d2e0; border-radius:14px; padding:16px; background:#f7fafc; }
-    .preview .ph{ font-size:12px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#8a94a2; margin-bottom:10px; }
-    .preview .rules-card{ background:#fff; border-radius:14px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,.08); max-width:340px; margin:0 auto; }
-    .preview .rules-card h3{ margin:0 0 4px; font-size:16px; color:#003b82; }
-    .preview .rules-card .site{ font-size:13px; color:#6b7280; margin-bottom:12px; }
-    .preview ul{ margin:0; padding-left:20px; }
-    .preview li{ margin:6px 0; font-size:14px; }
-    .preview .none{ color:#8a94a2; font-size:13px; font-style:italic; }
+    .btn.sync{ background:#eaf1ff; color:#1e4fd6; }
+    .row-actions{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
     .msg{ font-size:13px; margin-top:10px; min-height:16px; }
     .msg.ok{ color:#0e7a3b; } .msg.err{ color:#b91c1c; }
     .hide{ display:none; }
     a.linkback{ text-decoration:none; color:var(--ml-blue); font-size:14px; cursor:pointer; }
+
+    /* Contractor / Visitor toggle */
+    .seg{ display:inline-flex; background:#eef1f5; border-radius:999px; padding:4px; gap:4px; }
+    .seg-b{ border:0; background:transparent; padding:9px 16px; border-radius:999px; font-weight:700; font-size:14px; color:#64748b; cursor:pointer; }
+    .seg-b.active{ background:#fff; color:#003b82; box-shadow:0 1px 5px rgba(0,0,0,.14); }
+    .seg-b.visitor.active{ color:#7a5b00; }
+    .varnote{ font-size:12.5px; color:var(--muted); margin-top:8px; }
+
+    /* Editor + preview side by side on desktop */
+    .split{ display:flex; gap:18px; align-items:flex-start; }
+    .split .col-edit{ flex:1; min-width:0; }
+    .split .col-prev{ flex:none; width:300px; }
+    @media (max-width:760px){ .split{ display:block; } .split .col-prev{ width:auto; margin-top:16px; } }
+
+    .prev-h{ font-size:12px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#8a94a2; margin-bottom:8px; text-align:center; }
+
+    /* Phone render example */
+    .phone{ width:280px; max-width:100%; margin:0 auto; background:#0f172a; border-radius:34px; padding:10px; box-shadow:0 18px 40px rgba(0,0,0,.28); }
+    .phone-top{ height:22px; display:flex; align-items:center; justify-content:center; }
+    .phone-top .phone-dot{ width:52px; height:6px; border-radius:999px; background:#334155; }
+    .phone-scr{ background:#eef2f7; border-radius:24px; padding:14px 13px 16px; min-height:430px; display:flex; flex-direction:column; }
+    .arr-appbar{ display:flex; align-items:center; justify-content:space-between; font-weight:800; color:#003b82; font-size:15px; }
+    .arr-badge{ font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:999px; background:#e3edff; color:#1e4fd6; }
+    .arr-badge.visitor{ background:#fff3cd; color:#7a5b00; }
+    .arr-you{ margin-top:14px; font-size:11.5px; color:#8a94a2; text-transform:uppercase; letter-spacing:.4px; font-weight:700; }
+    .arr-site{ font-size:18px; font-weight:800; color:#0f172a; margin:1px 0 12px; line-height:1.2; }
+    .arr-card{ background:#fff; border-radius:14px; padding:13px 14px; box-shadow:0 4px 14px rgba(0,0,0,.07); }
+    .arr-welcome{ font-size:13.5px; font-weight:800; color:#003b82; margin-bottom:6px; }
+    .arr-rules{ margin:0; padding-left:18px; }
+    .arr-rules li{ margin:5px 0; font-size:13px; color:#1f2937; }
+    .arr-none{ font-size:12.5px; color:#9aa3af; font-style:italic; }
+    .arr-docs{ margin-top:11px; border-top:1px dashed #e2e8f0; padding-top:10px; }
+    .arr-docs-h{ font-size:11.5px; font-weight:800; color:#7a5b00; margin-bottom:6px; }
+    .arr-doc{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:#334155; margin:5px 0; }
+    .arr-check{ width:15px; height:15px; border:2px solid #c7ccd3; border-radius:4px; flex:none; }
+    .arr-cta{ margin-top:14px; border:0; border-radius:12px; padding:12px; font-size:15px; font-weight:800; color:#fff; background:linear-gradient(90deg,#0e7a3b,#12a150); }
+    .arr-foot{ margin-top:9px; text-align:center; font-size:11px; color:#94a3b8; }
+
+    /* Documents manager */
     .doc-item{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #eef1f5; }
     .doc-item:last-child{ border-bottom:none; }
     .doc-ic{ font-size:20px; flex:none; }
@@ -65,7 +97,12 @@
       <h1>📋 Site Arrival Setup</h1>
       <a class="ml-back" data-role="home" href="main.html">← Menu</a>
     </header>
-    <p class="muted" style="margin:0;">Set what someone sees when they arrive and check in on a site with SiteLog. These <b>arrival rules</b> are shown to <b>everyone</b> who scans in there — your engineers and visiting subcontractors alike — right on the check-in screen.</p>
+    <p class="muted" style="margin:0 0 12px;">Set what someone sees when they arrive and check in on a site with SiteLog. There are <b>two screens</b> — one for <b>contractors</b> (your engineers &amp; subcontractors) and one for <b>visitors</b>. On arrival the scanner asks which they are and shows the matching screen; your registered engineers always get the Contractor one.</p>
+    <div class="seg" id="variantSeg" role="tablist" aria-label="Which screen to edit">
+      <button type="button" class="seg-b contractor active" data-v="contractor">👷 Contractor</button>
+      <button type="button" class="seg-b visitor" data-v="visitor">🧑‍💼 Visitor</button>
+    </div>
+    <div class="varnote" id="varNote">You're editing the <b>Contractor</b> screen.</div>
   </div>
 
   <div class="card" id="gateMsg" style="display:none;">
@@ -74,16 +111,25 @@
 
   <!-- Default view -->
   <div class="card" id="defaultCard" style="display:none;">
-    <h2 style="color:#003b82;font-size:16px;margin:0 0 4px;">⭐ Default — shown on every site</h2>
-    <p class="muted" style="margin:0;">These rules show on <b>any site that doesn't have its own</b>. Set them once and they cover everywhere.</p>
-    <label for="defRules">Default arrival rules <span class="muted" style="font-weight:400;">— one per line</span></label>
-    <textarea id="defRules" placeholder="e.g.&#10;Report to site office / person in charge on arrival&#10;Hi-vis and safety boots must be worn&#10;Follow all site signage and one-way systems&#10;Report any hazard or accident immediately"></textarea>
-    <div class="row-actions">
-      <button class="btn primary" id="saveDefBtn">Save default</button>
-      <button class="btn ghost" id="applyAllBtn" title="Copy the default onto every site that has no rules of its own">Apply to all sites without their own</button>
+    <div class="split">
+      <div class="col-edit">
+        <h2 id="defTitle" style="color:#003b82;font-size:16px;margin:0 0 4px;">⭐ Default Contractor screen — shown on every site</h2>
+        <p class="muted" style="margin:0;">These rules show on <b>any site that doesn't have its own</b>. Set them once and they cover everywhere.</p>
+        <label for="defRules">Default arrival rules <span class="muted" style="font-weight:400;">— one per line</span></label>
+        <textarea id="defRules" placeholder="e.g.&#10;Report to site office / person in charge on arrival&#10;Hi-vis and safety boots must be worn&#10;Follow all site signage and one-way systems&#10;Report any hazard or accident immediately"></textarea>
+        <div class="row-actions">
+          <button class="btn primary" id="saveDefBtn">Save default</button>
+          <button class="btn ghost" id="applyAllBtn" title="Copy this default onto every site that has no rules of its own">Apply to all sites without their own</button>
+          <button class="btn sync" id="syncDefBtn" title="Make the Visitor default a copy of the Contractor default">⇩ Copy Contractor → Visitor</button>
+        </div>
+        <div class="msg" id="defMsg"></div>
+        <p class="muted" id="coverage" style="margin:8px 0 0;"></p>
+      </div>
+      <div class="col-prev">
+        <div class="prev-h">Screen render example</div>
+        <div id="defPreview"></div>
+      </div>
     </div>
-    <div class="msg" id="defMsg"></div>
-    <p class="muted" id="coverage" style="margin:8px 0 0;"></p>
   </div>
 
   <!-- List view -->
@@ -98,30 +144,29 @@
     <h2 id="editTitle" style="color:#003b82;font-size:18px;margin:10px 0 2px;"></h2>
     <p class="muted" id="editSub" style="margin:0;"></p>
 
-    <label for="rules">This site's own rules <span class="muted" style="font-weight:400;">— one per line. Leave blank to use the default.</span></label>
-    <textarea id="rules" placeholder="Leave blank to use the default rules, or type rules just for this site…"></textarea>
+    <div class="split" style="margin-top:6px;">
+      <div class="col-edit">
+        <label for="rules" id="rulesLabel">This site's own Contractor rules <span class="muted" style="font-weight:400;">— one per line. Leave blank to use the default.</span></label>
+        <textarea id="rules" placeholder="Leave blank to use the default rules, or type rules just for this site…"></textarea>
 
-    <div class="row-actions">
-      <button class="btn primary" id="saveBtn">Save</button>
-      <button class="btn ghost" id="useDefaultBtn" title="Clear this site's own rules so it uses the default">Use the default</button>
-      <button class="btn ghost" id="cancelBtn">Cancel</button>
-    </div>
-    <div class="msg" id="editMsg"></div>
-
-    <div class="preview">
-      <div class="ph">What the visitor sees</div>
-      <div class="rules-card">
-        <h3>Welcome — please note:</h3>
-        <div class="site" id="pvSite"></div>
-        <ul id="pvRules"></ul>
-        <div class="none hide" id="pvNone">No arrival rules set for this site yet.</div>
+        <div class="row-actions">
+          <button class="btn primary" id="saveBtn">Save</button>
+          <button class="btn ghost" id="useDefaultBtn" title="Clear this site's own rules so it uses the default">Use the default</button>
+          <button class="btn sync" id="syncSiteBtn" title="Make this site's Visitor screen a copy of its Contractor screen">⇩ Copy Contractor → Visitor</button>
+          <button class="btn ghost" id="cancelBtn">Cancel</button>
+        </div>
+        <div class="msg" id="editMsg"></div>
+      </div>
+      <div class="col-prev">
+        <div class="prev-h">Screen render example</div>
+        <div id="pvMount"></div>
       </div>
     </div>
 
     <!-- Per-site documents -->
     <div id="docsSection" style="margin-top:20px;border-top:1px solid #eef1f5;padding-top:16px;">
       <h3 style="color:#003b82;font-size:15px;margin:0 0 3px;">📎 Documents for this site</h3>
-      <p class="muted" style="margin:0 0 12px;">RAMS, inductions, drawings — shown to anyone who checks in here. Tick <b>Must acknowledge</b> to make them confirm they've read it first.</p>
+      <p class="muted" style="margin:0 0 12px;">RAMS, inductions, drawings — shown to anyone who checks in here (both screens). Tick <b>Must acknowledge</b> to make them confirm they've read it first.</p>
       <div id="docList"><p class="muted">Loading documents…</p></div>
       <div class="docup">
         <div class="docup-row">
@@ -157,12 +202,71 @@ function authFetch(url, init = {}){
 function perms(){ try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch { return {}; } }
 function isFull(){ return String(perms().FullAccess || "").toLowerCase() === "yes"; }
 
+const TYPES = {
+  contractor: { key:"contractor", label:"Contractor", emoji:"👷", col:"site_rules" },
+  visitor:    { key:"visitor",    label:"Visitor",    emoji:"🧑‍💼", col:"site_rules_visitor" }
+};
 let SITES = [];
 let current = null;
-let DEFAULTS = [];   // default arrival rules (array of lines)
+let currentDocs = [];
+let variant = "contractor";
+let DEF = { contractor: [], visitor: [] };
+function T(){ return TYPES[variant]; }
+function colFor(v){ return TYPES[v].col; }
 
 function rulesToLines(raw){ return String(raw || "").split("\n").map(r => r.trim()).filter(Boolean); }
 
+// ── The phone render example ────────────────────────────────────────────────
+function phoneHTML(o){
+  const t = TYPES[o.type];
+  const badge = '<span class="arr-badge '+t.key+'">'+t.emoji+' '+t.label+'</span>';
+  const lines = o.lines || [];
+  const rules = lines.length
+    ? '<ul class="arr-rules">'+lines.map(l=>'<li>'+esc(l)+'</li>').join("")+'</ul>'
+    : '<div class="arr-none">No '+t.label.toLowerCase()+' rules'+(o.usingDefault?' (and no default set)':' for this site')+' yet.</div>';
+  const ackDocs = (o.docs || []).filter(d => Number(d.require_ack));
+  const docsHTML = ackDocs.length
+    ? '<div class="arr-docs"><div class="arr-docs-h">📄 Please read &amp; acknowledge</div>'
+        + ackDocs.map(d => '<label class="arr-doc"><span class="arr-check"></span>'+esc(d.title||d.file_name)+'</label>').join("")
+      + '</div>'
+    : "";
+  return '<div class="phone"><div class="phone-top"><span class="phone-dot"></span></div>'
+    + '<div class="phone-scr">'
+      + '<div class="arr-appbar"><span>SiteLog</span>'+badge+'</div>'
+      + '<div class="arr-you">You’ve arrived at</div>'
+      + '<div class="arr-site">'+esc(o.siteName||"This site")+'</div>'
+      + '<div class="arr-card"><div class="arr-welcome">Welcome — please note:</div>'+rules+docsHTML+'</div>'
+      + '<button class="arr-cta">Check in</button>'
+      + '<div class="arr-foot">'+(o.foot||"")+'</div>'
+    + '</div></div>';
+}
+
+// ── Variant toggle ──────────────────────────────────────────────────────────
+function captureDefault(){ DEF[variant] = rulesToLines($("defRules").value); }
+function captureSite(){ if (current) current[T().col] = rulesToLines($("rules").value).join("\n"); }
+function setVariant(v){
+  if (v === variant || !TYPES[v]) return;
+  captureDefault(); captureSite();       // keep unsaved edits when switching
+  variant = v;
+  [].forEach.call($("variantSeg").querySelectorAll(".seg-b"), b => b.classList.toggle("active", b.dataset.v === v));
+  reflectVariant();
+}
+function reflectVariant(){
+  const t = T();
+  $("varNote").innerHTML = 'You’re editing the <b>'+t.label+'</b> screen.';
+  $("defTitle").textContent = '⭐ Default '+t.label+' screen — shown on every site';
+  $("applyAllBtn").textContent = 'Apply to all sites without their own';
+  $("defRules").value = (DEF[variant] || []).join("\n");
+  if (current){
+    $("rulesLabel").innerHTML = "This site's own "+t.label+" rules <span class=\"muted\" style=\"font-weight:400;\">— one per line. Leave blank to use the default.</span>";
+    $("rules").value = rulesToLines(current[T().col]).join("\n");
+  }
+  renderList();
+  updateDefaultPreview();
+  updatePreview();
+}
+
+// ── Sites list ──────────────────────────────────────────────────────────────
 function renderList(){
   const q = ($("search").value || "").trim().toLowerCase();
   const rows = SITES
@@ -171,8 +275,8 @@ function renderList(){
     .sort((a,b) => String(a.site_name||"").localeCompare(String(b.site_name||"")));
   if (!rows.length){ $("list").innerHTML = '<p class="muted">'+(SITES.length?'No matches.':'No sites found.')+'</p>'; return; }
   $("list").innerHTML = rows.map(s => {
-    const has = rulesToLines(s.site_rules).length;
-    const pill = has ? '<span class="pill has">'+has+' custom rule'+(has>1?'s':'')+'</span>'
+    const has = rulesToLines(s[T().col]).length;
+    const pill = has ? '<span class="pill has">'+has+' '+T().label.toLowerCase()+' rule'+(has>1?'s':'')+'</span>'
                      : '<span class="pill no">uses default</span>';
     return '<button type="button" class="site-row" data-id="'+esc(s.id)+'">' +
       '<span class="nm">'+esc(s.site_name||'(unnamed)')+'</span>' + pill + '</button>';
@@ -183,8 +287,10 @@ function renderList(){
 function openSite(id){
   current = SITES.find(s => String(s.id) === String(id));
   if (!current) return;
+  currentDocs = [];
   $("editTitle").textContent = current.site_name || "(unnamed)";
-  $("rules").value = rulesToLines(current.site_rules).join("\n");
+  $("rules").value = rulesToLines(current[T().col]).join("\n");
+  $("rulesLabel").innerHTML = "This site's own "+T().label+" rules <span class=\"muted\" style=\"font-weight:400;\">— one per line. Leave blank to use the default.</span>";
   $("editMsg").textContent = "";
   updatePreview();
   loadDocs();
@@ -192,6 +298,30 @@ function openSite(id){
   $("listCard").style.display = "none";
   $("editCard").classList.remove("hide");
   window.scrollTo(0,0);
+}
+function closeSite(){ current = null; $("editCard").classList.add("hide"); $("listCard").style.display = ""; $("defaultCard").style.display = ""; }
+
+// Edit-card preview: this site's active-variant screen (own rules else default) + its compulsory docs.
+function updatePreview(){
+  if (!current) return;
+  const own = rulesToLines(current[T().col]);
+  const usingDefault = own.length === 0;
+  const lines = usingDefault ? DEF[variant] : own;
+  $("editSub").textContent = usingDefault
+    ? ("This site uses the DEFAULT " + T().label.toLowerCase() + " rules")
+    : ("This site has its own " + T().label.toLowerCase() + " rules");
+  $("pvMount").innerHTML = phoneHTML({
+    type: variant, siteName: current.site_name, lines, usingDefault, docs: currentDocs,
+    foot: usingDefault ? ("Using the default " + T().label.toLowerCase() + " screen")
+                       : ("This site's own " + T().label.toLowerCase() + " screen")
+  });
+}
+// Default-card preview: the default active-variant screen (generic site).
+function updateDefaultPreview(){
+  $("defPreview").innerHTML = phoneHTML({
+    type: variant, siteName: "Any site", lines: DEF[variant] || [], usingDefault: true,
+    foot: "The default " + T().label.toLowerCase() + " screen"
+  });
 }
 
 // ── Per-site documents ──────────────────────────────────────────────────────
@@ -202,6 +332,8 @@ async function loadDocs(){
   try {
     const j = await (await authFetch(API + "/sitelog/site-documents/list?site=" + encodeURIComponent(current.site_name), { cache:"no-store" })).json();
     const docs = (j && j.documents) || [];
+    currentDocs = docs;
+    updatePreview();
     if (!docs.length){ $("docList").innerHTML = '<p class="muted" style="margin:0;">No documents yet for this site.</p>'; return; }
     $("docList").innerHTML = docs.map(d => {
       const ack = Number(d.require_ack) ? '<span class="ackchip">must ack · '+(d.ack_count||0)+'</span>' : '';
@@ -238,7 +370,7 @@ async function toggleAck(id, currentlyOn){
   loadDocs();
 }
 async function deleteDoc(id){
-  const ok = window.MLUI ? await MLUI.confirm("Delete this document? Visitors will no longer see it.", { title:"Delete document", okLabel:"Delete", danger:true }) : confirm("Delete this document?");
+  const ok = window.MLUI ? await MLUI.confirm("Delete this document? People will no longer see it on arrival.", { title:"Delete document", okLabel:"Delete", danger:true }) : confirm("Delete this document?");
   if (!ok) return;
   await authFetch(API + "/sitelog/site-documents/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).catch(()=>{});
   loadDocs();
@@ -256,7 +388,7 @@ async function uploadDoc(){
   fd.append("title", $("docTitle").value.trim());
   fd.append("requireAck", $("docAck").checked ? "1" : "0");
   try {
-    const res = await authFetch(API + "/sitelog/site-documents/upload", { method:"POST", body: fd });   // multipart — let the browser set the boundary
+    const res = await authFetch(API + "/sitelog/site-documents/upload", { method:"POST", body: fd });
     const out = await res.json().catch(()=>({}));
     if (res.ok && out.ok){
       $("docMsg").className="msg ok"; $("docMsg").textContent="✓ Uploaded.";
@@ -268,40 +400,26 @@ async function uploadDoc(){
   } catch (e) { $("docMsg").className="msg err"; $("docMsg").textContent="Upload failed — check your connection."; }
   btn.disabled = false;
 }
-function closeSite(){ $("editCard").classList.add("hide"); $("listCard").style.display = ""; $("defaultCard").style.display = ""; }
 
-// Preview shows this site's own rules, or (when blank) the default — exactly
-// like the scanner: a site with no rules of its own falls back to the default.
-function updatePreview(){
-  const own = rulesToLines($("rules").value);
-  const usingDefault = own.length === 0;
-  const lines = usingDefault ? DEFAULTS : own;
-  $("editSub").textContent = usingDefault ? "This site uses the DEFAULT rules" : "This site has its own rules";
-  $("pvSite").textContent = (current ? (current.site_name || "") : "") + (usingDefault ? " · default rules" : "");
-  if (lines.length){
-    $("pvRules").innerHTML = lines.map(l => "<li>"+esc(l)+"</li>").join("");
-    $("pvNone").classList.add("hide"); $("pvRules").classList.remove("hide");
-  } else {
-    $("pvRules").innerHTML = ""; $("pvNone").classList.remove("hide");
-  }
-}
-
+// ── Save this site (both variants together) ─────────────────────────────────
 async function save(){
   if (!current) return;
+  captureSite();
   const btn = $("saveBtn"); btn.disabled = true;
   $("editMsg").className = "msg"; $("editMsg").textContent = "Saving…";
-  const siteRules = rulesToLines($("rules").value).join("\n");
+  const siteRules = current.site_rules || "";
+  const siteRulesVisitor = current.site_rules_visitor || "";
   try {
     const res = await authFetch(API + "/sitelog/update-site", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: current.id, siteName: current.site_name, radius: current.radius_m, siteRules, category: current.category })
+      body: JSON.stringify({ id: current.id, siteName: current.site_name, radius: current.radius_m, category: current.category, siteRules, siteRulesVisitor })
     });
     const out = await res.json().catch(()=>({}));
     if (res.ok && out.ok !== false){
-      current.site_rules = siteRules;              // reflect locally
       $("editMsg").className = "msg ok";
-      $("editMsg").textContent = siteRules ? "✓ Saved — visitors will see this on arrival." : "✓ Saved — this site now uses the default.";
-      renderList();
+      const own = rulesToLines(current[T().col]).length;
+      $("editMsg").textContent = own ? ("✓ Saved — this is the "+T().label.toLowerCase()+" arrival screen.") : ("✓ Saved — this site now uses the default "+T().label.toLowerCase()+" screen.");
+      renderList(); updatePreview();
     } else {
       $("editMsg").className = "msg err"; $("editMsg").textContent = (out && out.error) || "Couldn't save.";
     }
@@ -311,34 +429,54 @@ async function save(){
   btn.disabled = false;
 }
 
-// ── Default rules ──────────────────────────────────────────────────────────
-function renderCoverage(total, withOwn){
-  const usingDefault = Math.max(0, (total||0) - (withOwn||0));
-  $("coverage").textContent = total ? (total + " sites — " + withOwn + " with their own rules, " + usingDefault + " on the default.") : "";
+// Site sync: this site's Visitor screen mirrors its Contractor screen (contractor master).
+async function syncSite(){
+  if (!current) return;
+  captureSite();
+  const ok = window.MLUI ? await MLUI.confirm("Copy this site's Contractor screen onto its Visitor screen? The visitor rules will be replaced.", { title:"Sync visitor to contractor", okLabel:"Copy & save" }) : confirm("Copy Contractor screen onto Visitor for this site?");
+  if (!ok) return;
+  current.site_rules_visitor = current.site_rules || "";
+  setVariant("visitor");
+  await save();
 }
+
+// ── Default rules ───────────────────────────────────────────────────────────
+function renderCoverage(total, withOwn, withOwnVisitor){
+  const w = variant === "visitor" ? (withOwnVisitor||0) : (withOwn||0);
+  const usingDefault = Math.max(0, (total||0) - w);
+  $("coverage").textContent = total ? (total + " sites — " + w + " with their own " + T().label.toLowerCase() + " rules, " + usingDefault + " on the default.") : "";
+}
+let COV = { total:0, withOwn:0, withOwnVisitor:0 };
 async function saveDefault(){
+  captureDefault();
   const btn = $("saveDefBtn"); btn.disabled = true;
   $("defMsg").className = "msg"; $("defMsg").textContent = "Saving…";
-  const text = rulesToLines($("defRules").value).join("\n");
+  const body = variant === "visitor" ? { visitor: DEF.visitor } : { contractor: DEF.contractor };
   try {
     const res = await authFetch(API + "/sitelog/arrival-config", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text })
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     });
     const out = await res.json().catch(()=>({}));
-    if (res.ok && out.ok){ DEFAULTS = out.defaultRules || []; $("defMsg").className = "msg ok"; $("defMsg").textContent = "✓ Default saved."; renderList(); }
+    if (res.ok && out.ok){
+      DEF.contractor = out.contractor || DEF.contractor;
+      DEF.visitor = out.visitor || DEF.visitor;
+      $("defMsg").className = "msg ok"; $("defMsg").textContent = "✓ Default "+T().label.toLowerCase()+" screen saved.";
+      updateDefaultPreview(); renderList();
+    }
     else { $("defMsg").className = "msg err"; $("defMsg").textContent = (out && out.error) || "Couldn't save the default."; }
   } catch (e) { $("defMsg").className = "msg err"; $("defMsg").textContent = "Couldn't save — check your connection."; }
   btn.disabled = false;
 }
 async function applyAll(){
-  if (!DEFAULTS.length){ $("defMsg").className = "msg err"; $("defMsg").textContent = "Set and save a default first."; return; }
-  const ok = window.MLUI ? await MLUI.confirm("Copy the default rules onto every site that has no rules of its own?", { title: "Apply default", okLabel: "Apply" }) : confirm("Copy the default onto every site without its own rules?");
+  captureDefault();
+  if (!(DEF[variant] || []).length){ $("defMsg").className = "msg err"; $("defMsg").textContent = "Set and save a default first."; return; }
+  const ok = window.MLUI ? await MLUI.confirm("Copy the default "+T().label.toLowerCase()+" rules onto every site that has no "+T().label.toLowerCase()+" rules of its own?", { title: "Apply default", okLabel: "Apply" }) : confirm("Copy the default onto every site without its own?");
   if (!ok) return;
   const btn = $("applyAllBtn"); btn.disabled = true;
   $("defMsg").className = "msg"; $("defMsg").textContent = "Applying…";
   try {
     const res = await authFetch(API + "/sitelog/arrival-config/apply", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ onlyBlank: true })
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ onlyBlank: true, which: variant })
     });
     const out = await res.json().catch(()=>({}));
     if (res.ok && out.ok){ $("defMsg").className = "msg ok"; $("defMsg").textContent = "✓ Applied to " + (out.updated||0) + " site" + ((out.updated===1)?"":"s") + "."; await load(); }
@@ -346,18 +484,35 @@ async function applyAll(){
   } catch (e) { $("defMsg").className = "msg err"; $("defMsg").textContent = "Couldn't apply — check your connection."; }
   btn.disabled = false;
 }
+// Default sync: Visitor default mirrors Contractor default (contractor master).
+async function syncDefault(){
+  captureDefault();
+  const ok = window.MLUI ? await MLUI.confirm("Copy the Contractor default onto the Visitor default? The visitor default will be replaced.", { title:"Sync visitor to contractor", okLabel:"Copy & save" }) : confirm("Copy Contractor default onto Visitor default?");
+  if (!ok) return;
+  DEF.visitor = (DEF.contractor || []).slice();
+  try {
+    const res = await authFetch(API + "/sitelog/arrival-config", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ visitor: DEF.visitor })
+    });
+    const out = await res.json().catch(()=>({}));
+    if (res.ok && out.ok){ DEF.visitor = out.visitor || DEF.visitor; }
+  } catch (e) {}
+  setVariant("visitor");
+  $("defMsg").className = "msg ok"; $("defMsg").textContent = "✓ Visitor default now mirrors Contractor.";
+}
 
 async function load(){
   if (!isFull()){ $("gateMsg").style.display = ""; return; }
   $("defaultCard").style.display = ""; $("listCard").style.display = "";
-  // Default rules + coverage
   try {
     const cfg = await (await authFetch(API + "/sitelog/arrival-config", { cache: "no-store" })).json();
-    DEFAULTS = (cfg && cfg.defaultRules) || [];
-    $("defRules").value = DEFAULTS.join("\n");
-    renderCoverage(cfg.totalSites, cfg.sitesWithOwnRules);
+    DEF.contractor = (cfg && (cfg.contractor || cfg.defaultRules)) || [];
+    DEF.visitor = (cfg && cfg.visitor) || [];
+    COV = { total: cfg.totalSites||0, withOwn: cfg.sitesWithOwnRules||0, withOwnVisitor: cfg.sitesWithOwnVisitorRules||0 };
+    $("defRules").value = (DEF[variant] || []).join("\n");
+    renderCoverage(COV.total, COV.withOwn, COV.withOwnVisitor);
+    updateDefaultPreview();
   } catch (e) {}
-  // Sites
   try {
     const res = await authFetch(API + "/sitelog/sites", { cache: "no-store" });
     const j = await res.json();
@@ -369,15 +524,23 @@ async function load(){
   }
 }
 
+// Re-render coverage line when switching variant (uses cached counts).
+const _reflect = reflectVariant;
+reflectVariant = function(){ _reflect(); renderCoverage(COV.total, COV.withOwn, COV.withOwnVisitor); };
+
 $("search").addEventListener("input", renderList);
-$("rules").addEventListener("input", updatePreview);
+$("rules").addEventListener("input", () => { captureSite(); updatePreview(); renderList(); });
+$("defRules").addEventListener("input", () => { captureDefault(); updateDefaultPreview(); });
 $("saveBtn").addEventListener("click", save);
-$("useDefaultBtn").addEventListener("click", () => { $("rules").value = ""; updatePreview(); });
+$("useDefaultBtn").addEventListener("click", () => { $("rules").value = ""; captureSite(); updatePreview(); renderList(); });
 $("cancelBtn").addEventListener("click", closeSite);
 $("backToList").addEventListener("click", closeSite);
 $("saveDefBtn").addEventListener("click", saveDefault);
 $("applyAllBtn").addEventListener("click", applyAll);
+$("syncDefBtn").addEventListener("click", syncDefault);
+$("syncSiteBtn").addEventListener("click", syncSite);
 $("docUpBtn").addEventListener("click", uploadDoc);
+[].forEach.call($("variantSeg").querySelectorAll(".seg-b"), b => b.addEventListener("click", () => setVariant(b.dataset.v)));
 load();
 </script>
 </body>
