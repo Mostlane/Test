@@ -12,6 +12,16 @@
 // with no worker dependencies (imports only lib/pdf.js).
 
 import { PdfDoc, textWidth } from "./pdf.js";
+import { MOSTLANE_LOGO_JPEG_B64, MOSTLANE_LOGO_W, MOSTLANE_LOGO_H } from "./logo.js";
+
+// Decode the embedded logo once; fail soft so a bad decode never breaks a PDF.
+let LOGO_BYTES = null;
+try {
+  const bin = atob(MOSTLANE_LOGO_JPEG_B64);
+  LOGO_BYTES = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) LOGO_BYTES[i] = bin.charCodeAt(i);
+} catch (e) { LOGO_BYTES = null; }
+const LOGO_W = 76, LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);   // keep aspect
 
 const PW = 842, PH = 595;                 // A4 landscape
 const M = 26;                             // page margin
@@ -116,14 +126,18 @@ export function buildProgrammePdf(data, meta = {}) {
       first = false;
 
       // ── Header ─────────────────────────────────────────────────────────
+      // Mostlane logo top-left; title sits to its right, legend runs full
+      // width beneath (the logo is only ~30pt tall so it never overlaps).
+      let tx = M;
+      if (LOGO_BYTES) { try { doc.image(LOGO_BYTES, M, M - 2, LOGO_W, LOGO_H); tx = M + LOGO_W + 12; } catch (e) {} }
       let y = M + 14;
-      doc.text(M, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
+      doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT — not issued";
       const issued = meta.issuedAt ? ` · issued ${fmtFull(new Date(meta.issuedAt))}` : "";
       doc.text(PW - M, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" · ");
-      if (subBits) { doc.text(M, y, subBits, { size: 9, grey: true }); }
+      if (subBits) { doc.text(tx, y, subBits, { size: 9, grey: true }); }
       doc.text(PW - M, y, `Start ${fmtFull(s0)} · End ${fmtFull(e0)} · ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
       // Legend

@@ -18608,6 +18608,16 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
 }
 
 // src/lib/progpdf.js
+var LOGO_BYTES = null;
+try {
+  const bin = atob(MOSTLANE_LOGO_JPEG_B64);
+  LOGO_BYTES = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) LOGO_BYTES[i] = bin.charCodeAt(i);
+} catch (e) {
+  LOGO_BYTES = null;
+}
+var LOGO_W = 76;
+var LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
 var PW = 842;
 var PH = 595;
 var M = 26;
@@ -18713,15 +18723,23 @@ function buildProgrammePdf(data, meta = {}) {
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
+      let tx = M;
+      if (LOGO_BYTES) {
+        try {
+          doc.image(LOGO_BYTES, M, M - 2, LOGO_W, LOGO_H);
+          tx = M + LOGO_W + 12;
+        } catch (e) {
+        }
+      }
       let y = M + 14;
-      doc.text(M, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
+      doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
       const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
       doc.text(PW - M, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
       if (subBits) {
-        doc.text(M, y, subBits, { size: 9, grey: true });
+        doc.text(tx, y, subBits, { size: 9, grey: true });
       }
       doc.text(PW - M, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
