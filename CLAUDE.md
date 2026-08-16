@@ -1379,6 +1379,27 @@ suggestion carries the contractor, the builder diffs against the same-filtered
 base (no false "removed"), and "Load into my draft" **merges only that
 contractor's tasks** (everyone else's untouched). The workbook's VBA
 (theme/dropdown refresh, sheet password) is NOT needed — the portal replaces it.
+**AI draft-from-a-document (Aug 2026):** a "🤖 Draft from a document" button on
+programmes.html opens a modal that reads a **specification/scope (PDF via PDF.js,
+.xlsx via xlsx-lite, or text/CSV) ENTIRELY IN THE BROWSER** (nothing uploaded —
+only the extracted text is sent) — or the office can paste the scope. A **"Notes
+for the AI"** box passes free-text steering (who's subcontracting which trade,
+timing/sequencing constraints) that is sent as **prioritised INSTRUCTIONS** ahead
+of the document in the prompt (`notes` in the POST body; the endpoint accepts a
+notes-only draft with no document too). **POST
+/prog/ai-draft** (Programmes|FullAccess) calls the **Anthropic Messages API**
+(`env.ANTHROPIC_API_KEY` secret; model `env.ANTHROPIC_MODEL` || `claude-opus-5`)
+with a **forced tool** (`build_programme` input_schema → structured JSON: title,
+contractors[], tasks[] with `startOffset` in working-days + `days` + milestone),
+then materialises it into a BRAND-NEW `job_programmes` **draft** (contractor names
+→ ids + palette colours; `startOffset` → real dates by adding working days to the
+chosen start date, default next Monday, weekends skipped) and returns its id →
+the page navigates to programme-edit.html?id= so Jamie refines and issues as
+normal. **Nothing is issued or shared automatically.** Fails gracefully with a
+plain-English message when the secret is missing / the key is rejected / the
+model isn't available on the key (tells Jamie exactly what to add in the
+dashboard). Pair it with the builder's **"Auto-order"** button (sorts task lines
+by start date so a drafted or hand-built list staggers correctly).
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
 snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 `holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in
@@ -1891,8 +1912,11 @@ is kept as documentation of the hot pages.)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
 SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
 **COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
-extractor; POST /compliance/file + GET /compliance/has verify it in-handler)
-(secrets); EMAIL_FROM, R2_PUBLIC_BASE,
+extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
+**ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
+POST /prog/ai-draft calls api.anthropic.com; feature fails soft with a clear
+"add the key" message when unset) (secrets); optional var **ANTHROPIC_MODEL**
+(defaults to `claude-opus-5`); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB

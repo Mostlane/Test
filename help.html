@@ -419,6 +419,13 @@
           ["The share list shows how many times each link was opened. <b>Revoke</b> kills a link instantly — for leavers, lapsed quotes or anyone you no longer want looking."],
           ["If the client presses <b>✎ Suggest changes</b>, they edit their <i>own copy</i> and send it back. It lands in the programme's <b>💬 Client suggestions</b> with a list of exactly what they changed — review it, <b>↪ Load into my draft</b> if you agree, then Issue the next official revision."],
         ]},
+        { icon: "🤖", title: "Draft a programme from a document (AI)", perms: ["Programmes"], intro: "Turn a spec or scope of works into a starter task list in seconds — then refine it your way.", steps: [
+          ["On the <b>📊 Programmes</b> page press <b>🤖 Draft from a document</b>. Choose a file — a <b>PDF</b>, a <b>spreadsheet (.xlsx)</b> or a <b>text/CSV</b> file — or just <b>paste the scope</b> into the box. The file is read <b>on your device</b>; only the text is sent, never the file itself."],
+          ["Use the <b>Notes for the AI</b> box to steer it — the more you say, the better the draft. Tell it <b>who's doing which trade</b> (e.g. \"M&E is subcontracted to ABC Services, roofing with XYZ Roofing, everything else Mostlane\") and any timing or sequencing rules (\"live store — noisy works evenings only\", \"allow a week's lead-in\"). Your notes take priority over anything the document implies."],
+          ["Add anything helpful (title, client, site, and a <b>start date</b>), then press <b>✨ Draft it</b>. It reads the scope and builds a sensible <b>ordered task list with contractors</b>, staggering the dates so trades follow on — this can take up to a minute. You don't even need a document — you can just describe the works in the notes box and let it draft from that."],
+          ["It opens straight into the builder as a <b>new draft</b>. Nothing is issued or shared — it's a starting point. Tidy the tasks, fix any dates, then use <b>Auto-order</b> to re-stagger, and <b>Issue</b> when you're happy."],
+          ["First time only: if it says AI drafting isn't switched on, the <b>ANTHROPIC_API_KEY</b> needs adding to the mostlane-api worker in Cloudflare (a one-off) — the message tells you exactly what to do."],
+        ]},
       ]},
     ];
 
