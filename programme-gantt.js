@@ -33,24 +33,29 @@
   function parse(s) { const d = new Date(String(s || "") + "T12:00:00"); return isNaN(d) ? null : d; }
   function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
   const isWeekend = d => { const w = d.getDay(); return w === 0 || w === 6; };
+  // data.holidays = ["YYYY-MM-DD", …] bank holidays (snapshotted into the
+  // programme by the builder, so issued revisions keep the dates they were
+  // planned against). A non-working day = weekend OR bank holiday.
+  const holSet = data => { const m = new Set(); for (const h of (data && data.holidays) || []) m.add(String(h)); return m; };
+  const nonWork = (d, hs) => isWeekend(d) || (hs && hs.has(ymd(d)));
   const DOW = ["S", "M", "T", "W", "T", "F", "S"];
   function fmtDM(d) { return p2(d.getDate()) + "/" + p2(d.getMonth() + 1); }
   function fmtFull(d) { return p2(d.getDate()) + "/" + p2(d.getMonth() + 1) + "/" + d.getFullYear(); }
 
   // End date, Excel-WORKDAY style: `days` working days from start, weekends
   // skipped — unless the task's Wknd flag says it runs through the weekend.
-  function endOf(task) {
+  function endOf(task, hs) {
     const s = parse(task.start);
     if (!s) return null;
     // 730-day ceiling: no typo (or hostile suggestion payload) can make the
     // end-date loop or the bar maths run away.
     const days = Math.min(730, Math.max(1, Number(task.days) || 1));
-    if (task.wknd) return addDays(s, days - 1);
-    let d = new Date(s), left = days - 1;
-    while (left > 0) { d = addDays(d, 1); if (!isWeekend(d)) left--; }
+    if (task.wknd) return addDays(s, days - 1);   // Wknd = works weekends AND bank holidays
+    let d = new Date(s), left = days - 1, guard = 0;
+    while (left > 0 && guard++ < 4000) { d = addDays(d, 1); if (!nonWork(d, hs)) left--; }
     return d;
   }
-  const worksDay = (task, d) => task.wknd || !isWeekend(d);
+  const worksDay = (task, d, hs) => task.wknd || !nonWork(d, hs);
 
   function blank() {
     return {
@@ -78,9 +83,10 @@
 
   function summary(data) {
     let start = null, end = null;
+    const hs = holSet(data);
     for (const t of (data.tasks || [])) {
       const s = parse(t.start); if (!s) continue;
-      const e = endOf(t);
+      const e = endOf(t, hs);
       if (!start || s < start) start = s;
       if (e && (!end || e > end)) end = e;
     }
@@ -102,6 +108,7 @@
   // actually sit; anything outside it is listed but flagged instead of drawn.
   const MAX_GRID_DAYS = 550;
   function geometry(data) {
+    const hs = holSet(data);
     const today = new Date(); today.setHours(12, 0, 0, 0);
     const starts = (data.tasks || []).map(t => parse(t.start)).filter(Boolean).sort((a, b) => a - b);
     if (!starts.length) return { gridStart: today, days: 30, width: 30 * DAYW, offGrid: [], sumStart: null, sumEnd: null };
@@ -112,7 +119,7 @@
     let start = null, end = null;
     for (const t of (data.tasks || [])) {
       if (!near(t)) continue;
-      const s = parse(t.start), e = endOf(t);
+      const s = parse(t.start), e = endOf(t, hs);
       if (!start || s < start) start = s;
       if (e && (!end || e > end)) end = e;
     }
@@ -123,7 +130,7 @@
     const gridEndCap = addDays(gridStart, days - 1);
     const offGrid = (data.tasks || []).filter(t => {
       const s = parse(t.start); if (!s) return false;
-      const e = endOf(t) || s;
+      const e = endOf(t, hs) || s;
       return e < gridStart || s > gridEndCap;
     }).map(t => ({ name: t.name || "(unnamed)", start: t.start }));
     // Header summary uses the same sane window, so one wild date can't claim
@@ -137,6 +144,7 @@
     const editable = !!opts.editable;
     const view = opts.contractor ? filterFor(data, opts.contractor) : data;
     const tasks = view.tasks || [];
+    const hs = holSet(data);
     const geo = geometry(tasks.length ? view : data);
     const today = new Date(); today.setHours(12, 0, 0, 0);
     const todayOff = Math.round((today - geo.gridStart) / DAY);
@@ -148,9 +156,11 @@
     let hDates = "", hDows = "";
     for (let i = 0; i < geo.days; i++) {
       const d = addDays(geo.gridStart, i);
-      const we = isWeekend(d) ? " mlp-we" : "";
-      hDates += `<th class="mlp-day${we}">${fmtDM(d)}</th>`;
-      hDows += `<th class="mlp-dow${we}">${DOW[d.getDay()]}</th>`;
+      const bh = !isWeekend(d) && hs.has(ymd(d));
+      const we = isWeekend(d) ? " mlp-we" : (bh ? " mlp-bh" : "");
+      const tt = bh ? ' title="Bank holiday"' : "";
+      hDates += `<th class="mlp-day${we}"${tt}>${fmtDM(d)}</th>`;
+      hDows += `<th class="mlp-dow${we}"${tt}>${bh ? "BH" : DOW[d.getDay()]}</th>`;
     }
     const leftCols = editable ? 7 : 6;
     let head = `<tr><th class="mlp-sticky mlp-actcol" rowspan="2">Works</th>
@@ -158,25 +168,29 @@
       <th class="mlp-small" rowspan="2">Start</th>
       <th class="mlp-small" rowspan="2">End</th>
       <th class="mlp-small" rowspan="2">Days</th>
-      <th class="mlp-small" rowspan="2" title="Works through the weekend">Wknd</th>
+      <th class="mlp-small" rowspan="2" title="Works through weekends and bank holidays">Wknd</th>
       ${editable ? '<th class="mlp-small mlp-tools" rowspan="2"></th>' : ""}${hDates}</tr><tr>${hDows}</tr>`;
 
-    // Weekend shading behind every row, as one repeating background per row.
+    // Weekend + bank-holiday shading behind every row.
     let weBg = "";
-    for (let i = 0; i < geo.days; i++) if (isWeekend(addDays(geo.gridStart, i))) weBg += `<i class="mlp-webg" style="left:${i * DAYW}px"></i>`;
+    for (let i = 0; i < geo.days; i++) {
+      const d = addDays(geo.gridStart, i);
+      if (isWeekend(d)) weBg += `<i class="mlp-webg" style="left:${i * DAYW}px"></i>`;
+      else if (hs.has(ymd(d))) weBg += `<i class="mlp-bhbg" style="left:${i * DAYW}px"></i>`;
+    }
 
     let body = "";
     tasks.forEach(t => {
       const c = contractorOf(data, t.contractor);
       const colour = (c && c.colour) || "#94a3b8";
-      const s = parse(t.start), e = endOf(t);
+      const s = parse(t.start), e = endOf(t, hs);
       const prog = Math.max(0, Math.min(100, Number(t.progress) || 0));
       // Bar segments: consecutive worked days (weekends split the bar unless Wknd).
       let segs = "";
       if (s && e) {
         const marked = [];
         for (let d = new Date(s); d <= e; d = addDays(d, 1)) {
-          if (!worksDay(t, d)) continue;
+          if (!worksDay(t, d, hs)) continue;
           const off = Math.round((d - geo.gridStart) / DAY);
           if (off >= 0 && off < geo.days) marked.push(off);   // clip to the grid
         }
@@ -209,7 +223,7 @@
           ? `<input type="number" min="1" max="365" class="mlp-num" data-op="days" value="${esc(t.days || 1)}">`
           : esc(t.days || 1)}</td>
         <td class="mlp-small" style="text-align:center;">${editable
-          ? `<input type="checkbox" data-op="wknd" ${t.wknd ? "checked" : ""} title="Works through the weekend">`
+          ? `<input type="checkbox" data-op="wknd" ${t.wknd ? "checked" : ""} title="Works through weekends and bank holidays">`
           : (t.wknd ? "✓" : "")}</td>
         ${editable ? `<td class="mlp-small mlp-tools">
             <input type="number" min="0" max="100" step="5" class="mlp-num" data-op="progress" value="${prog}" title="Progress %">
@@ -312,6 +326,7 @@
   .mlp-table th.mlp-day{text-align:center;padding:3px 1px;font-size:9px;font-weight:600;color:#475569;min-width:${DAYW}px;max-width:${DAYW}px;border-left:1px solid #eef2f7;}
   .mlp-table th.mlp-dow{text-align:center;padding:1px;font-size:9.5px;font-weight:700;color:#64748b;top:20px;border-left:1px solid #eef2f7;}
   th.mlp-we{background:#e8edf4 !important;color:#94a3b8 !important;}
+  th.mlp-bh{background:#fdeeda !important;color:#b45309 !important;}
   .mlp-table td{border-bottom:1px solid #eef2f7;padding:3px 6px;vertical-align:middle;background:#fff;}
   .mlp-sticky{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 0 #e3e8ee;min-width:200px;max-width:280px;}
   th.mlp-sticky{z-index:4;background:#f4f7fb;}
@@ -333,6 +348,7 @@
   .mlp-tl{padding:0 !important;position:relative;}
   .mlp-tlin{position:relative;height:30px;background:repeating-linear-gradient(90deg,transparent 0,transparent ${DAYW - 1}px,#eef2f7 ${DAYW - 1}px,#eef2f7 ${DAYW}px);}
   .mlp-webg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#f1f4f9;}
+  .mlp-bhbg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#fdf3e5;}
   .mlp-bar{position:absolute;top:5px;height:20px;border-radius:5px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,58,.25);}
   .mlp-bar i{display:block;position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.4);}
   .mlp-dia{position:absolute;top:9px;width:12px;height:12px;transform:rotate(45deg);border-radius:2px;box-shadow:0 1px 2px rgba(16,32,58,.35);}

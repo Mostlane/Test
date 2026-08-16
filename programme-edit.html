@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
-  <script src="/programme-gantt.js?v=2"></script>
+  <script src="/programme-gantt.js?v=3"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -164,6 +164,8 @@
   let DATA = MLProg.blank();
   let REVISIONS = [], SHARES = [], SUGGESTIONS = [];
   let saveTimer = null, dirty = false, saving = false;
+  let VERSION;              // the updated_at we last loaded/saved — concurrency stamp
+  let conflictOpen = false;
 
   function fmtDT(iso){ if(!iso) return ""; const d=new Date(iso); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})+" "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); }
 
@@ -236,27 +238,54 @@
   });
 
   // EVERYTHING AUTOSAVES — debounced ~1s, keepalive flush on pagehide.
+  // Every save carries the version we last saw (baseVersion); if another
+  // device saved in between the server refuses with 409 and we ask the user.
   function queueSave(){ dirty = true; g("saveState").textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000); }
   async function save(){
-    if(saving){ queueSave(); return; }
+    if(saving || conflictOpen){ queueSave(); return; }
     saving = true; dirty = false;
     metaToData();
     try{
-      const r = await aFetch("/prog/save",{method:"POST",body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA})});
+      const r = await aFetch("/prog/save",{method:"POST",body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA,baseVersion:PROG_ID?VERSION:undefined})});
       const d = await r.json();
       if(d.ok){
         if(!PROG_ID){ PROG_ID = d.id; history.replaceState(null,"","programme-edit.html?id="+encodeURIComponent(PROG_ID)); }
+        VERSION = d.updatedAt;
         g("saveState").textContent = "Saved ✓";
+      } else if(r.status === 409 && d.conflict){
+        saving = false;
+        await handleConflict(d);
+        return;
       } else g("saveState").textContent = "⚠ "+(d.error||"Couldn't save");
     }catch(e){ g("saveState").textContent = "⚠ Offline — retrying"; setTimeout(queueSave, 4000); }
     saving = false;
     if(dirty) queueSave();
   }
+  async function handleConflict(d){
+    if(conflictOpen) return;
+    conflictOpen = true;
+    clearTimeout(saveTimer); saveTimer = null;
+    g("saveState").textContent = "⚠ Edited on another device";
+    const who = d.updatedBy || "Someone";
+    const when = d.updatedAt ? new Date(d.updatedAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) : "";
+    const loadTheirs = window.MLUI
+      ? await MLUI.confirm(`${who} saved changes to this programme${when?" at "+when:""} — probably on another device or tab.\n\nLoad their version? (Recommended — the edits you've made here since will be lost.)\n"Keep mine" overwrites their changes with yours.`, { title:"Edited on another device", okLabel:"Load theirs", cancelLabel:"Keep mine" })
+      : confirm("This programme was edited on another device.\nOK = load their version · Cancel = overwrite with yours");
+    conflictOpen = false;
+    if(loadTheirs){
+      await reload();
+      alert("Loaded the latest version ✓");
+    } else {
+      VERSION = undefined;      // one save without the stamp = deliberate overwrite
+      queueSave();
+    }
+  }
   window.addEventListener("pagehide", ()=>{
     if(!dirty && !saveTimer) return;
+    if(conflictOpen) return;                       // never blind-overwrite during a conflict
     metaToData();
     try{ fetch(API+"/prog/save",{method:"POST",keepalive:true,headers:{Authorization:"Bearer "+tok(),"Content-Type":"application/json"},
-      body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA})}); }catch(e){}
+      body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA,baseVersion:PROG_ID?VERSION:undefined})}); }catch(e){}
   });
   ["fTitle","fClient","fSite","fRef","fNotes"].forEach(id => g(id).addEventListener("input", queueSave));
 
@@ -403,6 +432,10 @@
     const d = await (await aFetch("/prog/one?id="+encodeURIComponent(PROG_ID))).json();
     if(!d.ok){ alert(d.error||"Programme not found"); location.href="programmes.html"; return; }
     DATA = MLProg.migrate(d.prog.data && (d.prog.data.tasks || d.prog.data.sections) ? d.prog.data : MLProg.blank());
+    VERSION = d.prog.updatedAt;
+    // Snapshot the company bank-holiday list into the programme so end dates
+    // skip them — and so issued revisions keep the dates they were planned with.
+    if(Array.isArray(d.bankHolidays)) DATA.holidays = d.bankHolidays;
     REVISIONS = d.revisions||[]; SHARES = d.shares||[]; SUGGESTIONS = d.suggestions||[];
     dataToMeta(); drawGantt(); renderRevState(); renderSuggestions();
   }

@@ -1379,6 +1379,19 @@ suggestion carries the contractor, the builder diffs against the same-filtered
 base (no false "removed"), and "Load into my draft" **merges only that
 contractor's tasks** (everyone else's untouched). The workbook's VBA
 (theme/dropdown refresh, sheet password) is NOT needed — the portal replaces it.
+**Bank holidays + concurrency (v3, `programme-gantt.js?v=3`):** the builder
+snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
+`holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in
+programmes.js, returned by /prog/one) into **`data.holidays`** — so issued
+revisions keep the dates they were planned with and the PUBLIC client page needs
+no extra endpoint. End dates skip weekends AND bank holidays (Wknd ticked = works
+through both); BH columns are amber-shaded and labelled "BH". **Concurrent-edit
+protection:** job_programmes gained `updated_by` (self-migrating); every
+/prog/save carries **`baseVersion`** (the updated_at the builder last saw) and a
+mismatch returns **409 {conflict, updatedAt, updatedBy}** → the builder pauses
+autosave and asks "Load theirs (recommended) / Keep mine" (Keep mine = ONE
+unstamped save that deliberately overwrites, then re-stamps). The pagehide
+keepalive save also carries baseVersion so closing a stale tab can't clobber.
 
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated

@@ -47,9 +47,28 @@ async function ensureTables(env) {
     id TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, token TEXT, rev TEXT,
     author TEXT, note TEXT, data TEXT, status TEXT DEFAULT 'open',
     created_at TEXT, decided_by TEXT, decided_at TEXT, contractor TEXT)`).run();
-  // Early installs created the tables without `contractor` — heal in place.
+  // Early installs created the tables without these columns — heal in place.
   try { await env.DB.prepare("ALTER TABLE programme_shares ADD COLUMN contractor TEXT").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE programme_suggestions ADD COLUMN contractor TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE job_programmes ADD COLUMN updated_by TEXT").run(); } catch {}
+}
+
+// Company bank holidays (the Holidays admin's GOV.UK-imported list, stored per
+// year in app_config `holiday:bankholidays:<year>`) — flattened to ISO dates
+// across a span of years so the programme maths can skip them.
+async function bankHolidayDates(db) {
+  const y = new Date().getFullYear();
+  const years = [y - 1, y, y + 1, y + 2];
+  const dates = [];
+  for (const yr of years) {
+    try {
+      const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?")
+        .bind(db.tenantId, `holiday:bankholidays:${yr}`).first();
+      if (!row) continue;
+      for (const b of JSON.parse(row.value) || []) if (b?.date) dates.push(b.date);
+    } catch { /* one bad year's config never breaks programmes */ }
+  }
+  return dates.sort();
 }
 
 async function progAdmin(env, request) {
@@ -243,8 +262,9 @@ export async function handle(request, env, ctx, url) {
     ).bind(id, db.tenantId).all()).results || [];
     return json({
       ok: true,
-      prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, data },
+      prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, updatedBy: p.updated_by || "", data },
       revisions, shares, suggestions,
+      bankHolidays: await bankHolidayDates(db),
     });
   }
 
@@ -258,15 +278,22 @@ export async function handle(request, env, ctx, url) {
     const site = String(b.site ?? c.obj.site ?? "").slice(0, 200);
     let id = String(b.id || "").trim();
     if (id) {
-      const exists = await db.prepare("SELECT id FROM job_programmes WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
-      if (!exists) return json({ ok: false, error: "Programme not found" }, 404);
+      const row = await db.prepare("SELECT id, updated_at, updated_by FROM job_programmes WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
+      if (!row) return json({ ok: false, error: "Programme not found" }, 404);
+      // Optimistic concurrency: the builder sends the version it loaded/last
+      // saved. A mismatch means another device saved in between — refuse
+      // instead of silently clobbering their work (client may retry without
+      // baseVersion to deliberately overwrite after asking the user).
+      if (b.baseVersion !== undefined && String(b.baseVersion) !== String(row.updated_at || "")) {
+        return json({ ok: false, conflict: true, error: "This programme was changed on another device.", updatedAt: row.updated_at, updatedBy: row.updated_by || "" }, 409);
+      }
       await db.prepare(
-        "UPDATE job_programmes SET title=?, client=?, site=?, data=?, updated_at=? WHERE id=? AND tenant_id=?"
-      ).bind(title, client, site, c.json, now, id, db.tenantId).run();
+        "UPDATE job_programmes SET title=?, client=?, site=?, data=?, updated_at=?, updated_by=? WHERE id=? AND tenant_id=?"
+      ).bind(title, client, site, c.json, now, me, id, db.tenantId).run();
     } else {
       id = newId("PRG");
-      await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now, now).run();
+      await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now, now, me).run();
     }
     return json({ ok: true, id, updatedAt: now });
   }
