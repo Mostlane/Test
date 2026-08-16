@@ -1407,7 +1407,7 @@ their tasks, coloured X day-cells, weekend/BH shading, frozen panes, sheet+
 workbook protection (legacy hash — a deterrent like the original workbook's).
 Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
-problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js).
+problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
 
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
