@@ -142,6 +142,44 @@ async function saveCustomTpls(db, list) {
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .bind(db.tenantId, CUSTOM_TPL_KEY(db.tenantId), JSON.stringify(list)).run();
 }
+// ── Manual grid override statuses (Full-Access sets these on the by-engineer
+// grid so stats reflect reality — holiday, off sick, van off road…). `tone`
+// decides how it counts: "done" = a completed check, "excused" = neither done
+// nor missed (drops out of the missed count), "issue" = a problem. Configurable
+// per tenant; "skipped" (Not required) is always the default first option.
+const GRID_STATUS_KEY = tid => `vancheck:gridstatuses:${tid}`;
+const DEFAULT_GRID_STATUSES = [
+  { key: "skipped", label: "Not required", colour: "#a5b4fc", tone: "excused" },
+  { key: "holiday", label: "On holiday", colour: "#2dd4bf", tone: "excused" },
+  { key: "sick", label: "Off sick", colour: "#fb923c", tone: "excused" },
+  { key: "vor", label: "Van off road", colour: "#94a3b8", tone: "excused" },
+  { key: "rest", label: "Not working", colour: "#cbd5e1", tone: "excused" },
+  { key: "manual", label: "Completed (paper)", colour: "#22c55e", tone: "done" },
+];
+function normGridStatuses(arr) {
+  const out = [], seen = new Set();
+  for (const i of Array.isArray(arr) ? arr : []) {
+    const label = String(i && i.label || "").trim(); if (!label) continue;
+    let key = slug(i.key) || slug(label) || ("s" + (out.length + 1));
+    while (seen.has(key)) key = key + "_" + (out.length + 1);
+    seen.add(key);
+    const tone = ["done", "excused", "issue"].includes(i.tone) ? i.tone : "excused";
+    const colour = /^#[0-9a-fA-F]{3,8}$/.test(i.colour || "") ? i.colour : "#a5b4fc";
+    out.push({ key, label: label.slice(0, 40), colour, tone });
+  }
+  // Always guarantee "skipped" (Not required) exists as the default.
+  if (!out.some(s => s.key === "skipped")) out.unshift({ ...DEFAULT_GRID_STATUSES[0] });
+  return out;
+}
+async function getGridStatuses(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, GRID_STATUS_KEY(db.tenantId)).first();
+  if (!row || !row.value) return DEFAULT_GRID_STATUSES.slice();
+  try { const v = JSON.parse(row.value); return normGridStatuses(v); } catch { return DEFAULT_GRID_STATUSES.slice(); }
+}
+async function saveGridStatuses(db, list) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, GRID_STATUS_KEY(db.tenantId), JSON.stringify(normGridStatuses(list))).run();
+}
 async function ensureCustomTable(db) {
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS custom_van_checks (
@@ -254,6 +292,8 @@ function shapeCheck(r) {
     defectCount: defects.length, alerts: items.alerts || [],
     answerMeta: items.answerMeta || {},
     skipped: !!items.skipped, skippedBy: items.skippedBy || "",
+    // Manual Full-Access override (holiday / sick / VOR / completed-on-paper…).
+    override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null,
   };
 }
 
@@ -587,17 +627,31 @@ export async function handle(request, env, ctx, url, sess) {
         cells: {},
       };
     }
+    const gridStatuses = await getGridStatuses(db);
+    const gsByKey = {}; for (const gs of gridStatuses) gsByKey[gs.key] = gs;
     for (const c of checks || []) {
       let r = rowMap[c.username];
       if (!r) r = rowMap[c.username] = { username: c.username, name: names[c.username] || c.username, vehicle: "", expected: false, cells: {} };
       const sc = shapeCheck(c);
-      r.cells[c.week] = {
-        status: sc.skipped ? "skipped" : ((sc.defectCount > 0 || (sc.alerts && sc.alerts.length) || sc.safeToDrive === false) ? "issue" : "done"),
-        reg: c.vehicle || sc.vehicle || "",
-        issues: sc.defectCount || 0,
-        safe: sc.safeToDrive,
-        skipped: !!sc.skipped,
-      };
+      // A manual override (holiday/sick/VOR/…) wins over the raw check state.
+      if (sc.override) {
+        const gs = gsByKey[sc.override.status] || {};
+        r.cells[c.week] = {
+          status: "override", key: sc.override.status,
+          label: sc.override.label || gs.label || sc.override.status,
+          colour: sc.override.colour || gs.colour || "#a5b4fc",
+          tone: sc.override.tone || gs.tone || "excused",
+          reg: c.vehicle || sc.vehicle || "",
+        };
+      } else {
+        r.cells[c.week] = {
+          status: sc.skipped ? "skipped" : ((sc.defectCount > 0 || (sc.alerts && sc.alerts.length) || sc.safeToDrive === false) ? "issue" : "done"),
+          reg: c.vehicle || sc.vehicle || "",
+          issues: sc.defectCount || 0,
+          safe: sc.safeToDrive,
+          skipped: !!sc.skipped,
+        };
+      }
     }
     const rows = Object.values(rowMap).map(r => {
       const cellWeeks = Object.keys(r.cells).sort();
@@ -606,13 +660,18 @@ export async function handle(request, env, ctx, url, sess) {
         if (r.cells[wk]) continue;
         r.cells[wk] = (r.expected && wk <= curWeek && (earliest === null || wk >= earliest)) ? { status: "missed" } : { status: "none" };
       }
-      // Simple per-row tallies for the range shown.
-      let done = 0, missed = 0, issue = 0;
-      for (const wk of weeks) { const st = r.cells[wk].status; if (st === "done") done++; else if (st === "missed") missed++; else if (st === "issue") issue++; }
-      return { ...r, done, missed, issue };
+      // Per-row tallies for the range shown (an override counts by its tone).
+      let done = 0, missed = 0, issue = 0, excused = 0;
+      for (const wk of weeks) {
+        const cell = r.cells[wk], st = cell.status;
+        const tone = st === "override" ? cell.tone : st;
+        if (tone === "done") done++; else if (tone === "missed") missed++;
+        else if (tone === "issue") issue++; else if (tone === "excused" || st === "skipped") excused++;
+      }
+      return { ...r, done, missed, issue, excused };
     });
     rows.sort((a, b) => (a.expected === b.expected ? a.name.localeCompare(b.name) : (a.expected ? -1 : 1)));
-    return json({ ok: true, weeks, currentWeek: curWeek, from, to, rows, dueAt: deadlineFor(curWeek, s) }, {}, env, request);
+    return json({ ok: true, weeks, currentWeek: curWeek, from, to, rows, statuses: gridStatuses, dueAt: deadlineFor(curWeek, s) }, {}, env, request);
   }
 
   // ── Admin: fire this week's reminder to everyone still outstanding, NOW ──────
@@ -670,35 +729,60 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week: wk }, {}, env, request);
   }
 
+  // ── FULL-ACCESS ONLY: the configurable grid override statuses ───────────────
+  if (path === "/vancheck/grid-statuses" && method === "GET") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    return json({ ok: true, statuses: await getGridStatuses(db) }, {}, env, request);
+  }
+  if (path === "/vancheck/grid-statuses" && method === "POST") {
+    if (!(await isAdmin())) return error("Full Access only.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    await saveGridStatuses(db, Array.isArray(b.statuses) ? b.statuses : []);
+    return json({ ok: true, statuses: await getGridStatuses(db) }, {}, env, request);
+  }
+
   // ── FULL-ACCESS ONLY: set a grid cell from the by-engineer matrix ───────────
-  // Currently supports skip / unskip (mark a week "not required" or clear it).
+  // action "set" (+ status key) marks a week with a configured override
+  // (Not required / holiday / sick / VOR / completed-on-paper…); "clear" removes
+  // it (week becomes due again). Legacy "skip"/"unskip" still work.
   // Deliberately stricter than /vancheck/skip (which allows any Vehicles admin).
   if (path === "/vancheck/grid-set" && method === "POST") {
     if (!(await isAdmin())) return error("Full Access only.", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
-    const action = String(b.action || "");
+    let action = String(b.action || "");
     if (!who) return error("username required", 400, env, request);
     const wk = mondayOf(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate());
     const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
       .bind(db.tenantId, who, wk).first();
     let it = {}; if (existing) { try { it = existing.items ? JSON.parse(existing.items) : {}; } catch {} }
-    if (action === "skip") {
+    const isManual = existing ? (!!it.skipped || !!it.override) : false;
+    // "skip" is the legacy alias for setting the "skipped" status.
+    if (action === "skip") { action = "set"; b.status = b.status || "skipped"; }
+    if (action === "unskip") action = "clear";
+    if (action === "set") {
       // Never overwrite a real completed check.
-      if (existing && !it.skipped) return json({ ok: false, error: "That week has a real check — open it instead." }, {}, env, request);
+      if (existing && !isManual) return json({ ok: false, error: "That week has a real check — open it instead." }, {}, env, request);
+      const statuses = await getGridStatuses(db);
+      const gs = statuses.find(s => s.key === String(b.status || "")) || statuses.find(s => s.key === "skipped") || DEFAULT_GRID_STATUSES[0];
       const veh = await db.prepare("SELECT vehicle_assigned FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, who).first();
       const now = new Date().toISOString();
-      const items = JSON.stringify({ skipped: true, skippedBy: me, skippedAt: now, source: "skip" });
+      const items = JSON.stringify({
+        override: true, status: gs.key, label: gs.label, tone: gs.tone, colour: gs.colour,
+        by: me, at: now, source: "override",
+        // Keep the legacy flags so old readers still treat every override as a skip.
+        skipped: true, skippedBy: me, skippedAt: now,
+      });
       await db.prepare(`
         INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
         VALUES (?,?,?,?,?,?,?,?)
         ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
-      `).bind(db.tenantId, who, wk, (veh && veh.vehicle_assigned) || "", now, null, items, "Skipped by " + me).run();
-      return json({ ok: true, week: wk, status: "skipped" }, {}, env, request);
+      `).bind(db.tenantId, who, wk, (veh && veh.vehicle_assigned) || "", now, null, items, gs.label + " (by " + me + ")").run();
+      return json({ ok: true, week: wk, status: "override", key: gs.key, label: gs.label, colour: gs.colour, tone: gs.tone }, {}, env, request);
     }
-    if (action === "unskip") {
+    if (action === "clear") {
       if (!existing) return json({ ok: true, week: wk, status: "none" }, {}, env, request);
-      if (!it.skipped) return json({ ok: false, error: "That is a real check, not a skip." }, {}, env, request);
+      if (!isManual) return json({ ok: false, error: "That is a real check, not a manual entry." }, {}, env, request);
       await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
       return json({ ok: true, week: wk, status: "none" }, {}, env, request);
     }

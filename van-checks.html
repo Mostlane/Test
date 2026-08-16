@@ -133,18 +133,13 @@
           <div class="muted" style="font-size:12px; margin-top:2px;" id="mtxRange">Loading…</div>
         </div>
         <div class="row" style="gap:6px;">
+          <button class="btn ghost small hide" id="mtxEditBtn">⚙ Statuses</button>
           <button class="btn ghost small" id="mtxEarlier">← Earlier weeks</button>
           <button class="btn grey small" id="mtxReset">Recent</button>
           <button class="btn grey small" id="mtxClose">Hide</button>
         </div>
       </div>
-      <div class="row" style="gap:12px; margin:8px 0 4px; font-size:11.5px; flex-wrap:wrap;">
-        <span class="mtx-key"><span class="mtx-cell done"></span> Done</span>
-        <span class="mtx-key"><span class="mtx-cell issue"></span> Issue reported</span>
-        <span class="mtx-key"><span class="mtx-cell missed"></span> Missed</span>
-        <span class="mtx-key"><span class="mtx-cell skipped"></span> Skipped</span>
-        <span class="mtx-key"><span class="mtx-cell none"></span> Not required / no record</span>
-      </div>
+      <div class="row" id="mtxLegend" style="gap:12px; margin:8px 0 4px; font-size:11.5px; flex-wrap:wrap;"></div>
       <div style="overflow-x:auto;">
         <table class="mtx" id="mtxTable"><tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody></table>
       </div>
@@ -279,6 +274,24 @@
   <!-- Full-Access: change a grid cell -->
   <div class="overlay" id="mtxEditModal">
     <div class="panel" style="max-width:420px;" id="mtxEditBody"></div>
+  </div>
+
+  <!-- Full-Access: edit the configurable grid statuses -->
+  <div class="overlay" id="statusModal">
+    <div class="panel" style="max-width:520px;">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Grid statuses</h2>
+        <button class="btn grey small" onclick="document.getElementById('statusModal').classList.remove('open')">✕</button>
+      </div>
+      <p class="ahint">The statuses you can set on the by-engineer grid (holiday, off sick, van off road…). <b>Excused</b> = not counted as missed; <b>Counts as done</b> = treated like a completed check in stats; <b>Issue</b> = flagged as a problem. “Not required” is the default and can be recoloured but not removed.</p>
+      <div id="statusRows"></div>
+      <button class="addbtn" id="statusAdd">＋ Add status</button>
+      <p class="msg" id="statusMsg"></p>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn green" id="statusSave">Save statuses</button>
+        <button class="btn grey" onclick="document.getElementById('statusModal').classList.remove('open')">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <div class="viewer" id="viewer" onclick="this.classList.remove('open')"><img id="viewerImg"></div>
@@ -416,7 +429,7 @@
   g("nextWk").onclick = () => { WEEK = addDays(WEEK, 7); load(); };
 
   // ── By-engineer compliance matrix (missed weeks) ────────────────────────────
-  let MTX_FROM = null, MTX_TO = null, MTX_EDIT = null;
+  let MTX_FROM = null, MTX_TO = null, MTX_EDIT = null, GRID_STATUSES = [];
   function mtxFmt(w) { return new Date(w + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
   // Default view starts at LAST week (last week + this week) — page further back
   // with "Earlier weeks". Keeps historic weeks (before people were doing checks)
@@ -444,15 +457,19 @@
   }
   function renderMatrix(d) {
     const weeks = d.weeks || [];
+    GRID_STATUSES = d.statuses || GRID_STATUSES;
+    renderMtxLegend();
+    g("mtxEditBtn").classList.toggle("hide", !IS_FULL);
     g("mtxRange").textContent = weeks.length
       ? ("w/c " + mtxFmt(weeks[0]) + " → w/c " + mtxFmt(weeks[weeks.length - 1]) + " · " + weeks.length + " weeks")
       : "";
     const head = "<tr><th class='eng'>Engineer</th>" + weeks.map(w =>
       `<th class="${w === d.currentWeek ? "mtx-cur" : ""}" title="w/c ${esc(w)}">${esc(mtxFmt(w))}</th>`).join("") + "</tr>";
     const titleFor = (c) => {
+      if (c.status === "override") return (c.label || "Set") + (c.reg ? " · " + c.reg : "");
       if (c.status === "done") return "Done" + (c.reg ? " · " + c.reg : "");
       if (c.status === "issue") return (c.skipped ? "Skipped" : (c.safe === false ? "NOT safe to drive" : (c.issues ? c.issues + " issue" + (c.issues === 1 ? "" : "s") : "Issue"))) + (c.reg ? " · " + c.reg : "");
-      if (c.status === "skipped") return "Skipped" + (c.reg ? " · " + c.reg : "");
+      if (c.status === "skipped") return "Not required" + (c.reg ? " · " + c.reg : "");
       if (c.status === "missed") return "No check this week";
       return "Not required / no record";
     };
@@ -461,18 +478,33 @@
           const sub = r.expected ? (r.vehicle ? esc(r.vehicle) : "") : "no van now";
           const cells = weeks.map(w => {
             const c = r.cells[w] || { status:"none" };
-            const openable = (c.status === "done" || c.status === "issue" || c.status === "skipped") && c.reg;
-            const editable = IS_FULL && (c.status === "skipped" || c.status === "missed" || c.status === "none") && w <= d.currentWeek;
+            const openable = (c.status === "done" || c.status === "issue") && c.reg;
+            // Full-Access can set/change any non-real-check cell up to this week.
+            const editable = IS_FULL && (c.status === "skipped" || c.status === "override" || c.status === "missed" || c.status === "none") && w <= d.currentWeek;
             const clk = openable || editable;
-            const attr = `data-user="${esc(r.username)}" data-name="${esc(r.name)}" data-week="${esc(w)}" data-status="${esc(c.status)}"${c.reg ? ` data-reg="${esc(c.reg)}"` : ""}`;
+            const attr = `data-user="${esc(r.username)}" data-name="${esc(r.name)}" data-week="${esc(w)}" data-status="${esc(c.status)}"${c.key ? ` data-key="${esc(c.key)}"` : ""}${c.reg ? ` data-reg="${esc(c.reg)}"` : ""}`;
             const tip = titleFor(c) + (editable ? " — tap to change" : (openable ? " — tap to open" : ""));
-            return `<td class="mc${clk ? " clk" : ""}" ${attr} title="${esc(tip)}"><span class="mtx-cell ${c.status}"></span></td>`;
+            const style = c.status === "override" && c.colour ? ` style="background:${esc(c.colour)}"` : "";
+            const cellCls = c.status === "override" ? "mtx-cell" : ("mtx-cell " + c.status);
+            return `<td class="mc${clk ? " clk" : ""}" ${attr} title="${esc(tip)}"><span class="${cellCls}"${style}></span></td>`;
           }).join("");
           const tally = r.missed ? ` <span class="sub" style="color:#b00020;">${r.missed} missed</span>` : "";
           return `<tr><td class="eng">${esc(r.name)}${sub ? ` <span class="sub">· ${sub}</span>` : ""}${tally}</td>${cells}</tr>`;
         }).join("")
       : `<tr><td class="muted" style="padding:14px;">No drivers to show.</td></tr>`;
     g("mtxTable").innerHTML = "<thead>" + head + "</thead><tbody>" + body + "</tbody>";
+  }
+  // Legend = the fixed states + every configured override status (its own colour).
+  function renderMtxLegend() {
+    const base = [
+      { colour:"#22c55e", label:"Done" },
+      { colour:"#f59e0b", label:"Issue reported" },
+      { colour:"#ef4444", label:"Missed" },
+    ];
+    const extra = (GRID_STATUSES || []).map(s => ({ colour:s.colour, label:s.label }));
+    const none = [{ colour:"", label:"No record", dashed:true }];
+    g("mtxLegend").innerHTML = base.concat(extra, none).map(k =>
+      `<span class="mtx-key"><span class="mtx-cell${k.dashed ? " none" : ""}" style="${k.colour ? "background:" + esc(k.colour) : ""}"></span> ${esc(k.label)}</span>`).join("");
   }
 
   document.addEventListener("click", e => {
@@ -487,49 +519,98 @@
     }
   });
 
-  // ── Full-Access: change a grid cell (skip / remove skip), with a double-check ─
+  // ── Full-Access: set/change a grid cell to a configured status (double-check) ─
   function openMtxEdit(ds) {
-    const st = ds.status, reg = ds.reg || "", who = ds.user, name = ds.name || who, week = ds.week;
+    const st = ds.status, reg = ds.reg || "", who = ds.user, name = ds.name || who, week = ds.week, curKey = ds.key || (st === "skipped" ? "skipped" : "");
     const wLabel = mtxFmt(week);
-    const statusText = { done:"Done", issue:"Issue reported", missed:"Missed — no check", skipped:"Skipped (not required)", none:"No record" }[st] || st;
-    let actions = "";
-    if (reg && (st === "done" || st === "issue" || st === "skipped"))
-      actions += `<button class="btn ghost" data-mact="open">📋 Open van history${reg ? " (" + esc(reg) + ")" : ""}</button>`;
-    if (st === "skipped")
-      actions += `<button class="btn" data-mact="unskip">↩ Remove skip — make this week due again</button>`;
-    else if (st === "missed" || st === "none")
-      actions += `<button class="btn" style="background:#6366f1;" data-mact="skip">⏭ Mark as Skipped — not required this week</button>`;
+    const curStatus = (GRID_STATUSES || []).find(s => s.key === curKey);
+    const statusText = st === "override" || st === "skipped"
+      ? ((curStatus && curStatus.label) || "Set")
+      : ({ done:"Done", issue:"Issue reported", missed:"Missed — no check", none:"No record" }[st] || st);
+    // One button per configured status, coloured; the current one is ticked.
+    const statusBtns = (GRID_STATUSES || []).map(s =>
+      `<button class="btn" style="background:${esc(s.colour)};${["#cbd5e1","#a5b4fc","#e5e7eb"].includes((s.colour||'').toLowerCase()) ? "color:#1f2937;" : ""}" data-mact="set" data-key="${esc(s.key)}">${s.key === curKey ? "✓ " : ""}${esc(s.label)}</button>`
+    ).join("");
+    const clearBtn = (st === "skipped" || st === "override")
+      ? `<button class="btn grey" data-mact="clear">↩ Clear — make this week due again</button>` : "";
     g("mtxEditBody").innerHTML =
       `<h3 style="margin:0 0 4px;">${esc(name)}</h3>`
-      + `<p class="muted" style="margin:0 0 12px; font-size:13px;">Week commencing <b>${esc(wLabel)}</b> · currently <b>${esc(statusText)}</b></p>`
-      + `<div style="display:flex; flex-direction:column; gap:8px;">${actions}`
-      + `<button class="btn grey" data-mact="cancel">Cancel</button></div>`
+      + `<p class="muted" style="margin:0 0 10px; font-size:13px;">Week commencing <b>${esc(wLabel)}</b> · currently <b>${esc(statusText)}</b></p>`
+      + `<p class="muted" style="margin:0 0 6px; font-size:12px;">Set this week to:</p>`
+      + `<div style="display:flex; flex-direction:column; gap:7px;">${statusBtns}${clearBtn}`
+      + `<button class="btn ghost" data-mact="cancel" style="margin-top:4px;">Cancel</button></div>`
       + `<p class="msg" id="mtxEditMsg"></p>`;
     MTX_EDIT = { who, week, name, wLabel, reg };
     g("mtxEditModal").classList.add("open");
   }
   g("mtxEditModal").addEventListener("click", async e => {
     if (e.target === g("mtxEditModal")) { g("mtxEditModal").classList.remove("open"); return; }
-    const act = e.target.dataset.mact; if (!act || !MTX_EDIT) return;
+    const btn = e.target.closest && e.target.closest("[data-mact]"); if (!btn || !MTX_EDIT) return;
+    const act = btn.dataset.mact;
     if (act === "cancel") { g("mtxEditModal").classList.remove("open"); return; }
-    if (act === "open") { if (MTX_EDIT.reg) location.href = "/vehicle-checks.html?reg=" + encodeURIComponent(MTX_EDIT.reg); return; }
     const { who, week, name, wLabel } = MTX_EDIT;
-    const isSkip = act === "skip";
-    const q = isSkip
-      ? `Mark ${name}'s van check for w/c ${wLabel} as SKIPPED (not required)? It will no longer show as missed.`
-      : `Remove the skip for ${name}, w/c ${wLabel}? Their van check becomes due again for that week.`;
-    const ok = window.MLUI ? await MLUI.confirm(q, { title: isSkip ? "Skip this week?" : "Remove skip?", okLabel: isSkip ? "Yes, skip it" : "Yes, remove", danger: !isSkip }) : confirm(q);
+    let q, body;
+    if (act === "set") {
+      const s = (GRID_STATUSES || []).find(x => x.key === btn.dataset.key); if (!s) return;
+      q = `Set ${name}'s week (w/c ${wLabel}) to "${s.label}"?`;
+      body = { username: who, week, action: "set", status: s.key };
+    } else if (act === "clear") {
+      q = `Clear this entry for ${name}, w/c ${wLabel}? Their van check becomes due again for that week.`;
+      body = { username: who, week, action: "clear" };
+    } else return;
+    const ok = window.MLUI ? await MLUI.confirm(q, { title: act === "clear" ? "Clear this week?" : "Change status?", okLabel: "Yes", danger: act === "clear" }) : confirm(q);
     if (!ok) return;
     const msg = g("mtxEditMsg"); if (msg) { msg.className = "msg"; msg.textContent = "Saving…"; }
     try {
       const r = await authFetch("/vancheck/grid-set", { method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ username: who, week, action: act }) }).then(r => r.json());
+        body: JSON.stringify(body) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "Couldn't save");
       g("mtxEditModal").classList.remove("open");
       loadMatrix();
       if (week === WEEK) load();   // keep the weekly table in step if it's the same week
     } catch (err) { if (msg) { msg.className = "msg err"; msg.textContent = err.message; } }
   });
+
+  // ── Full-Access: edit the configurable status list ──────────────────────────
+  const TONE_LABEL = { done:"Counts as done", excused:"Excused (not missed)", issue:"Counts as an issue" };
+  g("mtxEditBtn").onclick = () => { renderStatusEditor(GRID_STATUSES); g("statusModal").classList.add("open"); };
+  function statusRowHtml(s) {
+    s = s || { key:"", label:"", colour:"#a5b4fc", tone:"excused" };
+    const locked = s.key === "skipped";
+    return `<div class="remrow statusrow" data-locked="${locked ? "1" : "0"}">
+      <input type="color" class="sr-colour" value="${esc(/^#[0-9a-fA-F]{6}$/.test(s.colour) ? s.colour : "#a5b4fc")}" style="width:38px;height:34px;padding:2px;">
+      <input type="text" class="sr-label" placeholder="Status name" value="${esc(s.label)}" style="flex:1 1 120px;min-width:100px;"${locked ? " title='The default — you can recolour it but not rename'" : ""}>
+      <select class="sr-tone" style="flex:none;">
+        <option value="excused"${s.tone === "excused" ? " selected" : ""}>Excused</option>
+        <option value="done"${s.tone === "done" ? " selected" : ""}>Counts as done</option>
+        <option value="issue"${s.tone === "issue" ? " selected" : ""}>Issue</option>
+      </select>
+      <button class="rm" data-srrm${locked ? " disabled title='The default status can’t be removed'" : ""}>✕</button>
+    </div>`;
+  }
+  function renderStatusEditor(list) {
+    g("statusRows").innerHTML = (Array.isArray(list) && list.length ? list : [{ key:"skipped", label:"Not required", colour:"#a5b4fc", tone:"excused" }]).map(statusRowHtml).join("");
+  }
+  g("statusAdd").onclick = () => { g("statusRows").insertAdjacentHTML("beforeend", statusRowHtml()); };
+  g("statusRows").addEventListener("click", e => { const b = e.target.closest("[data-srrm]"); if (b && !b.disabled) b.closest(".statusrow").remove(); });
+  g("statusSave").onclick = async () => {
+    const rows = [...g("statusRows").querySelectorAll(".statusrow")].map(r => ({
+      key: r.dataset.locked === "1" ? "skipped" : "",
+      label: r.querySelector(".sr-label").value.trim(),
+      colour: r.querySelector(".sr-colour").value,
+      tone: r.querySelector(".sr-tone").value,
+    })).filter(r => r.label);
+    const msg = g("statusMsg"); msg.className = "msg"; msg.textContent = "Saving…";
+    try {
+      const r = await authFetch("/vancheck/grid-statuses", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ statuses: rows }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "Couldn't save");
+      GRID_STATUSES = r.statuses || rows;
+      msg.className = "msg ok"; msg.textContent = "Saved ✓";
+      g("statusModal").classList.remove("open");
+      loadMatrix();
+    } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+  };
 
   function openCheck(username) {
     const r = (DATA.rows || []).find(x => x.username === username);
