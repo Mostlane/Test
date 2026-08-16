@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Programmes — Mostlane</title>
+  <script src="/portal-config.js?v=5"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <link rel="manifest" href="/manifest.json">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f6;color:#1f2a37;}
+    header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 60px 14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:19px;margin:0;flex:1;}
+    .ml-back{color:#fff;text-decoration:none;font-weight:600;font-size:15px;}
+    .btn{border:none;border-radius:9px;padding:9px 14px;font:600 13.5px 'Segoe UI';cursor:pointer;text-decoration:none;display:inline-block;}
+    .btn.grey{background:rgba(255,255,255,.16);color:#fff;} .btn.ghost{background:#eef2f6;color:#1f2a44;} .btn.danger{background:#dc2626;color:#fff;}
+    .wrap{max-width:880px;margin:0 auto;padding:16px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 3px 12px rgba(0,30,80,.06);}
+    .card h3{margin:0 0 3px;font-size:16px;color:var(--navy);}
+    .muted{color:var(--muted);font-size:12.5px;}
+    .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;margin-right:5px;}
+    .pill.rev{background:#dcfce7;color:#166534;} .pill.draft{background:#fef3c7;color:#92400e;}
+    .pill.sug{background:#fee2e2;color:#b91c1c;} .pill.links{background:#e0e7ff;color:#3730a3;}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+    .empty{text-align:center;color:var(--muted);padding:36px 10px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+    <h1>📊 Job Programmes</h1>
+    <button class="btn grey" onclick="newProg()">＋ New programme</button>
+  </header>
+  <div class="wrap">
+    <p class="muted" style="margin:0 0 12px;">Build a programme of works, <b>issue</b> official revisions, and share a live link with the client — they see it in their browser (no file to copy), and can suggest changes that come back to you without touching the issued version.</p>
+    <div id="list"><div class="empty">Loading…</div></div>
+  </div>
+<script>
+  const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+  const tok = () => localStorage.getItem("mostlaneToken");
+  function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  (function(){
+    try{
+      const p = JSON.parse(localStorage.getItem("mostlanePermissions")||"{}");
+      if(p.FullAccess!=="Yes" && p.Programmes!=="Yes") location.replace("main.html");
+    }catch(e){}
+  })();
+  function fmtD(iso){ if(!iso) return ""; return new Date(iso).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
+  async function load(){
+    try{
+      const d = await (await aFetch("/prog/list")).json();
+      const host = document.getElementById("list");
+      const progs = (d.programmes||[]);
+      if(!progs.length){ host.innerHTML = '<div class="empty">No programmes yet — press ＋ New programme to build your first.</div>'; return; }
+      host.innerHTML = progs.map(p => `
+        <div class="card">
+          <div class="row">
+            <div style="min-width:0;">
+              <h3>${esc(p.title||"Untitled programme")}</h3>
+              <div class="muted">${[p.client,p.site].filter(Boolean).map(esc).join(" · ")||"&nbsp;"}</div>
+              <div style="margin-top:7px;">
+                ${p.latestRev?`<span class="pill rev">Rev ${esc(p.latestRev.rev)} · ${fmtD(p.latestRev.issuedAt)}</span>`:'<span class="pill draft">Draft — not issued</span>'}
+                ${p.openSuggestions?`<span class="pill sug">💬 ${p.openSuggestions} suggestion${p.openSuggestions===1?"":"s"}</span>`:""}
+                ${p.liveShares?`<span class="pill links">🔗 ${p.liveShares} live link${p.liveShares===1?"":"s"}</span>`:""}
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <a class="btn ghost" href="programme-edit.html?id=${encodeURIComponent(p.id)}">Open</a>
+              <button class="btn danger" onclick="delProg('${esc(p.id)}','${esc((p.title||"").replace(/'/g,""))}')">🗑</button>
+            </div>
+          </div>
+        </div>`).join("");
+    }catch(e){ document.getElementById("list").innerHTML = '<div class="empty">Couldn\'t load — check your signal and refresh.</div>'; }
+  }
+  async function newProg(){
+    location.href = "programme-edit.html";
+  }
+  async function delProg(id,title){
+    const ok = window.MLUI ? await MLUI.confirm(`Delete "${title||"this programme"}"? Its revisions, share links and suggestions all go too.`,{title:"Delete programme",okLabel:"Delete",danger:true}) : confirm("Delete this programme?");
+    if(!ok) return;
+    await aFetch("/prog/delete",{method:"POST",body:JSON.stringify({id})});
+    load();
+  }
+  load();
+</script>
+</body>
+</html>

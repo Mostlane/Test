@@ -1333,6 +1333,35 @@ travel caps), devices(device_token→person_id), visits. R2 (JOB_FILES): `fleetr
 hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
 
+## Job programmes (routes/programmes.js + programmes.html / programme-edit.html / programme-view.html — Aug 2026)
+Build a **programme of works** (Gantt: sections + activity rows on a weekly grid)
+in the portal and share it with clients by **revocable link — never a file**
+(Jamie's "locked hard" requirement: Excel can't be locked, so nothing leaves the
+portal). Permission **`Programmes`** (new PERMISSION_KEYS entry; FullAccess
+implies) gates the 📊 Programmes tile + sidebar item + all /prog/* admin routes.
+**Model:** the working **draft** autosaves (Jamie's no-save-button rule);
+**📤 Issue** freezes it as an immutable revision (Rev A, B, … `revLabel`);
+**🔗 Share** creates a token link (`programme-view.html?t=<hex>`; optional
+access code + expiry days + view-only, per-link open counter, Revoke kills it).
+The client page (NO auth.js/portal-config — public) fetches **POST
+/prog/shared/open** {token, code} which serves ONLY the latest ISSUED revision,
+watermarked; **✎ Suggest changes** gives the client an editable COPY (same
+shared renderer) submitted via **POST /prog/shared/suggest** — stored in
+`programme_suggestions` (+ push to the programme's creator), the issued
+revision untouched. The builder's 💬 suggestions list shows a per-row **change
+diff** (`MLProg.diff`, vs the revision it was made against), with "↪ Load into
+my draft" / incorporated / dismissed. Both /prog/shared/* are PUBLIC_ROUTES
+(token verified in-handler). **`programme-gantt.js?v=1`** = the ONE shared
+renderer (`window.MLProg`: render editable/read-only, blank, uid, diff) used by
+builder + client page, sticky first column, week columns from the Monday of the
+earliest activity, today line, milestones (◆), per-row colour + progress %.
+Tables (self-migrating + schema.sql): **job_programmes** (draft),
+**programme_revisions**, **programme_shares**, **programme_suggestions**.
+Headers on the two admin pages carry `padding-right:60px` so the fixed 🔔 bell
+never covers the header buttons. Help group "Job programmes" (build/issue +
+share/suggest). NB Jamie's example spreadsheet was NOT yet received when this
+was built — expect a layout/columns pass to match it when he sends it.
+
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
 set of at-a-glance widgets** — the start of "the hub of everything" (each user
