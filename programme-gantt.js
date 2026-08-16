@@ -42,7 +42,9 @@
   function endOf(task) {
     const s = parse(task.start);
     if (!s) return null;
-    const days = Math.max(1, Number(task.days) || 1);
+    // 730-day ceiling: no typo (or hostile suggestion payload) can make the
+    // end-date loop or the bar maths run away.
+    const days = Math.min(730, Math.max(1, Number(task.days) || 1));
     if (task.wknd) return addDays(s, days - 1);
     let d = new Date(s), left = days - 1;
     while (left > 0) { d = addDays(d, 1); if (!isWeekend(d)) left--; }
@@ -94,13 +96,39 @@
 
   function contractorOf(data, id) { return (data.contractors || []).find(c => c.id === id) || null; }
 
+  // The grid is capped at 550 day columns (~18 months) so ONE mistyped year
+  // (2072 for 2027) can never ask the browser to draw tens of thousands of
+  // columns and hang a phone. The cap window is anchored on where most tasks
+  // actually sit; anything outside it is listed but flagged instead of drawn.
+  const MAX_GRID_DAYS = 550;
   function geometry(data) {
-    const s = summary(data);
     const today = new Date(); today.setHours(12, 0, 0, 0);
-    const gridStart = s.start || today;
-    const gridEnd = addDays(s.end || addDays(gridStart, 29), 3);
-    const days = Math.max(14, Math.round((gridEnd - gridStart) / DAY) + 1);
-    return { gridStart, days, width: days * DAYW };
+    const starts = (data.tasks || []).map(t => parse(t.start)).filter(Boolean).sort((a, b) => a - b);
+    if (!starts.length) return { gridStart: today, days: 30, width: 30 * DAYW, offGrid: [], sumStart: null, sumEnd: null };
+    // Anchor on the median start — a lone wild date (1926/2072) can't drag the
+    // whole grid away from the real programme.
+    const anchor = starts[Math.floor(starts.length / 2)];
+    const near = t => { const s = parse(t.start); return s && Math.abs(s - anchor) / DAY <= MAX_GRID_DAYS; };
+    let start = null, end = null;
+    for (const t of (data.tasks || [])) {
+      if (!near(t)) continue;
+      const s = parse(t.start), e = endOf(t);
+      if (!start || s < start) start = s;
+      if (e && (!end || e > end)) end = e;
+    }
+    if (!start) { start = anchor; end = addDays(anchor, 29); }
+    let days = Math.max(14, Math.round((addDays(end, 3) - start) / DAY) + 1);
+    if (days > MAX_GRID_DAYS) days = MAX_GRID_DAYS;
+    const gridStart = start;
+    const gridEndCap = addDays(gridStart, days - 1);
+    const offGrid = (data.tasks || []).filter(t => {
+      const s = parse(t.start); if (!s) return false;
+      const e = endOf(t) || s;
+      return e < gridStart || s > gridEndCap;
+    }).map(t => ({ name: t.name || "(unnamed)", start: t.start }));
+    // Header summary uses the same sane window, so one wild date can't claim
+    // a "17,000 days on programme".
+    return { gridStart, days, width: days * DAYW, offGrid, sumStart: start, sumEnd: end };
   }
 
   function render(host, data, opts) {
@@ -112,7 +140,9 @@
     const geo = geometry(tasks.length ? view : data);
     const today = new Date(); today.setHours(12, 0, 0, 0);
     const todayOff = Math.round((today - geo.gridStart) / DAY);
-    const sum = summary(view);
+    const sum = geo.sumStart
+      ? { start: geo.sumStart, end: geo.sumEnd, days: Math.round((geo.sumEnd - geo.sumStart) / DAY) + 1 }
+      : { start: null, end: null, days: 0 };
 
     // Two header rows: date (dd/mm) + weekday letter; weekend columns shaded.
     let hDates = "", hDows = "";
@@ -145,7 +175,11 @@
       let segs = "";
       if (s && e) {
         const marked = [];
-        for (let d = new Date(s); d <= e; d = addDays(d, 1)) if (worksDay(t, d)) marked.push(Math.round((d - geo.gridStart) / DAY));
+        for (let d = new Date(s); d <= e; d = addDays(d, 1)) {
+          if (!worksDay(t, d)) continue;
+          const off = Math.round((d - geo.gridStart) / DAY);
+          if (off >= 0 && off < geo.days) marked.push(off);   // clip to the grid
+        }
         const progCut = Math.ceil(marked.length * prog / 100);       // worked days counted as done
         let i = 0, done = 0;
         while (i < marked.length) {
@@ -199,7 +233,10 @@
     const sumLine = sum.start
       ? `<div class="mlp-sum"><b>Start</b> ${fmtFull(sum.start)} · <b>End</b> ${fmtFull(sum.end)} · <b>${sum.days} days on programme</b></div>`
       : "";
-    host.innerHTML = sumLine +
+    const offWarn = (geo.offGrid && geo.offGrid.length)
+      ? `<div class="mlp-warn">⚠ ${geo.offGrid.length} task${geo.offGrid.length === 1 ? "" : "s"} sit${geo.offGrid.length === 1 ? "s" : ""} far outside this programme's dates and ${geo.offGrid.length === 1 ? "isn't" : "aren't"} drawn — check the date${geo.offGrid.length === 1 ? "" : "s"}: ${geo.offGrid.slice(0, 3).map(o => esc(o.name) + " (" + esc(o.start) + ")").join(", ")}${geo.offGrid.length > 3 ? "…" : ""}</div>`
+      : "";
+    host.innerHTML = sumLine + offWarn +
       `<div class="mlp-scroll"><table class="mlp-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>` +
       (opts.watermark ? `<div class="mlp-wm">${esc(opts.watermark)}</div>` : "");
 
@@ -268,6 +305,7 @@
 
   const css = `
   .mlp-sum{font:600 13px 'Segoe UI',system-ui,sans-serif;color:#003366;background:#ddebf7;border:1px solid #9dc3e6;border-radius:9px;padding:7px 12px;margin-bottom:8px;display:inline-block;}
+  .mlp-warn{font:600 12.5px 'Segoe UI',system-ui,sans-serif;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:9px;padding:7px 12px;margin:0 0 8px 8px;display:inline-block;}
   .mlp-scroll{overflow-x:auto;border:1px solid #e3e8ee;border-radius:12px;background:#fff;}
   .mlp-table{border-collapse:separate;border-spacing:0;font:13px 'Segoe UI',system-ui,sans-serif;color:#1f2a37;width:max-content;min-width:100%;}
   .mlp-table th{background:#f4f7fb;color:#334155;font-weight:700;font-size:11.5px;padding:5px 7px;border-bottom:1px solid #e3e8ee;text-align:left;white-space:nowrap;position:sticky;top:0;z-index:3;}
