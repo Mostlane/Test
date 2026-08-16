@@ -1388,7 +1388,7 @@ timing/sequencing constraints) that is sent as **prioritised INSTRUCTIONS** ahea
 of the document in the prompt (`notes` in the POST body; the endpoint accepts a
 notes-only draft with no document too). **POST
 /prog/ai-draft** (Programmes|FullAccess) calls the **Anthropic Messages API**
-(`env.ANTHROPIC_API_KEY` secret; model `env.ANTHROPIC_MODEL` || `claude-opus-5`)
+(`env.ANTHROPIC_API_KEY` secret; model `env.ANTHROPIC_MODEL` || `claude-sonnet-5`)
 with a **forced tool** (`build_programme` input_schema → structured JSON: title,
 contractors[], tasks[] with `startOffset` in working-days + `days` + milestone),
 then materialises it into a BRAND-NEW `job_programmes` **draft** (contractor names
@@ -1916,7 +1916,7 @@ extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
 POST /prog/ai-draft calls api.anthropic.com; feature fails soft with a clear
 "add the key" message when unset) (secrets); optional var **ANTHROPIC_MODEL**
-(defaults to `claude-opus-5`); EMAIL_FROM, R2_PUBLIC_BASE,
+(defaults to `claude-sonnet-5`); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB
