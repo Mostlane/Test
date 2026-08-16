@@ -118,7 +118,10 @@ export default {
     // the api.site-log.co.uk custom domain is moved onto this worker (Stage 2);
     // before that this worker never receives that host, so it's a no-op. The
     // ported handler does its own CORS/preflight for the site-log.co.uk origins.
-    if (url.hostname === "api.site-log.co.uk") {
+    // api2.site-log.co.uk is a temporary PROVE-IT host: point it at this worker
+    // (custom domain) to confirm SiteLog serves correctly here before cutting the
+    // live api.* domain over. Harmless to leave — nothing references it.
+    if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
       return sitelogApi.handle(request, env, ctx);
     }
 
