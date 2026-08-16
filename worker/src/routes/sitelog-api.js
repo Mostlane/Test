@@ -45,6 +45,12 @@ async function ensureOfflineSchema(env) {
   try { await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN served_by TEXT").run(); } catch (e) {}
   try { await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN fuel_rate REAL").run(); } catch (e) {}
   try { await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN is_main INTEGER DEFAULT 0").run(); } catch (e) {}
+  // Contractor vs Visitor arrival screens. A person is a VISITOR only when
+  // explicitly registered as one (person_type='visitor'); everyone else — every
+  // existing person, every portal-linked engineer — is a contractor. Sites carry
+  // a parallel visitor rule set alongside their contractor `site_rules`.
+  try { await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN person_type TEXT").run(); } catch (e) {}
+  try { await env.SITELOG_DB.prepare("ALTER TABLE sites ADD COLUMN site_rules_visitor TEXT").run(); } catch (e) {}
   // Mostlane portal identity link: the person's portal username, set via
   // /portal-link when the scanner is opened from the portal. NULL = not a
   // portal user = subcontractor (for the portal's unified job costing).
@@ -552,14 +558,43 @@ function didSetCookie(token) {
   return { "Set-Cookie": "ml_did=" + token + "; Max-Age=63072000; Path=/; Secure; SameSite=Lax; Domain=site-log.co.uk; HttpOnly" };
 }
 
+// Normalise a rules value (string or array) to a clean array of non-blank lines.
+function rulesLines(raw) {
+  if (Array.isArray(raw)) return raw.map((r) => String(r).trim()).filter((r) => r.length > 0);
+  return String(raw || "").split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+}
+
+// A person's arrival TYPE: 'visitor' only when explicitly registered as one.
+// Portal-linked engineers and every legacy person default to 'contractor'.
+function personArrivalType(person) {
+  if (!person) return "contractor";
+  if (person.portal_username) return "contractor";
+  return String(person.person_type || "").toLowerCase() === "visitor" ? "visitor" : "contractor";
+}
+const arrivalConfigKey = (type) =>
+  type === "visitor" ? "arrival_default_rules_visitor" : "arrival_default_rules";
+
 // Default arrival rules (config key) — shown on any site that has no rules of
-// its own. Stored newline-separated in the SiteLog `config` key/value table.
-async function getArrivalDefaultRules(env) {
+// its own, per arrival type. Stored newline-separated in the SiteLog `config`
+// key/value table (contractor = arrival_default_rules, visitor = *_visitor).
+async function getArrivalDefaultRules(env, type = "contractor") {
   try {
-    const row = await env.SITELOG_DB.prepare("SELECT value FROM config WHERE key = 'arrival_default_rules'").first();
+    const row = await env.SITELOG_DB.prepare("SELECT value FROM config WHERE key = ?")
+      .bind(arrivalConfigKey(type)).first();
     if (!row || !row.value) return [];
-    return String(row.value).split("\n").map((r) => r.trim()).filter((r) => r.length > 0);
+    return rulesLines(row.value);
   } catch { return []; }
+}
+
+// The arrival rules to SHOW for a given site + arrival type: the site's own
+// variant rules, else the type's portal default (so every site shows something).
+function siteVariantRulesRaw(site, type) {
+  return type === "visitor" ? (site.site_rules_visitor || "") : (site.site_rules || "");
+}
+async function getArrivalRulesFor(env, site, type) {
+  let rules = rulesLines(siteVariantRulesRaw(site, type));
+  if (!rules.length) rules = await getArrivalDefaultRules(env, type);
+  return rules;
 }
 
 // Ported SiteLog backend, now living inside mostlane-api. Faithful copy of the
@@ -759,11 +794,15 @@ export async function handle(request, env, ctx) {
 
       const company = ((body.company ?? "").toString().trim().slice(0, 120)) || null;
       const purpose = ((body.purpose ?? "").toString().trim().slice(0, 60)) || null;
+      // Contractor / Visitor chosen on the scanner's arrival screen (new devices).
+      const ptRaw = String(body.personType ?? body.type ?? "").toLowerCase();
+      const personType = ptRaw === "visitor" ? "visitor" : ptRaw === "contractor" ? "contractor" : null;
 
       if (!deviceToken || deviceToken.length > 128) return json({ ok: false, error: "Missing deviceToken" }, 400);
       if (!firstName && !lastName) return json({ ok: false, error: "Missing name" }, 400);
 
       try {
+        await ensureOfflineSchema(env); // person_type / site_rules_visitor columns
         const existing = await env.SITELOG_DB.prepare(`
           SELECT p.id as person_id, p.first_name, p.last_name, p.company, p.purpose, COALESCE(p.archived,0) as archived
           FROM devices d
@@ -775,9 +814,10 @@ export async function handle(request, env, ctx) {
         if (existing) {
           await env.SITELOG_DB.prepare(`
             UPDATE people
-            SET first_name = ?, last_name = ?, company = COALESCE(?, company), purpose = COALESCE(?, purpose)
+            SET first_name = ?, last_name = ?, company = COALESCE(?, company), purpose = COALESCE(?, purpose),
+                person_type = COALESCE(?, person_type)
             WHERE id = ?
-          `).bind(firstName, lastName, company, purpose, existing.person_id).run();
+          `).bind(firstName, lastName, company, purpose, personType, existing.person_id).run();
 
           return json({
             ok: true,
@@ -789,9 +829,9 @@ export async function handle(request, env, ctx) {
         const personId = crypto.randomUUID();
 
         await env.SITELOG_DB.prepare(`
-          INSERT INTO people (id, first_name, last_name, company, purpose, archived, hourly_rate)
-          VALUES (?, ?, ?, ?, ?, 0, 0)
-        `).bind(personId, firstName, lastName, company, purpose).run();
+          INSERT INTO people (id, first_name, last_name, company, purpose, person_type, archived, hourly_rate)
+          VALUES (?, ?, ?, ?, ?, ?, 0, 0)
+        `).bind(personId, firstName, lastName, company, purpose, personType).run();
 
         await env.SITELOG_DB.prepare(`
           INSERT INTO devices (device_token, person_id)
@@ -971,71 +1011,102 @@ export async function handle(request, env, ctx) {
       if (guard) return guard;
       await ensureOfflineSchema(env);
 
-      const { id, siteName, radius, siteRules, category } = await readBody(request);
+      const body = await readBody(request);
+      const { id, siteName, radius, siteRules, siteRulesVisitor, category } = body;
 
       if (!id) return json({ error: "Missing id" }, 400);
       if (!siteName) return json({ error: "Missing siteName" }, 400);
 
+      const sets = ["site_name = ?", "radius_m = ?", "site_rules = ?"];
+      const binds = [siteName, Number(radius ?? 500), siteRules ?? null];
       if (category !== undefined) {
-        await env.SITELOG_DB.prepare(
-          "UPDATE sites SET site_name = ?, radius_m = ?, site_rules = ?, category = ? WHERE id = ?"
-        ).bind(siteName, Number(radius ?? 500), siteRules ?? null, (String(category || "").trim() || "Projects"), id).run();
-      } else {
-        await env.SITELOG_DB.prepare(
-          "UPDATE sites SET site_name = ?, radius_m = ?, site_rules = ? WHERE id = ?"
-        ).bind(siteName, Number(radius ?? 500), siteRules ?? null, id).run();
+        sets.push("category = ?");
+        binds.push((String(category || "").trim() || "Projects"));
       }
+      // Only touch the visitor rules when the caller supplied them, so other
+      // /update-site callers (SiteLog admin) never wipe them.
+      if (siteRulesVisitor !== undefined) {
+        sets.push("site_rules_visitor = ?");
+        binds.push(siteRulesVisitor || null);
+      }
+      binds.push(id);
+      await env.SITELOG_DB.prepare(
+        `UPDATE sites SET ${sets.join(", ")} WHERE id = ?`
+      ).bind(...binds).run();
 
       return json({ ok: true });
     }
 
-    // GET /arrival-config — the DEFAULT arrival rules + coverage counts (admin).
+    // GET /arrival-config — the DEFAULT arrival rules (contractor + visitor) +
+    // coverage counts per variant (admin).
     if (url.pathname === "/arrival-config" && request.method === "GET") {
       const guard = requireAdmin();
       if (guard) return guard;
-      const defaultRules = await getArrivalDefaultRules(env);
+      await ensureOfflineSchema(env);
+      const contractor = await getArrivalDefaultRules(env, "contractor");
+      const visitor = await getArrivalDefaultRules(env, "visitor");
       const counts = await env.SITELOG_DB.prepare(
-        "SELECT COUNT(*) AS total, SUM(CASE WHEN site_rules IS NOT NULL AND TRIM(site_rules)!='' THEN 1 ELSE 0 END) AS withOwn FROM sites WHERE COALESCE(archived,0)=0"
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN site_rules IS NOT NULL AND TRIM(site_rules)!='' THEN 1 ELSE 0 END) AS withOwn,
+                SUM(CASE WHEN site_rules_visitor IS NOT NULL AND TRIM(site_rules_visitor)!='' THEN 1 ELSE 0 END) AS withOwnVisitor
+         FROM sites WHERE COALESCE(archived,0)=0`
       ).first();
       return json({
-        ok: true, defaultRules,
+        ok: true,
+        contractor, visitor,
+        defaultRules: contractor, // legacy field = contractor
         totalSites: (counts && counts.total) || 0,
-        sitesWithOwnRules: (counts && counts.withOwn) || 0
+        sitesWithOwnRules: (counts && counts.withOwn) || 0,
+        sitesWithOwnVisitorRules: (counts && counts.withOwnVisitor) || 0
       });
     }
 
     // POST /arrival-config — set the default arrival rules (admin).
-    // Body { rules: [..] } or { text: "line\nline" }.
+    // Body { contractor:[..], visitor:[..] } (either may be omitted to leave it),
+    // or legacy { rules:[..] } / { text:"line\nline" } = contractor only.
     if (url.pathname === "/arrival-config" && request.method === "POST") {
       const guard = requireAdmin();
       if (guard) return guard;
       const body = await readBody(request);
-      const lines = Array.isArray(body.rules)
-        ? body.rules
-        : String(body.text ?? body.rules ?? "").split("\n");
-      const value = lines.map((r) => String(r).trim()).filter((r) => r.length > 0).join("\n");
-      await env.SITELOG_DB.prepare(
-        "INSERT INTO config (key, value) VALUES ('arrival_default_rules', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-      ).bind(value).run();
-      return json({ ok: true, defaultRules: value ? value.split("\n") : [] });
+      const save = async (type, raw) => {
+        const value = rulesLines(raw).join("\n");
+        await env.SITELOG_DB.prepare(
+          "INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        ).bind(arrivalConfigKey(type), value).run();
+      };
+      const hasContractor = body.contractor !== undefined || body.rules !== undefined || body.text !== undefined;
+      if (hasContractor) await save("contractor", body.contractor ?? body.rules ?? body.text ?? "");
+      if (body.visitor !== undefined) await save("visitor", body.visitor);
+      return json({
+        ok: true,
+        contractor: await getArrivalDefaultRules(env, "contractor"),
+        visitor: await getArrivalDefaultRules(env, "visitor")
+      });
     }
 
-    // POST /arrival-config/apply — stamp the default onto sites in one go, so
-    // every known site shows it (admin). Body { onlyBlank: true } (default) only
-    // fills sites that have no rules of their own; { onlyBlank: false } overwrites
-    // every non-archived site with the default.
+    // POST /arrival-config/apply — stamp the defaults onto sites in one go, so
+    // every known site shows them (admin). Body { onlyBlank:true } (default) only
+    // fills sites with no rules of their own; { onlyBlank:false } overwrites every
+    // non-archived site. { which:'contractor'|'visitor'|'both' } (default 'both').
     if (url.pathname === "/arrival-config/apply" && request.method === "POST") {
       const guard = requireAdmin();
       if (guard) return guard;
+      await ensureOfflineSchema(env);
       const body = await readBody(request);
       const onlyBlank = body.onlyBlank !== false;
-      const rules = (await getArrivalDefaultRules(env)).join("\n");
-      const sql = onlyBlank
-        ? "UPDATE sites SET site_rules = ? WHERE COALESCE(archived,0)=0 AND (site_rules IS NULL OR TRIM(site_rules)='')"
-        : "UPDATE sites SET site_rules = ? WHERE COALESCE(archived,0)=0";
-      const res = await env.SITELOG_DB.prepare(sql).bind(rules).run();
-      const changes = (res && res.meta && res.meta.changes) || 0;
-      return json({ ok: true, updated: changes, onlyBlank });
+      const which = String(body.which || "both").toLowerCase();
+      let updated = 0;
+      const applyOne = async (col, type) => {
+        const rules = (await getArrivalDefaultRules(env, type)).join("\n");
+        const sql = onlyBlank
+          ? `UPDATE sites SET ${col} = ? WHERE COALESCE(archived,0)=0 AND (${col} IS NULL OR TRIM(${col})='')`
+          : `UPDATE sites SET ${col} = ? WHERE COALESCE(archived,0)=0`;
+        const res = await env.SITELOG_DB.prepare(sql).bind(rules).run();
+        updated += (res && res.meta && res.meta.changes) || 0;
+      };
+      if (which === "contractor" || which === "both") await applyOne("site_rules", "contractor");
+      if (which === "visitor" || which === "both") await applyOne("site_rules_visitor", "visitor");
+      return json({ ok: true, updated, onlyBlank, which });
     }
 
     // POST /toggle-site
@@ -2153,22 +2224,26 @@ export async function handle(request, env, ctx) {
       }
 
       const siteCode = matchedSite.site_name;
-      const rulesRaw = matchedSite.site_rules || "";
-      let siteRules = rulesRaw
-        .split("\n")
-        .map((r) => r.trim())
-        .filter((r) => r.length > 0);
-      // A site with no rules of its own falls back to the portal-set DEFAULT
-      // arrival rules (config key arrival_default_rules), so every site shows
-      // something on arrival without setting each one individually.
-      if (!siteRules.length) siteRules = await getArrivalDefaultRules(env);
+      // Compute BOTH arrival variants for this site (the site's own rules for
+      // that type, else the type's portal default — so every site shows
+      // something). The person's type decides which set they see; a brand-new
+      // device is offered the Contractor/Visitor choice on the scanner.
+      const siteRulesContractor = await getArrivalRulesFor(env, matchedSite, "contractor");
+      const siteRulesVisitor = await getArrivalRulesFor(env, matchedSite, "visitor");
 
       const device = await env.SITELOG_DB.prepare(
         "SELECT * FROM devices WHERE device_token = ?"
       ).bind(deviceToken).first();
 
       if (!device) {
-        return json({ status: "first_visit", site: siteCode, siteRules });
+        return json({
+          status: "first_visit",
+          site: siteCode,
+          askType: true,
+          siteRules: siteRulesContractor, // legacy field for an un-updated scanner
+          siteRulesContractor,
+          siteRulesVisitor
+        });
       }
 
       const isArchived = await env.SITELOG_DB.prepare(
@@ -2180,8 +2255,13 @@ export async function handle(request, env, ctx) {
       }
 
       const person = await env.SITELOG_DB.prepare(
-        "SELECT first_name, company FROM people WHERE id = ?"
+        "SELECT first_name, company, person_type, portal_username FROM people WHERE id = ?"
       ).bind(device.person_id).first();
+
+      // Which arrival screen this known person sees (registered engineers and
+      // legacy people = contractor; only an explicit 'visitor' sees the visitor set).
+      const arrivalType = personArrivalType(person);
+      const siteRules = arrivalType === "visitor" ? siteRulesVisitor : siteRulesContractor;
 
       const allOpenVisits = await env.SITELOG_DB.prepare(
         "SELECT id, site_code, check_in_at FROM visits WHERE person_id = ? AND check_out_at IS NULL"
@@ -2230,6 +2310,7 @@ export async function handle(request, env, ctx) {
         site: siteCode,
         firstName: person?.first_name || null,
         company: person?.company || null,
+        arrivalType,
         siteRules,
         mustAck
       });
