@@ -148,7 +148,7 @@
       <div style="overflow-x:auto;">
         <table class="mtx" id="mtxTable"><tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody></table>
       </div>
-      <p class="muted" style="font-size:11.5px; margin:8px 0 0;">Follows the person, not the van — a driver who changes vehicle keeps one row. Hover/tap a cell for the van used and any issue. “Missed” shows only for weeks a driver was assigned a van. Page back with <b>Earlier weeks</b>.</p>
+      <p class="muted" style="font-size:11.5px; margin:8px 0 0;">Follows the person, not the van — a driver who changes vehicle keeps one row. Hover/tap a cell for the van used and any issue. “Missed” shows only for weeks a driver was assigned a van. Starts at last week — page further back with <b>Earlier weeks</b>.</p>
     </div>
   </div>
 
@@ -412,18 +412,21 @@
   // ── By-engineer compliance matrix (missed weeks) ────────────────────────────
   let MTX_FROM = null, MTX_TO = null;
   function mtxFmt(w) { return new Date(w + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
+  // Default view starts at LAST week (last week + this week) — page further back
+  // with "Earlier weeks". Keeps historic weeks (before people were doing checks)
+  // out of the missed count unless you deliberately look back.
   g("matrixBtn").onclick = () => {
     const card = g("matrixCard");
     const showing = !card.classList.contains("hide");
     if (showing) { card.classList.add("hide"); return; }
     card.classList.remove("hide");
-    if (!MTX_TO) { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7 * 7); }
+    if (!MTX_TO) { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7); }
     loadMatrix();
     card.scrollIntoView({ behavior:"smooth", block:"start" });
   };
   g("mtxClose").onclick = () => g("matrixCard").classList.add("hide");
-  g("mtxEarlier").onclick = () => { MTX_FROM = addDays(MTX_FROM, -7 * 8); loadMatrix(); };
-  g("mtxReset").onclick = () => { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7 * 7); loadMatrix(); };
+  g("mtxEarlier").onclick = () => { MTX_FROM = addDays(MTX_FROM, -7 * 4); loadMatrix(); };
+  g("mtxReset").onclick = () => { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7); loadMatrix(); };
 
   async function loadMatrix() {
     g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody>';
