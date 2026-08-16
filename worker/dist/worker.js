@@ -11176,7 +11176,7 @@ var DEFAULT_PHOTO_SLOTS = [
   { id: "load", label: "Load area", required: false }
 ];
 var DEFAULT_EQUIPMENT = [];
-var DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, equipment: DEFAULT_EQUIPMENT, photoSlots: DEFAULT_PHOTO_SLOTS };
+var DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, equipment: DEFAULT_EQUIPMENT, photoSlots: DEFAULT_PHOTO_SLOTS, reminders: [] };
 function londonDate2(d = /* @__PURE__ */ new Date()) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
@@ -11212,7 +11212,21 @@ async function getSettings(db) {
   if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
   if (!Array.isArray(out.equipment)) out.equipment = [];
   if (!Array.isArray(out.alertUsers)) out.alertUsers = [];
+  if (!Array.isArray(out.reminders)) out.reminders = [];
   return out;
+}
+function normReminders(arr) {
+  const out = [], seen = /* @__PURE__ */ new Set();
+  for (const r of Array.isArray(arr) ? arr : []) {
+    const dow = Math.min(7, Math.max(1, Number(r && r.dow) || 0));
+    const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(r && r.time) ? r.time : "";
+    if (!dow || !time) continue;
+    const key = dow + ":" + time;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ dow, time });
+  }
+  return out.slice(0, 21).sort((a, b) => a.dow - b.dow || a.time.localeCompare(b.time));
 }
 var CUSTOM_TPL_KEY = (tid) => `vancheck:customtpls:${tid}`;
 var slug2 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
@@ -11257,25 +11271,72 @@ async function nameMap(env, tid) {
   }
   return out;
 }
+var DEF_CHECK_OPTS = [{ value: "ok", label: "OK", tone: "ok" }, { value: "defect", label: "Defect", tone: "issue" }];
+var DEF_EQUIP_OPTS = [{ value: "present", label: "Present", tone: "ok" }, { value: "missing", label: "Missing", tone: "issue" }];
+var optsFor = (item, kind) => item && Array.isArray(item.options) && item.options.length ? item.options : kind === "equip" ? DEF_EQUIP_OPTS : DEF_CHECK_OPTS;
+function normOptions(arr) {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  const out = [], seen = /* @__PURE__ */ new Set();
+  for (const o of arr) {
+    const label = String(o && o.label || "").trim();
+    if (!label) continue;
+    let value = slug2(o && o.value) || slug2(label);
+    if (!value) continue;
+    while (seen.has(value)) value += "_2";
+    seen.add(value);
+    const tone = o.tone === "issue" || o.tone === "na" ? o.tone : "ok";
+    out.push({ value, label, tone });
+  }
+  return out.length ? out : null;
+}
 function normAlertItem(i, failVal) {
   const id = String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30);
   const label = String(i.label || "").trim();
   const out = { id, label };
+  const options = normOptions(i && i.options);
+  if (options) out.options = options;
   if (i && i.alert) {
     const on = i.alertOn;
     out.alert = true;
-    out.alertOn = on === "ok" || on === "present" || on === "defect" || on === "missing" ? on : failVal;
+    if (!options) out.alertOn = on === "ok" || on === "present" || on === "defect" || on === "missing" ? on : failVal;
   }
   return out;
 }
+function answerTone(item, kind, value) {
+  const o = optsFor(item, kind).find((x) => x.value === value);
+  if (o) return o.tone;
+  return value === "defect" || value === "missing" ? "issue" : value === "ok" || value === "present" ? "ok" : "na";
+}
 function evalAlerts(answers, tpl) {
   const out = [];
-  for (const it of [...tpl.checklist || [], ...tpl.equipment || []]) {
-    if (it && it.alert && it.alertOn && answers[it.id] === it.alertOn) {
-      out.push({ id: it.id, label: it.label, answer: answers[it.id] });
+  for (const [arr, kind] of [[tpl.checklist || [], "check"], [tpl.equipment || [], "equip"]]) {
+    for (const it of arr) {
+      if (!it || !it.alert) continue;
+      const val = answers[it.id];
+      if (val == null) continue;
+      const fired = Array.isArray(it.options) && it.options.length ? answerTone(it, kind, val) === "issue" : val === it.alertOn;
+      if (fired) out.push({ id: it.id, label: it.label, answer: val });
     }
   }
   return out;
+}
+function answerMetaFor(answers, tpl) {
+  const defMap = {};
+  (tpl.checklist || []).forEach((it) => {
+    defMap[it.id] = { item: it, kind: "check" };
+  });
+  (tpl.equipment || []).forEach((it) => {
+    defMap[it.id] = { item: it, kind: "equip" };
+  });
+  const answerMeta = {}, issues = [];
+  for (const [id, val] of Object.entries(answers || {})) {
+    const d = defMap[id];
+    const tone = d ? answerTone(d.item, d.kind, val) : val === "defect" || val === "missing" ? "issue" : "ok";
+    const opt = d ? optsFor(d.item, d.kind).find((x) => x.value === val) : null;
+    answerMeta[id] = { label: opt ? opt.label : answerWord(val), tone };
+    if (tone === "issue") issues.push(id);
+  }
+  return { answerMeta, issues };
 }
 function answerWord(v) {
   return v === "defect" ? "Defect" : v === "missing" ? "Missing" : v === "present" ? "Present" : v === "ok" ? "OK" : String(v || "");
@@ -11293,7 +11354,7 @@ function shapeCheck(r) {
   } catch {
   }
   const answers = items.answers || {};
-  const defects = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing");
+  const defects = Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing");
   return {
     username: r.username,
     week: r.week,
@@ -11309,6 +11370,7 @@ function shapeCheck(r) {
     source: items.source || "story",
     defectCount: defects.length,
     alerts: items.alerts || [],
+    answerMeta: items.answerMeta || {},
     skipped: !!items.skipped,
     skippedBy: items.skippedBy || ""
   };
@@ -11349,6 +11411,7 @@ async function handle17(request, env, ctx, url, sess) {
       s.equipment = b.equipment.map((i) => normAlertItem(i, "missing")).filter((i) => i.label);
     }
     if (Array.isArray(b.alertUsers)) s.alertUsers = b.alertUsers.map((u) => String(u || "").trim()).filter(Boolean).slice(0, 50);
+    if (Array.isArray(b.reminders)) s.reminders = normReminders(b.reminders);
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, SETTINGS_KEY2, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
   }
@@ -11528,6 +11591,7 @@ async function handle17(request, env, ctx, url, sess) {
       if (key) photoKeys.push(key);
     }
     const alerts = evalAlerts(answers, s2);
+    const { answerMeta, issues } = answerMetaFor(answers, s2);
     const custom = customRow ? { id: customRow.id, name: customRow.name, checklist: s2.checklist, equipment: s2.equipment, photoSlots: s2.photoSlots } : void 0;
     const items = JSON.stringify({
       answers,
@@ -11537,6 +11601,8 @@ async function handle17(request, env, ctx, url, sess) {
       mileage: String(b.mileage || "").trim(),
       source: "portal",
       alerts,
+      answerMeta,
+      issues,
       ...custom ? { custom } : {}
     });
     const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -11740,11 +11806,13 @@ async function sendWeeklyReminders(env, now = /* @__PURE__ */ new Date()) {
   } catch {
     return { ran: false, reason: "no-users" };
   }
+  const DOWNUM = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+  const lonDowNum = DOWNUM[lonDow] || 0;
+  const lonHM2 = londonHM2(nowMs);
   const out = [];
   for (const tid of tenants) {
     const settings = await readVanSettings(env, tid);
-    const deadlineMs = Date.parse(deadlineFor(week, settings));
-    const withinChase = nowMs < deadlineMs && deadlineMs - nowMs <= CHASE_LEAD_MS;
+    const reminders = Array.isArray(settings.reminders) ? settings.reminders : [];
     const mkey = `vancheck:reminded:${tid}`;
     let slots = [];
     try {
@@ -11752,20 +11820,38 @@ async function sendWeeklyReminders(env, now = /* @__PURE__ */ new Date()) {
       if (row && row.value) slots = JSON.parse(row.value) || [];
     } catch {
     }
-    const mondayDue = isMonday7 && !slots.includes(`mon:${week}`);
-    const chaseDue = withinChase && !slots.includes(`chase:${week}`);
-    if (!mondayDue && !chaseDue) {
+    let payload = null, slotKey = "", reason = "";
+    if (reminders.length) {
+      for (const rem of reminders) {
+        if (rem.dow !== lonDowNum || lonHM2 < rem.time) continue;
+        const key = `rem:${rem.dow}:${rem.time}:${week}`;
+        if (slots.includes(key)) continue;
+        slotKey = key;
+        reason = "scheduled";
+        break;
+      }
+      if (slotKey) payload = { title: "Weekly van check due", body: "Please complete your weekly van check \u2014 tap to start.", url: "/van-check.html", tag: "vehicle-check" };
+    } else {
+      const deadlineMs = Date.parse(deadlineFor(week, settings));
+      const withinChase = nowMs < deadlineMs && deadlineMs - nowMs <= CHASE_LEAD_MS;
+      const mondayDue = isMonday7 && !slots.includes(`mon:${week}`);
+      const chaseDue = withinChase && !slots.includes(`chase:${week}`);
+      if (mondayDue || chaseDue) {
+        const dueBy = londonHM2(deadlineMs);
+        payload = chaseDue ? { title: "Van check due soon", body: `Last reminder \u2014 your weekly van check is due by ${dueBy} today. Tap to complete it.`, url: "/van-check.html", tag: "vehicle-check" } : { title: "Weekly van check due", body: "Please complete your weekly van check \u2014 tap to start.", url: "/van-check.html", tag: "vehicle-check" };
+        slotKey = chaseDue ? `chase:${week}` : `mon:${week}`;
+        reason = chaseDue ? "chase" : "monday";
+      }
+    }
+    if (!payload) {
       out.push({ tid, skipped: true });
       continue;
     }
-    const dueBy = londonHM2(deadlineMs);
-    const payload = chaseDue ? { title: "Van check due soon", body: `Last reminder \u2014 your weekly van check is due by ${dueBy} today. Tap to complete it.`, url: "/van-check.html", tag: "vehicle-check" } : { title: "Weekly van check due", body: "Please complete your weekly van check \u2014 tap to start.", url: "/van-check.html", tag: "vehicle-check" };
     const { reminded } = await remindDrivers(env, tid, week, payload);
-    if (mondayDue) slots.push(`mon:${week}`);
-    if (chaseDue) slots.push(`chase:${week}`);
-    slots = slots.slice(-30);
+    slots.push(slotKey);
+    slots = slots.slice(-40);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, mkey, JSON.stringify(slots)).run();
-    out.push({ tid, reminded, reason: chaseDue ? "chase" : "monday" });
+    out.push({ tid, reminded, reason });
   }
   return { ran: true, week, tenants: out };
 }
@@ -12473,7 +12559,7 @@ async function vanCheckDefects(env, tid, resolved) {
       const clearAt = resolved && resolved[rk] || "";
       if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
       const answers = items.answers || {};
-      const defItems = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing").length;
+      const defItems = (Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing")).length;
       const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
       if (!defItems && !notSafe) continue;
       const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
@@ -13472,7 +13558,7 @@ async function handle21(request, env, ctx, url, sess) {
       }
       if (items.skipped) continue;
       const answers = items.answers || {};
-      const defects = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing");
+      const defects = Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing");
       const slot = items.slotPhotos || {};
       const photos = Array.from(/* @__PURE__ */ new Set([...Object.values(slot), ...items.photos || []]));
       checks.push({
@@ -13489,6 +13575,7 @@ async function handle21(request, env, ctx, url, sess) {
         slotPhotos: slot,
         photos,
         alerts: items.alerts || [],
+        answerMeta: items.answerMeta || {},
         custom: items.custom || null
         // one-off custom check: carries its own item labels
       });

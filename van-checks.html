@@ -52,6 +52,16 @@
     .userpick { max-height:160px; overflow:auto; border:1px solid #e2e8f0; border-radius:9px; padding:8px; }
     .userpick label { display:flex; align-items:center; gap:8px; font-weight:500; font-size:14px; margin:3px 0; }
     .userpick input { width:auto; }
+    .itemrow .optbtn { background:#eef2f7; color:var(--brand); border:1px solid #cdd9ea; border-radius:8px; padding:6px 9px; font:600 12px inherit; font-family:inherit; cursor:pointer; white-space:nowrap; }
+    .ir-opts { flex-basis:100%; margin:2px 0 4px 4px; padding:8px 10px; border-left:3px solid #cdd9ea; background:#f8fafc; border-radius:0 8px 8px 0; }
+    .ir-opts .h { font-size:11px; font-weight:700; color:#5b6b7b; margin-bottom:5px; }
+    .optrow { display:flex; gap:6px; align-items:center; margin-bottom:5px; }
+    .optrow input.or-label { flex:1 1 140px; min-width:110px; padding:6px 8px; border:1px solid #ccd5dd; border-radius:7px; font-size:13px; }
+    .optrow select.or-tone { padding:6px; border:1px solid #ccd5dd; border-radius:7px; font-size:12.5px; }
+    .optrow .rm { background:#fdecea; color:var(--bad); border:none; border-radius:7px; width:26px; height:30px; font-size:13px; cursor:pointer; flex:none; }
+    .remrow { display:flex; gap:7px; align-items:center; margin-bottom:6px; }
+    .remrow select, .remrow input { padding:8px; border:1px solid #ccd5dd; border-radius:8px; font-size:13.5px; font-family:inherit; }
+    .remrow .rm { background:#fdecea; color:var(--bad); border:none; border-radius:8px; width:30px; height:34px; font-size:14px; cursor:pointer; }
     .ahint { font-size:12px; color:#6b7a90; margin:2px 0 8px; }
   </style>
 </head>
@@ -108,7 +118,11 @@
           <select id="s_dow"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option></select></div>
         <div style="flex:1;"><label>Due time</label><input type="time" id="s_time"></div>
       </div>
-      <label>Checklist (driver taps OK / Defect)</label>
+      <label style="margin-top:12px;">Reminder notifications</label>
+      <p class="ahint">When to push drivers who haven't done their check. Add as many day + time slots as you like. Leave empty for the default (Monday 07:00 + a chase before the deadline). Reminders fire at or just after the chosen time.</p>
+      <div id="s_reminders"></div>
+      <button type="button" class="addbtn" onclick="addReminderRow()">＋ Add reminder time</button>
+      <label style="margin-top:16px;">Checklist (driver taps the answers you set — default OK / Defect)</label>
       <p class="ahint">Tick <b>Alert if</b> on any item to notify the people below when that answer is given.</p>
       <div id="s_checkRows"></div>
       <button type="button" class="addbtn" onclick="addItemRow('s_checkRows','check')">＋ Add check</button>
@@ -385,27 +399,70 @@
   async function loadUsers() { if (USERS.length) return USERS; try { const d = await authFetch("/users").then(r => r.json()); USERS = (d.Users || d.users || []).filter(u => u.Username); } catch (e) {} return USERS; }
   const uName = u => ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
   const ANS = { check: [["defect", "Defect"], ["ok", "OK"]], equip: [["missing", "Missing"], ["present", "Present"]] };
+  // Custom answer options (per item). tone: ok | issue | na. Empty = default
+  // (OK/Defect for checklist, Present/Missing for equipment).
+  const TONE_OPTS = [["ok", "OK ✓"], ["issue", "Issue ✗"], ["na", "N/A –"]];
+  const DEF_OPTS = { check: [{ label: "OK", tone: "ok" }, { label: "Defect", tone: "issue" }], equip: [{ label: "Present", tone: "ok" }, { label: "Missing", tone: "issue" }] };
+  function optRowHtml(o) {
+    o = o || {}; const t = o.tone || "ok";
+    return `<div class="optrow"><input class="or-label" placeholder="Answer" value="${esc(o.label || "")}"><select class="or-tone">${TONE_OPTS.map(([v, l]) => `<option value="${v}" ${v === t ? "selected" : ""}>${l}</option>`).join("")}</select><button type="button" class="rm" title="Remove answer" onclick="this.closest('.optrow').remove()">✕</button></div>`;
+  }
   function itemRowHtml(kind, it) {
     it = it || {}; const opts = ANS[kind] || ANS.check; const on = it.alertOn || opts[0][0];
     const sel = opts.map(([v, l]) => `<option value="${v}" ${v === on ? "selected" : ""}>${l}</option>`).join("");
-    return `<div class="itemrow">
+    const hasOpts = Array.isArray(it.options) && it.options.length;
+    const optsHtml = (it.options || []).map(optRowHtml).join("");
+    return `<div class="itemrow" data-kind="${kind}">
       <input class="ir-label" placeholder="Item name" value="${esc(it.label || "")}">
-      <span class="ir-alertwrap"><input type="checkbox" class="ir-alertck" ${it.alert ? "checked" : ""} onchange="this.closest('.itemrow').querySelector('.ir-alerton').style.display=this.checked?'':'none'"> Alert if</span>
-      <select class="ir-alerton" style="display:${it.alert ? "" : "none"}">${sel}</select>
+      <button type="button" class="optbtn" onclick="toggleItemOpts(this)">⚙ Answers</button>
+      <span class="ir-alertwrap"><input type="checkbox" class="ir-alertck" ${it.alert ? "checked" : ""} onchange="this.closest('.itemrow').querySelector('.ir-alerton').style.display=(this.checked&&!this.closest('.itemrow').querySelector('.optrow'))?'':'none'"> Alert if</span>
+      <select class="ir-alerton" style="display:${(it.alert && !hasOpts) ? "" : "none"}">${sel}</select>
       <button type="button" class="rm" title="Remove" onclick="this.closest('.itemrow').remove()">✕</button>
+      <div class="ir-opts" style="display:${hasOpts ? "" : "none"}">
+        <div class="h">Answer buttons the driver sees — tag each OK / Issue / N/A. Leave empty for the default (${kind === "equip" ? "Present / Missing" : "OK / Defect"}).</div>
+        <div class="optlist">${optsHtml}</div>
+        <button type="button" class="addbtn" style="padding:5px 9px;font-size:12px;" onclick="addOptRow(this)">＋ Add answer</button>
+      </div>
     </div>`;
   }
+  // Toggle the answers editor; seed with the defaults the first time it's opened.
+  function toggleItemOpts(btn) {
+    const row = btn.closest(".itemrow"); const box = row.querySelector(".ir-opts");
+    const showing = box.style.display !== "none";
+    if (showing) { box.style.display = "none"; return; }
+    box.style.display = "";
+    if (!box.querySelector(".optrow")) {
+      const kind = row.dataset.kind || "check";
+      box.querySelector(".optlist").innerHTML = DEF_OPTS[kind].map(optRowHtml).join("");
+    }
+    // A custom-answer item alerts on any "Issue", so the specific alert-answer
+    // picker isn't needed — hide it while custom answers exist.
+    const on = row.querySelector(".ir-alerton"); if (on) on.style.display = "none";
+  }
+  function addOptRow(btn) { btn.closest(".ir-opts").querySelector(".optlist").insertAdjacentHTML("beforeend", optRowHtml({})); }
   function renderItemRows(containerId, kind, items) { const box = g(containerId); box.dataset.kind = kind; box.innerHTML = (items || []).map(it => itemRowHtml(kind, it)).join(""); }
   function addItemRow(containerId, kind) { g(containerId).insertAdjacentHTML("beforeend", itemRowHtml(kind, {})); }
   function collectItemRows(containerId) {
     const out = [];
     g(containerId).querySelectorAll(".itemrow").forEach(r => {
       const label = r.querySelector(".ir-label").value.trim(); if (!label) return;
-      if (r.querySelector(".ir-alertck").checked) out.push({ label, alert: true, alertOn: r.querySelector(".ir-alerton").value });
-      else out.push({ label });
+      const it = { label };
+      const options = [...r.querySelectorAll(".ir-opts .optrow")].map(o => ({ label: o.querySelector(".or-label").value.trim(), tone: o.querySelector(".or-tone").value })).filter(o => o.label);
+      if (options.length) it.options = options;
+      if (r.querySelector(".ir-alertck").checked) { it.alert = true; if (!options.length) it.alertOn = r.querySelector(".ir-alerton").value; }
+      out.push(it);
     });
     return out;
   }
+  // Reminder times editor.
+  const REM_DAYS = [[1, "Monday"], [2, "Tuesday"], [3, "Wednesday"], [4, "Thursday"], [5, "Friday"], [6, "Saturday"], [7, "Sunday"]];
+  function reminderRowHtml(r) {
+    r = r || {}; const dow = Number(r.dow) || 1;
+    return `<div class="remrow"><select class="rr-dow">${REM_DAYS.map(([v, l]) => `<option value="${v}" ${v === dow ? "selected" : ""}>${l}</option>`).join("")}</select><input type="time" class="rr-time" value="${esc(r.time || "07:00")}"><button type="button" class="rm" title="Remove" onclick="this.closest('.remrow').remove()">✕</button></div>`;
+  }
+  function renderReminders(list) { g("s_reminders").innerHTML = (list || []).map(reminderRowHtml).join(""); }
+  function addReminderRow() { g("s_reminders").insertAdjacentHTML("beforeend", reminderRowHtml({})); }
+  function collectReminders() { return [...g("s_reminders").querySelectorAll(".remrow")].map(r => ({ dow: Number(r.querySelector(".rr-dow").value), time: r.querySelector(".rr-time").value })).filter(r => r.dow && /^\d\d:\d\d$/.test(r.time)); }
   function renderUserPicker(containerId, selected) {
     const sel = new Set(selected || []);
     g(containerId).innerHTML = USERS.length
@@ -421,6 +478,7 @@
     const s = (DATA && DATA.settings) || { dueDow: 5, dueTime: "17:00", checklist: [] };
     g("s_dow").value = String(s.dueDow || 5);
     g("s_time").value = s.dueTime || "17:00";
+    renderReminders(s.reminders || []);
     renderItemRows("s_checkRows", "check", s.checklist || []);
     renderItemRows("s_equipRows", "equip", s.equipment || []);
     g("s_slots").value = slotsToText(s.photoSlots);
@@ -436,9 +494,10 @@
     const equipment = collectItemRows("s_equipRows");
     const photoSlots = textToSlots(g("s_slots").value);
     const alertUsers = collectUserPicker("s_alertUsers");
+    const reminders = collectReminders();
     try {
       const r = await authFetch("/vancheck/settings", { method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist, equipment, photoSlots, alertUsers }) }).then(r => r.json());
+        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist, equipment, photoSlots, alertUsers, reminders }) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "save failed");
       m.className = "msg ok"; m.textContent = "Saved ✓ — applies to everyone from now.";
       load();

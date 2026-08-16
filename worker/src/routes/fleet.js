@@ -289,7 +289,7 @@ async function vanCheckDefects(env, tid, resolved) {
       // Skip checks completed on/before the last "resolved" mark for this van.
       if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
       const answers = items.answers || {};
-      const defItems = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing").length;
+      const defItems = (Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing")).length;
       const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
       if (!defItems && !notSafe) continue;
       const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
@@ -1227,7 +1227,7 @@ export async function handle(request, env, ctx, url, sess) {
       let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
       if (items.skipped) continue;
       const answers = items.answers || {};
-      const defects = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
+      const defects = Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
       const slot = items.slotPhotos || {};
       const photos = Array.from(new Set([...Object.values(slot), ...((items.photos) || [])]));
       checks.push({
@@ -1235,7 +1235,7 @@ export async function handle(request, env, ctx, url, sess) {
         checkedAt: r.checked_at, safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
         defectCount: defects.length, note: r.note || "", mileage: items.mileage || "",
         answers, defectNotes: items.defectNotes || {}, slotPhotos: slot, photos,
-        alerts: items.alerts || [],
+        alerts: items.alerts || [], answerMeta: items.answerMeta || {},
         custom: items.custom || null,   // one-off custom check: carries its own item labels
       });
     }
