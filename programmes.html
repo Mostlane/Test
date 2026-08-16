@@ -51,9 +51,16 @@
   })();
   function fmtD(iso){ if(!iso) return ""; return new Date(iso).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
   async function load(){
+    const host = document.getElementById("list");
     try{
-      const d = await (await aFetch("/prog/list")).json();
-      const host = document.getElementById("list");
+      const r = await aFetch("/prog/list");
+      const d = await r.json().catch(()=>({}));
+      // Show a real error as an error — never as an empty "no programmes" state.
+      if(!d.ok){
+        host.innerHTML = '<div class="empty">⚠ ' + esc(d.error || ("Couldn't load your programmes (HTTP " + r.status + ")")) +
+          '<br><span style="font-size:12px;">Try the 🔄 button (top-left), or log out and back in, then tell Jamie the message above if it persists.</span></div>';
+        return;
+      }
       const progs = (d.programmes||[]);
       if(!progs.length){ host.innerHTML = '<div class="empty">No programmes yet — press ＋ New programme to build your first.</div>'; return; }
       host.innerHTML = progs.map(p => `
