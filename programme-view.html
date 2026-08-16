@@ -8,6 +8,7 @@
        Deliberately does not include auth.js / portal-config.js (those belong
        to logged-in portal pages and would bounce a client to the login). -->
   <script src="/programme-gantt.js?v=3"></script>
+  <script src="/programme-export.js?v=1"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -39,7 +40,9 @@
   <header class="page">
     <h1 id="hTitle">Programme of works</h1>
     <span class="sub" id="hSub"></span>
-    <button class="btn grey" onclick="window.print()">🖨 Print / PDF</button>
+    <button class="btn grey hide" id="pdfBtn" onclick="exportPdf()">⬇ PDF</button>
+    <button class="btn grey hide" id="xlsBtn" onclick="exportXlsx()">⬇ Excel</button>
+    <button class="btn grey" onclick="window.print()">🖨 Print</button>
     <button class="btn grey hide" id="suggestBtn" onclick="startSuggest()">✎ Suggest changes</button>
   </header>
 
@@ -126,6 +129,7 @@
     g("pRev").textContent = "Rev "+d.rev+(when?" · issued "+when:"");
     if((d.data||{}).notes){ g("notesCard").classList.remove("hide"); g("pNotes").textContent = d.data.notes; }
     if(d.allowSuggest) g("suggestBtn").classList.remove("hide");
+    g("pdfBtn").classList.remove("hide"); g("xlsBtn").classList.remove("hide");
     draw(ORIG,false);
     show("progWrap");
   }
@@ -153,6 +157,22 @@
   function openWithCode(){ open(g("codeInput").value.trim()); }
   g("codeInput") && g("codeInput").addEventListener("keydown", e => { if(e.key==="Enter") openWithCode(); });
 
+  async function exportPdf(){
+    try{
+      const r = await fetch(API+"/prog/shared/export",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:TOKEN,code:CODE})});
+      if(!r.ok){ const d=await r.json().catch(()=>({})); alert(d.error||"Couldn't build the PDF."); return; }
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = ((VIEW&&VIEW.title)||"Programme").replace(/[^\w .\-()]/g,"_") + " - Rev " + ((VIEW&&VIEW.rev)||"") + ".pdf";
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    }catch(e){ alert("Couldn't build the PDF — check your connection."); }
+  }
+  function exportXlsx(){
+    try{ MLProgXlsx.download(ORIG, { title: VIEW.title, client: VIEW.client, site: VIEW.site, ref: (ORIG||{}).ref, rev: VIEW.rev, issuedAt: VIEW.issuedAt }); }
+    catch(e){ alert("Couldn't build the Excel file."); }
+  }
   function startSuggest(){
     COPY = JSON.parse(JSON.stringify(ORIG));
     suggesting = true;
