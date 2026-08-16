@@ -7,7 +7,7 @@
   <!-- CLIENT-FACING page: opened from a share link, NO portal login.
        Deliberately does not include auth.js / portal-config.js (those belong
        to logged-in portal pages and would bounce a client to the login). -->
-  <script src="/programme-gantt.js?v=1"></script>
+  <script src="/programme-gantt.js?v=2"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -28,6 +28,9 @@
     .err{color:#b91c1c;font-size:13px;margin-top:8px;min-height:18px;}
     .sugbar{background:#fffbe9;border:1px solid #f2d675;border-radius:12px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;}
     .hide{display:none!important;}
+    .fchip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:5px 13px;font:600 12.5px 'Segoe UI';cursor:pointer;color:#334155;display:inline-flex;align-items:center;gap:6px;}
+    .fchip.on{background:#003b82;color:#fff;border-color:#003b82;}
+    .fchip i{width:11px;height:11px;border-radius:3px;display:inline-block;}
     footer{ text-align:center;font-size:11.5px;color:#94a3b8;padding:10px 0 26px;}
     @media print{header.page,.sugbar,#suggestPanel{display:none!important;} body{background:#fff;} .card{border:none;box-shadow:none;}}
   </style>
@@ -72,7 +75,10 @@
         <span class="revpill" id="pRev"></span>
       </div>
     </div>
-    <div class="card" style="padding:10px;"><div id="gantt"></div></div>
+    <div class="card" style="padding:10px;">
+      <div id="fchips" style="display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px;"></div>
+      <div id="gantt"></div>
+    </div>
     <div class="card hide" id="notesCard"><b style="color:var(--navy);">Notes</b><div class="muted" id="pNotes" style="white-space:pre-line;font-size:13px;margin-top:4px;"></div></div>
   </div>
 
@@ -111,7 +117,7 @@
     }catch(e){ fail("No connection — check your signal and refresh."); return; }
     if(d.needCode){ show("codeWrap"); g("codeErr").textContent = d.error||""; return; }
     if(!d.ok){ fail(d.error); return; }
-    CODE = code; VIEW = d; ORIG = d.data;
+    CODE = code; VIEW = d; ORIG = MLProg.migrate(d.data);
     g("hTitle").textContent = d.title || "Programme of works";
     g("hSub").textContent = d.sharedWith ? "for "+d.sharedWith : "";
     g("pTitle").textContent = d.title || "Programme of works";
@@ -123,8 +129,26 @@
     draw(ORIG,false);
     show("progWrap");
   }
+  let FILTER = "";
+  function renderChips(editable){
+    const host = g("fchips");
+    const cs = ((ORIG||{}).contractors||[]).filter(c => c.name);
+    // Chips only make sense on a whole-programme link with 2+ contractors —
+    // never on a contractor-scoped link, and not while marking up a copy.
+    if(editable || (VIEW && VIEW.contractor) || cs.length < 2){ host.innerHTML = ""; FILTER = editable ? "" : FILTER; return; }
+    host.innerHTML =
+      `<button type="button" class="fchip ${FILTER?"":"on"}" data-f="">All contractors</button>` +
+      cs.map(c => `<button type="button" class="fchip ${FILTER===c.id?"on":""}" data-f="${esc(c.id)}"><i style="background:${esc(c.colour)}"></i>${esc(c.name)}</button>`).join("");
+  }
+  g("fchips").addEventListener("click", e => {
+    const b = e.target.closest("[data-f]"); if(!b) return;
+    FILTER = b.getAttribute("data-f") || "";
+    draw(suggesting ? COPY : ORIG, suggesting);
+  });
   function draw(data, editable){
-    MLProg.render(g("gantt"), data, { editable, watermark: "Prepared by Mostlane Construction · Rev "+(VIEW?VIEW.rev:"")+" · shared with "+((VIEW&&VIEW.sharedWith)||"client") });
+    renderChips(editable);
+    MLProg.render(g("gantt"), data, { editable, contractor: editable ? "" : FILTER,
+      watermark: "Prepared by Mostlane Construction · Rev "+(VIEW?VIEW.rev:"")+" · shared with "+((VIEW&&VIEW.sharedWith)||"client") });
   }
   function openWithCode(){ open(g("codeInput").value.trim()); }
   g("codeInput") && g("codeInput").addEventListener("keydown", e => { if(e.key==="Enter") openWithCode(); });

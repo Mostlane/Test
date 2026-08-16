@@ -18566,11 +18566,19 @@ async function ensureTables3(env) {
     token TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, label TEXT,
     access_code TEXT, expires_at TEXT, revoked INTEGER DEFAULT 0,
     allow_suggest INTEGER DEFAULT 1, created_by TEXT, created_at TEXT,
-    last_opened_at TEXT, opens INTEGER DEFAULT 0)`).run();
+    last_opened_at TEXT, opens INTEGER DEFAULT 0, contractor TEXT)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS programme_suggestions (
     id TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, token TEXT, rev TEXT,
     author TEXT, note TEXT, data TEXT, status TEXT DEFAULT 'open',
-    created_at TEXT, decided_by TEXT, decided_at TEXT)`).run();
+    created_at TEXT, decided_by TEXT, decided_at TEXT, contractor TEXT)`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE programme_shares ADD COLUMN contractor TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE programme_suggestions ADD COLUMN contractor TEXT").run();
+  } catch {
+  }
 }
 async function progAdmin(env, request) {
   const sess = await requireSession(env, request);
@@ -18653,6 +18661,9 @@ async function handle29(request, env, ctx, url) {
       data = JSON.parse(rev.data);
     } catch {
     }
+    if (share.contractor && Array.isArray(data.tasks)) {
+      data = { ...data, tasks: data.tasks.filter((t) => t && t.contractor === share.contractor) };
+    }
     return json3({
       ok: true,
       title: prog?.title || data.title || "Programme of works",
@@ -18663,6 +18674,7 @@ async function handle29(request, env, ctx, url) {
       note: rev.note || "",
       allowSuggest: !!share.allow_suggest,
       sharedWith: share.label || "",
+      contractor: share.contractor || "",
       data
     });
   }
@@ -18678,8 +18690,8 @@ async function handle29(request, env, ctx, url) {
     const rev = await latestRevision(db, share.prog_id);
     const id = newId2("PSG");
     await db.prepare(`INSERT INTO programme_suggestions
-      (id, tenant_id, prog_id, token, rev, author, note, data, status, created_at)
-      VALUES (?,?,?,?,?,?,?,?, 'open', ?)`).bind(
+      (id, tenant_id, prog_id, token, rev, author, note, data, status, created_at, contractor)
+      VALUES (?,?,?,?,?,?,?,?, 'open', ?, ?)`).bind(
       id,
       db.tenantId,
       share.prog_id,
@@ -18688,7 +18700,8 @@ async function handle29(request, env, ctx, url) {
       String(b.author || share.label || "Client").slice(0, 80),
       String(b.note || "").slice(0, 2e3),
       c.json,
-      (/* @__PURE__ */ new Date()).toISOString()
+      (/* @__PURE__ */ new Date()).toISOString(),
+      share.contractor || ""
     ).run();
     const prog = await db.prepare("SELECT title, created_by FROM job_programmes WHERE id=? AND tenant_id=?").bind(share.prog_id, db.tenantId).first();
     if (prog?.created_by) {
@@ -18748,10 +18761,10 @@ async function handle29(request, env, ctx, url) {
       "SELECT id, rev, note, issued_by, issued_at FROM programme_revisions WHERE prog_id=? AND tenant_id=? ORDER BY issued_at DESC"
     ).bind(id, db.tenantId).all()).results || [];
     const shares = (await db.prepare(
-      "SELECT token, label, access_code, expires_at, revoked, allow_suggest, created_at, last_opened_at, opens FROM programme_shares WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC"
+      "SELECT token, label, access_code, expires_at, revoked, allow_suggest, created_at, last_opened_at, opens, contractor FROM programme_shares WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC"
     ).bind(id, db.tenantId).all()).results || [];
     const suggestions = (await db.prepare(
-      "SELECT id, rev, author, note, status, created_at, decided_by, decided_at FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
+      "SELECT id, rev, author, note, status, created_at, decided_by, decided_at, contractor FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
     ).bind(id, db.tenantId).all()).results || [];
     return json3({
       ok: true,
@@ -18821,8 +18834,8 @@ async function handle29(request, env, ctx, url) {
     const expires = days > 0 ? new Date(Date.now() + days * 864e5).toISOString() : null;
     const code = String(b.accessCode || "").trim().slice(0, 20);
     await db.prepare(`INSERT INTO programme_shares
-      (token, tenant_id, prog_id, label, access_code, expires_at, revoked, allow_suggest, created_by, created_at)
-      VALUES (?,?,?,?,?,?,0,?,?,?)`).bind(
+      (token, tenant_id, prog_id, label, access_code, expires_at, revoked, allow_suggest, created_by, created_at, contractor)
+      VALUES (?,?,?,?,?,?,0,?,?,?,?)`).bind(
       token,
       db.tenantId,
       p.id,
@@ -18831,7 +18844,8 @@ async function handle29(request, env, ctx, url) {
       expires,
       b.allowSuggest === false ? 0 : 1,
       me,
-      (/* @__PURE__ */ new Date()).toISOString()
+      (/* @__PURE__ */ new Date()).toISOString(),
+      String(b.contractor || "").slice(0, 40)
     ).run();
     return json3({ ok: true, token });
   }
@@ -18848,7 +18862,7 @@ async function handle29(request, env, ctx, url) {
       data = JSON.parse(s.data);
     } catch {
     }
-    return json3({ ok: true, id: s.id, progId: s.prog_id, rev: s.rev, author: s.author, note: s.note, status: s.status, createdAt: s.created_at, data });
+    return json3({ ok: true, id: s.id, progId: s.prog_id, rev: s.rev, author: s.author, note: s.note, status: s.status, createdAt: s.created_at, contractor: s.contractor || "", data });
   }
   if (method === "POST" && pathname === "/prog/suggestion/decide") {
     const b = await request.json().catch(() => ({}));

@@ -42,11 +42,14 @@ async function ensureTables(env) {
     token TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, label TEXT,
     access_code TEXT, expires_at TEXT, revoked INTEGER DEFAULT 0,
     allow_suggest INTEGER DEFAULT 1, created_by TEXT, created_at TEXT,
-    last_opened_at TEXT, opens INTEGER DEFAULT 0)`).run();
+    last_opened_at TEXT, opens INTEGER DEFAULT 0, contractor TEXT)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS programme_suggestions (
     id TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, token TEXT, rev TEXT,
     author TEXT, note TEXT, data TEXT, status TEXT DEFAULT 'open',
-    created_at TEXT, decided_by TEXT, decided_at TEXT)`).run();
+    created_at TEXT, decided_by TEXT, decided_at TEXT, contractor TEXT)`).run();
+  // Early installs created the tables without `contractor` — heal in place.
+  try { await env.DB.prepare("ALTER TABLE programme_shares ADD COLUMN contractor TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE programme_suggestions ADD COLUMN contractor TEXT").run(); } catch {}
 }
 
 async function progAdmin(env, request) {
@@ -130,12 +133,19 @@ export async function handle(request, env, ctx, url) {
     ).bind(new Date().toISOString(), share.token, db.tenantId).run());
     let data = {};
     try { data = JSON.parse(rev.data); } catch {}
+    // A contractor-scoped link serves ONLY that contractor's tasks — filtered
+    // here, server-side, so a subcontractor can't see the rest of the
+    // programme even in the network response.
+    if (share.contractor && Array.isArray(data.tasks)) {
+      data = { ...data, tasks: data.tasks.filter(t => t && t.contractor === share.contractor) };
+    }
     return json({
       ok: true,
       title: prog?.title || data.title || "Programme of works",
       client: prog?.client || "", site: prog?.site || "",
       rev: rev.rev, issuedAt: rev.issued_at, note: rev.note || "",
       allowSuggest: !!share.allow_suggest, sharedWith: share.label || "",
+      contractor: share.contractor || "",
       data,
     });
   }
@@ -151,11 +161,12 @@ export async function handle(request, env, ctx, url) {
     const rev = await latestRevision(db, share.prog_id);
     const id = newId("PSG");
     await db.prepare(`INSERT INTO programme_suggestions
-      (id, tenant_id, prog_id, token, rev, author, note, data, status, created_at)
-      VALUES (?,?,?,?,?,?,?,?, 'open', ?)`)
+      (id, tenant_id, prog_id, token, rev, author, note, data, status, created_at, contractor)
+      VALUES (?,?,?,?,?,?,?,?, 'open', ?, ?)`)
       .bind(id, db.tenantId, share.prog_id, share.token, rev ? rev.rev : "",
         String(b.author || share.label || "Client").slice(0, 80),
-        String(b.note || "").slice(0, 2000), c.json, new Date().toISOString()).run();
+        String(b.note || "").slice(0, 2000), c.json, new Date().toISOString(),
+        share.contractor || "").run();
     // Tell whoever built the programme a client has commented.
     const prog = await db.prepare("SELECT title, created_by FROM job_programmes WHERE id=? AND tenant_id=?")
       .bind(share.prog_id, db.tenantId).first();
@@ -212,10 +223,10 @@ export async function handle(request, env, ctx, url) {
       "SELECT id, rev, note, issued_by, issued_at FROM programme_revisions WHERE prog_id=? AND tenant_id=? ORDER BY issued_at DESC"
     ).bind(id, db.tenantId).all()).results || [];
     const shares = (await db.prepare(
-      "SELECT token, label, access_code, expires_at, revoked, allow_suggest, created_at, last_opened_at, opens FROM programme_shares WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC"
+      "SELECT token, label, access_code, expires_at, revoked, allow_suggest, created_at, last_opened_at, opens, contractor FROM programme_shares WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC"
     ).bind(id, db.tenantId).all()).results || [];
     const suggestions = (await db.prepare(
-      "SELECT id, rev, author, note, status, created_at, decided_by, decided_at FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
+      "SELECT id, rev, author, note, status, created_at, decided_by, decided_at, contractor FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
     ).bind(id, db.tenantId).all()).results || [];
     return json({
       ok: true,
@@ -287,10 +298,11 @@ export async function handle(request, env, ctx, url) {
     const expires = (days > 0) ? new Date(Date.now() + days * 86400000).toISOString() : null;
     const code = String(b.accessCode || "").trim().slice(0, 20);
     await db.prepare(`INSERT INTO programme_shares
-      (token, tenant_id, prog_id, label, access_code, expires_at, revoked, allow_suggest, created_by, created_at)
-      VALUES (?,?,?,?,?,?,0,?,?,?)`)
+      (token, tenant_id, prog_id, label, access_code, expires_at, revoked, allow_suggest, created_by, created_at, contractor)
+      VALUES (?,?,?,?,?,?,0,?,?,?,?)`)
       .bind(token, db.tenantId, p.id, String(b.label || "").slice(0, 120), code, expires,
-        b.allowSuggest === false ? 0 : 1, me, new Date().toISOString()).run();
+        b.allowSuggest === false ? 0 : 1, me, new Date().toISOString(),
+        String(b.contractor || "").slice(0, 40)).run();
     return json({ ok: true, token });
   }
 
@@ -306,7 +318,7 @@ export async function handle(request, env, ctx, url) {
       .bind(searchParams.get("id") || "", db.tenantId).first();
     if (!s) return json({ ok: false, error: "Suggestion not found" }, 404);
     let data = {}; try { data = JSON.parse(s.data); } catch {}
-    return json({ ok: true, id: s.id, progId: s.prog_id, rev: s.rev, author: s.author, note: s.note, status: s.status, createdAt: s.created_at, data });
+    return json({ ok: true, id: s.id, progId: s.prog_id, rev: s.rev, author: s.author, note: s.note, status: s.status, createdAt: s.created_at, contractor: s.contractor || "", data });
   }
 
   if (method === "POST" && pathname === "/prog/suggestion/decide") {
