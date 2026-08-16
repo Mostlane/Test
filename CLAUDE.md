@@ -2167,6 +2167,16 @@ engineer-report, hours-dashboard.html, add-site chain (Zapier), theme.html
 files to this public repo.
 
 ## Known quirks
+- **Manual D1 inserts into worker tables: tenant_id must be the string '1.0'**
+  (not 1, not '1') when the table declares `tenant_id TEXT` (job_programmes,
+  admin_tasks, the programme_* tables…). The worker binds the JS number 1,
+  which D1 marshals as REAL 1.0; the TEXT column then stores/compares it as
+  the string "1.0". A hand-inserted row with tenant_id=1 stores "1" and is
+  INVISIBLE to every worker query (cost a long debugging session on 16 Aug —
+  the Excel-example programme "wasn't there"). Tables declaring
+  `tenant_id INTEGER` (users, app_config…) compare numerically and don't care.
+  Safest: copy the tenant_id value from an existing worker-written row of the
+  SAME table.
 - **iOS PWA Web Push shows NOTHING while the app is in the FOREGROUND.** A push
   that the server sent fine (push_subscriptions.last_ok updates on a 201, and a
   user_notifications feed row is written) will NOT pop a banner if the installed
