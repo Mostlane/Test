@@ -18641,7 +18641,7 @@ var ROUTES = [
 var index_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.hostname === "api.site-log.co.uk") {
+    if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
       return handle11(request, env, ctx);
     }
     if (request.method === "OPTIONS") return preflight(env, request);
