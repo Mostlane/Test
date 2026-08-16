@@ -158,12 +158,25 @@ export async function handle(request, env, ctx, url) {
     if (!share.allow_suggest) return json({ ok: false, error: "Suggestions are switched off for this link." }, 403);
     const c = cleanData(b.data);
     if (c.error) return json({ ok: false, error: c.error }, 400);
-    const rev = await latestRevision(db, share.prog_id);
+    // Tag the suggestion with the revision the client actually marked up (sent
+    // by the page) — if a new revision was issued while they were editing, the
+    // diff still runs against the copy they saw, not the newer one.
+    let revLbl = "";
+    const claimed = String(b.rev || "").slice(0, 6);
+    if (claimed) {
+      const known = await db.prepare("SELECT rev FROM programme_revisions WHERE prog_id=? AND tenant_id=? AND rev=?")
+        .bind(share.prog_id, db.tenantId, claimed).first();
+      if (known) revLbl = known.rev;
+    }
+    if (!revLbl) {
+      const rev = await latestRevision(db, share.prog_id);
+      revLbl = rev ? rev.rev : "";
+    }
     const id = newId("PSG");
     await db.prepare(`INSERT INTO programme_suggestions
       (id, tenant_id, prog_id, token, rev, author, note, data, status, created_at, contractor)
       VALUES (?,?,?,?,?,?,?,?, 'open', ?, ?)`)
-      .bind(id, db.tenantId, share.prog_id, share.token, rev ? rev.rev : "",
+      .bind(id, db.tenantId, share.prog_id, share.token, revLbl,
         String(b.author || share.label || "Client").slice(0, 80),
         String(b.note || "").slice(0, 2000), c.json, new Date().toISOString(),
         share.contractor || "").run();

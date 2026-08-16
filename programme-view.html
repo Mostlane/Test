@@ -174,7 +174,7 @@
     g("sErr").textContent = "";
     try{
       const r = await fetch(API+"/prog/shared/suggest",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({token:TOKEN,code:CODE,author:name,note:g("sNote").value.trim(),data:COPY})});
+        body:JSON.stringify({token:TOKEN,code:CODE,author:name,note:g("sNote").value.trim(),data:COPY,rev:(VIEW&&VIEW.rev)||""})});
       const d = await r.json();
       if(!d.ok){ g("sErr").textContent = d.error||"Couldn't send — try again."; return; }
     }catch(e){ g("sErr").textContent = "No connection — try again."; return; }
