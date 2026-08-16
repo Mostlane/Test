@@ -321,7 +321,8 @@
   .mlp-sum{font:600 13px 'Segoe UI',system-ui,sans-serif;color:#003366;background:#ddebf7;border:1px solid #9dc3e6;border-radius:9px;padding:7px 12px;margin-bottom:8px;display:inline-block;}
   .mlp-warn{font:600 12.5px 'Segoe UI',system-ui,sans-serif;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:9px;padding:7px 12px;margin:0 0 8px 8px;display:inline-block;}
   .mlp-scroll{overflow-x:auto;border:1px solid #e3e8ee;border-radius:12px;background:#fff;}
-  .mlp-table{border-collapse:separate;border-spacing:0;font:13px 'Segoe UI',system-ui,sans-serif;color:#1f2a37;width:max-content;min-width:100%;}
+  .mlp-table{border-collapse:separate;border-spacing:0;font:13px 'Segoe UI',system-ui,sans-serif;color:#1f2a37;width:max-content;table-layout:fixed;}
+  .mlp-table th,.mlp-table td{box-sizing:border-box;}
   .mlp-table th{background:#f4f7fb;color:#334155;font-weight:700;font-size:11.5px;padding:5px 7px;border-bottom:1px solid #e3e8ee;text-align:left;white-space:nowrap;position:sticky;top:0;z-index:3;}
   .mlp-table th.mlp-day{text-align:center;padding:3px 1px;font-size:9px;font-weight:600;color:#475569;min-width:${DAYW}px;max-width:${DAYW}px;border-left:1px solid #eef2f7;}
   .mlp-table th.mlp-dow{text-align:center;padding:1px;font-size:9.5px;font-weight:700;color:#64748b;top:20px;border-left:1px solid #eef2f7;}
@@ -349,7 +350,7 @@
   .mlp-tlin{position:relative;height:30px;background:repeating-linear-gradient(90deg,transparent 0,transparent ${DAYW - 1}px,#eef2f7 ${DAYW - 1}px,#eef2f7 ${DAYW}px);}
   .mlp-webg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#f1f4f9;}
   .mlp-bhbg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#fdf3e5;}
-  .mlp-bar{position:absolute;top:5px;height:20px;border-radius:5px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,58,.25);}
+  .mlp-bar{position:absolute;top:5px;height:20px;border-radius:999px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,58,.25);}
   .mlp-bar i{display:block;position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.4);}
   .mlp-dia{position:absolute;top:9px;width:12px;height:12px;transform:rotate(45deg);border-radius:2px;box-shadow:0 1px 2px rgba(16,32,58,.35);}
   .mlp-today{position:absolute;top:0;bottom:0;width:2px;background:#e0344b;opacity:.65;z-index:1;}

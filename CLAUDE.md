@@ -1379,7 +1379,7 @@ suggestion carries the contractor, the builder diffs against the same-filtered
 base (no false "removed"), and "Load into my draft" **merges only that
 contractor's tasks** (everyone else's untouched). The workbook's VBA
 (theme/dropdown refresh, sheet password) is NOT needed — the portal replaces it.
-**Bank holidays + concurrency (v3, `programme-gantt.js?v=3`):** the builder
+**Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
 snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 `holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in
 programmes.js, returned by /prog/one) into **`data.holidays`** — so issued

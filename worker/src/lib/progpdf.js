@@ -197,7 +197,8 @@ export function buildProgrammePdf(data, meta = {}) {
             while (i < marked.length) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
-              doc.rect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, ROW_H - 5, { fill: col });
+              const bh = ROW_H - 5;
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, bh, bh / 2, { fill: col });
               i = j + 1;
             }
           }
