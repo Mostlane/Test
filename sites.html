@@ -1050,6 +1050,13 @@ if (marker && marker.setPosition) {
   };
 
   btnSave.onclick = async ()=>{
+    // iOS Safari doesn't commit a field's typed value to .value until the field
+    // blurs — tapping Save straight from the Site Number box used to read it as
+    // empty and wrongly demand a number (the workaround was to tap another field
+    // first). Blur the focused field ourselves + let the value settle so Save
+    // always sees what's on screen.
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch(_){}
+    await new Promise(r => setTimeout(r, 0));
     try{
       const oldNum = currentEditing.siteNumber;
       currentEditing.client = editClient.value;
