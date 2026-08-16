@@ -19357,7 +19357,7 @@ async function handle29(request, env, ctx, url) {
     userMsg += "DOCUMENT / SCOPE TO PLAN FROM";
     if (hintTitle) userMsg += ` (project: ${hintTitle})`;
     userMsg += ":\n\n" + text;
-    const model = env.ANTHROPIC_MODEL || "claude-opus-5";
+    const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
     let apiResp;
     try {
       apiResp = await fetch("https://api.anthropic.com/v1/messages", {
