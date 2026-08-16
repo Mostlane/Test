@@ -356,6 +356,7 @@ const PUBLIC_ROUTES = [
   // ISSUED revisions, never the working draft.
   ["POST", "/prog/shared/open"],
   ["POST", "/prog/shared/suggest"],
+  ["POST", "/prog/shared/export"],   // client PDF download — token+code verified in-handler
 ];
 
 function isPublic(method, pathname) {

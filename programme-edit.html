@@ -8,7 +8,8 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
-  <script src="/programme-gantt.js?v=3"></script>
+  <script src="/programme-gantt.js?v=4"></script>
+  <script src="/programme-export.js?v=1"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -62,7 +63,8 @@
     <a class="ml-back" href="programmes.html" title="Back">‹ Back</a>
     <h1 id="pageTitle">Programme builder</h1>
     <button class="btn grey" onclick="openShare()">🔗 Share</button>
-    <button class="btn grey" onclick="window.print()">🖨 Print</button>
+    <button class="btn grey" onclick="exportPdf()">⬇ PDF</button>
+    <button class="btn grey" onclick="exportXlsx()">⬇ Excel</button>
     <button class="btn green" onclick="openIssue()">📤 Issue</button>
   </header>
 
@@ -414,6 +416,30 @@
     if(!ok) return;
     await aFetch("/prog/share/revoke",{method:"POST",body:JSON.stringify({token})});
     await reload(); renderShares();
+  }
+
+  // ── Exports: PDF drawn server-side (crisp vector), Excel built here —
+  // both are read-only snapshots of the CURRENT DRAFT (what's on screen).
+  async function exportPdf(){
+    clearTimeout(saveTimer); await save();
+    if(!PROG_ID){ alert("Nothing to export yet."); return; }
+    g("saveState").textContent = "Building PDF…";
+    try{
+      const r = await aFetch("/prog/export",{method:"POST",body:JSON.stringify({id:PROG_ID})});
+      if(!r.ok){ const d=await r.json().catch(()=>({})); alert(d.error||"Couldn't build the PDF."); g("saveState").textContent=""; return; }
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = (DATA.title||"Programme").replace(/[^\w .\-()]/g,"_") + " - DRAFT.pdf";
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      g("saveState").textContent = "Saved ✓";
+    }catch(e){ alert("Couldn't build the PDF — check your signal."); g("saveState").textContent=""; }
+  }
+  function exportXlsx(){
+    metaToData();
+    try{ MLProgXlsx.download(DATA, { title: DATA.title, client: DATA.client, site: DATA.site, ref: DATA.ref, rev: "" }); }
+    catch(e){ alert("Couldn't build the Excel file."); }
   }
 
   function openIssue(){ openM("issueBackdrop"); }

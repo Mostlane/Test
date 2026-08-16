@@ -3012,17 +3012,58 @@ var PdfDoc = class {
   text(x, yTop, str, opt = {}) {
     const size = opt.size || 10;
     const font = opt.bold ? "/F2" : "/F1";
-    const grey = opt.grey ? "0.45 g " : "";
+    const col = opt.color ? `${opt.color.map((n) => n.toFixed(3)).join(" ")} rg ` : opt.grey ? "0.45 g " : "";
     let tx = x;
     if (opt.alignRight) tx = x - textWidth(str, size);
     const y = this._page.h - yTop;
-    this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
+    this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey || opt.color ? " 0 g" : ""}`);
     return this;
   }
   hr(x1, yTop, x2, opt = {}) {
     const y = this._page.h - yTop;
     const grey = opt.grey ? "0.75 G " : "0.2 G ";
     this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+    return this;
+  }
+  // Filled / stroked rectangle. (x, yTop) = top-left from the page top; fill and
+  // stroke are [r,g,b] 0–1 arrays. Used by the programme (Gantt) export.
+  rect(x, yTop, w, h, opt = {}) {
+    const y = this._page.h - yTop - h;
+    let op = "q ";
+    if (opt.fill) op += `${opt.fill.map((n) => n.toFixed(3)).join(" ")} rg `;
+    if (opt.stroke) op += `${opt.stroke.map((n) => n.toFixed(3)).join(" ")} RG ${opt.lw || 0.5} w `;
+    op += `${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re `;
+    op += opt.fill && opt.stroke ? "B" : opt.fill ? "f" : "S";
+    this._ops.push(op + " Q");
+    return this;
+  }
+  // Straight line between two points (top-based coordinates).
+  line(x1, yTop1, x2, yTop2, opt = {}) {
+    const y1 = this._page.h - yTop1, y2 = this._page.h - yTop2;
+    const col = (opt.stroke || [0.2, 0.2, 0.2]).map((n) => n.toFixed(3)).join(" ");
+    this._ops.push(`q ${col} RG ${opt.lw || 0.5} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q`);
+    return this;
+  }
+  // Rounded ("bubble") filled rectangle — Bézier-curve corners, radius clamped
+  // so narrow bars become clean pills. Used for the programme Gantt bars.
+  roundRect(x, yTop, w, h, r, opt = {}) {
+    const y = this._page.h - yTop - h;
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    const k = 0.5523 * r;
+    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const f = (n) => n.toFixed(2);
+    const op = `q ${fill} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
+    this._ops.push(op);
+    return this;
+  }
+  // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
+  poly(points, opt = {}) {
+    if (!points.length) return this;
+    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const pts = points.map(([x, yT]) => [x, this._page.h - yT]);
+    let op = `q ${fill} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
+    for (let i = 1; i < pts.length; i++) op += `${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} l `;
+    this._ops.push(op + "h f Q");
     return this;
   }
   bytes() {
@@ -11002,9 +11043,9 @@ async function mintRef(db, docType, site) {
     const prefix2 = PREFIX[docType];
     const code = (site.replace(/[^A-Za-z0-9]/g, "").toUpperCase() + "SITE").slice(0, 6);
     const d = /* @__PURE__ */ new Date();
-    const ymd = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
+    const ymd2 = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
     const n = String(Math.floor(100 + Math.random() * 900));
-    return `${prefix2}-${code}-${ymd}-${n}`;
+    return `${prefix2}-${code}-${ymd2}-${n}`;
   }
   const cfg = SEQ[docType] || { prefix: PREFIX[docType] || "DOC", sep: "-", pad: 4, floor: 1 };
   const { results } = await db.prepare(
@@ -18257,27 +18298,27 @@ function lonYMD(d) {
 function lonHM(d) {
   return d.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" });
 }
-function lonToISO(ymd, hm) {
+function lonToISO(ymd2, hm) {
   for (const off of ["+01:00", "+00:00"]) {
-    const dt = /* @__PURE__ */ new Date(`${ymd}T${hm}:00${off}`);
-    if (!isNaN(dt) && lonYMD(dt) === ymd && lonHM(dt) === hm) return dt.toISOString();
+    const dt = /* @__PURE__ */ new Date(`${ymd2}T${hm}:00${off}`);
+    if (!isNaN(dt) && lonYMD(dt) === ymd2 && lonHM(dt) === hm) return dt.toISOString();
   }
-  return (/* @__PURE__ */ new Date(`${ymd}T${hm}:00Z`)).toISOString();
+  return (/* @__PURE__ */ new Date(`${ymd2}T${hm}:00Z`)).toISOString();
 }
-function addDaysYMD(ymd, n) {
-  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+function addDaysYMD(ymd2, n) {
+  const d = /* @__PURE__ */ new Date(ymd2 + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-function mondayOf5(ymd) {
-  const d = /* @__PURE__ */ new Date(ymd + "T12:00:00Z");
+function mondayOf5(ymd2) {
+  const d = /* @__PURE__ */ new Date(ymd2 + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
   return d.toISOString().slice(0, 10);
 }
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
 function occurrence(task, now) {
   const today = lonYMD(now);
-  const [Y, M] = today.split("-").map(Number);
+  const [Y, M2] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
   const pad = (n) => String(n).padStart(2, "0");
@@ -18298,7 +18339,7 @@ function occurrence(task, now) {
       break;
     }
     case "quarterly": {
-      const q = Math.floor((M - 1) / 3), qMonth = q * 3 + 1;
+      const q = Math.floor((M2 - 1) / 3), qMonth = q * 3 + 1;
       periodKey = "Q:" + Y + "-" + (q + 1);
       startYMD = `${Y}-${pad(qMonth)}-01`;
       dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
@@ -18566,6 +18607,219 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
   return { ran: true, tenants: out };
 }
 
+// src/lib/progpdf.js
+var PW = 842;
+var PH = 595;
+var M = 26;
+var ROW_H = 14.5;
+var HDR_H = 22;
+var COLS = [
+  // fixed left columns
+  { key: "name", label: "Works", w: 168 },
+  { key: "contractor", label: "Contractor", w: 62 },
+  { key: "start", label: "Start", w: 36 },
+  { key: "end", label: "End", w: 36 },
+  { key: "days", label: "Days", w: 26 }
+];
+var LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
+var GRID_X = M + LEFT_W;
+var GRID_W = PW - M - GRID_X;
+var MIN_DAY_W = 6.5;
+var DAY = 864e5;
+var p2 = (n) => String(n).padStart(2, "0");
+var parse = (s) => {
+  const d = /* @__PURE__ */ new Date(String(s || "") + "T12:00:00Z");
+  return isNaN(d) ? null : d;
+};
+var ymd = (d) => d.toISOString().slice(0, 10);
+var addDays2 = (d, n) => new Date(d.getTime() + n * DAY);
+var isWeekend = (d) => {
+  const w = d.getUTCDay();
+  return w === 0 || w === 6;
+};
+var fmtDM = (d) => p2(d.getUTCDate()) + "/" + p2(d.getUTCMonth() + 1);
+var fmtFull = (d) => p2(d.getUTCDate()) + "/" + p2(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear();
+function hex2rgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return [0.55, 0.62, 0.7];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+var nonWork = (d, hs) => isWeekend(d) || hs.has(ymd(d));
+function endOf(t, hs) {
+  const s = parse(t.start);
+  if (!s) return null;
+  const days = Math.min(730, Math.max(1, Number(t.days) || 1));
+  if (t.wknd) return addDays2(s, days - 1);
+  let d = s, left = days - 1, guard = 0;
+  while (left > 0 && guard++ < 4e3) {
+    d = addDays2(d, 1);
+    if (!nonWork(d, hs)) left--;
+  }
+  return d;
+}
+function fitText(str, w, size) {
+  let s = String(str || "");
+  if (textWidth(s, size) <= w) return s;
+  while (s.length > 1 && textWidth(s + "\u2026", size) > w) s = s.slice(0, -1);
+  return s + "\u2026";
+}
+function buildProgrammePdf(data, meta = {}) {
+  data = data || {};
+  const contractors = Array.isArray(data.contractors) ? data.contractors : [];
+  const byC = {};
+  for (const c of contractors) byC[c.id] = c;
+  const hs = new Set((data.holidays || []).map(String));
+  const tasks = (Array.isArray(data.tasks) ? data.tasks : []).map((t) => ({
+    ...t,
+    _start: parse(t.start),
+    _end: endOf(t, hs),
+    _c: byC[t.contractor] || null
+  }));
+  const starts = tasks.map((t) => t._start).filter(Boolean).sort((a, b) => a - b);
+  const anchor = starts.length ? starts[Math.floor(starts.length / 2)] : /* @__PURE__ */ new Date();
+  const near = (t) => t._start && Math.abs(t._start - anchor) / DAY <= 550;
+  let s0 = null, e0 = null;
+  for (const t of tasks) {
+    if (!near(t)) continue;
+    if (!s0 || t._start < s0) s0 = t._start;
+    if (t._end && (!e0 || t._end > e0)) e0 = t._end;
+  }
+  if (!s0) {
+    s0 = anchor;
+    e0 = addDays2(anchor, 29);
+  }
+  const totalDays = Math.min(550, Math.max(14, Math.round((addDays2(e0, 2) - s0) / DAY) + 1));
+  const daysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
+  const windows = [];
+  for (let off = 0; off < totalDays; off += daysPerPage) {
+    windows.push({ from: off, days: Math.min(daysPerPage, totalDays - off) });
+  }
+  const headerBlockH = 78;
+  const footerH = 18;
+  const rowsPerPage = Math.max(8, Math.floor((PH - M - headerBlockH - HDR_H - footerH - M) / ROW_H));
+  const rowChunks = [];
+  for (let i = 0; i < Math.max(1, tasks.length); i += rowsPerPage) {
+    rowChunks.push(tasks.slice(i, i + rowsPerPage));
+  }
+  const doc = new PdfDoc(PW, PH);
+  let first = true;
+  const totalPages = windows.length * rowChunks.length;
+  let pageNo = 0;
+  for (const win of windows) {
+    const dayW = Math.min(16, GRID_W / win.days);
+    const winStart = addDays2(s0, win.from);
+    for (const rows of rowChunks) {
+      pageNo++;
+      if (!first) doc.newPage(PW, PH);
+      first = false;
+      let y = M + 14;
+      doc.text(M, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
+      const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
+      const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
+      doc.text(PW - M, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
+      y += 13;
+      const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
+      if (subBits) {
+        doc.text(M, y, subBits, { size: 9, grey: true });
+      }
+      doc.text(PW - M, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
+      y += 15;
+      let lx = M;
+      for (const c of contractors) {
+        if (!c.name) continue;
+        doc.rect(lx, y - 7, 8, 8, { fill: hex2rgb(c.colour) });
+        doc.text(lx + 11, y, c.name, { size: 8.5 });
+        lx += 11 + textWidth(c.name, 8.5) + 14;
+        if (lx > PW - M - 80) break;
+      }
+      if (windows.length > 1) {
+        doc.text(PW - M, y, `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)} \u2192 ${fmtDM(addDays2(winStart, win.days - 1))})`, { size: 8.5, alignRight: true, grey: true });
+      }
+      y = M + headerBlockH;
+      const gridTop = y, gridBot = gridTop + HDR_H + rows.length * ROW_H;
+      doc.rect(M, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
+      let cx = M;
+      for (const col of COLS) {
+        doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
+        cx += col.w;
+      }
+      for (let i = 0; i < win.days; i++) {
+        const d = addDays2(winStart, i);
+        const x = GRID_X + i * dayW;
+        const we = isWeekend(d), bh = !we && hs.has(ymd(d));
+        if (we) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.937, 0.949, 0.963] });
+        if (bh) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.992, 0.953, 0.898] });
+        const label = dayW >= 15 ? true : d.getUTCDay() === 1;
+        if (label) {
+          doc.text(x + 1, gridTop + 9, fmtDM(d), { size: 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
+          doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
+        }
+        if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
+      }
+      doc.line(M, gridTop, M + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M, gridTop + HDR_H, M + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
+      rows.forEach((t, ri) => {
+        const ry = gridTop + HDR_H + ri * ROW_H;
+        const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
+        doc.text(M + 3, ry + 10.5, fitText(t.name, COLS[0].w - 8, 8.5), { size: 8.5 });
+        if (t._c) {
+          doc.rect(M + COLS[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M + COLS[0].w + 12, ry + 10.5, fitText(t._c.name, COLS[1].w - 16, 8), { size: 8 });
+        }
+        if (t._start) doc.text(M + COLS[0].w + COLS[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M + COLS[0].w + COLS[1].w + COLS[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        doc.text(M + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
+        doc.line(M, ry + ROW_H, M + LEFT_W + win.days * dayW, ry + ROW_H, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        if (t._start && t._end) {
+          const marked = [];
+          for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
+            if (!t.wknd && nonWork(d, hs)) continue;
+            const off = Math.round((d - winStart) / DAY);
+            if (off >= 0 && off < win.days) marked.push(off);
+          }
+          if (t.milestone && marked.length) {
+            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + ROW_H / 2;
+            doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
+          } else {
+            let i = 0;
+            while (i < marked.length) {
+              let j = i;
+              while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
+              const bh = ROW_H - 5;
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, bh, bh / 2, { fill: col });
+              i = j + 1;
+            }
+          }
+        }
+      });
+      doc.rect(M, gridTop, LEFT_W + win.days * dayW, HDR_H + rows.length * ROW_H, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
+      const fy = PH - M + 6;
+      const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
+      doc.text(M, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
+      doc.text(PW - M, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
+    }
+  }
+  const notes = String(data.notes || meta.notes || "").trim();
+  if (notes) {
+    doc.newPage(PW, PH);
+    doc.text(M, M + 14, "Notes", { size: 12, bold: true });
+    const words = notes.split(/\s+/);
+    let line = "", ny = M + 32;
+    for (const w of words) {
+      if (textWidth(line + " " + w, 10) > PW - 2 * M) {
+        doc.text(M, ny, line, { size: 10 });
+        ny += 14;
+        line = w;
+      } else line = line ? line + " " + w : w;
+    }
+    if (line) doc.text(M, ny, line, { size: 10 });
+    doc.text(M, PH - M + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+  }
+  return doc.bytes();
+}
+
 // src/routes/programmes.js
 var MAX_DATA_BYTES = 400 * 1024;
 async function ensureTables3(env) {
@@ -18665,6 +18919,17 @@ async function latestRevision(db, progId) {
     "SELECT * FROM programme_revisions WHERE prog_id=? AND tenant_id=? ORDER BY issued_at DESC LIMIT 1"
   ).bind(progId, db.tenantId).first();
 }
+function pdfResponse(cors, bytes, filename) {
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      ...cors,
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${String(filename).replace(/[^\w .\-()]/g, "_")}"`,
+      "Cache-Control": "no-store"
+    }
+  });
+}
 async function handle29(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
@@ -18754,6 +19019,34 @@ async function handle29(request, env, ctx, url) {
       }));
     }
     return json3({ ok: true, id });
+  }
+  if (method === "POST" && pathname === "/prog/shared/export") {
+    const b = await request.json().catch(() => ({}));
+    const g = await getShare(db, b.token);
+    if (g.error) return json3({ ok: false, error: g.error }, g.code);
+    const share = g.share;
+    if (share.access_code && !codeOk(share, b.code)) return json3({ ok: false, error: "That access code isn't right." }, 403);
+    const rev = await latestRevision(db, share.prog_id);
+    if (!rev) return json3({ ok: false, error: "This programme hasn't been issued yet." }, 404);
+    const prog = await db.prepare("SELECT title, client, site FROM job_programmes WHERE id=? AND tenant_id=?").bind(share.prog_id, db.tenantId).first();
+    let data = {};
+    try {
+      data = JSON.parse(rev.data);
+    } catch {
+    }
+    if (share.contractor && Array.isArray(data.tasks)) {
+      data = { ...data, tasks: data.tasks.filter((t) => t && t.contractor === share.contractor) };
+    }
+    const bytes = buildProgrammePdf(data, {
+      title: prog?.title || data.title,
+      client: prog?.client,
+      site: prog?.site,
+      ref: data.ref,
+      rev: rev.rev,
+      issuedAt: rev.issued_at,
+      sharedWith: share.label || ""
+    });
+    return pdfResponse(cors, bytes, `${prog?.title || "Programme"} - Rev ${rev.rev}.pdf`);
   }
   const gate = await progAdmin(env, request);
   if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
@@ -18858,6 +19151,36 @@ async function handle29(request, env, ctx, url) {
     await db.prepare(`INSERT INTO programme_revisions (id, tenant_id, prog_id, rev, data, note, issued_by, issued_at)
       VALUES (?,?,?,?,?,?,?,?)`).bind(newId2("REV"), db.tenantId, p.id, rev, p.data, String(b.note || "").slice(0, 500), me, (/* @__PURE__ */ new Date()).toISOString()).run();
     return json3({ ok: true, rev });
+  }
+  if (method === "POST" && pathname === "/prog/export") {
+    const b = await request.json().catch(() => ({}));
+    const p = await db.prepare("SELECT * FROM job_programmes WHERE id=? AND tenant_id=?").bind(String(b.id || ""), db.tenantId).first();
+    if (!p) return json3({ ok: false, error: "Programme not found" }, 404);
+    let data = {}, revLbl = "", issuedAt = "";
+    if (b.revId) {
+      const r = await db.prepare("SELECT * FROM programme_revisions WHERE id=? AND prog_id=? AND tenant_id=?").bind(String(b.revId), p.id, db.tenantId).first();
+      if (!r) return json3({ ok: false, error: "Revision not found" }, 404);
+      try {
+        data = JSON.parse(r.data);
+      } catch {
+      }
+      revLbl = r.rev;
+      issuedAt = r.issued_at;
+    } else {
+      try {
+        data = JSON.parse(p.data);
+      } catch {
+      }
+    }
+    const bytes = buildProgrammePdf(data, {
+      title: p.title || data.title,
+      client: p.client,
+      site: p.site,
+      ref: data.ref,
+      rev: revLbl,
+      issuedAt
+    });
+    return pdfResponse(cors, bytes, `${p.title || "Programme"}${revLbl ? " - Rev " + revLbl : " - DRAFT"}.pdf`);
   }
   if (method === "GET" && pathname === "/prog/revision") {
     const r = await db.prepare("SELECT * FROM programme_revisions WHERE id=? AND tenant_id=?").bind(searchParams.get("id") || "", db.tenantId).first();
@@ -19244,7 +19567,9 @@ var PUBLIC_ROUTES = [
   // share token + optional access code verified in-handler; serves only
   // ISSUED revisions, never the working draft.
   ["POST", "/prog/shared/open"],
-  ["POST", "/prog/shared/suggest"]
+  ["POST", "/prog/shared/suggest"],
+  ["POST", "/prog/shared/export"]
+  // client PDF download — token+code verified in-handler
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

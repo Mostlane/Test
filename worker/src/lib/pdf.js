@@ -96,11 +96,11 @@ export class PdfDoc {
   text(x, yTop, str, opt = {}) {
     const size = opt.size || 10;
     const font = opt.bold ? "/F2" : "/F1";
-    const grey = opt.grey ? "0.45 g " : "";
+    const col = opt.color ? `${opt.color.map(n => n.toFixed(3)).join(" ")} rg ` : (opt.grey ? "0.45 g " : "");
     let tx = x;
     if (opt.alignRight) tx = x - textWidth(str, size);
     const y = this._page.h - yTop;
-    this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
+    this._ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${(opt.grey || opt.color) ? " 0 g" : ""}`);
     return this;
   }
 
@@ -108,6 +108,62 @@ export class PdfDoc {
     const y = this._page.h - yTop;
     const grey = opt.grey ? "0.75 G " : "0.2 G ";
     this._ops.push(`${grey}${(opt.w || 0.75)} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+    return this;
+  }
+
+  // Filled / stroked rectangle. (x, yTop) = top-left from the page top; fill and
+  // stroke are [r,g,b] 0–1 arrays. Used by the programme (Gantt) export.
+  rect(x, yTop, w, h, opt = {}) {
+    const y = this._page.h - yTop - h;
+    let op = "q ";
+    if (opt.fill) op += `${opt.fill.map(n => n.toFixed(3)).join(" ")} rg `;
+    if (opt.stroke) op += `${opt.stroke.map(n => n.toFixed(3)).join(" ")} RG ${(opt.lw || 0.5)} w `;
+    op += `${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re `;
+    op += opt.fill && opt.stroke ? "B" : (opt.fill ? "f" : "S");
+    this._ops.push(op + " Q");
+    return this;
+  }
+
+  // Straight line between two points (top-based coordinates).
+  line(x1, yTop1, x2, yTop2, opt = {}) {
+    const y1 = this._page.h - yTop1, y2 = this._page.h - yTop2;
+    const col = (opt.stroke || [0.2, 0.2, 0.2]).map(n => n.toFixed(3)).join(" ");
+    this._ops.push(`q ${col} RG ${(opt.lw || 0.5)} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q`);
+    return this;
+  }
+
+  // Rounded ("bubble") filled rectangle — Bézier-curve corners, radius clamped
+  // so narrow bars become clean pills. Used for the programme Gantt bars.
+  roundRect(x, yTop, w, h, r, opt = {}) {
+    const y = this._page.h - yTop - h;
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    const k = 0.5523 * r;
+    const fill = (opt.fill || [0, 0, 0]).map(n => n.toFixed(3)).join(" ");
+    const f = n => n.toFixed(2);
+    const op =
+      `q ${fill} rg ` +
+      `${f(x + r)} ${f(y)} m ` +
+      `${f(x + w - r)} ${f(y)} l ` +
+      `${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ` +
+      `${f(x + w)} ${f(y + h - r)} l ` +
+      `${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ` +
+      `${f(x + r)} ${f(y + h)} l ` +
+      `${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ` +
+      `${f(x)} ${f(y + r)} l ` +
+      `${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c ` +
+      `h f Q`;
+    this._ops.push(op);
+    return this;
+  }
+
+  // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
+  poly(points, opt = {}) {
+    if (!points.length) return this;
+    const fill = (opt.fill || [0, 0, 0]).map(n => n.toFixed(3)).join(" ");
+    const pts = points.map(([x, yT]) => [x, this._page.h - yT]);
+    let op = `q ${fill} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
+    for (let i = 1; i < pts.length; i++) op += `${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} l `;
+    this._ops.push(op + "h f Q");
     return this;
   }
 
