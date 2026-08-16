@@ -1392,6 +1392,22 @@ mismatch returns **409 {conflict, updatedAt, updatedBy}** → the builder pauses
 autosave and asks "Load theirs (recommended) / Keep mine" (Keep mine = ONE
 unstamped save that deliberately overwrites, then re-stamps). The pagehide
 keepalive save also carries baseVersion so closing a stale tab can't clobber.
+**Exports (⬇ PDF / ⬇ Excel, on the builder AND the client share link):** the PDF
+is a VECTOR A4-landscape Gantt drawn server-side by **`lib/progpdf.js`**
+(`buildProgrammePdf(data, meta)` — never a screenshot; paginates rows AND long
+timelines into date windows, weekend/BH shading, contractor bars, milestone
+diamonds, legend, watermark+page numbers, `*` = wknd footnote; lib/pdf.js gained
+`rect/line/poly` + text `color` for it). Routes: **POST /prog/export** {id,
+revId?} (admin — no revId = the DRAFT) and **POST /prog/shared/export** {token,
+code} (PUBLIC_ROUTES; latest issued rev, contractor-filtered like /shared/open).
+The Excel export is built CLIENT-side by **`programme-export.js?v=1`**
+(`window.MLProgXlsx`): a dependency-free stored-ZIP .xlsx writer — VALUES ONLY
+(no formulas/macros), "Programme" master sheet + one tab per contractor with
+their tasks, coloured X day-cells, weekend/BH shading, frozen panes, sheet+
+workbook protection (legacy hash — a deterrent like the original workbook's).
+Validated with openpyxl (parse, fills, protection, zero formulas) — NB
+LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
+problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js).
 
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated

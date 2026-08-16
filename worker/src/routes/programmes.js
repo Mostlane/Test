@@ -28,6 +28,7 @@ import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { sendToUser } from "./push.js";
+import { buildProgrammePdf } from "../lib/progpdf.js";
 
 const MAX_DATA_BYTES = 400 * 1024;      // a programme JSON should never be near this
 
@@ -123,6 +124,18 @@ async function latestRevision(db, progId) {
   ).bind(progId, db.tenantId).first();
 }
 
+function pdfResponse(cors, bytes, filename) {
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      ...cors,
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${String(filename).replace(/[^\w .\-()]/g, "_")}"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export async function handle(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
@@ -211,6 +224,29 @@ export async function handle(request, env, ctx, url) {
       }).catch(() => {}));
     }
     return json({ ok: true, id });
+  }
+
+  // Client downloads a print-quality PDF of the ISSUED revision from a share
+  // link — same token/code/contractor rules as /shared/open.
+  if (method === "POST" && pathname === "/prog/shared/export") {
+    const b = await request.json().catch(() => ({}));
+    const g = await getShare(db, b.token);
+    if (g.error) return json({ ok: false, error: g.error }, g.code);
+    const share = g.share;
+    if (share.access_code && !codeOk(share, b.code)) return json({ ok: false, error: "That access code isn't right." }, 403);
+    const rev = await latestRevision(db, share.prog_id);
+    if (!rev) return json({ ok: false, error: "This programme hasn't been issued yet." }, 404);
+    const prog = await db.prepare("SELECT title, client, site FROM job_programmes WHERE id=? AND tenant_id=?")
+      .bind(share.prog_id, db.tenantId).first();
+    let data = {}; try { data = JSON.parse(rev.data); } catch {}
+    if (share.contractor && Array.isArray(data.tasks)) {
+      data = { ...data, tasks: data.tasks.filter(t => t && t.contractor === share.contractor) };
+    }
+    const bytes = buildProgrammePdf(data, {
+      title: prog?.title || data.title, client: prog?.client, site: prog?.site, ref: data.ref,
+      rev: rev.rev, issuedAt: rev.issued_at, sharedWith: share.label || "",
+    });
+    return pdfResponse(cors, bytes, `${prog?.title || "Programme"} - Rev ${rev.rev}.pdf`);
   }
 
   // ══ Admin: everything below needs FullAccess | Programmes ═══════════════
@@ -319,6 +355,29 @@ export async function handle(request, env, ctx, url) {
       VALUES (?,?,?,?,?,?,?,?)`)
       .bind(newId("REV"), db.tenantId, p.id, rev, p.data, String(b.note || "").slice(0, 500), me, new Date().toISOString()).run();
     return json({ ok: true, rev });
+  }
+
+  // Office PDF export — the current DRAFT (what's on the builder screen), or a
+  // specific issued revision when revId is sent.
+  if (method === "POST" && pathname === "/prog/export") {
+    const b = await request.json().catch(() => ({}));
+    const p = await db.prepare("SELECT * FROM job_programmes WHERE id=? AND tenant_id=?").bind(String(b.id || ""), db.tenantId).first();
+    if (!p) return json({ ok: false, error: "Programme not found" }, 404);
+    let data = {}, revLbl = "", issuedAt = "";
+    if (b.revId) {
+      const r = await db.prepare("SELECT * FROM programme_revisions WHERE id=? AND prog_id=? AND tenant_id=?")
+        .bind(String(b.revId), p.id, db.tenantId).first();
+      if (!r) return json({ ok: false, error: "Revision not found" }, 404);
+      try { data = JSON.parse(r.data); } catch {}
+      revLbl = r.rev; issuedAt = r.issued_at;
+    } else {
+      try { data = JSON.parse(p.data); } catch {}
+    }
+    const bytes = buildProgrammePdf(data, {
+      title: p.title || data.title, client: p.client, site: p.site, ref: data.ref,
+      rev: revLbl, issuedAt,
+    });
+    return pdfResponse(cors, bytes, `${p.title || "Programme"}${revLbl ? " - Rev " + revLbl : " - DRAFT"}.pdf`);
   }
 
   if (method === "GET" && pathname === "/prog/revision") {
