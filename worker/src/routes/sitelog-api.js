@@ -577,6 +577,20 @@ export async function handle(request, env, ctx) {
       return Response.json(data, { status, headers });
     }
 
+    // GET /served-by — diagnostic health check. Returns which worker answered
+    // this host + whether the SiteLog DB is bound. The standalone sitelog-api
+    // worker has no such route (returns its own 404), so hitting this on
+    // api.site-log.co.uk tells us unambiguously whether mostlane-api is serving.
+    if (url.pathname === "/served-by" && request.method === "GET") {
+      return json({
+        worker: "mostlane-api",
+        sitelog: true,
+        dbBound: !!env.SITELOG_DB,
+        docsBound: !!env.DOCS_BUCKET,
+        host: url.hostname,
+      });
+    }
+
     async function readBody(req) {
       const ct = (req.headers.get("content-type") || "").toLowerCase();
 

@@ -7889,6 +7889,15 @@ async function handle11(request, env, ctx) {
     const headers = extraHeaders ? { ...base, ...extraHeaders } : base;
     return Response.json(data, { status, headers });
   }
+  if (url.pathname === "/served-by" && request.method === "GET") {
+    return json3({
+      worker: "mostlane-api",
+      sitelog: true,
+      dbBound: !!env.SITELOG_DB,
+      docsBound: !!env.DOCS_BUCKET,
+      host: url.hostname
+    });
+  }
   async function readBody(req) {
     const ct = (req.headers.get("content-type") || "").toLowerCase();
     if (ct.includes("application/json")) {
