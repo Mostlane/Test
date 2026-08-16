@@ -3044,6 +3044,18 @@ var PdfDoc = class {
     this._ops.push(`q ${col} RG ${opt.lw || 0.5} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q`);
     return this;
   }
+  // Rounded ("bubble") filled rectangle — Bézier-curve corners, radius clamped
+  // so narrow bars become clean pills. Used for the programme Gantt bars.
+  roundRect(x, yTop, w, h, r, opt = {}) {
+    const y = this._page.h - yTop - h;
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    const k = 0.5523 * r;
+    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const f = (n) => n.toFixed(2);
+    const op = `q ${fill} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
+    this._ops.push(op);
+    return this;
+  }
   // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
   poly(points, opt = {}) {
     if (!points.length) return this;
@@ -18774,7 +18786,8 @@ function buildProgrammePdf(data, meta = {}) {
             while (i < marked.length) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
-              doc.rect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, ROW_H - 5, { fill: col });
+              const bh = ROW_H - 5;
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, bh, bh / 2, { fill: col });
               i = j + 1;
             }
           }
