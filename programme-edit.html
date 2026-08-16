@@ -88,6 +88,10 @@
     </div>
 
     <div class="card" style="padding:10px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <button class="btn ghost" onclick="autoOrder()" title="Sort the task rows by start date so the programme cascades in order">⇅ Auto-order rows</button>
+        <span class="muted">Puts the rows in start-date order so they stagger down the page (earliest first).</span>
+      </div>
       <div class="fchips" id="fchips"></div>
       <div id="gantt"></div>
     </div>
@@ -294,6 +298,24 @@
   function drawGantt(){
     renderChips();
     MLProg.render(g("gantt"), DATA, { editable:true, onChange: queueSave, contractor: FILTER });
+  }
+
+  // Cascade the rows: order every task by start date (earliest first), then by
+  // the sooner-ending one, then keep the existing order for exact ties — so the
+  // programme reads top-to-bottom in time without hand-dragging each row.
+  function autoOrder(){
+    const parse = s => { const d = new Date(String(s||"")+"T12:00:00"); return isNaN(d) ? Infinity : d.getTime(); };
+    (DATA.tasks||[]).forEach((t,i)=> t.__i = i);   // stable-sort anchor
+    DATA.tasks.sort((a,b)=>{
+      const ka = parse(a.start), kb = parse(b.start);
+      if(ka !== kb) return ka - kb;                // earliest start first
+      const da = Math.max(1, Number(a.days)||1), dbb = Math.max(1, Number(b.days)||1);
+      if(da !== dbb) return da - dbb;              // shorter (ends sooner) first
+      return (a.__i||0) - (b.__i||0);              // otherwise keep current order
+    });
+    (DATA.tasks||[]).forEach(t=> delete t.__i);
+    drawGantt(); queueSave();
+    alert("Rows ordered by start date ✓");
   }
 
   function renderRevState(){
