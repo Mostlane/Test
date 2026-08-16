@@ -18588,6 +18588,24 @@ async function ensureTables3(env) {
     await env.DB.prepare("ALTER TABLE programme_suggestions ADD COLUMN contractor TEXT").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE job_programmes ADD COLUMN updated_by TEXT").run();
+  } catch {
+  }
+}
+async function bankHolidayDates(db) {
+  const y = (/* @__PURE__ */ new Date()).getFullYear();
+  const years = [y - 1, y, y + 1, y + 2];
+  const dates = [];
+  for (const yr of years) {
+    try {
+      const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, `holiday:bankholidays:${yr}`).first();
+      if (!row) continue;
+      for (const b of JSON.parse(row.value) || []) if (b?.date) dates.push(b.date);
+    } catch {
+    }
+  }
+  return dates.sort();
 }
 async function progAdmin(env, request) {
   const sess = await requireSession(env, request);
@@ -18786,10 +18804,11 @@ async function handle29(request, env, ctx, url) {
     ).bind(id, db.tenantId).all()).results || [];
     return json3({
       ok: true,
-      prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, data },
+      prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, updatedBy: p.updated_by || "", data },
       revisions,
       shares,
-      suggestions
+      suggestions,
+      bankHolidays: await bankHolidayDates(db)
     });
   }
   if (method === "POST" && pathname === "/prog/save") {
@@ -18802,15 +18821,18 @@ async function handle29(request, env, ctx, url) {
     const site = String(b.site ?? c.obj.site ?? "").slice(0, 200);
     let id = String(b.id || "").trim();
     if (id) {
-      const exists = await db.prepare("SELECT id FROM job_programmes WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
-      if (!exists) return json3({ ok: false, error: "Programme not found" }, 404);
+      const row = await db.prepare("SELECT id, updated_at, updated_by FROM job_programmes WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
+      if (!row) return json3({ ok: false, error: "Programme not found" }, 404);
+      if (b.baseVersion !== void 0 && String(b.baseVersion) !== String(row.updated_at || "")) {
+        return json3({ ok: false, conflict: true, error: "This programme was changed on another device.", updatedAt: row.updated_at, updatedBy: row.updated_by || "" }, 409);
+      }
       await db.prepare(
-        "UPDATE job_programmes SET title=?, client=?, site=?, data=?, updated_at=? WHERE id=? AND tenant_id=?"
-      ).bind(title, client, site, c.json, now, id, db.tenantId).run();
+        "UPDATE job_programmes SET title=?, client=?, site=?, data=?, updated_at=?, updated_by=? WHERE id=? AND tenant_id=?"
+      ).bind(title, client, site, c.json, now, me, id, db.tenantId).run();
     } else {
       id = newId2("PRG");
-      await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now, now).run();
+      await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now, now, me).run();
     }
     return json3({ ok: true, id, updatedAt: now });
   }
