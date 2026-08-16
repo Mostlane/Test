@@ -1359,8 +1359,26 @@ Tables (self-migrating + schema.sql): **job_programmes** (draft),
 **programme_revisions**, **programme_shares**, **programme_suggestions**.
 Headers on the two admin pages carry `padding-right:60px` so the fixed 🔔 bell
 never covers the header buttons. Help group "Job programmes" (build/issue +
-share/suggest). NB Jamie's example spreadsheet was NOT yet received when this
-was built — expect a layout/columns pass to match it when he sends it.
+share/suggest).
+**v2 — matched to Jamie's Excel example (`Programme (TURN OFF AUTOSAVE).xlsm`,
+received 16 Aug):** the workbook is a DAY-level programme (Works · Contractor ·
+Start · End · Days · Wknd; daily dd/mm+ddd columns; "X" day cells coloured by
+contractor via CF; per-contractor filtered tabs; MIN/MAX Start/End/Days summary;
+end = `WORKDAY(start,days-1)` unless Wknd=TRUE). `programme-gantt.js?v=2`
+replicates that model: data = `{contractors:[{id,name,colour}], tasks:[{name,
+contractor,start,days,wknd,progress,milestone}]}` (**`MLProg.migrate`** flattens
+old v1 `{sections}` drafts), DAY columns with weekend shading, **end date
+computed weekend-skipping** (bars SPLIT around weekends unless wknd), bars
+coloured by contractor (legend editor in the builder; default palette = the
+workbook's: #00B0F0/#92D050/#FFC000/#852C98 + grey), Start·End·Days summary
+line, and **filter chips** (the per-contractor tabs). **Contractor-scoped share
+links**: `programme_shares.contractor` + `programme_suggestions.contractor`
+(self-migrating ALTERs) — a scoped link's /prog/shared/open **filters tasks
+server-side** so a subcontractor only ever receives their own rows; their
+suggestion carries the contractor, the builder diffs against the same-filtered
+base (no false "removed"), and "Load into my draft" **merges only that
+contractor's tasks** (everyone else's untouched). The workbook's VBA
+(theme/dropdown refresh, sheet password) is NOT needed — the portal replaces it.
 
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated

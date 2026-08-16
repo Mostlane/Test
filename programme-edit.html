@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
-  <script src="/programme-gantt.js?v=1"></script>
+  <script src="/programme-gantt.js?v=2"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -23,7 +23,15 @@
     .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 3px 12px rgba(0,30,80,.06);}
     label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:8px 0 3px;}
     input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:14px;background:#fff;}
-    .meta{display:grid;grid-template-columns:2fr 1.4fr 1.4fr .9fr 1fr;gap:10px;}
+    .meta{display:grid;grid-template-columns:2fr 1.4fr 1.4fr .9fr;gap:10px;}
+    .ctr-row{display:flex;align-items:center;gap:8px;margin:4px 0;}
+    .ctr-row input[type=text]{max-width:220px;}
+    .ctr-row input[type=color]{width:34px;height:30px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;flex:none;}
+    .ctr-row button{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:4px 9px;font:600 12px 'Segoe UI';cursor:pointer;color:#334155;}
+    .fchips{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px;}
+    .fchip{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:5px 13px;font:600 12.5px 'Segoe UI';cursor:pointer;color:#334155;display:inline-flex;align-items:center;gap:6px;}
+    .fchip.on{background:#003b82;color:#fff;border-color:#003b82;}
+    .fchip i{width:11px;height:11px;border-radius:3px;display:inline-block;}
     @media(max-width:820px){.meta{grid-template-columns:1fr 1fr;}}
     .statusline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:10px;}
     .revpill{background:#dcfce7;color:#166534;border-radius:999px;padding:3px 10px;font-weight:700;font-size:12px;}
@@ -65,8 +73,9 @@
         <div><label>Client</label><input id="fClient" placeholder="Client name"></div>
         <div><label>Site / project</label><input id="fSite" placeholder="Site"></div>
         <div><label>Job ref</label><input id="fRef" placeholder="Ref"></div>
-        <div><label>Programme start</label><input id="fStart" type="date"></div>
       </div>
+      <label>Contractors (each gets a colour — bars are coloured by contractor)</label>
+      <div id="contractors"></div>
       <label>Notes (shown to the client under the programme)</label>
       <textarea id="fNotes" rows="2" placeholder="Assumptions, exclusions, access requirements…"></textarea>
       <div class="statusline">
@@ -76,7 +85,10 @@
       </div>
     </div>
 
-    <div class="card" style="padding:10px;"><div id="gantt"></div></div>
+    <div class="card" style="padding:10px;">
+      <div class="fchips" id="fchips"></div>
+      <div id="gantt"></div>
+    </div>
 
     <div class="card" id="suggCard">
       <h3 style="margin:0 0 4px;color:var(--navy);font-size:16px;" id="suggestions">💬 Client suggestions</h3>
@@ -91,6 +103,9 @@
       <h2>🔗 Share with a client</h2>
       <p class="muted" style="margin:0;">They get a live page in their browser — no file, revocable any time. It shows the latest <b>issued</b> revision.</p>
       <label>Who is this link for?</label><input id="shLabel" placeholder="e.g. John @ Southern Co-op">
+      <label>What do they see?</label>
+      <select id="shContractor"><option value="">The whole programme</option></select>
+      <div class="muted" style="margin-top:3px;">Pick a contractor to send a subcontractor <b>only their own tasks</b> — they never see the rest.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
         <div><label>Access code (optional)</label><input id="shCode" placeholder="e.g. 4821" maxlength="20"></div>
         <div><label>Expires after (days)</label><input id="shDays" type="number" min="0" placeholder="never"></div>
@@ -155,14 +170,70 @@
   function metaToData(){
     DATA.title = g("fTitle").value; DATA.client = g("fClient").value;
     DATA.site = g("fSite").value; DATA.ref = g("fRef").value;
-    DATA.startDate = g("fStart").value || DATA.startDate; DATA.notes = g("fNotes").value;
+    DATA.notes = g("fNotes").value;
   }
   function dataToMeta(){
     g("fTitle").value = DATA.title||""; g("fClient").value = DATA.client||"";
     g("fSite").value = DATA.site||""; g("fRef").value = DATA.ref||"";
-    g("fStart").value = DATA.startDate||""; g("fNotes").value = DATA.notes||"";
+    g("fNotes").value = DATA.notes||"";
     g("pageTitle").textContent = DATA.title ? DATA.title : "Programme builder";
+    renderContractors();
   }
+
+  // ── Contractors legend (name + colour per contractor; bars follow) ────────
+  let FILTER = "";                       // "" = all, else contractor id
+  function renderContractors(){
+    const host = g("contractors");
+    host.innerHTML = (DATA.contractors||[]).map(c => `
+      <div class="ctr-row" data-c="${esc(c.id)}">
+        <input type="color" data-cop="colour" value="${esc(c.colour||"#00B0F0")}" title="Colour">
+        <input type="text" data-cop="name" value="${esc(c.name||"")}" placeholder="Contractor name">
+        <button type="button" data-cop="del" title="Remove">✕</button>
+      </div>`).join("") +
+      `<div class="ctr-row"><button type="button" data-cop="add">＋ Add a contractor</button></div>`;
+  }
+  g("contractors").addEventListener("change", e => {
+    const op = e.target.getAttribute("data-cop"); if(!op) return;
+    const row = e.target.closest("[data-c]"); if(!row) return;
+    const c = (DATA.contractors||[]).find(x => x.id === row.getAttribute("data-c")); if(!c) return;
+    if(op === "name") c.name = e.target.value;
+    if(op === "colour") c.colour = e.target.value;
+    drawGantt(); queueSave();
+  });
+  g("contractors").addEventListener("click", async e => {
+    const op = e.target.getAttribute("data-cop"); if(!op) return;
+    if(op === "add"){
+      const used = (DATA.contractors||[]).length;
+      DATA.contractors.push({ id: MLProg.uid(), name: "", colour: MLProg.PALETTE[used % MLProg.PALETTE.length] });
+      renderContractors(); drawGantt(); queueSave(); return;
+    }
+    if(op === "del"){
+      const row = e.target.closest("[data-c]");
+      const c = (DATA.contractors||[]).find(x => x.id === row.getAttribute("data-c")); if(!c) return;
+      const inUse = (DATA.tasks||[]).some(t => t.contractor === c.id);
+      if(inUse){
+        const ok = window.MLUI ? await MLUI.confirm(`"${c.name||"This contractor"}" is on some tasks — remove anyway? Their tasks keep their dates but lose the colour.`,{title:"Remove contractor",okLabel:"Remove",danger:true}) : confirm("Remove this contractor?");
+        if(!ok) return;
+      }
+      DATA.contractors = DATA.contractors.filter(x => x !== c);
+      if(FILTER === c.id) FILTER = "";
+      (DATA.tasks||[]).forEach(t => { if(t.contractor === c.id) t.contractor = ""; });
+      renderContractors(); drawGantt(); queueSave();
+    }
+  });
+  function renderChips(){
+    const host = g("fchips");
+    const cs = (DATA.contractors||[]).filter(c => c.name);
+    if(cs.length < 2){ host.innerHTML = ""; if(FILTER) FILTER = ""; return; }
+    host.innerHTML =
+      `<button type="button" class="fchip ${FILTER?"":"on"}" data-f="">All contractors</button>` +
+      cs.map(c => `<button type="button" class="fchip ${FILTER===c.id?"on":""}" data-f="${esc(c.id)}"><i style="background:${esc(c.colour)}"></i>${esc(c.name)}</button>`).join("");
+  }
+  g("fchips").addEventListener("click", e => {
+    const b = e.target.closest("[data-f]"); if(!b) return;
+    FILTER = b.getAttribute("data-f") || "";
+    drawGantt();
+  });
 
   // EVERYTHING AUTOSAVES — debounced ~1s, keepalive flush on pagehide.
   function queueSave(){ dirty = true; g("saveState").textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000); }
@@ -187,10 +258,12 @@
     try{ fetch(API+"/prog/save",{method:"POST",keepalive:true,headers:{Authorization:"Bearer "+tok(),"Content-Type":"application/json"},
       body:JSON.stringify({id:PROG_ID||undefined,title:DATA.title,client:DATA.client,site:DATA.site,data:DATA})}); }catch(e){}
   });
-  ["fTitle","fClient","fSite","fRef","fStart","fNotes"].forEach(id => g(id).addEventListener("input", queueSave));
-  g("fStart").addEventListener("change", ()=>{ metaToData(); drawGantt(); queueSave(); });
+  ["fTitle","fClient","fSite","fRef","fNotes"].forEach(id => g(id).addEventListener("input", queueSave));
 
-  function drawGantt(){ MLProg.render(g("gantt"), DATA, { editable:true, onChange: queueSave }); }
+  function drawGantt(){
+    renderChips();
+    MLProg.render(g("gantt"), DATA, { editable:true, onChange: queueSave, contractor: FILTER });
+  }
 
   function renderRevState(){
     const el = g("revState");
@@ -214,14 +287,17 @@
     const d = await (await aFetch("/prog/suggestion?id="+encodeURIComponent(id))).json();
     if(!d.ok){ alert(d.error||"Couldn't open that suggestion."); return; }
     SUG = d;
-    g("sugTitle").textContent = "Suggestion from "+(d.author||"Client")+(d.rev?" (against Rev "+d.rev+")":"");
-    // Diff vs the revision it was made against (fall back to the current draft).
+    g("sugTitle").textContent = "Suggestion from "+(d.author||"Client")+(d.rev?" (against Rev "+d.rev+")":"")+(d.contractor?" — "+(contractorName(d.contractor)||"one contractor")+"'s view":"");
+    // Diff vs the revision it was made against (fall back to the current draft),
+    // filtered the same way their link was — so other contractors' tasks don't
+    // show up as "removed".
     let base = DATA;
     const rev = REVISIONS.find(r => r.rev === d.rev);
     if(rev){
       const rd = await (await aFetch("/prog/revision?id="+encodeURIComponent(rev.id))).json();
       if(rd.ok) base = rd.data;
     }
+    if(d.contractor) base = MLProg.filterFor(base, d.contractor);
     const df = MLProg.diff(base, d.data);
     const bits = [];
     if(d.note) bits.push(`💬 <i>“${esc(d.note)}”</i>`);
@@ -239,16 +315,32 @@
   }
   async function loadSugIntoDraft(){
     if(!SUG) return;
-    const ok = window.MLUI ? await MLUI.confirm("Replace your current draft with the client's copy? Your issued revisions are untouched — this only changes the working draft.",{title:"Load suggestion",okLabel:"Load it"}) : confirm("Replace your draft with the client's copy?");
+    const scoped = !!SUG.contractor;
+    const msg = scoped
+      ? "Fold the contractor's changes into your draft? Only their tasks are touched — everyone else's stay as they are. Your issued revisions are untouched."
+      : "Replace your current draft with the client's copy? Your issued revisions are untouched — this only changes the working draft.";
+    const ok = window.MLUI ? await MLUI.confirm(msg,{title:"Load suggestion",okLabel:"Load it"}) : confirm(msg);
     if(!ok) return;
-    DATA = SUG.data || DATA;
+    if(scoped){
+      // Their copy only ever held their own tasks — swap that contractor's set
+      // for theirs and leave the rest of the programme alone.
+      const theirs = (MLProg.migrate(SUG.data).tasks||[]).map(t => ({ ...t, contractor: SUG.contractor }));
+      const theirIds = new Set(theirs.map(t => t.id));
+      DATA.tasks = (DATA.tasks||[]).filter(t => t.contractor !== SUG.contractor && !theirIds.has(t.id)).concat(theirs);
+    } else {
+      DATA = MLProg.migrate(SUG.data) || DATA;
+    }
     dataToMeta(); drawGantt(); queueSave();
     closeM("sugBackdrop");
     alert("Loaded — review it, then Issue when you're happy.");
   }
 
+  function contractorName(id){ const c = (DATA.contractors||[]).find(x => x.id === id); return c ? c.name : ""; }
   function openShare(){
     if(!REVISIONS.length){ alert("Issue the programme first — a share link shows the latest issued revision."); return; }
+    const sel = g("shContractor");
+    sel.innerHTML = '<option value="">The whole programme</option>' +
+      (DATA.contractors||[]).filter(c => c.name).map(c => `<option value="${esc(c.id)}">Only ${esc(c.name)}'s tasks</option>`).join("");
     renderShares(); openM("shareBackdrop");
   }
   function renderShares(){
@@ -261,6 +353,7 @@
         : `${s.opens||0} opens${s.last_opened_at?" · last "+fmtDT(s.last_opened_at):""}`;
       return `<div class="sharerow">
         <b>${esc(s.label||"Link")}</b>
+        ${s.contractor?`<span class="muted">only ${esc(contractorName(s.contractor)||"one contractor")}</span>`:""}
         ${s.access_code?`<span class="muted">code ${esc(s.access_code)}</span>`:""}
         <span class="muted">${state}</span>
         ${s.revoked?"":`<code>${esc(url)}</code>
@@ -274,6 +367,7 @@
       progId: PROG_ID, label: g("shLabel").value.trim(),
       accessCode: g("shCode").value.trim(), expiresDays: Number(g("shDays").value)||0,
       allowSuggest: g("shSuggest").value === "1",
+      contractor: g("shContractor").value || "",
     })});
     const d = await r.json();
     if(!d.ok){ alert(d.error||"Couldn't create the link."); return; }
@@ -308,7 +402,7 @@
     if(!PROG_ID) return;
     const d = await (await aFetch("/prog/one?id="+encodeURIComponent(PROG_ID))).json();
     if(!d.ok){ alert(d.error||"Programme not found"); location.href="programmes.html"; return; }
-    DATA = d.prog.data && d.prog.data.sections ? d.prog.data : MLProg.blank();
+    DATA = MLProg.migrate(d.prog.data && (d.prog.data.tasks || d.prog.data.sections) ? d.prog.data : MLProg.blank());
     REVISIONS = d.revisions||[]; SHARES = d.shares||[]; SUGGESTIONS = d.suggestions||[];
     dataToMeta(); drawGantt(); renderRevState(); renderSuggestions();
   }

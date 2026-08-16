@@ -795,7 +795,8 @@ CREATE TABLE IF NOT EXISTS programme_shares (
   tenant_id TEXT, prog_id TEXT, label TEXT,
   access_code TEXT, expires_at TEXT, revoked INTEGER DEFAULT 0,
   allow_suggest INTEGER DEFAULT 1, created_by TEXT, created_at TEXT,
-  last_opened_at TEXT, opens INTEGER DEFAULT 0
+  last_opened_at TEXT, opens INTEGER DEFAULT 0,
+  contractor TEXT                       -- non-empty = link shows ONLY this contractor's tasks
 );
 CREATE TABLE IF NOT EXISTS programme_suggestions (
   id TEXT PRIMARY KEY, tenant_id TEXT, prog_id TEXT, token TEXT,
@@ -803,5 +804,6 @@ CREATE TABLE IF NOT EXISTS programme_suggestions (
   author TEXT, note TEXT,
   data TEXT,                            -- the client's full edited copy
   status TEXT DEFAULT 'open',           -- open | incorporated | dismissed
-  created_at TEXT, decided_by TEXT, decided_at TEXT
+  created_at TEXT, decided_by TEXT, decided_at TEXT,
+  contractor TEXT                       -- copied from the share: which filtered view they marked up
 );
