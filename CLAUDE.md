@@ -1511,6 +1511,14 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
 
 ## Notifications system
+- **🔄 Hard-refresh button (Aug 2026)** — portal-config `hardRefresh()` injects a
+  small fixed button top-LEFT on every logged-in page (positioned just BELOW the
+  page header so it never covers a ‹ Back link; skipped on auth/sign/my-day +
+  programme-view). One tap ≈ Ctrl+Shift+R: deletes every Cache Storage cache,
+  `registration.update()`s the service worker, re-fetches the core shell
+  (portal-config/portal.css/auth/device-auth + current page) with
+  `{cache:"reload"}` to punch through the browser HTTP cache, then reloads.
+  The user-facing cure for "my phone is stuck on an old version".
 - **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected
   portal-wide by portal-config.js (`notifBell()`, fixed top-right, `#mlBell`),
   for EVERY logged-in user (field engineers too; skipped only on auth/sign/

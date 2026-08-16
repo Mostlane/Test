@@ -1390,6 +1390,70 @@
   })();
 
   // ── Notification bell (Facebook-style feed) ─────────────────────────────────
+  // ── Hard-refresh button (🔄, top-left) ─────────────────────────────────────
+  // One tap = the closest a page can get to Ctrl+Shift+R: wipe every service-
+  // worker cache, re-fetch the service worker itself, force the core scripts
+  // past the browser HTTP cache, then reload. The cure for "my phone is stuck
+  // on an old version" without asking anyone to find browser settings.
+  (function hardRefresh() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
+        "memo-sign.html", "hs-sign.html", "programme-view.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      if (!localStorage.getItem(TOKEN_KEY)) return;
+
+      function build() {
+        if (document.getElementById("mlRefresh")) return;
+        var btn = document.createElement("button");
+        btn.id = "mlRefresh";
+        btn.setAttribute("aria-label", "Refresh this page");
+        btn.title = "Refresh — fetches the latest version of this page (clears cached copies)";
+        // Sit just BELOW the page header so it never covers a ‹ Back button;
+        // pages without a header get the top corner.
+        var hdr = document.querySelector("header.page, header.main-header");
+        var top = 8;
+        try { if (hdr) top = Math.max(8, Math.round(hdr.getBoundingClientRect().bottom + window.scrollY) + 6); } catch (e) {}
+        btn.style.cssText = "position:fixed;top:calc(" + top + "px + env(safe-area-inset-top,0px));left:8px;z-index:98000;" +
+          "width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.92);" +
+          "box-shadow:0 3px 12px rgba(0,20,60,.28);cursor:pointer;font-size:16px;line-height:34px;padding:0;opacity:.9;";
+        btn.textContent = "🔄";
+        var busy = false;
+        btn.onclick = async function () {
+          if (busy) return;
+          busy = true;
+          btn.style.transition = "transform .8s ease";
+          btn.style.transform = "rotate(720deg)";
+          btn.disabled = true;
+          try {
+            // 1. Wipe every Cache Storage cache (the service worker's copies).
+            if (window.caches && caches.keys) {
+              var keys = await caches.keys();
+              await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
+            }
+            // 2. Ask each service worker registration to fetch its newest sw.js.
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              var regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
+            }
+            // 3. Force the core shell past the browser HTTP cache so the reload
+            //    picks up fresh copies immediately (best-effort, failures ignored).
+            var core = ["/portal-config.js?v=5", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+              location.pathname + location.search];
+            await Promise.all(core.map(function (u) {
+              return fetch(u, { cache: "reload" }).catch(function () {});
+            }));
+          } catch (e) {}
+          location.reload();
+        };
+        (document.body || document.documentElement).appendChild(btn);
+      }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build);
+      else build();
+    } catch (e) { console.error("[hard-refresh]", e); }
+  })();
+
   // A small bell, top-right on every portal page, that anyone can open at any
   // time to see their past notifications (holiday decisions, job updates, memos,
   // van scores, equipment, …). Each one links straight to the thing it's about
