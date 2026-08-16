@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/portal.css?v=1">
   <link rel="manifest" href="/manifest.json">
   <script src="auth.js"></script>
+  <script src="/xlsx-lite.js"></script>
   <style>
     :root{ --navy:#003366; --line:#e3e8ee; --muted:#5b6b78; }
     *{box-sizing:border-box}
@@ -26,14 +27,56 @@
     .pill.sug{background:#fee2e2;color:#b91c1c;} .pill.links{background:#e0e7ff;color:#3730a3;}
     .row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
     .empty{text-align:center;color:var(--muted);padding:36px 10px;}
+    .ovl{position:fixed;inset:0;background:rgba(15,25,45,.55);display:none;align-items:flex-start;justify-content:center;z-index:9000;padding:24px 12px;overflow:auto;}
+    .ovl.on{display:flex;}
+    .modal{background:#fff;border-radius:16px;max-width:600px;width:100%;padding:18px 18px 16px;box-shadow:0 18px 60px rgba(0,20,60,.3);}
+    .modal h3{margin:0 0 4px;color:var(--navy);font-size:18px;}
+    .modal label{display:block;font-weight:600;font-size:12.5px;color:#334;margin:11px 0 4px;}
+    .modal input[type=text],.modal input[type=date],.modal textarea{width:100%;border:1px solid #cbd5e1;border-radius:9px;padding:9px 10px;font:14px 'Segoe UI';}
+    .modal textarea{min-height:120px;resize:vertical;}
+    .drop{border:2px dashed #b6c4d6;border-radius:12px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;background:#f7fafc;}
+    .drop.hot{border-color:#1A4F8F;background:#eef4fb;color:#1A4F8F;}
+    .aistat{font-size:12.5px;margin-top:10px;min-height:16px;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    @media(max-width:520px){.grid2{grid-template-columns:1fr;}}
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" href="main.html" title="Back">‹ Back</a>
     <h1>📊 Job Programmes</h1>
+    <button class="btn grey" onclick="openAI()">🤖 Draft from a document</button>
     <button class="btn grey" onclick="newProg()">＋ New programme</button>
   </header>
+
+  <div class="ovl" id="aiOvl">
+    <div class="modal">
+      <h3>🤖 Draft a programme from a document</h3>
+      <p class="muted" style="margin:2px 0 0;">Upload a specification or scope (PDF, spreadsheet or text) — or paste the text — and Claude will draft a starter task list with contractors and a sensible sequence. You then refine and issue it as normal. <b>Nothing is shared automatically.</b></p>
+
+      <div class="drop" id="aiDrop" style="margin-top:12px;">
+        📄 <b>Tap to choose a file</b> or drop it here<br>
+        <span style="font-size:12px;">PDF · Excel (.xlsx) · text/CSV — we read it in your browser, only the text is sent</span>
+        <input type="file" id="aiFile" accept=".pdf,.txt,.csv,.xlsx" style="display:none;">
+      </div>
+
+      <label>Scope text <span class="muted" style="font-weight:400;">(auto-filled from the file — or paste/edit here)</span></label>
+      <textarea id="aiText" placeholder="Paste the specification or a description of the works…"></textarea>
+
+      <div class="grid2">
+        <div><label>Programme title <span class="muted" style="font-weight:400;">(optional)</span></label><input type="text" id="aiTitle" placeholder="e.g. Guildford — shopfit"></div>
+        <div><label>Start date <span class="muted" style="font-weight:400;">(optional)</span></label><input type="date" id="aiStart"></div>
+        <div><label>Client <span class="muted" style="font-weight:400;">(optional)</span></label><input type="text" id="aiClient" placeholder="e.g. Southern Co-op"></div>
+        <div><label>Site <span class="muted" style="font-weight:400;">(optional)</span></label><input type="text" id="aiSite" placeholder="e.g. Woodbridge Road"></div>
+      </div>
+
+      <div class="aistat" id="aiStat"></div>
+      <div class="row" style="margin-top:12px;justify-content:flex-end;gap:8px;">
+        <button class="btn ghost" onclick="closeAI()">Cancel</button>
+        <button class="btn grey" id="aiGo" style="background:#1A4F8F;" onclick="runAI()">✨ Draft it</button>
+      </div>
+    </div>
+  </div>
   <div class="wrap">
     <p class="muted" style="margin:0 0 12px;">Build a programme of works, <b>issue</b> official revisions, and share a live link with the client — they see it in their browser (no file to copy), and can suggest changes that come back to you without touching the issued version.</p>
     <div id="list"><div class="empty">Loading…</div></div>
@@ -85,6 +128,96 @@
   }
   async function newProg(){
     location.href = "programme-edit.html";
+  }
+
+  // ── AI: draft from a document ──────────────────────────────────────────
+  function openAI(){ document.getElementById("aiOvl").classList.add("on"); }
+  function closeAI(){ document.getElementById("aiOvl").classList.remove("on"); }
+  function aiSay(msg,ok){ const el=document.getElementById("aiStat"); el.textContent=msg||""; el.style.color=ok===false?"#b91c1c":ok===true?"#166534":"#5b6b78"; }
+
+  // Load pdf.js the same way the EICR tools do (in-browser, nothing uploaded).
+  let _pdfjs=null;
+  function loadPdfjs(){
+    if(_pdfjs) return _pdfjs;
+    const BASE="https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
+    _pdfjs=new Promise((res,rej)=>{
+      if(window.pdfjsLib) return res(window.pdfjsLib);
+      const s=document.createElement("script"); s.src=BASE+"pdf.min.js";
+      s.onload=()=>{ try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=BASE+"pdf.worker.min.js";}catch(e){} res(window.pdfjsLib); };
+      s.onerror=()=>rej(new Error("Couldn't load the PDF reader (needs internet)."));
+      document.head.appendChild(s);
+    });
+    return _pdfjs;
+  }
+  async function extractPdf(buf){
+    const lib=await loadPdfjs();
+    const pdf=await lib.getDocument({data:buf}).promise;
+    let out=[];
+    const max=Math.min(pdf.numPages,60);
+    for(let p=1;p<=max;p++){
+      const page=await pdf.getPage(p);
+      const tc=await page.getTextContent();
+      out.push(tc.items.map(i=>i.str).join(" "));
+    }
+    return out.join("\n");
+  }
+  async function extractXlsx(buf){
+    if(!window.XLSXLite) throw new Error("Spreadsheet reader unavailable.");
+    const wb=await XLSXLite.parse(buf);
+    let lines=[], n=0;
+    for await(const row of wb.rows()){
+      const cells=Object.keys(row.cells).sort().map(k=>row.cells[k]).filter(v=>v!=="" && v!=null);
+      if(cells.length) lines.push(cells.join(" | "));
+      if(++n>4000) break;
+    }
+    return lines.join("\n");
+  }
+  async function handleFile(file){
+    if(!file) return;
+    const name=(file.name||"").toLowerCase();
+    aiSay("Reading "+(file.name||"file")+"…");
+    try{
+      let text="";
+      if(name.endsWith(".pdf")){ text=await extractPdf(await file.arrayBuffer()); }
+      else if(name.endsWith(".xlsx")){ text=await extractXlsx(await file.arrayBuffer()); }
+      else { text=await file.text(); }
+      text=(text||"").replace(/ /g,"").trim();
+      if(text.length<40){ aiSay("Couldn't read enough text from that file — paste the scope in instead.",false); return; }
+      document.getElementById("aiText").value=text;
+      if(!document.getElementById("aiTitle").value){
+        const base=(file.name||"").replace(/\.[^.]+$/,"").replace(/[_-]+/g," ").trim();
+        if(base) document.getElementById("aiTitle").value=base;
+      }
+      aiSay("✓ Read "+text.length.toLocaleString()+" characters. Add any details, then Draft it.",true);
+    }catch(e){ aiSay(e.message||"Couldn't read that file.",false); }
+  }
+  (function wireDrop(){
+    const drop=document.getElementById("aiDrop"), input=document.getElementById("aiFile");
+    if(!drop) return;
+    drop.addEventListener("click",()=>input.click());
+    input.addEventListener("change",e=>handleFile(e.target.files[0]));
+    ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
+    ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
+    drop.addEventListener("drop",e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+  })();
+  async function runAI(){
+    const text=document.getElementById("aiText").value.trim();
+    if(text.length<40){ aiSay("Add a document or paste at least a short scope of works first.",false); return; }
+    const btn=document.getElementById("aiGo"); btn.disabled=true; const old=btn.textContent; btn.textContent="Drafting…";
+    aiSay("Claude is reading the scope and drafting your task list — this can take up to a minute…");
+    try{
+      const r=await aFetch("/prog/ai-draft",{method:"POST",body:JSON.stringify({
+        text,
+        title:document.getElementById("aiTitle").value.trim(),
+        client:document.getElementById("aiClient").value.trim(),
+        site:document.getElementById("aiSite").value.trim(),
+        startDate:document.getElementById("aiStart").value||""
+      })});
+      const d=await r.json().catch(()=>({}));
+      if(!d.ok){ aiSay(d.error||("Couldn't draft it (HTTP "+r.status+")."),false); btn.disabled=false; btn.textContent=old; return; }
+      aiSay("✓ Drafted "+d.taskCount+" tasks. Opening the builder…",true);
+      location.href="programme-edit.html?id="+encodeURIComponent(d.id);
+    }catch(e){ aiSay("Couldn't reach the server — check your signal and try again.",false); btn.disabled=false; btn.textContent=old; }
   }
   async function delProg(id,title){
     const ok = window.MLUI ? await MLUI.confirm(`Delete "${title||"this programme"}"? Its revisions, share links and suggestions all go too.`,{title:"Delete programme",okLabel:"Delete",danger:true}) : confirm("Delete this programme?");
