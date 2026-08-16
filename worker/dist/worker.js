@@ -7423,6 +7423,10 @@ async function ensureOfflineSchema(env) {
   } catch (e) {
   }
   try {
+    await env.SITELOG_DB.prepare("ALTER TABLE visits ADD COLUMN served_by TEXT").run();
+  } catch (e) {
+  }
+  try {
     await env.SITELOG_DB.prepare("ALTER TABLE people ADD COLUMN fuel_rate REAL").run();
   } catch (e) {
   }
@@ -8723,8 +8727,8 @@ async function handle11(request, env, ctx) {
     }
     await env.SITELOG_DB.prepare(`
         INSERT INTO visits
-          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, check_in_at, travel_in_miles, travel_in_mins)
-        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, ?, ?, ?)
+          (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, check_in_at, travel_in_miles, travel_in_mins, served_by)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, ?, ?, ?, 'mostlane-api')
       `).bind(
       newVisitId,
       device.person_id,
