@@ -70,6 +70,9 @@
         <div><label>Site <span class="muted" style="font-weight:400;">(optional)</span></label><input type="text" id="aiSite" placeholder="e.g. Woodbridge Road"></div>
       </div>
 
+      <label>Notes for the AI <span class="muted" style="font-weight:400;">(optional — the more you tell it, the better the draft)</span></label>
+      <textarea id="aiNotes" style="min-height:70px;" placeholder="e.g. Mechanical &amp; electrical is subcontracted to ABC Building Services. Roofing is with XYZ Roofing Ltd. Everything else is Mostlane. Site is a live store — noisy works evenings only. Allow a week for lead-in before starting on site."></textarea>
+
       <div class="aistat" id="aiStat"></div>
       <div class="row" style="margin-top:12px;justify-content:flex-end;gap:8px;">
         <button class="btn ghost" onclick="closeAI()">Cancel</button>
@@ -208,6 +211,7 @@
     try{
       const r=await aFetch("/prog/ai-draft",{method:"POST",body:JSON.stringify({
         text,
+        notes:document.getElementById("aiNotes").value.trim(),
         title:document.getElementById("aiTitle").value.trim(),
         client:document.getElementById("aiClient").value.trim(),
         site:document.getElementById("aiSite").value.trim(),

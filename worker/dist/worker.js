@@ -19314,8 +19314,9 @@ async function handle29(request, env, ctx, url) {
       return json3({ ok: false, error: "AI drafting isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
     }
     const b = await request.json().catch(() => ({}));
+    const notes = String(b.notes || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 4e3);
     let text = String(b.text || "").replace(/ /g, "").trim();
-    if (text.length < 40) return json3({ ok: false, error: "There wasn't enough readable text in that document to work from. Try a different file, or type the scope in yourself." }, 400);
+    if (text.length < 40 && notes.length < 40) return json3({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
     const MAX_TEXT = 12e4;
     if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
     const hintTitle = String(b.title || "").slice(0, 200);
@@ -19348,8 +19349,12 @@ async function handle29(request, env, ctx, url) {
       },
       required: ["tasks"]
     };
-    const sys = "You are a UK construction planner helping build a programme of works (a Gantt schedule). From the supplied specification or scope document, produce a realistic, ordered list of work activities with sensible durations in WORKING DAYS and a start offset (in working days) from the project start, staggered so dependent trades follow on. Group tasks under the distinct contractors/trades. Keep task names short and practical. Only include a milestone flag for true single-point events. Return between about 8 and 60 tasks \u2014 a useful starting point the planner will refine, not an exhaustive breakdown.";
-    let userMsg = "Here is the document to plan from";
+    const sys = "You are a UK construction planner helping build a programme of works (a Gantt schedule). From the supplied specification or scope document, produce a realistic, ordered list of work activities with sensible durations in WORKING DAYS and a start offset (in working days) from the project start, staggered so dependent trades follow on. Group tasks under the distinct contractors/trades. Keep task names short and practical. Only include a milestone flag for true single-point events. Return between about 8 and 60 tasks \u2014 a useful starting point the planner will refine, not an exhaustive breakdown. If the planner has given specific instructions (below), follow them closely \u2014 especially who is doing which trade (name subcontractors as the contractor for their tasks) and any sequencing or timing constraints. The planner's instructions take priority over anything implied by the document.";
+    let userMsg = "";
+    if (notes) {
+      userMsg += "INSTRUCTIONS FROM THE PLANNER (follow these closely \u2014 they override the document where they conflict):\n" + notes + "\n\n";
+    }
+    userMsg += "DOCUMENT / SCOPE TO PLAN FROM";
     if (hintTitle) userMsg += ` (project: ${hintTitle})`;
     userMsg += ":\n\n" + text;
     const model = env.ANTHROPIC_MODEL || "claude-opus-5";
