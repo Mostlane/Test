@@ -2028,17 +2028,38 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
      is unbound OR the local module errors/returns non-ok, they fall back to the
      remote `api.site-log.co.uk` fetch (the standalone worker still runs). So the
      scanner + old worker are UNTOUCHED and everything is reversible.
-   - **Stage 2 (TODO — scanner cutover):** move the **`api.site-log.co.uk`
-     custom domain** off the standalone worker onto `mostlane-api` (index.js host-
-     dispatches `url.hostname==="api.site-log.co.uk"` → `sitelogApi.handle`; inert
-     until the domain moves). Then add the scanner's other bindings to
-     mostlane-api: **`DOCS_BUCKET`** (R2, site-document files) + secret
-     **`GOOGLE_MAPS_KEY`** (travel/geocode) — NOT needed for Stage 1 (job-costing
-     reads pre-stored travel). Switch the standalone worker off; revert = move the
-     domain back. Scanner front-end (site-log.co.uk GitHub Pages, QR codes,
-     deviceToken model) is unchanged throughout — only its API base host moves.
+   - **Stage 2 (LIVE — scanner cut over 16 Aug via FRONT-END REPOINT, not a
+     domain move).** Lesson from a failed attempt: **moving the live
+     `api.site-log.co.uk` custom domain between workers leaves a DNS/cert gap and
+     the scanner goes dark** (it orphaned once and needed re-attaching). So instead
+     of moving the domain, we stood up a SECOND host **`api2.site-log.co.uk`** as a
+     Custom Domain on `mostlane-api` and pointed the scanner front-end at it —
+     **zero downtime, old worker stays as a live fallback, both hosts read the same
+     `sitelog-db` so no split.** index.js host-dispatches BOTH
+     `api.site-log.co.uk` and `api2.site-log.co.uk` → `sitelogApi.handle`. The
+     scanner front-end (Mostlane/SiteLog `docs/`: app.html, admin.html,
+     documents.html, sites.html) now sets its API base to
+     **`https://api2.site-log.co.uk`** (was api.site-log.co.uk); SW cache bumped
+     v8→v9. Bindings needed & PRESENT on mostlane-api: **`SITELOG_DB`**,
+     **`DOCS_BUCKET`** (R2 sitelog-documents), secret **`GOOGLE_MAPS_KEY`**,
+     **`SITELOG_ADMIN_SECRET`** (all confirmed via `GET /served-by` →
+     `{worker:"mostlane-api",dbBound:true,docsBound:true}`). **Diagnostics baked
+     in:** `GET /served-by` names the answering worker; every `/confirm-checkin`
+     insert stamps **`visits.served_by='mostlane-api'`** (old worker leaves it
+     NULL) so the cutover can be watched device-by-device in D1. **`api2` is now
+     the PERMANENT scanner backend — do NOT remove it.** Device identity survives
+     the api→api2 move because the `ml_did` cookie is `Domain=site-log.co.uk`
+     (both subdomains) + localStorage/IndexedDB on the unchanged site-log.co.uk
+     front-end origin; CORS ALLOWED_ORIGINS already lists site-log.co.uk.
+     **Rollback = one commit** (revert the front-end API base to api.site-log.co.uk).
+     **REMAINING:** (a) old standalone `sitelog-api` worker + `api.site-log.co.uk`
+     stay as fallback until every active device shows `served_by='mostlane-api'`
+     (watch visits) — THEN retire the worker; (b) remove the STALE
+     `api.site-log.co.uk` custom-domain row still sitting on mostlane-api from the
+     failed attempt (harmless now — sitelog-api serves api.*).
    - **Stage 3 (TODO):** rebuild admin.html/documents as portal pages
-     (FullAccess-gated) reading SITELOG_DB directly.
+     (FullAccess-gated) reading SITELOG_DB directly. (admin/documents/sites.html
+     currently work standalone against mostlane-api via api2.)
    HISTORICAL (standalone worker, still the live scanner backend until Stage 2):
    repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk;
    worker `worker.js` = **manual paste**, not auto-deployed; commit to
