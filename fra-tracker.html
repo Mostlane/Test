@@ -109,6 +109,12 @@ const SC = { "Pending":"#94a3b8","Scheduled":"#6366f1","Travelling":"#0ea5e9","I
 const EMO = { "Pending":"⏳","Scheduled":"📅","Travelling":"🚗","In Progress":"🔧","On Hold":"⏸","Quote":"💬","Order":"📦","Complete":"✅","Closed Jobs":"✅","Invoiced":"🧾","Cancelled":"✖️" };
 const isDone = s => /^(complete|closed|closed jobs|invoiced)$/i.test(String(s||""));
 function fmtDT(x){ if(!x) return ""; const d=new Date(x); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+function durMins(j){
+  if(Number.isFinite(+j.durationMinutes) && +j.durationMinutes>0) return +j.durationMinutes;
+  if(j.scheduledAt && j.scheduledEnd){ const d=(new Date(j.scheduledEnd)-new Date(j.scheduledAt))/60000; if(d>0) return Math.round(d); }
+  return 0;
+}
+function fmtHours(mins){ if(!mins) return "—"; const h=Math.floor(mins/60), m=mins%60; return m? (h+"h "+m+"m") : (h+"h"); }
 function lastUpdate(j){
   const h = j.statusHistory||[]; let t = j.updatedAt || "";
   if(h.length){ const last = h[h.length-1].at; if(!t || new Date(last)>new Date(t)) t = last; }
@@ -122,6 +128,7 @@ const COLS = [
   { k:"works",  label:"Works required", get:j=>esc(j.description||"—"),        cls:"works", raw:j=>j.description||"" },
   { k:"status", label:"Status",    get:j=>`<span class="chip" style="background:${SC[j.status]||"#94a3b8"}">${EMO[j.status]||""} ${esc(j.status)}</span>`, cls:"nowrap", raw:j=>j.status||"" },
   { k:"sched",  label:"Scheduled", get:j=> j.scheduledAt ? esc(fmtDT(j.scheduledAt) + (j.scheduledEnd? " – "+fmtDT(j.scheduledEnd):"")) : '<span class="muted">—</span>', cls:"nowrap", raw:j=>j.scheduledAt||"" },
+  { k:"dur",    label:"Duration",  get:j=>esc(fmtHours(durMins(j))),          cls:"nowrap", raw:j=>durMins(j) },
   { k:"upd",    label:"Updated",   get:j=>esc(fmtDT(lastUpdate(j))),          cls:"nowrap muted", raw:j=>lastUpdate(j) },
   { k:"open",   label:"",          get:j=>`<a class="open-lnk" href="job-view.html?id=${encodeURIComponent(j.id)}" target="_blank">Open ↗</a>`, cls:"nowrap" }
 ];
@@ -202,6 +209,7 @@ function exportCSV(){
   const rows = batch.map(j => cols.map(c => {
     let v = c.raw ? c.raw(j) : String(j[c.k]==null?"":j[c.k]);
     if(c.k==="sched") v = (j.scheduledAt?fmtDT(j.scheduledAt):"") + (j.scheduledEnd?" - "+fmtDT(j.scheduledEnd):"");
+    if(c.k==="dur") v = fmtHours(durMins(j));
     if(c.k==="upd") v = fmtDT(lastUpdate(j));
     return '"' + String(v==null?"":v).replace(/"/g,'""').replace(/\r?\n/g," ") + '"';
   }));
