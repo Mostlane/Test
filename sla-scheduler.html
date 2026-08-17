@@ -106,6 +106,10 @@
     .day-job.done{cursor:pointer;border-color:#65a30d;}
     .day-job.done .day-job-ref{color:#3f6212;}
     .week-job-chip.done{background:#f0fdf4;}
+    /* Faint tick marking a completed job's ORIGINAL scheduled slot (it moved to
+       the time it was actually worked). */
+    .sched-marker{position:absolute;top:3px;bottom:3px;width:0;border-left:2px dashed #94a3b8;opacity:.75;z-index:1;}
+    .sched-marker::before{content:"🕘";position:absolute;top:-2px;left:-6px;font-size:9px;opacity:.8;}
     .now-line-v{position:absolute;top:0;width:2px;background:rgba(220,38,38,0.9);z-index:3;pointer-events:none;}
 
     .status-bar{margin-top:10px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;}
@@ -354,6 +358,32 @@ const MAP_STATUSES = ["Pending","Scheduled","In Progress","On Hold"];
 // A finished job that stays on the board (green + locked). Closed/Invoiced are
 // filtered out earlier; "Complete" is the one we keep showing.
 function isDoneStatus(s){ return s === "Complete"; }
+// Match the server's engineer id normalisation (spaces → dots), so we can pick
+// this engineer's own entries out of a multi-engineer job's status history.
+const schedNormId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+// The ACTUAL worked window for a finished job in one engineer's lane, read from
+// the status history (In Progress → Complete). Returns {start,end} Dates, or
+// null when we can't tell (→ the block keeps its scheduled slot). Never changes
+// the stored scheduled time — this is display only.
+function actualWindow(job, engineerUsername){
+  const hist = job.statusHistory || [];
+  if(!hist.length) return null;
+  const me = schedNormId(engineerUsername);
+  const mine = e => !e.eng || schedNormId(e.eng) === me;   // shared entries (single-eng) or this engineer's
+  let start = null, end = null;
+  for(const e of hist){
+    if(!mine(e)) continue;
+    const at = e.at ? new Date(e.at) : null;
+    if(!at || isNaN(at.getTime())) continue;
+    const s = String(e.status || "").toLowerCase();
+    if(s === "in progress"){ if(!start || at < start) start = at; }   // first on-site start
+    if(s === "complete") end = at;                                    // last completion
+  }
+  if(!end) return null;                                               // not completed in-app → keep scheduled
+  if(!start) start = new Date(end.getTime() - job.durationMinutes*60000);  // only completion known
+  if(end <= start) end = new Date(start.getTime() + 15*60000);
+  return { start, end };
+}
 
 let currentUser = null;
 let engineers = [];
@@ -415,7 +445,11 @@ function normaliseJob(j){
     lat: j.lat, lon: j.lon,
     scheduledAt: j.scheduledAt || null,
     durationMinutes,
-    assignedEngineers: assigned
+    assignedEngineers: assigned,
+    // Actual worked timestamps (In Progress → Complete) so a finished job can be
+    // shown at the time it was really done. The scheduled time above is kept
+    // untouched — this is display only.
+    statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : []
   };
 }
 
@@ -605,11 +639,35 @@ function renderDayView(container){
       .filter(j => sameDay(new Date(j.scheduledAt), dayDate));
 
     jobsForEngineer.forEach(job => {
-      const dStart = new Date(job.scheduledAt);
-      let startMins = clamp(minsSinceMidnight(dStart), dayStartMins, dayEndMins - 15);
-      const endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
-
       const done = isDoneStatus(job.status);
+      // The scheduled slot (what the office set) — kept, and marked on the lane.
+      const schedStartMins = clamp(minsSinceMidnight(new Date(job.scheduledAt)), dayStartMins, dayEndMins - 15);
+      // A finished job is drawn at the time it was ACTUALLY worked (from the
+      // status history), so an early finish slides left. Falls back to the
+      // scheduled slot when there are no actual times. Only apply when the work
+      // actually happened on this day.
+      const actRaw = done ? actualWindow(job, engineer.username) : null;
+      const act = (actRaw && sameDay(actRaw.start, dayDate)) ? actRaw : null;
+      let startMins, endMins;
+      if(act){
+        startMins = clamp(minsSinceMidnight(act.start), dayStartMins, dayEndMins - 15);
+        const durM = Math.max(15, Math.round((act.end - act.start)/60000));
+        endMins = clamp(startMins + durM, startMins + 15, dayEndMins);
+      } else {
+        startMins = schedStartMins;
+        endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
+      }
+      const shifted = act && Math.abs(startMins - schedStartMins) >= 5;
+
+      // Faint dashed tick at the original scheduled slot when the block moved.
+      if(shifted){
+        const mk = document.createElement("div");
+        mk.className = "sched-marker";
+        mk.style.left = ((schedStartMins - dayStartMins) * pxPerMin) + "px";
+        mk.title = "Scheduled " + pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
+        track.appendChild(mk);
+      }
+
       const el = document.createElement("div");
       el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "");
       el.dataset.jobId = job.id;
@@ -625,7 +683,10 @@ function renderDayView(container){
       el.querySelector(".day-job-time").textContent = timeLabel;
       el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "");
       el.querySelector(".day-job-label").textContent = job.title;
-      el.title = (done ? "✓ Complete  " : "") + timeLabel + "  " + (job.ref ? job.ref + "  " : "") + job.title +
+      const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
+      el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
+                 (shifted ? "Scheduled " + schedLabel : timeLabel) + "  " +
+                 (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
                  (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "");
 

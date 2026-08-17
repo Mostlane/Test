@@ -376,6 +376,17 @@ across all pages with sed. Provides:
   date; week view uses today if it's in the shown week, else the picked date.
   Tapping a job row opens the quick edit modal (board jobs) or job-view.html
   (finished jobs, which loadJobs drops from the board).
+  **Completed jobs stay on the board (Aug 2026):** loadJobs no longer drops
+  "Complete" (only Closed Jobs / Invoiced stay off). A Complete job renders GREEN
+  with a ✓ and is LOCKED (not draggable). **Day view positions a finished job at
+  the time it was ACTUALLY worked** — `actualWindow(job, engineer)` reads the
+  In Progress → Complete timestamps from `job.statusHistory` (normaliseJob now
+  passes statusHistory through; multi-eng entries carry `eng`=normId matched via
+  `schedNormId`) so an early finish slides left behind the now-line. The stored
+  `scheduledAt` is NEVER changed — a faint dashed 🕘 `.sched-marker` is drawn at
+  the original scheduled slot and the hover shows "Scheduled HH:MM (worked HH:MM)".
+  Falls back to the scheduled slot when there are no actual times (office-marked
+  complete) or the work wasn't on the shown day. Week view just greens the chip.
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference
