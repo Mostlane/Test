@@ -129,6 +129,23 @@
     .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:12px;}
     .modal{background:#fff;border-radius:14px;max-width:440px;width:100%;padding:16px;box-shadow:0 20px 40px rgba(15,23,42,0.35);font-size:13px;max-height:92vh;overflow:auto;}
     .modal h2{font-size:16px;margin:0 0 8px;color:var(--ml-blue);}
+    /* Engineer day-summary modal */
+    .day-name.clickable{cursor:pointer;}
+    .week-day-header.clickable{cursor:pointer;}
+    .day-name.clickable:hover,.week-day-header.clickable:hover{text-decoration:underline;color:var(--ml-blue);}
+    .eng-sum{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px;}
+    .eng-sum .sc{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600;background:#fff;}
+    .eng-sum .sc .dot{width:9px;height:9px;border-radius:50%;}
+    .eng-sum .sc.total{background:#f1f5f9;}
+    .eng-jobs{display:flex;flex-direction:column;gap:7px;}
+    .eng-jobrow{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-left-width:4px;border-radius:9px;padding:9px 11px;cursor:pointer;}
+    .eng-jobrow:hover{background:#f8fafc;}
+    .eng-jobrow .ej-main{flex:1;min-width:0;}
+    .eng-jobrow .ej-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .eng-jobrow .ej-meta{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .eng-jobrow .ej-time{font-size:12px;font-weight:700;color:#334155;flex:0 0 auto;}
+    .eng-jobrow .ej-chip{flex:0 0 auto;font-size:11px;font-weight:700;color:#fff;border-radius:999px;padding:3px 9px;}
+    .eng-empty{color:var(--muted);font-size:13px;padding:12px 2px;}
     .modal label{display:block;font-size:12px;font-weight:600;margin-top:8px;margin-bottom:2px;}
     .modal input,.modal select,.modal textarea{width:100%;padding:7px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);}
     .modal textarea{min-height:56px;resize:vertical;}
@@ -277,6 +294,19 @@
         </span>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ENGINEER DAY SUMMARY MODAL -->
+<div class="modal-backdrop" id="engDayBackdrop">
+  <div class="modal" style="max-width:520px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
+      <button type="button" class="btn" id="engDayClose">✕</button>
+    </div>
+    <div id="engDayDate" style="font-size:12px;color:var(--muted);margin:2px 0 8px;"></div>
+    <div class="eng-sum" id="engDaySummary"></div>
+    <div class="eng-jobs" id="engDayJobs"></div>
   </div>
 </div>
 
@@ -539,8 +569,10 @@ function renderDayView(container){
     const row = document.createElement("div");
     row.className = "day-row";
     const name = document.createElement("div");
-    name.className = "day-name";
+    name.className = "day-name clickable";
     name.textContent = engineer.name;
+    name.title = "See how " + engineer.name + " is getting on today";
+    name.addEventListener("click", () => openEngDay(engineer.username, engineer.name, dayDate));
     const holD = holFor(engineer.username, dayDate);
     if(holD){ row.classList.add("on-holiday"); const bd=document.createElement("span"); bd.className="hol-badge-inline"; bd.textContent="🌴 "+(holD.half?holD.half+" leave":"Holiday"); name.appendChild(bd); }
     row.appendChild(name);
@@ -632,8 +664,13 @@ function renderWeekView(container){
 
   engineerList.forEach(engineer => {
     const nameCell = document.createElement("div");
-    nameCell.className = "week-day-header";
+    nameCell.className = "week-day-header clickable";
     nameCell.textContent = engineer.name;
+    nameCell.title = "See how " + engineer.name + " is getting on";
+    // No single day in the week grid — show today if it's in view, else the picked date.
+    const now = new Date();
+    const inWeek = now >= monday && now < new Date(monday.getFullYear(), monday.getMonth(), monday.getDate()+7);
+    nameCell.addEventListener("click", () => openEngDay(engineer.username, engineer.name, inWeek ? now : selectedDate));
     grid.appendChild(nameCell);
 
     for(let i = 0; i < 7; i++){
@@ -812,6 +849,71 @@ async function onPointerUp(e){
 
 /* ============== MODAL ============== */
 let modalJobId = null;
+/* ── Engineer day summary ─────────────────────────────────────────────────────
+   Click an engineer's name → their jobs for the day, each with a clear status,
+   plus a headline count of Scheduled / In Progress / Complete etc. Uses
+   /sla/jobs/for-engineer which serves THAT engineer's own per-engineer status. */
+// Order statuses sensibly for the summary chips; anything else (custom
+// categories) is appended after these in first-seen order.
+const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs"];
+function engStatusColour(s){ return STATUS_COLOUR[s] || "#64748b"; }
+function openEngDay(username, name, date){
+  const iso = formatDateInput(date);
+  $("engDayTitle").textContent = name;
+  const today = sameDay(date, new Date());
+  $("engDayDate").textContent = (today ? "Today · " : "") + date.toDateString();
+  $("engDaySummary").innerHTML = "";
+  $("engDayJobs").innerHTML = '<div class="eng-empty">Loading…</div>';
+  $("engDayBackdrop").style.display = "flex";
+  authFetch("/sla/jobs/for-engineer?engineer=" + encodeURIComponent(username) + "&date=" + iso + "&t=" + Date.now())
+    .then(r => r.json())
+    .then(list => {
+      const arr = Array.isArray(list) ? list : (list.jobs || []);
+      renderEngDay(arr);
+    })
+    .catch(() => { $("engDayJobs").innerHTML = '<div class="eng-empty">Couldn\'t load — try again.</div>'; });
+}
+function renderEngDay(list){
+  // Count by status.
+  const counts = {};
+  list.forEach(j => { const s = j.status || "Scheduled"; counts[s] = (counts[s] || 0) + 1; });
+  const seen = Object.keys(counts);
+  const ordered = ENG_STATUS_ORDER.filter(s => seen.includes(s)).concat(seen.filter(s => !ENG_STATUS_ORDER.includes(s)));
+  const sum = $("engDaySummary");
+  sum.innerHTML =
+    `<span class="sc total"><b>${list.length}</b>&nbsp;job${list.length === 1 ? "" : "s"}</span>` +
+    ordered.map(s => `<span class="sc"><span class="dot" style="background:${engStatusColour(s)}"></span>${s} <b>${counts[s]}</b></span>`).join("");
+  const wrap = $("engDayJobs");
+  if(!list.length){ wrap.innerHTML = '<div class="eng-empty">No jobs scheduled for this day.</div>'; return; }
+  // Sort by scheduled time.
+  const sorted = list.slice().sort((a,b) => new Date(a.scheduledAt||0) - new Date(b.scheduledAt||0));
+  wrap.innerHTML = sorted.map(j => {
+    const c = engStatusColour(j.status);
+    const t = j.scheduledAt ? (() => { const d = new Date(j.scheduledAt); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); })() : "—";
+    const meta = [j.site, j.priority].filter(Boolean).join(" · ");
+    return `<div class="eng-jobrow" data-jid="${escapeAttr(j.id)}" style="border-left-color:${c}">
+      <span class="ej-time">${t}</span>
+      <span class="ej-main">
+        <span class="ej-title">${escapeHtml(j.ref ? j.ref + " · " : "")}${escapeHtml(j.title || "(no title)")}</span>
+        ${meta ? `<span class="ej-meta">${escapeHtml(meta)}</span>` : ""}
+      </span>
+      <span class="ej-chip" style="background:${c}">${escapeHtml(j.status || "Scheduled")}</span>
+    </div>`;
+  }).join("");
+  wrap.querySelectorAll("[data-jid]").forEach(row => row.addEventListener("click", () => {
+    const id = row.getAttribute("data-jid");
+    $("engDayBackdrop").style.display = "none";
+    // On the board (not finished) → quick modal; finished/off-board jobs
+    // (dropped from the board by loadJobs) → open the full office job view.
+    if(jobs.find(x => x.id === id)) openJobModal(id);
+    else window.open("job-view.html?id=" + encodeURIComponent(id), "_blank");
+  }));
+}
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
+document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
+document.getElementById("engDayBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("engDayBackdrop")) document.getElementById("engDayBackdrop").style.display = "none"; });
+
 function openJobModal(jobId){
   const job = jobs.find(j => j.id === jobId);
   if(!job) return;

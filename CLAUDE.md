@@ -364,6 +364,18 @@ across all pages with sed. Provides:
   The standard back-button markup portal-wide is
   `<a class="ml-back" href="…" title="Back">‹ Back</a>` placed FIRST in the header
   (no `data-role` → visible on desktop).
+  **Engineer day summary (Aug 2026):** clicking an engineer's NAME on the
+  scheduler (day-lane header or week-grid name cell — `.day-name.clickable` /
+  `.week-day-header.clickable`) opens the **#engDayBackdrop** modal (`openEngDay`)
+  showing how that engineer is getting on for the day: a **status count strip**
+  (N jobs · Scheduled N · In Progress N · Complete N …, coloured by STATUS_COLOUR,
+  known statuses ordered by `ENG_STATUS_ORDER` then custom categories) + a
+  time-sorted **list of their jobs** each with time · ref/title · site/priority ·
+  a coloured status chip. Data = **GET /sla/jobs/for-engineer?engineer=&date=**
+  (serves THAT engineer's own per-engineer status). Day view uses the selected
+  date; week view uses today if it's in the shown week, else the picked date.
+  Tapping a job row opens the quick edit modal (board jobs) or job-view.html
+  (finished jobs, which loadJobs drops from the board).
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference
