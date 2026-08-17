@@ -83,11 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=8`)
-All 123 pages reference `?v=8` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7 added the animated loading mark, ?v=8 widened it to every busy state — all
-17 Aug). If a portal-config change must reach them again, bump to ?v=9 across
-all pages with sed — and check the
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=9`)
+All 123 pages reference `?v=9` (cache-bust; ?v=6 forced the `.ml-back` styling,
+?v=7 added the animated loading mark, ?v=8/9 widened it to every wait state —
+all 17 Aug). If a portal-config change must reach them again, bump to ?v=10
+across all pages with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
 was silently running an ancient portal-config). NB `grep` treats programmes.html
@@ -122,13 +122,17 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   every which way (static HTML, innerHTML, textContent), so an initial pass + a
   MutationObserver upgrade any element whose WHOLE text is a busy phrase,
   keeping the original wording as the label ("Loading fleet…" still reads).
-  **Two rules keep it safe, both learned the hard way:**
-  (a) **A trailing ellipsis is REQUIRED** (bare "Loading" excepted). The match is
-  `/^(loading|saving|uploading|updating|checking|searching|refreshing|fetching|
-  preparing|generating|building|processing|working|please wait|one moment)\b/i`
-  + ≤34 chars + no element children — but on word alone the H&S pages' "Working
-  days" and "Working On or Near Live Services" sprouted a spinner. The ellipsis
-  test kills that.
+  **Detection is NOT a word list** — it needs BOTH signals: the text **ends in an
+  ellipsis** AND **contains a gerund** (an "-ing" word), ≤40 chars, no element
+  children. Either signal alone is wrong: the ellipsis alone catches dropdown
+  placeholders ("Select site…", "Choose a person…") and menu/button labels
+  ("Edit finance…", "🗓 Shift dates…", "Mark selected as…"); the gerund alone
+  catches the H&S pages' "Working days" / "Working On or Near Live Services".
+  A STOP set drops non-verbs that end in -ing (nothing/something/morning/…) so
+  "Nothing new…" and "Something went wrong…" stay plain. Bare "Loading" (no
+  ellipsis) is the one accepted exception. **Validated against every "…" string
+  in the repo: 100 wait states matched, and the 22 non-matches are all
+  placeholders or buttons** — re-run that sweep if the rule is ever touched.
   (b) **NO sticky "already done" flag.** An early version set `data-mlload` and
   skipped flagged elements, which broke any page that re-shows its status —
   vehicles.html does `statusLine.textContent = "Loading fleet…"` on every
