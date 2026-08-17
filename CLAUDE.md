@@ -1609,7 +1609,12 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
   notification (identified by page+count; counts shared across devices via
   prefs), then enforced. A note may carry **`maxSnooze`** to override the 2×
   default (the **van handover** uses `maxSnooze:1` — one 4h snooze then
-  enforced). Every shown/snoozed/opened/dismissed is POSTed to
+  enforced). **The weekly van-check note is TIME-gated, not count-gated**
+  (`timeGated:true` + `snoozeUntil` = van-check `dueAt` − 2h): the driver can
+  keep snoozing right up to 2h before the deadline however many times, then it's
+  enforced; each snooze is capped (`dueMs`) so it can't bury the reminder past
+  the deadline, and an OVERDUE check (`snoozeUntil:0`) is never snoozable.
+  `itemCanSnooze(i,now)` is the shared rule. Every shown/snoozed/opened/dismissed is POSTed to
   /notify/log → viewer notify-log.html (FullAccess, linked from Users Admin)
   — proof against "mine never showed that".
 
