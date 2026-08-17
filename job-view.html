@@ -1178,14 +1178,34 @@ function renderCapture(){
         kvRow("Status", "⚠️ Skipped (Full-Access override)")
       ]));
     } else {
-    const ticks = [["Safe access", r.safeAccess],["PPE", r.ppe],["Isolation", r.isolation],
-                   ["Height controlled", r.height],["Others protected", r.othersAtRisk],["Hazmat considered", r.hazardous]]
-      .map(([label, ok]) => `${ok ? "✅" : "▫️"} ${label}`).join("   ");
-    body.appendChild(captureSection("🦺 Risk assessment" + (r.by ? ` — ${r.by}` : ""), [
-      kvRow("Checks", ticks),
-      kvRow("Safe to proceed", r.safeToProceed ? "Yes" : "No"),
-      kvRow("Notes", r.note)
-    ]));
+    // Two RA formats exist and BOTH must display correctly:
+    //  • field app (engineer-job.html): { safe, hazards:[{item,answer}],
+    //    declarations:{competent,publicSafeguarded,safeToProceed}, notes, name }
+    //  • job-view's own quick RA: flat booleans { safeAccess, ppe, …, safeToProceed, note }
+    const rows = [];
+    if(Array.isArray(r.hazards) && r.hazards.length){
+      const ticks = r.hazards.map(h => {
+        const ok = /^(ok|yes|safe|n\/?a|na|none|controlled)$/i.test(String(h.answer || ""));
+        return `${ok ? "✅" : "⚠️"} ${h.item}${(h.answer && !ok) ? " ("+h.answer+")" : ""}`;
+      }).join("   ");
+      rows.push(kvRow("Checks", ticks));
+    } else {
+      const ticks = [["Safe access", r.safeAccess],["PPE", r.ppe],["Isolation", r.isolation],
+                     ["Height controlled", r.height],["Others protected", r.othersAtRisk],["Hazmat considered", r.hazardous]]
+        .map(([label, ok]) => `${ok ? "✅" : "▫️"} ${label}`).join("   ");
+      rows.push(kvRow("Checks", ticks));
+    }
+    if(r.declarations){
+      const d = r.declarations;
+      rows.push(kvRow("Declarations", `${d.competent?"✅":"▫️"} Competent   ${d.publicSafeguarded?"✅":"▫️"} Public safeguarded`));
+    }
+    // safeToProceed lives under declarations in the field-app format, flat in the
+    // office format; fall back to the overall `safe` flag.
+    const safeProceed = (r.declarations && r.declarations.safeToProceed !== undefined) ? r.declarations.safeToProceed
+                      : (r.safeToProceed !== undefined ? r.safeToProceed : r.safe);
+    rows.push(kvRow("Safe to proceed", safeProceed ? "Yes" : "No"));
+    rows.push(kvRow("Notes", r.notes != null ? r.notes : r.note));
+    body.appendChild(captureSection("🦺 Risk assessment" + ((r.by || r.name) ? ` — ${r.by || r.name}` : ""), rows));
     }
   }
   if(job.hold){
