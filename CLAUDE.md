@@ -2275,6 +2275,16 @@ engineer-report, hours-dashboard.html, add-site chain (Zapier), theme.html
 files to this public repo.
 
 ## Known quirks
+- **Mobile-first `.shell{max-width:560px}` clamps a page to mobile width on
+  DESKTOP too** (a "field-friendly restyle" that unconditionally overrode an
+  earlier `max-width:1100px`). Symptom: an OFFICE page (e.g. **job-view.html**)
+  opens narrow like mobile on desktop; a refresh sometimes "fixes" it only
+  because the SW served an older, wider cached copy — pure cache lottery, not a
+  real fix. The cure is a desktop widen rule AFTER the 560 clamp:
+  `@media(min-width:769px){ .shell{ max-width:1000px } }` (applied Aug 2026 to
+  job-view / daily-logs / oncall_current; **my-day.html is a FIELD phone page —
+  left narrow on purpose**). When restyling any office page mobile-first, always
+  re-add a desktop `.shell` width or it'll be stuck at 560px on desktop.
 - **Manual D1 inserts into worker tables: tenant_id must be the string '1.0'**
   (not 1, not '1') when the table declares `tenant_id TEXT` (job_programmes,
   admin_tasks, the programme_* tables…). The worker binds the JS number 1,
