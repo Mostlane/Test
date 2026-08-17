@@ -41,6 +41,10 @@
     .muted{color:var(--muted);font-size:12.5px;}
     .backdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;z-index:60;}
     .backdrop.open{display:flex;}
+    .tools-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,20,60,.16);min-width:200px;z-index:50;overflow:hidden;}
+    .tools-menu.open{display:block;}
+    .tools-item{display:block;width:100%;text-align:left;border:none;background:none;padding:10px 14px;font:600 13.5px 'Segoe UI';color:#1f2a44;cursor:pointer;}
+    .tools-item:hover{background:#eef4fb;}
     .modal{background:#fff;border-radius:16px;max-width:640px;width:100%;padding:18px 20px;}
     .modal.wide{max-width:1100px;}
     .modal h2{margin:0 0 8px;color:var(--navy);font-size:18px;}
@@ -89,17 +93,17 @@
 
     <div class="card" style="padding:10px;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-        <button class="btn ghost" onclick="autoOrder()" title="Sort the task rows by start date so the programme cascades in order">⇅ Auto-order rows</button>
-        <button class="btn ghost" onclick="openShift()" title="Move the whole programme, or move one task and ripple the rest">🗓 Shift dates</button>
-        <button class="btn ghost" id="undoBtn" onclick="undoEdit()" style="display:none;" title="Undo the last shift or AI change">↩ Undo</button>
+        <div style="position:relative;">
+          <button class="btn ghost" id="toolsBtn" onclick="toggleTools(event)" title="Order rows, shift dates, or ask the AI to change the programme">🛠 Tools ▾</button>
+          <div class="tools-menu" id="toolsMenu">
+            <button class="tools-item" onclick="toolsRun(autoOrder)">⇅ Auto-order rows</button>
+            <button class="tools-item" onclick="toolsRun(openShift)">🗓 Shift dates…</button>
+            <button class="tools-item" onclick="toolsRun(openAiEdit)">✨ Ask AI to edit…</button>
+            <button class="tools-item" id="toolsUndo" onclick="toolsRun(undoEdit)" style="display:none;">↩ Undo last change</button>
+          </div>
+        </div>
+        <span class="muted">Order rows, shift dates, or ask the AI to change the programme.</span>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:4px;">
-        <input id="aiEditText" placeholder="Ask AI to change the programme — e.g. compress into two weeks, push everything back a week…"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();askAiEdit();}"
-          style="flex:1;min-width:220px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font:14px 'Segoe UI';">
-        <button class="btn" id="aiEditGo" style="background:#1A4F8F;color:#fff;" onclick="askAiEdit()">✨ Ask AI</button>
-      </div>
-      <div id="aiEditStat" class="muted" style="min-height:15px;margin-bottom:6px;"></div>
       <div class="fchips" id="fchips"></div>
       <div id="gantt"></div>
     </div>
@@ -170,6 +174,19 @@
         </div>
       </div>
       <div class="mfoot"><button class="btn ghost" onclick="closeM('shiftBackdrop')">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Ask AI to edit -->
+  <div class="backdrop" id="aiEditBackdrop">
+    <div class="modal">
+      <h2>✨ Ask AI to edit</h2>
+      <p class="muted" style="margin:0;">Describe the change in plain English and Claude rewrites the programme. It only touches your <b>draft</b> — press ↩ Undo (in Tools) to revert.</p>
+      <label>What would you like changed?</label>
+      <textarea id="aiEditText" rows="3" placeholder="e.g. compress everything into two weeks · push all tasks back a week · make the M&E take 5 days · start on 6 Oct and tighten the gaps"></textarea>
+      <div id="aiEditStat" class="muted" style="min-height:15px;"></div>
+      <div class="mfoot"><button class="btn ghost" onclick="closeM('aiEditBackdrop')">Cancel</button>
+        <button class="btn" id="aiEditGo" style="background:#1A4F8F;color:#fff;" onclick="askAiEdit()">✨ Apply change</button></div>
     </div>
   </div>
 
@@ -364,9 +381,15 @@
   const daysBetween = (a,b) => { const da=dParse(a), db=dParse(b); if(!da||!db) return 0; return Math.round((db-da)/86400000); };
   function earliestStart(){ let best=null; for(const t of (DATA.tasks||[])){ const d=dParse(t.start); if(d && (!best || d<best)) best=d; } return best?dYmd(best):""; }
 
+  // Tools dropdown
+  function toggleTools(e){ if(e) e.stopPropagation(); g("toolsMenu").classList.toggle("open"); }
+  function closeTools(){ g("toolsMenu").classList.remove("open"); }
+  function toolsRun(fn){ closeTools(); try{ fn(); }catch(e){} }
+  document.addEventListener("click", e=>{ if(!e.target.closest("#toolsMenu") && e.target.id!=="toolsBtn") closeTools(); });
+
   let UNDO=null;
-  function snapshot(){ UNDO=JSON.stringify(DATA); g("undoBtn").style.display=""; }
-  function undoEdit(){ if(!UNDO) return; try{ DATA=JSON.parse(UNDO); }catch(e){ return; } UNDO=null; g("undoBtn").style.display="none"; drawGantt(); queueSave(); alert("Reverted the last change ✓"); }
+  function snapshot(){ UNDO=JSON.stringify(DATA); g("toolsUndo").style.display=""; }
+  function undoEdit(){ if(!UNDO){ alert("Nothing to undo yet."); return; } try{ DATA=JSON.parse(UNDO); }catch(e){ return; } UNDO=null; g("toolsUndo").style.display="none"; drawGantt(); renderContractors(); queueSave(); alert("Reverted the last change ✓"); }
 
   function shiftAllBy(n){ (DATA.tasks||[]).forEach(t=>{ if(t.start) t.start=addDaysISO(t.start,n); }); }
   function openShift(){
@@ -402,6 +425,7 @@
   }
 
   // ── AI edit: change the programme by a plain-English instruction ────────
+  function openAiEdit(){ g("aiEditStat").textContent=""; openM("aiEditBackdrop"); setTimeout(()=>{ try{ g("aiEditText").focus(); }catch(e){} },50); }
   async function askAiEdit(){
     const instruction=g("aiEditText").value.trim();
     const st=g("aiEditStat");
@@ -417,8 +441,8 @@
       DATA=MLProg.migrate(d.data)||DATA;
       drawGantt(); renderContractors(); queueSave();
       g("aiEditText").value="";
-      st.style.color="#166534"; st.textContent="✓ Updated ("+(d.taskCount||(DATA.tasks||[]).length)+" tasks). Not happy? Press ↩ Undo. Issue when you're ready.";
-      alert("Programme updated by AI ✓ — review it, then Issue when happy");
+      closeM("aiEditBackdrop");
+      alert("Programme updated by AI ✓ — review it; Tools › ↩ Undo reverts it. Issue when happy.");
     }catch(e){ st.style.color="#b91c1c"; st.textContent="Couldn't reach the server — check your signal and try again."; }
     finally{ btn.disabled=false; btn.textContent=old; }
   }
