@@ -59,6 +59,14 @@
   .tl-status{ font-weight:700; }
   .tl-when{ color:var(--grey); font-size:11.5px; }
 
+  /* Time-on-job summary */
+  .timegrid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .timebox{ border:1px solid var(--line); border-radius:10px; padding:11px 12px; background:var(--soft); }
+  .timebox.total{ background:#eef4ff; border-color:#cfe0ff; }
+  .timebox .tb-k{ font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--grey); font-weight:700; }
+  .timebox .tb-v{ font-size:19px; font-weight:800; color:var(--ink); margin-top:2px; }
+  .timebox.total .tb-v{ color:var(--blue); }
+
   .note{ background:var(--soft); border-left:4px solid var(--blue); border-radius:8px; padding:9px 12px; margin-bottom:8px; }
   .note .who{ font-size:11.5px; color:var(--grey); margin-top:4px; }
   .note .body{ font-size:13.5px; white-space:pre-wrap; line-height:1.5; }
@@ -138,6 +146,11 @@
     <div id="sla"></div>
   </div>
 
+  <div class="sec" id="secTime" data-field="timeSpent">
+    <h2>Time on job</h2>
+    <div class="timegrid" id="timeSpent"></div>
+  </div>
+
   <div class="sec" id="secTimeline" data-field="timeline">
     <h2>Activity timeline</h2>
     <div class="tl" id="timeline"></div>
@@ -186,6 +199,20 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&am
 const cleanName = n => String(n || "").replace(/\./g, " ").trim();
 function fmtDate(x){ if(!x) return ""; const d = new Date(x); return isNaN(d) ? "" : d.toLocaleDateString("en-GB",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"}); }
 function fmtDateTime(x){ if(!x) return ""; const d = new Date(x); return isNaN(d) ? "" : d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+function fmtDur(ms){ if(!ms || ms < 0) return "0m"; const mins = Math.round(ms/60000); const h = Math.floor(mins/60), m = mins%60; return h ? (h + "h " + String(m).padStart(2,"0") + "m") : (m + "m"); }
+// Sum time spent in each status from the status history: each entry lasts until
+// the next one (Travelling → In Progress = travel time; In Progress → next = on-site).
+function timeOnJob(history){
+  const h = (history || []).filter(e => e && e.at && !isNaN(new Date(e.at))).slice().sort((a,b)=>new Date(a.at)-new Date(b.at));
+  let travelling = 0, onsite = 0;
+  for(let i=0;i<h.length-1;i++){
+    const dur = new Date(h[i+1].at) - new Date(h[i].at);
+    const s = String(h[i].status||"").toLowerCase();
+    if(s === "travelling") travelling += Math.max(0,dur);
+    else if(s === "in progress") onsite += Math.max(0,dur);
+  }
+  return { travelling, onsite, total: travelling + onsite };
+}
 
 const STATUS_EMOJI = {
   "pending":"⏳","scheduled":"📅","travelling":"🚗","in progress":"🔧","on hold":"⏸",
@@ -251,6 +278,17 @@ async function load(){
     document.getElementById("sla").innerHTML =
       `<span class="pill ${met?"ok":"bad"}">${met?"SLA achieved":"SLA not achieved"}</span>` +
       `<div class="sla-meta">Target: ${esc(fmtDateTime(job.targetAt))}</div>`;
+  }
+
+  // Time on job (travel / on-site / total) from the status timestamps
+  const dur = timeOnJob(job.statusHistory);
+  if(!dur.total){
+    document.getElementById("secTime").style.display = "none";
+  } else {
+    document.getElementById("timeSpent").innerHTML =
+      `<div class="timebox"><div class="tb-k">🚗 Travelling</div><div class="tb-v">${fmtDur(dur.travelling)}</div></div>` +
+      `<div class="timebox"><div class="tb-k">🔧 On site</div><div class="tb-v">${fmtDur(dur.onsite)}</div></div>` +
+      `<div class="timebox total"><div class="tb-k">⏱ Total time</div><div class="tb-v">${fmtDur(dur.total)}</div></div>`;
   }
 
   // Emoji timeline
