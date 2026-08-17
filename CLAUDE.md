@@ -1430,6 +1430,50 @@ Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
 
+## Projects (routes/projects-api.js + project-new.html / projects-live.html / project-hub.html — Aug 2026)
+A **first-class project record** that is the SPINE linking a job together — before
+this, programmes/RAMS/costing joined only by loose name strings. Permission
+**Projects** (viewer) / **ProjectsAdmin|FullAccess** (manage); the "Projects"
+tile + sidebar now open **projects-live.html** (the old external
+`projects-ml-portal` doc-repo is absorbed — projects.html/projects-admin.html are
+redirect stubs to projects-live; existing external docs were NOT migrated).
+- **Tables (self-migrating):** `projects` (id PRJ-…, number=P-number, name,
+  site_client/site_number = its own project-site, status live|complete|archived,
+  `data` JSON) + `project_files` (docs in R2 JOB_FILES `projectdocs/<tid>/<pid>/`).
+  `data` JSON holds: postcode/lat/lon, mileageRoundTrip/OneWay, fromExisting,
+  required{programme,rams,cpp,valuations,projectDocs}, sitelog{rules,visitorRules,
+  companies[]}, contractValue, links{programmeId,ramsIds[],cppRef,costingKey},
+  doneOverride{}. **costingKey = normName(project name)** — the SAME key costing
+  uses, so PO/labour/valuations roll up automatically.
+- **Wizard (project-new.html)** — 4 steps: **1** site (existing → search+copy
+  coords, or new) + **always creates its own Pxxxx project-site** via `/add-site?
+  category=projects` (auto P-number, pushes the SiteLog geofence, PO picks it up
+  via its add-only mirror) + confirm/drop coords (Leaflet, postcodes.io geocode) +
+  **round-trip mileage** computed client-side (haversine ×1.25×2 from HQ PO15 5RQ,
+  saved to site_miles) + name/number; **2** required-docs tick-box; **3** SiteLog
+  message (→ site_rules) + companies-on-site (pick from PO `/po/api/subcontractors`
+  + free add); **4** review → POST **/project/create** → project-hub.
+- **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
+  the links + presence; manual tick via /project/todo), build actions
+  (**Programme**: POST /prog/save then /project/link → programme-edit; **RAMS**:
+  → `hs-docs.html?newRams=1&site=&project=<id>` which links back on save;
+  **CPP**: link-out to `hs-plan/#…&projectName=&projectNo=` PRE-FILLED (hs-plan
+  applyLaunchParams reads those hash params); **Valuations**: sets proj_fin value),
+  **Project Documents** (drag-drop upload, hide/show, delete; engineers with
+  Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
+  the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
+  valuations for FullAccess/costing perm; silently omitted otherwise), and
+  **Required-docs editor** (add/remove later).
+- **Endpoints (routes/projects-api.js, mounted /project + /projects):** GET
+  /projects/list, GET /project/get, POST /project/create|update|link|todo|delete
+  (manage=ProjectsAdmin|FullAccess), GET /project/docs, POST /project/doc (multipart)
+  |doc-update|doc-delete, GET **/project/doc** (PUBLIC_ROUTES, sig-verified R2
+  stream). **Valuations reuse costing's `proj_fin`** (keyed by costingKey) — nothing
+  new to learn on the costing side. SiteLog rules applied via `applySiteLogRules`
+  (in-process sitelogApi.handle when SITELOG_DB, else remote, best-effort). The
+  wizard front-end orchestrates the /add-site call (D1) so the P-number + geofence
+  come from the existing sites path.
+
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
 set of at-a-glance widgets** — the start of "the hub of everything" (each user

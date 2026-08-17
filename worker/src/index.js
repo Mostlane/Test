@@ -47,6 +47,7 @@ import * as po from "./routes/po.js";              // DONE  (Purchase Orders —
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
+import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -107,6 +108,8 @@ const ROUTES = [
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
+  ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
+  ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -357,6 +360,8 @@ const PUBLIC_ROUTES = [
   ["POST", "/prog/shared/open"],
   ["POST", "/prog/shared/suggest"],
   ["POST", "/prog/shared/export"],   // client PDF download — token+code verified in-handler
+  // Project documents streamed for the in-app viewer / new tab — signed URL, verified in-handler.
+  ["GET", "/project/doc"],
 ];
 
 function isPublic(method, pathname) {

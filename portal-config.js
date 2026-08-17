@@ -644,7 +644,7 @@
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
           { label: "Plant & Equipment", href: "my-assets.html", icon: "assets", perms: ["Assets"], match: ["my-assets.html", "asset-menu.html", "assets-admin.html", "shared-assets.html"] },
-          { label: "Projects", href: "projects.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], hrefBy: [["Projects", "projects.html"], ["ProjectsAdmin", "projects-admin.html"]], match: ["projects.html", "projects-admin.html"] },
+          { label: "Projects", href: "projects-live.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], match: ["projects-live.html", "project-new.html", "project-hub.html", "projects.html", "projects-admin.html"] },
           { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
