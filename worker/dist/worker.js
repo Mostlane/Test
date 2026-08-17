@@ -6223,6 +6223,7 @@ function firestopMissing(job) {
 }
 function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
+  if (job && job.investigateOnly) return [];
   const miss = [];
   if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
   if (photoRequiredFor(job) && afterPhotoCount < 1) miss.push("a completion photo (After)");
@@ -6230,6 +6231,7 @@ function completionMissing(job, patch, afterPhotoCount) {
   return miss;
 }
 function quoteMissing(job, patch, photoCount) {
+  if (job && job.investigateOnly) return [];
   const q = patch.quote && typeof patch.quote === "object" ? patch.quote : job.quote || {};
   const miss = [];
   if (!String(q.description || "").trim()) miss.push("the works description");
@@ -6240,6 +6242,7 @@ function quoteMissing(job, patch, photoCount) {
   return miss;
 }
 function holdMissing(patch, job) {
+  if (job && job.investigateOnly) return [];
   const h = patch.hold && typeof patch.hold === "object" ? patch.hold : job.hold || {};
   const miss = [];
   if (!String(h.reason || "").trim()) miss.push("the reason");
@@ -6635,6 +6638,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the standard completion (photo/note/signature). Preserved across re-saves.
     firestopping: body.firestopping !== void 0 ? !!body.firestopping : existing?.firestopping || false,
     firestop: existing?.firestop,
+    // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
+    // engineer + office job pages. Preserved across re-saves.
+    investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -6705,6 +6711,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresPhoto !== void 0) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
+  if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
