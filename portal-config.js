@@ -425,6 +425,101 @@
     window.alert = function (m) { toast(m); };
   })();
 
+  // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
+  // There are ~200 "Loading…" strings across ~80 pages, written every which way
+  // (static HTML, innerHTML, textContent). Rather than edit them all, this
+  // upgrades any element whose WHOLE text is a loading phrase into the shared
+  // animated mark, keeping the original wording as the label ("Loading sites…"
+  // still reads as such). New code should call MLUI.loading() directly.
+  (function mlLoading() {
+    var ICON = "/icons/icon-192.png";
+    // This component injects its OWN stylesheet rather than riding the sidebar's
+    // (#pnav-style). That block is skipped inside iframes (po.html embeds
+    // po-office.html), on the auth/my-day pages, and for Story users — and
+    // without the CSS the mark would render as a raw 192px icon.
+    function injectCss() {
+      if (document.getElementById("ml-load-style")) return;
+      var st = document.createElement("style");
+      st.id = "ml-load-style";
+      st.textContent =
+        "@keyframes mlSpinStop{ 0%{transform:rotate(0)} 55%{transform:rotate(360deg)} 100%{transform:rotate(360deg)} }"
+        + ".ml-load{ display:inline-flex; align-items:center; gap:9px; color:inherit; font-size:inherit; vertical-align:middle; }"
+        + ".ml-load .ml-load-m{ width:22px; height:22px; border-radius:5px; flex:none; display:block;"
+        + "  animation:mlSpinStop 1.7s cubic-bezier(.55,.05,.35,1) infinite; }"
+        // Bigger centred variant for a whole empty panel (MLUI.loading(t,{big:1})).
+        + ".ml-load.big{ flex-direction:column; gap:11px; padding:26px 10px; width:100%; justify-content:center; }"
+        + ".ml-load.big .ml-load-m{ width:44px; height:44px; border-radius:9px; }"
+        // Honour the OS "reduce motion" setting — hold it still rather than spin.
+        + "@media (prefers-reduced-motion: reduce){ .ml-load .ml-load-m{ animation:none; } }";
+      (document.head || document.documentElement).appendChild(st);
+    }
+    injectCss();
+    // "Loading", "Loading…", "Loading your sites…" — a short phrase, nothing else.
+    var RE = /^loading\b[^\n]{0,26}$/i;
+    var SKIP = { OPTION: 1, OPTGROUP: 1, SELECT: 1, TITLE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, BUTTON: 1 };
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+    function markup(label, big) {
+      return '<span class="ml-load' + (big ? " big" : "") + '" role="status" aria-live="polite">'
+        + '<img class="ml-load-m" src="' + ICON + '" alt="" aria-hidden="true">'
+        + '<span class="ml-load-t">' + esc(label == null ? "Loading…" : label) + "</span></span>";
+    }
+    function upgrade(el) {
+      if (!el || el.nodeType !== 1 || SKIP[el.tagName]) return;
+      if (el.children && el.children.length) return;          // text-only nodes
+      if (el.getAttribute && el.getAttribute("data-mlload")) return;
+      // Never re-process our own markup (its label would match too).
+      if (el.closest && el.closest(".ml-load")) return;
+      var t = (el.textContent || "").trim();
+      if (!t || t.length > 34 || !RE.test(t)) return;
+      el.setAttribute("data-mlload", "1");
+      el.innerHTML = markup(t, false);
+    }
+    var queue = [], pending = false;
+    function flush() { pending = false; var q = queue; queue = []; for (var i = 0; i < q.length; i++) upgrade(q[i]); }
+    function schedule() {
+      if (pending || !queue.length) return;
+      pending = true;
+      (window.requestAnimationFrame || function (f) { setTimeout(f, 0); })(flush);
+    }
+    function consider(n) {
+      if (!n) return;
+      if (n.nodeType === 3) { queue.push(n.parentElement); return; }
+      if (n.nodeType !== 1) return;
+      queue.push(n);
+      // Cheap: only look inside small subtrees (a rendered list is re-checked
+      // by its own added rows anyway).
+      if (n.children && n.children.length && n.querySelectorAll) {
+        var d = n.querySelectorAll("*");
+        if (d.length <= 60) for (var i = 0; i < d.length; i++) queue.push(d[i]);
+      }
+    }
+    function start() {
+      if (!document.body) return;
+      var all = document.body.querySelectorAll("*");
+      if (all.length <= 8000) for (var i = 0; i < all.length; i++) upgrade(all[i]);
+      try {
+        new MutationObserver(function (muts) {
+          for (var i = 0; i < muts.length; i++) {
+            var m = muts[i];
+            if (m.type === "characterData") queue.push(m.target && m.target.parentElement);
+            else for (var j = 0; j < m.addedNodes.length; j++) consider(m.addedNodes[j]);
+          }
+          schedule();
+        }).observe(document.body, { childList: true, subtree: true, characterData: true });
+      } catch (e) {}
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+    else start();
+    window.MLUI = window.MLUI || {};
+    // MLUI.loading("Loading jobs…")        → inline mark + label (HTML string)
+    // MLUI.loading("Loading jobs…", {big:true}) → large centred, for a whole panel
+    window.MLUI.loading = function (text, opts) { return markup(text, opts && opts.big); };
+  })();
+
   // ── View As (owner only) ────────────────────────────────────────────────────
   // Jamie can open a real session as any user to see exactly what they see.
   // The server locks /auth/impersonate to the owner account and audits each use.
