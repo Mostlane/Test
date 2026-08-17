@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=15"></script>
+  <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -527,6 +528,12 @@
     </div>
   </div>
 
+  <!-- FIRESTOPPING (RIA form) — shown only for firestopping jobs -->
+  <div class="card" id="firestopCard" style="display:none;">
+    <h2 class="section-title">🔥 Firestopping record</h2>
+    <div id="firestopHost"></div>
+  </div>
+
   <!-- MATERIALS (POs raised against this job) — office/admin only -->
   <div class="card" id="poCard" style="display:none;">
     <h2 class="section-title">🧾 Materials — purchase orders</h2>
@@ -940,8 +947,23 @@ function renderJob(){
 
   fillPoButton();
   loadJobPOs();
+  mountFirestopView();
 
   startCountdownLoop();
+}
+
+// Firestopping jobs: show the read-only RIA record + Download PDF/bundle.
+let fsViewMounted = false;
+function mountFirestopView(){
+  const card = $("firestopCard"); if(!card || !job) return;
+  card.style.display = job.firestopping ? "" : "none";
+  if(job.firestopping && !fsViewMounted && window.MLFirestop){
+    fsViewMounted = true;
+    window.MLFirestop.mount($("firestopHost"), {
+      jobId: job.id, mode: "office",
+      api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken")
+    });
+  }
 }
 
 /* Materials cost: the POs raised against THIS job (office/admin only). Reads

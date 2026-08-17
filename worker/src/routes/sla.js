@@ -21,6 +21,9 @@ import { trackJobTime } from "./timesheets.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser, sendToPermission } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
+import { buildFirestopPdf } from "../lib/firestoppdf.js";
+import { buildZip } from "../lib/zip.js";
+import { logoBytes } from "../lib/logo.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -50,6 +53,220 @@ export async function handle(request, env, ctx, url, sess) {
       const list = Array.isArray(body?.categories) ? body.categories : [];
       return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
     }
+  }
+
+  /* ═══════════════ Firestopping (RIA form) ═══════════════
+     A firestopping job produces a "Record of Installation Activities" PDF from
+     the engineer's per-seal photos + a signed declaration, bundled with the
+     product spec sheets for the materials used. Only shown on jobs ticked
+     "firestopping". Config + material presets live in app_config; the record
+     lives on job.firestop; photos + spec docs in R2. */
+  if (subpath.startsWith("/firestop")) {
+    const r2Bytes = async (key) => { try { const o = await env.JOB_FILES.get(key); return o ? new Uint8Array(await o.arrayBuffer()) : null; } catch { return null; } };
+    const safeName = s => String(s || "file").replace(/[^\w.\- ]+/g, "_").replace(/\s+/g, " ").trim().slice(0, 90);
+    const padRef = n => "0".repeat(Math.max(0, 5 - String(n).length)) + n;
+    const padRef2 = n => String(n).padStart(2, "0");
+
+    // Config: company / seal category / declaration / next sequential number.
+    if (subpath === "/firestop/config") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (method === "GET") return jsonResponse(await getFsConfig(env, tenantId), headers);
+      if (method === "POST") {
+        if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+        const b = await readJson(request);
+        const cfg = await getFsConfig(env, tenantId);
+        if (b.company !== undefined) cfg.company = String(b.company).slice(0, 120);
+        if (b.sealCategory !== undefined) cfg.sealCategory = String(b.sealCategory).slice(0, 200);
+        if (b.declaration !== undefined) cfg.declaration = String(b.declaration).slice(0, 1200);
+        if (b.nextRef !== undefined && b.nextRef !== "") cfg.nextRef = Math.max(1, parseInt(b.nextRef, 10) || 1);
+        await saveFsConfig(env, tenantId, cfg);
+        return jsonResponse({ ok: true, config: cfg }, headers);
+      }
+    }
+
+    // Material presets (products) + their uploaded spec documents.
+    if (subpath === "/firestop/materials") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (method === "GET") {
+        const mats = await getFsMaterials(env, tenantId);
+        const out = await Promise.all(mats.map(async m => ({
+          id: m.id, manufacturer: m.manufacturer, name: m.name, category: m.category || "",
+          docs: await Promise.all((m.docs || []).map(async d => ({
+            id: d.id, name: d.name,
+            url: await signedFileUrl(env, url.origin, "/sla/firestop/spec-file", d.key, 86400),
+          }))),
+        })));
+        return jsonResponse({ materials: out }, headers);
+      }
+      if (method === "POST") {
+        if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+        const b = await readJson(request);
+        let mats = await getFsMaterials(env, tenantId);
+        if (b.delete && b.id) {
+          const m = mats.find(x => x.id === b.id);
+          if (m) for (const d of m.docs || []) { try { await env.JOB_FILES.delete(d.key); } catch {} }
+          mats = mats.filter(x => x.id !== b.id);
+        } else {
+          const id = b.id || ("fsm-" + crypto.randomUUID().slice(0, 8));
+          const ex = mats.find(x => x.id === id);
+          const fields = { manufacturer: String(b.manufacturer || "").slice(0, 120), name: String(b.name || "").slice(0, 160), category: String(b.category || "").slice(0, 120) };
+          if (!fields.manufacturer && !fields.name) return jsonResponse({ error: "manufacturer or name required" }, headers, 400);
+          if (ex) Object.assign(ex, fields); else mats.push({ id, ...fields, docs: [] });
+        }
+        await saveFsMaterials(env, tenantId, mats);
+        return jsonResponse({ ok: true }, headers);
+      }
+    }
+
+    if (subpath === "/firestop/material-doc" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const form = await request.formData();
+      const file = form.get("file"); const pid = String(form.get("productId") || "");
+      if (!file || !pid) return jsonResponse({ error: "file and productId required" }, headers, 400);
+      const mats = await getFsMaterials(env, tenantId);
+      const m = mats.find(x => x.id === pid);
+      if (!m) return jsonResponse({ error: "Product not found" }, headers, 404);
+      const key = `firestopspec/${tenantId}/${pid}/${Date.now()}-${safeName(file.name)}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
+      m.docs = m.docs || [];
+      m.docs.push({ id: "doc-" + crypto.randomUUID().slice(0, 8), name: file.name || safeName(file.name), key });
+      await saveFsMaterials(env, tenantId, mats);
+      return jsonResponse({ ok: true }, headers);
+    }
+    if (subpath === "/firestop/material-doc-delete" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson(request);
+      const mats = await getFsMaterials(env, tenantId);
+      const m = mats.find(x => x.id === b.productId);
+      if (m) { const d = (m.docs || []).find(x => x.id === b.docId); if (d) { try { await env.JOB_FILES.delete(d.key); } catch {} m.docs = m.docs.filter(x => x.id !== b.docId); await saveFsMaterials(env, tenantId, mats); } }
+      return jsonResponse({ ok: true }, headers);
+    }
+
+    // Stream a spec doc / a seal photo (session OR signed link).
+    if (subpath === "/firestop/spec-file" || subpath === "/firestop/photo-file") {
+      const key = searchParams.get("key") || "";
+      if (!sess && !(await verifyFileSig(env, key, searchParams))) return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
+      const obj = await env.JOB_FILES.get(key);
+      if (!obj) return new Response("Not found", { status: 404, headers });
+      const h = new Headers(headers); obj.writeHttpMetadata(h); h.set("Cache-Control", "private, max-age=300");
+      return new Response(obj.body, { status: 200, headers: h });
+    }
+
+    // The job's firestop record (+ header defaults + presets for the form).
+    if (subpath === "/firestop/record") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const jobId = method === "GET" ? searchParams.get("jobId") : null;
+      if (method === "GET") {
+        const job = await getJob(env, tenantId, jobId);
+        if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
+        const cfg = await getFsConfig(env, tenantId);
+        const rec = job.firestop || {};
+        // Sensible header defaults the engineer can override.
+        const installer = rec.installer || (job.assignedTo || (sess.user && sess.user.username) || "");
+        const siteAddress = rec.siteAddress || [job.siteName, job.address, job.postcode].filter(Boolean).join(", ") || job.siteName || "";
+        const now = new Date();
+        const dflt = {
+          company: cfg.company, sealCategory: cfg.sealCategory, declaration: cfg.declaration,
+          installer, siteAddress, dateOfIssue: `${padRef2(now.getUTCDate())}/${padRef2(now.getUTCMonth() + 1)}/${now.getUTCFullYear()}`,
+          nextRef: padRef(cfg.nextRef),
+        };
+        return jsonResponse({ record: rec, defaults: dflt, firestopping: !!job.firestopping }, headers);
+      }
+      if (method === "POST") {
+        const b = await readJson(request);
+        const job = await getJob(env, tenantId, b.jobId);
+        if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
+        const rec = (b.record && typeof b.record === "object") ? b.record : {};
+        // Assign the next sequential RIA number on first save if none typed.
+        if (!String(rec.ref || "").trim()) {
+          const cfg = await getFsConfig(env, tenantId);
+          rec.ref = padRef(cfg.nextRef);
+          cfg.nextRef = (parseInt(cfg.nextRef, 10) || 1) + 1;
+          await saveFsConfig(env, tenantId, cfg);
+        }
+        job.firestop = rec;
+        job.updatedAt = new Date().toISOString();
+        await saveJob(env, tenantId, job);
+        return jsonResponse({ ok: true, record: rec }, headers);
+      }
+    }
+
+    // Upload / delete a seal photo (or the signature, sealId "_sig").
+    if (subpath === "/firestop/photo" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const form = await request.formData();
+      const file = form.get("file");
+      const jobId = String(form.get("jobId") || ""); const sealId = String(form.get("sealId") || "s").replace(/[^\w-]/g, "");
+      const stage = String(form.get("stage") || "before").replace(/[^\w-]/g, "");
+      if (!file || !jobId) return jsonResponse({ error: "file and jobId required" }, headers, 400);
+      const key = `firestop/${tenantId}/${jobId}/${sealId}/${stage}-${Date.now()}.jpg`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+      return jsonResponse({ ok: true, key, url: await signedFileUrl(env, url.origin, "/sla/firestop/photo-file", key, 86400) }, headers);
+    }
+    if (subpath === "/firestop/photo-delete" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson(request);
+      const key = String(b.key || "");
+      if (key.startsWith(`firestop/${tenantId}/`)) { try { await env.JOB_FILES.delete(key); } catch {} }
+      return jsonResponse({ ok: true }, headers);
+    }
+
+    // Build the completed RIA PDF (used by /pdf and inside /bundle).
+    const buildJobPdf = async (job) => {
+      const rec = job.firestop || {};
+      const seals = await Promise.all((rec.seals || []).map(async s => ({
+        sealRef: s.sealRef || rec.ref, date: s.date, by: s.by, location: s.location, aperture: s.aperture,
+        frp: s.frp, manufacturer: s.manufacturer, componentName: s.componentName, comments: s.comments,
+        beforePhotos: (await Promise.all((s.beforePhotos || []).map(r2Bytes))).filter(Boolean),
+        afterPhotos: (await Promise.all((s.afterPhotos || []).map(r2Bytes))).filter(Boolean),
+      })));
+      const signature = rec.signatureKey ? await r2Bytes(rec.signatureKey) : null;
+      let logo = null; try { logo = logoBytes(); } catch {}
+      return buildFirestopPdf({
+        ref: rec.ref, dateOfIssue: rec.dateOfIssue, company: rec.company, installer: rec.installer,
+        siteAddress: rec.siteAddress, sealCategory: rec.sealCategory, declaration: rec.declaration,
+        signature, seals,
+      }, { logo });
+    };
+
+    if (subpath === "/firestop/pdf" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const job = await getJob(env, tenantId, searchParams.get("jobId"));
+      if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
+      const pdf = await buildJobPdf(job);
+      const fn = `RIA form ${(job.firestop && job.firestop.ref) || job.helpdeskRef || job.id}.pdf`;
+      return new Response(pdf.buffer, { status: 200, headers: { ...headers, "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${fn.replace(/[^\w.\- ]+/g, "_")}"`, "Cache-Control": "no-store" } });
+    }
+
+    if (subpath === "/firestop/bundle" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const job = await getJob(env, tenantId, searchParams.get("jobId"));
+      if (!job) return jsonResponse({ error: "Job not found" }, headers, 404);
+      const rec = job.firestop || {};
+      const pdf = await buildJobPdf(job);
+      const refName = (rec.ref || job.helpdeskRef || job.id);
+      const files = [{ name: `RIA form ${safeName(refName)}.pdf`, data: pdf }];
+      // Product specification subfolder: every preset product used on the job.
+      const mats = await getFsMaterials(env, tenantId);
+      const usedIds = new Set();
+      (rec.seals || []).forEach(s => (s.productIds || []).forEach(id => usedIds.add(id)));
+      const seen = new Set();
+      for (const id of usedIds) {
+        const m = mats.find(x => x.id === id); if (!m) continue;
+        for (const d of m.docs || []) {
+          if (seen.has(d.key)) continue; seen.add(d.key);
+          const bytes = await r2Bytes(d.key); if (!bytes) continue;
+          files.push({ name: `Product specification/${safeName([m.manufacturer, m.name].filter(Boolean).join(" "))} - ${safeName(d.name)}`, data: bytes });
+        }
+      }
+      const zip = buildZip(files);
+      const zn = `Firestopping ${safeName(refName)}.zip`;
+      return new Response(zip.buffer, { status: 200, headers: { ...headers, "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${zn.replace(/[^\w.\- ]+/g, "_")}"`, "Cache-Control": "no-store" } });
+    }
+
+    return jsonResponse({ error: "Unknown firestop route" }, headers, 404);
   }
 
   /* GET /sla/sheet-config — which fields appear on the Job Sheet's Mostlane vs
@@ -1316,7 +1533,20 @@ function noteRequiredFor(job) {
 // Complete = a completion note + an (After) photo + the customer's signature —
 // each demanded only when the job requires it. Projects default to NONE (they
 // can complete with nothing); everything else requires all three.
+function firestopMissing(job) {
+  const rec = (job && job.firestop) || {};
+  const seals = Array.isArray(rec.seals) ? rec.seals : [];
+  const miss = [];
+  if (!seals.length) miss.push("at least one seal on the firestopping record");
+  else if (!seals.some(s => (s.beforePhotos || []).length && (s.afterPhotos || []).length))
+    miss.push("before and after photos on a seal");
+  if (!rec.signatureKey) miss.push("the signed declaration");
+  return miss;
+}
 function completionMissing(job, patch, afterPhotoCount) {
+  // Firestopping jobs are completed by the RIA record (seals + photos +
+  // signed declaration), NOT the standard note/photo/signature.
+  if (job && job.firestopping) return firestopMissing(job);
   const miss = [];
   if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
   if (photoRequiredFor(job) && afterPhotoCount < 1) miss.push("a completion photo (After)");
@@ -1801,6 +2031,10 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     storeType: body.storeType || existing?.storeType || "",
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
     requiresRA, requiresSignature, requiresPhoto, requiresNote,
+    // Firestopping job: produces the RIA form + product-spec bundle instead of
+    // the standard completion (photo/note/signature). Preserved across re-saves.
+    firestopping: body.firestopping !== undefined ? !!body.firestopping : (existing?.firestopping || false),
+    firestop: existing?.firestop,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -1881,6 +2115,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresSignature !== undefined) job.requiresSignature = !!patch.requiresSignature;
   if (patch.requiresPhoto !== undefined) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
+  if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
@@ -2618,4 +2853,41 @@ function buildJobExportHtml(job, files, logoDataUrl) {
 </div>
 </body>
 </html>`;
+}
+
+/* ── Firestopping config + material presets (app_config) ──────────────────────
+   Config: company name, seal category, the declaration text, and the next
+   sequential RIA number. Materials: the office's usual products (manufacturer +
+   name + category) each with uploaded spec documents (keys → R2). */
+const FS_DEFAULT_DECL =
+  "I declare that the work undertaken fully complies with the manufacturers guidance for all products installed. " +
+  "All materials used are correctly installed in accordance with training and to a good standard. Local " +
+  "identification labelling installed to each penetration seal.";
+async function getFsConfig(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='firestop_config'").bind(tenantId).first();
+  let c = {}; try { c = row && row.value ? JSON.parse(row.value) : {}; } catch {}
+  return {
+    company: c.company || "Mostlane",
+    sealCategory: c.sealCategory || "Group A: Fire stopping and fire sealing kits for Penetration Seals",
+    declaration: c.declaration || FS_DEFAULT_DECL,
+    nextRef: c.nextRef || 1,
+  };
+}
+async function saveFsConfig(env, tenantId, cfg) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tenantId, JSON.stringify(cfg)).run();
+  return cfg;
+}
+async function getFsMaterials(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='firestop_materials'").bind(tenantId).first();
+  try { return row && row.value ? JSON.parse(row.value) : []; } catch { return []; }
+}
+async function saveFsMaterials(env, tenantId, mats) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tenantId, JSON.stringify(mats)).run();
+  return mats;
 }

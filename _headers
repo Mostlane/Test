@@ -155,3 +155,7 @@
   Cache-Control: no-cache
 /programme-export.js
   Cache-Control: no-cache
+/firestop-admin.html
+  Cache-Control: no-cache
+/firestop-form.js
+  Cache-Control: no-cache
