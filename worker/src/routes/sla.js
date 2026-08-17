@@ -1547,6 +1547,8 @@ function completionMissing(job, patch, afterPhotoCount) {
   // Firestopping jobs are completed by the RIA record (seals + photos +
   // signed declaration), NOT the standard note/photo/signature.
   if (job && job.firestopping) return firestopMissing(job);
+  // Investigate-only jobs have relaxed gates — Connor sets Quote/Complete freely.
+  if (job && job.investigateOnly) return [];
   const miss = [];
   if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
   if (photoRequiredFor(job) && afterPhotoCount < 1) miss.push("a completion photo (After)");
@@ -1556,6 +1558,8 @@ function completionMissing(job, patch, afterPhotoCount) {
 
 // Quote = the quote pack the office prices from + photos + signature.
 function quoteMissing(job, patch, photoCount) {
+  // Investigate-only jobs: relaxed — no quote pack required (findings go in the note).
+  if (job && job.investigateOnly) return [];
   const q = (patch.quote && typeof patch.quote === "object") ? patch.quote : (job.quote || {});
   const miss = [];
   if (!String(q.description || "").trim()) miss.push("the works description");
@@ -1568,6 +1572,7 @@ function quoteMissing(job, patch, photoCount) {
 
 // On Hold = a reason and what's needed to resume (approval is handled separately).
 function holdMissing(patch, job) {
+  if (job && job.investigateOnly) return [];   // relaxed gates for investigate-only jobs
   const h = (patch.hold && typeof patch.hold === "object") ? patch.hold : (job.hold || {});
   const miss = [];
   if (!String(h.reason || "").trim()) miss.push("the reason");
@@ -2035,6 +2040,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the standard completion (photo/note/signature). Preserved across re-saves.
     firestopping: body.firestopping !== undefined ? !!body.firestopping : (existing?.firestopping || false),
     firestop: existing?.firestop,
+    // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
+    // engineer + office job pages. Preserved across re-saves.
+    investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -2116,6 +2124,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresPhoto !== undefined) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
+  if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {

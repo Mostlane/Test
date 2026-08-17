@@ -474,6 +474,7 @@
   </div>
   <!-- HEADER / SUMMARY -->
   <div class="card job-hero">
+    <div id="investigateBanner" style="display:none;background:#fdecec;border:2px solid #d11f2d;border-radius:12px;color:#b00020;font-weight:800;font-size:22px;text-align:center;letter-spacing:.04em;padding:12px;margin-bottom:12px;">⚠ INVESTIGATE ONLY</div>
     <div class="header-row">
       <div>
         <h1 id="jobTitle">Job</h1>
@@ -945,6 +946,7 @@ function renderJob(){
     if(localSig.pending) flushSignature(job.id);
   }
 
+  const invB = $("investigateBanner"); if(invB) invB.style.display = job.investigateOnly ? "" : "none";
   fillPoButton();
   loadJobPOs();
   mountFirestopView();

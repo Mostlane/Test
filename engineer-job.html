@@ -261,6 +261,7 @@
     var niceRef=(!rref||rref===String(job.id)||/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rref))?"":rref;
     h+='<button class="backline" id="backBtn">← '+esc(niceRef||"Back")+'</button>';
     h+='<h1 class="big">'+esc(jobName())+'</h1>';
+    if(job.investigateOnly) h+='<div style="background:#fdecec;border:2px solid #d11f2d;border-radius:12px;color:#b00020;font-weight:800;font-size:22px;text-align:center;letter-spacing:.04em;padding:12px;margin:8px 0;">⚠ INVESTIGATE ONLY</div>';
     if(job.description) h+='<div class="works"><div class="works-l">The job</div>'+esc(job.description)+'</div>';
     h+='<div class="metarow">'+(urgent?'<span class="pill urgent">Urgent</span>':'')+'<span class="pill grey" id="curstatus">'+esc(job.status||"")+'</span></div>';
     h+='<div class="banner lock" id="lockBanner"><b>🔒 Risk assessment on arrival.</b> <span id="lockMsg"></span><div class="go" id="lockGo"></div></div>';
@@ -358,6 +359,9 @@
   }
   function ntrim(id){var el=$(id);return el?String(el.value||"").trim():"";}
   function outcomeMissing(){
+    // Investigate-only jobs have relaxed gates — any status (incl. Quote / Complete)
+    // can be set with nothing required (findings go in the note if he adds one).
+    if(job && job.investigateOnly) return [];
     if(chosen==="Complete"){var m=[];if(noteRequired() && ($("note").value||"").trim().length<15)m.push("a completion note");if(photoRequired() && !photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
     if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
     if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photoRequired() && photos.length<1)m.push("a photo");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
