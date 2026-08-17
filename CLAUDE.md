@@ -83,11 +83,14 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=4`)
-All pages reference `?v=4` (cache-bust; bumped from ?v=3 on 14 Aug to force the
-Timesheet/My-Hours menu-gating fix onto stubborn phone caches). If a
-portal-config change must reach stubborn phone caches again, bump to ?v=5
-across all pages with sed. Provides:
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=6`)
+All 123 pages reference `?v=6` (cache-bust; bumped to ?v=6 on 17 Aug to push the
+forced `.ml-back` styling onto stubborn phone caches). If a portal-config change
+must reach them again, bump to ?v=7 across all pages with sed — and check the
+count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
+should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
+was silently running an ancient portal-config). NB `grep` treats programmes.html
+as binary — use `grep -a` or it drops out of every sweep. Provides:
 - `window.MOSTLANE_API` = https://mostlane-api.jamie-def.workers.dev
 - Legacy-host fetch bridge: rewrites calls to the migrated old workers
   (login, mostlane-users, mostlane-holidays, mostlane-assets, mostlane-sla
@@ -364,6 +367,20 @@ across all pages with sed. Provides:
   The standard back-button markup portal-wide is
   `<a class="ml-back" href="…" title="Back">‹ Back</a>` placed FIRST in the header
   (no `data-role` → visible on desktop).
+  **The pill's LOOK is owned by portal-config.js and FORCED with `!important`
+  (17 Aug) — never restyle `.ml-back` on a page.** It is a white pill, 999px
+  radius, 1px #d7dee6 border, navy #003366 text, 14px/600. Why forced: a page with
+  a dark header band declares `header.page a{color:#fff}` (specificity 0,1,2),
+  which beat the old un-forced `.ml-back{color:#003366}` (0,1,0) and painted WHITE
+  text on the WHITE pill — a blank, invisible button. That hit 16 pages (all the
+  po-*, timesheets-admin, engineer-timesheet, van-timesheet, fleet-report,
+  programmes/programme-edit, compliance-review, my-van-scores, cctv…). All 19
+  per-page `.ml-back` rules were deleted; **only engineer-jobs.html keeps one**
+  (`display:none !important`, because the field app uses its own `.eng-back`) —
+  which still works because `display` is deliberately the ONE property portal-config
+  does NOT force. Verified by rendering all 97 pages headless and measuring computed
+  colour/contrast (scratchpad `audit-back.cjs`): 93 measurable pages all report
+  identical `rgb(0,51,102)` on `rgb(255,255,255)`, 999px, 14px.
   **Engineer day summary (Aug 2026):** clicking an engineer's NAME on the
   scheduler (day-lane header or week-grid name cell — `.day-name.clickable` /
   `.week-day-header.clickable`) opens the **#engDayBackdrop** modal (`openEngDay`)

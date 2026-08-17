@@ -1261,8 +1261,14 @@
           // Standard portal back button (data-role='home' returns to the menu and
           // is hidden on desktop where the sidebar replaces it; data-role='up' is
           // a sub-page back and always stays).
-          + ".ml-back{ display:inline-flex; align-items:center; gap:6px; text-decoration:none; font:600 14px/1 -apple-system,system-ui,'Segoe UI',sans-serif; padding:8px 13px; border-radius:999px; background:#fff; border:1px solid #d7dee6; color:#003366; box-shadow:0 1px 2px rgba(0,0,0,.06); cursor:pointer; }"
-          + ".ml-back:hover{ background:#f4f7fb; }"
+          // The pill's LOOK is forced (!important) so it is identical on every
+          // page. Without it a dark-header page's own `header.page a{color:#fff}`
+          // (specificity 0,1,2) beat this rule and painted white text on the white
+          // pill — a blank, invisible button. `display` is deliberately NOT forced:
+          // the field app hides .ml-back outright (engineer-jobs.html uses its own
+          // .eng-back), and the desktop sidebar rule below still hides the home one.
+          + ".ml-back{ display:inline-flex; align-items:center; gap:6px !important; text-decoration:none !important; font:600 14px/1 -apple-system,system-ui,'Segoe UI',sans-serif !important; padding:8px 13px !important; border-radius:999px !important; background:#fff !important; border:1px solid #d7dee6 !important; color:#003366 !important; box-shadow:0 1px 2px rgba(0,0,0,.06) !important; cursor:pointer; }"
+          + ".ml-back:hover{ background:#f4f7fb !important; }"
           + "@media (min-width:1000px){ body.pnav-on .ml-back[data-role='home']{ display:none !important; } }"
           // ===== Portal shared theme (Batch 3) — one look across every page.
           // Injected after each page parses, so it wins at EQUAL specificity;
