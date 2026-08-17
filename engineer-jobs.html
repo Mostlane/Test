@@ -170,9 +170,15 @@
   </div>
   <div id="dayMapSeg">
     <button type="button" class="mapseg on" data-r="day">Day</button>
-    <button type="button" class="mapseg" data-r="7">7 days</button>
-    <button type="button" class="mapseg" data-r="30">30 days</button>
+    <button type="button" class="mapseg" data-r="7">Next 7 days</button>
+    <button type="button" class="mapseg" data-r="30">Next 30 days</button>
     <button type="button" class="mapseg" data-r="year">Year</button>
+  </div>
+  <div id="dayMapFilterRow" style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+    <label for="dayMapStatus" style="font-size:12px;color:#6b7280;font-weight:600;">Show status:</label>
+    <select id="dayMapStatus" style="flex:1;padding:8px 9px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;background:#fff;">
+      <option value="all">All statuses</option>
+    </select>
   </div>
   <div id="dayNav">
     <button type="button" id="dayPrev" aria-label="Previous day">‹</button>
@@ -791,20 +797,34 @@ const DAY_STATUS_COLOUR = {
 function escH(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 let mapMode = "day";        // day | week | month | year — the pin range
 let allMineJobs = null;     // all the engineer's jobs, fetched once for the map
+let mapStatusFilter = "all"; // pin status filter (all | a specific status)
+
+// Fill the status dropdown from the statuses actually present in my jobs.
+function populateMapStatuses(){
+  const sel = document.getElementById("dayMapStatus");
+  if(!sel) return;
+  const present = Array.from(new Set((allMineJobs || []).map(j => j.status || "").filter(Boolean))).sort();
+  const cur = sel.value || "all";
+  sel.innerHTML = '<option value="all">All statuses</option>' +
+    present.map(s => `<option value="${escH(s)}">${escH(s)}</option>`).join("");
+  sel.value = present.includes(cur) || cur === "all" ? cur : "all";
+  mapStatusFilter = sel.value;
+}
 
 let dayCursor = null;       // the single day shown in "Day" mode (scrollable)
-// Modes: day (one day, scroll ‹ ›) | 7 (last 7 days) | 30 (last 30 days) | year (YTD).
+// Modes: day (one day, scroll ‹ ›) | 7 (next 7 days) | 30 (next 30 days) | year (whole year).
+// The N-day ranges look FORWARD from today so an engineer sees upcoming work to pick.
 function mapRange(mode){
   const now = new Date(); now.setHours(0,0,0,0);
-  if(mode === "7")    return [addDays(now, -6), now];
-  if(mode === "30")   return [addDays(now, -29), now];
-  if(mode === "year") return [new Date(now.getFullYear(), 0, 1), now];
+  if(mode === "7")    return [now, addDays(now, 6)];
+  if(mode === "30")   return [now, addDays(now, 29)];
+  if(mode === "year") return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31)];
   const c = dayCursor || now;
   return [c, c];           // day
 }
 function mapLabel(mode){
-  if(mode === "7")    return "in the last 7 days";
-  if(mode === "30")   return "in the last 30 days";
+  if(mode === "7")    return "in the next 7 days";
+  if(mode === "30")   return "in the next 30 days";
   if(mode === "year") return "this year";
   const c = dayCursor || new Date();
   return "on " + c.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" });
@@ -830,6 +850,7 @@ async function openDayMap(){
       if(!Array.isArray(allMineJobs)) allMineJobs = [];
     }catch{ allMineJobs = []; }
   }
+  populateMapStatuses();
   dayCursor = new Date(); dayCursor.setHours(0,0,0,0);   // Day starts on today
   mapMode = "day";          // always default to the day's jobs on open
   renderMapForRange(mapMode);
@@ -846,10 +867,11 @@ async function renderMapForRange(mode){
   const fromISO = isoDate(from), toISO = isoDate(to);
   const list = (allMineJobs || []).filter(j => {
     if(!j.scheduledAt) return false;
+    if(mapStatusFilter !== "all" && (j.status || "") !== mapStatusFilter) return false;
     const d = isoDate(new Date(j.scheduledAt));   // local date, matches the range bounds
     return d >= fromISO && d <= toISO;
   });
-  const label = mapLabel(mode);
+  const label = mapLabel(mode) + (mapStatusFilter !== "all" ? ` · ${mapStatusFilter}` : "");
   $("dayMapNote").textContent = "Placing jobs by postcode…";
   await geocodePostcodes(list.map(jobPostcode));
   setTimeout(() => {
@@ -985,6 +1007,10 @@ function init(){
   $("dayMapClose").addEventListener("click", () => { $("dayMapOverlay").style.display = "none"; });
   [].forEach.call(document.querySelectorAll("#dayMapSeg .mapseg"), b =>
     b.addEventListener("click", () => renderMapForRange(b.dataset.r)));
+  if($("dayMapStatus")) $("dayMapStatus").addEventListener("change", (e) => {
+    mapStatusFilter = e.target.value || "all";
+    renderMapForRange(mapMode);
+  });
   // ‹ › scroll through individual days (Day mode only).
   const stepDay = (n) => { dayCursor = addDays(dayCursor || new Date(), n); dayCursor.setHours(0,0,0,0); renderMapForRange("day"); };
   if($("dayPrev")) $("dayPrev").addEventListener("click", () => stepDay(-1));
