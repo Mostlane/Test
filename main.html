@@ -1045,10 +1045,17 @@ const MAP = window.ML_PERM_MAP || {
           dot("Vehicles", n);
           if (d.mineDue) {
             var dueTxt = new Date(d.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" });
+            // Snoozing the weekly check is allowed right up to 2 hours before the
+            // deadline (not a fixed count) — after that it's enforced. dueMs caps
+            // a snooze so it can never bury the reminder past the deadline.
+            var dueMs = d.dueAt ? new Date(d.dueAt).getTime() : 0;
             notes.push({
               n: 1, icon: "🚐", href: "van-check.html",
               title: d.overdue ? "Weekly van check OVERDUE" : "Weekly van check due",
-              text: d.overdue ? "It was due by " + dueTxt + " — do it now." : "Complete your walkaround check by " + dueTxt + "."
+              text: d.overdue ? "It was due by " + dueTxt + " — do it now." : "Complete your walkaround check by " + dueTxt + ".",
+              timeGated: true,
+              snoozeUntil: (dueMs && !d.overdue) ? (dueMs - 2 * 3600 * 1000) : 0,
+              dueMs: dueMs
             });
           }
           if (missingN && d.overdue) {
@@ -1101,6 +1108,13 @@ const MAP = window.ML_PERM_MAP || {
       // The snooze state is merged with the server copy (per user), so using
       // a reminder on one device counts on every device.
       var SNOOZE_MAX = 2, SNOOZE_MS = 4 * 3600 * 1000;   // 4-hour snooze
+      // A note may be TIME-gated (snoozeUntil = last moment a snooze is allowed,
+      // e.g. 2h before the van-check deadline) instead of count-gated. Time-gated
+      // notes ignore the snooze count entirely.
+      function itemCanSnooze(i, now) {
+        if (i.timeGated) return now < (i.snoozeUntil || 0);   // enforced once past cutoff (incl. overdue → 0)
+        return (i.snoozes || 0) < (i.maxSnooze || SNOOZE_MAX);
+      }
       function snoozeStore() {
         var local = {};
         try { local = JSON.parse(localStorage.getItem("mlNotifySnooze") || "{}"); } catch (e) {}
@@ -1147,7 +1161,7 @@ const MAP = window.ML_PERM_MAP || {
           });
           items = items.filter(function (i) { return !i.snoozedNow; });
           if (!items.length) return;   // everything snoozed — back when it expires
-          canSnooze = items.every(function (i) { return i.snoozes < (i.maxSnooze || SNOOZE_MAX); });
+          canSnooze = items.every(function (i) { return itemCanSnooze(i, now); });
         }
 
         var rows = items.map(function (i) {
@@ -1183,7 +1197,17 @@ const MAP = window.ML_PERM_MAP || {
               "#mlNotify .mln-card{position:relative;}");
         document.head.appendChild(css);
 
-        var left = Math.max(0, Math.min.apply(null, items.map(function (i) { return (i.maxSnooze || SNOOZE_MAX) - (i.snoozes || 0); })));
+        // Count-gated items show "N more times"; a time-gated item (van check)
+        // shows the cutoff time instead.
+        var timeGated = items.filter(function (i) { return i.timeGated; });
+        var left = Math.max(0, Math.min.apply(null, items.map(function (i) {
+          return i.timeGated ? 99 : ((i.maxSnooze || SNOOZE_MAX) - (i.snoozes || 0));
+        })));
+        var snzFoot = timeGated.length
+          ? "Puts this off for 4 hours — you can keep doing this until " +
+            new Date(Math.min.apply(null, timeGated.map(function (i) { return i.snoozeUntil; })))
+              .toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) + "."
+          : "Puts this off for 4 hours — you can do that " + (left > 1 ? left + " more times." : "once more.");
         var el = document.createElement("div");
         el.id = "mlNotify";
         el.innerHTML = '<div class="mln-card">' +
@@ -1195,7 +1219,7 @@ const MAP = window.ML_PERM_MAP || {
             ? '<div class="mln-hr"></div>' +
               (canSnooze
                 ? '<button class="mln-snz" id="mlnSnooze">💤 Remind me later</button>' +
-                  '<div class="mln-foot">Puts this off for 4 hours — you can do that ' + (left > 1 ? left + " more times." : "once more.") + "</div>"
+                  '<div class="mln-foot">' + snzFoot + "</div>"
                 : '<div class="mln-foot"><b>Reminders used up</b> — these have to be dealt with now.</div>')
             : "") +
           "</div>";
@@ -1214,7 +1238,11 @@ const MAP = window.ML_PERM_MAP || {
             var st = snoozeStore();
             items.forEach(function (i) {
               var e2 = st[i.key] || { c: 0, until: 0 };
-              e2.c++; e2.until = Date.now() + SNOOZE_MS;
+              e2.c++;
+              // A time-gated note (van check) can't be snoozed past its deadline.
+              e2.until = (i.dueMs && i.dueMs > Date.now())
+                ? Math.min(Date.now() + SNOOZE_MS, i.dueMs)
+                : Date.now() + SNOOZE_MS;
               st[i.key] = e2; i.snoozes = e2.c;
             });
             saveSnooze(st);
