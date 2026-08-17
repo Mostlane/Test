@@ -184,7 +184,9 @@
     aiSay("Reading "+(file.name||"file")+"…");
     try{
       let text="", buf=null;
-      if(name.endsWith(".pdf")){ buf=await file.arrayBuffer(); text=await extractPdf(buf); }
+      // pdf.js DETACHES the ArrayBuffer it's given, so hand it a copy and keep
+      // `buf` intact — the scanned-PDF fallback still needs the bytes to base64.
+      if(name.endsWith(".pdf")){ buf=await file.arrayBuffer(); text=await extractPdf(buf.slice(0)); }
       else if(name.endsWith(".xlsx")){ text=await extractXlsx(await file.arrayBuffer()); }
       else { text=await file.text(); }
       text=(text||"").replace(/ /g,"").trim();
