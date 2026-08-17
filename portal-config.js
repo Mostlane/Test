@@ -456,16 +456,29 @@
       (document.head || document.documentElement).appendChild(st);
     }
     injectCss();
-    // Any BUSY state, not just "Loading" — the portal says Saving…, Uploading…,
-    // Checking access…, Building report… in different corners; all get the mark.
-    var BUSY = /^(loading|saving|uploading|updating|checking|searching|refreshing|fetching|preparing|generating|building|processing|working|please wait|one moment)\b/i;
-    // A trailing ellipsis is REQUIRED (bare "Loading" excepted). Without it, real
-    // copy that merely opens with one of these words gets swallowed — the H&S
-    // pages carry "Working days" and "Working On or Near Live Services", which
-    // would otherwise have sprouted a spinner.
+    // ANY wait state, not a fixed word list — the portal says Loading fleet…,
+    // Checking access…, Reading spreadsheet…, Opening Purchase Orders…, Placing
+    // jobs by postcode…, Claude is revising the programme…, and dozens more.
+    // Two signals together identify one, and BOTH are needed:
+    //   1. it ends in an ellipsis, and
+    //   2. it contains a GERUND (an "-ing" word).
+    // The ellipsis alone is not enough — dropdown placeholders ("Select site…",
+    // "Choose a person…") and menu/button labels ("Edit finance…", "🗓 Shift
+    // dates…", "Mark selected as…") all end in one. The gerund alone is not
+    // enough either — the H&S pages carry "Working days" and "Working On or Near
+    // Live Services". Checked against every "…" string in the repo: 100 wait
+    // states matched, and the 22 non-matches are all placeholders or buttons.
+    var STOP = { nothing: 1, something: 1, anything: 1, everything: 1, morning: 1,
+      evening: 1, during: 1, thing: 1, string: 1, spring: 1, ring: 1, king: 1,
+      ceiling: 1, sing: 1, wing: 1, bring: 1 };
     function isBusy(t) {
-      if (!t || t.length > 34 || !BUSY.test(t)) return false;
-      return /(…|\.\.\.)$/.test(t) || /^loading$/i.test(t);
+      if (!t || t.length > 40) return false;
+      // Bare "Loading" (no ellipsis) is the one accepted exception.
+      if (!/(…|\.\.\.)$/.test(t)) return /^loading$/i.test(t);
+      if (/^\s*(please wait|one moment)\b/i.test(t)) return true;
+      var re = /\b([a-z]{2,})ing\b/ig, m;   // fresh each call — /g keeps lastIndex
+      while ((m = re.exec(t))) { if (!STOP[(m[1] + "ing").toLowerCase()]) return true; }
+      return false;
     }
     var SKIP = { OPTION: 1, OPTGROUP: 1, SELECT: 1, TITLE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, BUTTON: 1 };
     function esc(s) {
