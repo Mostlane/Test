@@ -443,8 +443,10 @@
       st.id = "ml-load-style";
       st.textContent =
         "@keyframes mlSpinStop{ 0%{transform:rotate(0)} 55%{transform:rotate(360deg)} 100%{transform:rotate(360deg)} }"
-        + ".ml-load{ display:inline-flex; align-items:center; gap:9px; color:inherit; font-size:inherit; vertical-align:middle; }"
-        + ".ml-load .ml-load-m{ width:22px; height:22px; border-radius:5px; flex:none; display:block;"
+        + ".ml-load{ display:inline-flex; align-items:center; gap:.55em; color:inherit; font-size:inherit; vertical-align:middle; }"
+        // Sized in em so it matches whatever it sits in — a small grey footer
+        // status line and a full-size card row both look right.
+        + ".ml-load .ml-load-m{ width:1.45em; height:1.45em; border-radius:.3em; flex:none; display:block;"
         + "  animation:mlSpinStop 1.7s cubic-bezier(.55,.05,.35,1) infinite; }"
         // Bigger centred variant for a whole empty panel (MLUI.loading(t,{big:1})).
         + ".ml-load.big{ flex-direction:column; gap:11px; padding:26px 10px; width:100%; justify-content:center; }"
@@ -454,8 +456,17 @@
       (document.head || document.documentElement).appendChild(st);
     }
     injectCss();
-    // "Loading", "Loading…", "Loading your sites…" — a short phrase, nothing else.
-    var RE = /^loading\b[^\n]{0,26}$/i;
+    // Any BUSY state, not just "Loading" — the portal says Saving…, Uploading…,
+    // Checking access…, Building report… in different corners; all get the mark.
+    var BUSY = /^(loading|saving|uploading|updating|checking|searching|refreshing|fetching|preparing|generating|building|processing|working|please wait|one moment)\b/i;
+    // A trailing ellipsis is REQUIRED (bare "Loading" excepted). Without it, real
+    // copy that merely opens with one of these words gets swallowed — the H&S
+    // pages carry "Working days" and "Working On or Near Live Services", which
+    // would otherwise have sprouted a spinner.
+    function isBusy(t) {
+      if (!t || t.length > 34 || !BUSY.test(t)) return false;
+      return /(…|\.\.\.)$/.test(t) || /^loading$/i.test(t);
+    }
     var SKIP = { OPTION: 1, OPTGROUP: 1, SELECT: 1, TITLE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, BUTTON: 1 };
     function esc(s) {
       return String(s).replace(/[&<>"]/g, function (c) {
@@ -469,14 +480,16 @@
     }
     function upgrade(el) {
       if (!el || el.nodeType !== 1 || SKIP[el.tagName]) return;
-      if (el.children && el.children.length) return;          // text-only nodes
-      if (el.getAttribute && el.getAttribute("data-mlload")) return;
+      // Text-only nodes. This ALSO means an already-upgraded element is skipped
+      // (it now holds our <span>), so no permanent "done" flag is needed — and
+      // must not be used: a page that re-shows its status (vehicles.html does
+      // `statusLine.textContent = "Loading fleet…"` on every refresh) wipes the
+      // mark back to plain text, and a sticky flag left it that way for good.
+      if (el.children && el.children.length) return;
       // Never re-process our own markup (its label would match too).
       if (el.closest && el.closest(".ml-load")) return;
-      var t = (el.textContent || "").trim();
-      if (!t || t.length > 34 || !RE.test(t)) return;
-      el.setAttribute("data-mlload", "1");
-      el.innerHTML = markup(t, false);
+      if (!isBusy((el.textContent || "").trim())) return;
+      el.innerHTML = markup((el.textContent || "").trim(), false);
     }
     var queue = [], pending = false;
     function flush() { pending = false; var q = queue; queue = []; for (var i = 0; i < q.length; i++) upgrade(q[i]); }
