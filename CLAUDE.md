@@ -1382,7 +1382,13 @@ contractor's tasks** (everyone else's untouched). The workbook's VBA
 **AI draft-from-a-document (Aug 2026):** a "🤖 Draft from a document" button on
 programmes.html opens a modal that reads a **specification/scope (PDF via PDF.js,
 .xlsx via xlsx-lite, or text/CSV) ENTIRELY IN THE BROWSER** (nothing uploaded —
-only the extracted text is sent) — or the office can paste the scope. A **"Notes
+only the extracted text is sent) — or the office can paste the scope.
+**Scanned / image-only PDFs (no text layer, e.g. "Print to PDF" of pictures):**
+when browser extraction yields < 40 chars the client base64-encodes the PDF and
+posts it as `pdfBase64`; the worker sends it to Claude as a **`document` content
+block** (`{type:"document",source:{type:"base64",media_type:"application/pdf"}}` —
+GA, no beta header) so Claude OCRs it with its own vision (capped ~6 MB; this is
+the one path where the file itself is sent, surfaced in the modal status). A **"Notes
 for the AI"** box passes free-text steering (who's subcontracting which trade,
 timing/sequencing constraints) that is sent as **prioritised INSTRUCTIONS** ahead
 of the document in the prompt (`notes` in the POST body; the endpoint accepts a
