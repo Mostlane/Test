@@ -102,6 +102,10 @@
     .day-job-ref{font-weight:700;margin-right:5px;color:#1e3a8a;}
     .day-job.dragging{opacity:0.55;}
     .day-job.multi{border-style:double;border-width:3px;}
+    /* Completed jobs stay on the board: green, locked (not draggable). */
+    .day-job.done{cursor:pointer;border-color:#65a30d;}
+    .day-job.done .day-job-ref{color:#3f6212;}
+    .week-job-chip.done{background:#f0fdf4;}
     .now-line-v{position:absolute;top:0;width:2px;background:rgba(220,38,38,0.9);z-index:3;pointer-events:none;}
 
     .status-bar{margin-top:10px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;}
@@ -347,6 +351,9 @@ const STATUS_COLOUR = {
   "Order":"#0d9488", "Complete":"#84cc16", "Invoiced":"#22c55e", "Closed Jobs":"#701a75"
 };
 const MAP_STATUSES = ["Pending","Scheduled","In Progress","On Hold"];
+// A finished job that stays on the board (green + locked). Closed/Invoiced are
+// filtered out earlier; "Complete" is the one we keep showing.
+function isDoneStatus(s){ return s === "Complete"; }
 
 let currentUser = null;
 let engineers = [];
@@ -415,8 +422,11 @@ function normaliseJob(j){
 async function loadJobs(){
   const res = await authFetch("/sla/jobs?t=" + Date.now());
   const data = await res.json();
+  // Keep COMPLETE jobs on the board (they render green + locked) so the day
+  // still shows what's been done. Closed/Invoiced are downstream accounting
+  // states applied later — those stay off the board.
   jobs = (Array.isArray(data) ? data : []).map(normaliseJob)
-    .filter(j => !["Complete","Closed Jobs","Invoiced"].includes(j.status));
+    .filter(j => !["Closed Jobs","Invoiced"].includes(j.status));
 }
 
 // Approved holidays overlaid on the board so you never schedule someone on leave.
@@ -599,26 +609,28 @@ function renderDayView(container){
       let startMins = clamp(minsSinceMidnight(dStart), dayStartMins, dayEndMins - 15);
       const endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
 
+      const done = isDoneStatus(job.status);
       const el = document.createElement("div");
-      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "");
+      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "");
       el.dataset.jobId = job.id;
       el.dataset.engineer = engineer.username;
       el.style.left = ((startMins - dayStartMins) * pxPerMin) + "px";
       el.style.width = Math.max(28, (endMins - startMins) * pxPerMin) + "px";
       const colour = STATUS_COLOUR[job.status] || "#60a5fa";
       el.style.borderColor = colour;
-      el.style.background = colour + "22";
+      el.style.background = colour + (done ? "33" : "22");
 
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      if(job.ref) el.querySelector(".day-job-ref").textContent = job.ref;
+      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "");
       el.querySelector(".day-job-label").textContent = job.title;
-      el.title = timeLabel + "  " + (job.ref ? job.ref + "  " : "") + job.title +
+      el.title = (done ? "✓ Complete  " : "") + timeLabel + "  " + (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
                  (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "");
 
-      attachPointerDrag(el, job, false);
+      // Completed jobs are locked (not draggable) — they still open on click.
+      if(!done) attachPointerDrag(el, job, false);
       el.addEventListener("click", () => { if(!dragState.active && !dragState.moved) openJobModal(job.id); });
       track.appendChild(el);
     });
@@ -694,11 +706,12 @@ function renderWeekView(container){
         .filter(j => j.scheduledAt && j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
         .filter(j => sameDay(new Date(j.scheduledAt), date))
         .forEach(job => {
+          const done = isDoneStatus(job.status);
           const chip = document.createElement("div");
-          chip.className = "week-job-chip";
+          chip.className = "week-job-chip" + (done ? " done" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (job.ref ? job.ref + " " : "") + job.title;
+          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title;
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });
