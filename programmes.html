@@ -134,9 +134,11 @@
   }
 
   // ── AI: draft from a document ──────────────────────────────────────────
+  let aiPdfB64=null;   // set when a scanned/image PDF has no text layer — Claude reads it directly
   function openAI(){ document.getElementById("aiOvl").classList.add("on"); }
   function closeAI(){ document.getElementById("aiOvl").classList.remove("on"); }
   function aiSay(msg,ok){ const el=document.getElementById("aiStat"); el.textContent=msg||""; el.style.color=ok===false?"#b91c1c":ok===true?"#166534":"#5b6b78"; }
+  function bufToB64(buf){ let bin=""; const bytes=new Uint8Array(buf); const CH=0x8000; for(let i=0;i<bytes.length;i+=CH){ bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+CH)); } return btoa(bin); }
 
   // Load pdf.js the same way the EICR tools do (in-browser, nothing uploaded).
   let _pdfjs=null;
@@ -177,15 +179,31 @@
   }
   async function handleFile(file){
     if(!file) return;
+    aiPdfB64=null;
     const name=(file.name||"").toLowerCase();
     aiSay("Reading "+(file.name||"file")+"…");
     try{
-      let text="";
-      if(name.endsWith(".pdf")){ text=await extractPdf(await file.arrayBuffer()); }
+      let text="", buf=null;
+      if(name.endsWith(".pdf")){ buf=await file.arrayBuffer(); text=await extractPdf(buf); }
       else if(name.endsWith(".xlsx")){ text=await extractXlsx(await file.arrayBuffer()); }
       else { text=await file.text(); }
       text=(text||"").replace(/ /g,"").trim();
-      if(text.length<40){ aiSay("Couldn't read enough text from that file — paste the scope in instead.",false); return; }
+      if(text.length<40){
+        // No text layer. A PDF (a scan or a "Print to PDF" of images) can still be
+        // read — hand the file to Claude, which OCRs it with its own vision.
+        if(name.endsWith(".pdf") && buf){
+          if(buf.byteLength > 6*1024*1024){ aiSay("This looks like a scanned PDF, but it's too big to read directly (over ~6 MB). Try a smaller file, or paste the text in.",false); return; }
+          aiPdfB64=bufToB64(buf);
+          document.getElementById("aiText").value="";
+          if(!document.getElementById("aiTitle").value){
+            const base=(file.name||"").replace(/\.[^.]+$/,"").replace(/[_-]+/g," ").trim();
+            if(base) document.getElementById("aiTitle").value=base;
+          }
+          aiSay("✓ This is a scanned/picture PDF with no text — Claude will read the file itself (the PDF is sent to the AI). Add any details, then Draft it.",true);
+          return;
+        }
+        aiSay("Couldn't read enough text from that file — paste the scope in instead.",false); return;
+      }
       document.getElementById("aiText").value=text;
       if(!document.getElementById("aiTitle").value){
         const base=(file.name||"").replace(/\.[^.]+$/,"").replace(/[_-]+/g," ").trim();
@@ -205,13 +223,15 @@
   })();
   async function runAI(){
     const text=document.getElementById("aiText").value.trim();
-    if(text.length<40){ aiSay("Add a document or paste at least a short scope of works first.",false); return; }
+    const notes=document.getElementById("aiNotes").value.trim();
+    if(text.length<40 && notes.length<40 && !aiPdfB64){ aiSay("Add a document or paste at least a short scope of works first.",false); return; }
     const btn=document.getElementById("aiGo"); btn.disabled=true; const old=btn.textContent; btn.textContent="Drafting…";
-    aiSay("Claude is reading the scope and drafting your task list — this can take up to a minute…");
+    aiSay(aiPdfB64 ? "Claude is reading your PDF and drafting the task list — a scanned file can take a little longer…" : "Claude is reading the scope and drafting your task list — this can take up to a minute…");
     try{
       const r=await aFetch("/prog/ai-draft",{method:"POST",body:JSON.stringify({
         text,
-        notes:document.getElementById("aiNotes").value.trim(),
+        notes,
+        pdfBase64:aiPdfB64||"",
         title:document.getElementById("aiTitle").value.trim(),
         client:document.getElementById("aiClient").value.trim(),
         site:document.getElementById("aiSite").value.trim(),

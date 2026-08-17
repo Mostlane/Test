@@ -19503,7 +19503,11 @@ async function handle29(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     const notes = String(b.notes || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 4e3);
     let text = String(b.text || "").replace(/ /g, "").trim();
-    if (text.length < 40 && notes.length < 40) return json3({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
+    let pdfB64 = String(b.pdfBase64 || "").replace(/\s+/g, "");
+    if (pdfB64 && !/^[A-Za-z0-9+/=]+$/.test(pdfB64)) pdfB64 = "";
+    const MAX_PDF_B64 = 9 * 1024 * 1024;
+    if (pdfB64.length > MAX_PDF_B64) return json3({ ok: false, error: "That PDF is too big to read directly (over ~6 MB). Try a smaller file, or paste the text in." }, 400);
+    if (text.length < 40 && notes.length < 40 && !pdfB64) return json3({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
     const MAX_TEXT = 12e4;
     if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
     const hintTitle = String(b.title || "").slice(0, 200);
@@ -19541,9 +19545,16 @@ async function handle29(request, env, ctx, url) {
     if (notes) {
       userMsg += "INSTRUCTIONS FROM THE PLANNER (follow these closely \u2014 they override the document where they conflict):\n" + notes + "\n\n";
     }
-    userMsg += "DOCUMENT / SCOPE TO PLAN FROM";
-    if (hintTitle) userMsg += ` (project: ${hintTitle})`;
-    userMsg += ":\n\n" + text;
+    if (pdfB64) {
+      userMsg += "The attached PDF is the specification / scope to plan from";
+      userMsg += hintTitle ? ` (project: ${hintTitle}).` : ".";
+      if (text) userMsg += "\n\nAny text already read from it:\n" + text;
+    } else {
+      userMsg += "DOCUMENT / SCOPE TO PLAN FROM";
+      if (hintTitle) userMsg += ` (project: ${hintTitle})`;
+      userMsg += ":\n\n" + text;
+    }
+    const userContent = pdfB64 ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfB64 } }, { type: "text", text: userMsg }] : userMsg;
     const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
     let apiResp;
     try {
@@ -19560,7 +19571,7 @@ async function handle29(request, env, ctx, url) {
           system: sys,
           tools: [{ name: "build_programme", description: "Return the drafted programme of works.", input_schema: schema }],
           tool_choice: { type: "tool", name: "build_programme" },
-          messages: [{ role: "user", content: userMsg }]
+          messages: [{ role: "user", content: userContent }]
         })
       });
     } catch (e) {
