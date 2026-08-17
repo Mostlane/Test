@@ -1419,6 +1419,15 @@ helper, forced `revise_programme` tool → full revised programme with absolute
 `start` YYYY-MM-DD + working `days` + `wknd`/milestone) returns a complete revised
 programme the client adopts into the DRAFT (issued revisions untouched; contractor
 COLOURS preserved by matching names to the existing legend). Undo reverts it.
+The whole reshaping set (Auto-order, Shift dates, Ask AI, Undo) lives under one
+**🛠 Tools** dropdown in the builder toolbar. **Resizable "Works" column:** drag
+the handle on the Works header to widen/narrow it; the width is stored on the
+programme as **`data.worksW`** (px) and flows through to BOTH exports — progpdf.js
+`applyWorksWidth()` scales it to PDF points (230px≈168pt), and programme-export.js
+scales it to Excel char-width (230px≈34). `programme-gantt.js?v=5`,
+`programme-export.js?v=2`. **PDF truncation fix:** progpdf `fitText` now uses ASCII
+"..." not "…" (U+2026) — the WinAnsi PDF font has no ellipsis glyph, so it was
+rendering as "?" after every truncated task/contractor label.
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
 snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 `holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in
