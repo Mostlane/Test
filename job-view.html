@@ -622,6 +622,13 @@
     <div id="statusBar">Ready.</div>
   </div>
 
+  <!-- ENGINEER'S NOTES -->
+  <div class="card">
+    <h2 class="section-title">📝 Engineer's notes</h2>
+    <p class="section-sub">What the engineer wrote on the job — newest first.</p>
+    <div id="engNotes" class="panel-light">No notes yet.</div>
+  </div>
+
   <!-- PHOTOS -->
   <div class="card">
     <h2 class="section-title">Photos</h2>
@@ -887,6 +894,7 @@ function renderJob(){
 
   renderSite();
   renderCapture();
+  renderNotes();
   renderTimeline();
 
   const statusSelect = $("statusSelect");
@@ -1202,6 +1210,37 @@ function renderCapture(){
     body.appendChild(captureSection("🚐 Mileage", [kvRow("Odometer at arrival", job.travelStartMileage + " mi")]));
   }
   $("captureCard").style.display = any ? "block" : "none";
+}
+
+/* ---- Engineer's notes (the compulsory completion note + any note events) ---- */
+function renderNotes(){
+  const el = $("engNotes");
+  if(!el) return;
+  const notes = (job.events || [])
+    .filter(e => (e.type === "note") || (e.note && String(e.note).trim()))
+    .map(e => ({ at: e.at, by: e.by, text: String(e.note || "").trim() }))
+    .filter(n => n.text)
+    .sort((a,b) => new Date(b.at) - new Date(a.at));
+  if(!notes.length){
+    const done = /^(complete|closed|invoiced)$/i.test(job.status || "");
+    el.innerHTML = done
+      ? '<span style="color:#b45309;font-weight:600;">⚠ No completion note was recorded for this job.</span>'
+      : "No notes yet.";
+    return;
+  }
+  el.innerHTML = "";
+  notes.forEach(n => {
+    const row = document.createElement("div");
+    row.style.cssText = "padding:10px 12px;margin-bottom:8px;background:#fff;border:1px solid #e6eaf0;border-left:4px solid #1e66ff;border-radius:8px;";
+    const txt = document.createElement("div");
+    txt.style.cssText = "font-size:14px;color:#0f172a;white-space:pre-wrap;line-height:1.45;";
+    txt.textContent = n.text;
+    const meta = document.createElement("div");
+    meta.style.cssText = "font-size:12px;color:#64748b;margin-top:5px;";
+    meta.textContent = (n.by ? n.by : "Engineer") + (n.at ? " · " + fmtDateTimeLong(parseDate(n.at)) : "");
+    row.append(txt, meta);
+    el.appendChild(row);
+  });
 }
 
 /* ---- Activity timeline (statusHistory + events, newest first) ---- */
