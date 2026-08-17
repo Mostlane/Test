@@ -891,15 +891,17 @@ function renderEngDay(list){
     const c = engStatusColour(j.status);
     const t = j.scheduledAt ? (() => { const d = new Date(j.scheduledAt); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); })() : "—";
     // /sla/jobs/for-engineer serves RAW server jobs (description/helpdeskRef/
-    // siteName), not the scheduler's normalised shape — accept either.
+    // siteName), not the scheduler's normalised shape — accept either. Lead with
+    // the SITE (where they are); the full job description is deliberately left
+    // off this at-a-glance view (open the job to read it).
     const ref = j.ref || j.helpdeskRef || "";
-    const title = j.title || j.description || "(no title)";
     const site = j.site || j.siteName || j.siteCode || "";
-    const meta = [site, j.priority].filter(Boolean).join(" · ");
+    const title = site || ref || "(job)";
+    const meta = [site ? ref : "", j.priority].filter(Boolean).join(" · ");
     return `<div class="eng-jobrow" data-jid="${escapeAttr(j.id)}" style="border-left-color:${c}">
       <span class="ej-time">${t}</span>
       <span class="ej-main">
-        <span class="ej-title">${escapeHtml(ref ? ref + " · " : "")}${escapeHtml(title)}</span>
+        <span class="ej-title">${escapeHtml(title)}</span>
         ${meta ? `<span class="ej-meta">${escapeHtml(meta)}</span>` : ""}
       </span>
       <span class="ej-chip" style="background:${c}">${escapeHtml(j.status || "Scheduled")}</span>
