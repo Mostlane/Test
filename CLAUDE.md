@@ -83,10 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=7`)
-All 123 pages reference `?v=7` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7 added the animated loading mark — both 17 Aug). If a portal-config change
-must reach them again, bump to ?v=8 across all pages with sed — and check the
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=8`)
+All 123 pages reference `?v=8` (cache-bust; ?v=6 forced the `.ml-back` styling,
+?v=7 added the animated loading mark, ?v=8 widened it to every busy state — all
+17 Aug). If a portal-config change must reach them again, bump to ?v=9 across
+all pages with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
 was silently running an ancient portal-config). NB `grep` treats programmes.html
@@ -109,25 +110,36 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   its own fallback copies — must work against a stale portal-config).
 - **Page-view beacon**: POST /audit/pageview once per page open (logged-in
   only; login/reset/onboard pages excluded).
-- **Loading mark — the spinning Mostlane "M"** (`mlLoading()` IIFE, 17 Aug):
-  replaces every plain "Loading…" with `/icons/icon-192.png` (the M tile)
+- **Busy mark — the spinning Mostlane "M"** (`mlLoading()` IIFE, 17 Aug):
+  EVERY busy state in the portal shows `/icons/icon-192.png` (the M tile)
   animating `mlSpinStop` — one eased revolution in ~0.9s, then a ~0.8s rest,
   repeating (spin · stop · spin · stop), 1.7s cycle, held still under
-  `prefers-reduced-motion`. **New code should call
-  `MLUI.loading("Loading jobs…")`** → an HTML string (inline mark + label);
+  `prefers-reduced-motion`. Sized in **em** (1.45em) so a small grey footer
+  status line and a full-size card row both look right. **New code should call
+  `MLUI.loading("Loading jobs…")`** → an HTML string (mark + label);
   `MLUI.loading(txt,{big:true})` is the large centred variant for a whole panel.
-  Existing pages need NO edit: there were ~196 "Loading…" strings across 82
-  pages written every which way (static HTML, innerHTML, textContent), so an
-  initial pass + a MutationObserver upgrade any element whose WHOLE text is a
-  loading phrase (`/^loading\b/i`, ≤34 chars, no element children), keeping the
-  original wording as the label so "Loading sites…" still reads. Ordinary prose
-  containing the word is untouched; `.ml-load` subtrees are skipped so it can't
-  recurse. **The component injects its OWN `<style id="ml-load-style">` rather
-  than riding the sidebar's `#pnav-style`** — that block is skipped inside
-  iframes (po.html embeds po-office.html), on auth/my-day pages and for Story
-  users, and without the CSS the mark renders as a raw 192px icon. Deliberately
-  scoped to "Loading" only — "Saving…" (×50, the autosave status lines) and the
-  few "Fetching…"/"Working…" are left alone.
+  Existing pages need NO edit: ~250 busy strings across ~90 pages are written
+  every which way (static HTML, innerHTML, textContent), so an initial pass + a
+  MutationObserver upgrade any element whose WHOLE text is a busy phrase,
+  keeping the original wording as the label ("Loading fleet…" still reads).
+  **Two rules keep it safe, both learned the hard way:**
+  (a) **A trailing ellipsis is REQUIRED** (bare "Loading" excepted). The match is
+  `/^(loading|saving|uploading|updating|checking|searching|refreshing|fetching|
+  preparing|generating|building|processing|working|please wait|one moment)\b/i`
+  + ≤34 chars + no element children — but on word alone the H&S pages' "Working
+  days" and "Working On or Near Live Services" sprouted a spinner. The ellipsis
+  test kills that.
+  (b) **NO sticky "already done" flag.** An early version set `data-mlload` and
+  skipped flagged elements, which broke any page that re-shows its status —
+  vehicles.html does `statusLine.textContent = "Loading fleet…"` on every
+  refresh, wiping the mark back to plain text for good (Jamie caught this on his
+  phone). The `el.children.length` test already skips an upgraded element (it
+  now holds our span), so the flag was both redundant and harmful.
+  `<button>` is in the SKIP list so a "Saving…" button label never gets a mark.
+  **The component injects its OWN `<style id="ml-load-style">` rather than riding
+  the sidebar's `#pnav-style`** — that block is skipped inside iframes (po.html
+  embeds po-office.html), on auth/my-day pages and for Story users, and without
+  the CSS the mark renders as a raw 192px icon.
 - **Embossed logo watermark** (added 14 Jul): one fixed `html::before` layer
   (`#mlEmbossCss`, `/Mostlane_Embossed.png`, z-index:-1, behind all content),
   so it shows on EVERY portal page without touching per-page `body`
