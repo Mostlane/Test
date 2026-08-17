@@ -325,13 +325,20 @@ function setStatusTab(status) {
 async function loadDashboard() {
   let d;
   try { d = await authFetch('/po/api/dashboard').then(r => r.json()); } catch (e) { return; }
+  // If the endpoint returned an error object (e.g. no access) rather than counts,
+  // hide the card instead of rendering "undefined" tiles.
+  if (!d || typeof d.uncosted === 'undefined') {
+    document.getElementById('attention-card').style.display = 'none';
+    return;
+  }
+  const num = v => (typeof v === 'number' ? v : 0);
   const cards = [
-    ['uncosted', 'Uncosted', d.uncosted, '#003366'],
-    ['review', 'Awaiting review', d.needs_review, '#b58a00'],
-    ['flagged', 'Flagged', d.flagged, '#c0392b'],
-    ['credit_due', 'Credit due', d.credit_due, '#b58a00'],
-    ['unmatched_site', 'Site not in list', d.unmatched_site, '#b58a00'],
-    ['today', 'Raised today', d.today, '#003366']
+    ['uncosted', 'Uncosted', num(d.uncosted), '#003366'],
+    ['review', 'Awaiting review', num(d.needs_review), '#b58a00'],
+    ['flagged', 'Flagged', num(d.flagged), '#c0392b'],
+    ['credit_due', 'Credit due', num(d.credit_due), '#b58a00'],
+    ['unmatched_site', 'Site not in list', num(d.unmatched_site), '#b58a00'],
+    ['today', 'Raised today', num(d.today), '#003366']
   ];
   document.getElementById('attention-card').style.display = 'block';
   document.getElementById('attention').innerHTML = cards.map(([kind, label, v, color]) =>
