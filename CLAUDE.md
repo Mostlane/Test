@@ -120,10 +120,14 @@ across all pages with sed. Provides:
   field app's **engineer-jobs.html also has a top-left header back** (`.eng-back`
   → route.html; its own class since `.ml-back` is force-hidden there) so there's
   always an escape the bottom bar can't block.
-- **Field-app bottom tabbar (Aug 2026 rework)** — the four tabs on route.html /
-  engineer-jobs.html / inbox.html / you.html are now **Route · Jobs · PO · Menu**
-  (were Route/Jobs/Inbox/You). **PO** (`#tabPO`) resolves to the engineer's
-  personal PO link via GET /po-config (falls back to po.html); **Menu** →
+- **Field-app bottom tabbar (Aug 2026 rework)** — the tabs on route.html /
+  engineer-jobs.html / inbox.html / you.html are now **Route · Jobs · Menu**
+  (were Route/Jobs/Inbox/You, then briefly Route·Jobs·PO·Menu). **The PO tab
+  (`#tabPO`) was REMOVED (Aug 2026)** — it pointed at the old standalone PO
+  system, and engineers are now pushed to raise POs **from the job** (job-view
+  "Raise PO for this job", which stamps job_id for costing linkage) so nothing is
+  unlinked. The `/po-config` resolver script was removed from all four pages too.
+  **Menu** →
   main.html (field users use the full office tile menu — everything they can open
   is a permitted tile there, so the old you.html permission-launcher is no longer
   linked, though the file remains). **Field-user "home" = main.html**:
