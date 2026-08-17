@@ -2338,6 +2338,20 @@ engineer-report, hours-dashboard.html, add-site chain (Zapier), theme.html
 files to this public repo.
 
 ## Known quirks
+- **Compliance codes are ZERO-PADDED to 4 digits; portal site numbers are not.**
+  `pad4()` makes a Co-op store "0649", but the portal site created back in July is
+  `site_number = "649"`. The old `/compliance/stores/import` set `site_number = code`
+  blindly, so those stores missed the site that already existed and (with
+  `createSites:true`) minted a DUPLICATE 3-digit/4-digit site pair — 6 of them
+  (0649/0650/0665/0667/0668/0670, ELS + ELS Private funeral directors), each a
+  minimal stub next to the real record. Fixed 17 Aug: **`coopSiteNumber(env,tid,code)`**
+  in compliance.js resolves the link NUMERICALLY (shortest match wins, so the
+  original unpadded row is used) and only falls back to the padded code when the
+  store genuinely has no site yet — used by /stores/import, /store, /store-meta and
+  bumpDue. The `/stores` GET join also matches numerically (and dedupes by code) so
+  a padded code still resolves an unpadded site's live name/postcode. The 6 stores
+  were repointed and the 6 stub sites deleted in D1. **Any new site↔code matching
+  must compare numerically, never as strings.**
 - **Mobile-first `.shell{max-width:560px}` clamps a page to mobile width on
   DESKTOP too** (a "field-friendly restyle" that unconditionally overrode an
   earlier `max-width:1100px`). Symptom: an OFFICE page (e.g. **job-view.html**)

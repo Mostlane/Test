@@ -17602,7 +17602,7 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
   }
   due[type] = next;
   if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(due), at, tid, scheme, code).run();
-  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(due), scheme === "coop" ? code : null, at).run();
+  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(due), scheme === "coop" ? await coopSiteNumber(env, tid, code) : null, at).run();
 }
 function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -17614,6 +17614,20 @@ var pad4 = (v) => {
   const d = s.replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
 };
+async function coopSiteNumber(env, tid, code) {
+  if (!code) return null;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT site_number FROM sites
+        WHERE tenant_id=? AND site_number <> '' AND site_number NOT GLOB '*[^0-9]*'
+          AND CAST(site_number AS INTEGER) = CAST(? AS INTEGER)
+        ORDER BY LENGTH(site_number), site_number LIMIT 1`
+    ).bind(tid, code).first();
+    if (row && row.site_number) return String(row.site_number);
+  } catch {
+  }
+  return code;
+}
 var SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council" };
 var schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 var TYPE_LABELS = {
@@ -17891,10 +17905,18 @@ async function handle25(request, env, ctx, url, sess) {
       }
     }
     const { results } = scheme === "coop" ? await env.DB.prepare(
+      // Resolve the live site by the store's LINK (site_number), falling back
+      // to its code — and match numerically as well as exactly, so a padded
+      // code ("0649") still finds an unpadded portal site ("649") instead of
+      // showing as unlinked. Duplicate matches are collapsed below by code.
       `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active, cs.meta, cs.site_number,
                   s.site_name AS sname, s.postcode AS spost
              FROM compliance_stores cs
-             LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND s.site_number = cs.code
+             LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND (
+                    s.site_number = COALESCE(NULLIF(cs.site_number, ''), cs.code)
+                 OR (s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*'
+                     AND COALESCE(NULLIF(cs.site_number, ''), cs.code) NOT GLOB '*[^0-9]*'
+                     AND CAST(s.site_number AS INTEGER) = CAST(COALESCE(NULLIF(cs.site_number, ''), cs.code) AS INTEGER)))
             WHERE cs.tenant_id = ? AND cs.scheme = ?`
     ).bind(tid, scheme).all() : await env.DB.prepare(
       `SELECT code, category, name AS cname, postcode AS cpost, due, active, meta, site_number,
@@ -17906,7 +17928,12 @@ async function handle25(request, env, ctx, url, sess) {
     for (const r of fi.results || []) {
       (idx[r.code] = idx[r.code] || {})[r.type] = r.n;
     }
-    const stores = (results || []).map((r) => {
+    const byCode = /* @__PURE__ */ new Map();
+    for (const r of results || []) {
+      const prev = byCode.get(r.code);
+      if (!prev || !prev.sname && r.sname) byCode.set(r.code, r);
+    }
+    const stores = [...byCode.values()].map((r) => {
       let due = {};
       if (r.due) {
         try {
@@ -17956,7 +17983,7 @@ async function handle25(request, env, ctx, url, sess) {
       }
       const metaJson = r.meta && typeof r.meta === "object" ? JSON.stringify(r.meta) : null;
       let siteNo = null;
-      if (scheme === "coop") siteNo = code;
+      if (scheme === "coop") siteNo = await coopSiteNumber(env, tid, code);
       else {
         const match = await env.DB.prepare(
           "SELECT site_number FROM sites WHERE tenant_id=? AND LOWER(TRIM(site_name))=LOWER(TRIM(?)) ORDER BY site_number LIMIT 1"
@@ -18043,7 +18070,7 @@ async function handle25(request, env, ctx, url, sess) {
     const name = b.name != null ? String(b.name).slice(0, 200) : row ? row.name : null;
     const postcode = b.postcode != null ? String(b.postcode).slice(0, 20) : row ? row.postcode : null;
     const explicitSite = (b.siteNumber != null ? String(b.siteNumber) : b.site_number != null ? String(b.site_number) : "").trim();
-    const siteNo = explicitSite || (scheme === "coop" ? code : null);
+    const siteNo = explicitSite || (scheme === "coop" ? await coopSiteNumber(env, tid, code) : null);
     await env.DB.prepare(
       `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, site_number, updated_at)
        VALUES (?,?,?,?,?,?,?,1,?,?)
@@ -18076,7 +18103,7 @@ async function handle25(request, env, ctx, url, sess) {
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2e3) || null;
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2e3) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
-    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), scheme === "coop" ? code : null, at).run();
+    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), scheme === "coop" ? await coopSiteNumber(env, tid, code) : null, at).run();
     return jr6({ ok: true, code, meta }, headers);
   }
   if (sub === "/store-delete" && method === "POST") {
