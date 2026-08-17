@@ -18,27 +18,31 @@
   "use strict";
   if (window.MLJobEdit) return;
 
-  // Clean "Job name" for titles everywhere: the store/site formatted
-  // "Street - Number". These jobs store the store either in siteName or (for
-  // email-intake jobs) in the description field ("25886/1 Gatwick Road"), while
-  // the reference holds the fault text — so pick whichever looks like a store
-  // (short + has a number, not a long fault sentence) and reorder it so the
-  // street reads first: "25886/1 Gatwick Road" → "Gatwick Road - 25886/1".
+  // Clean "Job name" for titles everywhere, formatted "{Job number} - {Site name}"
+  // (e.g. "26819 - Poole, Ringwood Road"). The job number is the ticket that
+  // prefixes the id ("26819-Poole, Ringwood Road", "27882/1-Marchwood",
+  // "P0002-…"); it can also lead the reference. The site name is the clean
+  // siteName (falling back to the reference minus its number, then the site
+  // code). A job with no derivable number just shows its site name.
   function mlJobName(job) {
-    // New intake jobs carry a clean "Ticket - Site" reference
-    // (e.g. "19667 - Freshwater, Avenue Road") — use it verbatim as the name.
-    const ref = String((job && job.helpdeskRef) || "").trim();
-    if (ref && ref.length <= 70 && /^[0-9][0-9./-]*\s+-\s+\S/.test(ref)) return ref;
-    // Legacy jobs: the store sits in siteName or the description; reorder to
-    // "Street - Number".
-    const store = s => { s = String(s == null ? "" : s).trim(); return (s && s.length <= 50 && /\d/.test(s)) ? s : ""; };
-    let s = store(job && job.siteName) || store(job && job.description) || String((job && job.siteName) || "").trim();
-    if (!s) return "";
-    let m = s.match(/^([0-9][0-9\/\-]*)\s+(.+)$/);          // number-first: "25886/1 Gatwick Road"
-    if (m) return m[2].trim() + " - " + m[1].trim();
-    m = s.match(/^(.+?)[ ,]+([0-9][0-9\/\-]*)$/);           // number-last: "Portsmouth, Copnor Road 331"
-    if (m) return m[1].trim().replace(/,+$/, "") + " - " + m[2].trim();
-    return s;
+    if (!job) return "";
+    const id = String(job.id || "");
+    const ref = String(job.helpdeskRef || "").trim();
+    // Job/ticket number: id prefix "<num>-…", else the number that leads the ref.
+    let m = id.match(/^([A-Za-z]?\d+(?:\/\d+)?)-/);
+    let num = m ? m[1] : ((ref.match(/^([A-Za-z]?\d+(?:\/\d+)?)\b/) || [])[1] || "");
+    // Drop a leading "<num> - " / "<num>, " that's baked into a string.
+    const stripNum = s => String(s || "").replace(/^\s*[A-Za-z]?\d+(?:\/\d+)?\s*[-–,]\s*/, "").trim();
+    // Site name: prefer siteName; else pull the site out of a short reference
+    // (not a long fault sentence); else the site code.
+    let site = String(job.siteName || "").trim();
+    if (!site) {
+      const refSite = (ref && ref.length <= 70 && /\s/.test(ref) && !/[.!?]/.test(ref)) ? stripNum(ref) : "";
+      site = refSite || String(job.siteCode || "").trim();
+    }
+    site = stripNum(site) || site;   // de-duplicate a number already in siteName
+    if (num && site) return num + " - " + site;
+    return site || num || (ref && ref.length <= 40 ? ref : "") || "";
   }
   window.mlJobName = mlJobName;
 
