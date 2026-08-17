@@ -1382,7 +1382,13 @@ contractor's tasks** (everyone else's untouched). The workbook's VBA
 **AI draft-from-a-document (Aug 2026):** a "🤖 Draft from a document" button on
 programmes.html opens a modal that reads a **specification/scope (PDF via PDF.js,
 .xlsx via xlsx-lite, or text/CSV) ENTIRELY IN THE BROWSER** (nothing uploaded —
-only the extracted text is sent) — or the office can paste the scope. A **"Notes
+only the extracted text is sent) — or the office can paste the scope.
+**Scanned / image-only PDFs (no text layer, e.g. "Print to PDF" of pictures):**
+when browser extraction yields < 40 chars the client base64-encodes the PDF and
+posts it as `pdfBase64`; the worker sends it to Claude as a **`document` content
+block** (`{type:"document",source:{type:"base64",media_type:"application/pdf"}}` —
+GA, no beta header) so Claude OCRs it with its own vision (capped ~6 MB; this is
+the one path where the file itself is sent, surfaced in the modal status). A **"Notes
 for the AI"** box passes free-text steering (who's subcontracting which trade,
 timing/sequencing constraints) that is sent as **prioritised INSTRUCTIONS** ahead
 of the document in the prompt (`notes` in the POST body; the endpoint accepts a
@@ -1400,6 +1406,28 @@ plain-English message when the secret is missing / the key is rejected / the
 model isn't available on the key (tells Jamie exactly what to add in the
 dashboard). Pair it with the builder's **"Auto-order"** button (sorts task lines
 by start date so a drafted or hand-built list staggers correctly).
+**Date-shift tools + AI edit (Aug 2026):** the builder toolbar adds **🗓 Shift
+dates** (a modal: move the WHOLE programme to a new start date or by ±N days;
+or **move one task to a date and ripple every task starting on/after its
+original date** by the same delta, keeping the sequence — pure client-side date
+maths, `dParse`/`addDaysISO`/`daysBetween`), a single-level **↩ Undo** (stashes
+a JSON snapshot before any shift/AI edit), and an **"✨ Ask AI" edit box** — a
+plain-English instruction ("compress into two weeks", "push everything back a
+week", "make the M&E take 5 days") POSTed with the current draft to **POST
+/prog/ai-edit** (Programmes|FullAccess). That endpoint (shared `anthropicStructured`
+helper, forced `revise_programme` tool → full revised programme with absolute
+`start` YYYY-MM-DD + working `days` + `wknd`/milestone) returns a complete revised
+programme the client adopts into the DRAFT (issued revisions untouched; contractor
+COLOURS preserved by matching names to the existing legend). Undo reverts it.
+The whole reshaping set (Auto-order, Shift dates, Ask AI, Undo) lives under one
+**🛠 Tools** dropdown in the builder toolbar. **Resizable "Works" column:** drag
+the handle on the Works header to widen/narrow it; the width is stored on the
+programme as **`data.worksW`** (px) and flows through to BOTH exports — progpdf.js
+`applyWorksWidth()` scales it to PDF points (230px≈168pt), and programme-export.js
+scales it to Excel char-width (230px≈34). `programme-gantt.js?v=5`,
+`programme-export.js?v=2`. **PDF truncation fix:** progpdf `fitText` now uses ASCII
+"..." not "…" (U+2026) — the WinAnsi PDF font has no ellipsis glyph, so it was
+rendering as "?" after every truncated task/contractor label.
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
 snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 `holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in

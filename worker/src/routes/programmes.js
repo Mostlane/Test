@@ -136,6 +136,37 @@ function pdfResponse(cors, bytes, filename) {
   });
 }
 
+// Shared Anthropic Messages call that forces a structured tool result. Returns
+// { ok:true, input } or { ok:false, code, error } with a plain-English message.
+async function anthropicStructured(env, { system, userContent, schema, toolName, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let apiResp;
+  try {
+    apiResp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model, max_tokens: maxTokens || 8000, system,
+        tools: [{ name: toolName, description: "Return the result.", input_schema: schema }],
+        tool_choice: { type: "tool", name: toolName },
+        messages: [{ role: "user", content: userContent }],
+      }),
+    });
+  } catch (e) { return { ok: false, code: 502, error: "Couldn't reach the AI service. Try again in a moment." }; }
+  if (!apiResp.ok) {
+    let detail = ""; try { const j = await apiResp.json(); detail = j?.error?.message || ""; } catch {}
+    if (apiResp.status === 401 || apiResp.status === 403) return { ok: false, code: 400, error: "The AI key was rejected. Check the ANTHROPIC_API_KEY secret on the worker." };
+    if (apiResp.status === 404 && /model/i.test(detail)) return { ok: false, code: 400, error: `The AI model "${model}" isn't available on this key. Set ANTHROPIC_MODEL on the worker to one you can use.` };
+    return { ok: false, code: 502, error: "The AI service returned an error" + (detail ? ": " + detail : ".") };
+  }
+  let payload; try { payload = await apiResp.json(); } catch { return { ok: false, code: 502, error: "The AI service returned an unreadable response." }; }
+  if (payload.stop_reason === "refusal") return { ok: false, code: 400, error: "The AI declined that request." };
+  const block = Array.isArray(payload.content) ? payload.content.find(c => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
+  return { ok: true, input: block.input };
+}
+
 export async function handle(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
@@ -347,7 +378,13 @@ export async function handle(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     const notes = String(b.notes || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 4000);
     let text = String(b.text || "").replace(/ /g, "").trim();
-    if (text.length < 40 && notes.length < 40) return json({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
+    // A scanned / image-only PDF has no text layer, so the client sends the raw
+    // PDF (base64) and Claude reads it directly with its own OCR/vision.
+    let pdfB64 = String(b.pdfBase64 || "").replace(/\s+/g, "");
+    if (pdfB64 && !/^[A-Za-z0-9+/=]+$/.test(pdfB64)) pdfB64 = "";   // must be clean base64
+    const MAX_PDF_B64 = 9 * 1024 * 1024;   // ~6.7 MB file — bounds cost + request size
+    if (pdfB64.length > MAX_PDF_B64) return json({ ok: false, error: "That PDF is too big to read directly (over ~6 MB). Try a smaller file, or paste the text in." }, 400);
+    if (text.length < 40 && notes.length < 40 && !pdfB64) return json({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
     // Keep the token cost bounded — the front of a spec carries the scope.
     const MAX_TEXT = 120000;
     if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
@@ -392,9 +429,19 @@ export async function handle(request, env, ctx, url) {
     if (notes) {
       userMsg += "INSTRUCTIONS FROM THE PLANNER (follow these closely — they override the document where they conflict):\n" + notes + "\n\n";
     }
-    userMsg += "DOCUMENT / SCOPE TO PLAN FROM";
-    if (hintTitle) userMsg += ` (project: ${hintTitle})`;
-    userMsg += ":\n\n" + text;
+    if (pdfB64) {
+      userMsg += "The attached PDF is the specification / scope to plan from";
+      userMsg += hintTitle ? ` (project: ${hintTitle}).` : ".";
+      if (text) userMsg += "\n\nAny text already read from it:\n" + text;
+    } else {
+      userMsg += "DOCUMENT / SCOPE TO PLAN FROM";
+      if (hintTitle) userMsg += ` (project: ${hintTitle})`;
+      userMsg += ":\n\n" + text;
+    }
+    // A scanned PDF rides as a document content block so Claude OCRs it itself.
+    const userContent = pdfB64
+      ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfB64 } }, { type: "text", text: userMsg }]
+      : userMsg;
 
     const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
     let apiResp;
@@ -412,7 +459,7 @@ export async function handle(request, env, ctx, url) {
           system: sys,
           tools: [{ name: "build_programme", description: "Return the drafted programme of works.", input_schema: schema }],
           tool_choice: { type: "tool", name: "build_programme" },
-          messages: [{ role: "user", content: userMsg }],
+          messages: [{ role: "user", content: userContent }],
         }),
       });
     } catch (e) {
@@ -490,6 +537,89 @@ export async function handle(request, env, ctx, url) {
       VALUES (?,?,?,?,?,?,?,?,?,?)`)
       .bind(id, db.tenantId, data.title, data.client, data.site, JSON.stringify(data), me, now, now, me).run();
     return json({ ok: true, id, taskCount: tasks.length, contractors: contractors.length });
+  }
+
+  // -- AI: edit the current programme by a plain-English instruction --------
+  // e.g. "compress everything into two weeks", "push all tasks back a week",
+  // "make the M&E take 5 days". Returns a revised programme the client adopts
+  // into the working draft (issued revisions are untouched).
+  if (method === "POST" && pathname === "/prog/ai-edit") {
+    if (!env.ANTHROPIC_API_KEY) return json({ ok: false, error: "AI editing isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
+    const b = await request.json().catch(() => ({}));
+    const instruction = String(b.instruction || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 2000);
+    if (instruction.length < 2) return json({ ok: false, error: "Type what you'd like changed (e.g. \"compress into two weeks\")." }, 400);
+    const cur = cleanData(b.data);
+    if (cur.error) return json({ ok: false, error: cur.error }, 400);
+    const src = cur.obj;
+    const srcTasks = Array.isArray(src.tasks) ? src.tasks : [];
+    if (!srcTasks.length) return json({ ok: false, error: "There are no tasks to edit yet." }, 400);
+    const conById = {}, colourByName = {};
+    for (const c of (src.contractors || [])) { if (c && c.id) { conById[c.id] = c.name || ""; if (c.name) colourByName[String(c.name).toLowerCase()] = c.colour; } }
+    const compact = {
+      title: src.title || "",
+      contractors: (src.contractors || []).map(c => c && c.name).filter(Boolean),
+      tasks: srcTasks.map(t => ({ name: t.name || "", contractor: conById[t.contractor] || "", start: t.start || "", days: Math.max(1, Number(t.days) || 1), wknd: !!t.wknd, milestone: !!t.milestone })),
+    };
+    const schema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        contractors: { type: "array", items: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } },
+        tasks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              contractor: { type: "string", description: "Contractor name doing this task." },
+              start: { type: "string", description: "Start date, YYYY-MM-DD." },
+              days: { type: "integer", description: "Duration in working days (at least 1)." },
+              wknd: { type: "boolean", description: "True if this task works through weekends." },
+              milestone: { type: "boolean" },
+            },
+            required: ["name", "start", "days"],
+          },
+        },
+      },
+      required: ["tasks"],
+    };
+    const sys = "You edit an existing UK construction programme of works (a Gantt schedule) according to the user's instruction. "
+      + "Return the COMPLETE revised programme - every task, not just the ones you changed. Preserve tasks, dates, durations and contractors the instruction doesn't touch. "
+      + "Dates are calendar dates in YYYY-MM-DD; durations are in WORKING DAYS (weekends aren't worked unless a task's wknd flag is true). "
+      + "Keep tasks in a sensible sequence so dependent work follows on and things don't overlap unrealistically. When asked to compress or expand the programme to a target length, rescale the start dates and, only if needed, the durations to fit while keeping the order.";
+    const userContent = "CURRENT PROGRAMME (JSON):\n" + JSON.stringify(compact) + "\n\nINSTRUCTION:\n" + instruction;
+    const r = await anthropicStructured(env, { system: sys, userContent, schema, toolName: "revise_programme" });
+    if (!r.ok) return json({ ok: false, error: r.error }, r.code || 502);
+    const out = r.input;
+    if (!Array.isArray(out.tasks) || !out.tasks.length) return json({ ok: false, error: "The AI returned no tasks." }, 422);
+    const PALETTE = ["#00B0F0", "#92D050", "#FFC000", "#852C98", "#7F7F7F", "#e0344b", "#0369a1", "#b45309"];
+    const uid = () => "c" + Math.random().toString(36).slice(2, 8);
+    const conByName = new Map(), contractors = [];
+    const addCon = (nm) => {
+      const name = String(nm || "").trim().slice(0, 60);
+      if (!name) return null;
+      const k = name.toLowerCase();
+      if (conByName.has(k)) return conByName.get(k);
+      const colour = colourByName[k] || PALETTE[contractors.length % PALETTE.length];
+      const c = { id: uid(), name, colour };
+      contractors.push(c); conByName.set(k, c);
+      return c;
+    };
+    for (const c of (out.contractors || [])) addCon(c && c.name);
+    const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+    const tasks = [];
+    for (const t of out.tasks) {
+      const name = String(t?.name || "").trim().slice(0, 200);
+      if (!name) continue;
+      const con = t?.contractor ? addCon(t.contractor) : null;
+      const start = isDate(t?.start) ? t.start : "";
+      const days = Math.max(1, Math.min(365, Number(t?.days) || 1));
+      tasks.push({ id: uid(), name, contractor: con ? con.id : "", start, days, wknd: !!t?.wknd, progress: 0, milestone: !!t?.milestone });
+    }
+    if (!tasks.length) return json({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
+    if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
+    const data = { ...src, title: String(out.title || src.title || "").slice(0, 200) || "Programme of works", contractors, tasks };
+    return json({ ok: true, data, taskCount: tasks.length });
   }
 
   if (method === "POST" && pathname === "/prog/delete") {

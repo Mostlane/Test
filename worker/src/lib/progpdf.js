@@ -27,16 +27,26 @@ const PW = 842, PH = 595;                 // A4 landscape
 const M = 26;                             // page margin
 const ROW_H = 14.5;
 const HDR_H = 22;                         // day-grid header band
-const COLS = [                            // fixed left columns
+const COLS = [                            // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
   { key: "contractor", label: "Contractor", w: 62 },
   { key: "start", label: "Start", w: 36 },
   { key: "end", label: "End", w: 36 },
   { key: "days", label: "Days", w: 26 },
 ];
-const LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
-const GRID_X = M + LEFT_W;
-const GRID_W = PW - M - GRID_X;
+// Recomputed per render from data.worksW (the on-screen Works column width).
+let LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
+let GRID_X = M + LEFT_W;
+let GRID_W = PW - M - GRID_X;
+const WORKS_DEFAULT_PX = 230;             // matches the builder's default column
+const PX_TO_PT = 168 / WORKS_DEFAULT_PX;  // 230px on screen ≈ 168pt in the PDF
+function applyWorksWidth(worksW) {
+  const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
+  COLS[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
+  LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
+  GRID_X = M + LEFT_W;
+  GRID_W = PW - M - GRID_X;
+}
 const MIN_DAY_W = 6.5;                    // never squeeze below this — split pages instead
 
 const DAY = 86400000;
@@ -68,12 +78,14 @@ function endOf(t, hs) {
 function fitText(str, w, size) {
   let s = String(str || "");
   if (textWidth(s, size) <= w) return s;
-  while (s.length > 1 && textWidth(s + "…", size) > w) s = s.slice(0, -1);
-  return s + "…";
+  // ASCII "..." — the PDF font is WinAnsi and has no "…" glyph (it renders as "?").
+  while (s.length > 1 && textWidth(s + "...", size) > w) s = s.slice(0, -1);
+  return s + "...";
 }
 
 export function buildProgrammePdf(data, meta = {}) {
   data = data || {};
+  applyWorksWidth(data.worksW);
   const contractors = Array.isArray(data.contractors) ? data.contractors : [];
   const byC = {}; for (const c of contractors) byC[c.id] = c;
   const hs = new Set((data.holidays || []).map(String));
