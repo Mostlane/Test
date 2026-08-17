@@ -375,7 +375,12 @@ across all pages with sed. Provides:
   (serves THAT engineer's own per-engineer status). Day view uses the selected
   date; week view uses today if it's in the shown week, else the picked date.
   Tapping a job row opens the quick edit modal (board jobs) or job-view.html
-  (finished jobs, which loadJobs drops from the board).
+  (finished jobs, which loadJobs drops from the board). The modal has a **🗺️ Map**
+  button (`openMapForEngineer`) that opens the shared map overlay scoped to that
+  engineer's jobs for the day (`mapScope` = {engineer,name,date}; `jobsForMap()`
+  filters, the status chips hide, title shows the name+date). The scheduler's
+  **quick edit modal** also has a **🗂 Job card** button → `job-view.html?jobId=`
+  (the full office card — handy for completed jobs).
   **Completed jobs stay on the board (Aug 2026):** loadJobs no longer drops
   "Complete" (only Closed Jobs / Invoiced stay off). A Complete job renders GREEN
   with a ✓ and is LOCKED (not draggable). **Day view positions a finished job at

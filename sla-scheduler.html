@@ -295,7 +295,10 @@
       <textarea id="jobNotes"></textarea>
 
       <div class="buttons" style="justify-content:space-between;">
-        <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
+        <span style="display:flex;gap:8px;">
+          <button type="button" class="btn" id="jobCardBtn" title="Open the full job card">🗂 Job card</button>
+          <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
+        </span>
         <span style="display:flex;gap:8px;">
           <button type="button" class="btn" id="jobCancel">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
@@ -310,7 +313,10 @@
   <div class="modal" style="max-width:520px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
-      <button type="button" class="btn" id="engDayClose">✕</button>
+      <span style="display:flex;gap:6px;flex:none;">
+        <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
+        <button type="button" class="btn" id="engDayClose">✕</button>
+      </span>
     </div>
     <div id="engDayDate" style="font-size:12px;color:var(--muted);margin:2px 0 8px;"></div>
     <div class="eng-sum" id="engDaySummary"></div>
@@ -321,11 +327,13 @@
 <!-- MAP OVERLAY -->
 <div id="mapOverlay">
   <div class="map-top">
-    <h2>🗺️ Job map</h2>
-    <span class="map-chip" data-st="Pending" style="--c:#9f1239">Pending</span>
-    <span class="map-chip" data-st="Scheduled" style="--c:#f59e0b">Scheduled</span>
-    <span class="map-chip" data-st="In Progress" style="--c:#9333ea">In Progress</span>
-    <span class="map-chip" data-st="On Hold" style="--c:#6b7280">On Hold</span>
+    <h2 id="mapTitle">🗺️ Job map</h2>
+    <span id="mapChips">
+      <span class="map-chip" data-st="Pending" style="--c:#9f1239">Pending</span>
+      <span class="map-chip" data-st="Scheduled" style="--c:#f59e0b">Scheduled</span>
+      <span class="map-chip" data-st="In Progress" style="--c:#9333ea">In Progress</span>
+      <span class="map-chip" data-st="On Hold" style="--c:#6b7280">On Hold</span>
+    </span>
     <button class="btn" id="closeMapBtn">✕ Close</button>
   </div>
   <div id="jobsMap"></div>
@@ -931,7 +939,9 @@ let modalJobId = null;
 // categories) is appended after these in first-seen order.
 const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs"];
 function engStatusColour(s){ return STATUS_COLOUR[s] || "#64748b"; }
+let engDayCtx = null;   // remembers who/when the day-summary modal is showing (for the 🗺️ Map button)
 function openEngDay(username, name, date){
+  engDayCtx = { username, name, date };
   const iso = formatDateInput(date);
   $("engDayTitle").textContent = name;
   const today = sameDay(date, new Date());
@@ -993,6 +1003,7 @@ function renderEngDay(list){
 function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
 function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
 document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
+document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
 document.getElementById("engDayBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("engDayBackdrop")) document.getElementById("engDayBackdrop").style.display = "none"; });
 
 function openJobModal(jobId){
@@ -1023,6 +1034,8 @@ function openJobModal(jobId){
 }
 function closeJobModal(){ modalJobId = null; $("jobModalBackdrop").style.display = "none"; }
 $("jobCancel").addEventListener("click", closeJobModal);
+// Open the full office job card (read-only view, handy for completed jobs).
+$("jobCardBtn").addEventListener("click", () => { if(modalJobId) window.open("job-view.html?jobId=" + encodeURIComponent(modalJobId), "_blank"); });
 // Mouse-wheel stepping on the quick modal's date/time/duration boxes
 // (15 min / 1 day / step-attr per notch — shared helper from sla-jobedit.js).
 if (window.MLJobEdit && window.MLJobEdit.wheelify) window.MLJobEdit.wheelify($("jobModalBackdrop"));
@@ -1162,8 +1175,34 @@ function coordsFor(job){
   return null;
 }
 
-function openMap(){
+// Map scope: null = the whole board (open statuses, chip-filtered); or
+// {engineer, name, date} = one engineer's jobs for a day (all statuses).
+let mapScope = null;
+function jobsForMap(){
+  if(mapScope){
+    const me = mapScope.engineer.toLowerCase();
+    return jobs.filter(j => j.scheduledAt
+      && j.assignedEngineers.map(a => a.toLowerCase()).includes(me)
+      && sameDay(new Date(j.scheduledAt), mapScope.date));
+  }
+  return jobs.filter(j => MAP_STATUSES.includes(j.status) && mapFilter.has(j.status));
+}
+// Open the map showing ONE engineer's jobs for a day (from their day-summary modal).
+function openMapForEngineer(username, name, date){
+  $("engDayBackdrop").style.display = "none";
+  openMap({ engineer: username, name: name, date: date });
+}
+function openMap(scope){
+  mapScope = scope || null;
   $("mapOverlay").classList.add("show");
+  // Engineer-scoped view: name the person + day and hide the status chips.
+  if(mapScope){
+    $("mapTitle").textContent = "🗺️ " + mapScope.name + " — " + mapScope.date.toDateString();
+    $("mapChips").style.display = "none";
+  } else {
+    $("mapTitle").textContent = "🗺️ Job map";
+    $("mapChips").style.display = "";
+  }
   if(typeof L === "undefined"){
     $("mapNote").textContent = "⚠️ Map library couldn't load — check the connection and try again.";
     return;
@@ -1180,13 +1219,14 @@ function openMap(){
   $("mapNote").textContent = "Placing jobs by postcode…";
   (async () => {
     await loadSiteMeta();
-    const mappable = jobs.filter(j => MAP_STATUSES.includes(j.status));
+    const mappable = jobsForMap();
     await geocodePostcodes(mappable.map(postcodeFor));
     setTimeout(() => { map.invalidateSize(); plotJobs(); }, 60);
   })();
 }
 function closeMap(){
   $("mapOverlay").classList.remove("show");
+  mapScope = null;
   if(location.hash === "#map") history.replaceState(null, "", location.pathname + location.search);
 }
 function plotJobs(){
@@ -1195,7 +1235,7 @@ function plotJobs(){
   const pts = [];
   let noLoc = 0;
   const problems = [];
-  jobs.filter(j => MAP_STATUSES.includes(j.status) && mapFilter.has(j.status)).forEach(job => {
+  jobsForMap().forEach(job => {
     const pt = coordsFor(job);
     if(!pt){
       noLoc++;
