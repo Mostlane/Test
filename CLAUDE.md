@@ -83,10 +83,10 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=6`)
-All 123 pages reference `?v=6` (cache-bust; bumped to ?v=6 on 17 Aug to push the
-forced `.ml-back` styling onto stubborn phone caches). If a portal-config change
-must reach them again, bump to ?v=7 across all pages with sed — and check the
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=7`)
+All 123 pages reference `?v=7` (cache-bust; ?v=6 forced the `.ml-back` styling,
+?v=7 added the animated loading mark — both 17 Aug). If a portal-config change
+must reach them again, bump to ?v=8 across all pages with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
 was silently running an ancient portal-config). NB `grep` treats programmes.html
@@ -109,6 +109,25 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   its own fallback copies — must work against a stale portal-config).
 - **Page-view beacon**: POST /audit/pageview once per page open (logged-in
   only; login/reset/onboard pages excluded).
+- **Loading mark — the spinning Mostlane "M"** (`mlLoading()` IIFE, 17 Aug):
+  replaces every plain "Loading…" with `/icons/icon-192.png` (the M tile)
+  animating `mlSpinStop` — one eased revolution in ~0.9s, then a ~0.8s rest,
+  repeating (spin · stop · spin · stop), 1.7s cycle, held still under
+  `prefers-reduced-motion`. **New code should call
+  `MLUI.loading("Loading jobs…")`** → an HTML string (inline mark + label);
+  `MLUI.loading(txt,{big:true})` is the large centred variant for a whole panel.
+  Existing pages need NO edit: there were ~196 "Loading…" strings across 82
+  pages written every which way (static HTML, innerHTML, textContent), so an
+  initial pass + a MutationObserver upgrade any element whose WHOLE text is a
+  loading phrase (`/^loading\b/i`, ≤34 chars, no element children), keeping the
+  original wording as the label so "Loading sites…" still reads. Ordinary prose
+  containing the word is untouched; `.ml-load` subtrees are skipped so it can't
+  recurse. **The component injects its OWN `<style id="ml-load-style">` rather
+  than riding the sidebar's `#pnav-style`** — that block is skipped inside
+  iframes (po.html embeds po-office.html), on auth/my-day pages and for Story
+  users, and without the CSS the mark renders as a raw 192px icon. Deliberately
+  scoped to "Loading" only — "Saving…" (×50, the autosave status lines) and the
+  few "Fetching…"/"Working…" are left alone.
 - **Embossed logo watermark** (added 14 Jul): one fixed `html::before` layer
   (`#mlEmbossCss`, `/Mostlane_Embossed.png`, z-index:-1, behind all content),
   so it shows on EVERY portal page without touching per-page `body`
