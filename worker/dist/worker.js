@@ -6555,6 +6555,7 @@ var SHEET_FIELDS = [
   { key: "engineer", label: "Engineer", m: true, c: true },
   { key: "description", label: "Job description", m: true, c: true },
   { key: "sla", label: "SLA status", m: true, c: false },
+  { key: "timeSpent", label: "Time on job (travel / on-site / total)", m: true, c: false },
   { key: "timeline", label: "Activity timeline", m: true, c: false },
   { key: "notes", label: "Engineer notes", m: true, c: true },
   { key: "riskAssessment", label: "Risk assessment", m: true, c: false },
