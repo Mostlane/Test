@@ -1486,6 +1486,48 @@ Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
 
+## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
+A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
+from the engineer's per-seal photos + a signed declaration, bundled with the
+product spec sheets for the materials used. **Tickable when raising a job**:
+add-job.html "🔥 Firestopping job" → `job.firestopping` (patchJob accepts it;
+ticking it sends requiresRA/Sig/Photo/Note=false — the RIA record IS the
+completion). **Completion gate:** `completionMissing()` short-circuits to
+`firestopMissing()` for firestopping jobs — needs ≥1 seal with before+after
+photos + a signed declaration (NOT the standard note/photo/signature).
+- **Record** lives on `job.firestop` = {ref, dateOfIssue, company, installer,
+  siteAddress, sealCategory, declaration, signatureKey, seals:[{id, location,
+  aperture, frp, manufacturer, componentName, comments, productIds[],
+  beforePhotos:[{key,url}], afterPhotos[]}]}. Photos in R2
+  `firestop/<tid>/<jobId>/<sealId>/<stage>-<ts>.jpg`; signature is sealId `_sig`.
+- **Config + materials** in app_config (`firestop_config` = company/sealCategory/
+  declaration/**nextRef** auto-sequence; `firestop_materials` = preset products
+  {id,manufacturer,name,category,docs:[{id,name,key}]}). Spec docs in R2
+  `firestopspec/<tid>/<productId>/`. RIA number auto-assigned from nextRef on
+  first save (padded to 5 digits, e.g. 00161), manual override honoured.
+- **Endpoints** (all `/sla/firestop/*`): config GET/POST (POST=SLA admin),
+  materials GET (session)/POST (admin), material-doc POST + material-doc-delete
+  (admin, R2), spec-file + photo-file GET (session OR signed), record GET
+  (returns record + header defaults + presets)/POST (saves `job.firestop`,
+  assigns ref), photo POST (multipart)/photo-delete, **pdf** GET (lib/firestoppdf.js
+  → application/pdf), **bundle** GET (lib/zip.js → ZIP: "RIA form N.pdf" at top +
+  "Product specification/" subfolder of each used product's docs).
+- **lib/firestoppdf.js** builds the RIA layout (header grid, declaration +
+  embedded signature, one bordered block per seal with fields + before/after
+  photo thumbnails, page numbers) via lib/pdf.js (JPEG images). **lib/zip.js** =
+  dependency-free STORED-zip writer (CRC32, folder paths in entry names) — no
+  Node zlib, WebCrypto-only. Both validated in Node (PDF opens, `unzip -t` OK).
+- **Front-end:** **firestop-form.js** = shared `window.MLFirestop.mount(el,{jobId,
+  mode:"engineer"|"office",api,token,patchComplete,onComplete})` — the whole RIA
+  UI (header, seals, product chips that autofill manufacturer/name, per-seal
+  before/after camera photos client-shrunk to JPEG, signature pad, autosave,
+  ⬇PDF/⬇Bundle, engineer "✅ Complete" that validates then PATCHes Complete).
+  **engineer-job.html** mounts it for firestopping jobs (replaces the standard
+  photo/note/signature/slider; status grid trimmed to Travelling/In Progress;
+  the photo/refresh/applyLock helpers are null-guarded). **job-view.html** mounts
+  it read-only + downloads. **firestop-admin.html** (🔥 Firestopping button on
+  sla-main, SLA-admin) manages config + products + spec-doc uploads.
+
 ## Projects (routes/projects-api.js + project-new.html / projects-live.html / project-hub.html — Aug 2026)
 A **first-class project record** that is the SPINE linking a job together — before
 this, programmes/RAMS/costing joined only by loose name strings. Permission

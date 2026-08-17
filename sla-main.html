@@ -226,6 +226,7 @@
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
         <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
         <a href="sla-data-tools.html" class="btn" id="dataToolsLink" style="display:none">🧰 Data</a>
+        <a href="firestop-admin.html" class="btn" id="firestopLink" style="display:none">🔥 Firestopping</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
       </div>
     </header>
@@ -239,6 +240,7 @@
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
           document.getElementById("dataToolsLink").style.display = "";
+          document.getElementById("firestopLink").style.display = "";
         }
         var isField = (function(){
           if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();

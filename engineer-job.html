@@ -9,6 +9,7 @@
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=15"></script>
+  <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -271,13 +272,22 @@
       if(dirDest) h+='<a class="tool" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(dirDest)+'">🗺️ Directions</a>';
       h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
     }
-    h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
-    h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
-    h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
-    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">Set status</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
-    h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
-    h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
-    h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    var fs = !!(job && job.firestopping);
+    if(!fs){
+      h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
+      h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
+      h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
+    }
+    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+(fs?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
+    if(fs){
+      // Firestopping jobs complete via the RIA form (per-seal photos + products +
+      // a signed declaration) — the shared component handles it + the download.
+      h+='<div class="card"><div id="firestopHost"></div></div>';
+    } else {
+      h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
+      h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
+      h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    }
     h+='<div class="card"><div class="sec-h"><span class="t">Activity</span></div><div class="tl" id="timeline"></div></div>';
     h+='<div id="editWrap" style="display:none;text-align:center;margin-top:6px"><button class="btn line" id="editBtn">✏️ Edit details (office)</button></div>';
     $("app").innerHTML=h;
@@ -285,7 +295,8 @@
   }
 
   function drawPhotos(){
-    var host=$("photos"),html="";
+    var host=$("photos"); if(!host) return;   // firestopping jobs use per-seal photos in the RIA panel
+    var html="";
     photos.forEach(function(p,i){
       var bg=p.publicURL?'background-image:url('+esc(p.publicURL)+')':'';
       var tag=p.stage?'<span class="tag">'+esc(p.stage.toUpperCase())+'</span>':'';
@@ -301,6 +312,9 @@
     // Projects have a slim status set — just Travelling · In Progress · Complete
     // (no On Hold / Quote packs).
     var list = STATUSES.filter(function(s){ return !(jobIsProject() && (s.n==="On Hold" || s.n==="Quote")); });
+    // Firestopping jobs are completed via the RIA panel, not the status grid —
+    // leave only the "start work" statuses here.
+    if(job && job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
     $("statusGrid").innerHTML=list.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
     [].forEach.call($("statusGrid").querySelectorAll(".sc"),function(el){ el.onclick=function(){ pick(el.dataset.n); }; });
   }
@@ -351,6 +365,7 @@
   }
   function refresh(){
     var wrap=$("completeWrap"),slide=$("slide");
+    if(!wrap||!slide) return;   // firestopping jobs complete via the RIA panel
     var miss = raDone? outcomeMissing():null;
     if(miss===null){ wrap.style.display="none"; return; }
     wrap.style.display="block";
@@ -370,7 +385,7 @@
   function applyLock(){
     var locked=!raDone;
     document.body.classList.toggle("ralock",locked);
-    $("note").readOnly=locked; drawPhotos();
+    var noteEl=$("note"); if(noteEl) noteEl.readOnly=locked; drawPhotos();
     var lb=$("lockBanner");
     if(locked){ lb.classList.add("show");
       if(reported){ $("lockMsg").innerHTML="Reported to the office — they've been alerted and will call you. You're held on this job until they respond. Retry the risk assessment once it's sorted."; $("lockGo").textContent="Retry risk assessment →"; lb.classList.add("reported"); }
@@ -380,21 +395,36 @@
   }
 
   function wire(){
+    var fs = !!(job && job.firestopping);
     $("backBtn").onclick=function(){ location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
-    $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
-    $("fileInput").addEventListener("change",uploadPhotos);
-    $("note").addEventListener("input",refresh);
-    $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
-    $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
+    if(!fs){
+      $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
+      $("fileInput").addEventListener("change",uploadPhotos);
+      $("note").addEventListener("input",refresh);
+      $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
+      $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
+      var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
+      knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
+      knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
+      knob.addEventListener("pointerup",function(){dg=false;});
+      slide.addEventListener("click",function(){if(!slide.classList.contains("locked"))doFinish();});
+    }
     $("lockGo").onclick=openRA;
-    var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
-    knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
-    knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
-    knob.addEventListener("pointerup",function(){dg=false;});
-    slide.addEventListener("click",function(){if(!slide.classList.contains("locked"))doFinish();});
     fillPoButton(); setupOfficeEdit();
     drawStatus(); drawTimeline(); applyLock();
+    if(fs) mountFirestop();
+  }
+  var fsMounted=false;
+  function mountFirestop(){
+    var host=$("firestopHost"); if(!host || fsMounted || !window.MLFirestop) return;
+    fsMounted=true;
+    window.MLFirestop.mount(host, {
+      jobId: jobId, mode: "engineer",
+      api: (window.MOSTLANE_API || MOSTLANE_API), token: localStorage.getItem("mostlaneToken"),
+      patchComplete: function(){ return patchJob({status:"Complete"}); },
+      onComplete: function(){ toast("Firestopping job completed"); setTimeout(function(){ location.href=backTo; }, 1200); }
+    });
   }
   async function fillPoButton(){
     var btn=$("poBtn"); if(!btn) return;
