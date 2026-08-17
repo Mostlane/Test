@@ -30,6 +30,8 @@
     .docrow .nm{flex:1;}
     .msg{font-size:13px;margin:8px 0 0;} .msg.err{color:var(--bad);} .msg.ok{color:var(--ok);}
     .pill{display:inline-block;background:#eef4ff;color:var(--brand);border:1px solid #cdddf5;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;}
+    .dropzone{border:1px dashed transparent;border-radius:9px;padding:6px;transition:background .12s,border-color .12s;}
+    .dropzone.over{border-color:var(--brand);background:#eef4ff;} .dropzone.over .dz-hint{color:var(--brand);}
   </style>
 </head>
 <body>
@@ -111,12 +113,29 @@
           <div style="margin-top:8px;">
             ${(m.docs || []).map(d => `<div class="docrow"><span class="nm">📄 <a href="#" data-open="${esc(d.url)}" data-name="${esc(d.name)}" style="text-decoration:none;">${esc(d.name)}</a></span><button class="btn grey small" data-deldoc="${esc(m.id)}|${esc(d.id)}">✕</button></div>`).join("") || `<div class="muted" style="font-size:12.5px;">No spec documents yet.</div>`}
           </div>
-          <div style="margin-top:8px;"><button class="btn ghost small" data-upload="${esc(m.id)}">📎 Add spec document</button></div>
+          <div class="dropzone" data-drop="${esc(m.id)}" style="margin-top:8px;">
+            <button class="btn ghost small" data-upload="${esc(m.id)}">📎 Add spec document</button>
+            <span class="muted dz-hint" style="font-size:12px;margin-left:6px;">or drop a file here</span>
+          </div>
         </div>`).join("");
       box.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault(); if (window.MLDocViewer) MLDocViewer.open(a.dataset.open, a.dataset.name); else window.open(a.dataset.open, "_blank"); });
       box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => delProduct(b.dataset.del));
       box.querySelectorAll("[data-deldoc]").forEach(b => b.onclick = () => { const [pid, did] = b.dataset.deldoc.split("|"); delDoc(pid, did); });
       box.querySelectorAll("[data-upload]").forEach(b => b.onclick = () => uploadDoc(b.dataset.upload));
+      // Drag-and-drop onto a product card uploads to that product.
+      box.querySelectorAll("[data-drop]").forEach(dz => {
+        const pid = dz.dataset.drop;
+        dz.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; dz.classList.add("over"); });
+        dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+        dz.addEventListener("drop", async e => {
+          e.preventDefault(); dz.classList.remove("over");
+          const files = [...(e.dataTransfer.files || [])];
+          if (!files.length) return;
+          const hint = dz.querySelector(".dz-hint"); if (hint) hint.textContent = "Uploading…";
+          for (const f of files) await uploadFile(pid, f);
+          await reloadMaterials();
+        });
+      });
     }
 
     async function saveConfig() {
@@ -142,12 +161,15 @@
       await authFetch("/sla/firestop/material-doc-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ productId: pid, docId: did }) });
       await reloadMaterials();
     }
+    async function uploadFile(pid, file) {
+      const fd = new FormData(); fd.append("file", file); fd.append("productId", pid);
+      await authFetch("/sla/firestop/material-doc", { method:"POST", body: fd });
+    }
     function uploadDoc(pid) {
-      const inp = document.createElement("input"); inp.type = "file";
+      const inp = document.createElement("input"); inp.type = "file"; inp.multiple = true;
       inp.onchange = async () => {
-        if (!inp.files[0]) return;
-        const fd = new FormData(); fd.append("file", inp.files[0]); fd.append("productId", pid);
-        await authFetch("/sla/firestop/material-doc", { method:"POST", body: fd });
+        if (!inp.files.length) return;
+        for (const f of inp.files) await uploadFile(pid, f);
         await reloadMaterials();
       };
       inp.click();
