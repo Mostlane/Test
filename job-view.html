@@ -410,6 +410,10 @@
     }
     html,body{ background:var(--ml-bg); }
     .shell{ max-width:560px; margin:0 auto; padding:16px 14px 46px; }
+    /* This is the OFFICE job view (opened on desktop from the SLA board /
+       scheduler). The mobile-first restyle above clamped it to 560px at EVERY
+       width; widen it on desktop so it isn't stuck mobile-narrow. */
+    @media(min-width:769px){ .shell{ max-width:1000px; padding:20px 22px 46px; } }
     .card{
       background:#fff; border:1px solid var(--border); border-radius:var(--radius);
       box-shadow:var(--shadow); padding:16px; margin-bottom:14px;
