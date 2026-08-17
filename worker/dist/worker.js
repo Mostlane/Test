@@ -18968,7 +18968,7 @@ var M = 26;
 var ROW_H = 14.5;
 var HDR_H = 22;
 var COLS = [
-  // fixed left columns
+  // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
   { key: "contractor", label: "Contractor", w: 62 },
   { key: "start", label: "Start", w: 36 },
@@ -18978,6 +18978,15 @@ var COLS = [
 var LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
 var GRID_X = M + LEFT_W;
 var GRID_W = PW - M - GRID_X;
+var WORKS_DEFAULT_PX = 230;
+var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
+function applyWorksWidth(worksW) {
+  const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
+  COLS[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
+  LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
+  GRID_X = M + LEFT_W;
+  GRID_W = PW - M - GRID_X;
+}
 var MIN_DAY_W = 6.5;
 var DAY = 864e5;
 var p2 = (n) => String(n).padStart(2, "0");
@@ -19015,11 +19024,12 @@ function endOf(t, hs) {
 function fitText(str, w, size) {
   let s = String(str || "");
   if (textWidth(s, size) <= w) return s;
-  while (s.length > 1 && textWidth(s + "\u2026", size) > w) s = s.slice(0, -1);
-  return s + "\u2026";
+  while (s.length > 1 && textWidth(s + "...", size) > w) s = s.slice(0, -1);
+  return s + "...";
 }
 function buildProgrammePdf(data, meta = {}) {
   data = data || {};
+  applyWorksWidth(data.worksW);
   const contractors = Array.isArray(data.contractors) ? data.contractors : [];
   const byC = {};
   for (const c of contractors) byC[c.id] = c;
