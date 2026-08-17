@@ -1406,6 +1406,19 @@ plain-English message when the secret is missing / the key is rejected / the
 model isn't available on the key (tells Jamie exactly what to add in the
 dashboard). Pair it with the builder's **"Auto-order"** button (sorts task lines
 by start date so a drafted or hand-built list staggers correctly).
+**Date-shift tools + AI edit (Aug 2026):** the builder toolbar adds **🗓 Shift
+dates** (a modal: move the WHOLE programme to a new start date or by ±N days;
+or **move one task to a date and ripple every task starting on/after its
+original date** by the same delta, keeping the sequence — pure client-side date
+maths, `dParse`/`addDaysISO`/`daysBetween`), a single-level **↩ Undo** (stashes
+a JSON snapshot before any shift/AI edit), and an **"✨ Ask AI" edit box** — a
+plain-English instruction ("compress into two weeks", "push everything back a
+week", "make the M&E take 5 days") POSTed with the current draft to **POST
+/prog/ai-edit** (Programmes|FullAccess). That endpoint (shared `anthropicStructured`
+helper, forced `revise_programme` tool → full revised programme with absolute
+`start` YYYY-MM-DD + working `days` + `wknd`/milestone) returns a complete revised
+programme the client adopts into the DRAFT (issued revisions untouched; contractor
+COLOURS preserved by matching names to the existing legend). Undo reverts it.
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
 snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 `holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in

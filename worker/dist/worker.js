@@ -19292,6 +19292,48 @@ function pdfResponse(cors, bytes, filename) {
     }
   });
 }
+async function anthropicStructured(env, { system, userContent, schema, toolName, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let apiResp;
+  try {
+    apiResp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens || 8e3,
+        system,
+        tools: [{ name: toolName, description: "Return the result.", input_schema: schema }],
+        tool_choice: { type: "tool", name: toolName },
+        messages: [{ role: "user", content: userContent }]
+      })
+    });
+  } catch (e) {
+    return { ok: false, code: 502, error: "Couldn't reach the AI service. Try again in a moment." };
+  }
+  if (!apiResp.ok) {
+    let detail = "";
+    try {
+      const j = await apiResp.json();
+      detail = j?.error?.message || "";
+    } catch {
+    }
+    if (apiResp.status === 401 || apiResp.status === 403) return { ok: false, code: 400, error: "The AI key was rejected. Check the ANTHROPIC_API_KEY secret on the worker." };
+    if (apiResp.status === 404 && /model/i.test(detail)) return { ok: false, code: 400, error: `The AI model "${model}" isn't available on this key. Set ANTHROPIC_MODEL on the worker to one you can use.` };
+    return { ok: false, code: 502, error: "The AI service returned an error" + (detail ? ": " + detail : ".") };
+  }
+  let payload;
+  try {
+    payload = await apiResp.json();
+  } catch {
+    return { ok: false, code: 502, error: "The AI service returned an unreadable response." };
+  }
+  if (payload.stop_reason === "refusal") return { ok: false, code: 400, error: "The AI declined that request." };
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
+  return { ok: true, input: block.input };
+}
 async function handle29(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
@@ -19675,6 +19717,87 @@ async function handle29(request, env, ctx, url) {
     await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
       VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, data.title, data.client, data.site, JSON.stringify(data), me, now, now, me).run();
     return json3({ ok: true, id, taskCount: tasks.length, contractors: contractors.length });
+  }
+  if (method === "POST" && pathname === "/prog/ai-edit") {
+    if (!env.ANTHROPIC_API_KEY) return json3({ ok: false, error: "AI editing isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
+    const b = await request.json().catch(() => ({}));
+    const instruction = String(b.instruction || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 2e3);
+    if (instruction.length < 2) return json3({ ok: false, error: `Type what you'd like changed (e.g. "compress into two weeks").` }, 400);
+    const cur = cleanData(b.data);
+    if (cur.error) return json3({ ok: false, error: cur.error }, 400);
+    const src = cur.obj;
+    const srcTasks = Array.isArray(src.tasks) ? src.tasks : [];
+    if (!srcTasks.length) return json3({ ok: false, error: "There are no tasks to edit yet." }, 400);
+    const conById = {}, colourByName = {};
+    for (const c of src.contractors || []) {
+      if (c && c.id) {
+        conById[c.id] = c.name || "";
+        if (c.name) colourByName[String(c.name).toLowerCase()] = c.colour;
+      }
+    }
+    const compact = {
+      title: src.title || "",
+      contractors: (src.contractors || []).map((c) => c && c.name).filter(Boolean),
+      tasks: srcTasks.map((t) => ({ name: t.name || "", contractor: conById[t.contractor] || "", start: t.start || "", days: Math.max(1, Number(t.days) || 1), wknd: !!t.wknd, milestone: !!t.milestone }))
+    };
+    const schema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        contractors: { type: "array", items: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } },
+        tasks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              contractor: { type: "string", description: "Contractor name doing this task." },
+              start: { type: "string", description: "Start date, YYYY-MM-DD." },
+              days: { type: "integer", description: "Duration in working days (at least 1)." },
+              wknd: { type: "boolean", description: "True if this task works through weekends." },
+              milestone: { type: "boolean" }
+            },
+            required: ["name", "start", "days"]
+          }
+        }
+      },
+      required: ["tasks"]
+    };
+    const sys = "You edit an existing UK construction programme of works (a Gantt schedule) according to the user's instruction. Return the COMPLETE revised programme - every task, not just the ones you changed. Preserve tasks, dates, durations and contractors the instruction doesn't touch. Dates are calendar dates in YYYY-MM-DD; durations are in WORKING DAYS (weekends aren't worked unless a task's wknd flag is true). Keep tasks in a sensible sequence so dependent work follows on and things don't overlap unrealistically. When asked to compress or expand the programme to a target length, rescale the start dates and, only if needed, the durations to fit while keeping the order.";
+    const userContent = "CURRENT PROGRAMME (JSON):\n" + JSON.stringify(compact) + "\n\nINSTRUCTION:\n" + instruction;
+    const r = await anthropicStructured(env, { system: sys, userContent, schema, toolName: "revise_programme" });
+    if (!r.ok) return json3({ ok: false, error: r.error }, r.code || 502);
+    const out = r.input;
+    if (!Array.isArray(out.tasks) || !out.tasks.length) return json3({ ok: false, error: "The AI returned no tasks." }, 422);
+    const PALETTE = ["#00B0F0", "#92D050", "#FFC000", "#852C98", "#7F7F7F", "#e0344b", "#0369a1", "#b45309"];
+    const uid = () => "c" + Math.random().toString(36).slice(2, 8);
+    const conByName = /* @__PURE__ */ new Map(), contractors = [];
+    const addCon = (nm) => {
+      const name = String(nm || "").trim().slice(0, 60);
+      if (!name) return null;
+      const k = name.toLowerCase();
+      if (conByName.has(k)) return conByName.get(k);
+      const colour = colourByName[k] || PALETTE[contractors.length % PALETTE.length];
+      const c = { id: uid(), name, colour };
+      contractors.push(c);
+      conByName.set(k, c);
+      return c;
+    };
+    for (const c of out.contractors || []) addCon(c && c.name);
+    const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+    const tasks = [];
+    for (const t of out.tasks) {
+      const name = String(t?.name || "").trim().slice(0, 200);
+      if (!name) continue;
+      const con = t?.contractor ? addCon(t.contractor) : null;
+      const start = isDate(t?.start) ? t.start : "";
+      const days = Math.max(1, Math.min(365, Number(t?.days) || 1));
+      tasks.push({ id: uid(), name, contractor: con ? con.id : "", start, days, wknd: !!t?.wknd, progress: 0, milestone: !!t?.milestone });
+    }
+    if (!tasks.length) return json3({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
+    if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
+    const data = { ...src, title: String(out.title || src.title || "").slice(0, 200) || "Programme of works", contractors, tasks };
+    return json3({ ok: true, data, taskCount: tasks.length });
   }
   if (method === "POST" && pathname === "/prog/delete") {
     const b = await request.json().catch(() => ({}));

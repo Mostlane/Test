@@ -88,10 +88,18 @@
     </div>
 
     <div class="card" style="padding:10px;">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
         <button class="btn ghost" onclick="autoOrder()" title="Sort the task rows by start date so the programme cascades in order">⇅ Auto-order rows</button>
-        <span class="muted">Puts the rows in start-date order so they stagger down the page (earliest first).</span>
+        <button class="btn ghost" onclick="openShift()" title="Move the whole programme, or move one task and ripple the rest">🗓 Shift dates</button>
+        <button class="btn ghost" id="undoBtn" onclick="undoEdit()" style="display:none;" title="Undo the last shift or AI change">↩ Undo</button>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:4px;">
+        <input id="aiEditText" placeholder="Ask AI to change the programme — e.g. compress into two weeks, push everything back a week…"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();askAiEdit();}"
+          style="flex:1;min-width:220px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font:14px 'Segoe UI';">
+        <button class="btn" id="aiEditGo" style="background:#1A4F8F;color:#fff;" onclick="askAiEdit()">✨ Ask AI</button>
+      </div>
+      <div id="aiEditStat" class="muted" style="min-height:15px;margin-bottom:6px;"></div>
       <div class="fchips" id="fchips"></div>
       <div id="gantt"></div>
     </div>
@@ -131,6 +139,37 @@
       <label>Revision note (optional)</label><input id="issueNote" placeholder="e.g. First issue / Client comments incorporated">
       <div class="mfoot"><button class="btn ghost" onclick="closeM('issueBackdrop')">Cancel</button>
         <button class="btn green" onclick="doIssue()">Issue now</button></div>
+    </div>
+  </div>
+
+  <!-- Shift dates -->
+  <div class="backdrop" id="shiftBackdrop">
+    <div class="modal">
+      <h2>🗓 Shift dates</h2>
+      <div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:12px;">
+        <b>Move the whole programme</b>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px;">
+          <div><label style="margin:0;">Start it on</label><input type="date" id="shiftStart"></div>
+          <button class="btn primary" onclick="applyShiftStart()">Apply</button>
+          <span class="muted">shifts every task by the same amount</span>
+        </div>
+        <div class="muted" style="margin:10px 0 6px;">— or —</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div><label style="margin:0;">Shift everyone by (days)</label><input type="number" id="shiftDays" value="7" style="width:110px;"></div>
+          <button class="btn primary" onclick="applyShiftDays()">Apply</button>
+          <span class="muted">use a minus number to bring forward</span>
+        </div>
+      </div>
+      <div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;">
+        <b>Move one task — and everything after it</b>
+        <div class="muted" style="margin:3px 0 8px;">Every task starting on or after that task's current date shifts by the same amount, keeping the sequence.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="flex:1;min-width:180px;"><label style="margin:0;">Task</label><select id="shiftTask" style="width:100%;"></select></div>
+          <div><label style="margin:0;">Move to</label><input type="date" id="shiftTaskDate"></div>
+          <button class="btn primary" onclick="applyShiftTask()">Apply</button>
+        </div>
+      </div>
+      <div class="mfoot"><button class="btn ghost" onclick="closeM('shiftBackdrop')">Close</button></div>
     </div>
   </div>
 
@@ -316,6 +355,72 @@
     (DATA.tasks||[]).forEach(t=> delete t.__i);
     drawGantt(); queueSave();
     alert("Rows ordered by start date ✓");
+  }
+
+  // ── Date-shift tools + single-level undo ───────────────────────────────
+  const dParse = s => { const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||"")); if(!m) return null; const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3],12)); return isNaN(d)?null:d; };
+  const dYmd = d => d.toISOString().slice(0,10);
+  const addDaysISO = (iso,n) => { const d=dParse(iso); if(!d) return iso; d.setUTCDate(d.getUTCDate()+(n|0)); return dYmd(d); };
+  const daysBetween = (a,b) => { const da=dParse(a), db=dParse(b); if(!da||!db) return 0; return Math.round((db-da)/86400000); };
+  function earliestStart(){ let best=null; for(const t of (DATA.tasks||[])){ const d=dParse(t.start); if(d && (!best || d<best)) best=d; } return best?dYmd(best):""; }
+
+  let UNDO=null;
+  function snapshot(){ UNDO=JSON.stringify(DATA); g("undoBtn").style.display=""; }
+  function undoEdit(){ if(!UNDO) return; try{ DATA=JSON.parse(UNDO); }catch(e){ return; } UNDO=null; g("undoBtn").style.display="none"; drawGantt(); queueSave(); alert("Reverted the last change ✓"); }
+
+  function shiftAllBy(n){ (DATA.tasks||[]).forEach(t=>{ if(t.start) t.start=addDaysISO(t.start,n); }); }
+  function openShift(){
+    const e=earliestStart(); g("shiftStart").value=e||"";
+    const sel=g("shiftTask"); sel.innerHTML="";
+    (DATA.tasks||[]).forEach((t,i)=>{ const o=document.createElement("option"); o.value=String(i); o.textContent=(t.name||"(unnamed)")+(t.start?" · "+t.start:""); sel.appendChild(o); });
+    g("shiftTaskDate").value="";
+    openM("shiftBackdrop");
+  }
+  function applyShiftDays(){
+    const n=parseInt(g("shiftDays").value,10); if(!n){ alert("Enter a number of days (e.g. 7, or -3 to bring forward)."); return; }
+    snapshot(); shiftAllBy(n); drawGantt(); queueSave(); closeM("shiftBackdrop");
+    alert("Whole programme shifted "+(n>0?"+":"")+n+" day"+(Math.abs(n)===1?"":"s")+" ✓");
+  }
+  function applyShiftStart(){
+    const target=g("shiftStart").value; if(!dParse(target)){ alert("Pick a start date first."); return; }
+    const e=earliestStart(); if(!e){ alert("No dated tasks to move yet."); return; }
+    const n=daysBetween(e,target); if(!n){ alert("That's already the start date."); return; }
+    snapshot(); shiftAllBy(n); drawGantt(); queueSave(); closeM("shiftBackdrop");
+    alert("Programme moved to start "+target+" ✓");
+  }
+  function applyShiftTask(){
+    const idx=parseInt(g("shiftTask").value,10); const target=g("shiftTaskDate").value;
+    const t=(DATA.tasks||[])[idx]; if(!t){ alert("Pick a task."); return; }
+    if(!dParse(target)){ alert("Pick the date to move it to."); return; }
+    if(!dParse(t.start)){ alert("That task has no start date yet — set one on its row first."); return; }
+    const n=daysBetween(t.start,target); if(!n){ alert("That's already its date."); return; }
+    const cutoff=dParse(t.start).getTime();
+    snapshot();
+    (DATA.tasks||[]).forEach(x=>{ const d=dParse(x.start); if(d && d.getTime()>=cutoff) x.start=addDaysISO(x.start,n); });
+    drawGantt(); queueSave(); closeM("shiftBackdrop");
+    alert("Moved “"+(t.name||"task")+"” and everything after it "+(n>0?"+":"")+n+" day"+(Math.abs(n)===1?"":"s")+" ✓");
+  }
+
+  // ── AI edit: change the programme by a plain-English instruction ────────
+  async function askAiEdit(){
+    const instruction=g("aiEditText").value.trim();
+    const st=g("aiEditStat");
+    if(instruction.length<2){ st.style.color="#b91c1c"; st.textContent="Type what you'd like changed first."; return; }
+    if(!(DATA.tasks||[]).length){ st.style.color="#b91c1c"; st.textContent="Add some tasks first, then ask the AI to change them."; return; }
+    const btn=g("aiEditGo"); btn.disabled=true; const old=btn.textContent; btn.textContent="Thinking…";
+    st.style.color="#5b6b78"; st.textContent="Claude is revising the programme…";
+    try{
+      const r=await aFetch("/prog/ai-edit",{method:"POST",body:JSON.stringify({ id:PROG_ID||"", instruction, data:DATA })});
+      const d=await r.json().catch(()=>({}));
+      if(!d.ok){ st.style.color="#b91c1c"; st.textContent=d.error||("Couldn't apply that (HTTP "+r.status+")."); btn.disabled=false; btn.textContent=old; return; }
+      snapshot();
+      DATA=MLProg.migrate(d.data)||DATA;
+      drawGantt(); renderContractors(); queueSave();
+      g("aiEditText").value="";
+      st.style.color="#166534"; st.textContent="✓ Updated ("+(d.taskCount||(DATA.tasks||[]).length)+" tasks). Not happy? Press ↩ Undo. Issue when you're ready.";
+      alert("Programme updated by AI ✓ — review it, then Issue when happy");
+    }catch(e){ st.style.color="#b91c1c"; st.textContent="Couldn't reach the server — check your signal and try again."; }
+    finally{ btn.disabled=false; btn.textContent=old; }
   }
 
   function renderRevState(){
