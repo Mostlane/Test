@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Project</title>
+  <script src="/portal-config.js?v=5"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:760px; margin:14px auto 80px; padding:0 12px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px; margin-bottom:14px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:10px 15px; font-size:15px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.green { background:var(--ok); } .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+    .btn.small { padding:7px 11px; font-size:13.5px; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .muted { color:#6b7a90; } .hide { display:none !important; }
+    label { display:block; font-size:13px; font-weight:600; margin:12px 0 4px; }
+    input[type=text],input[type=number],input[type=search],select,textarea { width:100%; padding:10px; border:1px solid #ccd5dd; border-radius:9px; font-size:15px; font-family:inherit; }
+    textarea { min-height:80px; resize:vertical; }
+    /* Step progress */
+    .steps { display:flex; gap:8px; margin-bottom:14px; }
+    .steps .s { flex:1; text-align:center; font-size:12px; font-weight:700; color:#8a97a6; padding:8px 4px; border-radius:9px; background:#fff; border:1px solid var(--line); }
+    .steps .s.on { background:var(--brand); color:#fff; border-color:var(--brand); }
+    .steps .s.done { color:var(--ok); border-color:#bfe3c9; }
+    .choice { display:flex; gap:10px; margin:6px 0 4px; flex-wrap:wrap; }
+    .choice button { flex:1 1 200px; padding:14px; border-radius:12px; border:2px solid var(--line); background:#fff; font:600 15px inherit; cursor:pointer; text-align:left; }
+    .choice button.on { border-color:var(--brand); background:#eef4ff; }
+    .choice button .sub { display:block; font-weight:400; font-size:12.5px; color:#6b7a90; margin-top:3px; }
+    #map { height:260px; border-radius:12px; border:1px solid var(--line); margin-top:8px; }
+    .row2 { display:flex; gap:10px; flex-wrap:wrap; } .row2 > div { flex:1 1 160px; }
+    .tick { display:flex; align-items:flex-start; gap:10px; padding:11px; border:1px solid var(--line); border-radius:11px; margin-bottom:8px; cursor:pointer; }
+    .tick input { width:20px; height:20px; margin-top:1px; flex:none; }
+    .tick b { font-size:14.5px; } .tick .d { font-size:12.5px; color:#6b7a90; }
+    .pill { display:inline-flex; align-items:center; gap:6px; background:#eef4ff; color:var(--brand); border:1px solid #cdddf5; border-radius:999px; padding:5px 10px; font-size:13px; font-weight:600; margin:3px 5px 3px 0; }
+    .pill button { background:none; border:none; color:var(--brand); cursor:pointer; font-size:14px; padding:0; line-height:1; }
+    .sug { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+    .sug button { background:#f1f5f9; border:1px solid #dbe3ec; border-radius:999px; padding:5px 10px; font:600 13px inherit; cursor:pointer; }
+    .navbtns { display:flex; justify-content:space-between; gap:10px; margin-top:8px; }
+    .msg { font-size:13.5px; margin:10px 0 0; } .msg.err { color:var(--bad); } .msg.ok { color:var(--ok); }
+    .found { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:11px; margin-top:6px; }
+    .found div { padding:9px 11px; border-top:1px solid #f0f3f7; cursor:pointer; font-size:14px; }
+    .found div:first-child { border-top:none; } .found div:hover { background:#eef4ff; }
+    .found .n { color:#8a97a6; font-size:12.5px; }
+    .kv { font-size:13.5px; margin:3px 0; } .kv b { color:#334155; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/projects-live.html" style="text-decoration:none;">‹ Back</a>
+    <h1>➕ New Project</h1>
+  </header>
+  <div class="wrap">
+    <div class="steps">
+      <div class="s on" data-step="1">1 · Site &amp; project</div>
+      <div class="s" data-step="2">2 · Documents</div>
+      <div class="s" data-step="3">3 · SiteLog</div>
+      <div class="s" data-step="4">4 · Review</div>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="card" id="step1">
+      <h2 style="margin:0 0 8px;">Site</h2>
+      <div class="choice">
+        <button id="chExisting" type="button">📍 Existing site<span class="sub">Pick a site you already have — its location is copied</span></button>
+        <button id="chNew" type="button">🆕 New site<span class="sub">Create a brand-new site here</span></button>
+      </div>
+
+      <div id="existingBox" class="hide">
+        <label>Search your sites</label>
+        <input type="search" id="siteSearch" placeholder="Type a site name or number…">
+        <div class="found hide" id="siteFound"></div>
+        <div id="pickedSite" class="hide" style="margin-top:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px;">
+          <b id="pickedName"></b> <span class="muted" id="pickedMeta"></span>
+        </div>
+      </div>
+
+      <div id="newBox" class="hide">
+        <label>Site / location name</label>
+        <input type="text" id="newSiteName" placeholder="e.g. Old Mill Refurbishment, Fareham">
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0;">
+      <h2 style="margin:0 0 8px;">Project</h2>
+      <label>Project name</label>
+      <input type="text" id="projName" placeholder="Name this project">
+      <div class="row2">
+        <div>
+          <label>Project number</label>
+          <input type="text" id="projNumber" placeholder="P0001">
+          <div class="muted" style="font-size:12px;margin-top:3px;">Auto-assigned — editable if you need a specific one.</div>
+        </div>
+        <div>
+          <label>Postcode</label>
+          <input type="text" id="postcode" placeholder="e.g. PO15 5RQ">
+        </div>
+      </div>
+
+      <label>Location (drop the pin for the SiteLog geofence)</label>
+      <div class="row2">
+        <div><button class="btn ghost small" id="btnLocate" type="button">📍 From postcode</button></div>
+        <div class="kv" id="coordLine">No location set yet.</div>
+      </div>
+      <div id="map"></div>
+      <div class="kv" id="mileLine" style="margin-top:8px;"></div>
+
+      <div class="navbtns">
+        <span></span>
+        <button class="btn" id="to2" type="button" disabled>Next: Documents →</button>
+      </div>
+      <p class="msg" id="msg1"></p>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="card hide" id="step2">
+      <h2 style="margin:0 0 4px;">What does this project need?</h2>
+      <p class="muted" style="font-size:13px;margin:0 0 12px;">Tick everything to build. You can add or remove these later from the project page.</p>
+      <label class="tick"><input type="checkbox" id="req_programme"><span><b>Programme of works</b><div class="d">A Gantt programme you can issue &amp; share with the client.</div></span></label>
+      <label class="tick"><input type="checkbox" id="req_rams"><span><b>Risk Assessment (RAMS)</b><div class="d">A method statement &amp; risk assessment, signed off on site.</div></span></label>
+      <label class="tick"><input type="checkbox" id="req_cpp"><span><b>Construction Phase Plan</b><div class="d">Opens the CPH&amp;S Plan builder, pre-filled with this project.</div></span></label>
+      <label class="tick"><input type="checkbox" id="req_valuations"><span><b>Valuations</b><div class="d">Track contract value, valuations, profit &amp; retention.</div></span></label>
+      <label class="tick"><input type="checkbox" id="req_projectDocs"><span><b>Project Documents</b><div class="d">A document folder engineers (with permission) can view.</div></span></label>
+      <div id="valBox" class="hide" style="margin-top:6px;">
+        <label>Contract value (£, optional — you can add it later)</label>
+        <input type="number" id="contractValue" placeholder="e.g. 48000" min="0" step="1">
+      </div>
+      <div class="navbtns">
+        <button class="btn grey" id="back1" type="button">← Back</button>
+        <button class="btn" id="to3" type="button">Next: SiteLog →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="card hide" id="step3">
+      <h2 style="margin:0 0 4px;">SiteLog setup</h2>
+      <p class="muted" style="font-size:13px;margin:0 0 8px;">What should SiteLog show people when they check in on site?</p>
+      <label>Arrival message — everyone</label>
+      <textarea id="slRules" placeholder="One rule per line, e.g.&#10;Sign in at the site office&#10;Hi-vis &amp; boots required beyond this point&#10;Speed limit 5mph"></textarea>
+      <label>Extra message — visitors only (optional)</label>
+      <textarea id="slVisitor" placeholder="Anything specific to visitors (optional)"></textarea>
+
+      <label>Companies on site</label>
+      <div class="sug" id="coSug"></div>
+      <div class="row2" style="margin-top:6px;">
+        <div><input type="text" id="coInput" placeholder="Add a company / contractor…"></div>
+        <div style="flex:0 0 auto;"><button class="btn ghost small" id="coAdd" type="button">＋ Add</button></div>
+      </div>
+      <div id="coList" style="margin-top:8px;"></div>
+
+      <div class="navbtns">
+        <button class="btn grey" id="back2" type="button">← Back</button>
+        <button class="btn" id="to4" type="button">Next: Review →</button>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="card hide" id="step4">
+      <h2 style="margin:0 0 8px;">Review &amp; create</h2>
+      <div id="review"></div>
+      <div class="navbtns">
+        <button class="btn grey" id="back3" type="button">← Back</button>
+        <button class="btn green" id="createBtn" type="button">✅ Create project</button>
+      </div>
+      <p class="msg" id="msg4"></p>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch((path.startsWith("http") ? path : API + path), opts);
+    }
+    const HQ = "PO15 5RQ";
+    const state = { mode: "", existing: null, lat: null, lon: null, companies: [], number: "" };
+
+    // ── Access gate ─────────────────────────────────────────────────────────
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.ProjectsAdmin === "Yes")) {
+          alert("Creating projects needs Projects Admin or Full Access."); location.href = "/projects-live.html"; return;
+        }
+      } catch (e) { location.href = "/main.html"; return; }
+      // Pre-fetch the next project number.
+      try { const n = await authFetch("/next-project-job-number").then(r => r.json()); state.number = n.next || ""; g("projNumber").value = state.number; } catch {}
+      loadCompanySuggestions();
+    })();
+
+    // ── Map ─────────────────────────────────────────────────────────────────
+    let map, marker;
+    function initMap() {
+      if (map) { setTimeout(() => map.invalidateSize(), 50); return; }
+      map = L.map("map").setView([50.85, -1.18], 10);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        attribution: "© OpenStreetMap © CARTO", maxZoom: 19,
+      }).addTo(map);
+      map.on("click", e => setPin(e.latlng.lat, e.latlng.lng));
+      setTimeout(() => map.invalidateSize(), 60);
+    }
+    function setPin(lat, lon, recentre) {
+      state.lat = +(+lat).toFixed(6); state.lon = +(+lon).toFixed(6);
+      if (!marker) { marker = L.marker([lat, lon], { draggable: true }).addTo(map); marker.on("dragend", () => { const p = marker.getLatLng(); setPin(p.lat, p.lng); }); }
+      else marker.setLatLng([lat, lon]);
+      if (recentre) map.setView([lat, lon], 16);
+      g("coordLine").innerHTML = `📍 <b>${state.lat}, ${state.lon}</b>`;
+      calcMileage();
+      validateStep1();
+    }
+    async function geocode(pc) {
+      pc = String(pc || "").trim(); if (!pc) return null;
+      try {
+        const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc)).then(r => r.json());
+        if (r && r.result) return { lat: r.result.latitude, lon: r.result.longitude };
+      } catch {}
+      return null;
+    }
+    g("btnLocate").onclick = async () => {
+      const pc = g("postcode").value.trim();
+      if (!pc) { flash("msg1", "Enter a postcode first.", true); return; }
+      const p = await geocode(pc);
+      if (!p) { flash("msg1", "Couldn't find that postcode.", true); return; }
+      setPin(p.lat, p.lon, true); flash("msg1", "", false);
+    };
+    function haversine(a, b) {
+      const R = 3958.8, toR = d => d * Math.PI / 180;
+      const dLat = toR(b.lat - a.lat), dLon = toR(b.lon - a.lon);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.asin(Math.sqrt(s));
+    }
+    let HQ_LL = null;
+    async function calcMileage() {
+      if (state.lat == null) { g("mileLine").textContent = ""; return; }
+      if (!HQ_LL) HQ_LL = await geocode(HQ);
+      if (!HQ_LL) { g("mileLine").textContent = ""; return; }
+      const straight = haversine(HQ_LL, { lat: state.lat, lon: state.lon });
+      state.mileOneWay = Math.round(straight * 1.25 * 10) / 10;
+      state.mileRound = Math.round(straight * 1.25 * 2 * 10) / 10;
+      g("mileLine").innerHTML = `🚗 Mileage from HQ (${HQ}): <b>${state.mileRound} mi round trip</b> <span class="muted">(${state.mileOneWay} mi each way, estimated)</span>`;
+    }
+
+    // ── Step 1: site choice ───────────────────────────────────────────────────
+    g("chExisting").onclick = () => { state.mode = "existing"; g("chExisting").classList.add("on"); g("chNew").classList.remove("on"); g("existingBox").classList.remove("hide"); g("newBox").classList.add("hide"); initMap(); validateStep1(); };
+    g("chNew").onclick = () => { state.mode = "new"; g("chNew").classList.add("on"); g("chExisting").classList.remove("on"); g("newBox").classList.remove("hide"); g("existingBox").classList.add("hide"); initMap(); validateStep1(); };
+
+    let ALL_SITES = [];
+    async function loadSites() { if (ALL_SITES.length) return; try { ALL_SITES = await authFetch("/get-sites?category=all").then(r => r.json()); } catch { ALL_SITES = []; } }
+    g("siteSearch").addEventListener("input", async e => {
+      await loadSites();
+      const q = e.target.value.toLowerCase().trim();
+      const box = g("siteFound");
+      if (!q) { box.classList.add("hide"); return; }
+      const hits = ALL_SITES.filter(s => `${s.siteName || ""} ${s.siteNumber || ""} ${s.client || ""}`.toLowerCase().includes(q)).slice(0, 30);
+      box.innerHTML = hits.length ? hits.map((s, i) => `<div data-i="${ALL_SITES.indexOf(s)}">${esc(s.siteName || "(no name)")} <span class="n">· ${esc(s.client || "")} ${esc(s.siteNumber || "")}${s.postcode ? " · " + esc(s.postcode) : ""}</span></div>`).join("") : `<div class="n" style="cursor:default">No matches.</div>`;
+      box.classList.remove("hide");
+    });
+    g("siteFound").addEventListener("click", e => {
+      const d = e.target.closest("[data-i]"); if (!d) return;
+      const s = ALL_SITES[+d.dataset.i]; if (!s) return;
+      state.existing = { client: s.client, siteNumber: s.siteNumber, name: s.siteName };
+      g("pickedSite").classList.remove("hide");
+      g("pickedName").textContent = s.siteName || "(no name)";
+      g("pickedMeta").textContent = `· ${s.client || ""} ${s.siteNumber || ""}`;
+      g("siteFound").classList.add("hide"); g("siteSearch").value = s.siteName || "";
+      if (!g("projName").value) g("projName").value = s.siteName || "";
+      if (s.postcode) g("postcode").value = s.postcode;
+      if (s.lat != null && (s.lon != null || s.lng != null)) setPin(s.lat, s.lon ?? s.lng, true);
+      else if (s.postcode) g("btnLocate").click();
+      validateStep1();
+    });
+    g("projName").addEventListener("input", validateStep1);
+    g("projNumber").addEventListener("input", () => { state.number = g("projNumber").value.trim(); validateStep1(); });
+    g("newSiteName").addEventListener("input", () => { if (!g("projName").value) g("projName").value = g("newSiteName").value; validateStep1(); });
+
+    function validateStep1() {
+      const okSite = state.mode === "existing" ? !!state.existing : (state.mode === "new" && g("newSiteName").value.trim());
+      const ok = okSite && g("projName").value.trim() && g("projNumber").value.trim() && state.lat != null;
+      g("to2").disabled = !ok;
+    }
+
+    // ── Step nav ──────────────────────────────────────────────────────────────
+    function show(step) {
+      for (let i = 1; i <= 4; i++) g("step" + i).classList.toggle("hide", i !== step);
+      document.querySelectorAll(".steps .s").forEach(s => {
+        const n = +s.dataset.step; s.classList.toggle("on", n === step); s.classList.toggle("done", n < step);
+      });
+      window.scrollTo(0, 0);
+      if (step === 1) setTimeout(() => map && map.invalidateSize(), 60);
+      if (step === 4) renderReview();
+    }
+    g("to2").onclick = () => show(2);
+    g("back1").onclick = () => show(1);
+    g("to3").onclick = () => show(3);
+    g("back2").onclick = () => show(2);
+    g("to4").onclick = () => show(4);
+    g("back3").onclick = () => show(3);
+
+    // ── Step 2: valuations reveal ─────────────────────────────────────────────
+    g("req_valuations").addEventListener("change", e => g("valBox").classList.toggle("hide", !e.target.checked));
+
+    // ── Step 3: companies ─────────────────────────────────────────────────────
+    async function loadCompanySuggestions() {
+      let names = [];
+      try {
+        const r = await authFetch("/po/api/subcontractors").then(r => r.json());
+        names = (r.subcontractors || r.items || r || []).map(x => x.name || x).filter(Boolean);
+      } catch {}
+      const box = g("coSug");
+      box.innerHTML = names.slice(0, 24).map(n => `<button type="button" data-co="${esc(n)}">＋ ${esc(n)}</button>`).join("");
+    }
+    g("coSug").addEventListener("click", e => { const b = e.target.closest("[data-co]"); if (b) addCompany(b.dataset.co); });
+    g("coAdd").onclick = () => { addCompany(g("coInput").value); g("coInput").value = ""; };
+    g("coInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); g("coAdd").click(); } });
+    function addCompany(name) {
+      name = String(name || "").trim(); if (!name) return;
+      if (state.companies.some(c => c.toLowerCase() === name.toLowerCase())) return;
+      state.companies.push(name); renderCompanies();
+    }
+    function renderCompanies() {
+      g("coList").innerHTML = state.companies.map((c, i) => `<span class="pill">${esc(c)} <button data-rm="${i}">✕</button></span>`).join("");
+    }
+    g("coList").addEventListener("click", e => { const b = e.target.closest("[data-rm]"); if (b) { state.companies.splice(+b.dataset.rm, 1); renderCompanies(); } });
+
+    // ── Step 4: review + create ────────────────────────────────────────────────
+    function collect() {
+      return {
+        name: g("projName").value.trim(),
+        number: g("projNumber").value.trim(),
+        siteClient: "projects",
+        siteNumber: g("projNumber").value.trim(),
+        postcode: g("postcode").value.trim(),
+        lat: state.lat, lon: state.lon,
+        mileageRoundTrip: state.mileRound ?? null, mileageOneWay: state.mileOneWay ?? null,
+        fromExisting: state.mode === "existing" ? state.existing : null,
+        required: {
+          programme: g("req_programme").checked, rams: g("req_rams").checked, cpp: g("req_cpp").checked,
+          valuations: g("req_valuations").checked, projectDocs: g("req_projectDocs").checked,
+        },
+        sitelog: { rules: g("slRules").value.trim(), visitorRules: g("slVisitor").value.trim(), companies: state.companies },
+        contractValue: g("req_valuations").checked && g("contractValue").value ? Number(g("contractValue").value) : null,
+      };
+    }
+    function renderReview() {
+      const d = collect();
+      const reqList = Object.entries(d.required).filter(([, v]) => v).map(([k]) => ({ programme:"Programme", rams:"Risk Assessment", cpp:"Construction Phase Plan", valuations:"Valuations", projectDocs:"Project Documents" }[k])).join(", ") || "None yet";
+      g("review").innerHTML = `
+        <div class="kv"><b>Project:</b> ${esc(d.name)} (${esc(d.number)})</div>
+        <div class="kv"><b>Site:</b> ${d.fromExisting ? "copied from " + esc(d.fromExisting.name) : "new site"} · own project-site ${esc(d.number)}</div>
+        <div class="kv"><b>Postcode:</b> ${esc(d.postcode) || "—"} · <b>Location:</b> ${d.lat}, ${d.lon}</div>
+        <div class="kv"><b>Mileage:</b> ${d.mileageRoundTrip != null ? d.mileageRoundTrip + " mi round trip" : "—"}</div>
+        <div class="kv"><b>To build:</b> ${esc(reqList)}</div>
+        ${d.contractValue ? `<div class="kv"><b>Contract value:</b> £${Number(d.contractValue).toLocaleString()}</div>` : ""}
+        <div class="kv"><b>SiteLog message:</b> ${d.sitelog.rules ? esc(d.sitelog.rules).replace(/\n/g, "<br>") : "—"}</div>
+        <div class="kv"><b>Companies on site:</b> ${d.sitelog.companies.length ? d.sitelog.companies.map(esc).join(", ") : "—"}</div>`;
+    }
+
+    g("createBtn").onclick = async () => {
+      const d = collect();
+      const btn = g("createBtn"); btn.disabled = true; flash("msg4", "Creating the project-site…", false);
+      try {
+        // 1) Create the project's OWN Pxxxx site (auto-numbered; pushes the SiteLog geofence; PO picks it up).
+        const siteBody = { siteName: d.name, client: "projects", siteNumber: d.number, jobNumber: d.number,
+          active: true, postcode: d.postcode, lat: d.lat, lon: d.lon,
+          mileageFromHQ: d.mileageOneWay, addedVia: "project-wizard" };
+        const sr = await authFetch("/add-site?category=projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(siteBody) }).then(r => r.json());
+        if (!sr.success) throw new Error(sr.error || "Couldn't create the project-site");
+        // The worker may assign a different number if one already existed — use what came back.
+        const assigned = (sr.site && (sr.site.jobNumber || sr.site.siteNumber)) || d.number;
+        d.number = assigned; d.siteNumber = assigned;
+        // Save the round-trip mileage into the mileage register (keyed by the project-site name).
+        if (d.mileageRoundTrip != null) {
+          try { await authFetch("/ts/miles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [{ name: d.name, postcode: d.postcode, miles: d.mileageRoundTrip }] }) }); } catch {}
+        }
+        flash("msg4", "Saving the project…", false);
+        // 2) Create the project record (spine).
+        const pr = await authFetch("/project/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }).then(r => r.json());
+        if (!pr.ok) throw new Error(pr.error || "Couldn't save the project");
+        flash("msg4", "Done — opening your project…", false);
+        location.href = "/project-hub.html?id=" + encodeURIComponent(pr.id);
+      } catch (e) { flash("msg4", e.message, true); btn.disabled = false; }
+    };
+
+    function flash(id, txt, err) { const m = g(id); m.className = "msg" + (err ? " err" : txt ? " ok" : ""); m.textContent = txt; }
+  </script>
+</body>
+</html>

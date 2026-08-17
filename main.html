@@ -360,8 +360,8 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <!-- Legacy SharePoint "My Documents" tile removed — the portal My Documents
          (#MyDocs → my-documents.html, always visible below) replaced it. The old
          one was a dead javascript:void(0) button for anyone without a SharePointPath. -->
-    <a class="button" id="Projects" href="projects.html">
-  <span class="emoji">📁</span> Projects
+    <a class="button" id="Projects" href="projects-live.html">
+  <span class="emoji">🏗️</span> Projects
 </a>
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
@@ -537,7 +537,7 @@ const MAP = window.ML_PERM_MAP || {
         };
         setHref("OfficeTimesheet", [["FullAccess", "office-timesheet.html"]]);   // Full Access only → office-wide timesheet
         setHref("Users",          [["Users", "users-admin.html"],              ["DeviceAdmin", "device-admin.html"]]);
-        setHref("Projects",       [["Projects", "projects.html"],              ["ProjectsAdmin", "projects-admin.html"]]);
+        setHref("Projects",       [["Projects", "projects-live.html"],         ["ProjectsAdmin", "projects-live.html"]]);
 
         // Story Mode: guided users get a pinned "Back to My Day" at the top.
         const existing = document.getElementById("backToMyDay");

@@ -807,3 +807,27 @@ CREATE TABLE IF NOT EXISTS programme_suggestions (
   created_at TEXT, decided_by TEXT, decided_at TEXT,
   contractor TEXT                       -- copied from the share: which filtered view they marked up
 );
+
+-- ── Projects (the wizard's first-class project record — links a job together) ──
+-- A project has its own P-number project-site (client='projects'), created via
+-- /add-site, so PO + costing roll up under it. `data` JSON holds coordinates,
+-- mileage, required-docs config, SiteLog message + companies, contract value,
+-- the To-Do done overrides, and the LINKS (programmeId, ramsIds[], cppRef,
+-- costingKey). Self-migrating in routes/projects-api.js.
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY, tenant_id TEXT,
+  number TEXT,                          -- P-number (= the project-site's site_number)
+  name TEXT,
+  site_client TEXT, site_number TEXT,   -- the project's own project-site
+  status TEXT DEFAULT 'live',           -- live | complete | archived
+  data TEXT,                            -- JSON: coords, mileage, required, sitelog, contractValue, links, doneOverride
+  created_by TEXT, created_at TEXT, updated_at TEXT
+);
+-- Project Documents (engineer-visible by permission unless hidden). R2 JOB_FILES
+-- under projectdocs/<tid>/<projectId>/.
+CREATE TABLE IF NOT EXISTS project_files (
+  id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT,
+  title TEXT, section TEXT, r2_key TEXT, name TEXT, type TEXT,
+  hidden INTEGER DEFAULT 0, downloadable INTEGER DEFAULT 1,
+  uploaded_by TEXT, uploaded_at TEXT
+);

@@ -2094,8 +2094,17 @@ function applyLaunchParams(){
     const url=p.get("worker"), token=p.get("token");
     if(url&&token){
       setCloud({ url:url.trim(), token:token.trim() });
-      history.replaceState(null,"",location.pathname+location.search);
     }
+    // Pre-fill from a portal Project: start a fresh plan seeded with its name/number.
+    const pn=p.get("projectName");
+    if(pn){
+      state=exampleState(); state._id=uid();
+      state.projectName=pn;
+      if(p.get("projectNo")) state.projectNo=p.get("projectNo");
+      if(p.get("projectRef")) state.projectRef=p.get("projectRef");
+      persist(); window.__cppPrefilled=true;
+    }
+    if(url&&token || pn) history.replaceState(null,"",location.pathname+location.search);
   }catch(e){}
 }
 
@@ -2103,7 +2112,7 @@ load();
 applyLaunchParams();
 buildForm();
 renderDoc();
-if(cloudOn()) showLibrary();   // start on the library when connected
+if(cloudOn() && !window.__cppPrefilled) showLibrary();   // start on the library when connected (unless pre-filled from a Project)
 </script>
 </body>
 </html>
