@@ -312,20 +312,24 @@ function statusClass(status){
   if(s.includes("complete") || s.includes("closed")) return "status-pill status-complete";
   return "status-pill status-open";
 }
-// Clean "Job name" = the store/site as "Street - Number"
-// ("25886/1 Gatwick Road" → "Gatwick Road - 25886/1"). Store lives in siteName
-// or (email-intake jobs) the address-like description; the reference is the fault.
+// Clean "Job name" = "{Job number} - {Site name}" ("26819 - Poole, Ringwood Road").
+// The number is the ticket that prefixes the id (or leads the reference); the
+// site is the clean siteName (else the ref minus its number, else site code).
 function mlJobName(job){
-  const ref = String((job && job.helpdeskRef) || "").trim();
-  if(ref && ref.length <= 70 && /^[0-9][0-9./-]*\s+-\s+\S/.test(ref)) return ref;   // clean "Ticket - Site"
-  const store = s => { s = String(s == null ? "" : s).trim(); return (s && s.length <= 50 && /\d/.test(s)) ? s : ""; };
-  let s = store(job && job.siteName) || store(job && job.description) || String((job && job.siteName) || "").trim();
-  if(!s) return "";
-  let m = s.match(/^([0-9][0-9\/\-]*)\s+(.+)$/);
-  if(m) return m[2].trim() + " - " + m[1].trim();
-  m = s.match(/^(.+?)[ ,]+([0-9][0-9\/\-]*)$/);
-  if(m) return m[1].trim().replace(/,+$/,"") + " - " + m[2].trim();
-  return s;
+  if(!job) return "";
+  const id = String(job.id || "");
+  const ref = String(job.helpdeskRef || "").trim();
+  let m = id.match(/^([A-Za-z]?\d+(?:\/\d+)?)-/);
+  let num = m ? m[1] : ((ref.match(/^([A-Za-z]?\d+(?:\/\d+)?)\b/) || [])[1] || "");
+  const stripNum = s => String(s || "").replace(/^\s*[A-Za-z]?\d+(?:\/\d+)?\s*[-–,]\s*/, "").trim();
+  let site = String(job.siteName || "").trim();
+  if(!site){
+    const refSite = (ref && ref.length <= 70 && /\s/.test(ref) && !/[.!?]/.test(ref)) ? stripNum(ref) : "";
+    site = refSite || String(job.siteCode || "").trim();
+  }
+  site = stripNum(site) || site;
+  if(num && site) return num + " - " + site;
+  return site || num || (ref && ref.length <= 40 ? ref : "") || "";
 }
 // Priority "Priority 2" / "P2" / 2 → p2 class + P2 label (defaults P4).
 function prioClass(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "p"+m[1] : "p4"; }

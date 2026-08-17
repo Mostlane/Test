@@ -4573,6 +4573,15 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
     }
   }
+  if (subpath === "/sheet-config") {
+    if (method === "GET") return jsonResponse({ fields: await getSheetConfig(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      return jsonResponse({ ok: true, fields: await setSheetConfig(env, tenantId, body && body.fields || body) }, headers);
+    }
+  }
   if (subpath === "/categories/delete" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -6531,6 +6540,60 @@ async function setConfig(env, tenantId, body) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(merged)).run();
   return merged;
+}
+var SHEET_FIELDS = [
+  { key: "jobId", label: "Job ID / reference", m: true, c: true },
+  { key: "jobDate", label: "Job date", m: true, c: true },
+  { key: "priority", label: "Priority", m: true, c: true },
+  { key: "status", label: "Status", m: true, c: true },
+  { key: "customer", label: "Customer", m: true, c: true },
+  { key: "contactPerson", label: "Site contact person", m: true, c: true },
+  { key: "contactPhone", label: "Site contact telephone", m: true, c: true },
+  { key: "contactEmail", label: "Site contact email", m: true, c: true },
+  { key: "siteAddress", label: "Site address", m: true, c: true },
+  { key: "jobName", label: "Job name", m: true, c: true },
+  { key: "engineer", label: "Engineer", m: true, c: true },
+  { key: "description", label: "Job description", m: true, c: true },
+  { key: "sla", label: "SLA status", m: true, c: false },
+  { key: "timeSpent", label: "Time on job (travel / on-site / total)", m: true, c: false },
+  { key: "timeline", label: "Activity timeline", m: true, c: false },
+  { key: "notes", label: "Engineer notes", m: true, c: true },
+  { key: "riskAssessment", label: "Risk assessment", m: true, c: false },
+  { key: "photos", label: "Photos", m: true, c: true },
+  { key: "signature", label: "Customer signature", m: true, c: true }
+];
+async function getSheetConfig(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_sheet_config'").bind(tenantId).first();
+  let saved = {};
+  try {
+    saved = row ? JSON.parse(row.value) : {};
+  } catch {
+    saved = {};
+  }
+  if (!saved || typeof saved !== "object") saved = {};
+  return SHEET_FIELDS.map((f) => {
+    const s = saved[f.key] || {};
+    return {
+      key: f.key,
+      label: f.label,
+      mostlane: typeof s.mostlane === "boolean" ? s.mostlane : f.m,
+      client: typeof s.client === "boolean" ? s.client : f.c
+    };
+  });
+}
+async function setSheetConfig(env, tenantId, fields) {
+  const db = tenantDB(env, tenantId);
+  const valid = new Set(SHEET_FIELDS.map((f) => f.key));
+  const arr = Array.isArray(fields) ? fields : Object.keys(fields || {}).map((k) => Object.assign({ key: k }, fields[k]));
+  const map = {};
+  for (const f of arr) {
+    if (f && valid.has(f.key)) map[f.key] = { mostlane: !!f.mostlane, client: !!f.client };
+  }
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_sheet_config', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).bind(tenantId, JSON.stringify(map)).run();
+  return getSheetConfig(env, tenantId);
 }
 async function getCategories(env, tenantId) {
   const db = tenantDB(env, tenantId);
