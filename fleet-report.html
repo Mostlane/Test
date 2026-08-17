@@ -112,8 +112,8 @@
   </div>
 
   <div class="card">
-    <h3 style="margin-bottom:4px;color:var(--indigo-dark);font-size:15px;">🧑‍🔧 Vehicle drivers</h3>
-    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Pre-filled from the <b>Vehicles</b> registry (current drivers). Change any that differ for this report's week — the report uses these names. To change a driver permanently, do it on the Vehicles page (it keeps a history).</p>
+    <h3 style="margin-bottom:4px;color:var(--indigo-dark);font-size:15px;">🧑‍🔧 Vehicle drivers <span id="driverSaveState" style="font-size:11.5px;font-weight:600;color:#6b7280;margin-left:6px"></span></h3>
+    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Pre-filled from the <b>Vehicles</b> registry (current drivers). Change any that differ for this report's week — the report uses these names. <b>Each change saves on its own</b> and is remembered for next week. To change a driver permanently, do it on the Vehicles page (it keeps a history).</p>
     <div id="driverMap"><span class="muted">Loading…</span></div>
   </div>
 
@@ -308,6 +308,9 @@ async function loadDriverMap(){
   try{ const d=await authFetch("/fleet/current").then(r=>r.json()); if(d.ok) base=d.map||{}; }catch(e){}
   try{ const d=await authFetch("/fleet/drivers").then(r=>r.json()); if(d.ok) saved=d.map||{}; }catch(e){}
   DRIVERMAP=Object.assign({},base,saved);
+  // Remember which blanks were a deliberate "unassigned" so they keep overriding
+  // the registry after a refresh (see getDriverSelections).
+  DRIVER_BLANKS=new Set(Object.keys(saved).filter(r=>saved[r]===""));
   try{ const d=await authFetch("/fleet/pool-alloc").then(r=>r.json()); if(d.ok) POOLALLOC=d.alloc||{}; }catch(e){}
 }
 function renderDriverTable(){
@@ -318,11 +321,82 @@ function renderDriverTable(){
       <td><select data-reg="${esc(v.reg)}" style="font:inherit;padding:6px;border:1px solid #cdd2e6;border-radius:7px;min-width:180px">${opts}</select></td></tr>`).join("")+`</table>`;
   // Pre-select from saved map (default hardcoded pool vans to pool if not overridden).
   $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ const reg=s.getAttribute("data-reg"); const v=DRIVERMAP[reg]!=null?DRIVERMAP[reg]:(POOL.has(reg)?POOL_VAL:""); if(v) s.value=v; });
+  wireDriverAutosave();
 }
+// Regs the user has actively set to "— unassigned —". POST /fleet/drivers
+// REPLACES the stored map, and load merges it OVER the vehicle registry — so an
+// empty value has to be sent explicitly, or the registry's driver silently comes
+// back on the next load and the choice looks like it never saved. Seeded on load
+// from any blank already stored, so it survives a refresh.
+let DRIVER_BLANKS=new Set();
 function getDriverSelections(){
-  const map={}; $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ if(s.value) map[s.getAttribute("data-reg")]=s.value; }); return map;
+  const map={};
+  $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{
+    const reg=s.getAttribute("data-reg");
+    if(s.value) map[reg]=s.value;
+    else if(DRIVER_BLANKS.has(reg)) map[reg]="";   // deliberate "unassigned"
+  });
+  return map;
 }
 async function saveDriverMap(map){ try{ await authFetch("/fleet/drivers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({map})}); }catch(e){} }
+
+/* ── Autosave the driver picks (Jamie's rule: no save buttons) ───────────────
+   Each change writes straight away and is remembered for next week, so the
+   table no longer has to be re-done every report. Debounced so flicking through
+   several selects is one write, with a keepalive flush if the page is closed
+   mid-save. */
+let driverSaveT=null, driverSaving=false;
+function driverState(msg,tone){
+  const el=$("driverSaveState"); if(!el) return;
+  el.textContent=msg||"";
+  el.style.color = tone==="bad" ? "#b42318" : tone==="ok" ? "#067647" : "#6b7280";
+}
+function queueDriverSave(){
+  driverState("Saving…");
+  clearTimeout(driverSaveT);
+  driverSaveT=setTimeout(flushDriverSave,500);
+}
+async function flushDriverSave(){
+  clearTimeout(driverSaveT);
+  if(driverSaving){ driverSaveT=setTimeout(flushDriverSave,400); return; }   // coalesce
+  driverSaving=true;
+  const map=getDriverSelections();
+  try{
+    const r=await authFetch("/fleet/drivers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({map})});
+    if(!r.ok) throw new Error("http "+r.status);
+    DRIVERMAP=Object.assign({},DRIVERMAP,map);
+    driverState("Saved ✓","ok");
+    setTimeout(()=>{ if(($("driverSaveState")||{}).textContent==="Saved ✓") driverState(""); },2500);
+  }catch(e){
+    driverState("Not saved — will retry","bad");
+    setTimeout(queueDriverSave,4000);          // keep trying on a flaky signal
+  }finally{ driverSaving=false; }
+}
+function wireDriverAutosave(){
+  const box=$("driverMap");
+  if(!box || box.dataset.autosave) return;      // renderDriverTable can run again
+  box.dataset.autosave="1";
+  box.addEventListener("change",e=>{
+    const s=e.target && e.target.closest && e.target.closest("select[data-reg]");
+    if(!s) return;
+    const reg=s.getAttribute("data-reg");
+    if(s.value) DRIVER_BLANKS.delete(reg); else DRIVER_BLANKS.add(reg);
+    DRIVERMAP[reg]=s.value;
+    queueDriverSave();
+  });
+  // Don't lose a debounced change if the page is closed or backgrounded. Uses a
+  // keepalive fetch, not sendBeacon — the beacon can't carry the Bearer header
+  // and the worker takes no token in the query, so it would 401 in silence.
+  const flushNow=()=>{
+    if(!driverSaveT) return;
+    clearTimeout(driverSaveT); driverSaveT=null;
+    try{ authFetch("/fleet/drivers",{method:"POST",keepalive:true,
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({map:getDriverSelections()})}); }catch(e){}
+  };
+  addEventListener("pagehide",flushNow);
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushNow(); });
+}
 // Per-day pool allocation: remember which driver used a shared van on a given date.
 async function savePoolAlloc(reg,date,username){
   const key=reg+"|"+date;

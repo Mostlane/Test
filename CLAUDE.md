@@ -1249,6 +1249,18 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   XLS + driver-score PDF, parsed client-side): `/fleet/report` POST (save
   standalone HTML to R2) / `/fleet/reports` GET / `/fleet/report-delete`;
   `/fleet/drivers` GET/POST (remembered reg→driver overrides for the report).
+  **Driver table autosaves (Aug 2026):** the "🧑‍🔧 Vehicle drivers" selects
+  (reg → driver for the week) now save the moment one is changed — debounced
+  500ms, "Saved ✓" beside the heading, retry on failure, `keepalive` flush on
+  pagehide/visibilitychange (NOT sendBeacon — it can't carry the Bearer header
+  and the worker takes no `?token=`). Previously they were only written when a
+  report was generated, so the table had to be redone every week.
+  **Gotcha:** POST /fleet/drivers REPLACES the whole map, and load merges it OVER
+  `/fleet/current` (the registry) — so a deliberate "— unassigned —" must be sent
+  as an explicit `""` or the registry's driver silently reappears on reload.
+  `DRIVER_BLANKS` tracks those, seeded on load from stored blanks so it survives
+  a refresh; getDriverSelections() still omits untouched blanks so an unedited
+  van keeps following the registry.
   **Auto-save (Aug 2026):** every generated report saves to the portal
   automatically (generate() calls saveReport({auto:true})); the POST **dedupes by
   week range** (deletes any earlier report with the same weekStart+weekEnd) so
