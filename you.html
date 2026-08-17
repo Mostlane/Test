@@ -90,18 +90,8 @@
   <nav class="tabbar">
     <a href="route.html?stay=1"><span class="ic">🧭</span>Route</a>
     <a href="engineer-jobs.html"><span class="ic">📋</span>Jobs</a>
-    <a href="po.html" id="tabPO"><span class="ic">🧾</span>PO</a>
     <a href="main.html"><span class="ic">▦</span>Menu</a>
   </nav>
-  <script>
-  (function(){ try{
-    var API=window.MOSTLANE_API||""; var t=localStorage.getItem("mostlaneToken")||"";
-    var a=document.getElementById("tabPO"); if(!a||!t) return;
-    fetch(API+"/po-config",{headers:{Authorization:"Bearer "+t},cache:"no-store"})
-      .then(function(r){return r.json();}).then(function(c){ if(c&&c.ok&&c.url){ a.href=c.url; } })
-      .catch(function(){});
-  }catch(e){} })();
-  </script>
   <div class="toast" id="toast"></div>
 
 <script>

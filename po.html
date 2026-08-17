@@ -31,24 +31,33 @@
       fetch(API + "/auth/me", { headers: { "Authorization": "Bearer " + token } })
         .then(function (r) { return r.json(); })
         .then(function (me) {
-          var u = (me && me.user) || {};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}}
-          // Admins get the full office board (covers admins whose staffType
-          // defaults to "field").
-          if (u.FullAccess === "Yes") {
-            location.replace("po-office.html");
-            return;
+          var user = (me && me.user) || {};
+          var perms = {};
+          try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {}; } catch (e) {}
+          var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
+          // Under "View As", the IMPERSONATED user's perms + staff type live in
+          // storage — use those so an admin previewing a field engineer sees the
+          // engineer's PO page, not the office board.
+          var viewAs = !!localStorage.getItem("mostlaneViewAsReal");
+          var full   = viewAs ? yes(perms.FullAccess)      : (user.FullAccess === "Yes"      || yes(perms.FullAccess));
+          var poPerm = viewAs ? yes(perms.PurchaseOrders)  : (user.PurchaseOrders === "Yes"  || yes(perms.PurchaseOrders));
+          var st = String(
+            localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") ||
+            (viewAs ? "" : (user.StaffType || ""))
+          ).toLowerCase();
+          // Robust field-user test (mirrors portal-config's mlFieldUser): not an
+          // admin, and either staffType=field or an SLA/Story-only engineer — so a
+          // blank staff type still routes engineers to the raise page.
+          function isField() {
+            if (full || yes(perms.SLAAdmin)) return false;
+            if (st === "office") return false;
+            if (st === "field") return true;
+            return yes(perms.SLA) || yes(perms.StoryMode);
           }
-          // FIELD ENGINEERS get the restricted raise page — even if they hold the
-          // PurchaseOrders permission (that just means "can use POs", not "manage").
-          if (u.StaffType === "field") {
-            location.replace("po-raise.html");
-            return;
-          }
-          // Office staff with the Purchase Orders permission → full office board.
-          if (u.PurchaseOrders === "Yes") {
-            location.replace("po-office.html");
-            return;
-          }
+          // FIELD ENGINEERS always get the restricted raise page — never the
+          // office board (they raise POs from the job to keep costing linked).
+          if (isField()) { location.replace("po-raise.html"); return; }
+          if (full || poPerm) { location.replace("po-office.html"); return; }
           msg.innerHTML = "<h2>No PO access</h2>Ask the office to enable Purchase Orders for your account.";
         })
         .catch(function () {
