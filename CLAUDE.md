@@ -2225,7 +2225,14 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   encryption (RFC 8291) on WebCrypto only (no libs). `sendPush(env, sub, str)`.
   Verified against http_ece + RFC-style round-trips.
 - **routes/push.js** — /push/public-key (VAPID pub for subscribe),
-  /push/subscribe, /push/unsubscribe, /push/test. Table push_subscriptions
+  /push/subscribe, /push/unsubscribe, /push/test, **/push/status-all**
+  (FullAccess: every active user + whether they have push ON — device count,
+  last-confirmed-send time; groups push_subscriptions by lower(username), merges
+  the active users list, off-first sort; surfaced on **notification-centre.html**
+  "📱 Who has notifications on" card with an Off-only filter + refresh — so Jamie
+  can see at any time who's enabled. NB a subscription row = "on" but can be
+  stale until a send returns 404/410 and prunes it; the card shows last-confirmed
+  age as the freshness signal). Table push_subscriptions
   (self-migrating: endpoint PK, username, p256dh, auth, ua). `sendToUser(env,
   tid, username, {title,body,url})` fans out to a user's devices + prunes dead
   (404/410) — **Phase 2 event hooks will call this**.

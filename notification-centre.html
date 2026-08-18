@@ -55,6 +55,17 @@
     <p id="pushHint" class="sub" style="margin:10px 0 0;"></p>
   </div>
 
+  <div class="card" id="pushStatusCard">
+    <h2>📱 Who has notifications on</h2>
+    <p class="sub">Every active user and whether they currently have push notifications enabled on at least one device. <b>On</b> = a device is registered; <b>Off</b> = none registered (they've never enabled it, turned it off, or reinstalled). Last-confirmed shows when the server last successfully delivered a push to them.</p>
+    <p class="sub" id="psSummary" style="font-weight:600;color:#334155;">Loading…</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="btn small grey" id="psRefresh">↻ Refresh</button>
+      <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer;"><input type="checkbox" id="psOffOnly"> Show only <b>Off</b></label>
+    </div>
+    <div id="psList"><div class="empty">Loading…</div></div>
+  </div>
+
   <div class="card" id="memoCard" style="display:none;">
     <h2>📢 Company memos</h2>
     <p class="sub">Write a memo, save it as a draft, then send it to <b>everyone</b> or to <b>selected people</b>. A sent memo <b>can't be snoozed</b> — each recipient must read it and sign to confirm, and a signed copy is filed in their <b>My Documents › Memos</b>. Use the 🗑 on any memo (draft or sent) to remove it.</p>
@@ -474,6 +485,53 @@ function initMemos(user){
   mmLoad();
 }
 
+function psAgo(iso){
+  if(!iso) return "";
+  try{
+    const d = new Date(iso), now = Date.now(), s = Math.max(0, (now - d.getTime())/1000);
+    if(s < 90) return "just now";
+    const m = s/60; if(m < 90) return Math.round(m)+" min ago";
+    const h = m/60; if(h < 36) return Math.round(h)+" h ago";
+    const dd = h/24; if(dd < 14) return Math.round(dd)+" days ago";
+    return d.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"});
+  }catch{ return String(iso); }
+}
+async function loadPushStatus(){
+  const list = document.getElementById("psList");
+  const summ = document.getElementById("psSummary");
+  const offOnly = document.getElementById("psOffOnly").checked;
+  try{
+    const d = await (await authFetch("/push/status-all")).json();
+    if(!d.ok){ summ.textContent = d.error || "Couldn't load."; list.innerHTML = '<div class="empty">—</div>'; return; }
+    summ.innerHTML = "<b>"+d.on+"</b> of <b>"+d.total+"</b> users have notifications on · <b>"+d.off+"</b> off";
+    let users = d.users || [];
+    if(offOnly) users = users.filter(u => !u.on);
+    if(!users.length){ list.innerHTML = '<div class="empty">'+(offOnly?"Everyone has notifications on 🎉":"No users.")+'</div>'; return; }
+    list.innerHTML = users.map(u => {
+      const on = u.on;
+      const dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(on?"#0a7d33":"#cbd5e1")+';flex:none;"></span>';
+      const badge = on
+        ? '<span style="font-size:12px;font-weight:700;color:#0a7d33;">On</span>'
+        : '<span style="font-size:12px;font-weight:700;color:#94a3b8;">Off</span>';
+      const meta = on
+        ? (u.devices+" device"+(u.devices===1?"":"s")+(u.lastOk?" · last confirmed "+esc(psAgo(u.lastOk)):(u.lastReg?" · enabled "+esc(psAgo(u.lastReg)):"")))
+        : "No devices registered";
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #eef2f6;">'
+        + dot
+        + '<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:14px;">'+esc(u.name)+'</div>'
+        + '<div class="sub" style="margin:0;font-size:12px;">'+meta+'</div></div>'
+        + badge + '</div>';
+    }).join("");
+  }catch(e){
+    summ.textContent = "Couldn't load push status.";
+    list.innerHTML = '<div class="empty">—</div>';
+  }
+}
+function initPushStatus(){
+  document.getElementById("psRefresh").addEventListener("click", loadPushStatus);
+  document.getElementById("psOffOnly").addEventListener("change", loadPushStatus);
+}
+
 (async function(){
   // Full-access only.
   let meUser = "";
@@ -484,7 +542,9 @@ function initMemos(user){
   }catch{ location.href="main.html"; return; }
   initMemos(meUser);
   initMuteForm();
+  initPushStatus();
   await initPush();
+  await loadPushStatus();
   await loadUsers();
   await load();
 })();

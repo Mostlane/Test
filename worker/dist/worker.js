@@ -1372,7 +1372,59 @@ async function handle4(request, env, ctx, url, sess) {
     if (!r.sent && !r.failed && !r.gone) return jr({ ok: false, error: "No devices registered on this account yet \u2014 enable notifications first." }, headers, 400);
     return jr({ ok: r.sent > 0, ...r }, headers);
   }
+  if (sub === "/status-all" && method === "GET") {
+    const perms = await permissionsFor(env, tid, me);
+    if (!perms || perms.FullAccess !== "Yes") return jr({ error: "Forbidden" }, headers, 403);
+    await ensureTable(env);
+    let subs = [];
+    try {
+      const r = await env.DB.prepare(
+        `SELECT lower(username) uk,
+                COUNT(*) devices,
+                MAX(created_at) last_reg,
+                MAX(last_ok) last_ok
+           FROM push_subscriptions
+          WHERE tenant_id = ?
+          GROUP BY lower(username)`
+      ).bind(tid).all();
+      subs = r.results || [];
+    } catch {
+      subs = [];
+    }
+    const byUser = {};
+    for (const s of subs) byUser[s.uk] = s;
+    let users = [];
+    try {
+      const r = await env.DB.prepare("SELECT first_name, last_name, username, status FROM users WHERE tenant_id = ? ORDER BY username").bind(tid).all();
+      users = (r.results || []).filter((u) => isActiveStatus2(u.status));
+    } catch {
+      users = [];
+    }
+    const list = users.map((u) => {
+      const s = byUser[String(u.username || "").toLowerCase()] || null;
+      const devices = s ? Number(s.devices) || 0 : 0;
+      const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username;
+      return {
+        username: u.username,
+        name,
+        on: devices > 0,
+        devices,
+        lastOk: s ? s.last_ok || null : null,
+        lastReg: s ? s.last_reg || null : null
+      };
+    });
+    list.sort((a, b) => {
+      if (a.on !== b.on) return a.on ? 1 : -1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    const onCount = list.filter((u) => u.on).length;
+    return jr({ ok: true, users: list, total: list.length, on: onCount, off: list.length - onCount }, headers);
+  }
   return jr({ error: "Not found: " + sub }, headers, 404);
+}
+function isActiveStatus2(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
 }
 
 // src/routes/holidays.js
