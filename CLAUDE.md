@@ -1642,6 +1642,37 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
 - Uses the **already-present** `GOOGLE_MAPS_KEY` (same key sitelog-api's
   `getTravelData` uses) and the OPTIONAL `ANTHROPIC_API_KEY` (the programme AI's
   key). No new secrets; both fail soft with a clear reason in `warnings`.
+- **"Jobs you could work in" + cross-engineer fill-ins (front-end only, ZERO API
+  cost):** the whole suggestion engine is **local straight-line geometry** on
+  coordinates the page already has — `haversineMiC`/`roadMi` (×1.25) +
+  `cheapestInsertion(points, x)` (min added road-miles to slot a job into a
+  polyline home→…→home). `loadEngineers` now carries each engineer's home
+  (`Profile.homePostcode`/`homeLat`/`homeLng` from GET /users), so every
+  engineer's start point is known client-side (`engHomeCoord`, geocoded via the
+  same free postcodes.io cache). **Google is NEVER spent on the scan** — only when
+  a chosen route is actually (re-)optimised. Two surfaces, both in
+  sla-scheduler.html:
+  - **Backfill panel** inside the optimiser (`renderBackfill`): after a route, it
+    scans every active job NOT already on that day (unscheduled OR same-day; never
+    a job booked for another day), ranks by detour into the optimised route,
+    filters by a **max-detour slider** (`optThreshold`, default 20 min), and shows
+    each with `≈ +Nm · +N mi · <slot>` and an owner flag (**"⚠ currently <name>"**
+    if it's another engineer's, **"🆕 unscheduled"** otherwise). Tick some →
+    **↻ Re-optimise** folds them in (`optAddedIds`) and the real Google matrix
+    runs; **Apply reassigns** each added job to this engineer (`assignedEngineers`
+    on the PATCH).
+  - **Cross-engineer overview** (💡 Fill-ins button → `#fillBackdrop`): a
+    **tick-list of engineers** (auto-ticked when a home is set, disabled + "no home
+    set" otherwise), scanned together for the selected date. For each loose job
+    (unscheduled, or scheduled that date but NOT on a ticked engineer) it finds the
+    **best-fit ticked engineer** by cheapest insertion into their day-route
+    (`engRoutePoints`), skipping anyone on leave (`holFor`), flags the current
+    owner, and offers **Assign** (PATCH `assignedEngineers` + schedule onto the day
+    if it had no time — then "open their day and Optimise to slot it in").
+  Because empty/near-empty days score a full home round-trip, the detour metric
+  naturally prefers engineers already passing by — i.e. "without going out of
+  their way". No worker change and no new endpoint — reuses /sla/route-optimize
+  (for the re-optimise) and PATCH /sla/jobs/{id} (for assignment).
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

@@ -294,7 +294,13 @@
           ["On the scheduler, tap an engineer's <b>name</b> to open their day, then <b>🧭 Optimise route</b>. Pick the day's start time and a lunch break."],
           ["Type any <b>anomalies</b> in plain English — e.g. \"the Tesco Fareham job must be done at 14:00\" or \"do Southampton last\". The AI honours these while keeping the driving as short as it can."],
           ["You get a preview: the best visiting order with arrival times, plus <b>driving time, time on site, total miles and the predicted day length</b>. Nothing changes yet."],
+          ["Under the route, <b>➕ Jobs you could work in</b> lists other jobs that fit this day with little detour — each shows the extra time/miles and whether it's <b>🆕 unscheduled</b> or <b>⚠ currently</b> another engineer's. Tick any and press <b>↻ Re-optimise</b> to fold them in (they get reassigned to this engineer when you apply)."],
           ["Happy with it? Tap <b>✓ Apply to schedule</b> and the jobs are re-timed on the board. If a job has no location it's listed and left where it is."],
+        ]},
+        { icon: "💡", title: "Fill loose jobs into the best engineer's day", perms: ["SLAAdmin"], steps: [
+          ["On the scheduler, tap <b>💡 Fill-ins</b> (top right). Tick which engineers to consider (anyone with a home postcode set)."],
+          ["It scans that day and lists loose jobs — unscheduled ones, and jobs sitting with an engineer you didn't tick — showing the <b>best-fit engineer</b> and the extra time it'd add to their run."],
+          ["Tap <b>Assign</b> to give the job to that engineer, then open their day and <b>🧭 Optimise route</b> to slot it in at the right time. Jobs already booked onto a ticked engineer's day are left alone."],
         ]},
         { icon: "📁", title: "Site documents", perms: ["SLA", "SLAAdmin"], steps: [
           ["On a job, tap <b>📁 Site documents</b> (in the Site box) to see everything on file for that building. Office staff can also reach it from <b>Manage Sites → a site → Site documents</b>."],
