@@ -1549,6 +1549,34 @@ mismatch returns **409 {conflict, updatedAt, updatedBy}** → the builder pauses
 autosave and asks "Load theirs (recommended) / Keep mine" (Keep mine = ONE
 unstamped save that deliberately overwrites, then re-stamps). The pagehide
 keepalive save also carries baseVersion so closing a stale tab can't clobber.
+**PDF export fixes (18 Aug, from a real tender programme Jamie exported):** four
+faults, in `lib/progpdf.js` / `lib/pdf.js` —
+(a) **pages of empty rows.** Pagination crossed EVERY date window with EVERY
+row-chunk, so a page could show the December tasks against the Sept-Nov columns
+with a completely blank chart. The page list is now built first, pairing each
+window only with the tasks that intersect it (`inWindow`), and a window no task
+touches is dropped. A 4-page export became a correct 2-page one.
+(b) **"?" in the date range.** `pdfStr` mapped only a few typographic chars and
+turned everything else >255 into "?" - the arrow in "(28/09 -> 21/11)" was the
+visible one. `lib/pdf.js` now carries a real **WIN1252** map (en/em dash,
+ellipsis, curly quotes, bullet, euro, tm) plus an **ASCIIFY** map (arrows,
+<=, >=, ticks), exported as **`toWinAnsi()`**; anything still unmappable (emoji,
+CJK) is DROPPED rather than printed as "?" - a stray "?" reads as a broken
+document to a client. `textWidth()` measures the transliterated string so fits
+stay accurate. Supersedes the old fitText "..." workaround.
+(c) **legend overlapped the range label** - it reserved a flat 80pt for a label
+nearly twice that wide, so the last contractor sat on top of it. The legend now
+WRAPS to a second line (headerBlockH 78->89) and reserves the label's measured
+width; anything beyond two lines becomes "+N more".
+(d) **bars rendered as blobs.** The corner radius was `barHeight/2`, so a 1-day
+bar (~8pt wide, 9.5pt tall) came out a circle. The radius is now capped by the
+bar's own width. Also: date windows and rows are both split EVENLY (77 days over
+2 pages = 39+38, not 71+6; 30 rows = 15+15, not 28+orphan), and a date label that
+would spill past the grid's right edge is suppressed.
+Regression-tested by rebuilding the programme from the exported PDF and
+re-generating (scratchpad `gen.mjs`): 32/32 tasks drawn, zero stray "?", every
+page's chart populated. The firestop RIA PDF was smoke-tested too (shared encoder).
+
 **Exports (⬇ PDF / ⬇ Excel, on the builder AND the client share link):** the PDF
 is a VECTOR A4-landscape Gantt drawn server-side by **`lib/progpdf.js`**
 (`buildProgrammePdf(data, meta)` — never a screenshot; paginates rows AND long
