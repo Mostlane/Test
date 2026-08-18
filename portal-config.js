@@ -1603,7 +1603,7 @@
           }
           // 3. Force the core shell past the browser HTTP cache so the reload
           //    picks up fresh copies immediately (best-effort, failures ignored).
-          var core = ["/portal-config.js?v=14", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+          var core = ["/portal-config.js?v=15", "/portal.css?v=1", "/auth.js", "/device-auth.js",
             location.pathname + location.search];
           await Promise.all(core.map(function (u) {
             return fetch(u, { cache: "reload" }).catch(function () {});
@@ -1707,11 +1707,16 @@
 
   // ── New van driving-score banner (top of every page for the engineer) ────
   // A dark navy "🚐 Your new van driving score is ready — tap to view" bar that
-  // sits above the page header until dismissed or opened. Used to be hardcoded
-  // into route.html only, so an engineer who landed on main.html (or Jobs /
-  // Inbox / a job card) never saw it. Moved here so it appears on every
-  // logged-in portal page. Same seen-marker as before (localStorage
-  // `mlVanScoreSeen` + /prefs vanScoreSeen), same target (my-van-scores.html).
+  // sits above the page header until dismissed or opened. Was hardcoded into
+  // route.html only — moved here so it appears on every logged-in portal page.
+  //
+  // Two fixes over the original:
+  //   • The seen marker is now keyed PER-USER (`mlVanScoreSeen:<username>`)
+  //     instead of a shared device key. Without this, View As'ing a user
+  //     inherited whoever's marker was on that phone last — so Jamie viewing
+  //     as Connor saw no banner because Jamie had dismissed his own score.
+  //   • Tapping the WHOLE banner (not only the ✕) now also POSTs to /prefs
+  //     so the seen state syncs cross-device, matching the ✕ behaviour.
   (function vanScoreBanner() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
@@ -1723,6 +1728,17 @@
       if (SKIP.indexOf(page) !== -1) return;
       if (!localStorage.getItem(TOKEN_KEY)) return;
 
+      // Per-user key so View As doesn't inherit the impersonator's marker.
+      // Empty username → falls back to the shared key (legacy behaviour).
+      function whoNow() {
+        try { return (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").trim(); }
+        catch (e) { return ""; }
+      }
+      function seenKey() {
+        var u = whoNow();
+        return u ? ("mlVanScoreSeen:" + u) : "mlVanScoreSeen";
+      }
+
       function fetchAndShow() {
         var t = localStorage.getItem(TOKEN_KEY) || "";
         if (!t) return;
@@ -1730,32 +1746,38 @@
           headers: { "Authorization": "Bearer " + t }, cache: "no-store"
         }).then(function (r) { return r.json(); }).then(function (d) {
           if (!d || !d.ok || !d.latest) return;
-          var seen = ""; try { seen = localStorage.getItem("mlVanScoreSeen") || ""; } catch (e) {}
+          var key = seenKey(), seen = "";
+          try { seen = localStorage.getItem(key) || ""; } catch (e) {}
           if (seen && seen >= d.latest) return;
           if (document.getElementById("mlVanScoreNote")) return;
+
+          // Post the seen date to BOTH storages — the ✕ AND the whole-banner
+          // click now do the same thing, so the marker survives on this device
+          // AND on the user's other devices (via /prefs).
+          function markSeen() {
+            try { localStorage.setItem(key, d.latest); } catch (e) {}
+            try { fetch(window.MOSTLANE_API + "/prefs", { method: "POST",
+              headers: { "Authorization": "Bearer " + t, "Content-Type": "application/json" },
+              body: JSON.stringify({ vanScoreSeen: d.latest }) }); } catch (e) {}
+          }
+
           var a = document.createElement("a");
           a.id = "mlVanScoreNote";
           a.href = "/my-van-scores.html";
-          // Sits BELOW the statusCap (which paints the notch inset) but on top
-          // of the page — the statusCap has a higher z-index. Padding needs no
-          // safe-area allowance because statusCap owns that region now.
+          // Sits BELOW the statusCap (which paints the notch inset). Padding
+          // needs no safe-area allowance because statusCap owns that region.
           a.style.cssText = "position:fixed;top:env(safe-area-inset-top, 0px);left:0;right:0;z-index:99500;" +
             "background:#003468;color:#fff;text-decoration:none;padding:10px 14px;" +
             "font:650 13px -apple-system,system-ui,'Segoe UI',Roboto,Arial,sans-serif;" +
             "display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22);";
           a.innerHTML = '<span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>' +
             '<span id="mlVanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>';
-          a.addEventListener("click", function () {
-            try { localStorage.setItem("mlVanScoreSeen", d.latest); } catch (e) {}
-          });
+          a.addEventListener("click", function () { markSeen(); });
           document.body.appendChild(a);
           var x = document.getElementById("mlVanScoreX");
           if (x) x.addEventListener("click", function (ev) {
             ev.preventDefault(); ev.stopPropagation();
-            try { localStorage.setItem("mlVanScoreSeen", d.latest); } catch (e) {}
-            try { fetch(window.MOSTLANE_API + "/prefs", { method: "POST",
-              headers: { "Authorization": "Bearer " + t, "Content-Type": "application/json" },
-              body: JSON.stringify({ vanScoreSeen: d.latest }) }); } catch (e) {}
+            markSeen();
             a.remove();
           });
         }).catch(function () {});
