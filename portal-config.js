@@ -443,41 +443,38 @@
     var st = document.createElement("style");
     st.id = "ml-statuscap-style";
     st.textContent =
-      // Our padding must be INSIDE the body's height, not added to it. Pages
-      // like main.html set `html,body{height:100%}` with the default
-      // content-box, so a 47px top padding made the document 47px taller than
-      // the screen — a blank strip you could scroll to at the bottom.
-      "body{ box-sizing:border-box; }"
+      // The offset goes on <html>, NOT <body>. Two earlier attempts on body both
+      // misfired: a CSS rule replaced whatever padding a page set for itself,
+      // and a JS one that added to it broke pages where BODY is the scroll
+      // container (main.html sets overflow-x:hidden, which makes overflow-y
+      // scrollable on body) — padding a scroll box left a strip of background
+      // at the end of the scroll range. Padding <html> instead shifts the whole
+      // page down, and because percentage heights resolve against the parent's
+      // CONTENT box, a `body{height:100%}` shrinks to fit exactly. Nothing
+      // overflows and no page's own padding is touched.
+      "html{ box-sizing:border-box; padding-top:env(safe-area-inset-top, 0px); }"
+      // `vh` is measured against the FULL screen and ignores the padding above,
+      // so a page with `body{min-height:100vh}` (route.html and friends) ends up
+      // exactly one inset too tall — the blank strip again. Re-base it. Pages
+      // with no min-height simply gain a full-height body, which is harmless
+      // and makes short pages fill the screen rather than half-paint it.
+      + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px)); }"
+      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px);"
+      + "  padding-right:env(safe-area-inset-right, 0px); } }"
       + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
       + "  background:#003468; z-index:2147483000; pointer-events:none; }"
-      // Landscape on a notched phone: keep content out of the side notch too.
-      + "@media (orientation:landscape){ body{ padding-left:env(safe-area-inset-left, 0px);"
-      + "  padding-right:env(safe-area-inset-right, 0px); } }";
+;
     (document.head || document.documentElement).appendChild(st);
 
-    var cap = null, basePad = null;
-    function apply() {
-      if (!document.body) return;
-      if (!cap) {
-        cap = document.createElement("div");
-        cap.id = "mlStatusCap";
-        document.body.appendChild(cap);
-      }
-      // Read the inset off the cap itself rather than a CSS rule on <body>. A
-      // plain `body{padding-top:env(...)}` REPLACED the padding pages set for
-      // themselves — the field app (route/inbox/you) lost its own 14px and its
-      // content ended up jammed against the bar. Adding to the page's own value
-      // keeps every layout as its author intended.
-      var sat = Math.round(cap.getBoundingClientRect().height);
-      if (basePad === null) basePad = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
-      document.body.style.paddingTop = (basePad + sat) + "px";
+    var cap = null;
+    function add() {
+      if (!document.body || document.getElementById("mlStatusCap")) return;
+      cap = document.createElement("div");
+      cap.id = "mlStatusCap";
+      document.body.appendChild(cap);
     }
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply);
-    else apply();
-    // The inset changes with orientation, so re-measure (basePad is kept, so
-    // this never compounds).
-    addEventListener("resize", apply);
-    addEventListener("orientationchange", apply);
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add);
+    else add();
   })();
 
   // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
