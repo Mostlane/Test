@@ -20,7 +20,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
-import { sendToUser, sendToPermission } from "./push.js";
+import { sendToUser, sendToPermission, markNotificationsReadByTag } from "./push.js";
 
 // ── Shared: approved leave as per-day markers ────────────────────────────────
 // Used by the engineer timesheet + the SLA scheduler so an approved holiday
@@ -241,7 +241,7 @@ export async function handle(request, env, ctx, url, sess) {
     ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
       title: "Holiday request",
       body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} → ${end}).`,
-      url: "/holiday-admin.html", tag: "holiday-admin"
+      url: "/holiday-admin.html", tag: "holiday-admin:" + id
     }, user));
     return json({ success: true, id });
   }
@@ -371,6 +371,8 @@ export async function handle(request, env, ctx, url, sess) {
       body: `Your holiday ${record.start_date} → ${record.end_date} was ${status.toLowerCase()}.`,
       url: "/holiday.html", tag: "holiday-decision"
     }));
+    // Dealt with — clear the "holiday request" alert from every holiday admin's bell.
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "holiday-admin:" + id));
     return json({ success: true });
   }
 

@@ -1529,7 +1529,7 @@ async function handle5(request, env, ctx, url, sess) {
       title: "Holiday request",
       body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
       url: "/holiday-admin.html",
-      tag: "holiday-admin"
+      tag: "holiday-admin:" + id
     }, user));
     return json3({ success: true, id });
   }
@@ -1642,6 +1642,7 @@ async function handle5(request, env, ctx, url, sess) {
       url: "/holiday.html",
       tag: "holiday-decision"
     }));
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "holiday-admin:" + id));
     return json3({ success: true });
   }
   if (path === "/holiday/config" && method === "GET") {
@@ -2455,7 +2456,7 @@ async function handle6(request, env, ctx, url, sess) {
       title: "Equipment sent to you",
       body: `${me} sent you ${asset.name || asset.assetName || asset.id} \u2014 tap to accept.`,
       url: "/my-assets.html",
-      tag: "asset-transfer"
+      tag: "asset-transfer:" + reqId
     }));
     return json3({ ok: true, id: reqId });
   }
@@ -2517,6 +2518,7 @@ async function handle6(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
     ).bind(now, sigKey, db.tenantId, req.id).run();
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
     return json3({ ok: true, note });
   }
@@ -2540,6 +2542,7 @@ async function handle6(request, env, ctx, url, sess) {
       reason: b.reason || "",
       timestamp: now
     });
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
     return json3({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/transfer-cancel") {
@@ -2554,6 +2557,7 @@ async function handle6(request, env, ctx, url, sess) {
       if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
     }
     await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, req.id).run();
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
     return json3({ ok: true });
   }
   if (method === "GET" && pathname === "/asset/transfer-note") {
