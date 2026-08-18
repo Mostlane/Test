@@ -88,7 +88,7 @@
 </head>
 <body>
   <!-- New van-score notice (shown only when the office has sent an unseen score). -->
-  <a id="vanScoreNote" href="/my-van-scores.html" style="display:none;position:fixed;top:0;left:0;right:0;z-index:60;background:#003468;color:#fff;text-decoration:none;padding:10px 14px;font:650 13px -apple-system,system-ui,sans-serif;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22)">
+  <a id="vanScoreNote" href="/my-van-scores.html" style="display:none;position:fixed;top:0;left:0;right:0;z-index:60;background:#003468;color:#fff;text-decoration:none;padding:calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;font:650 13px -apple-system,system-ui,sans-serif;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22)">
     <span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>
     <span id="vanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>
   </a>

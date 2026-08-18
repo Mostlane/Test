@@ -2577,7 +2577,10 @@ files to this public repo.
   is byte-identical, then substituting a 47px inset and checking the back button
   moves clear (scratchpad `safearea.cjs`). Pages WITHOUT `viewport-fit=cover` are
   unaffected — iOS insets those automatically. NB `.topbar` in the po-* pages is
-  dead CSS (no element uses it).
+  dead CSS (no element uses it). Same rule applies to any FIXED `top:0` banner
+  or toast on a viewport-fit=cover page — e.g. route.html's `#vanScoreNote`
+  "new van driving score" bar sat under the clock until its padding was changed
+  to `calc(env(safe-area-inset-top, 0px) + 10px)` (18 Aug).
 - **Full-screen photo/doc close (✕) buttons must clear the iOS status bar.**
   On installed PWAs the ✕ sat at a fixed `top` under the notch/clock/battery.
   Fix pattern (Apple-standard): the page's `<meta viewport>` needs
