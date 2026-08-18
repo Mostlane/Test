@@ -2388,6 +2388,16 @@ files to this public repo.
 - Site images: sites.data JSON carries imageURL/_svAt/_noImagery flags.
 - Worker delivery: always give commit + line count + expected tail so a
   truncated paste is detectable. Chat-pasting the worker truncates — never.
+- **van-check.html answer buttons must read CFG LIVE, never a captured array.**
+  The driver form's answer handlers were bound as `onPick(CFG.checklist||[], …)`
+  at load — but `CFG` is fetched async, so at bind time it was null → an empty
+  array was captured (or it threw) and NO answer could be selected once items
+  existed. Fix: `onPick(kind, render)` looks up `CFG.checklist`/`CFG.equipment`
+  on every tap (+ `e.target.closest("button[data-id]")`), and `normItems()`
+  guarantees every item a stable id (`slugId(label)`, matching the worker's
+  underscore slug) so items added/removed in settings always stay answerable and
+  never collide on `answers[undefined]`. Same pattern applies to any config-driven
+  tap list — bind once, read the live config in the handler.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a
