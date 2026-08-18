@@ -55,7 +55,7 @@
   var CSS = ''
     + '.mldv-back{position:fixed;inset:0;background:#1e293b;display:none;flex-direction:column;z-index:100001;}'
     + '.mldv-back.show{display:flex;}'
-    + '.mldv-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#0f172a;color:#fff;flex-wrap:wrap;}'
+    + '.mldv-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top, 0px));background:#0f172a;color:#fff;flex-wrap:wrap;}'
     + '.mldv-title{flex:1;min-width:80px;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
     + '.mldv-bar button,.mldv-bar a{appearance:none;border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:8px;padding:7px 11px;font-size:14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;line-height:1;font-family:inherit;}'
     + '.mldv-bar button:active{background:#334155;}'
