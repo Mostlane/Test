@@ -2492,6 +2492,16 @@ files to this public repo.
   underscore slug) so items added/removed in settings always stay answerable and
   never collide on `answers[undefined]`. Same pattern applies to any config-driven
   tap list — bind once, read the live config in the handler.
+- **Full-screen photo/doc close (✕) buttons must clear the iOS status bar.**
+  On installed PWAs the ✕ sat at a fixed `top` under the notch/clock/battery.
+  Fix pattern (Apple-standard): the page's `<meta viewport>` needs
+  **`viewport-fit=cover`** AND the button's `top`/`right` use
+  **`calc(env(safe-area-inset-top, 0px) + Npx)`** (both are required — without
+  viewport-fit the env() inset is 0). Applied to engineer-job.html `.lx-close`,
+  docviewer.js `.mldv-bar` (padding-top), job-view.html `.photo-modal-close`,
+  site-folder.html `.lb .x`; viewport-fit added to job-view/site-folder/
+  my-documents/vehicle-maintenance/project-hub. docviewer bumped `?v=6`.
+  Any NEW full-screen overlay close button needs the same treatment.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

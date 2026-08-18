@@ -4,7 +4,7 @@
   <script src="/portal-config.js?v=9"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=15"></script>
   <script src="firestop-form.js?v=1"></script>
@@ -334,8 +334,9 @@
     }
     .photo-modal-close{
       position:absolute;
-      top:8px;
-      right:8px;
+      top:calc(env(safe-area-inset-top, 0px) + 8px);
+      right:calc(env(safe-area-inset-right, 0px) + 8px);
+      z-index:2;
       border:none;
       border-radius:999px;
       padding:4px 10px;

@@ -4,9 +4,9 @@
   <script src="/portal-config.js?v=9"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Site Documents</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="/docviewer.js?v=5"></script>
+  <script src="/docviewer.js?v=6"></script>
   <style>
     :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --panel:rgba(255,255,255,0.95); }
     html{background:#e6e8eb;}
@@ -79,7 +79,7 @@
     .lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:9999;}
     .lb.show{display:flex;}
     .lb img{max-width:94vw;max-height:92vh;border-radius:8px;}
-    .lb .x{position:absolute;top:12px;right:14px;color:#fff;font-size:26px;cursor:pointer;background:none;border:0;}
+    .lb .x{position:absolute;top:calc(env(safe-area-inset-top, 0px) + 12px);right:calc(env(safe-area-inset-right, 0px) + 14px);color:#fff;font-size:30px;line-height:1;padding:6px 10px;cursor:pointer;background:none;border:0;z-index:2;}
     #msg{font-size:13px;margin-top:8px;}
   </style>
 </head>
