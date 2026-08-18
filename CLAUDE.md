@@ -1822,16 +1822,27 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
   (clears the red badge); a "Mark all read" button too. Icons derived client-side
   from tag/url/title (`iconFor`). NB the bell is the read-back history; the
   blocking attention gate + red tile badges are unchanged and separate.
-  **Group-clear when dealt with:** `push.js markNotificationsReadByTag(env,tid,tag)`
-  marks EVERY recipient's feed row for a tag read+seen, so an actionable alert
-  that went to a whole group clears from all of them once one person handles it
-  (and just sits read in each log). The notification must carry a PER-ITEM tag.
-  Wired: on-hold approval (`hold-approve:<jobId>` — sla.js hold-approve/reject),
-  holiday requests (`holiday-admin:<id>` — holidays.js approve/reject), equipment
-  transfers (`asset-transfer:<reqId>` — assets.js transfer-accept/reject/cancel).
-  The actor's own follow-up notice uses a DIFFERENT tag (e.g. `hold-decided`,
-  `holiday-decision`) so it's never wrongly cleared. To extend to another flow,
-  give its group notification a per-item tag and call the helper when it's actioned.
+  **Actionable alerts — stay outstanding until DEALT WITH (Aug 2026):**
+  `user_notifications` gained **`actionable`** (0/1) + **`resolved_at`**. An alert
+  sent with `actionable:true` (per-item tag) stays OUTSTANDING for every recipient
+  — bold + amber "Needs action", always counted, NOT cleared by opening/clicking —
+  until the underlying item is dealt with. **Outstanding = `resolved_at IS NULL AND
+  (actionable=1 OR seen_at IS NULL)`** (portal.js feed/count + feed). On resolution,
+  **`push.js resolveNotificationsByTag(env,tid,tag,{title,body})`** stamps resolved_at
+  + read + seen on EVERY recipient's row AND rewrites it to the outcome ("Dave's
+  holiday — ✅ approved by Jamie"), so it drops off everyone's outstanding list and
+  sits read in each log. (`markNotificationsReadByTag` is now a thin wrapper.) Wired:
+  on-hold (`hold-approve:<jobId>`), holiday (`holiday-admin:<id>`), transfers
+  (`asset-transfer:<reqId>`); the actor's own follow-up notice uses a DIFFERENT tag
+  (`hold-decided`/`holiday-decision`) so it's untouched. Client: portal-config bell
+  renders outstanding items amber, opening never dismisses them, the badge = count
+  of still-outstanding actionable items (openPanel + Mark-all-read both respect it).
+  **Re-reminders (cron, push-only via `remindUser`/`remindPermission` — no new feed
+  rows):** on-hold chased **every ~10 min** (`sla.remindPendingHolds`, gated
+  `minute%10<5`); holiday + transfer chased **daily ~08:00 London**
+  (`holidays.remindPendingHolidays` + `assets.remindPendingTransfers`, deduped via
+  app_config `approvals:dailyReminded:1`). To extend: send with a per-item tag +
+  `actionable:true`, resolve with an outcome, and add a reminder sweep.
 - Red badges on tiles (main.html) + sidebar (portal-config) from
   /asset/transfers/pending-count, /holiday/my (unseen decisions),
   /holiday/all (pending + staff cancellations). "Seen" markers are per-USER
