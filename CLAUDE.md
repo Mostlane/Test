@@ -2542,6 +2542,24 @@ files to this public repo.
   underscore slug) so items added/removed in settings always stay answerable and
   never collide on `answers[undefined]`. Same pattern applies to any config-driven
   tap list — bind once, read the live config in the handler.
+- **`viewport-fit=cover` means YOU own the top inset — headers included.**
+  Adding `viewport-fit=cover` (needed so a full-screen ✕ can clear the notch)
+  makes the whole page extend UNDER the iOS status bar on an installed PWA. Any
+  page that sets it must therefore pad its own top bar, or the header — and the
+  ‹ Back button in it — sits under the clock and can't be tapped (Jamie hit this
+  on My Documents, 18 Aug). Fix applied to all 12 such pages: the header's own
+  padding gains the inset, e.g. `padding:14px 16px` →
+  `padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px` (my-documents,
+  vehicle-maintenance, memo-sign, project-hub, site-folder, and the seven po-*
+  pages, whose padding is an INLINE style on `<header class="page">` so a
+  stylesheet rule wouldn't win). A `position:sticky; top:0` toolbar needs
+  `top:env(safe-area-inset-top, 0px)` too or it slides under the clock on scroll
+  (my-documents `.bar`). The `env()` fallback is 0px, so nothing changes in a
+  browser — verified by rendering each page and confirming the fallback padding
+  is byte-identical, then substituting a 47px inset and checking the back button
+  moves clear (scratchpad `safearea.cjs`). Pages WITHOUT `viewport-fit=cover` are
+  unaffected — iOS insets those automatically. NB `.topbar` in the po-* pages is
+  dead CSS (no element uses it).
 - **Full-screen photo/doc close (✕) buttons must clear the iOS status bar.**
   On installed PWAs the ✕ sat at a fixed `top` under the notch/clock/battery.
   Fix pattern (Apple-standard): the page's `<meta viewport>` needs
