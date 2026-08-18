@@ -19,7 +19,7 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { trackJobTime } from "./timesheets.js";
 import { permissionsFor } from "../lib/auth.js";
-import { sendToUser, sendToPermission, markNotificationsReadByTag } from "./push.js";
+import { sendToUser, sendToPermission, resolveNotificationsByTag, remindPermission } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
 import { buildZip } from "../lib/zip.js";
@@ -1034,8 +1034,11 @@ export async function handle(request, env, ctx, url, sess) {
         body: `${job.helpdeskRef || id} was approved to stay on hold — you're clear to move on.`,
         url: "/engineer-jobs.html", tag: "hold-decided:" + id
       }));
-      // It's dealt with — clear the "approval needed" alert from EVERY admin's bell.
-      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
+      // Dealt with — flip the "approval needed" alert to the outcome for EVERY admin.
+      ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "hold-approve:" + id, {
+        title: "On-hold approved",
+        body: `${job.helpdeskRef || id} — ✅ approved by ${sess.user.username}.`
+      }));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
@@ -1064,8 +1067,11 @@ export async function handle(request, env, ctx, url, sess) {
         body: `${job.helpdeskRef || id}: ${body.reason || "the office needs this finished"} — tap to continue.`,
         url: "/job-view.html?jobId=" + encodeURIComponent(id), tag: "hold-decided:" + id
       }));
-      // It's dealt with — clear the "approval needed" alert from EVERY admin's bell.
-      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
+      // Dealt with — flip the "approval needed" alert to the outcome for EVERY admin.
+      ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "hold-approve:" + id, {
+        title: "On-hold declined",
+        body: `${job.helpdeskRef || id} — ❌ sent back by ${sess.user.username}.`
+      }));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
@@ -1244,7 +1250,7 @@ export async function handle(request, env, ctx, url, sess) {
         ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
           title: "On-hold approval needed",
           body: `${updated.hold.approval.requestedBy} wants to hold ${updated.helpdeskRef || id}: ${String(updated.hold.reason || "").slice(0, 60)}`,
-          url: "/inbox.html", tag: "hold-approve:" + id
+          url: "/inbox.html", tag: "hold-approve:" + id, actionable: true
         }, updated.hold.approval.requestedBy));
       }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
@@ -1859,6 +1865,23 @@ export async function sweepJobReleases(env, tid = 1) {
     const r = j.release; if (!r || !r.mode || r.mode === "now") continue;
     await reconcileRelease(env, tid, j, jobs).catch(() => {});
   }
+}
+
+// Re-nudge SLA admins about jobs still On Hold pending approval (blocks the
+// engineer, so it's chased often — every ~10 min from the cron). Push-only, so
+// the single outstanding bell alert isn't duplicated.
+export async function remindPendingHolds(env, tid = 1) {
+  try {
+    const jobs = await listJobs(env, tid);
+    for (const j of jobs) {
+      if (j.hold?.approval?.state !== "pending") continue;
+      await remindPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+        title: "On-hold still waiting",
+        body: `${j.hold.approval.requestedBy || "An engineer"} is waiting on ${j.helpdeskRef || j.id} — approve or send it back.`,
+        url: "/inbox.html", tag: "hold-approve:" + j.id
+      }, j.hold.approval.requestedBy).catch(() => {});
+    }
+  } catch { /* best-effort */ }
 }
 
 // Push every engineer NEWLY added to a job (added since `before`), so editing a

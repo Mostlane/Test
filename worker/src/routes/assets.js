@@ -17,7 +17,7 @@ import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { getRules, isSuppressed } from "../lib/suppress.js";
-import { sendToUser, markNotificationsReadByTag } from "./push.js";
+import { sendToUser, resolveNotificationsByTag, remindUser } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -585,7 +585,7 @@ export async function handle(request, env, ctx, url, sess) {
     ctx?.waitUntil(sendToUser(env, tenantId, b.to, {
       title: "Equipment sent to you",
       body: `${me} sent you ${asset.name || asset.assetName || asset.id} — tap to accept.`,
-      url: "/my-assets.html", tag: "asset-transfer:" + reqId
+      url: "/my-assets.html", tag: "asset-transfer:" + reqId, actionable: true
     }));
     return json({ ok: true, id: reqId });
   }
@@ -664,8 +664,11 @@ export async function handle(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
     ).bind(now, sigKey, db.tenantId, req.id).run();
-    // Dealt with — clear the "equipment sent to you" alert from the recipient's bell.
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
+    // Dealt with — flip the "equipment sent to you" alert to the outcome.
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Equipment accepted",
+      body: `You accepted ${asset?.name || req.asset_id}.`
+    }));
 
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
     return json({ ok: true, note });
@@ -687,7 +690,10 @@ export async function handle(request, env, ctx, url, sess) {
       type: "TRANSFER_REJECTED", transferId: req.id, assetID: req.asset_id,
       from: req.from_user, to: req.to_user, reason: b.reason || "", timestamp: now
     });
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Equipment declined",
+      body: `You declined the transfer${req.from_user ? " from " + req.from_user : ""}.`
+    }));
     return json({ ok: true });
   }
 
@@ -705,8 +711,11 @@ export async function handle(request, env, ctx, url, sess) {
     }
     await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?")
       .bind(new Date().toISOString(), db.tenantId, req.id).run();
-    // Withdrawn — clear the "equipment sent to you" alert from the recipient's bell.
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
+    // Withdrawn — flip the "equipment sent to you" alert to the outcome.
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Transfer withdrawn",
+      body: `${req.from_user || "The sender"} withdrew this equipment transfer.`
+    }));
     return json({ ok: true });
   }
 
@@ -995,4 +1004,22 @@ function londonWhen(iso) {
   const day = Number(get("day"));
   const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
   return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
+}
+
+// Daily re-nudge to recipients about equipment transfers still pending. Push-only
+// (the outstanding bell alert already exists). Called once a day from the cron.
+export async function remindPendingTransfers(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, to_user, from_user FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      if (!r.to_user) continue;
+      await remindUser(env, tid, r.to_user, {
+        title: "Equipment waiting for you",
+        body: `${r.from_user || "Someone"} sent you equipment that's still waiting to be accepted.`,
+        url: "/my-assets.html", tag: "asset-transfer:" + r.id
+      }).catch(() => {});
+    }
+  } catch { /* best-effort */ }
 }

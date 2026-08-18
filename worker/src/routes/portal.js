@@ -254,8 +254,10 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/notify/feed/count" && method === "GET") {
     if (!sess) return error("Not authenticated", 401, env, request);
     await ensureFeedTable(env);
+    // Outstanding = an actionable alert not yet resolved (stays until dealt with),
+    // OR a normal notification not yet seen.
     const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, unread: (row && row.n) || 0 }, {}, env, request);
   }
@@ -264,14 +266,16 @@ export async function handle(request, env, ctx, url, sess) {
     await ensureFeedTable(env);
     const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
     const { results } = await db.prepare(
-      "SELECT id, title, body, url, tag, created_at, read_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
+      "SELECT id, title, body, url, tag, created_at, read_at, actionable, resolved_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
     ).bind(db.tenantId, sess.user.username, limit).all();
     const items = (results || []).map(r => ({
       id: r.id, title: r.title || "", body: r.body || "", url: r.url || "",
-      tag: r.tag || "", at: r.created_at, read: !!r.read_at
+      tag: r.tag || "", at: r.created_at, read: !!r.read_at,
+      // actionable-but-unresolved stays "outstanding" (bold, counts) until dealt with.
+      actionable: !!r.actionable, resolved: !!r.resolved_at
     }));
     const cRow = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, items, unread: (cRow && cRow.n) || 0 }, {}, env, request);
   }

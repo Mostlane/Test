@@ -1175,6 +1175,14 @@ async function ensureFeedTable(env) {
   } catch {
   }
   try {
+    await env.DB.prepare("ALTER TABLE user_notifications ADD COLUMN actionable INTEGER DEFAULT 0").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE user_notifications ADD COLUMN resolved_at TEXT").run();
+  } catch {
+  }
+  try {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_usernotif ON user_notifications(tenant_id, username, id)").run();
   } catch {
   }
@@ -1188,7 +1196,7 @@ async function recordNotification(env, tenantId, username, payload) {
     if (!p.title && !p.body) return;
     await ensureFeedTable(env);
     await env.DB.prepare(
-      "INSERT INTO user_notifications (tenant_id, username, title, body, url, tag, created_at) VALUES (?,?,?,?,?,?,?)"
+      "INSERT INTO user_notifications (tenant_id, username, title, body, url, tag, created_at, actionable) VALUES (?,?,?,?,?,?,?,?)"
     ).bind(
       tenantId,
       username,
@@ -1196,7 +1204,8 @@ async function recordNotification(env, tenantId, username, payload) {
       String(p.body || "").slice(0, 600),
       String(p.url || "").slice(0, 300),
       tag.slice(0, 60),
-      (/* @__PURE__ */ new Date()).toISOString()
+      (/* @__PURE__ */ new Date()).toISOString(),
+      p.actionable ? 1 : 0
     ).run();
     await env.DB.prepare(
       "DELETE FROM user_notifications WHERE tenant_id=? AND username=? AND id NOT IN (SELECT id FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT 120)"
@@ -1204,17 +1213,65 @@ async function recordNotification(env, tenantId, username, payload) {
   } catch {
   }
 }
-async function markNotificationsReadByTag(env, tenantId, tag) {
+async function resolveNotificationsByTag(env, tenantId, tag, outcome) {
   const t = String(tag || "").slice(0, 60);
   if (!t) return;
   try {
     await ensureFeedTable(env);
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare(
-      "UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND tag=?"
-    ).bind(now, now, tenantId, t).run();
+    const o = outcome || {};
+    if (o.title || o.body) {
+      await env.DB.prepare(
+        "UPDATE user_notifications SET title=COALESCE(?,title), body=COALESCE(?,body), resolved_at=?, read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND tag=?"
+      ).bind(
+        o.title ? String(o.title).slice(0, 200) : null,
+        o.body ? String(o.body).slice(0, 600) : null,
+        now,
+        now,
+        now,
+        tenantId,
+        t
+      ).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE user_notifications SET resolved_at=?, read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND tag=?"
+      ).bind(now, now, now, tenantId, t).run();
+    }
   } catch {
   }
+}
+async function remindUser(env, tenantId, username, payload) {
+  try {
+    return await pushToUser(env, tenantId, username, payload);
+  } catch {
+    return { sent: 0, failed: 0, gone: 0 };
+  }
+}
+async function remindPermission(env, tenantId, permKeys, payload, excludeUser) {
+  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0 };
+  const keys = (permKeys || []).filter(Boolean);
+  if (!keys.length) return { sent: 0 };
+  const ph = keys.map(() => "?").join(",");
+  let usernames = [];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT username FROM user_permissions WHERE tenant_id=? AND value=1 AND permission IN (${ph})`
+    ).bind(tenantId, ...keys).all();
+    usernames = (results || []).map((r) => r.username);
+  } catch {
+    return { sent: 0 };
+  }
+  const ex = excludeUser ? String(excludeUser).toLowerCase() : null;
+  let sent = 0;
+  for (const u of usernames) {
+    if (ex && u.toLowerCase() === ex) continue;
+    try {
+      const r = await pushToUser(env, tenantId, u, payload);
+      sent += r.sent || 0;
+    } catch {
+    }
+  }
+  return { sent };
 }
 async function sendToUser(env, tenantId, username, payload) {
   const result = await pushToUser(env, tenantId, username, payload);
@@ -1339,6 +1396,25 @@ async function approvedLeaveInRange(env, tid, from, to, username) {
   } catch {
   }
   return out;
+}
+async function remindPendingHolidays(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, username, start_date, end_date FROM holidays WHERE tenant_id=? AND status='Pending'"
+    ).bind(tid).all();
+    const rows = results || [];
+    if (!rows.length) return;
+    for (const r of rows) {
+      await remindPermission(env, tid, ["FullAccess", "HolidayAdmin"], {
+        title: "Holiday still awaiting approval",
+        body: `${r.username}'s request (${r.start_date} \u2192 ${r.end_date}) hasn't been actioned yet.`,
+        url: "/holiday-admin.html",
+        tag: "holiday-admin:" + r.id
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
 }
 async function handle5(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -1529,7 +1605,8 @@ async function handle5(request, env, ctx, url, sess) {
       title: "Holiday request",
       body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
       url: "/holiday-admin.html",
-      tag: "holiday-admin:" + id
+      tag: "holiday-admin:" + id,
+      actionable: true
     }, user));
     return json3({ success: true, id });
   }
@@ -1642,7 +1719,10 @@ async function handle5(request, env, ctx, url, sess) {
       url: "/holiday.html",
       tag: "holiday-decision"
     }));
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "holiday-admin:" + id));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `${record.username}'s holiday ${record.start_date} \u2192 ${record.end_date} \u2014 ${status === "Approved" ? "\u2705 approved" : "\u274C rejected"} by ${user}.`
+    }));
     return json3({ success: true });
   }
   if (path === "/holiday/config" && method === "GET") {
@@ -2456,7 +2536,8 @@ async function handle6(request, env, ctx, url, sess) {
       title: "Equipment sent to you",
       body: `${me} sent you ${asset.name || asset.assetName || asset.id} \u2014 tap to accept.`,
       url: "/my-assets.html",
-      tag: "asset-transfer:" + reqId
+      tag: "asset-transfer:" + reqId,
+      actionable: true
     }));
     return json3({ ok: true, id: reqId });
   }
@@ -2518,7 +2599,10 @@ async function handle6(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
     ).bind(now, sigKey, db.tenantId, req.id).run();
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Equipment accepted",
+      body: `You accepted ${asset?.name || req.asset_id}.`
+    }));
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
     return json3({ ok: true, note });
   }
@@ -2542,7 +2626,10 @@ async function handle6(request, env, ctx, url, sess) {
       reason: b.reason || "",
       timestamp: now
     });
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Equipment declined",
+      body: `You declined the transfer${req.from_user ? " from " + req.from_user : ""}.`
+    }));
     return json3({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/transfer-cancel") {
@@ -2557,7 +2644,10 @@ async function handle6(request, env, ctx, url, sess) {
       if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
     }
     await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, req.id).run();
-    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
+      title: "Transfer withdrawn",
+      body: `${req.from_user || "The sender"} withdrew this equipment transfer.`
+    }));
     return json3({ ok: true });
   }
   if (method === "GET" && pathname === "/asset/transfer-note") {
@@ -2820,6 +2910,24 @@ function londonWhen(iso) {
   const day = Number(get("day"));
   const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
   return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
+}
+async function remindPendingTransfers(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, to_user, from_user FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      if (!r.to_user) continue;
+      await remindUser(env, tid, r.to_user, {
+        title: "Equipment waiting for you",
+        body: `${r.from_user || "Someone"} sent you equipment that's still waiting to be accepted.`,
+        url: "/my-assets.html",
+        tag: "asset-transfer:" + r.id
+      }).catch(() => {
+      });
+    }
+  } catch {
+  }
 }
 
 // src/lib/filesign.js
@@ -5844,7 +5952,10 @@ async function handle8(request, env, ctx, url, sess) {
         url: "/engineer-jobs.html",
         tag: "hold-decided:" + id
       }));
-      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
+      ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "hold-approve:" + id, {
+        title: "On-hold approved",
+        body: `${job.helpdeskRef || id} \u2014 \u2705 approved by ${sess.user.username}.`
+      }));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (parts[2] === "hold-reject" && method === "POST") {
@@ -5871,7 +5982,10 @@ async function handle8(request, env, ctx, url, sess) {
         url: "/job-view.html?jobId=" + encodeURIComponent(id),
         tag: "hold-decided:" + id
       }));
-      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
+      ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "hold-approve:" + id, {
+        title: "On-hold declined",
+        body: `${job.helpdeskRef || id} \u2014 \u274C sent back by ${sess.user.username}.`
+      }));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (parts[2] === "ra-block" && method === "POST") {
@@ -6011,7 +6125,8 @@ async function handle8(request, env, ctx, url, sess) {
           title: "On-hold approval needed",
           body: `${updated.hold.approval.requestedBy} wants to hold ${updated.helpdeskRef || id}: ${String(updated.hold.reason || "").slice(0, 60)}`,
           url: "/inbox.html",
-          tag: "hold-approve:" + id
+          tag: "hold-approve:" + id,
+          actionable: true
         }, updated.hold.approval.requestedBy));
       }
       if (!updated) return jsonResponse({ error: "Not found" }, headers, 404);
@@ -6562,6 +6677,22 @@ async function sweepJobReleases(env, tid = 1) {
     if (!r || !r.mode || r.mode === "now") continue;
     await reconcileRelease(env, tid, j, jobs).catch(() => {
     });
+  }
+}
+async function remindPendingHolds(env, tid = 1) {
+  try {
+    const jobs = await listJobs(env, tid);
+    for (const j of jobs) {
+      if (j.hold?.approval?.state !== "pending") continue;
+      await remindPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+        title: "On-hold still waiting",
+        body: `${j.hold.approval.requestedBy || "An engineer"} is waiting on ${j.helpdeskRef || j.id} \u2014 approve or send it back.`,
+        url: "/inbox.html",
+        tag: "hold-approve:" + j.id
+      }, j.hold.approval.requestedBy).catch(() => {
+      });
+    }
+  } catch {
   }
 }
 async function notifyNewlyAssigned(env, tid, before, after) {
@@ -8016,7 +8147,7 @@ async function handle10(request, env, ctx, url, sess) {
     if (!sess) return error("Not authenticated", 401, env, request);
     await ensureFeedTable(env);
     const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
   }
@@ -8025,7 +8156,7 @@ async function handle10(request, env, ctx, url, sess) {
     await ensureFeedTable(env);
     const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
     const { results } = await db.prepare(
-      "SELECT id, title, body, url, tag, created_at, read_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
+      "SELECT id, title, body, url, tag, created_at, read_at, actionable, resolved_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
     ).bind(db.tenantId, sess.user.username, limit).all();
     const items = (results || []).map((r) => ({
       id: r.id,
@@ -8034,10 +8165,13 @@ async function handle10(request, env, ctx, url, sess) {
       url: r.url || "",
       tag: r.tag || "",
       at: r.created_at,
-      read: !!r.read_at
+      read: !!r.read_at,
+      // actionable-but-unresolved stays "outstanding" (bold, counts) until dealt with.
+      actionable: !!r.actionable,
+      resolved: !!r.resolved_at
     }));
     const cRow = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND seen_at IS NULL"
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
     ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
   }
@@ -21271,7 +21405,11 @@ var index_default = {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
+    if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
+      ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
+    }
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
+      ctx.waitUntil(remindDailyApprovals(env).catch((e) => console.error("scheduled daily approvals:", e)));
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
       ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
@@ -21279,6 +21417,23 @@ var index_default = {
     }
   }
 };
+async function remindDailyApprovals(env) {
+  const now = /* @__PURE__ */ new Date();
+  const lonHour = Number(now.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  if (lonHour !== 8) return;
+  const today = now.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const key = "approvals:dailyReminded:1";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=1 AND key=?").bind(key).first();
+    if (row && row.value === today) return;
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (1,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(key, today).run();
+  } catch {
+  }
+  await remindPendingHolidays(env, 1).catch(() => {
+  });
+  await remindPendingTransfers(env, 1).catch(() => {
+  });
+}
 var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
 var AUDIT_SKIP = [
   "/notify/log",
