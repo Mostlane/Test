@@ -1666,9 +1666,17 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
     set" otherwise), scanned together for the selected date. For each loose job
     (unscheduled, or scheduled that date but NOT on a ticked engineer) it finds the
     **best-fit ticked engineer** by cheapest insertion into their day-route
-    (`engRoutePoints`), skipping anyone on leave (`holFor`), flags the current
-    owner, and offers **Assign** (PATCH `assignedEngineers` + schedule onto the day
-    if it had no time — then "open their day and Optimise to slot it in").
+    (`engRoutePoints`), skipping anyone on leave (`holFor`), and flags the current
+    owner. Each suggestion has **✓ Accept** (`acceptFillin` — PATCH
+    `assignedEngineers` + schedule onto the day if it had no time; removes just
+    that row, NO re-scan), **✕ Reject** (`rejectFillin` — dismiss + remember in
+    `fillRejected` for the session), and **👁 View**.
+  - **Job-card sub-modal** (`#jobCardBackdrop`, z-index 10001, `openJobCard`):
+    View on ANY suggestion (backfill or fill-ins) stacks a read-only job card OVER
+    the suggestion modal, rendered from the in-memory `jobs` array (no fetch). ‹
+    Back just hides it — **the suggestion list underneath is untouched, so nothing
+    re-runs**. This "peek then return without re-scanning" was an explicit
+    requirement. "Open full job ↗" links to job-view.html.
   Because empty/near-empty days score a full home round-trip, the detour metric
   naturally prefers engineers already passing by — i.e. "without going out of
   their way". No worker change and no new endpoint — reuses /sla/route-optimize

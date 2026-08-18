@@ -173,9 +173,11 @@
     .opt-thr{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;font-weight:600;}
     .opt-thr input[type=range]{width:110px;}
     .opt-bf-empty{color:var(--muted);font-size:12.5px;padding:6px 2px;}
-    .opt-bf-row{display:flex;align-items:center;gap:9px;border:1px solid var(--border);border-radius:9px;padding:7px 10px;margin-bottom:6px;cursor:pointer;}
+    .opt-bf-row{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:7px 10px;margin-bottom:6px;}
     .opt-bf-row:hover{background:#f8fafc;}
+    .opt-bf-lbl{display:flex;align-items:center;gap:9px;flex:1;min-width:0;cursor:pointer;}
     .opt-bf-row input{width:auto;flex:0 0 auto;}
+    .opt-bf-view{flex:0 0 auto;}
     .opt-bf-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
     .opt-bf-main b{font-size:13px;}
     .opt-bf-meta{font-size:11.5px;color:var(--muted);}
@@ -194,7 +196,15 @@
     .fill-meta{font-size:11.5px;color:var(--muted);}
     .fill-best{flex:0 0 auto;text-align:right;font-size:12px;color:#334155;line-height:1.25;}
     .fill-best small{color:#16a34a;font-weight:700;}
-    .fill-assign{flex:0 0 auto;background:#003366;color:#fff;}
+    .fill-acts{flex:0 0 auto;display:flex;gap:4px;align-items:center;}
+    .fill-accept{background:#16a34a;color:#fff;}
+    .fill-reject{color:#b91c1c;}
+    /* Job-card sub-modal */
+    .jc-desc{font-size:13.5px;line-height:1.45;margin-bottom:10px;white-space:pre-wrap;}
+    .jc-tbl{width:100%;border-collapse:collapse;font-size:13px;}
+    .jc-tbl th{text-align:left;color:var(--muted);font-weight:600;padding:5px 10px 5px 0;vertical-align:top;white-space:nowrap;width:1%;}
+    .jc-tbl td{padding:5px 0;vertical-align:top;}
+    .jc-chip{display:inline-block;color:#fff;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;}
     .modal label{display:block;font-size:12px;font-weight:600;margin-top:8px;margin-bottom:2px;}
     .modal input,.modal select,.modal textarea{width:100%;padding:7px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);}
     .modal textarea{min-height:56px;resize:vertical;}
@@ -425,6 +435,21 @@
     </div>
     <div id="fillStatus" style="font-size:13px;color:var(--muted);margin-bottom:6px;"></div>
     <div id="fillResult"></div>
+  </div>
+</div>
+
+<!-- JOB CARD SUB-MODAL (stacks over the suggestion modals; closing returns to
+     them with their state untouched — no re-scan) -->
+<div class="modal-backdrop" id="jobCardBackdrop" style="z-index:10001;">
+  <div class="modal" style="max-width:520px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <h2 id="jcTitle" style="margin:0;font-size:18px;">Job</h2>
+      <button type="button" class="btn" id="jcClose" style="flex:none;">‹ Back</button>
+    </div>
+    <div id="jcBody" style="margin-top:10px;"></div>
+    <div style="margin-top:12px;">
+      <button type="button" class="btn" id="jcOpenFull">Open full job ↗</button>
+    </div>
   </div>
 </div>
 
@@ -1257,14 +1282,18 @@ function renderBackfill(data){
     const owner = j.assignedEngineers.length
       ? (mine ? "" : `<span class="opt-owner">⚠ currently ${escapeHtml(ownerLabel(j))}</span>`)
       : `<span class="opt-new">🆕 unscheduled</span>`;
-    return `<label class="opt-bf-row"><input type="checkbox" class="opt-bf-cb" data-id="${escapeAttr(j.id)}" ${optAddedIds.has(j.id) ? "checked" : ""}>
-      <span class="opt-bf-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
-        <span class="opt-bf-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
-      <span class="opt-bf-cost">≈ +${c.detourMin}m<br><small>+${c.detourMi} mi · ${escapeHtml(c.slot)}</small></span></label>`;
+    return `<div class="opt-bf-row" data-id="${escapeAttr(j.id)}">
+      <label class="opt-bf-lbl"><input type="checkbox" class="opt-bf-cb" data-id="${escapeAttr(j.id)}" ${optAddedIds.has(j.id) ? "checked" : ""}>
+        <span class="opt-bf-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
+          <span class="opt-bf-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
+        <span class="opt-bf-cost">≈ +${c.detourMin}m<br><small>+${c.detourMi} mi · ${escapeHtml(c.slot)}</small></span></label>
+      <button type="button" class="btn tiny opt-bf-view" data-id="${escapeAttr(j.id)}" title="View the job card">👁</button>
+    </div>`;
   }).join("");
   html += `<div class="opt-bf-foot"><button type="button" class="btn btn-primary" id="optReopt" ${optAddedIds.size ? "" : "disabled"}>↻ Re-optimise with ${optAddedIds.size} added</button></div>`;
   wrap.innerHTML = html;
   $("optThreshold").addEventListener("input", e => { optThreshold = Number(e.target.value) || 20; $("optThrVal").textContent = optThreshold + " min"; renderBackfill(data); });
+  wrap.querySelectorAll(".opt-bf-view").forEach(b => b.addEventListener("click", () => openJobCard(b.getAttribute("data-id"))));
   wrap.querySelectorAll(".opt-bf-cb").forEach(cb => cb.addEventListener("change", () => {
     const id = cb.getAttribute("data-id");
     if(cb.checked) optAddedIds.add(id); else optAddedIds.delete(id);
@@ -1308,7 +1337,7 @@ document.getElementById("optRun").addEventListener("click", runOptimise);
 document.getElementById("optApply").addEventListener("click", applyOptimise);
 
 /* ===== Cross-engineer fill-ins (local scan; no API calls until you assign) ===== */
-let fillThreshold = 20;
+let fillThreshold = 20, fillRejected = new Set();
 function engName(username){ const e = engineers.find(x => (x.username || "").toLowerCase() === (username || "").toLowerCase()); return e ? e.name : username; }
 function openFillins(){
   $("fillDate").textContent = "Loose jobs for " + selectedDate.toDateString();
@@ -1320,7 +1349,7 @@ function openFillins(){
   }).join("");
   $("fillEngs").innerHTML = rows || '<div class="opt-bf-empty">No engineers.</div>';
   $("fillThreshold").value = fillThreshold; $("fillThrVal").textContent = fillThreshold + " min";
-  $("fillStatus").textContent = ""; $("fillResult").innerHTML = "";
+  $("fillStatus").textContent = ""; $("fillResult").innerHTML = ""; fillRejected = new Set();
   $("fillBackdrop").style.display = "flex";
 }
 async function runFillScan(){
@@ -1336,6 +1365,7 @@ async function runFillScan(){
   const tickedSet = new Set(ticked.map(t => t.toLowerCase()));
   const cand = [];
   jobs.forEach(j => {
+    if(fillRejected.has(j.id)) return;                                  // dismissed this session
     if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return;
     const c = coordsFor(j); if(!c) return;
     const sched = j.scheduledAt ? new Date(j.scheduledAt).toISOString().slice(0, 10) : null;
@@ -1354,38 +1384,87 @@ async function runFillScan(){
   });
   cand.sort((a, b) => a.best.mins - b.best.mins);
   if(!cand.length){ $("fillStatus").textContent = `No loose jobs fit within ${fillThreshold} min of the ticked engineers' days.`; $("fillResult").innerHTML = ""; $("fillScan").disabled = false; return; }
-  $("fillStatus").textContent = `${cand.length} job${cand.length === 1 ? "" : "s"} could be worked in:`;
   $("fillResult").innerHTML = cand.map(c => {
     const j = c.job;
     const owner = j.assignedEngineers.length ? `<span class="opt-owner">⚠ currently ${escapeHtml(ownerLabel(j))}</span>` : `<span class="opt-new">🆕 unscheduled</span>`;
-    return `<div class="fill-row">
+    return `<div class="fill-row" data-id="${escapeAttr(j.id)}">
       <span class="fill-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
         <span class="fill-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
       <span class="fill-best">→ <b>${escapeHtml(engName(c.best.u))}</b><br><small>≈ +${c.best.mins}m · +${c.best.mi} mi</small></span>
-      <button type="button" class="btn fill-assign" data-id="${escapeAttr(j.id)}" data-eng="${escapeAttr(c.best.u)}" data-sched="${j.scheduledAt ? 1 : 0}">Assign</button>
+      <span class="fill-acts">
+        <button type="button" class="btn tiny fill-view" data-id="${escapeAttr(j.id)}" title="View the job card">👁</button>
+        <button type="button" class="btn tiny fill-reject" data-id="${escapeAttr(j.id)}" title="Reject this suggestion">✕</button>
+        <button type="button" class="btn tiny fill-accept" data-id="${escapeAttr(j.id)}" data-eng="${escapeAttr(c.best.u)}" data-sched="${j.scheduledAt ? 1 : 0}">✓ Accept</button>
+      </span>
     </div>`;
   }).join("");
-  $("fillResult").querySelectorAll(".fill-assign").forEach(btn => btn.addEventListener("click", () => assignFillin(btn)));
+  $("fillResult").querySelectorAll(".fill-view").forEach(b => b.addEventListener("click", () => openJobCard(b.getAttribute("data-id"))));
+  $("fillResult").querySelectorAll(".fill-reject").forEach(b => b.addEventListener("click", () => rejectFillin(b.getAttribute("data-id"))));
+  $("fillResult").querySelectorAll(".fill-accept").forEach(b => b.addEventListener("click", () => acceptFillin(b)));
+  updateFillCount();
   $("fillScan").disabled = false;
 }
-async function assignFillin(btn){
+function updateFillCount(){
+  const n = $("fillResult").querySelectorAll(".fill-row").length;
+  $("fillStatus").textContent = n ? `${n} job${n === 1 ? "" : "s"} could be worked in — accept, reject or 👁 view each:` : "All suggestions dealt with. Press 💡 Find fill-ins to scan again.";
+}
+function rejectFillin(id){
+  fillRejected.add(id);
+  const row = $("fillResult").querySelector(`.fill-row[data-id="${CSS.escape(id)}"]`);
+  if(row) row.remove();
+  updateFillCount();
+}
+async function acceptFillin(btn){
   const id = btn.getAttribute("data-id"), eng = btn.getAttribute("data-eng"), wasSched = btn.getAttribute("data-sched") === "1";
-  btn.disabled = true; btn.textContent = "Assigning…";
+  btn.disabled = true; btn.textContent = "…";
   const patch = { assignedEngineers: [eng], assignedTo: eng, changedBy: currentUser || "scheduler" };
   if(!wasSched){ const d = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 8, 0, 0, 0); patch.scheduledAt = d.toISOString(); }
   try{
     const res = await authFetch("/sla/jobs/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
     if(!res.ok) throw new Error();
-    setStatus("Assigned to " + engName(eng) + " — open their day and Optimise to slot it in.");
+    // Remove just this row — the rest of the suggestions stay as-is (no re-scan).
+    const row = $("fillResult").querySelector(`.fill-row[data-id="${CSS.escape(id)}"]`);
+    if(row) row.remove();
+    const n = $("fillResult").querySelectorAll(".fill-row").length;
+    $("fillStatus").innerHTML = `✓ Assigned to <b>${escapeHtml(engName(eng))}</b> — open their day and Optimise to slot it in.` + (n ? ` <span style="color:var(--muted)">${n} left.</span>` : "");
     await loadJobs(); render();
-    runFillScan();
-  }catch{ btn.disabled = false; btn.textContent = "Assign"; alert("Couldn't assign — try again."); }
+  }catch{ btn.disabled = false; btn.textContent = "✓ Accept"; alert("Couldn't assign — try again."); }
 }
 $("openFillBtn").addEventListener("click", openFillins);
 $("fillClose").addEventListener("click", () => { $("fillBackdrop").style.display = "none"; });
 $("fillBackdrop").addEventListener("click", e => { if(e.target === $("fillBackdrop")) $("fillBackdrop").style.display = "none"; });
 $("fillThreshold").addEventListener("input", e => { fillThreshold = Number(e.target.value) || 20; $("fillThrVal").textContent = fillThreshold + " min"; });
 $("fillScan").addEventListener("click", runFillScan);
+
+/* Job-card sub-modal — read-only, rendered from the in-memory job (no fetch, no
+   re-scan). Stacks over whichever suggestion modal is open; ‹ Back just hides it. */
+let jcJobId = null;
+function openJobCard(id){
+  jcJobId = id;
+  const j = jobs.find(x => x.id === id);
+  if(!j){ $("jcTitle").textContent = "Job"; $("jcBody").innerHTML = '<div class="opt-bf-empty">Couldn\'t load this job.</div>'; }
+  else {
+    $("jcTitle").textContent = j.ref || j.site || "Job";
+    const c = STATUS_COLOUR[j.status] || "#64748b";
+    const when = j.scheduledAt ? new Date(j.scheduledAt) : null;
+    const engs = (j.assignedEngineers || []).map(engName).join(", ") || "—";
+    const rowsHtml = [
+      ["Status", `<span class="jc-chip" style="background:${c}">${escapeHtml(j.status || "—")}</span>`],
+      ["Priority", escapeHtml(j.priority || "—")],
+      ["Site", escapeHtml(j.site || j.siteCode || "—")],
+      ["Address", escapeHtml(j.address || "—")],
+      ["Scheduled", when ? (when.toLocaleDateString() + " " + pad2(when.getHours()) + ":" + pad2(when.getMinutes()) + " · " + (j.durationMinutes || 60) + " min") : "Not scheduled"],
+      ["Engineer(s)", escapeHtml(engs)]
+    ];
+    $("jcBody").innerHTML =
+      (j.title ? `<div class="jc-desc">${escapeHtml(j.title)}</div>` : "") +
+      `<table class="jc-tbl">` + rowsHtml.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join("") + `</table>`;
+  }
+  $("jobCardBackdrop").style.display = "flex";
+}
+$("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.display = "none"; });
+$("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
+$("jcOpenFull").addEventListener("click", () => { if(jcJobId){ const e = encodeURIComponent(jcJobId); window.open("job-view.html?jobId=" + e + "&id=" + e, "_blank"); } });
 
 function openJobModal(jobId){
   const job = jobs.find(j => j.id === jobId);
