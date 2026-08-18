@@ -288,6 +288,14 @@
           ["A job's width is its booked duration (finish time). Tap a job to edit details, duration or the engineer list."],
           ["<b>🗺️ Map view</b> shows Pending / Scheduled / In Progress / On Hold jobs as coloured pins. Tap a pin for the summary and an <b>Open job</b> link."],
         ]},
+        { icon: "🧭", title: "Auto-order an engineer's day (route optimiser)", perms: ["SLAAdmin"], steps: [
+          ["First, book that engineer's jobs onto the day (any order), and set each job's <b>Expected duration</b> when you raise or edit it — that's the time on site the day prediction uses."],
+          ["Save the engineer's <b>Home postcode</b> once, in <b>Users Admin</b> (optionally drop a precise <b>📍 pin</b>). This is the start and end of the round trip."],
+          ["On the scheduler, tap an engineer's <b>name</b> to open their day, then <b>🧭 Optimise route</b>. Pick the day's start time and a lunch break."],
+          ["Type any <b>anomalies</b> in plain English — e.g. \"the Tesco Fareham job must be done at 14:00\" or \"do Southampton last\". The AI honours these while keeping the driving as short as it can."],
+          ["You get a preview: the best visiting order with arrival times, plus <b>driving time, time on site, total miles and the predicted day length</b>. Nothing changes yet."],
+          ["Happy with it? Tap <b>✓ Apply to schedule</b> and the jobs are re-timed on the board. If a job has no location it's listed and left where it is."],
+        ]},
         { icon: "📁", title: "Site documents", perms: ["SLA", "SLAAdmin"], steps: [
           ["On a job, tap <b>📁 Site documents</b> (in the Site box) to see everything on file for that building. Office staff can also reach it from <b>Manage Sites → a site → Site documents</b>."],
           ["<b>Previous Jobs</b> — every job ever done at this site. Tap one to see a quick job sheet (engineer, dates, last note, who signed) and <b>Open full job</b> for the detail."],

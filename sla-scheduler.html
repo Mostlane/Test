@@ -7,7 +7,7 @@
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=15"></script>
+  <script src="sla-jobedit.js?v=16"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -154,6 +154,21 @@
     .eng-jobrow .ej-time{font-size:12px;font-weight:700;color:#334155;flex:0 0 auto;}
     .eng-jobrow .ej-chip{flex:0 0 auto;font-size:11px;font-weight:700;color:#fff;border-radius:999px;padding:3px 9px;}
     .eng-empty{color:var(--muted);font-size:13px;padding:12px 2px;}
+    /* Route optimiser */
+    .opt-sum{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px;}
+    .opt-sum > div{flex:1;min-width:88px;background:#f1f5f9;border:1px solid var(--border);border-radius:9px;padding:8px 10px;text-align:center;}
+    .opt-sum > div b{display:block;font-size:16px;color:#0f172a;}
+    .opt-sum > div span{font-size:11px;color:var(--muted);}
+    .opt-reason{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;font-size:12.5px;color:#3730a3;margin:6px 0;}
+    .opt-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;font-size:12px;color:#92400e;margin:6px 0;}
+    .opt-leg{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:9px;padding:8px 11px;margin-bottom:6px;}
+    .opt-leg .opt-time{font-size:12px;font-weight:800;color:#334155;flex:0 0 46px;padding-top:1px;}
+    .opt-leg .opt-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+    .opt-leg .opt-main b{font-size:13px;}
+    .opt-leg .opt-meta{font-size:11.5px;color:var(--muted);}
+    .opt-leg .opt-drive{font-size:11.5px;color:#2563eb;font-weight:600;margin-top:1px;}
+    .opt-leg.opt-home{background:#f8fafc;font-size:12.5px;font-weight:600;color:#334155;align-items:center;}
+    .opt-leg.opt-lunch{background:#f0fdf4;border-color:#bbf7d0;font-size:12.5px;font-weight:600;color:#166534;align-items:center;}
     .modal label{display:block;font-size:12px;font-weight:600;margin-top:8px;margin-bottom:2px;}
     .modal input,.modal select,.modal textarea{width:100%;padding:7px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);}
     .modal textarea{min-height:56px;resize:vertical;}
@@ -314,6 +329,7 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
       <span style="display:flex;gap:6px;flex:none;">
+        <button type="button" class="btn" id="engDayOptimise" title="Auto-order this engineer's day into the most efficient route">🧭 Optimise route</button>
         <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
         <button type="button" class="btn" id="engDayClose">✕</button>
       </span>
@@ -321,6 +337,45 @@
     <div id="engDayDate" style="font-size:12px;color:var(--muted);margin:2px 0 8px;"></div>
     <div class="eng-sum" id="engDaySummary"></div>
     <div class="eng-jobs" id="engDayJobs"></div>
+  </div>
+</div>
+
+<!-- ROUTE OPTIMISER MODAL -->
+<div class="modal-backdrop" id="optBackdrop">
+  <div class="modal" style="max-width:600px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 id="optTitle" style="margin:0;">Optimise route</h2>
+        <div id="optDate" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button type="button" class="btn" id="optClose" style="flex:none;">✕</button>
+    </div>
+
+    <div class="opt-controls" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">
+      <label style="flex:1;min-width:120px;">Start of day
+        <input type="time" id="optStart" value="08:00" step="300" style="width:100%;">
+      </label>
+      <label style="flex:1;min-width:120px;">Lunch break
+        <select id="optLunch" style="width:100%;">
+          <option value="0">None</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="45">45 minutes</option>
+          <option value="60">1 hour</option>
+        </select>
+      </label>
+    </div>
+    <label style="display:block;">Anomalies / instructions for the AI <span style="font-weight:400;color:var(--muted);font-size:12px;">(optional)</span>
+      <textarea id="optNotes" rows="2" placeholder="e.g. The Tesco Fareham job must be done at 14:00. Do the Southampton one last." style="width:100%;margin-top:4px;"></textarea>
+    </label>
+
+    <div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary" id="optRun">🧭 Work out the best route</button>
+      <button type="button" class="btn" id="optApply" style="display:none;background:#16a34a;color:#fff;">✓ Apply to schedule</button>
+    </div>
+
+    <div id="optStatus" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+    <div id="optSummary"></div>
+    <div id="optResult"></div>
   </div>
 </div>
 
@@ -1005,6 +1060,129 @@ function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
 document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
 document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
 document.getElementById("engDayBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("engDayBackdrop")) document.getElementById("engDayBackdrop").style.display = "none"; });
+
+/* ===== Route optimiser ===== */
+let optCtx = null, optResult = null;
+function optFmtMins(m){ m = Math.round(m || 0); const h = Math.floor(m / 60), mm = m % 60; return h ? (h + "h" + (mm ? " " + mm + "m" : "")) : (mm + "m"); }
+function optWallClock(dateObj, dayStart, offsetMin){
+  const [h, m] = dayStart.split(":").map(Number);
+  const base = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), h, m, 0, 0);
+  const d = new Date(base.getTime() + Math.round(offsetMin) * 60000);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function openRouteOptimise(){
+  if(!engDayCtx) return;
+  optCtx = { username: engDayCtx.username, name: engDayCtx.name, date: engDayCtx.date };
+  optResult = null;
+  $("engDayBackdrop").style.display = "none";
+  $("optTitle").textContent = "Optimise route — " + optCtx.name;
+  $("optDate").textContent = optCtx.date.toDateString();
+  $("optApply").style.display = "none";
+  $("optSummary").innerHTML = ""; $("optResult").innerHTML = ""; $("optStatus").textContent = "";
+  $("optBackdrop").style.display = "flex";
+}
+function optDayJobs(){
+  const eng = (optCtx.username || "").toLowerCase();
+  const iso = formatDateInput(optCtx.date);
+  return jobs.filter(j => {
+    if(!j.assignedEngineers.some(a => (a || "").toLowerCase() === eng)) return false;
+    if(!j.scheduledAt) return false;
+    if(new Date(j.scheduledAt).toISOString().slice(0, 10) !== iso) return false;
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return false;
+    return true;
+  });
+}
+async function runOptimise(){
+  const dayJobs = optDayJobs();
+  if(dayJobs.length < 2){ $("optStatus").textContent = "Need at least two active jobs scheduled on this day for this engineer."; return; }
+  $("optStatus").textContent = "Looking up locations…";
+  $("optRun").disabled = true; $("optApply").style.display = "none";
+  try{ await loadSiteMeta(); await geocodePostcodes(dayJobs.map(postcodeFor)); }catch{}
+  const payloadJobs = dayJobs.map(j => {
+    const c = coordsFor(j);
+    return { id: j.id, ref: j.ref || j.site || j.siteCode, site: j.site, priority: j.priority,
+      durationMinutes: j.durationMinutes || 60,
+      lat: c ? c[0] : undefined, lng: c ? c[1] : undefined, postcode: postcodeFor(j) || undefined };
+  });
+  $("optStatus").textContent = "Working out the most efficient route…";
+  try{
+    const res = await authFetch("/sla/route-optimize", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ engineer: optCtx.username, name: optCtx.name, date: formatDateInput(optCtx.date),
+        dayStart: $("optStart").value || "08:00", lunchMinutes: Number($("optLunch").value) || 0,
+        notes: $("optNotes").value || "", jobs: payloadJobs }) });
+    const data = await res.json();
+    if(!data.ok){ $("optStatus").textContent = data.error || "Couldn't optimise this route."; $("optRun").disabled = false; return; }
+    optResult = data;
+    renderOptimise(data);
+  }catch(e){ $("optStatus").textContent = "Couldn't reach the optimiser — try again."; }
+  $("optRun").disabled = false;
+}
+function renderOptimise(data){
+  const s = data.summary, dayStart = data.dayStart;
+  const endClock = optWallClock(optCtx.date, dayStart, s.dayLengthMins);
+  const srcLabel = data.matrixSource === "google" ? "live driving times" : "estimated distances (no Maps key)";
+  $("optStatus").innerHTML = (data.aiUsed ? "🤖 AI-ordered · " : "📐 Shortest-driving · ") + srcLabel;
+  $("optSummary").innerHTML =
+    `<div class="opt-sum">
+      <div><b>${optFmtMins(s.driveMins)}</b><span>driving</span></div>
+      <div><b>${optFmtMins(s.siteMins)}</b><span>on site</span></div>
+      ${s.lunchMins ? `<div><b>${optFmtMins(s.lunchMins)}</b><span>lunch</span></div>` : ""}
+      <div><b>${s.driveMiles} mi</b><span>round trip</span></div>
+      <div><b>${optFmtMins(s.dayLengthMins)}</b><span>day · ends ~${endClock}</span></div>
+    </div>` +
+    (data.aiReason ? `<div class="opt-reason">🤖 ${escapeHtml(data.aiReason)}</div>` : "") +
+    ((data.warnings && data.warnings.length) ? `<div class="opt-warn">⚠ ${data.warnings.map(escapeHtml).join("<br>")}</div>` : "");
+  const rows = [];
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${dayStart}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
+  data.legs.forEach((l, i) => {
+    if(data.lunch && data.lunch.beforeJobId === l.jobId){
+      rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(optCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
+    }
+    const arrive = optWallClock(optCtx.date, dayStart, l.arrivalOffset);
+    rows.push(
+      `<div class="opt-leg"><span class="opt-time">${arrive}</span>
+        <span class="opt-main"><b>${i + 1}. ${escapeHtml(l.ref || l.site || "Job")}</b>
+          <span class="opt-meta">${escapeHtml(l.site || "")}${l.priority ? " · " + escapeHtml(l.priority) : ""} · ${l.durationMin} min on site</span>
+          <span class="opt-drive">🚗 ${optFmtMins(l.driveMins)} · ${l.driveMiles} mi from previous</span>
+        </span></div>`);
+  });
+  if(data.lunch && !data.lunch.beforeJobId){
+    rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(optCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
+  }
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${endClock}</span><span>🏠 Back home · 🚗 ${optFmtMins(s.homeDriveMins)} · ${s.homeDriveMiles} mi</span></div>`);
+  $("optResult").innerHTML = rows.join("");
+  $("optApply").style.display = "";
+}
+async function applyOptimise(){
+  if(!optResult || !optResult.legs) return;
+  $("optApply").disabled = true;
+  $("optStatus").textContent = "Applying new times…";
+  const dayStart = optResult.dayStart;
+  const [h, m] = dayStart.split(":").map(Number);
+  let ok = 0, fail = 0;
+  for(const l of optResult.legs){
+    const base = new Date(optCtx.date.getFullYear(), optCtx.date.getMonth(), optCtx.date.getDate(), h, m, 0, 0);
+    const start = new Date(base.getTime() + Math.round(l.arrivalOffset) * 60000);
+    const end = new Date(start.getTime() + Math.round(l.durationMin) * 60000);
+    try{
+      const res = await authFetch("/sla/jobs/" + encodeURIComponent(l.jobId), { method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledAt: start.toISOString(), scheduledEnd: end.toISOString(),
+          durationMinutes: l.durationMin, changedBy: currentUser || "scheduler" }) });
+      if(res.ok) ok++; else fail++;
+    }catch{ fail++; }
+  }
+  $("optStatus").textContent = `Applied ${ok} job${ok === 1 ? "" : "s"}${fail ? ", " + fail + " failed" : ""}.`;
+  await loadJobs();
+  render();
+  $("optApply").disabled = false;
+  if(!fail) setTimeout(() => { $("optBackdrop").style.display = "none"; }, 800);
+}
+document.getElementById("engDayOptimise").addEventListener("click", openRouteOptimise);
+document.getElementById("optClose").addEventListener("click", () => { $("optBackdrop").style.display = "none"; });
+document.getElementById("optBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("optBackdrop")) $("optBackdrop").style.display = "none"; });
+document.getElementById("optRun").addEventListener("click", runOptimise);
+document.getElementById("optApply").addEventListener("click", applyOptimise);
 
 function openJobModal(jobId){
   const job = jobs.find(j => j.id === jobId);

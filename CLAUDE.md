@@ -1603,6 +1603,46 @@ Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
 
+## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
+Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal
+`#engDayBackdrop`, alongside 🗺️ Map) that auto-orders that engineer's jobs for a
+day into the most efficient **round trip** (home → jobs → home) and previews the
+predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
+- **POST /sla/route-optimize** (SLA-admin gated; `isSlaAdmin`). Body `{engineer,
+  date, dayStart, lunchMinutes, notes, jobs:[{id,ref,site,priority,durationMinutes,
+  lat,lng,postcode}]}`. The CLIENT sends the day's jobs WITH resolved coords (it
+  already geocodes postcodes for the map via `coordsFor`); the worker resolves the
+  engineer's **home** from `users.profile.homeLat/homeLng` else geocodes
+  `profile.homePostcode` (postcodes.io, edge-cached), builds a **Google Distance
+  Matrix** driving-time+miles matrix (`driveMatrix`, chunked to the 100-element
+  cap; haversine ×1.25 @30mph fallback when `GOOGLE_MAPS_KEY` is unset or the call
+  fails — `matrixSource` says which), solves a **nearest-neighbour + 2-opt**
+  baseline (`solveRoute`), then calls **Claude** (`anthropicRouteOrder`, forced
+  `set_route` tool, `env.ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL`) with the matrix +
+  the office's plain-English `notes` to RE-ORDER for anomalies ("the Tesco job must
+  be at 14:00", "do Southampton last"). AI order is validated as a full permutation
+  else the baseline is used; every fallback is surfaced in `warnings`. Returns a
+  PREVIEW only — `legs` (per stop: arrivalOffset minutes-from-start, driveMins,
+  driveMiles, durationMin), a fixed **lunch** allowance (inserted ~13:00, else after
+  the last job), and a **summary** (driveMins, driveMiles round-trip, siteMins,
+  lunchMins, dayLengthMins). Times are OFFSETS in minutes — the client owns the
+  local wall-clock conversion (it knows the date + start in London time).
+- **Apply** writes the new times back: the client builds each `scheduledAt`/
+  `scheduledEnd` from date + dayStart + offset and PATCHes each job (nothing is
+  written until the office presses ✓ Apply).
+- **Per-job expected duration**: a real persisted **`job.durationMinutes`** field
+  (create + patch in sla.js) so an UNSCHEDULED job still carries its on-site time
+  (the finish time only exists once scheduled). Input on **add-job.html** (allocate
+  section) + the shared **sla-jobedit.js** editor (a typed finish time still wins,
+  so the picker never fights the finish box). `sla-jobedit.js?v=16`.
+- **Engineer home** lives on `users.profile.homePostcode` (+ optional
+  `homeLat/homeLng` pin) — edited in **users-admin.html** (postcode field always;
+  a "📍 Set on map" Leaflet pin modal, lazy-loaded from unpkg, that overrides the
+  postcode). Postcode alone is enough (worker geocodes it); the pin is a fine-tune.
+- Uses the **already-present** `GOOGLE_MAPS_KEY` (same key sitelog-api's
+  `getTravelData` uses) and the OPTIONAL `ANTHROPIC_API_KEY` (the programme AI's
+  key). No new secrets; both fail soft with a clear reason in `warnings`.
+
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
 from the engineer's per-seal photos + a signed declaration, bundled with the
