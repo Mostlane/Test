@@ -11196,6 +11196,26 @@ async function handle13(request, env, ctx, url, sess) {
       e.days[r.date] = (e.days[r.date] || 0) + sec;
       e.total += sec;
     }
+    const leaveAll = await approvedLeaveInRange(env, tenantId, monday, sunday);
+    const officeUsers = new Set((permUsers || []).map((u) => u.username));
+    for (const [uname, byDate] of Object.entries(leaveAll || {})) {
+      if (excluded(uname)) continue;
+      if (!officeUsers.has(uname) && !map[uname]) continue;
+      const e = ensure6(uname);
+      for (const d of days) {
+        const h = byDate[d];
+        if (!h) continue;
+        const secs = leaveSeconds(h);
+        e.holidays = e.holidays || {};
+        e.holidays[d] = { type: h.type || "Holiday", half: h.half || "", seconds: secs, paid: isPaidLeave(h.type) };
+        e.holidayTotal = (e.holidayTotal || 0) + secs;
+      }
+    }
+    for (const e of Object.values(map)) {
+      e.holidays = e.holidays || {};
+      e.holidayTotal = e.holidayTotal || 0;
+      e.paidTotal = e.total + e.holidayTotal;
+    }
     const users = Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
     return json({ ok: true, monday, sunday, days, users }, {}, env, request);
   }
