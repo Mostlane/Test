@@ -19,7 +19,7 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { trackJobTime } from "./timesheets.js";
 import { permissionsFor } from "../lib/auth.js";
-import { sendToUser, sendToPermission } from "./push.js";
+import { sendToUser, sendToPermission, markNotificationsReadByTag } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
 import { buildZip } from "../lib/zip.js";
@@ -1034,6 +1034,8 @@ export async function handle(request, env, ctx, url, sess) {
         body: `${job.helpdeskRef || id} was approved to stay on hold — you're clear to move on.`,
         url: "/engineer-jobs.html", tag: "hold-decided:" + id
       }));
+      // It's dealt with — clear the "approval needed" alert from EVERY admin's bell.
+      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
@@ -1062,6 +1064,8 @@ export async function handle(request, env, ctx, url, sess) {
         body: `${job.helpdeskRef || id}: ${body.reason || "the office needs this finished"} — tap to continue.`,
         url: "/job-view.html?jobId=" + encodeURIComponent(id), tag: "hold-decided:" + id
       }));
+      // It's dealt with — clear the "approval needed" alert from EVERY admin's bell.
+      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 

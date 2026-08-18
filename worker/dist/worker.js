@@ -1204,6 +1204,18 @@ async function recordNotification(env, tenantId, username, payload) {
   } catch {
   }
 }
+async function markNotificationsReadByTag(env, tenantId, tag) {
+  const t = String(tag || "").slice(0, 60);
+  if (!t) return;
+  try {
+    await ensureFeedTable(env);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare(
+      "UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND tag=?"
+    ).bind(now, now, tenantId, t).run();
+  } catch {
+  }
+}
 async function sendToUser(env, tenantId, username, payload) {
   const result = await pushToUser(env, tenantId, username, payload);
   await recordNotification(env, tenantId, username, payload);
@@ -5828,6 +5840,7 @@ async function handle8(request, env, ctx, url, sess) {
         url: "/engineer-jobs.html",
         tag: "hold-decided:" + id
       }));
+      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (parts[2] === "hold-reject" && method === "POST") {
@@ -5854,6 +5867,7 @@ async function handle8(request, env, ctx, url, sess) {
         url: "/job-view.html?jobId=" + encodeURIComponent(id),
         tag: "hold-decided:" + id
       }));
+      ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "hold-approve:" + id));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (parts[2] === "ra-block" && method === "POST") {

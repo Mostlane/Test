@@ -80,6 +80,22 @@ export async function recordNotification(env, tenantId, username, payload) {
   } catch { /* feed is best-effort — never break the push path */ }
 }
 
+// Mark EVERY recipient's bell copy of a tagged notification read + seen — used
+// when a shared/group item is dealt with (e.g. one admin approves an on-hold, so
+// the "approval needed" alert clears from every other admin's bell and just sits
+// read in their log). Best-effort; safe from ctx.waitUntil().
+export async function markNotificationsReadByTag(env, tenantId, tag) {
+  const t = String(tag || "").slice(0, 60);
+  if (!t) return;
+  try {
+    await ensureFeedTable(env);
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND tag=?"
+    ).bind(now, now, tenantId, t).run();
+  } catch { /* best-effort */ }
+}
+
 // Send a { title, body, url } payload to every device a user has registered.
 // Prunes subscriptions the push service reports as gone (404/410). Best-effort;
 // returns { sent, failed, gone }. Safe to call from ctx.waitUntil().
