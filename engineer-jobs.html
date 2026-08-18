@@ -59,8 +59,12 @@
     .day-banner.today{color:var(--accent)}
     .day-banner.today::after{content:"TODAY";font-size:10px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--accent);padding:2px 8px;border-radius:999px;align-self:center}
     .job-card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 0 rgba(16,32,58,.03);padding:15px 16px;margin-bottom:12px;overflow:hidden}
-    .job-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip,var(--line))}
+    .job-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--strip,var(--line))}
     .job-card.strip-ok{--strip:var(--ok)}.job-card.strip-warn{--strip:var(--amber)}.job-card.strip-bad{--strip:var(--urgent)}.job-card.strip-done{--strip:#b9c2d0}.job-card.strip-none{--strip:var(--line)}
+    /* Completed jobs recede so scheduled/active work stands out when scrolling. */
+    .job-card.is-done{background:color-mix(in srgb,var(--muted) 5%,var(--card))}
+    .job-card.is-done .job-site{opacity:.72}
+    .job-card.is-done .job-addr,.job-card.is-done .ref{opacity:.78}
     .job-card.job-flash{animation:mlJobFlash 1s ease-in-out 0s 4;scroll-margin-top:80px}
     @keyframes mlJobFlash{0%,100%{box-shadow:0 1px 0 rgba(16,32,58,.03)}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
     @media (prefers-reduced-motion:reduce){.job-card.job-flash{animation:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
@@ -82,6 +86,7 @@
     .act{min-height:50px;border-radius:13px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);text-decoration:none;touch-action:manipulation}
     .act.dir{flex:0 0 auto;padding:0 16px;font-size:20px;color:var(--muted)}
     .act.open{flex:1;background:var(--accent);border-color:var(--accent);color:#fff}
+    .act.open.is-done{background:var(--chip);border-color:var(--line);color:var(--muted);font-weight:650}
     .act.open:active{transform:translateY(1px)}
     .small{font-size:11px}.muted{color:var(--muted)}
     .modal-backdrop{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999}
@@ -312,10 +317,14 @@ function computeSlaCountdown(targetISO){
   };
 }
 
+// A finished job — complete/closed/invoiced. Used to grey out + recede the card.
+function isDoneStatus(status){
+  const s = (status || "").toLowerCase();
+  return s.includes("complete") || s.includes("closed") || s.includes("invoiced");
+}
 // Engineer status pill — plain status only, NO SLA overdue colouring.
 function statusClass(status){
-  const s = (status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")) return "status-pill status-complete";
+  if(isDoneStatus(status)) return "status-pill status-complete";
   return "status-pill status-open";
 }
 // Clean "Job name" = "{Job number} - {Site name}" ("26819 - Poole, Ringwood Road").
@@ -360,6 +369,8 @@ function jobCardInner(job, slaInfo, target){
   const addr = escH([...new Set([job.address, pc].map(x => String(x||"").trim()).filter(Boolean))]
     .filter(a => !String(siteRaw).includes(a)).join(" · "));
   const dir = dirUrl(job);
+  const done = isDoneStatus(job.status);
+  const statusTxt = escH(job.status || "Open");
   // Engineer view — deliberately NO SLA information (no countdown, target or
   // P-number). Just the site, address and the plain job status.
   return `
@@ -371,11 +382,11 @@ function jobCardInner(job, slaInfo, target){
       ${addr ? `<div class="job-addr">${addr}</div>` : ""}
       <div class="job-meta">
         ${isUrgentJob(job) ? `<span class="status-pill urgent-pill">Urgent</span>` : ""}
-        <span class="${statusClass(job.status)}">${escH(job.status || "Open")}</span>
+        <span class="${statusClass(job.status)}">${done ? "✓ " : ""}${statusTxt}</span>
       </div>
       <div class="job-actions">
         ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
-        <a class="act open" href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">Open job →</a>
+        <a class="act open${done ? " is-done" : ""}" href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">${done ? "View job →" : "Open job →"}</a>
       </div>`;
 }
 
@@ -441,7 +452,7 @@ function renderDay(dateStr, jobs, mode){
     const slaInfo = computeSlaCountdown(target);
 
     const card = document.createElement("div");
-    card.className = "job-card " + stripClass(job.status, isUrgentJob(job));
+    card.className = "job-card " + stripClass(job.status, isUrgentJob(job)) + (isDoneStatus(job.status) ? " is-done" : "");
     card.dataset.jobId = job.id;
     card.innerHTML = jobCardInner(job, slaInfo, target);
     group.appendChild(card);
@@ -933,7 +944,7 @@ async function loadUnscheduled(){
       const target = job.targetAt || job.sla?.targetAt;
       const slaInfo = computeSlaCountdown(target);
       const card = document.createElement("div");
-      card.className = "job-card " + stripClass(job.status, isUrgentJob(job));
+      card.className = "job-card " + stripClass(job.status, isUrgentJob(job)) + (isDoneStatus(job.status) ? " is-done" : "");
       card.dataset.jobId = job.id;
       card.innerHTML = jobCardInner(job, slaInfo, target);
       items.appendChild(card);
