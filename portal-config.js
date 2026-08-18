@@ -1603,7 +1603,7 @@
           }
           // 3. Force the core shell past the browser HTTP cache so the reload
           //    picks up fresh copies immediately (best-effort, failures ignored).
-          var core = ["/portal-config.js?v=12", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+          var core = ["/portal-config.js?v=14", "/portal.css?v=1", "/auth.js", "/device-auth.js",
             location.pathname + location.search];
           await Promise.all(core.map(function (u) {
             return fetch(u, { cache: "reload" }).catch(function () {});
@@ -1703,6 +1703,66 @@
       if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
       else start();
     } catch (e) { console.error("[hard-refresh]", e); }
+  })();
+
+  // ── New van driving-score banner (top of every page for the engineer) ────
+  // A dark navy "🚐 Your new van driving score is ready — tap to view" bar that
+  // sits above the page header until dismissed or opened. Used to be hardcoded
+  // into route.html only, so an engineer who landed on main.html (or Jobs /
+  // Inbox / a job card) never saw it. Moved here so it appears on every
+  // logged-in portal page. Same seen-marker as before (localStorage
+  // `mlVanScoreSeen` + /prefs vanScoreSeen), same target (my-van-scores.html).
+  (function vanScoreBanner() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      // Skip auth flows, gate pages, and the target page itself.
+      var SKIP = ["login.html", "onboard.html", "confirmation.html",
+        "forgot-password.html", "reset-password.html", "change-password.html",
+        "hash.html", "memo-sign.html", "hs-sign.html", "programme-view.html",
+        "my-van-scores.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      if (!localStorage.getItem(TOKEN_KEY)) return;
+
+      function fetchAndShow() {
+        var t = localStorage.getItem(TOKEN_KEY) || "";
+        if (!t) return;
+        fetch(window.MOSTLANE_API + "/fleet/scores/unseen", {
+          headers: { "Authorization": "Bearer " + t }, cache: "no-store"
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (!d || !d.ok || !d.latest) return;
+          var seen = ""; try { seen = localStorage.getItem("mlVanScoreSeen") || ""; } catch (e) {}
+          if (seen && seen >= d.latest) return;
+          if (document.getElementById("mlVanScoreNote")) return;
+          var a = document.createElement("a");
+          a.id = "mlVanScoreNote";
+          a.href = "/my-van-scores.html";
+          // Sits BELOW the statusCap (which paints the notch inset) but on top
+          // of the page — the statusCap has a higher z-index. Padding needs no
+          // safe-area allowance because statusCap owns that region now.
+          a.style.cssText = "position:fixed;top:env(safe-area-inset-top, 0px);left:0;right:0;z-index:99500;" +
+            "background:#003468;color:#fff;text-decoration:none;padding:10px 14px;" +
+            "font:650 13px -apple-system,system-ui,'Segoe UI',Roboto,Arial,sans-serif;" +
+            "display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22);";
+          a.innerHTML = '<span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>' +
+            '<span id="mlVanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>';
+          a.addEventListener("click", function () {
+            try { localStorage.setItem("mlVanScoreSeen", d.latest); } catch (e) {}
+          });
+          document.body.appendChild(a);
+          var x = document.getElementById("mlVanScoreX");
+          if (x) x.addEventListener("click", function (ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            try { localStorage.setItem("mlVanScoreSeen", d.latest); } catch (e) {}
+            try { fetch(window.MOSTLANE_API + "/prefs", { method: "POST",
+              headers: { "Authorization": "Bearer " + t, "Content-Type": "application/json" },
+              body: JSON.stringify({ vanScoreSeen: d.latest }) }); } catch (e) {}
+            a.remove();
+          });
+        }).catch(function () {});
+      }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fetchAndShow);
+      else fetchAndShow();
+    } catch (e) { console.error("[van-score]", e); }
   })();
 
   // A small bell, top-right on every portal page, that anyone can open at any

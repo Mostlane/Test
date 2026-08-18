@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=13"></script>
+  <script src="/portal-config.js?v=14"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -87,35 +87,10 @@
   </style>
 </head>
 <body>
-  <!-- New van-score notice (shown only when the office has sent an unseen score). -->
-  <a id="vanScoreNote" href="/my-van-scores.html" style="display:none;position:fixed;top:0;left:0;right:0;z-index:60;background:#003468;color:#fff;text-decoration:none;padding:calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;font:650 13px -apple-system,system-ui,sans-serif;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22)">
-    <span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>
-    <span id="vanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>
-  </a>
+  <!-- New van-score notice now injected globally by portal-config.js — appears
+       on every logged-in page, not just this one. -->
   <div id="loading">Loading your day…</div>
   <div id="screen" style="display:none"></div>
-  <script>
-  (function(){
-    try{
-      var API=window.MOSTLANE_API||""; var t=localStorage.getItem("mostlaneToken")||"";
-      if(!t) return;
-      fetch(API+"/fleet/scores/unseen",{headers:{"Authorization":"Bearer "+t},cache:"no-store"})
-        .then(function(r){return r.json();}).then(function(d){
-          if(!d||!d.ok||!d.latest) return;
-          var seen=""; try{ seen=localStorage.getItem("mlVanScoreSeen")||""; }catch(e){}
-          if(seen && seen>=d.latest) return;                 // already acknowledged on this device
-          var el=document.getElementById("vanScoreNote"); if(!el) return;
-          el.style.display="flex";
-          var x=document.getElementById("vanScoreX");
-          if(x) x.addEventListener("click",function(ev){ ev.preventDefault(); ev.stopPropagation();
-            try{ localStorage.setItem("mlVanScoreSeen",d.latest); }catch(e){}
-            try{ fetch(API+"/prefs",{method:"POST",headers:{"Authorization":"Bearer "+t,"Content-Type":"application/json"},body:JSON.stringify({vanScoreSeen:d.latest})}); }catch(e){}
-            el.style.display="none";
-          });
-        }).catch(function(){});
-    }catch(e){}
-  })();
-  </script>
 
   <div class="modal" id="vcModal"><div class="sheet">
     <h3>Weekly van check</h3>
