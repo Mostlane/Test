@@ -10937,6 +10937,13 @@ function weekDays2(monday) {
   }
   return out;
 }
+var LEAVE_DAY_SECONDS = 8 * 3600;
+var LEAVE_HALF_SECONDS = 4 * 3600;
+var isPaidLeave = (type) => String(type || "").trim().toLowerCase() !== "unpaid";
+var leaveSeconds = (h) => {
+  if (!h || !isPaidLeave(h.type)) return 0;
+  return h.half === "AM" || h.half === "PM" ? LEAVE_HALF_SECONDS : LEAVE_DAY_SECONDS;
+};
 async function weekDetail(env, tenantId, username, week) {
   const db = tenantDB(env, tenantId);
   const monday = mondayOf2(isDateStr2(week) ? week : londonDate());
@@ -10956,7 +10963,16 @@ async function weekDetail(env, tenantId, username, week) {
     weekTotal += seg.seconds;
     if (seg.open) day.open = true;
   }
-  return { monday, sunday, days, byDay, weekTotal };
+  let holidayTotal = 0;
+  const leave = (await approvedLeaveInRange(env, tenantId, monday, sunday, username))[username] || {};
+  for (const d of days) {
+    const h = leave[d];
+    if (!h) continue;
+    const secs = leaveSeconds(h);
+    byDay[d].holiday = { type: h.type || "Holiday", half: h.half || "", seconds: secs, paid: isPaidLeave(h.type) };
+    holidayTotal += secs;
+  }
+  return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
 async function handle13(request, env, ctx, url, sess) {
   const path = url.pathname;
