@@ -263,22 +263,26 @@ export async function handle(request, env, ctx, url, sess) {
     if (!perms || perms.FullAccess !== "Yes") return jr({ error: "Forbidden" }, headers, 403);
     await ensureTable(env);
 
-    // Subscriptions grouped per user (case-insensitive).
-    let subs = [];
+    // Every subscription row (one per device), grouped per user (case-insensitive).
+    let rows = [];
     try {
       const r = await env.DB.prepare(
-        `SELECT lower(username) uk,
-                COUNT(*) devices,
-                MAX(created_at) last_reg,
-                MAX(last_ok) last_ok
+        `SELECT lower(username) uk, ua, created_at, last_ok
            FROM push_subscriptions
           WHERE tenant_id = ?
-          GROUP BY lower(username)`
+          ORDER BY created_at`
       ).bind(tid).all();
-      subs = r.results || [];
-    } catch { subs = []; }
+      rows = r.results || [];
+    } catch { rows = []; }
     const byUser = {};
-    for (const s of subs) byUser[s.uk] = s;
+    for (const s of rows) {
+      (byUser[s.uk] = byUser[s.uk] || []).push({
+        device: describeDevice(s.ua),
+        ua: s.ua || "",
+        lastOk: s.last_ok || null,
+        lastReg: s.created_at || null
+      });
+    }
 
     // All active users.
     let users = [];
@@ -288,16 +292,20 @@ export async function handle(request, env, ctx, url, sess) {
     } catch { users = []; }
 
     const list = users.map(u => {
-      const s = byUser[String(u.username || "").toLowerCase()] || null;
-      const devices = s ? Number(s.devices) || 0 : 0;
+      const devs = byUser[String(u.username || "").toLowerCase()] || [];
+      // newest-confirmed device first within a user
+      devs.sort((a, b) => String(b.lastOk || "").localeCompare(String(a.lastOk || "")) || String(b.lastReg || "").localeCompare(String(a.lastReg || "")));
       const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username;
+      const lastOk = devs.reduce((m, d) => (d.lastOk && (!m || d.lastOk > m)) ? d.lastOk : m, null);
+      const lastReg = devs.reduce((m, d) => (d.lastReg && (!m || d.lastReg > m)) ? d.lastReg : m, null);
       return {
         username: u.username,
         name,
-        on: devices > 0,
-        devices,
-        lastOk: s ? s.last_ok || null : null,
-        lastReg: s ? s.last_reg || null : null
+        on: devs.length > 0,
+        devices: devs.length,
+        devicesList: devs,
+        lastOk,
+        lastReg
       };
     });
     // Off first, then stale (never confirmed / old), then on — most-attention-needed at the top.
@@ -315,4 +323,28 @@ export async function handle(request, env, ctx, url, sess) {
 function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
+}
+
+// Turn a raw browser user-agent into a friendly "iPhone · Safari" style label.
+function describeDevice(ua) {
+  const u = String(ua || "");
+  if (!u) return "Unknown device";
+  let os = "";
+  if (/iPhone/i.test(u)) os = "iPhone";
+  else if (/iPad/i.test(u)) os = "iPad";
+  else if (/Android/i.test(u)) os = "Android";
+  else if (/Windows/i.test(u)) os = "Windows PC";
+  else if (/Macintosh|Mac OS X/i.test(u)) os = "Mac";
+  else if (/CrOS/i.test(u)) os = "Chromebook";
+  else if (/Linux/i.test(u)) os = "Linux";
+  let br = "";
+  if (/EdgA?\//i.test(u)) br = "Edge";
+  else if (/OPR\/|Opera/i.test(u)) br = "Opera";
+  else if (/SamsungBrowser/i.test(u)) br = "Samsung Internet";
+  else if (/FxiOS|Firefox/i.test(u)) br = "Firefox";
+  else if (/CriOS/i.test(u)) br = "Chrome";
+  else if (/Chrome\//i.test(u)) br = "Chrome";
+  else if (/Version\/.*Safari/i.test(u) || /Safari/i.test(u)) br = "Safari";
+  const parts = [os, br].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Unknown device";
 }
