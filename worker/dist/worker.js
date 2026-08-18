@@ -2936,19 +2936,83 @@ var W = {
   "\u2013": 556,
   "\u2014": 1e3
 };
+var WIN1252 = {
+  "\u20AC": 128,
+  "\u201A": 130,
+  "\u0192": 131,
+  "\u201E": 132,
+  "\u2026": 133,
+  "\u2020": 134,
+  "\u2021": 135,
+  "\u02C6": 136,
+  "\u2030": 137,
+  "\u0160": 138,
+  "\u2039": 139,
+  "\u0152": 140,
+  "\u017D": 142,
+  "\u2018": 145,
+  "\u2019": 146,
+  "\u201C": 147,
+  "\u201D": 148,
+  "\u2022": 149,
+  "\u2013": 150,
+  "\u2014": 151,
+  "\u02DC": 152,
+  "\u2122": 153,
+  "\u0161": 154,
+  "\u203A": 155,
+  "\u0153": 156,
+  "\u017E": 158,
+  "\u0178": 159
+};
+var ASCIIFY = {
+  "\u2192": "->",
+  "\u2190": "<-",
+  "\u2194": "<->",
+  "\u21D2": "=>",
+  "\u21D0": "<=",
+  "\u2212": "-",
+  "\u2011": "-",
+  "\u2012": "-",
+  "\u2015": "-",
+  "\u2044": "/",
+  "\u2264": "<=",
+  "\u2265": ">=",
+  "\u2260": "!=",
+  "\u2248": "~",
+  "\u2713": "v",
+  "\u2714": "v",
+  "\u2715": "x",
+  "\u2717": "x",
+  "\u221A": "v",
+  "\xA0": " ",
+  "\u2009": " ",
+  "\u202F": " ",
+  "\u200B": ""
+};
+function toWinAnsi(s) {
+  let out = "";
+  for (const ch of String(s == null ? "" : s)) {
+    if (ASCIIFY[ch] != null) {
+      out += ASCIIFY[ch];
+      continue;
+    }
+    if (WIN1252[ch] != null || ch.charCodeAt(0) <= 255) {
+      out += ch;
+      continue;
+    }
+  }
+  return out;
+}
 function textWidth(str, size = 10) {
   let u = 0;
-  for (const ch of String(str)) u += W[ch] != null ? W[ch] : 556;
+  for (const ch of toWinAnsi(str)) u += W[ch] != null ? W[ch] : 556;
   return u / 1e3 * size;
 }
 function pdfStr(s) {
   let out = "";
-  for (const ch of String(s)) {
-    let c = ch.charCodeAt(0);
-    if (ch === "\u2013" || ch === "\u2014") c = 45;
-    if (ch === "\u2019" || ch === "\u2018") c = 39;
-    if (ch === "\u201C" || ch === "\u201D") c = 34;
-    if (c > 255) c = 63;
+  for (const ch of toWinAnsi(s)) {
+    let c = WIN1252[ch] != null ? WIN1252[ch] : ch.charCodeAt(0);
     if (c === 92) out += "\\\\";
     else if (c === 40) out += "\\(";
     else if (c === 41) out += "\\)";
@@ -19733,26 +19797,42 @@ function buildProgrammePdf(data, meta = {}) {
     e0 = addDays2(anchor, 29);
   }
   const totalDays = Math.min(550, Math.max(14, Math.round((addDays2(e0, 2) - s0) / DAY) + 1));
-  const daysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
+  const maxDaysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
+  const nWindows = Math.max(1, Math.ceil(totalDays / maxDaysPerPage));
+  const daysPerPage = Math.ceil(totalDays / nWindows);
   const windows = [];
   for (let off = 0; off < totalDays; off += daysPerPage) {
     windows.push({ from: off, days: Math.min(daysPerPage, totalDays - off) });
   }
-  const headerBlockH = 78;
+  const headerBlockH = 89;
   const footerH = 18;
   const rowsPerPage = Math.max(8, Math.floor((PH - M2 - headerBlockH - HDR_H - footerH - M2) / ROW_H));
-  const rowChunks = [];
-  for (let i = 0; i < Math.max(1, tasks.length); i += rowsPerPage) {
-    rowChunks.push(tasks.slice(i, i + rowsPerPage));
+  const inWindow = (t, win) => {
+    if (!t._start || !t._end) return false;
+    const from = Math.round((t._start - s0) / DAY);
+    const to = Math.round((t._end - s0) / DAY);
+    return to >= win.from && from < win.from + win.days;
+  };
+  const pages = [];
+  for (const win of windows) {
+    const winTasks = tasks.filter((t) => inWindow(t, win));
+    if (!winTasks.length) continue;
+    const nPages = Math.max(1, Math.ceil(winTasks.length / rowsPerPage));
+    const per = Math.ceil(winTasks.length / nPages);
+    for (let i = 0; i < winTasks.length; i += per) {
+      pages.push({ win, rows: winTasks.slice(i, i + per) });
+    }
   }
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, rowsPerPage) });
   const doc = new PdfDoc(PW, PH);
   let first = true;
-  const totalPages = windows.length * rowChunks.length;
+  const totalPages = pages.length;
   let pageNo = 0;
-  for (const win of windows) {
-    const dayW = Math.min(16, GRID_W / win.days);
-    const winStart = addDays2(s0, win.from);
-    for (const rows of rowChunks) {
+  {
+    for (const page of pages) {
+      const win = page.win, rows = page.rows;
+      const dayW = Math.min(16, GRID_W / win.days);
+      const winStart = addDays2(s0, win.from);
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
@@ -19776,17 +19856,30 @@ function buildProgrammePdf(data, meta = {}) {
       }
       doc.text(PW - M2, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
-      let lx = M2;
+      const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays2(winStart, win.days - 1))})` : "";
+      if (rangeLbl) doc.text(PW - M2, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      const LEG_LINE_H = 11;
+      const legendRightL1 = PW - M2 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M2, line = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
-        doc.rect(lx, y - 7, 8, 8, { fill: hex2rgb(c.colour) });
-        doc.text(lx + 11, y, c.name, { size: 8.5 });
-        lx += 11 + textWidth(c.name, 8.5) + 14;
-        if (lx > PW - M2 - 80) break;
+        const w = 11 + textWidth(c.name, 8.5) + 14;
+        const right = line === 0 ? legendRightL1 : PW - M2;
+        if (lx + w > right) {
+          if (line === 0) {
+            line = 1;
+            lx = M2;
+          } else {
+            dropped++;
+            continue;
+          }
+        }
+        const ly = y + line * LEG_LINE_H;
+        doc.rect(lx, ly - 7, 8, 8, { fill: hex2rgb(c.colour) });
+        doc.text(lx + 11, ly, c.name, { size: 8.5 });
+        lx += w;
       }
-      if (windows.length > 1) {
-        doc.text(PW - M2, y, `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)} \u2192 ${fmtDM(addDays2(winStart, win.days - 1))})`, { size: 8.5, alignRight: true, grey: true });
-      }
+      if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M2 + headerBlockH;
       const gridTop = y, gridBot = gridTop + HDR_H + rows.length * ROW_H;
       doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
@@ -19801,7 +19894,8 @@ function buildProgrammePdf(data, meta = {}) {
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.992, 0.953, 0.898] });
-        const label = dayW >= 15 ? true : d.getUTCDay() === 1;
+        let label = dayW >= 15 ? true : d.getUTCDay() === 1;
+        if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
         if (label) {
           doc.text(x + 1, gridTop + 9, fmtDM(d), { size: 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
           doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
@@ -19838,7 +19932,9 @@ function buildProgrammePdf(data, meta = {}) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
               const bh = ROW_H - 5;
-              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, bh, bh / 2, { fill: col });
+              const bw = (j - i + 1) * dayW - 1;
+              const r = Math.max(1, Math.min(2.5, bh / 2, bw / 2));
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, bw, bh, r, { fill: col });
               i = j + 1;
             }
           }
