@@ -1418,10 +1418,9 @@
   (function chatWidget() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
-      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
-        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
-        "route.html", "engineer-jobs.html", "inbox.html", "you.html"];
-      if (SKIP.indexOf(page) !== -1) return;
+      // The chat bubble lives ONLY on the home page (same reason as the bell —
+      // it floated over full-screen photo/doc close buttons on other pages).
+      if (page !== "main.html") return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var p = {};
@@ -1537,12 +1536,11 @@
         btn.id = "mlRefresh";
         btn.setAttribute("aria-label", "Refresh this page");
         btn.title = "Refresh — fetches the latest version of this page (clears cached copies)";
-        // Sit just BELOW the page header so it never covers a ‹ Back button;
-        // pages without a header get the top corner.
-        var hdr = document.querySelector("header.page, header.main-header");
-        var top = 8;
-        try { if (hdr) top = Math.max(8, Math.round(hdr.getBoundingClientRect().bottom + window.scrollY) + 6); } catch (e) {}
-        btn.style.cssText = "position:fixed;top:calc(" + top + "px + env(safe-area-inset-top,0px));left:8px;z-index:98000;" +
+        // Bottom-LEFT so it never covers a top-corner Back button or a
+        // full-screen photo's ✕. Lifted above the field-app tabbar when present.
+        var bottom = 12;
+        try { var tb = document.querySelector(".tabbar"); if (tb && tb.offsetParent !== null) bottom = Math.round(tb.getBoundingClientRect().height) + 12; } catch (e) {}
+        btn.style.cssText = "position:fixed;bottom:calc(" + bottom + "px + env(safe-area-inset-bottom,0px));left:8px;z-index:98000;" +
           "width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.92);" +
           "box-shadow:0 3px 12px rgba(0,20,60,.28);cursor:pointer;font-size:16px;line-height:34px;padding:0;opacity:.9;";
         btn.textContent = "🔄";
@@ -1566,7 +1564,7 @@
             }
             // 3. Force the core shell past the browser HTTP cache so the reload
             //    picks up fresh copies immediately (best-effort, failures ignored).
-            var core = ["/portal-config.js?v=5", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+            var core = ["/portal-config.js?v=10", "/portal.css?v=1", "/auth.js", "/device-auth.js",
               location.pathname + location.search];
             await Promise.all(core.map(function (u) {
               return fetch(u, { cache: "reload" }).catch(function () {});
@@ -1590,10 +1588,9 @@
   (function notifBell() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
-      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
-        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
-        "memo-sign.html", "hs-sign.html"];
-      if (SKIP.indexOf(page) !== -1) return;
+      // The bell lives ONLY on the home page — it used to float top-right on every
+      // page and covered full-screen photo/doc close (✕) buttons.
+      if (page !== "main.html") return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var p = {};
