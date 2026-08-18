@@ -169,6 +169,11 @@
     catch (e) { document.querySelector(".wrap").innerHTML = "<p class='muted'>Couldn't load — check your connection and try again.</p>"; return; }
     if (!d.ok) { document.querySelector(".wrap").innerHTML = "<p class='muted'>" + esc(d.error || "Couldn't load this check.") + "</p>"; return; }
     CFG = d;
+    // Make every checklist/equipment item carry a stable id, so the driver can
+    // always answer them however the office adds or removes items. (The worker
+    // assigns ids on save too — this is belt-and-braces for any legacy/edge data.)
+    CFG.checklist = normItems(CFG.checklist);
+    CFG.equipment = normItems(CFG.equipment);
     // Auto-fill the engineer's assigned registration: prefer the server's
     // vehicle_assigned, fall back to the reg cached at login (VehicleAssigned).
     try { CFG.vehicle = CFG.vehicle || localStorage.getItem("mostlaneVehicle") || sessionStorage.getItem("mostlaneVehicle") || ""; } catch (e) {}
@@ -245,6 +250,23 @@
   function driverOpts(it, kind) {
     return (Array.isArray(it.options) && it.options.length) ? it.options : DEF_DRIVER_OPTS[kind];
   }
+  // Give every item a guaranteed, stable id (same slug rule the worker uses:
+  // lower-case, non-alphanumerics → "_"). Keeps the driver form working no
+  // matter how items are added/removed, and never lets two items collide.
+  function slugId(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40); }
+  function normItems(list) {
+    const seen = {}, out = [];
+    (Array.isArray(list) ? list : []).forEach(function (it, idx) {
+      if (!it) return;
+      const o = (typeof it === "object") ? it : { label: String(it) };
+      const label = String(o.label != null ? o.label : "").trim(); if (!label) return;
+      let id = String(o.id || "").trim() || slugId(label) || ("item_" + idx);
+      while (seen[id]) id = id + "_" + idx;
+      seen[id] = 1;
+      out.push(Object.assign({}, o, { id: id, label: label }));
+    });
+    return out;
+  }
   function toneClass(tone) { return tone === "issue" ? "on-bad" : tone === "na" ? "on-na" : "on-ok"; }
   function toneOf(it, kind, val) {
     const o = driverOpts(it, kind).find(x => x.value === val);
@@ -273,23 +295,28 @@
     if (!eq.length) return;
     g("equipItems").innerHTML = eq.map(it => itemHtml(it, "equip")).join("");
   }
-  function onPick(items, kind, render) {
+  // Read the CURRENT items from CFG on every tap (never a captured snapshot) so
+  // the handler can't go stale, and can't crash while CFG is still loading.
+  function onPick(kind, render) {
     return e => {
-      const id = e.target.dataset.id, val = e.target.dataset.val;
-      if (!id || val == null) return;
+      const btn = e.target.closest ? e.target.closest("button[data-id]") : null;
+      if (!btn) return;
+      const id = btn.dataset.id, val = btn.dataset.val;
+      if (!id || val == null || !CFG) return;
+      const items = kind === "equip" ? (CFG.equipment || []) : (CFG.checklist || []);
       const it = items.find(x => x.id === id); if (!it) return;
       answers[id] = val;
       if (toneOf(it, kind, val) !== "issue") delete defectNotes[id];
       render(); saveDraft();
     };
   }
-  g("equipItems").addEventListener("click", onPick(CFG.equipment || [], "equip", renderEquip));
+  g("equipItems").addEventListener("click", onPick("equip", renderEquip));
   g("equipItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
 
   function renderItems() {
     g("checkItems").innerHTML = (CFG.checklist || []).map(it => itemHtml(it, "check")).join("");
   }
-  g("checkItems").addEventListener("click", onPick(CFG.checklist || [], "check", renderItems));
+  g("checkItems").addEventListener("click", onPick("check", renderItems));
   g("checkItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
   ["f_vehicle", "f_mileage", "f_note"].forEach(id => g(id).addEventListener("input", saveDraft));
 
