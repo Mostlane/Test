@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>My Documents — Mostlane</title>
-<script src="/portal-config.js?v=12"></script>
+<script src="/portal-config.js?v=13"></script>
 <script src="/docviewer.js?v=6"></script>
 <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
-  header.page{background:#0f172a;color:#fff;padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px;display:flex;align-items:center;gap:12px;}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
   header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;}
   .wrap{max-width:900px;margin:0 auto;padding:16px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
@@ -218,7 +218,7 @@ function reportHtml(d){
   .tw{overflow-x:auto;} table{border-collapse:collapse;width:100%;font-size:12px;margin:4px 0 8px;}
   th,td{border:1px solid #bbb;padding:4px 7px;text-align:left;vertical-align:top;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis;}
   th{background:#eee;}
-  .bar{position:sticky;top:env(safe-area-inset-top, 0px);background:#fff;padding:8px 0 12px;display:flex;gap:10px;flex-wrap:wrap;}
+  .bar{position:sticky;top:0;background:#fff;padding:8px 0 12px;display:flex;gap:10px;flex-wrap:wrap;}
   .bar button,.bar a{font:inherit;font-size:14px;padding:8px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#111;cursor:pointer;text-decoration:none;}
   .bar button.primary{background:#2563eb;color:#fff;border-color:#2563eb;}
   @media print{ .bar{display:none;} body{padding:0;} }

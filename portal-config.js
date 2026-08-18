@@ -425,6 +425,56 @@
     window.alert = function (m) { toast(m); };
   })();
 
+  // ── Status-bar cap: the slim branded bar every native app has ───────────────
+  // The installed PWA is `apple-mobile-web-app-status-bar-style: black-translucent`
+  // (set on main.html, the start_url, so it governs the WHOLE app). That makes
+  // every page run full-bleed UNDER the iOS clock/battery. Rather than have each
+  // page pad its own header — which only ever covered the handful of pages that
+  // also set viewport-fit=cover, and left the rest with an untappable back button
+  // — this paints one opaque bar across the status-bar inset and pushes the page
+  // below it, portal-wide. Height is exactly the device's inset (0 on a phone
+  // with no notch, and in a normal browser tab), so it's only ever as slim as it
+  // needs to be. Content scrolling under it looks right because it's opaque.
+  (function statusCap() {
+    // Only the top document paints it — po.html embeds portal pages in an
+    // iframe, and a second cap inside the frame would double the gap.
+    try { if (window.self !== window.top) return; } catch (e) { return; }
+    if (document.getElementById("ml-statuscap-style")) return;
+    var st = document.createElement("style");
+    st.id = "ml-statuscap-style";
+    st.textContent =
+      "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
+      + "  background:#003468; z-index:2147483000; pointer-events:none; }"
+      // Landscape on a notched phone: keep content out of the side notch too.
+      + "@media (orientation:landscape){ body{ padding-left:env(safe-area-inset-left, 0px);"
+      + "  padding-right:env(safe-area-inset-right, 0px); } }";
+    (document.head || document.documentElement).appendChild(st);
+
+    var cap = null, basePad = null;
+    function apply() {
+      if (!document.body) return;
+      if (!cap) {
+        cap = document.createElement("div");
+        cap.id = "mlStatusCap";
+        document.body.appendChild(cap);
+      }
+      // Read the inset off the cap itself rather than a CSS rule on <body>. A
+      // plain `body{padding-top:env(...)}` REPLACED the padding pages set for
+      // themselves — the field app (route/inbox/you) lost its own 14px and its
+      // content ended up jammed against the bar. Adding to the page's own value
+      // keeps every layout as its author intended.
+      var sat = Math.round(cap.getBoundingClientRect().height);
+      if (basePad === null) basePad = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+      document.body.style.paddingTop = (basePad + sat) + "px";
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply);
+    else apply();
+    // The inset changes with orientation, so re-measure (basePad is kept, so
+    // this never compounds).
+    addEventListener("resize", apply);
+    addEventListener("orientationchange", apply);
+  })();
+
   // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
   // There are ~200 "Loading…" strings across ~80 pages, written every which way
   // (static HTML, innerHTML, textContent). Rather than edit them all, this

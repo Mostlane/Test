@@ -83,11 +83,12 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=9`)
-All 123 pages reference `?v=9` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7 added the animated loading mark, ?v=8/9 widened it to every wait state —
-all 17 Aug). If a portal-config change must reach them again, bump to ?v=10
-across all pages with sed — and check the
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=13`)
+All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
+?v=7–9 the animated wait mark, ?v=13 the status-bar cap — it had to clear a
+concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
+portal-config change must reach them again, bump to ?v=14 across all pages
+with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
 was silently running an ancient portal-config). NB `grep` treats programmes.html
@@ -2560,27 +2561,43 @@ files to this public repo.
   underscore slug) so items added/removed in settings always stay answerable and
   never collide on `answers[undefined]`. Same pattern applies to any config-driven
   tap list — bind once, read the live config in the handler.
-- **`viewport-fit=cover` means YOU own the top inset — headers included.**
-  Adding `viewport-fit=cover` (needed so a full-screen ✕ can clear the notch)
-  makes the whole page extend UNDER the iOS status bar on an installed PWA. Any
-  page that sets it must therefore pad its own top bar, or the header — and the
-  ‹ Back button in it — sits under the clock and can't be tapped (Jamie hit this
-  on My Documents, 18 Aug). Fix applied to all 12 such pages: the header's own
-  padding gains the inset, e.g. `padding:14px 16px` →
-  `padding:calc(env(safe-area-inset-top, 0px) + 14px) 16px 14px` (my-documents,
-  vehicle-maintenance, memo-sign, project-hub, site-folder, and the seven po-*
-  pages, whose padding is an INLINE style on `<header class="page">` so a
-  stylesheet rule wouldn't win). A `position:sticky; top:0` toolbar needs
-  `top:env(safe-area-inset-top, 0px)` too or it slides under the clock on scroll
-  (my-documents `.bar`). The `env()` fallback is 0px, so nothing changes in a
-  browser — verified by rendering each page and confirming the fallback padding
-  is byte-identical, then substituting a 47px inset and checking the back button
-  moves clear (scratchpad `safearea.cjs`). Pages WITHOUT `viewport-fit=cover` are
-  unaffected — iOS insets those automatically. NB `.topbar` in the po-* pages is
-  dead CSS (no element uses it). Same rule applies to any FIXED `top:0` banner
-  or toast on a viewport-fit=cover page — e.g. route.html's `#vanScoreNote`
-  "new van driving score" bar sat under the clock until its padding was changed
-  to `calc(env(safe-area-inset-top, 0px) + 10px)` (18 Aug).
+- **Status-bar cap: ONE slim branded bar, portal-wide (18 Aug).** main.html (the
+  PWA start_url) sets `apple-mobile-web-app-status-bar-style: black-translucent`,
+  which governs the WHOLE installed app — so EVERY page runs full-bleed under the
+  iOS clock/battery, and a header's back button sat under the clock, untappable.
+  Fixed centrally by **`statusCap()` in portal-config.js**: it paints
+  `#mlStatusCap` (fixed, full width, `height:env(safe-area-inset-top,0px)`, navy
+  #003468, z-index 2147483000) and pushes the page below it. **`viewport-fit=cover`
+  is now on every page that LOADS portal-config.js** (117 pages) — without it
+  `env()` reports 0 and the cap can't size itself.
+  **Two rules learned doing it:**
+  (a) **The body padding is applied in JS, ADDING to the page's own** — measure
+  the cap's rendered height, then `body.style.paddingTop = ownPadding + inset`
+  (re-run on resize/orientationchange; the original padding is cached so it never
+  compounds). A plain CSS `body{padding-top:env(...)}` REPLACED the padding pages
+  set for themselves — the field app (route/inbox/you, engineer-job, vehicle)
+  lost its own 14–16px and content jammed against the bar.
+  (b) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
+  for the `<script src=…portal-config.js>` tag, NOT the string — programme-view.html
+  merely *mentions* it in a comment, and giving that client-facing page the meta
+  without a cap pushed its content under the status bar.
+  The cap skips iframes (po.html embeds portal pages; a second cap would double
+  the gap) and collapses to 0 in a browser, so nothing changes off-device.
+  Per-page header insets were REMOVED as part of this (my-documents,
+  vehicle-maintenance, memo-sign, project-hub, site-folder, the seven po-*,
+  engineer-timesheet, engineer-job) — the cap owns the top inset now, so never
+  add `env(safe-area-inset-top)` to a header again. Fixed OVERLAY buttons still
+  need it themselves (they ignore body padding): job-view `.photo-modal-close`,
+  site-folder `.lb .x`, engineer-job `.lx-close`, docviewer `.mldv-bar`, and
+  portal-config's own 🔔 bell. offline.html carries its own inline cap (it never
+  loads portal-config). Verified across all 124 portal-config pages
+  (scratchpad `cap.cjs`): cap present, 0px at rest, and with a 47px inset the bar
+  is exactly 47px with each page's own padding preserved beneath it.
+  **A FIXED `top:0` element still needs the inset itself** — it is positioned
+  against the viewport, so the cap's body padding doesn't move it. route.html's
+  `#vanScoreNote` "new van driving score" banner sat under the clock until its
+  padding became `calc(env(safe-area-inset-top, 0px) + 10px)` (18 Aug, found in
+  a concurrent session); same for any toast or banner pinned to the top edge.
 - **Full-screen photo/doc close (✕) buttons must clear the iOS status bar.**
   On installed PWAs the ✕ sat at a fixed `top` under the notch/clock/battery.
   Fix pattern (Apple-standard): the page's `<meta viewport>` needs
