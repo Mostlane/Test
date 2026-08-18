@@ -1516,11 +1516,13 @@
   })();
 
   // ── Notification bell (Facebook-style feed) ─────────────────────────────────
-  // ── Hard-refresh button (🔄, top-left) ─────────────────────────────────────
-  // One tap = the closest a page can get to Ctrl+Shift+R: wipe every service-
-  // worker cache, re-fetch the service worker itself, force the core scripts
-  // past the browser HTTP cache, then reload. The cure for "my phone is stuck
-  // on an old version" without asking anyone to find browser settings.
+  // ── Hard refresh: 🔄 button (desktop) + pull-down gesture (touch/PWA) ─────
+  // One action = the closest a page can get to Ctrl+Shift+R: wipe every
+  // service-worker cache, re-fetch the service worker itself, force the core
+  // scripts past the browser HTTP cache, then reload. The cure for "my phone
+  // is stuck on an old version" without asking anyone to find browser settings.
+  // On touch devices (mobile/PWA) the button is hidden and users pull DOWN at
+  // the top of the page instead; on desktop the button stays (no pull-down).
   (function hardRefresh() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
@@ -1530,7 +1532,39 @@
       if (SKIP.indexOf(page) !== -1) return;
       if (!localStorage.getItem(TOKEN_KEY)) return;
 
-      function build() {
+      var isTouch = false;
+      try { isTouch = window.matchMedia && window.matchMedia("(pointer:coarse)").matches; } catch (e) {}
+
+      // The refresh routine — shared by the button + the pull gesture.
+      var refreshing = false;
+      async function doHardRefresh() {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+          // 1. Wipe every Cache Storage cache (the service worker's copies).
+          if (window.caches && caches.keys) {
+            var keys = await caches.keys();
+            await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
+          }
+          // 2. Ask each service worker registration to fetch its newest sw.js.
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            var regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
+          }
+          // 3. Force the core shell past the browser HTTP cache so the reload
+          //    picks up fresh copies immediately (best-effort, failures ignored).
+          var core = ["/portal-config.js?v=12", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+            location.pathname + location.search];
+          await Promise.all(core.map(function (u) {
+            return fetch(u, { cache: "reload" }).catch(function () {});
+          }));
+        } catch (e) {}
+        location.reload();
+      }
+
+      // ── Desktop-only button ────────────────────────────────────────────────
+      function buildButton() {
+        if (isTouch) return;   // touch users get the pull-to-refresh gesture instead
         if (document.getElementById("mlRefresh")) return;
         var btn = document.createElement("button");
         btn.id = "mlRefresh";
@@ -1544,38 +1578,80 @@
           "width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.92);" +
           "box-shadow:0 3px 12px rgba(0,20,60,.28);cursor:pointer;font-size:16px;line-height:34px;padding:0;opacity:.9;";
         btn.textContent = "🔄";
-        var busy = false;
-        btn.onclick = async function () {
-          if (busy) return;
-          busy = true;
+        btn.onclick = function () {
           btn.style.transition = "transform .8s ease";
           btn.style.transform = "rotate(720deg)";
           btn.disabled = true;
-          try {
-            // 1. Wipe every Cache Storage cache (the service worker's copies).
-            if (window.caches && caches.keys) {
-              var keys = await caches.keys();
-              await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
-            }
-            // 2. Ask each service worker registration to fetch its newest sw.js.
-            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-              var regs = await navigator.serviceWorker.getRegistrations();
-              await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
-            }
-            // 3. Force the core shell past the browser HTTP cache so the reload
-            //    picks up fresh copies immediately (best-effort, failures ignored).
-            var core = ["/portal-config.js?v=11", "/portal.css?v=1", "/auth.js", "/device-auth.js",
-              location.pathname + location.search];
-            await Promise.all(core.map(function (u) {
-              return fetch(u, { cache: "reload" }).catch(function () {});
-            }));
-          } catch (e) {}
-          location.reload();
+          doHardRefresh();
         };
         (document.body || document.documentElement).appendChild(btn);
       }
-      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build);
-      else build();
+
+      // ── Touch-only pull-to-refresh ────────────────────────────────────────
+      // Pull DOWN at the very top of the page ~80px, release, and the same
+      // hard refresh fires. A blue banner slides down from the top with a hint
+      // ("↓ Pull to refresh" → "↻ Release to refresh"), matching modern app
+      // conventions. Uses 60% resistance for a native feel.
+      function wirePull() {
+        if (!isTouch) return;
+        // Suppress the browser's native overscroll (would trigger its own,
+        // soft reload on Chromium and fight our gesture).
+        try { document.documentElement.style.overscrollBehaviorY = "contain"; } catch (e) {}
+
+        var THRESH = 80, banner = null, startY = 0, startX = 0, dragging = false, engaged = false;
+        function atTop() {
+          var se = document.scrollingElement || document.documentElement;
+          return (se && se.scrollTop <= 0);
+        }
+        function ensureBanner() {
+          if (banner) return banner;
+          banner = document.createElement("div");
+          banner.id = "mlP2R";
+          banner.style.cssText = "position:fixed;top:0;left:0;right:0;height:0;overflow:hidden;" +
+            "background:linear-gradient(180deg,#003366,#004080);color:#fff;font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;" +
+            "display:flex;align-items:flex-end;justify-content:center;padding-bottom:10px;" +
+            "z-index:100000;box-shadow:0 3px 12px rgba(0,20,60,.28);will-change:height;transition:none;";
+          document.body.appendChild(banner);
+          return banner;
+        }
+        function killBanner() { if (banner) { banner.remove(); banner = null; } }
+
+        document.addEventListener("touchstart", function (e) {
+          if (e.touches.length !== 1 || !atTop()) return;
+          startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+          dragging = true; engaged = false;
+        }, { passive: true });
+
+        document.addEventListener("touchmove", function (e) {
+          if (!dragging) return;
+          var t = e.touches[0], dy = t.clientY - startY, dx = Math.abs(t.clientX - startX);
+          // Ignore upward or sideways drags — user is scrolling / swiping, not pulling.
+          if (dy <= 0 || dx > Math.abs(dy) || !atTop()) { killBanner(); engaged = false; return; }
+          var el = ensureBanner();
+          var h = Math.min(dy * 0.6, THRESH + 30);
+          el.style.height = h + "px";
+          el.textContent = h >= THRESH ? "↻  Release to refresh" : "↓  Pull to refresh";
+          engaged = h >= THRESH;
+        }, { passive: true });
+
+        function finish() {
+          if (!dragging) return;
+          dragging = false;
+          if (engaged) {
+            if (banner) { banner.style.height = "50px"; banner.textContent = "↻  Refreshing…"; }
+            doHardRefresh();
+          } else if (banner) {
+            banner.style.transition = "height .2s ease"; banner.style.height = "0";
+            setTimeout(killBanner, 220);
+          }
+        }
+        document.addEventListener("touchend", finish, { passive: true });
+        document.addEventListener("touchcancel", function () { dragging = false; killBanner(); }, { passive: true });
+      }
+
+      function start() { buildButton(); wirePull(); }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+      else start();
     } catch (e) { console.error("[hard-refresh]", e); }
   })();
 

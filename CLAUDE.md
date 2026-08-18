@@ -1791,15 +1791,22 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
 
 ## Notifications system
-- **🔄 Hard-refresh button (Aug 2026)** — portal-config `hardRefresh()` injects a
-  small fixed button **BOTTOM-LEFT** on every logged-in page (Aug 2026: moved from
-  top-left so it never covers a ‹ Back link OR a full-screen photo's ✕; lifted
-  above the field-app `.tabbar` when present, `env(safe-area-inset-bottom)`-aware;
-  skipped on auth/sign/my-day + programme-view). One tap ≈ Ctrl+Shift+R: deletes every Cache Storage cache,
-  `registration.update()`s the service worker, re-fetches the core shell
-  (portal-config/portal.css/auth/device-auth + current page) with
+- **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
+  the closest thing to Ctrl+Shift+R without leaving the app: deletes every Cache
+  Storage cache, `registration.update()`s the service worker, re-fetches the
+  core shell (portal-config/portal.css/auth/device-auth + current page) with
   `{cache:"reload"}` to punch through the browser HTTP cache, then reloads.
-  The user-facing cure for "my phone is stuck on an old version".
+  **How it's triggered depends on the device** — `window.matchMedia("(pointer:coarse)")`
+  splits them: touch devices (mobile/PWA) get **pull-to-refresh** (drag DOWN
+  ≥80px at the top of the page → blue banner "↓ Pull to refresh" → "↻ Release
+  to refresh" → same routine on release; 60% resistance, HTML gets
+  `overscroll-behavior-y:contain` to stop Chromium's own soft reload fighting
+  the gesture); desktops keep the small fixed **🔄 button** BOTTOM-LEFT (so it
+  never covers a ‹ Back link or a full-screen photo's ✕; lifted above the
+  field-app `.tabbar` when present; `env(safe-area-inset-bottom)`-aware). Skipped
+  on the same set of pages (auth/sign/my-day/programme-view). Same underlying
+  `doHardRefresh()` for both. The user-facing cure for "my phone is stuck on an
+  old version" — no button-hunting required on mobile.
 - **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected by
   portal-config.js (`notifBell()`, fixed top-right, `#mlBell`). **It lives ONLY
   on main.html (Aug 2026)** — it used to float top-right on EVERY page and
