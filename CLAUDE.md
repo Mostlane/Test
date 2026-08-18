@@ -1755,17 +1755,20 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
 
 ## Notifications system
 - **🔄 Hard-refresh button (Aug 2026)** — portal-config `hardRefresh()` injects a
-  small fixed button top-LEFT on every logged-in page (positioned just BELOW the
-  page header so it never covers a ‹ Back link; skipped on auth/sign/my-day +
-  programme-view). One tap ≈ Ctrl+Shift+R: deletes every Cache Storage cache,
+  small fixed button **BOTTOM-LEFT** on every logged-in page (Aug 2026: moved from
+  top-left so it never covers a ‹ Back link OR a full-screen photo's ✕; lifted
+  above the field-app `.tabbar` when present, `env(safe-area-inset-bottom)`-aware;
+  skipped on auth/sign/my-day + programme-view). One tap ≈ Ctrl+Shift+R: deletes every Cache Storage cache,
   `registration.update()`s the service worker, re-fetches the core shell
   (portal-config/portal.css/auth/device-auth + current page) with
   `{cache:"reload"}` to punch through the browser HTTP cache, then reloads.
   The user-facing cure for "my phone is stuck on an old version".
-- **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected
-  portal-wide by portal-config.js (`notifBell()`, fixed top-right, `#mlBell`),
-  for EVERY logged-in user (field engineers too; skipped only on auth/sign/
-  my-day pages + Story users). A durable per-user history of every notification:
+- **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected by
+  portal-config.js (`notifBell()`, fixed top-right, `#mlBell`). **It lives ONLY
+  on main.html (Aug 2026)** — it used to float top-right on EVERY page and
+  covered full-screen photo/doc close (✕) buttons in the field app; the same
+  applies to the 💬 chat bubble (`chatWidget()` also gated to main.html only).
+  A durable per-user history of every notification:
   each event that fires a push is ALSO written to a feed row, so the bell is
   complete even if the phone never enabled push. **Mechanism:** `push.js
   sendToUser()` calls **`recordNotification(env,tid,user,{title,body,url,tag})`**
