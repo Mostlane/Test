@@ -26,6 +26,11 @@
     td.name b { color:#27313a; } td.name .muted { color:#8a97a6; font-size:12px; }
     td.day { color:#5b6b78; } td.day.has { color:#27313a; font-weight:600; }
     td.total { font-weight:700; color:#003366; }
+    td.day.leave { background:#f2fbf5; }
+    .eseg-hol { background:#f2fbf5; border-radius:8px; padding:7px 10px; margin:4px 0; font-size:13px; color:#0c7d3f; }
+    td.day.leave.unpaid { background:#f7f8fa; color:#5b6b78; }
+    td.day .hol { font-size:11px; opacity:.85; }
+    td.total .muted, td.name .muted { font-weight:400; font-size:11px; color:#8a97a6; }
     tr.grand td { border-top:2px solid #dbe2ea; background:#f9fbfd; font-weight:700; color:#003366; }
     .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#fff3cd; color:#7a5b00; margin-left:6px; }
     .empty { padding:26px; text-align:center; color:#8a97a6; }
@@ -95,10 +100,12 @@
         <tbody id="body"><tr><td class="empty" colspan="10">Loading…</td></tr></tbody>
       </table>
     </div>
-    <p class="note">Totals are the sum of each person's clocked segments (breaks excluded). A
-      <span class="pill">running</span> tag means they're still clocked in — that open session isn't counted until
-      they clock out (or you set an end time via <b>Edit</b>). Use <b>Edit</b> to correct clocked times: the
-      original auto times are kept and shown struck through, and totals use your edited times.</p>
+    <p class="note">Totals are each person's clocked segments (breaks excluded) <b>plus approved leave</b> —
+      a holiday counts as a full 8-hour day (4 for a half day) and is shown green with a 🌴, so a day off never
+      reads as a no-show. Where someone has both, the Total shows the split. Unpaid leave marks the day but adds
+      no hours. A <span class="pill">running</span> tag means they're still clocked in — that open session isn't
+      counted until they clock out (or you set an end time via <b>Edit</b>). Use <b>Edit</b> to correct clocked
+      times: the original auto times are kept and shown struck through, and totals use your edited times.</p>
   </div>
 
   <!-- Edit modal -->
@@ -162,22 +169,42 @@
 
       if (!data.users.length) { g("body").innerHTML = `<tr><td class="empty" colspan="${days.length+3}">No office-clock users yet. Give someone the “Office clock in/out” permission and flag their office device.</td></tr>`; return; }
 
-      const dayTotals = days.map(() => 0); let grand = 0;
+      const dayTotals = days.map(() => 0); let grand = 0, grandHol = 0;
       const rows = data.users.map(u => {
+        const hols = u.holidays || {};
         const cells = days.map((d,i) => {
-          const sec = u.days[d] || 0; dayTotals[i] += sec;
+          const sec = u.days[d] || 0;
+          const hol = hols[d];
+          const holSec = hol ? (hol.seconds || 0) : 0;
+          dayTotals[i] += sec + holSec;
           const running = u.openDays && u.openDays[d];
+          // Approved leave shows as a worked day (same as My Hours) — a green
+          // cell with 🌴, so a holiday isn't mistaken for a no-show.
+          if (hol) {
+            const half = (hol.half === "AM" || hol.half === "PM") ? ` ${hol.half}½` : "";
+            const tip = `${hol.type || "Holiday"}${half}${hol.paid === false ? " (unpaid)" : ""}`;
+            return `<td class="day leave${hol.paid === false ? " unpaid" : ""}" title="${esc(tip)}">`
+              + `${holSec || sec ? hm(sec + holSec) : "–"} <span class="hol">🌴</span>`
+              + `${running ? ' <span class="pill">running</span>' : ""}</td>`;
+          }
           if (running && !sec) return `<td class="day running"><span class="pill">running</span></td>`;
           return `<td class="day${sec?" has":""}">${hm(sec)}${running?' <span class="pill">running</span>':""}</td>`;
         }).join("");
-        grand += u.total;
+        grand += u.total; grandHol += (u.holidayTotal || 0);
+        const paid = u.paidTotal != null ? u.paidTotal : u.total;
+        // hm() renders 0 as "–", which read as "–ic+ 40h leave" for someone off
+        // all week — show leave on its own when nothing was clocked.
+        const split = !u.holidayTotal ? ""
+          : `<div class="muted">${u.total ? hm(u.total) + " + " : ""}${hm(u.holidayTotal)} leave</div>`;
         const open = u.open ? `<span class="pill">running</span>` : "";
-        return `<tr><td class="name"><b>${esc(u.name)}</b>${open}<div class="muted">${esc(u.username)}</div></td>${cells}<td class="total">${hm(u.total)}</td>`
+        return `<tr><td class="name"><b>${esc(u.name)}</b>${open}<div class="muted">${esc(u.username)}</div></td>${cells}<td class="total">${hm(paid)}${split}</td>`
           + `<td class="actcell"><button class="editbtn" data-edit="${esc(u.username)}">✏️ Edit</button></td></tr>`;
       }).join("");
 
       const grandCells = dayTotals.map(s => `<td>${hm(s)}</td>`).join("");
-      const grandRow = `<tr class="grand"><td class="name">All office staff</td>${grandCells}<td class="total">${hm(grand)}</td><td></td></tr>`;
+      const grandSplit = !grandHol ? ""
+        : `<div class="muted">${grand ? hm(grand) + " + " : ""}${hm(grandHol)} leave</div>`;
+      const grandRow = `<tr class="grand"><td class="name">All office staff</td>${grandCells}<td class="total">${hm(grand + grandHol)}${grandSplit}</td><td></td></tr>`;
       g("body").innerHTML = rows + grandRow;
     }
 
@@ -193,10 +220,17 @@
     g("csv").onclick = () => {
       if (!current) return;
       const days = current.days;
-      const head = ["Name","Username", ...days.map((d,i) => DOW[i] + " " + d), "Total (h)"];
+      // Day columns match the screen (clocked + approved leave); the split is
+      // spelled out in its own columns so payroll can reconcile either way.
+      const head = ["Name","Username", ...days.map((d,i) => DOW[i] + " " + d),
+        "Clocked (h)", "Leave (h)", "Total paid (h)"];
       const lines = [head.join(",")];
       current.users.forEach(u => {
-        const row = [u.name, u.username, ...days.map(d => decimalHours(u.days[d] || 0)), decimalHours(u.total)];
+        const hols = u.holidays || {};
+        const dayVal = d => decimalHours((u.days[d] || 0) + ((hols[d] && hols[d].seconds) || 0));
+        const row = [u.name, u.username, ...days.map(dayVal),
+          decimalHours(u.total), decimalHours(u.holidayTotal || 0),
+          decimalHours(u.paidTotal != null ? u.paidTotal : u.total)];
         lines.push(row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(","));
       });
       const blob = new Blob([lines.join("\n")], { type:"text/csv" });
@@ -253,8 +287,16 @@
     function renderEditor(d){
       const html = d.days.map((date,i) => {
         const info = d.byDay[date] || { segments:[] };
-        if(!info.segments.length) return "";
-        return `<div class="eday"><h4>${DOW[i]} · ${fmtDayLabel(date)}</h4>${info.segments.map(segEditHtml).join("")}</div>`;
+        const hol = info.holiday;
+        // Show approved leave here too, so a day with no sessions reads as
+        // "on holiday" rather than looking like a missed clock-in.
+        if(!info.segments.length && !hol) return "";
+        const half = hol && (hol.half === "AM" || hol.half === "PM") ? ` (${hol.half} half)` : "";
+        const holLine = hol
+          ? `<div class="eseg-hol">🌴 ${esc(hol.type || "Holiday")}${half}${hol.paid === false ? " — unpaid" : ""}`
+            + `${hol.seconds ? " · " + hm(hol.seconds) : ""}</div>`
+          : "";
+        return `<div class="eday"><h4>${DOW[i]} · ${fmtDayLabel(date)}</h4>${holLine}${info.segments.map(segEditHtml).join("")}</div>`;
       }).join("");
       g("editBody").innerHTML = html || `<div class="eseg-none">No clocked sessions this week.</div>`;
     }

@@ -358,6 +358,33 @@ export async function handle(request, env, ctx, url, sess) {
       e.days[r.date] = (e.days[r.date] || 0) + sec;
       e.total += sec;
     }
+    // Overlay approved leave, exactly as "My Hours" does — a holiday must not
+    // read as a blank day here either. `total` stays CLOCKED-only so existing
+    // consumers keep their meaning; `holidayTotal`/`paidTotal` carry the leave.
+    const leaveAll = await approvedLeaveInRange(env, tenantId, monday, sunday);
+    // Only office-clock staff belong on this sheet — a field engineer's holiday
+    // must not appear here just because it overlaps the week.
+    const officeUsers = new Set((permUsers || []).map(u => u.username));
+    for (const [uname, byDate] of Object.entries(leaveAll || {})) {
+      if (excluded(uname)) continue;
+      if (!officeUsers.has(uname) && !map[uname]) continue;
+      // Someone signed off all week has no clock rows at all — make sure they
+      // still get a line rather than vanishing from the sheet.
+      const e = ensure(uname);
+      for (const d of days) {
+        const h = byDate[d];
+        if (!h) continue;
+        const secs = leaveSeconds(h);
+        e.holidays = e.holidays || {};
+        e.holidays[d] = { type: h.type || "Holiday", half: h.half || "", seconds: secs, paid: isPaidLeave(h.type) };
+        e.holidayTotal = (e.holidayTotal || 0) + secs;
+      }
+    }
+    for (const e of Object.values(map)) {
+      e.holidays = e.holidays || {};
+      e.holidayTotal = e.holidayTotal || 0;
+      e.paidTotal = e.total + e.holidayTotal;
+    }
     const users = Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
     return json({ ok: true, monday, sunday, days, users }, {}, env, request);
   }

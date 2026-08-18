@@ -634,8 +634,17 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `weekTotal` deliberately stays CLOCKED-only so existing consumers don't change
   meaning — the new **`holidayTotal`** and **`paidTotal`** carry the leave, and
   My Hours shows `paidTotal` with a "Nh clocked + Nh leave" split underneath.
-  Applies to /office/my AND /office/user-week (admin edit view gets the data).
-  The office master timesheet (/office/timesheet) is NOT changed.
+  Applies to /office/my, /office/user-week AND the office master timesheet
+  **/office/timesheet** (office-timesheet.html, 18 Aug): each user row carries
+  `holidays`/`holidayTotal`/`paidTotal`, a leave day renders as a green cell with
+  🌴, the Total column shows the paid figure with a "20h 0m + 12h 0m leave" split,
+  and the CSV's day columns match the screen plus explicit Clocked / Leave /
+  Total-paid columns. Someone signed off ALL week has no clock rows at all, so
+  the leave pass calls `ensure()` to give them a line rather than letting them
+  vanish — but only for OfficeClock holders (`officeUsers` set), or a field
+  engineer's holiday would appear on the office sheet. The per-person ✏️ Edit
+  modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
+  clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
 - **Per-job PO materials cost** (job-view.html "🧾 Materials — purchase orders"
   card, **office/admin only** — FullAccess|SLAAdmin): reads live from the PO
   system via **GET /costing/job-pos?jobId=** (costing.js `jobPoRows`), which sums
