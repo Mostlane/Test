@@ -18,6 +18,7 @@
 import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { approvedLeaveInRange } from "./holidays.js";
 
 // Local calendar day in the UK, regardless of the server's UTC clock.
 function londonDate(d = new Date()) {
@@ -145,6 +146,19 @@ function weekDays(monday) {
   return out;
 }
 
+// An approved day of leave is worth a standard office day. Without this a
+// holiday reads as a blank day on "My Hours" — as if the person simply never
+// clocked in — and their week total comes up short.
+const LEAVE_DAY_SECONDS = 8 * 3600;
+const LEAVE_HALF_SECONDS = 4 * 3600;
+// Unpaid leave still MARKS the day (so it isn't a mystery blank) but is worth
+// no hours. Everything else approved (Holiday, Compassionate, Other…) is paid.
+const isPaidLeave = (type) => String(type || "").trim().toLowerCase() !== "unpaid";
+const leaveSeconds = (h) => {
+  if (!h || !isPaidLeave(h.type)) return 0;
+  return (h.half === "AM" || h.half === "PM") ? LEAVE_HALF_SECONDS : LEAVE_DAY_SECONDS;
+};
+
 // One user's week: per-day segments (with original + effective + edit flags).
 async function weekDetail(env, tenantId, username, week) {
   const db = tenantDB(env, tenantId);
@@ -164,7 +178,19 @@ async function weekDetail(env, tenantId, username, week) {
     day.seconds += seg.seconds; weekTotal += seg.seconds;
     if (seg.open) day.open = true;
   }
-  return { monday, sunday, days, byDay, weekTotal };
+  // Overlay approved leave. `weekTotal` stays CLOCKED time only so nothing that
+  // already reads it changes meaning; `paidTotal` is what a person is owed for
+  // the week (clocked + leave) and is what "My Hours" shows.
+  let holidayTotal = 0;
+  const leave = (await approvedLeaveInRange(env, tenantId, monday, sunday, username))[username] || {};
+  for (const d of days) {
+    const h = leave[d];
+    if (!h) continue;
+    const secs = leaveSeconds(h);
+    byDay[d].holiday = { type: h.type || "Holiday", half: h.half || "", seconds: secs, paid: isPaidLeave(h.type) };
+    holidayTotal += secs;
+  }
+  return { monday, sunday, days, byDay, weekTotal, holidayTotal, paidTotal: weekTotal + holidayTotal };
 }
 
 export async function handle(request, env, ctx, url, sess) {

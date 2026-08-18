@@ -38,12 +38,19 @@
     .pill.void { background:#fde8ea; color:#b00020; }
     .editnote { display:block; font-size:11px; color:#9aa6b2; margin-top:2px; }
     .empty-note { text-align:center; color:#8a97a6; padding:20px; }
+    .day.leave { background:#f2fbf5; box-shadow:0 2px 8px rgba(12,125,63,.08); }
+    .day.leave.unpaid { background:#f7f8fa; }
+    .holtag { font-size:12px; padding:3px 10px; border-radius:999px; background:#e4f6ea; color:#0c7d3f; white-space:nowrap; }
+    .day.leave.unpaid .holtag { background:#eceff3; color:#5b6b78; }
+    .totalcard .sub { font-size:11.5px; opacity:.8; margin-top:2px; }
   </style>
 </head>
 <body>
   <header>
+    <!-- Back goes FIRST (the portal standard): the fixed 🔔 bell is pinned
+         top-right and was sitting on top of it here. -->
+    <a class="ml-back" data-role="home" href="main.html" title="Back">‹ Back</a>
     <h1>🕒 My Hours</h1>
-    <a class="ml-back" data-role="home" href="main.html">← Menu</a>
   </header>
 
   <div class="wrap">
@@ -54,7 +61,7 @@
       <button class="btn" id="thisWeek">This week</button>
     </div>
 
-    <div class="totalcard"><span class="lbl">Week total</span><span class="val" id="weekTotal">—</span></div>
+    <div class="totalcard"><span><span class="lbl">Week total</span><div class="sub" id="weekTotalSub"></div></span><span class="val" id="weekTotal">—</span></div>
     <div id="days"><div class="empty-note">Loading…</div></div>
   </div>
 
@@ -98,18 +105,48 @@
       render(data);
     }
 
+    // Approved leave reads as a worked day here — a holiday is time you're paid
+    // for, so it must not look like a day you simply never clocked in.
+    const holName = t => { const x = String(t || "Holiday"); return x.toLowerCase() === "holiday" ? "Holiday" : x; };
+    function holLabel(h) {
+      const half = (h.half === "AM" || h.half === "PM") ? ` (${h.half} half)` : "";
+      // Don't tack "— unpaid" onto a type that already says it.
+      const unpaid = h.paid === false && !/unpaid/i.test(String(h.type || ""));
+      return `🌴 ${holName(h.type)}${half}${unpaid ? " — unpaid" : ""}`;
+    }
+
     function render(data) {
       g("weekLabel").textContent = `${fmtDay(data.days[0])} – ${fmtDay(data.days[6])}`;
-      g("weekTotal").textContent = hm(data.weekTotal);
-      const anyData = data.weekTotal > 0 || data.days.some(d => (data.byDay[d]||{}).segments?.length);
+      // Headline = clocked + approved leave. Show the split when both exist so
+      // the number is never a mystery.
+      const holTotal = data.holidayTotal || 0;
+      const paid = data.paidTotal != null ? data.paidTotal : data.weekTotal;
+      g("weekTotal").textContent = hm(paid);
+      const sub = g("weekTotalSub");
+      if (sub) sub.textContent = holTotal > 0 ? `${hm(data.weekTotal)} clocked + ${hm(holTotal)} leave` : "";
+
+      const anyLeave = data.days.some(d => (data.byDay[d]||{}).holiday);
+      const anyData = paid > 0 || anyLeave || data.days.some(d => (data.byDay[d]||{}).segments?.length);
       if (!anyData) { g("days").innerHTML = `<div class="empty-note">No clocked time this week.</div>`; return; }
 
       g("days").innerHTML = data.days.map((d, i) => {
         const info = data.byDay[d] || { seconds:0, segments:[] };
         const has = (info.segments || []).length;
+        const hol = info.holiday;
         const segs = (info.segments || []).map(segHtml).join("");
-        return `<div class="day${has?"":" empty"}">
-          <div class="dayhead"><span class="d">${DOW[i]}<small>${fmtDay(d)}</small></span><span class="h">${has?hm(info.seconds):"–"}</span></div>
+        // A full day of leave with no clocked time is a leave card on its own.
+        if (hol && !has) {
+          return `<div class="day leave${hol.paid === false ? " unpaid" : ""}">
+            <div class="dayhead"><span class="d">${DOW[i]}<small>${fmtDay(d)}</small></span>
+              <span class="h">${hol.seconds ? hm(hol.seconds) : "–"}</span></div>
+            <div class="seg"><span class="times">${holLabel(hol)}</span><span></span></div>
+          </div>`;
+        }
+        // Clocked time on a day of leave (a half day, or someone popped in).
+        return `<div class="day${has||hol?"":" empty"}${hol?" leave":""}">
+          <div class="dayhead"><span class="d">${DOW[i]}<small>${fmtDay(d)}</small></span>
+            <span class="h">${(has||hol) ? hm(info.seconds + (hol ? hol.seconds : 0)) : "–"}</span></div>
+          ${hol?`<div class="seg"><span class="times">${holLabel(hol)}</span><span>${hol.seconds?hm(hol.seconds):""}</span></div>`:""}
           ${segs}
         </div>`;
       }).join("");

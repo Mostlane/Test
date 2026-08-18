@@ -624,6 +624,18 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
   /office/timesheet), `email.js` lib (Resend templates).
+  **Approved leave shows on the office clock (Aug 2026):** a holiday used to
+  read as a BLANK day on "My Hours" (office-my-hours.html) — as if the person
+  never clocked in — and the week came up short. `weekDetail()` now overlays
+  `approvedLeaveInRange()` (the same holidays.js helper the engineer timesheet
+  and SLA scheduler use), so each day may carry
+  `holiday:{type,half,seconds,paid}`. A full day is **8h** (`LEAVE_DAY_SECONDS`),
+  a half day 4h; **Unpaid leave marks the day but is worth 0h** (`isPaidLeave`).
+  `weekTotal` deliberately stays CLOCKED-only so existing consumers don't change
+  meaning — the new **`holidayTotal`** and **`paidTotal`** carry the leave, and
+  My Hours shows `paidTotal` with a "Nh clocked + Nh leave" split underneath.
+  Applies to /office/my AND /office/user-week (admin edit view gets the data).
+  The office master timesheet (/office/timesheet) is NOT changed.
 - **Per-job PO materials cost** (job-view.html "🧾 Materials — purchase orders"
   card, **office/admin only** — FullAccess|SLAAdmin): reads live from the PO
   system via **GET /costing/job-pos?jobId=** (costing.js `jobPoRows`), which sums
