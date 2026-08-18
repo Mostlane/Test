@@ -1813,6 +1813,16 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
   (clears the red badge); a "Mark all read" button too. Icons derived client-side
   from tag/url/title (`iconFor`). NB the bell is the read-back history; the
   blocking attention gate + red tile badges are unchanged and separate.
+  **Group-clear when dealt with:** `push.js markNotificationsReadByTag(env,tid,tag)`
+  marks EVERY recipient's feed row for a tag read+seen, so an actionable alert
+  that went to a whole group clears from all of them once one person handles it
+  (and just sits read in each log). The notification must carry a PER-ITEM tag.
+  Wired: on-hold approval (`hold-approve:<jobId>` — sla.js hold-approve/reject),
+  holiday requests (`holiday-admin:<id>` — holidays.js approve/reject), equipment
+  transfers (`asset-transfer:<reqId>` — assets.js transfer-accept/reject/cancel).
+  The actor's own follow-up notice uses a DIFFERENT tag (e.g. `hold-decided`,
+  `holiday-decision`) so it's never wrongly cleared. To extend to another flow,
+  give its group notification a per-item tag and call the helper when it's actioned.
 - Red badges on tiles (main.html) + sidebar (portal-config) from
   /asset/transfers/pending-count, /holiday/my (unseen decisions),
   /holiday/all (pending + staff cancellations). "Seen" markers are per-USER

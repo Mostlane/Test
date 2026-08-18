@@ -17,7 +17,7 @@ import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { getRules, isSuppressed } from "../lib/suppress.js";
-import { sendToUser } from "./push.js";
+import { sendToUser, markNotificationsReadByTag } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -585,7 +585,7 @@ export async function handle(request, env, ctx, url, sess) {
     ctx?.waitUntil(sendToUser(env, tenantId, b.to, {
       title: "Equipment sent to you",
       body: `${me} sent you ${asset.name || asset.assetName || asset.id} — tap to accept.`,
-      url: "/my-assets.html", tag: "asset-transfer"
+      url: "/my-assets.html", tag: "asset-transfer:" + reqId
     }));
     return json({ ok: true, id: reqId });
   }
@@ -664,6 +664,8 @@ export async function handle(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
     ).bind(now, sigKey, db.tenantId, req.id).run();
+    // Dealt with — clear the "equipment sent to you" alert from the recipient's bell.
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
 
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
     return json({ ok: true, note });
@@ -685,6 +687,7 @@ export async function handle(request, env, ctx, url, sess) {
       type: "TRANSFER_REJECTED", transferId: req.id, assetID: req.asset_id,
       from: req.from_user, to: req.to_user, reason: b.reason || "", timestamp: now
     });
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
     return json({ ok: true });
   }
 
@@ -702,6 +705,8 @@ export async function handle(request, env, ctx, url, sess) {
     }
     await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?")
       .bind(new Date().toISOString(), db.tenantId, req.id).run();
+    // Withdrawn — clear the "equipment sent to you" alert from the recipient's bell.
+    ctx?.waitUntil(markNotificationsReadByTag(env, tenantId, "asset-transfer:" + req.id));
     return json({ ok: true });
   }
 
