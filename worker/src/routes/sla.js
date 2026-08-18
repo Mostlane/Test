@@ -1615,13 +1615,13 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
     // must never block them.
     const st = effStatus(j, uNorm);
     if (j.raBlock && j.raBlock.state === "open")
-      return { id: j.id, ref: j.helpdeskRef || j.id, why: "it's flagged 'can't proceed safely' — waiting for the office" };
+      return { id: j.id, ref: j.helpdeskRef || j.id, kind: "safety", why: "it's flagged 'can't proceed safely' — waiting for the office" };
     if (st === "In Progress" || st === "Travelling")
-      return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${st}` };
+      return { id: j.id, ref: j.helpdeskRef || j.id, kind: "active", why: `it's still ${st}` };
     if (st === "On Hold") {
       const ap = j.hold && j.hold.approval;
       if (!ap || ap.state !== "approved")
-        return { id: j.id, ref: j.helpdeskRef || j.id, why: "its on-hold is waiting for an admin to approve" };
+        return { id: j.id, ref: j.helpdeskRef || j.id, kind: "holdPending", why: "its on-hold is waiting for an admin to approve" };
     }
   }
   return null;

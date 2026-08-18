@@ -140,11 +140,11 @@
   </div></div>
 
   <div class="modal" id="blockModal"><div class="sheet">
-    <h3>⚠️ Finish your current job first</h3>
+    <h3 id="blockTitle">⚠️ Finish your current job first</h3>
     <p id="blockMsg" style="color:var(--muted);font-size:14.5px;line-height:1.5;margin:8px 0 16px"></p>
     <button class="btn primary wide" id="blockGo"><span id="blockGoRef">Go to that job →</span></button>
     <button class="btn line wide" id="blockStay" style="margin-top:8px">Stay here</button>
-    <div class="hint" style="text-align:center">You can only work one job at a time — wrap up the open one to move on.</div>
+    <div class="hint" id="blockHint" style="text-align:center">You can only work one job at a time — wrap up the open one to move on.</div>
   </div></div>
 
   <div class="lightbox" id="lightbox"><button class="lx-close" id="lxClose">✕</button><button class="lx-nav" id="lxPrev" style="left:6px">‹</button><img id="lxImg" alt=""><button class="lx-nav" id="lxNext" style="right:6px">›</button><div id="lxStage"></div></div>
@@ -481,8 +481,25 @@
   var blockedBy=null;
   function showBlockModal(bj, msg){
     blockedBy=bj||null;
-    $("blockMsg").textContent = msg || ("Finish "+((bj&&bj.ref)||"your other job")+" first — "+((bj&&bj.why)||"it's still open")+".");
-    $("blockGoRef").textContent = (bj&&bj.ref) ? ("Go to "+bj.ref+" →") : "Go to that job →";
+    var ref=(bj&&bj.ref)||"your other job";
+    if(bj && bj.kind==="holdPending"){
+      // Nothing the engineer can DO — they're waiting on the office to approve
+      // their on-hold. Don't tell them to "finish" a job they can't act on.
+      $("blockTitle").textContent="⏳ Waiting for the office";
+      $("blockMsg").textContent="You've asked to put "+ref+" on hold. The office needs to approve that before you can start another job — you'll be free to move on as soon as they do. Nothing more to do right now.";
+      $("blockHint").textContent="You'll get a notification the moment it's approved.";
+      $("blockGoRef").textContent=(bj&&bj.ref)?("View "+bj.ref+" →"):"View that job →";
+    } else if(bj && bj.kind==="safety"){
+      $("blockTitle").textContent="⚠️ Waiting for the office";
+      $("blockMsg").textContent=(ref)+" is flagged 'can't proceed safely' and is with the office. You can start another job once they've sorted it.";
+      $("blockHint").textContent="You'll get a notification when it's cleared.";
+      $("blockGoRef").textContent=(bj&&bj.ref)?("View "+bj.ref+" →"):"View that job →";
+    } else {
+      $("blockTitle").textContent="⚠️ Finish your current job first";
+      $("blockMsg").textContent = msg || ("Finish "+ref+" first — "+((bj&&bj.why)||"it's still open")+".");
+      $("blockHint").textContent="You can only work one job at a time — wrap up the open one to move on.";
+      $("blockGoRef").textContent=(bj&&bj.ref)?("Go to "+bj.ref+" →"):"Go to that job →";
+    }
     $("blockModal").classList.add("show");
   }
   async function uploadPhotos(e){
