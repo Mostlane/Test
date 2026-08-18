@@ -443,7 +443,12 @@
     var st = document.createElement("style");
     st.id = "ml-statuscap-style";
     st.textContent =
-      "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
+      // Our padding must be INSIDE the body's height, not added to it. Pages
+      // like main.html set `html,body{height:100%}` with the default
+      // content-box, so a 47px top padding made the document 47px taller than
+      // the screen — a blank strip you could scroll to at the bottom.
+      "body{ box-sizing:border-box; }"
+      + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
       + "  background:#003468; z-index:2147483000; pointer-events:none; }"
       // Landscape on a notched phone: keep content out of the side notch too.
       + "@media (orientation:landscape){ body{ padding-left:env(safe-area-inset-left, 0px);"

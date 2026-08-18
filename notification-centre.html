@@ -57,7 +57,7 @@
 
   <div class="card" id="pushStatusCard">
     <h2>📱 Who has notifications on</h2>
-    <p class="sub">Every active user and whether they currently have push notifications enabled on at least one device. <b>On</b> = a device is registered; <b>Off</b> = none registered (they've never enabled it, turned it off, or reinstalled). Last-confirmed shows when the server last successfully delivered a push to them.</p>
+    <p class="sub">Every active user and whether they currently have push notifications enabled on at least one device. <b>On</b> = a device is registered; <b>Off</b> = none registered (they've never enabled it, turned it off, or reinstalled). Each of a user's devices is listed with its type (e.g. <i>iPhone · Safari</i>, from the browser it enabled on — the portal doesn't ask people to name a device) and when the server last successfully delivered a push to it.</p>
     <p class="sub" id="psSummary" style="font-weight:600;color:#334155;">Loading…</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
       <button class="btn small grey" id="psRefresh">↻ Refresh</button>
@@ -516,11 +516,26 @@ async function loadPushStatus(){
       const meta = on
         ? (u.devices+" device"+(u.devices===1?"":"s")+(u.lastOk?" · last confirmed "+esc(psAgo(u.lastOk)):(u.lastReg?" · enabled "+esc(psAgo(u.lastReg)):"")))
         : "No devices registered";
-      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #eef2f6;">'
+      // Per-device breakdown (each subscription = one device the person enabled).
+      let devHtml = "";
+      if(on && (u.devicesList||[]).length){
+        devHtml = '<div style="margin:6px 0 0 20px;display:grid;gap:4px;">' + u.devicesList.map(dv => {
+          const when = dv.lastOk
+            ? "last confirmed "+esc(psAgo(dv.lastOk))
+            : (dv.lastReg ? "enabled "+esc(psAgo(dv.lastReg))+" · not yet confirmed" : "not yet confirmed");
+          return '<div style="display:flex;align-items:baseline;gap:6px;font-size:12px;color:#475569;">'
+            + '<span style="color:#0a7d33;flex:none;">•</span>'
+            + '<span style="font-weight:600;color:#334155;">'+esc(dv.device)+'</span>'
+            + '<span style="color:#94a3b8;">— '+when+'</span></div>';
+        }).join("") + '</div>';
+      }
+      return '<div style="padding:8px 4px;border-bottom:1px solid #eef2f6;">'
+        + '<div style="display:flex;align-items:center;gap:10px;">'
         + dot
         + '<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:14px;">'+esc(u.name)+'</div>'
         + '<div class="sub" style="margin:0;font-size:12px;">'+meta+'</div></div>'
-        + badge + '</div>';
+        + badge + '</div>'
+        + devHtml + '</div>';
     }).join("");
   }catch(e){
     summ.textContent = "Couldn't load push status.";

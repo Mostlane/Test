@@ -83,11 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=13`)
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=14`)
 All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7–9 the animated wait mark, ?v=13 the status-bar cap — it had to clear a
+?v=7–9 the animated wait mark, ?v=13/14 the status-bar cap — 13 had to clear a
 concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
-portal-config change must reach them again, bump to ?v=14 across all pages
+portal-config change must reach them again, bump to ?v=15 across all pages
 with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
@@ -2584,7 +2584,15 @@ files to this public repo.
   compounds). A plain CSS `body{padding-top:env(...)}` REPLACED the padding pages
   set for themselves — the field app (route/inbox/you, engineer-job, vehicle)
   lost its own 14–16px and content jammed against the bar.
-  (b) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
+  (b) **`body{box-sizing:border-box}` ships WITH the padding.** main.html sets
+  `html,body{height:100%}` with the default content-box, so the 47px top padding
+  was ADDED to a full-height body — the document became 47px taller than the
+  screen and you could scroll to a blank strip at the bottom (Jamie spotted it
+  immediately). border-box puts the padding inside that 100%. Pages whose height
+  is content-driven simply get 47px taller, which is correct — the content moved
+  down. Swept all 124 pages for the "fitted before, scrolls now" signature; only
+  daily-logs.html shifts (28px) and that is real content reflow, not a gap.
+  (c) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
   for the `<script src=…portal-config.js>` tag, NOT the string — programme-view.html
   merely *mentions* it in a comment, and giving that client-facing page the meta
   without a cap pushed its content under the status bar.
