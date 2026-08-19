@@ -139,14 +139,23 @@
   var jobs=[], shift=null, vcState="prompt", eng="", vcVehicle="";
 
   // ---- postcode geocoding (shared cache with engineer-jobs.html) ----
-  var GEO_KEY="mlPostcodeGeo_v1", geoCache={};
-  try{ geoCache=JSON.parse(localStorage.getItem(GEO_KEY))||{}; }catch(e){ geoCache={}; }
+  var GEO_KEY="mlPostcodeGeo_v1", geoCache={}, geoMiss={};
+  try{
+    var _raw=JSON.parse(localStorage.getItem(GEO_KEY))||{};
+    // Successes only. A miss cached as null meant a postcode that failed once —
+    // a bad batch, a rate-limit — was never looked up again on that device and
+    // its pin stayed missing for good. Drop any nulls left by older builds.
+    Object.keys(_raw).forEach(function(k){ if(Array.isArray(_raw[k])) geoCache[k]=_raw[k]; });
+  }catch(e){ geoCache={}; }
   var PC_RE=/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
   function jobPostcode(j){ var pc=String(j.postcode||"").replace(/\*+$/,"").trim(); if(!pc){ var m=PC_RE.exec(j.address||""); if(m) pc=m[0]; } return pc.toUpperCase().replace(/\s+/g," "); }
-  async function geocode(pcs){ var todo=[]; pcs.forEach(function(pc){ if(pc&&geoCache[pc]===undefined&&todo.indexOf(pc)<0) todo.push(pc); });
+  async function geocode(pcs){ var todo=[]; pcs.forEach(function(pc){ if(pc&&!Array.isArray(geoCache[pc])&&!geoMiss[pc]&&todo.indexOf(pc)<0) todo.push(pc); });
     for(var i=0;i<todo.length;i+=100){ var batch=todo.slice(i,i+100);
       try{ var res=await fetch("https://api.postcodes.io/postcodes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({postcodes:batch})});
-        var data=await res.json(); (data.result||[]).forEach(function(r){ geoCache[(r.query||"").toUpperCase()]=(r.result&&isFinite(r.result.latitude))?[r.result.latitude,r.result.longitude]:null; });
+        var data=await res.json(); (data.result||[]).forEach(function(r){ var q=(r.query||"").toUpperCase();
+          if(r.result&&isFinite(r.result.latitude)) geoCache[q]=[r.result.latitude,r.result.longitude];
+          else geoMiss[q]=1;   // this page load only — never persisted
+        });
       }catch(e){} }
     try{ localStorage.setItem(GEO_KEY,JSON.stringify(geoCache)); }catch(e){}
   }
