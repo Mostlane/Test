@@ -504,45 +504,156 @@
     }
 
     // ── Job costing ───────────────────────────────────────────────────────────
+    // Contract value vs total cost = projected profit/loss + margin. Admins can
+    // also add manual labour shifts (hours × rate → auto-cost) and material
+    // costs — both feed into the same totals via /costing/summary.
     async function loadCosting() {
       const card = g("costingCard"); if (!card) return;
-      let d;
+      // Engineer dropdown for manual labour shifts needs the user list; if the
+      // Jobs & site visits card hasn't loaded it yet, fetch it here.
+      if (CAN && !ENGS) { try { const u = await authFetch("/users").then(r => r.json()); ENGS = (u.Users || u.users || []).filter(x => x.Username && String(x.Status || "Active") !== "Disabled"); } catch { ENGS = []; } }
+      let d, costs = { costs: [] };
       try { d = await authFetch("/costing/summary?site=" + encodeURIComponent(P.name) + "&from=2000-01-01").then(r => r.json()); }
       catch { return; }
       if (!d || !d.ok) return;   // no costing permission — silently omit
-      const key = P.costingKey;
-      const s = (d.sites || []).find(x => x.project && x.project.id === PID) || (d.sites || []).find(x => x.key === key) || (d.sites || []).find(x => (x.site || "").toLowerCase() === (P.name || "").toLowerCase());
+      try { costs = await authFetch("/project/costs?id=" + encodeURIComponent(PID)).then(r => r.json()) || costs; } catch {}
+      const s = (d.sites || []).find(x => x.project && x.project.id === PID) || (d.sites || []).find(x => x.key === P.costingKey) || (d.sites || []).find(x => (x.site || "").toLowerCase() === (P.name || "").toLowerCase());
       const fin = s && s.fin;
-      const labour = s ? s.laborCost : 0, po = s ? s.poTotal : 0, grand = s ? s.grandTotal : 0;
+      const labour = s ? (s.laborCost || 0) : 0;
+      const po = s ? (s.poTotal || 0) : 0;
+      const manualLab = s ? (s.manualLabour || 0) : 0;
+      const manualMat = s ? (s.manualMaterials || 0) : 0;
+      const grand = s ? (s.grandTotal || 0) : 0;
+      const contract = (fin && fin.value) || P.contractValue || 0;
+      const pnl = contract ? Math.round((contract - grand) * 100) / 100 : null;
+      const margin = contract ? Math.round(((contract - grand) / contract) * 1000) / 10 : null;
+      const pos = pnl == null ? "" : (pnl >= 0 ? "var(--ok)" : "var(--bad)");
       const costingHref = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
+
+      // P&L headline
+      const pnlBlock = `<div class="money" style="margin-top:8px;">
+        <div class="stat"><div class="n">${money(contract)}</div><div class="l">Contract value</div></div>
+        <div class="stat"><div class="n">${money(grand)}</div><div class="l">Total cost</div></div>
+        <div class="stat"><div class="n" style="color:${pos}">${pnl == null ? "—" : money(pnl)}</div><div class="l">Projected ${pnl != null && pnl < 0 ? "loss" : "profit"}</div></div>
+        <div class="stat"><div class="n" style="color:${pos}">${margin == null ? "—" : margin + "%"}</div><div class="l">Margin</div></div>
+      </div>`;
+      const breakdown = `<div style="margin-top:10px;font-size:13.5px;">
+        <div class="frow"><span>🛠 Captured labour <span class="muted" style="font-size:12px;">(status-tap timers + SiteLog)</span></span><b>${money(labour - manualLab)}</b></div>
+        <div class="frow"><span>➕ Manual labour shifts</span><b>${money(manualLab)}</b></div>
+        <div class="frow"><span>🧾 PO materials <span class="muted" style="font-size:12px;">(from the PO system)</span></span><b>${money(po - manualMat)}</b></div>
+        <div class="frow"><span>➕ Manual materials</span><b>${money(manualMat)}</b></div>
+      </div>`;
+      // Valuations block (unchanged behaviour; existing proj_fin)
       let finHtml = "";
       if (fin) {
         finHtml = `<h2 style="margin-top:14px;">📈 Valuations</h2>
           <div class="money">
-            <div class="stat"><div class="n">${money(fin.value)}</div><div class="l">Contract value</div></div>
             <div class="stat"><div class="n">${money(fin.valued)}</div><div class="l">Valued to date</div></div>
             <div class="stat"><div class="n" style="color:${fin.position >= 0 ? "var(--ok)" : "var(--bad)"}">${money(fin.position)}</div><div class="l">Position (valued − cost)</div></div>
             <div class="stat"><div class="n">${money(fin.retentionHeld)}</div><div class="l">Retention held</div></div>
+            <div class="stat"><div class="n">${money(fin.remainingValue)}</div><div class="l">Left to value</div></div>
           </div>
           ${fin.suggestedNext ? `<p class="muted" style="font-size:12.5px;margin-top:6px;">💡 Suggested next valuation: <b>${money(fin.suggestedNext)}</b></p>` : ""}
           <p style="margin-top:6px;"><a class="btn ghost small" href="${costingHref}">Manage valuations →</a></p>`;
       } else if (P.required && P.required.valuations) {
         finHtml = `<p class="muted" style="margin-top:10px;">No contract value set yet — use “Set contract value” in the to-do above to start tracking valuations.</p>`;
       }
+      // Manual entry forms (admin only)
+      const engOpts = (ENGS || []).filter(u => String(u.StaffType || "").toLowerCase() === "field").sort((a, b) => ((a.FirstName || a.Username) + "").localeCompare((b.FirstName || b.Username) + ""))
+        .map(u => `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("");
+      const manualForms = CAN ? `
+        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px;">
+          <h3 style="margin:0 0 8px;font-size:14.5px;">➕ Log a labour shift <span class="muted" style="font-size:12px;font-weight:400;">(auto-costed from the engineer's rate)</span></h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+            <div style="flex:1 1 180px;"><label style="font-size:12px;font-weight:600;">Engineer</label><select id="labUser"><option value="">Select…</option>${engOpts}</select></div>
+            <div style="flex:0 0 140px;"><label style="font-size:12px;font-weight:600;">Date</label><input type="date" id="labDate" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div style="flex:0 0 90px;"><label style="font-size:12px;font-weight:600;">Hours</label><input type="number" id="labHours" min="0" step="0.25" placeholder="8"></div>
+            <div style="flex:0 0 120px;"><label style="font-size:12px;font-weight:600;">Rate £/hr <span class="muted" style="font-size:11px;">(opt)</span></label><input type="number" id="labRate" min="0" step="0.5" placeholder="auto"></div>
+            <div style="flex:1 1 200px;"><label style="font-size:12px;font-weight:600;">Note (opt)</label><input type="text" id="labNote" placeholder="e.g. Second fix"></div>
+            <button class="btn small" id="labAdd">Add shift</button>
+          </div>
+          <p class="msg" id="labMsg" style="margin-top:6px;"></p>
+
+          <h3 style="margin:12px 0 8px;font-size:14.5px;">➕ Add a material cost</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+            <div style="flex:0 0 140px;"><label style="font-size:12px;font-weight:600;">Date</label><input type="date" id="matDate" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div style="flex:1 1 200px;"><label style="font-size:12px;font-weight:600;">Description</label><input type="text" id="matDesc" placeholder="e.g. Screws / plaster"></div>
+            <div style="flex:1 1 160px;"><label style="font-size:12px;font-weight:600;">Supplier (opt)</label><input type="text" id="matSup" placeholder="e.g. Screwfix"></div>
+            <div style="flex:0 0 120px;"><label style="font-size:12px;font-weight:600;">Amount £ ex-VAT</label><input type="number" id="matAmt" min="0" step="0.01" placeholder="123.45"></div>
+            <button class="btn small" id="matAdd">Add material</button>
+          </div>
+          <p class="msg" id="matMsg" style="margin-top:6px;"></p>
+        </div>` : "";
+      // Recent manual entries
+      const rows = (costs.costs || []);
+      const rowsHtml = rows.length ? `<div style="margin-top:14px;">
+        <h3 style="margin:0 0 6px;font-size:14.5px;">Manual entries</h3>
+        ${rows.map(r => {
+          const who = r.kind === "labour" ? `👷 ${esc(r.username)} · ${r.hours}h${r.rate ? " @ £" + r.rate : ""}` : `🧾 ${esc(r.supplier || "material")}`;
+          return `<div class="frow"><span>${esc(r.date)} · ${who}${r.description ? " · <span class='muted' style='font-size:12.5px;'>" + esc(r.description) + "</span>" : ""}</span><span><b>${money(r.amount)}</b> ${CAN ? `<button class="btn small grey" data-costdel="${esc(r.id)}" style="padding:3px 8px;font-size:12px;">✕</button>` : ""}</span></div>`;
+        }).join("")}
+      </div>` : "";
       card.innerHTML = `<div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span>💷 Job costing</span>
-          <a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing to enter costs / valuations">Open in Job Costing →</a>
+          <span>💷 Job costing &amp; P&amp;L</span>
+          <a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing">Open in Job Costing →</a>
         </h2>
-        <div class="money">
-          <div class="stat"><div class="n">${money(grand)}</div><div class="l">Total cost</div></div>
-          <div class="stat"><div class="n">${money(labour)}</div><div class="l">Labour</div></div>
-          <div class="stat"><div class="n">${money(po)}</div><div class="l">Materials / PO</div></div>
-        </div>
+        ${pnlBlock}
+        ${breakdown}
         ${s && s.engineers && s.engineers.length ? `<div style="margin-top:10px;"><b style="font-size:13px;">People</b>${s.engineers.map(e => `<div class="frow"><span>${esc(e.name || e.user || "")}</span><span>${money(e.cost || 0)}</span></div>`).join("")}</div>` : ""}
         ${s && s.suppliers && s.suppliers.length ? `<div style="margin-top:10px;"><b style="font-size:13px;">Suppliers</b>${s.suppliers.map(su => `<div class="frow"><span>${esc(su.name || su.supplier || "")}</span><span>${money(su.total || su.cost || 0)}</span></div>`).join("")}</div>` : ""}
         ${!s ? `<p class="muted" style="margin-top:8px;">No costs recorded against this project yet.</p>` : ""}
+        ${manualForms}
+        ${rowsHtml}
         ${finHtml}
       </div>`;
+      if (CAN) wireCostForms();
+    }
+    function wireCostForms() {
+      const labAdd = document.getElementById("labAdd"), matAdd = document.getElementById("matAdd");
+      if (labAdd) labAdd.onclick = addLabour;
+      if (matAdd) matAdd.onclick = addMaterial;
+      document.querySelectorAll("[data-costdel]").forEach(b => b.onclick = async () => {
+        if (!(window.MLUI ? await MLUI.confirm("Delete this entry?", { danger: true }) : confirm("Delete this entry?"))) return;
+        await authFetch("/project/cost-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, costId: b.dataset.costdel }) });
+        loadCosting();
+      });
+    }
+    async function addLabour() {
+      const msg = document.getElementById("labMsg"); msg.className = "msg"; msg.textContent = "";
+      const body = { id: PID, kind: "labour",
+        username: document.getElementById("labUser").value,
+        date: document.getElementById("labDate").value,
+        hours: Number(document.getElementById("labHours").value),
+        rate: document.getElementById("labRate").value ? Number(document.getElementById("labRate").value) : undefined,
+        description: document.getElementById("labNote").value };
+      if (!body.username) { msg.className = "msg err"; msg.textContent = "Pick an engineer."; return; }
+      if (!(body.hours > 0)) { msg.className = "msg err"; msg.textContent = "Hours must be > 0."; return; }
+      msg.textContent = "Saving…";
+      try {
+        const r = await authFetch("/project/cost", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't save");
+        msg.className = "msg ok"; msg.textContent = "Added ✓ (£" + (r.amount || 0).toFixed(2) + ")";
+        document.getElementById("labHours").value = ""; document.getElementById("labRate").value = ""; document.getElementById("labNote").value = "";
+        loadCosting();
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+    }
+    async function addMaterial() {
+      const msg = document.getElementById("matMsg"); msg.className = "msg"; msg.textContent = "";
+      const body = { id: PID, kind: "material",
+        date: document.getElementById("matDate").value,
+        description: document.getElementById("matDesc").value,
+        supplier: document.getElementById("matSup").value,
+        amount: Number(document.getElementById("matAmt").value) };
+      if (!body.description) { msg.className = "msg err"; msg.textContent = "Enter a description."; return; }
+      if (!(body.amount > 0)) { msg.className = "msg err"; msg.textContent = "Amount must be > 0."; return; }
+      msg.textContent = "Saving…";
+      try {
+        const r = await authFetch("/project/cost", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't save");
+        msg.className = "msg ok"; msg.textContent = "Added ✓";
+        document.getElementById("matDesc").value = ""; document.getElementById("matSup").value = ""; document.getElementById("matAmt").value = "";
+        loadCosting();
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
     }
   </script>
 </body>

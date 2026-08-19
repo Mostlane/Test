@@ -574,12 +574,54 @@ export async function handle(request, env, ctx, url, sess) {
       }
     }
 
+    // ── Manual costs entered on the project hub (labour shifts + materials)
+    // Folded per project's site key: labour into cost + per-engineer; materials
+    // into poTotal (grouped as a supplier "Manual entry"). Kept as separate
+    // manualLabour/manualMaterials totals for the P&L split on the hub.
+    try {
+      const projKeyById = {};   // projectId -> site key
+      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
+      const projIds = Object.keys(projKeyById);
+      if (projIds.length) {
+        for (const pid of projIds) {
+          const { results } = await env.DB.prepare(
+            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
+          ).bind(tid, pid).all();
+          const sKey = projKeyById[pid];
+          const s = bySite[sKey]; if (!s) continue;
+          for (const r of results || []) {
+            const amt = Number(r.amount) || 0;
+            if (r.kind === "labour") {
+              s.cost = Math.round((s.cost + amt) * 100) / 100;
+              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
+              addDay(s.labD, r.date, amt);
+              const who = canonEng(r.username || "(manual)");
+              const eng = engFor(s, who);
+              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
+              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+              if (mins) { s.onsiteMins += mins; eng.mins += mins; if (!eng.days) eng.days = new Set(); eng.days.add(r.date); }
+              addSrc(eng, "sla");
+            } else {
+              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
+              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
+              addDay(s.poD, r.date, amt);
+              const supName = (r.supplier || "").trim() || "Manual entry";
+              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+              sup.count++;
+              sup.total = Math.round((sup.total + amt) * 100) / 100;
+            }
+          }
+        }
+      }
+    } catch {}
+
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
         ...s,
         key,   // stable per-site id the front-end pins/hides/orders against
         project: seededProjects[key] || null,   // { id, number } when this site IS a portal project
+        manualLabour: s.manualLabour || 0, manualMaterials: s.manualMaterials || 0,
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
@@ -1230,7 +1272,7 @@ async function jobPoRows(env, jobId) {
 
 /* ══ Rates (mirrors timesheets.js effectiveCfg, read-only subset) ═══════════ */
 
-async function ratesMap(env, tid) {
+export async function ratesMap(env, tid) {
   const out = {};
   let cfg = { byUser: {} };
   try {

@@ -28,6 +28,7 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
 import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned } from "./sla.js";
+import { ratesMap } from "./costing.js";
 
 const PROJ_FIN_KEY = tid => `proj_fin:${tid}`;
 
@@ -60,6 +61,28 @@ async function ensureTables(env) {
     id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, title TEXT, section TEXT,
     r2_key TEXT, name TEXT, type TEXT, hidden INTEGER DEFAULT 0,
     downloadable INTEGER DEFAULT 1, uploaded_by TEXT, uploaded_at TEXT)`).run();
+  // Manual labour + material costs on a project. Labour rows carry hours + a
+  // snapshot of the rate at entry time (so a later rate change never rewrites
+  // history); material rows carry an amount + supplier. Folded into the site's
+  // cost totals by costing.js and shown on the project hub P&L.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS project_costs (
+    id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, kind TEXT,
+    date TEXT, username TEXT, hours REAL, rate REAL,
+    supplier TEXT, description TEXT, amount REAL,
+    created_by TEXT, created_at TEXT)`).run();
+}
+
+// Add-only push of the project's site name to the PO system's sites table
+// (env.PO_DB — separate D1), so raising a PO can pick this project. Same
+// idempotent shape as po.js addSite. Best-effort; must never break the caller.
+export async function pushSiteToPO(env, name) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare(
+      "INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1"
+    ).bind(String(name).trim()).run();
+    return true;
+  } catch { return false; }
 }
 
 async function cfgGet(db, key) {
@@ -236,6 +259,9 @@ export async function handle(request, env, ctx, url, sess) {
     if (!row) return error("Project not found", 404, env, request);
     const data = parse(row);
     if (!canSeeProject(data, me, canManage)) return error("Project not found", 404, env, request);
+    // Opportunistically heal an existing project whose PO-site push was missed
+    // when it was created (idempotent add-only; PO_DB may not be bound yet).
+    if (canManage) ctx?.waitUntil(pushSiteToPO(env, row.name));
     return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage }, {}, env, request);
   }
 
@@ -280,6 +306,10 @@ export async function handle(request, env, ctx, url, sess) {
     if (data.sitelog.rules || data.sitelog.visitorRules) {
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
     }
+    // Register the project's site on the PO system so a PO raised here can
+    // pick it — and once priced, its cost automatically appears against the
+    // project in job-costing (costing.js matches po_log.site by name).
+    ctx?.waitUntil(pushSiteToPO(env, name));
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse(row), 0) }, {}, env, request);
   }
@@ -557,6 +587,80 @@ export async function handle(request, env, ctx, url, sess) {
       firestopping: !!j.firestopping, investigateOnly: !!j.investigateOnly,
     })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
     return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
+  }
+
+  // ── Manual costs: labour shifts + material entries ────────────────────────
+  // Admins add labour (hours × rate → auto-cost) and materials (£ ex-VAT) that
+  // aren't captured elsewhere (no PO raised, no status-tap timing). Folded
+  // into the project's site totals by costing.js.
+  if (path === "/project/costs" && method === "GET") {
+    const pid = url.searchParams.get("id") || "";
+    if (!(await getRow(pid))) return error("Project not found", 404, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM project_costs WHERE tenant_id=? AND project_id=? ORDER BY date DESC, created_at DESC"
+    ).bind(tenantId, pid).all();
+    const rows = (results || []).map(r => ({
+      id: r.id, kind: r.kind, date: r.date, username: r.username || "",
+      hours: r.hours != null ? Number(r.hours) : null, rate: r.rate != null ? Number(r.rate) : null,
+      supplier: r.supplier || "", description: r.description || "",
+      amount: Number(r.amount) || 0, createdBy: r.created_by, createdAt: r.created_at,
+    }));
+    return json({ ok: true, costs: rows, canManage }, {}, env, request);
+  }
+  if (path === "/project/cost" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const kind = b.kind === "material" ? "material" : "labour";
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const description = String(b.description || "").slice(0, 400);
+    let username = "", hours = null, rate = null, amount = 0, supplier = "";
+    if (kind === "labour") {
+      username = String(b.username || "").trim();
+      if (!username) return error("Engineer required", 400, env, request);
+      hours = Number(b.hours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return error("Hours must be between 0 and 24", 400, env, request);
+      // Rate: explicit override else engts:cfg (per-user or default). A missing
+      // rate is allowed but the row will cost nothing — flagged in the UI so
+      // the admin knows to type one or set the engineer's rate.
+      const explicit = Number(b.rate);
+      if (Number.isFinite(explicit) && explicit > 0) rate = explicit;
+      else { const rates = await ratesMap(env, tenantId); const r = rates[username]; rate = r && r.rateType === "hour" ? r.rate : null; }
+      amount = rate ? Math.round(hours * rate * 100) / 100 : 0;
+    } else {
+      supplier = String(b.supplier || "").trim().slice(0, 120);
+      const amt = Number(b.amount);
+      if (!Number.isFinite(amt) || amt <= 0) return error("Amount required", 400, env, request);
+      amount = Math.round(amt * 100) / 100;
+      if (!description) return error("Description required", 400, env, request);
+    }
+    const id = newId("PC");
+    const now = new Date().toISOString();
+    await env.DB.prepare(`INSERT INTO project_costs
+      (id, tenant_id, project_id, kind, date, username, hours, rate, supplier, description, amount, created_by, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      id, tenantId, row.id, kind, date, username, hours, rate, supplier, description, amount, me, now
+    ).run();
+    return json({ ok: true, id, amount }, {}, env, request);
+  }
+  if (path === "/project/cost-delete" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.costId || "");
+    if (!id) return error("costId required", 400, env, request);
+    await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+
+  // ── Push this project's site to the PO system (manual heal) ───────────────
+  if (path === "/project/push-po" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const ok = await pushSiteToPO(env, row.name);
+    return json({ ok, poBound: !!env.PO_DB }, {}, env, request);
   }
 
   // ── Delete a whole project (record only; the project-site is kept) ────────

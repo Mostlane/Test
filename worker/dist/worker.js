@@ -16868,6 +16868,49 @@ async function handle24(request, env, ctx, url, sess) {
         if (hrs > 0) addDay(site.labD, londonDate3(v.check_in_at), hrs * (rt.cost / rt.hrs));
       }
     }
+    try {
+      const projKeyById = {};
+      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
+      const projIds = Object.keys(projKeyById);
+      if (projIds.length) {
+        for (const pid of projIds) {
+          const { results } = await env.DB.prepare(
+            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
+          ).bind(tid, pid).all();
+          const sKey = projKeyById[pid];
+          const s = bySite[sKey];
+          if (!s) continue;
+          for (const r of results || []) {
+            const amt = Number(r.amount) || 0;
+            if (r.kind === "labour") {
+              s.cost = Math.round((s.cost + amt) * 100) / 100;
+              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
+              addDay(s.labD, r.date, amt);
+              const who = canonEng(r.username || "(manual)");
+              const eng = engFor(s, who);
+              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
+              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+              if (mins) {
+                s.onsiteMins += mins;
+                eng.mins += mins;
+                if (!eng.days) eng.days = /* @__PURE__ */ new Set();
+                eng.days.add(r.date);
+              }
+              addSrc(eng, "sla");
+            } else {
+              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
+              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
+              addDay(s.poD, r.date, amt);
+              const supName = (r.supplier || "").trim() || "Manual entry";
+              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+              sup.count++;
+              sup.total = Math.round((sup.total + amt) * 100) / 100;
+            }
+          }
+        }
+      }
+    } catch {
+    }
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
@@ -16876,6 +16919,8 @@ async function handle24(request, env, ctx, url, sess) {
         // stable per-site id the front-end pins/hides/orders against
         project: seededProjects[key] || null,
         // { id, number } when this site IS a portal project
+        manualLabour: s.manualLabour || 0,
+        manualMaterials: s.manualMaterials || 0,
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost,
         poTotal,
@@ -21006,6 +21051,22 @@ async function ensureTables4(env) {
     id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, title TEXT, section TEXT,
     r2_key TEXT, name TEXT, type TEXT, hidden INTEGER DEFAULT 0,
     downloadable INTEGER DEFAULT 1, uploaded_by TEXT, uploaded_at TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS project_costs (
+    id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, kind TEXT,
+    date TEXT, username TEXT, hours REAL, rate REAL,
+    supplier TEXT, description TEXT, amount REAL,
+    created_by TEXT, created_at TEXT)`).run();
+}
+async function pushSiteToPO(env, name) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare(
+      "INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1"
+    ).bind(String(name).trim()).run();
+    return true;
+  } catch {
+    return false;
+  }
 }
 async function cfgGet2(db, key) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
@@ -21183,6 +21244,7 @@ async function handle30(request, env, ctx, url, sess) {
     if (!row) return error("Project not found", 404, env, request);
     const data = parse2(row);
     if (!canSeeProject(data, me, canManage)) return error("Project not found", 404, env, request);
+    if (canManage) ctx?.waitUntil(pushSiteToPO(env, row.name));
     return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage }, {}, env, request);
   }
   if (path === "/project/create" && method === "POST") {
@@ -21232,6 +21294,7 @@ async function handle30(request, env, ctx, url, sess) {
     if (data.sitelog.rules || data.sitelog.visitorRules) {
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
     }
+    ctx?.waitUntil(pushSiteToPO(env, name));
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse2(row), 0) }, {}, env, request);
   }
@@ -21508,6 +21571,93 @@ async function handle30(request, env, ctx, url, sess) {
       investigateOnly: !!j.investigateOnly
     })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
     return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
+  }
+  if (path === "/project/costs" && method === "GET") {
+    const pid = url.searchParams.get("id") || "";
+    if (!await getRow(pid)) return error("Project not found", 404, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM project_costs WHERE tenant_id=? AND project_id=? ORDER BY date DESC, created_at DESC"
+    ).bind(tenantId, pid).all();
+    const rows = (results || []).map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      date: r.date,
+      username: r.username || "",
+      hours: r.hours != null ? Number(r.hours) : null,
+      rate: r.rate != null ? Number(r.rate) : null,
+      supplier: r.supplier || "",
+      description: r.description || "",
+      amount: Number(r.amount) || 0,
+      createdBy: r.created_by,
+      createdAt: r.created_at
+    }));
+    return json({ ok: true, costs: rows, canManage }, {}, env, request);
+  }
+  if (path === "/project/cost" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const kind = b.kind === "material" ? "material" : "labour";
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const description = String(b.description || "").slice(0, 400);
+    let username = "", hours = null, rate = null, amount = 0, supplier = "";
+    if (kind === "labour") {
+      username = String(b.username || "").trim();
+      if (!username) return error("Engineer required", 400, env, request);
+      hours = Number(b.hours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return error("Hours must be between 0 and 24", 400, env, request);
+      const explicit = Number(b.rate);
+      if (Number.isFinite(explicit) && explicit > 0) rate = explicit;
+      else {
+        const rates = await ratesMap(env, tenantId);
+        const r = rates[username];
+        rate = r && r.rateType === "hour" ? r.rate : null;
+      }
+      amount = rate ? Math.round(hours * rate * 100) / 100 : 0;
+    } else {
+      supplier = String(b.supplier || "").trim().slice(0, 120);
+      const amt = Number(b.amount);
+      if (!Number.isFinite(amt) || amt <= 0) return error("Amount required", 400, env, request);
+      amount = Math.round(amt * 100) / 100;
+      if (!description) return error("Description required", 400, env, request);
+    }
+    const id = newId3("PC");
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare(`INSERT INTO project_costs
+      (id, tenant_id, project_id, kind, date, username, hours, rate, supplier, description, amount, created_by, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      id,
+      tenantId,
+      row.id,
+      kind,
+      date,
+      username,
+      hours,
+      rate,
+      supplier,
+      description,
+      amount,
+      me,
+      now
+    ).run();
+    return json({ ok: true, id, amount }, {}, env, request);
+  }
+  if (path === "/project/cost-delete" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.costId || "");
+    if (!id) return error("costId required", 400, env, request);
+    await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/project/push-po" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const ok = await pushSiteToPO(env, row.name);
+    return json({ ok, poBound: !!env.PO_DB }, {}, env, request);
   }
   if (path === "/project/delete" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);

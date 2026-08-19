@@ -1694,6 +1694,29 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Auto-push project site to PO + manual labour/materials + P&L (Aug 2026):**
+  Creating a project now **auto-registers its site name in the PO system's
+  `sites` table** (env.PO_DB) via `pushSiteToPO()` (add-only, idempotent), so a
+  PO raised for the project can pick it — and once priced, its cost automatically
+  appears against the project in job-costing (costing.js already matches
+  `po_log.site` by name). Existing projects self-heal on the next
+  /project/get, and there's a **POST /project/push-po** admin backfill (called
+  from a hub button when needed). NEW table **`project_costs`** (self-migrating)
+  + endpoints: **GET /project/costs**, **POST /project/cost** (kind=labour → the
+  hours are auto-costed from the engineer's `engts:cfg` rate — an explicit
+  override in £/hr wins; kind=material → £ ex-VAT + supplier), **POST
+  /project/cost-delete**. Manual entries are folded into `/costing/summary` for
+  the project's site: labour → `s.cost` + per-engineer + `s.manualLabour`;
+  materials → `s.poTotal` + `s.manualMaterials` + a supplier row (default
+  "Manual entry"). Front-end (project-hub.html "💷 Job costing & P&L" card):
+  clear headline (Contract value · Total cost · Projected profit/loss · Margin
+  %; green/red by sign), a 4-line **breakdown** (Captured labour · Manual
+  labour · PO materials · Manual materials), the People + Suppliers rows as
+  before, and two admin-only mini-forms: **Log a labour shift** (engineer +
+  date + hours + optional rate override + note) and **Add a material cost**
+  (date + description + supplier + £ ex-VAT). Every manual entry lists below
+  with a delete button. `ratesMap` is now exported from costing.js so
+  projects-api.js can snapshot the rate at entry time.
 - **Jobs & site visits from the project (Aug 2026):** every SLA job now carries
   an optional **`job.projectId`** (`createOrUpdateJobFromPayload` + `patchJob`
   accept + preserve it); a job raised from a project is stamped with the
