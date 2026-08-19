@@ -81,6 +81,35 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  /* AI: suggest a job's area of work from its description (office confirms).
+     Cheap (~0.1p) but capped + metered. Any logged-in session may call it
+     (add-job / the editor are already permission-gated pages). */
+  if (subpath === "/infer-work-area" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const b = await readJson(request);
+    const cap = await aiCapCheck(env, tenantId);
+    if (cap.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
+    const r = await inferWorkArea(env, tenantId, b.description || "");
+    if (r.ok && (r.areaId || r.name)) ctx?.waitUntil(bumpAiUsage(env, tenantId, "infer-work-area"));
+    return jsonResponse(r, headers);
+  }
+
+  /* AI usage meter + soft daily cap (SLA admin). */
+  if (subpath === "/ai-usage") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (method === "GET") return jsonResponse(await getAiUsage(env, tenantId), headers);
+    if (method === "POST") {
+      const b = await readJson(request);
+      if (b.dailyCap !== undefined) {
+        const n = Math.max(0, parseInt(b.dailyCap, 10) || 0);
+        const db = tenantDB(env, tenantId);
+        await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,'ai_daily_cap',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, String(n)).run();
+      }
+      return jsonResponse(await getAiUsage(env, tenantId), headers);
+    }
+  }
+
   /* ═══════════════ Firestopping (RIA form) ═══════════════
      A firestopping job produces a "Record of Installation Activities" PDF from
      the engineer's per-seal photos + a signed declaration, bundled with the
@@ -775,7 +804,15 @@ export async function handle(request, env, ctx, url, sess) {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!(await isSlaAdmin(env, tenantId, sess)))
       return jsonResponse({ error: "Only SLA admins can optimise a route." }, headers, 403);
-    return jsonResponse(await optimiseEngineerRoute(env, tenantId, await readJson(request)), headers);
+    const roBody = await readJson(request);
+    // Soft daily cap applies to the AI re-order; over the cap we still return the
+    // shortest-driving (Google/estimate) order, just without the AI pass.
+    const roCap = await aiCapCheck(env, tenantId);
+    if (roCap.capped) roBody.useAI = false;
+    const roRes = await optimiseEngineerRoute(env, tenantId, roBody);
+    if (roRes.aiUsed) ctx?.waitUntil(bumpAiUsage(env, tenantId, "route-optimize"));
+    if (roCap.capped) (roRes.warnings = roRes.warnings || []).push(`Daily AI limit reached (${roCap.cap}) — used shortest-driving order without the AI pass.`);
+    return jsonResponse(roRes, headers);
   }
 
   /* ===== Story Mode: daily shift (clock on / off) ===== */
@@ -3162,6 +3199,107 @@ async function setEngSkills(env, tenantId, skills) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_eng_skills', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
+}
+
+/* ================= AI usage meter + soft daily cap =================
+   Every paid AI call (route optimise, work-area inference, auto-schedule,
+   programme draft/edit) bumps a per-month counter so the office can see spend
+   and a soft DAILY cap protects against runaway cost. Stored in app_config
+   ai_usage:<yyyy-mm> = {total, days:{d:n}, kinds:{k:n}}; cap in ai_daily_cap. */
+const AI_CAP_DEFAULT = 400;
+export async function bumpAiUsage(env, tenantId, kind) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = new Date().toISOString().slice(0, 7), day = new Date().toISOString().slice(0, 10);
+    const k = "ai_usage:" + mon;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, k).first();
+    let u; try { u = row ? JSON.parse(row.value) : null; } catch { u = null; }
+    if (!u || typeof u !== "object") u = { total: 0, days: {}, kinds: {} };
+    u.total = (u.total || 0) + 1;
+    u.days = u.days || {}; u.days[day] = (u.days[day] || 0) + 1;
+    u.kinds = u.kinds || {}; u.kinds[kind || "other"] = (u.kinds[kind || "other"] || 0) + 1;
+    await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, k, JSON.stringify(u)).run();
+    return u.days[day];
+  } catch { return 0; }
+}
+async function aiCapLimit(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='ai_daily_cap'").bind(tenantId).first();
+    const n = row ? parseInt(row.value, 10) : NaN;
+    return Number.isFinite(n) && n >= 0 ? n : AI_CAP_DEFAULT;
+  } catch { return AI_CAP_DEFAULT; }
+}
+async function aiUsageToday(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = new Date().toISOString().slice(0, 7), day = new Date().toISOString().slice(0, 10);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+    let u; try { u = row ? JSON.parse(row.value) : null; } catch { u = null; }
+    return (u && u.days && u.days[day]) || 0;
+  } catch { return 0; }
+}
+// Returns {capped:true,...} when today's calls would exceed the soft cap (cap 0 = off).
+async function aiCapCheck(env, tenantId) {
+  const cap = await aiCapLimit(env, tenantId);
+  if (!cap) return { capped: false, cap: 0 };
+  const today = await aiUsageToday(env, tenantId);
+  return { capped: today >= cap, cap, today };
+}
+async function getAiUsage(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const mon = new Date().toISOString().slice(0, 7), day = new Date().toISOString().slice(0, 10);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+  let u; try { u = row ? JSON.parse(row.value) : null; } catch { u = null; }
+  u = (u && typeof u === "object") ? u : { total: 0, days: {}, kinds: {} };
+  return { ok: true, month: mon, monthTotal: u.total || 0, today: (u.days && u.days[day]) || 0, cap: await aiCapLimit(env, tenantId), kinds: u.kinds || {} };
+}
+
+/* Generic forced-tool Anthropic call → {ok, input} (the validated tool args). */
+async function anthropicTool(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured on the server (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 800, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] }),
+    });
+  } catch { return { ok: false, error: "Couldn't reach the AI service." }; }
+  if (!resp.ok) {
+    let d = ""; try { const j = await resp.json(); d = j?.error?.message || ""; } catch {}
+    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "The AI key was rejected." };
+    if (resp.status === 404 && /model/i.test(d)) return { ok: false, error: `The AI model "${model}" isn't available on this key.` };
+    return { ok: false, error: "The AI service errored." + (d ? " (" + d + ")" : "") };
+  }
+  let payload; try { payload = await resp.json(); } catch { return { ok: false, error: "AI gave an unreadable reply." }; }
+  const block = Array.isArray(payload.content) ? payload.content.find(c => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+  return { ok: true, input: block.input };
+}
+
+/* Classify a job description into ONE work area id (or empty). */
+async function inferWorkArea(env, tenantId, description) {
+  const areas = await getWorkAreas(env, tenantId);
+  if (!areas.length) return { ok: false, error: "No areas of work are configured yet." };
+  const list = areas.map(a => `${a.id}: ${a.name}`).join("\n");
+  const schema = {
+    type: "object",
+    properties: {
+      areaId: { type: "string", description: "The id of the single best-matching area, or empty string if none fit." },
+      confidence: { type: "string", enum: ["high", "medium", "low"] },
+    },
+    required: ["areaId"],
+  };
+  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
+  const user = `Areas (id: name):\n${list}\n\nJob description:\n"""${String(description || "").slice(0, 1500)}"""\n\nWhich single area id best fits this work?`;
+  const r = await anthropicTool(env, { system, user, toolName: "set_area", schema, maxTokens: 120 });
+  if (!r.ok) return r;
+  const id = String(r.input.areaId || "").trim();
+  const match = areas.find(a => a.id === id);
+  return { ok: true, areaId: match ? match.id : "", name: match ? match.name : "", confidence: r.input.confidence || "" };
 }
 
 /* ================= FILES (R2) + PDF ================= */
