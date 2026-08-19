@@ -825,6 +825,32 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(await autoScheduleDay(env, tenantId, await readJson(request)), headers);
   }
 
+  /* GET /sla/duration-insights — the learned duration model + overruns + a
+     review sample (allocated vs actual vs AI estimate). SLA admin. */
+  if (subpath === "/duration-insights" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const dur = await estimateJobDurations(env, tenantId);
+    const ai = await loadAiDurCache(env, tenantId);
+    const recent = (dur.recent || []).map(r => ({ ...r, ai: ai[r.id] ?? null }));
+    return jsonResponse({
+      ok: true,
+      model: { typical: dur.typical, byPriority: dur.byPriority, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
+      overruns: dur.overruns, recent, aiCount: Object.keys(ai).length,
+    }, headers);
+  }
+
+  /* POST /sla/duration-clear-ai — forget the cached AI estimates so they're
+     recomputed on the next auto-day (e.g. after editing descriptions). SLA admin. */
+  if (subpath === "/duration-clear-ai" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    try { await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:aidur:" + tenantId).run(); } catch {}
+    return jsonResponse({ ok: true }, headers);
+  }
+
   /* ===== Story Mode: daily shift (clock on / off) ===== */
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
@@ -2836,6 +2862,24 @@ async function autoScheduleDay(env, tenantId, body) {
   }
   if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
 
+  // AI estimates are the PRIMARY length for a job with no set duration: read its
+  // description and estimate the on-site time (cached per job, so it's a one-off
+  // cost). Falls back to the learned historical typical already set above.
+  let aiUsed = 0, aiSource = "history";
+  const needIds = jobs.filter(j => j.estimated).map(j => j.id);
+  if (needIds.length && env.ANTHROPIC_API_KEY) {
+    const cache = await loadAiDurCache(env, tenantId);
+    const missing = needIds.filter(id => !(id in cache));
+    if (missing.length) {
+      const got = await aiEstimateDurations(env, await jobMetaForIds(env, tenantId, missing));
+      if (Object.keys(got).length) { Object.assign(cache, got); await saveAiDurCache(env, tenantId, cache); }
+    }
+    for (const j of jobs) if (j.estimated && cache[j.id] != null) { j.durationMin = Math.max(15, Math.min(480, Math.round(cache[j.id]))); j.aiEstimated = true; aiUsed++; }
+    if (aiUsed) aiSource = "ai";
+  } else if (needIds.length && !env.ANTHROPIC_API_KEY) {
+    warnings.push("AI duration estimates are off (no ANTHROPIC_API_KEY) — used the learned typical instead.");
+  }
+
   // One matrix over all points: engineer homes first, then jobs. Cap Google use.
   const pts = [...engs.map(e => e.coord), ...jobs.map(j => j.coord)];
   const NE = engs.length;
@@ -2890,7 +2934,7 @@ async function autoScheduleDay(env, tenantId, body) {
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
       const j = jobs[k];
-      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
       site += j.durationMin; t = arrival + j.durationMin; cur = p;
     }
     const homeMin = orderedK.length ? M.mins[cur][pE(ei)] : 0; drive += homeMin;
@@ -2902,6 +2946,7 @@ async function autoScheduleDay(env, tenantId, body) {
     placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length,
     durModel: { typical: dur.typical, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
     estimatedCount: jobs.filter(j => j.estimated).length,
+    aiUsed, aiSource,
     overruns: dur.overruns,
   };
 }
@@ -2924,7 +2969,7 @@ async function estimateJobDurations(env, tid) {
   // Measured actuals are the ground truth; explicit set-durations are a weaker
   // secondary signal (often a uniform placeholder), so prefer actuals and only
   // fall back to set-durations when there's too little real history.
-  const actuals = [], actualByPrio = {}, setVals = [], setByPrio = {}, overruns = [];
+  const actuals = [], actualByPrio = {}, setVals = [], setByPrio = {}, overruns = [], recent = [];
   const MIN = 5;
   for (const r of rows) {
     let d; try { d = JSON.parse(r.data || "{}"); } catch { continue; }
@@ -2938,7 +2983,10 @@ async function estimateJobDurations(env, tid) {
       else if (st === "Complete" && ip) { const mins = Math.round((Date.parse(e.at) - ip) / 60000); if (mins >= 5 && mins <= 600) actual = mins; ip = null; }
     }
     if (Number.isFinite(explicit) && explicit > 0 && explicit <= 600) { setVals.push(explicit); if (prio) (setByPrio[prio] ||= []).push(explicit); }
-    if (actual != null) { actuals.push(actual); if (prio) (actualByPrio[prio] ||= []).push(actual); }
+    if (actual != null) {
+      actuals.push(actual); if (prio) (actualByPrio[prio] ||= []).push(actual);
+      recent.push({ id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || r.id, priority: prio, allocated: (Number.isFinite(explicit) && explicit > 0) ? Math.round(explicit) : null, actual });
+    }
     if (Number.isFinite(explicit) && explicit > 0 && actual != null && actual > Math.max(explicit * 1.5, explicit + 30))
       overruns.push({ ref: r.helpdesk_ref || d.helpdeskRef || r.id, allocated: Math.round(explicit), actual });
   }
@@ -2954,9 +3002,70 @@ async function estimateJobDurations(env, tid) {
     if (v != null) byPriority[p] = v;
   }
   overruns.sort((a, b) => (b.actual - b.allocated) - (a.actual - a.allocated));
-  _durCache = { typical, byPriority, sampleCount: actuals.length + setVals.length, actualCount: actuals.length, overruns: overruns.slice(0, 10) };
+  _durCache = { typical, byPriority, sampleCount: actuals.length + setVals.length, actualCount: actuals.length, overruns: overruns.slice(0, 10), recent: recent.slice(-80).reverse() };
   _durCacheAt = Date.now();
   return _durCache;
+}
+
+// ── AI on-site duration estimates (primary; history is the fallback) ─────────
+// Claude reads each job's description/trade/priority and estimates its ON-SITE
+// working time. Batched (one call per ~40 jobs) so it's cheap, and PERSISTED per
+// job in app_config `sla:aidur:<tid>` so a job is only ever estimated once (until
+// re-estimated). Fails soft — no key / API error → returns nothing and the caller
+// falls back to the learned historical typical.
+async function loadAiDurCache(env, tid) {
+  try { const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:aidur:" + tid).first(); return row ? JSON.parse(row.value) : {}; }
+  catch { return {}; }
+}
+async function saveAiDurCache(env, tid, cache) {
+  try {
+    // Keep it bounded — newest 3000 ids.
+    let obj = cache; const keys = Object.keys(cache);
+    if (keys.length > 3000) { obj = {}; for (const k of keys.slice(-3000)) obj[k] = cache[k]; }
+    await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:aidur:" + tid, JSON.stringify(obj)).run();
+  } catch { /* cache is best-effort */ }
+}
+// metas: [{id, ref, description, priority, site, workArea}] → {id: minutes}
+async function aiEstimateDurations(env, metas) {
+  if (!env.ANTHROPIC_API_KEY || !metas.length) return {};
+  const schema = {
+    type: "object",
+    properties: {
+      estimates: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            minutes: { type: "integer", description: "On-site working minutes (exclude travel), 15–480." },
+          },
+          required: ["id", "minutes"],
+        },
+      },
+    },
+    required: ["estimates"],
+  };
+  const system = "You estimate how long a UK building-maintenance / facilities job takes ON SITE — the hands-on working time for one engineer, EXCLUDING travel — so an office can schedule the day. Use the description, trade and priority. Typical reactive repairs run 30–90 min; diagnostics/multi-part or install works run longer. Give a whole number of minutes (15–480) for every job id; for a vague description give a sensible middle estimate. Do not omit any job.";
+  const chunks = [];
+  for (let i = 0; i < metas.length && i < 200; i += 40) chunks.push(metas.slice(i, i + 40));
+  const out = {};
+  const results = await Promise.all(chunks.map(chunk => {
+    const list = chunk.map(m => `- id:${m.id} | ${m.priority || "?"} | ${m.workArea || ""} | ${m.site || ""} | ${String(m.description || m.ref || "").replace(/\s+/g, " ").slice(0, 220)}`).join("\n");
+    return anthropicTool(env, { system, user: `Estimate on-site minutes for each job (return every id):\n${list}`, toolName: "set_durations", schema, maxTokens: 1600 }).catch(() => ({ ok: false }));
+  }));
+  for (const r of results) if (r.ok) for (const e of (r.input.estimates || [])) { const m = Math.round(Number(e.minutes)); if (e.id && Number.isFinite(m)) out[String(e.id)] = Math.max(15, Math.min(480, m)); }
+  return out;
+}
+// Look up description/priority/site for a set of job ids (for the AI prompt).
+async function jobMetaForIds(env, tid, ids) {
+  if (!ids.length) return [];
+  const db = tenantDB(env, tid);
+  const chunkIds = ids.slice(0, 200);
+  const ph = chunkIds.map(() => "?").join(",");
+  let rows = [];
+  try { rows = (await db.prepare(`SELECT id, helpdesk_ref, priority, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunkIds).all()).results || []; }
+  catch { rows = []; }
+  return rows.map(r => { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} return { id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || "", description: d.description || "", priority: r.priority || d.priority || "", site: (d.site && (d.site.name || d.site)) || "", workArea: d.workArea || "" }; });
 }
 
 /* ===== Job archive (imported history) ===== */
