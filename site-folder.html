@@ -95,6 +95,7 @@
         <a class="ml-back" id="backBtn" href="#" title="Back">‹ Back</a>
       </div>
     </header>
+    <div id="tenantBox" style="display:none;margin:0 0 12px;padding:12px 14px;background:#f4faf3;border:1px solid #cfe6cb;border-radius:12px;"></div>
     <div class="tabs" id="tabs"></div>
     <div class="content" id="content"><div class="empty">Loading…</div></div>
   </div>
@@ -147,6 +148,39 @@ function init(){
   $("jmClose").addEventListener("click", closeJobModal);
   $("jobModal").addEventListener("click", e => { if(e.target === $("jobModal")) closeJobModal(); });
   loadAreas().then(renderTabs).then(() => selectTab("Previous Jobs"));
+  loadTenants();
+}
+
+// Tenant contacts for a site (Chapplins lettings). Fetches the tenant record;
+// on any non-Chapplins site the endpoint 404s and the panel stays hidden.
+async function loadTenants(){
+  if(!siteCode) return;
+  try{
+    const r = await authFetch("/chapplins/site?number=" + encodeURIComponent(siteCode));
+    if(!r.ok) return;
+    const j = await r.json();
+    const tens = (j && j.tenants) || [];
+    if(!tens.length) return;
+    const box = $("tenantBox");
+    const one = t => {
+      const contact = [
+        t.phone ? `<a href="tel:${esc(String(t.phone).replace(/\s/g,''))}" style="color:var(--ml-blue);text-decoration:none;font-weight:600;">${esc(t.phone)}</a>` : "",
+        t.email ? `<a href="mailto:${esc(String(t.email).split(';')[0])}" style="color:var(--ml-blue);text-decoration:none;">${esc(String(t.email).split(';')[0])}</a>` : "",
+        t.homeTel ? `<span style="color:var(--muted)">${esc(t.homeTel)}</span>` : ""
+      ].filter(Boolean).join(" · ");
+      const tag = t.current
+        ? `<span style="background:#2e7d32;color:#fff;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700;">CURRENT TENANT</span>`
+        : `<span style="background:#e7edf3;color:#5b6b7d;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700;">previous</span>`;
+      return `<div style="margin-top:6px;">${tag} <b>${esc(t.name || t.ref || "—")}</b>${t.ref?` <span style="color:var(--muted);font-size:12px;">[${esc(t.ref)}]</span>`:""}`+
+             (contact?`<div style="font-size:13px;margin-top:2px;">${contact}</div>`:"")+`</div>`;
+    };
+    const cur = tens.filter(t=>t.current);
+    const prev = tens.filter(t=>!t.current);
+    box.innerHTML = `<div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#4a7a44;font-weight:700;">👤 Tenant</div>`
+      + (cur.length?cur.map(one).join(""):`<div style="margin-top:6px;color:var(--muted)">No current tenant on record.</div>`)
+      + (prev.length?`<details style="margin-top:6px;"><summary style="cursor:pointer;color:var(--muted);font-size:13px;">${prev.length} previous tenant${prev.length>1?"s":""}</summary>${prev.map(one).join("")}</details>`:"");
+    box.style.display = "";
+  }catch{ /* non-critical */ }
 }
 
 async function loadAreas(){
