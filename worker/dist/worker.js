@@ -7348,6 +7348,27 @@ async function engineerHome(env, tenantId, username) {
   }
   return null;
 }
+async function osrmTable(pts) {
+  if (!pts || pts.length < 2 || pts.length > 100) return null;
+  const coords = pts.map((p) => `${p[1]},${p[0]}`).join(";");
+  try {
+    const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`, { signal: AbortSignal.timeout(7e3) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.code !== "Ok" || !Array.isArray(data.durations)) return null;
+    const mins = data.durations.map((row) => row.map((s) => s == null ? 0 : Math.max(1, Math.round(s / 60))));
+    return { mins, source: "osrm" };
+  } catch {
+    return null;
+  }
+}
+async function roadMatrix(pts) {
+  const osrm = await osrmTable(pts);
+  if (osrm) return osrm;
+  const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) mins[i][j] = Math.max(1, Math.round(haversineMi(pts[i], pts[j]) * 1.25 / 30 * 60));
+  return { mins, source: "estimate" };
+}
 async function driveMatrix(env, pts) {
   const n = pts.length;
   const mins = Array.from({ length: n }, () => Array(n).fill(0));
@@ -7695,7 +7716,7 @@ async function autoScheduleDay(env, tenantId, body) {
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
   const NE = engs.length;
   let M3;
-  if (pts.length <= 45) M3 = await driveMatrix(env, pts);
+  if (pts.length <= 90) M3 = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
@@ -7805,7 +7826,7 @@ async function autoScheduleDay(env, tenantId, body) {
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
   let matrixSource = M3.source;
-  if (M3.source !== "google" && env.GOOGLE_MAPS_KEY && plan.length) {
+  if (M3.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
     let allReal = true;
@@ -7816,8 +7837,8 @@ async function autoScheduleDay(env, tenantId, body) {
         allReal = false;
         continue;
       }
-      const dm = await driveMatrix(env, pts2);
-      if (dm.source !== "google") {
+      const dm = await roadMatrix(pts2);
+      if (dm.source !== "osrm") {
         allReal = false;
         continue;
       }
@@ -7841,10 +7862,8 @@ async function autoScheduleDay(env, tenantId, body) {
       drive += homeMin;
       p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
     }
-    matrixSource = allReal ? "google" : "estimate";
-    if (!allReal) warnings.push("Some routes fell back to estimated driving times (Google didn't answer for every one).");
-  } else if (M3.source !== "google" && !env.GOOGLE_MAPS_KEY) {
-    warnings.push("Live driving times need a Google Maps key on the server \u2014 showing estimates.");
+    matrixSource = allReal ? "osrm" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (the free routing service didn't answer for every one \u2014 try again in a moment).");
   }
   const areaCounts = (legs) => {
     const m = {};
