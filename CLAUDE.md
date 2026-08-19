@@ -603,6 +603,20 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   gated `isOfficeAdmin() && !isFieldUser()` — a FIELD engineer never gets it even
   if they hold an SLAAdmin grant (it's an office control). isFieldUser reads
   mostlaneStaffType / perms.StaffType.
+  **Job photo thumbnails (Aug 2026 — fixes slow/blank previews in engineer-job.html):**
+  the engineer photo grid used to paint each tile with the FULL-RES `publicURL` as a
+  CSS background — no lazy-load, so every photo downloaded at once and previews were
+  slow or blank (they only appeared once tapped = cached). Now mirrors the site-photo
+  pattern: **POST /sla/jobs/{id}/files** accepts a client-shrunk `thumb` form field →
+  stored as `<key>.thumb`; **GET /sla/jobs/{id}/files** returns `key` + a signed
+  `thumb` URL (via `/sla/site/thumb`, which already accepts `jobs/` keys and edge-
+  caches) + `hasThumb`. engineer-job.html `uploadPhotos` generates a 400px JPEG thumb
+  (`shrinkImage`) alongside each photo; `drawPhotos` renders `<img loading="lazy"
+  decoding="async" src="thumb||publicURL">` (full-res only opens in the lightbox on
+  tap) with a shimmer `.pend` placeholder + a one-shot error fallback to full-res;
+  `backfillThumbs()` self-heals older photos with no thumb (fetch→shrink→POST
+  /site/thumb, 2 lanes) — normally a no-op since new uploads carry their thumb.
+  (job-view.html office view still uses full-res; same treatment could be applied there.)
   **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
   saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
   BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,
