@@ -189,14 +189,28 @@ function report(findings, meta) {
 
   if (!findings.length && !ALWAYS_ISSUE) { console.log("✅ No drift — not opening an issue."); return; }
   if (!REPO || !GH_TOKEN) { console.log("\n" + body); return; }
-  openIssue(`🎯 Alignment check — ${line} — ${new Date().toISOString().slice(0, 10)}`, body);
+  // ONE tracking issue, updated in place — never a fresh issue per run (that spammed
+  // the owner's inbox). Title is stable (no date); the date lives in the body.
+  const dated = `${body}\n\n_Last updated: ${new Date().toISOString().slice(0, 10)}_`;
+  upsertIssue(`🎯 Alignment check — centralisation & endpoint drift`, dated);
 }
 
-async function openIssue(title, body) {
+async function upsertIssue(title, body) {
   const H = { "Authorization": "Bearer " + GH_TOKEN, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "content-type": "application/json" };
   try { await fetch(`https://api.github.com/repos/${REPO}/labels`, { method: "POST", headers: H, body: JSON.stringify({ name: "alignment-check", color: "1d76db", description: "Centralisation / endpoint alignment drift" }) }); } catch {}
+  // Reuse the existing open alignment-check issue if there is one.
+  let existing = null;
+  try {
+    const q = await fetch(`https://api.github.com/repos/${REPO}/issues?state=open&labels=alignment-check&per_page=100`, { headers: H });
+    if (q.ok) { const arr = await q.json(); existing = (arr || []).find(i => !i.pull_request) || null; }
+  } catch {}
+  if (existing) {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues/${existing.number}`, { method: "PATCH", headers: H, body: JSON.stringify({ title, body, state: "open" }) });
+    console.log(res.ok ? "Updated tracking issue #" + existing.number : "Issue update failed: HTTP " + res.status);
+    return;
+  }
   const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, { method: "POST", headers: H, body: JSON.stringify({ title, body, labels: ["alignment-check"] }) });
-  if (res.ok) console.log("Opened issue: " + (await res.json()).html_url);
+  if (res.ok) console.log("Opened tracking issue: " + (await res.json()).html_url);
   else console.log("Issue create failed: HTTP " + res.status);
 }
 function stepSummary(md) { try { if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n"); } catch {} }
