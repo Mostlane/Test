@@ -21594,7 +21594,10 @@ async function handle30(request, env, ctx, url, sess) {
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage) {
       const meNorm = normId2(me);
-      visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm);
+      visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm).map((v) => {
+        const { cost, rate, amount, ...rest } = v;
+        return rest;
+      });
     }
     const perUser = [];
     if (canManage) {
@@ -21626,6 +21629,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
   }
   if (path === "/project/costs" && method === "GET") {
+    if (!canManage) return json({ ok: true, costs: [], canManage: false }, {}, env, request);
     const pid = url.searchParams.get("id") || "";
     if (!await getRow(pid)) return error("Project not found", 404, env, request);
     const { results } = await env.DB.prepare(

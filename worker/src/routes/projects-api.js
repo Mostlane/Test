@@ -584,9 +584,11 @@ export async function handle(request, env, ctx, url, sess) {
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
     if (!canManage) {
       // Field/engineer view: only their own visits (match on either username or
-      // the dotted form some legacy records carry).
+      // the dotted form some legacy records carry). Strip every £-carrying
+      // field — engineers must NEVER see cost/rate/amount in their visit list.
       const meNorm = normId(me);
-      visits = visits.filter(v => v.user.toLowerCase() === meLower || normId(v.user) === meNorm);
+      visits = visits.filter(v => v.user.toLowerCase() === meLower || normId(v.user) === meNorm)
+        .map(v => { const { cost, rate, amount, ...rest } = v; return rest; });
     }
     const perUser = [];
     if (canManage) {
@@ -615,6 +617,9 @@ export async function handle(request, env, ctx, url, sess) {
   // aren't captured elsewhere (no PO raised, no status-tap timing). Folded
   // into the project's site totals by costing.js.
   if (path === "/project/costs" && method === "GET") {
+    // £-carrying data — admins only. A non-manager (field engineer) must never
+    // see rates or amounts; return an empty list instead of leaking numbers.
+    if (!canManage) return json({ ok: true, costs: [], canManage: false }, {}, env, request);
     const pid = url.searchParams.get("id") || "";
     if (!(await getRow(pid))) return error("Project not found", 404, env, request);
     const { results } = await env.DB.prepare(
