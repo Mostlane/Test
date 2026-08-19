@@ -83,11 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=13`)
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=15`)
 All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7–9 the animated wait mark, ?v=13 the status-bar cap — it had to clear a
+?v=7–9 the animated wait mark, ?v=13/14/15 the status-bar cap — 13 had to clear a
 concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
-portal-config change must reach them again, bump to ?v=14 across all pages
+portal-config change must reach them again, bump to ?v=16 across all pages
 with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
@@ -2578,12 +2578,24 @@ files to this public repo.
   is now on every page that LOADS portal-config.js** (117 pages) — without it
   `env()` reports 0 and the cap can't size itself.
   **Two rules learned doing it:**
-  (a) **The body padding is applied in JS, ADDING to the page's own** — measure
-  the cap's rendered height, then `body.style.paddingTop = ownPadding + inset`
-  (re-run on resize/orientationchange; the original padding is cached so it never
-  compounds). A plain CSS `body{padding-top:env(...)}` REPLACED the padding pages
-  set for themselves — the field app (route/inbox/you, engineer-job, vehicle)
-  lost its own 14–16px and content jammed against the bar.
+  (a) **The offset goes on `<html>`, never `<body>` — this took three attempts.**
+  A CSS `body{padding-top:env(...)}` REPLACED the padding pages set for
+  themselves (the field app lost its 14px). A JS version that ADDED to the
+  page's own value then broke main.html: `html,body{overflow-x:hidden}` makes
+  **body the scroll container**, and padding a scroll box left a band of
+  background at the end of the scroll range — the "blank section bar" Jamie
+  reported. The working form is CSS on html:
+  `html{box-sizing:border-box; padding-top:env(safe-area-inset-top,0px)}`.
+  Percentage heights resolve against the parent's CONTENT box, so a
+  `body{height:100%}` shrinks to fit exactly and nothing overflows.
+  **`vh` does NOT** — it measures the full screen and ignores that padding, so
+  portal-config also injects `body{min-height:calc(100vh - env(...))}` to
+  re-base it, and the five pages that used `height:100vh` (login, change/forgot/
+  reset-password, hours-menu) were switched to `min-height:100vh` so that one
+  central rule can win. Check with scratchpad `cap3.cjs`, which flags any page
+  that fitted the screen before and scrolls after. Two known non-issues: hs-docs
+  `.wrap` has its own 60px bottom margin, and daily-logs reflows — both are the
+  pages' own spacing, not a gap the cap created.
   (b) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
   for the `<script src=…portal-config.js>` tag, NOT the string — programme-view.html
   merely *mentions* it in a comment, and giving that client-facing page the meta
