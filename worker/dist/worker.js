@@ -5139,6 +5139,29 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, skills: await setEngSkills(env, tenantId, body?.skills || {}) }, headers);
     }
   }
+  if (subpath === "/infer-work-area" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const b = await readJson2(request);
+    const cap = await aiCapCheck(env, tenantId);
+    if (cap.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
+    const r = await inferWorkArea(env, tenantId, b.description || "");
+    if (r.ok && (r.areaId || r.name)) ctx?.waitUntil(bumpAiUsage(env, tenantId, "infer-work-area"));
+    return jsonResponse(r, headers);
+  }
+  if (subpath === "/ai-usage") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (method === "GET") return jsonResponse(await getAiUsage(env, tenantId), headers);
+    if (method === "POST") {
+      const b = await readJson2(request);
+      if (b.dailyCap !== void 0) {
+        const n = Math.max(0, parseInt(b.dailyCap, 10) || 0);
+        const db2 = tenantDB(env, tenantId);
+        await db2.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,'ai_daily_cap',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, String(n)).run();
+      }
+      return jsonResponse(await getAiUsage(env, tenantId), headers);
+    }
+  }
   if (subpath.startsWith("/firestop")) {
     const r2Bytes = async (key) => {
       try {
@@ -5779,7 +5802,19 @@ async function handle8(request, env, ctx, url, sess) {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess))
       return jsonResponse({ error: "Only SLA admins can optimise a route." }, headers, 403);
-    return jsonResponse(await optimiseEngineerRoute(env, tenantId, await readJson2(request)), headers);
+    const roBody = await readJson2(request);
+    const roCap = await aiCapCheck(env, tenantId);
+    if (roCap.capped) roBody.useAI = false;
+    const roRes = await optimiseEngineerRoute(env, tenantId, roBody);
+    if (roRes.aiUsed) ctx?.waitUntil(bumpAiUsage(env, tenantId, "route-optimize"));
+    if (roCap.capped) (roRes.warnings = roRes.warnings || []).push(`Daily AI limit reached (${roCap.cap}) \u2014 used shortest-driving order without the AI pass.`);
+    return jsonResponse(roRes, headers);
+  }
+  if (subpath === "/auto-schedule" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess))
+      return jsonResponse({ error: "Only SLA admins can auto-schedule a day." }, headers, 403);
+    return jsonResponse(await autoScheduleDay(env, tenantId, await readJson2(request)), headers);
   }
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
@@ -7542,6 +7577,126 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     warnings
   };
 }
+async function autoScheduleDay(env, tenantId, body) {
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
+  const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 480));
+  const cap = Math.max(120, dayMinutes - lunch);
+  const warnings = [];
+  const skills = await getEngSkills(env, tenantId);
+  const normPrio = (p) => {
+    const m = /(\d)/.exec(String(p || ""));
+    return m ? Number(m[1]) : 5;
+  };
+  const engs = [];
+  for (const e of Array.isArray(body.engineers) ? body.engineers : []) {
+    const u = String(e.username || "").trim();
+    if (!u) continue;
+    let coord = null;
+    const lat = Number(e.homeLat), lng = Number(e.homeLng ?? e.homeLon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord) {
+      const h = await engineerHome(env, tenantId, u);
+      if (h) coord = h.coord;
+    }
+    if (!coord && e.homePostcode) {
+      const g = await geocodePcServer(e.homePostcode);
+      if (g) coord = g;
+    }
+    if (!coord) {
+      warnings.push(`${e.name || u} has no home location \u2014 skipped.`);
+      continue;
+    }
+    engs.push({ username: u, name: String(e.name || u), coord, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+  }
+  if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
+  const jobs = [];
+  for (const j of Array.isArray(body.jobs) ? body.jobs : []) {
+    let coord = null;
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord && j.postcode) {
+      const g = await geocodePcServer(j.postcode);
+      if (g) coord = g;
+    }
+    if (!coord) {
+      warnings.push(`${j.ref || j.site || "A job"} has no map location \u2014 left unscheduled.`);
+      continue;
+    }
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin: Math.max(15, Math.round(Number(j.durationMinutes)) || 60), workArea: String(j.workArea || ""), coord });
+  }
+  if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
+  const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
+  const NE = engs.length;
+  let M3;
+  if (pts.length <= 45) M3 = await driveMatrix(env, pts);
+  else {
+    const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
+    M3 = { mins, source: "estimate" };
+    warnings.push("Lots of jobs \u2014 used estimated driving times to keep it fast and cheap.");
+  }
+  const pE = (i) => i, pJ = (k) => NE + k;
+  const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
+  const unassigned = [];
+  for (const k of order) {
+    const j = jobs[k];
+    let best = null;
+    engs.forEach((e, ei) => {
+      const route = [pE(ei), ...e.seq.map((x) => pJ(x)), pE(ei)];
+      const p = pJ(k);
+      let bDelta = Infinity, bPos = 1;
+      for (let pos = 1; pos < route.length; pos++) {
+        const a = route[pos - 1], b = route[pos];
+        const delta = M3.mins[a][p] + M3.mins[p][b] - M3.mins[a][b];
+        if (delta < bDelta) {
+          bDelta = delta;
+          bPos = pos;
+        }
+      }
+      const newLoad = e.load + bDelta + j.durationMin;
+      if (newLoad > cap) return;
+      const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
+      const eff = stars > 0 ? bDelta - stars * 4 : bDelta;
+      if (best === null || eff < best.eff) best = { ei, pos: bPos, newLoad, eff };
+    });
+    if (!best) {
+      unassigned.push({ id: j.id, ref: j.ref, reason: "no engineer had room in the day" });
+      continue;
+    }
+    engs[best.ei].seq.splice(best.pos - 1, 0, k);
+    engs[best.ei].load = best.newLoad;
+  }
+  const [sh, sm] = dayStart.split(":").map(Number);
+  const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
+  const plan = engs.map((e, ei) => {
+    const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
+    const subCost = sub.map((a) => sub.map((b) => M3.mins[a][b]));
+    const solved = solveRoute(subCost);
+    const orderedK = solved.map((si) => e.seq[si - 1]);
+    const legs = [];
+    let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
+    for (const k of orderedK) {
+      const p = pJ(k), dMin = M3.mins[cur][p];
+      drive += dMin;
+      let arrival = t + dMin;
+      if (!lunchDone && arrival >= lunchTarget) {
+        arrival += lunch;
+        t += lunch;
+        lunchDone = true;
+      }
+      const j = jobs[k];
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      site += j.durationMin;
+      t = arrival + j.durationMin;
+      cur = p;
+    }
+    const homeMin = orderedK.length ? M3.mins[cur][pE(ei)] : 0;
+    drive += homeMin;
+    return { username: e.username, name: e.name, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+  }).filter((p) => p.legs.length);
+  return { ok: true, dayStart, matrixSource: M3.source, plan, unassigned, warnings, placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length };
+}
 var _archiveReady = false;
 async function ensureArchive(env, tenantId) {
   if (_archiveReady) return;
@@ -7968,6 +8123,137 @@ async function setEngSkills(env, tenantId, skills) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_eng_skills', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
+}
+var AI_CAP_DEFAULT = 400;
+async function bumpAiUsage(env, tenantId, kind) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const k = "ai_usage:" + mon;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, k).first();
+    let u;
+    try {
+      u = row ? JSON.parse(row.value) : null;
+    } catch {
+      u = null;
+    }
+    if (!u || typeof u !== "object") u = { total: 0, days: {}, kinds: {} };
+    u.total = (u.total || 0) + 1;
+    u.days = u.days || {};
+    u.days[day] = (u.days[day] || 0) + 1;
+    u.kinds = u.kinds || {};
+    u.kinds[kind || "other"] = (u.kinds[kind || "other"] || 0) + 1;
+    await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, k, JSON.stringify(u)).run();
+    return u.days[day];
+  } catch {
+    return 0;
+  }
+}
+async function aiCapLimit(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='ai_daily_cap'").bind(tenantId).first();
+    const n = row ? parseInt(row.value, 10) : NaN;
+    return Number.isFinite(n) && n >= 0 ? n : AI_CAP_DEFAULT;
+  } catch {
+    return AI_CAP_DEFAULT;
+  }
+}
+async function aiUsageToday(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+    let u;
+    try {
+      u = row ? JSON.parse(row.value) : null;
+    } catch {
+      u = null;
+    }
+    return u && u.days && u.days[day] || 0;
+  } catch {
+    return 0;
+  }
+}
+async function aiCapCheck(env, tenantId) {
+  const cap = await aiCapLimit(env, tenantId);
+  if (!cap) return { capped: false, cap: 0 };
+  const today = await aiUsageToday(env, tenantId);
+  return { capped: today >= cap, cap, today };
+}
+async function getAiUsage(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const mon = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+  let u;
+  try {
+    u = row ? JSON.parse(row.value) : null;
+  } catch {
+    u = null;
+  }
+  u = u && typeof u === "object" ? u : { total: 0, days: {}, kinds: {} };
+  return { ok: true, month: mon, monthTotal: u.total || 0, today: u.days && u.days[day] || 0, cap: await aiCapLimit(env, tenantId), kinds: u.kinds || {} };
+}
+async function anthropicTool(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured on the server (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 800, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] })
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+  if (!resp.ok) {
+    let d = "";
+    try {
+      const j = await resp.json();
+      d = j?.error?.message || "";
+    } catch {
+    }
+    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "The AI key was rejected." };
+    if (resp.status === 404 && /model/i.test(d)) return { ok: false, error: `The AI model "${model}" isn't available on this key.` };
+    return { ok: false, error: "The AI service errored." + (d ? " (" + d + ")" : "") };
+  }
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    return { ok: false, error: "AI gave an unreadable reply." };
+  }
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+  return { ok: true, input: block.input };
+}
+async function inferWorkArea(env, tenantId, description) {
+  const areas = await getWorkAreas(env, tenantId);
+  if (!areas.length) return { ok: false, error: "No areas of work are configured yet." };
+  const list = areas.map((a) => `${a.id}: ${a.name}`).join("\n");
+  const schema = {
+    type: "object",
+    properties: {
+      areaId: { type: "string", description: "The id of the single best-matching area, or empty string if none fit." },
+      confidence: { type: "string", enum: ["high", "medium", "low"] }
+    },
+    required: ["areaId"]
+  };
+  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
+  const user = `Areas (id: name):
+${list}
+
+Job description:
+"""${String(description || "").slice(0, 1500)}"""
+
+Which single area id best fits this work?`;
+  const r = await anthropicTool(env, { system, user, toolName: "set_area", schema, maxTokens: 120 });
+  if (!r.ok) return r;
+  const id = String(r.input.areaId || "").trim();
+  const match = areas.find((a) => a.id === id);
+  return { ok: true, areaId: match ? match.id : "", name: match ? match.name : "", confidence: r.input.confidence || "" };
 }
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
