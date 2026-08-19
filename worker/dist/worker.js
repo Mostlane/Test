@@ -7700,7 +7700,6 @@ async function autoScheduleDay(env, tenantId, body) {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
     M3 = { mins, source: "estimate" };
-    warnings.push("Lots of jobs \u2014 used estimated driving times to keep it fast and cheap.");
   }
   const pE = (i) => i, pJ = (k) => NE + k;
   const FERRY = 90, REMOTE = 75;
@@ -7805,6 +7804,48 @@ async function autoScheduleDay(env, tenantId, body) {
     drive += homeMin;
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
+  let matrixSource = M3.source;
+  if (M3.source !== "google" && env.GOOGLE_MAPS_KEY && plan.length) {
+    const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
+    const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
+    let allReal = true;
+    for (const p of plan) {
+      const home = engCoord.get(p.username);
+      const pts2 = [home, ...p.legs.map((l) => coordById.get(l.jobId))];
+      if (!home || pts2.some((c) => !c) || pts2.length < 2) {
+        allReal = false;
+        continue;
+      }
+      const dm = await driveMatrix(env, pts2);
+      if (dm.source !== "google") {
+        allReal = false;
+        continue;
+      }
+      let t = 0, drive = 0, site = 0, lunchDone = lunch === 0, cur = 0;
+      p.legs.forEach((l, idx) => {
+        const to = idx + 1, dMin = dm.mins[cur][to];
+        drive += dMin;
+        let arrival = t + dMin;
+        if (!lunchDone && arrival >= lunchTarget) {
+          arrival += lunch;
+          t += lunch;
+          lunchDone = true;
+        }
+        l.driveMins = dMin;
+        l.arrivalOffset = arrival;
+        site += l.durationMin;
+        t = arrival + l.durationMin;
+        cur = to;
+      });
+      const homeMin = dm.mins[cur][0];
+      drive += homeMin;
+      p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
+    }
+    matrixSource = allReal ? "google" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (Google didn't answer for every one).");
+  } else if (M3.source !== "google" && !env.GOOGLE_MAPS_KEY) {
+    warnings.push("Live driving times need a Google Maps key on the server \u2014 showing estimates.");
+  }
   const areaCounts = (legs) => {
     const m = {};
     for (const l of legs) {
@@ -7843,7 +7884,7 @@ async function autoScheduleDay(env, tenantId, body) {
   return {
     ok: true,
     dayStart,
-    matrixSource: M3.source,
+    matrixSource,
     plan,
     unassigned,
     warnings,

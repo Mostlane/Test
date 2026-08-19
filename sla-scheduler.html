@@ -1561,7 +1561,7 @@ function renderAutoPreview(d){
   const parts = [];
   const totDrive = (d.plan||[]).reduce((a,p)=>a+(p.summary.driveMins||0),0);
   const totSite = (d.plan||[]).reduce((a,p)=>a+(p.summary.siteMins||0),0);
-  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs across <b>${(d.plan||[]).length}</b> engineer${(d.plan||[]).length===1?"":"s"} · ${optFmtMins(totSite)} on site · ${optFmtMins(totDrive)} driving${d.matrixSource!=="google"?' <span style="color:var(--muted)">(est. drive times)</span>':''}.</div>`);
+  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs across <b>${(d.plan||[]).length}</b> engineer${(d.plan||[]).length===1?"":"s"} · ${optFmtMins(totSite)} on site · ${optFmtMins(totDrive)} driving ${d.matrixSource==="google"?'<span style="color:#0a7d33;">· live drive times ✓</span>':'<span style="color:var(--muted)">(est. drive times)</span>'}.</div>`);
   if(d.durModel){
     const dm = d.durModel;
     const how = d.aiUsed ? `${d.aiUsed} estimated by AI` : (d.estimatedCount ? `${d.estimatedCount} used the learned typical` : "");
