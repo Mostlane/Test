@@ -2510,6 +2510,30 @@ Two automatic, always-on quality checks — one for the LIVE system, one for the
   point at the centralised database" check. Report-only — never auto-edits (legacy pages
   are migrations, not one-line fixes).
 
+## Auto-day job-duration estimation (sla.js + sla-scheduler.html + job-durations.html — Aug 2026)
+Auto-make-a-day now ALLOCATES a realistic on-site time per unscheduled job instead of a
+flat 60 min, and shows everything in **hours+minutes** (`optFmtMins`); day target raised to
+**~9h door-to-door** (`dayMinutes` 540, the 8–10h band). Duration per job, best source first:
+1. the job's own **set `durationMinutes`** (a typed length always wins);
+2. an **AI estimate** — `aiEstimateDurations(env, metas)` batches the day's un-set jobs (≤40
+   per call, parallel chunks) to Claude via the shared `anthropicTool` helper (forced
+   `set_durations` tool → `{id,minutes}`), reading each job's description/trade/priority;
+   **cached per job in app_config `sla:aidur:<tid>`** so a job is estimated once (POST
+   `/sla/duration-clear-ai` forgets them). Fails soft → falls back to;
+3. a **learned historical typical** — `estimateJobDurations(env,tid)` medians the MEASURED
+   actual on-site time (last `In Progress`→`Complete` in `statusHistory`), preferring
+   measured over set-durations (which were a uniform 40m placeholder), refining per priority
+   at ≥5 samples, bounded 30–240m, default 90m; 5-min isolate cache.
+`autoScheduleDay` returns `durModel` + `estimatedCount` + `aiUsed`/`aiSource` + `overruns`;
+legs carry `estimated`/`aiEstimated` (shown "(AI)"/"(est)"). **Overrun learning:** a job whose
+actual ran >1.5× (and >+30m) over its allocated time is flagged, and those actuals feed the
+median — so estimates self-correct as engineers tap In Progress/Complete. **Review page
+`job-durations.html`** (⏱ Durations button on sla-scheduler, SLA-admin) reads GET
+`/sla/duration-insights` (typical + per-priority + overruns + a recent allowed-vs-actual-vs-AI
+table). NB **0 jobs are workArea-tagged and only ~9 have measured times today**, so estimates
+lean on AI now and sharpen as status-tap history accrues. Reuses the existing
+`ANTHROPIC_API_KEY`; no new secret.
+
 ## Personalisation
 personalise.html (🎨 tile + sidebar; theme.html is now only a redirect — the
 old URL got cache-poisoned on phones). 8 accent themes + menu background
