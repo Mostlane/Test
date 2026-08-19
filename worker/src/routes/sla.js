@@ -2833,6 +2833,10 @@ async function autoScheduleDay(env, tenantId, body) {
   const dur = await estimateJobDurations(env, tenantId);    // learned typical job length
   const normPrio = p => { const m = /(\d)/.exec(String(p || "")); return m ? Number(m[1]) : 5; };
   const estimateFor = p => { const m = /(\d)/.exec(String(p || "")); const key = m ? "Priority " + m[1] : ""; return (dur.byPriority && dur.byPriority[key]) || dur.typical; };
+  // Postcode district (e.g. "GU15") — the unit we cluster/explain by; falls back
+  // to the first word of the site name.
+  const outward = pc => { const s = String(pc || "").trim().toUpperCase(); const m = s.match(/^[A-Z]{1,2}\d[A-Z\d]?/); return m ? m[0] : ""; };
+  const hmm = m => { m = Math.round(m || 0); const h = Math.floor(m / 60), mm = m % 60; return h ? (h + "h" + (mm ? " " + mm + "m" : "")) : (mm + "m"); };
 
   const engs = [];
   for (const e of (Array.isArray(body.engineers) ? body.engineers : [])) {
@@ -2843,7 +2847,7 @@ async function autoScheduleDay(env, tenantId, body) {
     if (!coord) { const h = await engineerHome(env, tenantId, u); if (h) coord = h.coord; }
     if (!coord && e.homePostcode) { const g = await geocodePcServer(e.homePostcode); if (g) coord = g; }
     if (!coord) { warnings.push(`${e.name || u} has no home location — skipped.`); continue; }
-    engs.push({ username: u, name: String(e.name || u), coord, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0 });
   }
   if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
 
@@ -2858,7 +2862,7 @@ async function autoScheduleDay(env, tenantId, body) {
     const explicit = Number(j.durationMinutes);
     const hasExplicit = Number.isFinite(explicit) && explicit > 0;
     const durationMin = hasExplicit ? Math.max(15, Math.round(explicit)) : Math.max(15, Math.round(estimateFor(j.priority)));
-    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), coord });
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), area: outward(j.postcode) || String(j.site || "").split(/[,\s]/)[0] || "", coord });
   }
   if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
 
@@ -2911,7 +2915,13 @@ async function autoScheduleDay(env, tenantId, body) {
       const newLoad = e.load + bDelta + j.durationMin;
       if (newLoad > cap) return;                       // no room in this engineer's day
       const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
-      const eff = stars > 0 ? bDelta - stars * 4 : bDelta;   // soft skill preference
+      // Keep a POSTCODE AREA with one engineer where we can: an engineer already
+      // working that district gets a strong pull for more of its jobs, so two
+      // engineers only end up in the same area when it genuinely won't fit one day.
+      const sameArea = j.area && e.seq.some(x => jobs[x].area === j.area);
+      let eff = bDelta;
+      if (stars > 0) eff -= stars * 4;                 // soft skill preference
+      if (sameArea) eff -= 25;                         // area-cohesion pull
       if (best === null || eff < best.eff) best = { ei, pos: bPos, newLoad, eff };
     });
     if (!best) { unassigned.push({ id: j.id, ref: j.ref, reason: "no engineer had room in the day" }); continue; }
@@ -2934,15 +2944,41 @@ async function autoScheduleDay(env, tenantId, body) {
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
       const j = jobs[k];
-      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, area: j.area, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
       site += j.durationMin; t = arrival + j.durationMin; cur = p;
     }
     const homeMin = orderedK.length ? M.mins[cur][pE(ei)] : 0; drive += homeMin;
-    return { username: e.username, name: e.name, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+    return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter(p => p.legs.length);
 
+  // Plain-English "why these jobs" per engineer + a shared-area explainer.
+  const areaCounts = legs => { const m = {}; for (const l of legs) { const a = l.area || ""; if (a) m[a] = (m[a] || 0) + 1; } return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+  for (const p of plan) {
+    const ac = areaCounts(p.legs);
+    const skillN = p.legs.filter(l => l.stars > 0).length;
+    const bits = [];
+    if (ac.length) bits.push("clustered around " + ac.slice(0, 2).map(([a, n]) => `${a} (${n} job${n > 1 ? "s" : ""})`).join(" and ") + (ac.length > 2 ? `, plus ${ac.length - 2} other area${ac.length - 2 > 1 ? "s" : ""}` : ""));
+    if (skillN) bits.push(`${skillN} match ${p.name.split(" ")[0]}'s rated skills`);
+    bits.push(`fills ${hmm(p.summary.dayLengthMins)} door-to-door with ${hmm(p.summary.driveMins)} driving`);
+    if (p.hq) bits.push("routed from HQ (no home postcode set)");
+    p.why = bits.join(" · ") + ".";
+  }
+  // Where two+ engineers share a postcode area, say why (usually: too big for one day).
+  const areaMap = {}, areaSite = {};
+  for (const p of plan) for (const l of p.legs) { const a = l.area; if (!a) continue; (areaMap[a] ||= {}); areaMap[a][p.name] = (areaMap[a][p.name] || 0) + 1; areaSite[a] = (areaSite[a] || 0) + l.durationMin; }
+  const overlaps = [];
+  for (const [area, byName] of Object.entries(areaMap)) {
+    const es = Object.entries(byName); if (es.length < 2) continue;
+    const totalJobs = es.reduce((s, [, n]) => s + n, 0);
+    const reason = (areaSite[area] || 0) > cap * 0.7
+      ? `${totalJobs} jobs there — more than one engineer can fit in a ${hmm(cap)} working day, so it's shared to keep everyone finishing on time`
+      : `both were already passing ${area} on efficient routes — drag a job across if you'd rather one engineer owned the whole area`;
+    overlaps.push({ area, engineers: es.map(([name, count]) => ({ name, count })), reason });
+  }
+  overlaps.sort((a, b) => b.engineers.reduce((s, e) => s + e.count, 0) - a.engineers.reduce((s, e) => s + e.count, 0));
+
   return {
-    ok: true, dayStart, matrixSource: M.source, plan, unassigned, warnings,
+    ok: true, dayStart, matrixSource: M.source, plan, unassigned, warnings, overlaps,
     placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length,
     durModel: { typical: dur.typical, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
     estimatedCount: jobs.filter(j => j.estimated).length,

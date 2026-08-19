@@ -1558,7 +1558,9 @@ async function runAutoSchedule(usernames, titleWho, dateObj){
 function autoOffToClock(off){ const base = 8*60 + Number(off||0); return String(Math.floor(base/60)%24).padStart(2,"0")+":"+String(base%60).padStart(2,"0"); }
 function renderAutoPreview(d){
   const parts = [];
-  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs${d.matrixSource!=="google"?' <span style="color:var(--muted)">(estimated drive times)</span>':''}.</div>`);
+  const totDrive = (d.plan||[]).reduce((a,p)=>a+(p.summary.driveMins||0),0);
+  const totSite = (d.plan||[]).reduce((a,p)=>a+(p.summary.siteMins||0),0);
+  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs across <b>${(d.plan||[]).length}</b> engineer${(d.plan||[]).length===1?"":"s"} · ${optFmtMins(totSite)} on site · ${optFmtMins(totDrive)} driving${d.matrixSource!=="google"?' <span style="color:var(--muted)">(est. drive times)</span>':''}.</div>`);
   if(d.durModel){
     const dm = d.durModel;
     const how = d.aiUsed ? `${d.aiUsed} estimated by AI` : (d.estimatedCount ? `${d.estimatedCount} used the learned typical` : "");
@@ -1571,15 +1573,31 @@ function renderAutoPreview(d){
   if(autoFromHQ){
     parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">ℹ ${autoFromHQ} engineer${autoFromHQ>1?"s were":" was"} routed from HQ (${HQ_POSTCODE}) — no home postcode saved. Set each engineer's home in Users Admin for accurate start/finish times.</div>`);
   }
-  d.plan.forEach(p => {
+  // Why some areas have two engineers — the clustering explainer.
+  if(d.overlaps && d.overlaps.length){
+    parts.push(`<details style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;background:#f8fafc;">
+      <summary style="cursor:pointer;padding:8px 10px;font-weight:600;font-size:13px;">🗺️ Why some areas have two engineers (${d.overlaps.length})</summary>
+      <div style="padding:0 10px 8px;">${d.overlaps.map(o => `<div style="font-size:12.5px;padding:4px 0;border-top:1px solid #eef2f7;">
+        <b>${escapeHtml(o.area)}</b> — ${o.engineers.map(e=>`${escapeHtml(e.name.split(" ")[0])} (${e.count})`).join(", ")}<br>
+        <span style="color:var(--muted);">${escapeHtml(o.reason)}.</span></div>`).join("")}</div>
+    </details>`);
+  }
+  // One collapsible section per engineer — totals in the header, expand for detail.
+  d.plan.forEach((p, i) => {
     const s = p.summary;
-    parts.push(`<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;margin-bottom:8px;">
-      <div style="font-weight:700;">${escapeHtml(p.name)} <span style="font-weight:400;color:var(--muted);font-size:12px;">— ${s.jobs} jobs · ${optFmtMins(s.dayLengthMins)} door-to-door · ${optFmtMins(s.driveMins)} driving</span></div>
-      ${p.legs.map(l => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0;align-items:baseline;">
-        <span style="width:44px;color:#0a7d33;font-weight:700;flex:none;">${autoOffToClock(l.arrivalOffset)}</span>
-        <span style="flex:1;">${escapeHtml(l.ref||l.site||"Job")}${l.priority?` · ${escapeHtml(l.priority)}`:""}${l.workArea?skillBadge(p.username,l.workArea):""} <span style="color:var(--muted);">· ${optFmtMins(l.durationMin)} on site${l.aiEstimated?" (AI)":(l.estimated?" (est)":"")}</span></span>
-        <span style="color:var(--muted);flex:none;">+${optFmtMins(l.driveMins)}</span></div>`).join("")}
-    </div>`);
+    parts.push(`<details ${i===0?"open":""} style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">
+      <summary style="cursor:pointer;padding:9px 11px;list-style:none;display:flex;align-items:baseline;gap:8px;">
+        <span style="font-weight:700;">${escapeHtml(p.name)}</span>
+        <span style="margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;">${s.jobs} jobs · ${optFmtMins(s.dayLengthMins)} · 🚗 ${optFmtMins(s.driveMins)}</span>
+      </summary>
+      <div style="padding:0 11px 9px;">
+        ${p.why?`<div style="font-size:12px;color:#334155;background:#f1f5f9;border-radius:8px;padding:6px 9px;margin:2px 0 8px;">💡 ${escapeHtml(p.why)}</div>`:""}
+        ${p.legs.map(l => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0;align-items:baseline;">
+          <span style="width:44px;color:#0a7d33;font-weight:700;flex:none;">${autoOffToClock(l.arrivalOffset)}</span>
+          <span style="flex:1;">${escapeHtml(l.ref||l.site||"Job")}${l.area?` <span style="color:#94a3b8;">${escapeHtml(l.area)}</span>`:""}${l.priority?` · ${escapeHtml(l.priority)}`:""}${l.workArea?skillBadge(p.username,l.workArea):""} <span style="color:var(--muted);">· ${optFmtMins(l.durationMin)} on site${l.aiEstimated?" (AI)":(l.estimated?" (est)":"")}</span></span>
+          <span style="color:var(--muted);flex:none;">+${optFmtMins(l.driveMins)}</span></div>`).join("")}
+      </div>
+    </details>`);
   });
   if(d.unassigned && d.unassigned.length){
     parts.push(`<div style="font-size:12px;color:#b45309;margin-bottom:6px;">⚠ ${d.unassigned.length} couldn't be placed (day full or no location): ${d.unassigned.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${d.unassigned.length>6?"…":""}</div>`);
