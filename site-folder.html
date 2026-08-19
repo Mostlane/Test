@@ -484,6 +484,72 @@ function compUploadBar(sec){
   return bar;
 }
 
+// ── Auto-recognise a compliance certificate dropped into a GENERAL Site
+// Documents area, so it can be filed into the compliance store (chart + due
+// dates) exactly like the Compliance tab upload — instead of sitting as a plain
+// document the chart never sees. Detection is by filename keyword; the office
+// confirms (and can correct) the type before it's filed, so a mis-named file
+// never silently bumps a due date. ──────────────────────────────────────────
+function canCompliance(){ const p = perms(); return p.FullAccess==="Yes" || p.Compliance==="Yes"; }
+function detectComplianceType(name){
+  const n = " " + String(name||"").toLowerCase().replace(/[_\-]+/g," ") + " ";
+  if(/\basbestos\b/.test(n)) return "asbestos";
+  if(/\beicr\b|fixed wire|periodic|condition report|\b5 ?year\b|\bfive ?year\b/.test(n)) return "fiveYear";
+  if(/\bpat\b|portable appliance/.test(n)) return "pat";
+  if(/emergency light|\bem\b|\bel\b/.test(n)) return "em";
+  if(/photovoltaic|\bpv\b|\bsolar\b/.test(n)) return "pv";
+  if(/forecourt|\bev\b|charge ?point|charging/.test(n)) return "ev";
+  if(/\bpump\b/.test(n)) return "pump";
+  return null;
+}
+async function loadCompSections(){
+  if(cache.__compSections) return cache.__compSections;
+  try{ const d = await authFetch("/compliance/site-files?site=" + encodeURIComponent(siteCode)).then(r=>r.json()); cache.__compSections = d.sections || []; }
+  catch(e){ cache.__compSections = []; }
+  return cache.__compSections;
+}
+// Confirm-and-correct modal. Resolves {scheme,code,type} to file as compliance,
+// or null to keep it as an ordinary document.
+function askCompliance(file, detected, sections){
+  return new Promise(resolve => {
+    const secs = (sections && sections.length) ? sections : [{ scheme:"coop", code:siteCode, schemeLabel:"Southern Co-op", types:null }];
+    let cur = secs[0];
+    const typesFor = s => (s.types && s.types.length) ? s.types : Object.keys(COMP_TYPES).map(k=>({ key:k, label:COMP_TYPES[k] }));
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(6,12,22,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;";
+    const card = document.createElement("div");
+    card.style.cssText = "background:#fff;border-radius:14px;max-width:440px;width:100%;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);";
+    card.innerHTML =
+      '<div style="font-weight:800;font-size:16px;color:#003468;margin-bottom:4px;">This looks like a compliance certificate</div>'
+      + '<div style="font-size:13px;color:#475569;margin-bottom:12px;word-break:break-word;">' + esc(file.name) + '</div>'
+      + (secs.length > 1
+          ? '<label style="font-size:12px;font-weight:700;">Site / scheme</label><select id="cpScheme" class="btn small" style="width:100%;background:#fff;color:#111;margin:2px 0 10px;"></select>'
+          : '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Scheme: <b>' + esc(cur.schemeLabel || cur.scheme || "Southern Co-op") + '</b></div>')
+      + '<label style="font-size:12px;font-weight:700;">Document type</label>'
+      + '<select id="cpType" class="btn small" style="width:100%;background:#fff;color:#111;margin:2px 0 14px;"></select>'
+      + '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">Filing it here adds it to the compliance chart for this site and moves the next-due date forward.</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">'
+      + '<button id="cpDoc" class="btn small" style="background:#eef1f5;">Keep as a normal document</button>'
+      + '<button id="cpGo" class="btn primary small">File under Compliance</button></div>';
+    ov.appendChild(card); document.body.appendChild(ov);
+    const schemeSel = card.querySelector("#cpScheme"), typeSel = card.querySelector("#cpType");
+    function fillTypes(){
+      const ts = typesFor(cur); typeSel.innerHTML = "";
+      ts.forEach(t => { const o = document.createElement("option"); o.value = t.key; o.textContent = t.label; typeSel.appendChild(o); });
+      if(detected && ts.some(t => t.key === detected)) typeSel.value = detected;
+    }
+    if(schemeSel){
+      secs.forEach((s,i) => { const o = document.createElement("option"); o.value = String(i); o.textContent = (s.schemeLabel || s.scheme) + " · " + s.code; schemeSel.appendChild(o); });
+      schemeSel.addEventListener("change", () => { cur = secs[+schemeSel.value]; fillTypes(); });
+    }
+    fillTypes();
+    function done(v){ ov.remove(); resolve(v); }
+    card.querySelector("#cpDoc").onclick = () => done(null);
+    card.querySelector("#cpGo").onclick = () => done({ scheme: cur.scheme || "coop", code: cur.code || siteCode, type: typeSel.value });
+    ov.addEventListener("click", e => { if(e.target === ov) done(null); });
+  });
+}
+
 function uploadBar(area, accept, cameraHint){
   const bar = document.createElement("div"); bar.className = "uploadbar";
   const label = document.createElement("label"); label.className = "btn primary small"; label.textContent = "⬆️ Add " + (cameraHint ? "photo" : "document");
@@ -493,8 +559,28 @@ function uploadBar(area, accept, cameraHint){
   input.addEventListener("change", async () => {
     const files = [...input.files]; if(!files.length) return;
     label.style.pointerEvents = "none"; label.textContent = "Uploading…";
-    let ok = 0, fail = 0;
+    let ok = 0, fail = 0, comp = 0;
     for(const file of files){
+      // A compliance-looking cert dropped into a general document area is offered
+      // for filing into the compliance store (so it reaches the chart + due dates)
+      // instead of becoming an ordinary document the chart never sees.
+      if(!cameraHint && canCompliance()){
+        const dt = detectComplianceType(file.name);
+        if(dt){
+          const choice = await askCompliance(file, dt, await loadCompSections());
+          if(choice){
+            try{
+              const cf = new FormData();
+              cf.append("file", file, file.name); cf.append("code", choice.code);
+              cf.append("type", choice.type); cf.append("bump", "1"); cf.append("filename", file.name);
+              const cr = await authFetch("/compliance/file?scheme=" + encodeURIComponent(choice.scheme), { method:"POST", body: cf }).then(r=>r.json());
+              if(cr.ok){ comp++; delete cache.__compSections; } else fail++;
+            }catch(e){ fail++; }
+            continue;   // filed as compliance — don't also store it as a plain doc
+          }
+          // choice === null → user chose "keep as a normal document"; fall through
+        }
+      }
       try{
         const form = new FormData();
         // Photos: upload a slimmed 1600px copy + a 400px thumbnail so the grid
@@ -512,7 +598,8 @@ function uploadBar(area, accept, cameraHint){
         if(r.ok) ok++; else fail++;
       }catch(e){ fail++; }
     }
-    status.textContent = `✓ ${ok} added${fail ? `, ${fail} failed` : ""}`;
+    status.textContent = `✓ ${ok} added${comp ? `, ${comp} filed under Compliance` : ""}${fail ? `, ${fail} failed` : ""}`;
+    if(comp && window.MLUI) MLUI.toast(`${comp} document${comp>1?"s":""} filed under Compliance — see the Compliance tab.`);
     label.style.pointerEvents = ""; label.textContent = "⬆️ Add " + (cameraHint ? "photo" : "document");
     input.value = "";
     // refresh the relevant cache + view
