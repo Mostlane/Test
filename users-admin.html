@@ -217,6 +217,20 @@
         </div>
         <div><label>Address</label><input id="p_address" /></div>
         <div class="grid2">
+          <div>
+            <label>Home postcode <small style="font-weight:400;color:#64748b;">(round-trip route start/end)</small></label>
+            <input id="p_homePostcode" placeholder="e.g. PO15 5RQ" style="text-transform:uppercase" />
+          </div>
+          <div>
+            <label>Home pin <small style="font-weight:400;color:#64748b;">(optional — overrides postcode)</small></label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button type="button" class="btn" id="homePinBtn" style="white-space:nowrap;">📍 Set on map</button>
+              <span id="homePinLabel" style="font-size:12px;color:#64748b;"></span>
+              <button type="button" class="btn" id="homePinClear" style="display:none;">Clear</button>
+            </div>
+          </div>
+        </div>
+        <div class="grid2">
           <div><label>Emergency contact name</label><input id="p_emergencyName" /></div>
           <div><label>Emergency contact phone</label><input id="p_emergencyPhone" /></div>
           <div>
@@ -338,7 +352,7 @@
       "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
       "EngTimesheet","ThemeColour","ThemeBackground"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
-    const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
+    const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
 
     // Human labels for the permission switches (data-perm keeps the exact key).
@@ -376,6 +390,69 @@
     // that keys this form doesn't manage (e.g. home geofence, onboarding data)
     // survive a save instead of being wiped by the full-Profile replace.
     let editingProfile = {};
+
+    // ---- Home location pin (optional; a precise start/end point for the route
+    // optimiser). The postcode alone is enough — the worker geocodes it — so this
+    // is a fine-tune. homeLat/homeLng ride on the unmanaged Profile blob. ----
+    function renderHomePin() {
+      if (!renderHomePin._wired) {
+        renderHomePin._wired = true;
+        const b = g("homePinBtn"), c = g("homePinClear");
+        if (b) b.addEventListener("click", openHomePinMap);
+        if (c) c.addEventListener("click", () => { delete editingProfile.homeLat; delete editingProfile.homeLng; delete editingProfile.homeLon; renderHomePin(); });
+      }
+      const lat = Number(editingProfile.homeLat), lng = Number(editingProfile.homeLng ?? editingProfile.homeLon);
+      const has = isFinite(lat) && isFinite(lng) && (lat || lng);
+      const lbl = g("homePinLabel"), clr = g("homePinClear");
+      if (lbl) lbl.textContent = has ? `📍 ${lat.toFixed(4)}, ${lng.toFixed(4)}` : "Not set";
+      if (clr) clr.style.display = has ? "" : "none";
+    }
+    let _leafletLoading = null;
+    function loadLeaflet() {
+      if (window.L) return Promise.resolve();
+      if (_leafletLoading) return _leafletLoading;
+      _leafletLoading = new Promise((res, rej) => {
+        const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
+        const s = document.createElement("script"); s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; s.onload = () => res(); s.onerror = () => rej(new Error("map failed")); document.head.appendChild(s);
+      });
+      return _leafletLoading;
+    }
+    async function openHomePinMap() {
+      try { await loadLeaflet(); } catch { alert("Couldn't load the map — the postcode on its own works fine."); return; }
+      let ov = g("homePinOverlay");
+      if (!ov) {
+        ov = document.createElement("div"); ov.id = "homePinOverlay";
+        ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;";
+        ov.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:660px;width:100%;overflow:hidden;">
+          <div style="display:flex;gap:8px;padding:10px 12px;align-items:center;border-bottom:1px solid #e2e8f0;">
+            <input id="homePinPc" placeholder="Jump to a postcode…" style="flex:1;padding:8px;border:1px solid #cbd5e1;border-radius:8px;text-transform:uppercase;">
+            <button type="button" class="btn" id="homePinJump">Go</button>
+            <button type="button" class="btn" id="homePinSave" style="background:#003366;color:#fff;">Save pin</button>
+            <button type="button" class="btn" id="homePinCancel">✕</button>
+          </div>
+          <div style="padding:6px 12px;font-size:12px;color:#64748b;">Tap the map or drag the pin to the engineer's home, then Save pin.</div>
+          <div id="homePinMap" style="height:420px;"></div>
+        </div>`;
+        document.body.appendChild(ov);
+      }
+      ov.style.display = "flex";
+      const startLat = Number(editingProfile.homeLat), startLng = Number(editingProfile.homeLng ?? editingProfile.homeLon);
+      const has = isFinite(startLat) && isFinite(startLng) && (startLat || startLng);
+      const center = has ? [startLat, startLng] : [50.85, -1.2];   // Solent default
+      const map = L.map(g("homePinMap")).setView(center, has ? 15 : 10);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { maxZoom: 19, attribution: "© OpenStreetMap © CARTO" }).addTo(map);
+      const marker = L.marker(center, { draggable: true }).addTo(map);
+      map.on("click", e => marker.setLatLng(e.latlng));
+      setTimeout(() => map.invalidateSize(), 90);
+      const close = () => { try { map.remove(); } catch { } ov.style.display = "none"; };
+      g("homePinJump").onclick = async () => {
+        const pc = (g("homePinPc").value || "").trim(); if (!pc) return;
+        try { const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc)); const d = await r.json(); if (d.result) { const ll = [d.result.latitude, d.result.longitude]; map.setView(ll, 16); marker.setLatLng(ll); } else alert("Postcode not found."); } catch { alert("Lookup failed."); }
+      };
+      g("homePinSave").onclick = () => { const ll = marker.getLatLng(); editingProfile.homeLat = Math.round(ll.lat * 1e6) / 1e6; editingProfile.homeLng = Math.round(ll.lng * 1e6) / 1e6; delete editingProfile.homeLon; renderHomePin(); close(); };
+      g("homePinCancel").onclick = close;
+    }
+
     // While Full access is ON, holds each area switch's remembered underlying
     // state ({perm: bool}); null when Full access is OFF. Used to restore the
     // switches when Full access is turned off, and to save the admin's real
@@ -717,6 +794,7 @@
       const prof = user?.Profile || {};
       editingProfile = Object.assign({}, prof);
       PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
+      renderHomePin();
       // Clear any prior lock, set every switch from the user, then re-lock if
       // this user has Full access so all areas show on + locked.
       faSnapshot = null;
