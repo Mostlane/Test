@@ -201,8 +201,10 @@ const INTEGRITY_CHECKS = [
   { id: "active_login", area: "People", label: "Active users can actually log in (have a password)",
     sql: "SELECT COUNT(*) n FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active') AND (password_hash IS NULL OR password_hash='')" },
   // ── Holidays ─────────────────────────────────────────────────────────────────
-  { id: "hol_user", area: "Holidays", label: "Holiday bookings point at a real user",
-    sql: "SELECT COUNT(*) n FROM holidays h WHERE h.tenant_id=? AND h.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=h.tenant_id AND lower(u.username)=lower(h.username))" },
+  { id: "hol_user", area: "Holidays", label: "Current/future holiday bookings point at a real user",
+    // Only CURRENT/FUTURE bookings — a past booking for a departed employee is
+    // just history (kept on purpose), not a broken link, so it shouldn't flag.
+    sql: "SELECT COUNT(*) n FROM holidays h WHERE h.tenant_id=? AND h.username<>'' AND h.end_date >= date('now') AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=h.tenant_id AND lower(u.username)=lower(h.username))" },
   { id: "hol_range", area: "Holidays", label: "No holiday ends before it starts",
     sql: "SELECT COUNT(*) n FROM holidays WHERE tenant_id=? AND end_date < start_date" },
   // ── Compliance ───────────────────────────────────────────────────────────────
