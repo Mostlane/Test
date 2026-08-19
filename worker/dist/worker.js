@@ -15073,13 +15073,13 @@ async function handle21(request, env, ctx, url, sess) {
   if (sub === "/handover/template" && method === "POST") {
     if (!await canMoney(env, tid, sess)) return jr3({ error: "Only a Full-Access admin can change the handover template." }, headers, 403);
     const b = await readJson4(request);
-    const slug3 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    const slug4 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
     const mkList = (arr, kind, failVal) => {
       const out = [], seen = /* @__PURE__ */ new Set();
       for (const it of Array.isArray(arr) ? arr : []) {
         const label = String(it && it.label || "").trim().slice(0, 120);
         if (!label) continue;
-        let id = slug3(it && it.id) || slug3(label) || "item" + (out.length + 1);
+        let id = slug4(it && it.id) || slug4(label) || "item" + (out.length + 1);
         while (seen.has(id)) id = id + "_" + (out.length + 1);
         seen.add(id);
         if (kind === "photo") {
@@ -18220,6 +18220,21 @@ var SCHEME_DEFAULTS = {
     elec: { years: 5, amberDays: 90, redDays: 30 },
     gas: { years: 1, amberDays: 90, redDays: 30 },
     bldg: { years: 10, amberDays: 90, redDays: 30 }
+  },
+  // Chapplins (residential lettings): statutory landlord certificates.
+  chapplins: {
+    fiveYear: { years: 5, amberDays: 90, redDays: 30 },
+    // EICR (electrical), 5-yearly
+    gas: { years: 1, amberDays: 60, redDays: 21 },
+    // Gas Safety (CP12), annual
+    epc: { years: 10, amberDays: 180, redDays: 60 },
+    // EPC, 10-yearly
+    alarms: { years: 1, amberDays: 60, redDays: 21 },
+    // Smoke/CO alarms
+    fire: { years: 1, amberDays: 90, redDays: 30 },
+    // Fire / emergency lighting (communal)
+    legionella: { years: 2, amberDays: 90, redDays: 30 }
+    // Legionella risk assessment
   }
 };
 var DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;
@@ -18314,7 +18329,7 @@ async function coopSiteNumber(env, tid, code) {
   }
   return code;
 }
-var SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council" };
+var SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council", chapplins: "Chapplins" };
 var schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 var TYPE_LABELS = {
   fiveYear: "5 Year",
@@ -18327,11 +18342,16 @@ var TYPE_LABELS = {
   forecourt: "EV/Forecourt",
   pump: "Pump",
   asbestos: "Asbestos Register",
-  other: "Other",
   // Projects scheme
   elec: "Electrical Certificate",
+  bldg: "Building Control",
+  // Chapplins lettings types
   gas: "Gas Safety",
-  bldg: "Building Control"
+  epc: "EPC",
+  alarms: "Smoke/CO Alarms",
+  fire: "Fire / Emergency Lighting",
+  legionella: "Legionella",
+  other: "Other"
 };
 function typeOptionsFor(scheme) {
   const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
@@ -18339,7 +18359,7 @@ function typeOptionsFor(scheme) {
   if (!keys.includes("other")) keys.push("other");
   return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
 }
-var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "elec", "gas", "bldg", "other"];
+var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "elec", "gas", "bldg", "epc", "alarms", "fire", "legionella", "other"];
 function canonType(t) {
   const s = String(t || "").toLowerCase();
   const exact = KNOWN_TYPES.find((k2) => k2.toLowerCase() === s);
@@ -18347,7 +18367,12 @@ function canonType(t) {
   if (/em\s*month|month.*\bem\b|emmonthly/.test(s)) return "emMonthly";
   if (/em\s*year|year.*\bem\b|emyearly/.test(s)) return "emYearly";
   if (/asbestos/.test(s)) return "asbestos";
+  if (/legionella|\blra\b/.test(s)) return "legionella";
+  if (/\bepc\b|energy\s*perf/.test(s)) return "epc";
+  if (/\bgas\b|cp12|gsc|landlord.*gas|gas.*safety/.test(s)) return "gas";
+  if (/smoke|\bco\b|carbon\s*monox|alarm/.test(s)) return "alarms";
   if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
+  if (/\bfire\b|\bfra\b/.test(s)) return "fire";
   if (/\bpat\b/.test(s)) return "pat";
   if (/emergency|\bem\b|em\s*light/.test(s)) return "em";
   if (/forecourt|\bpfs\b|petrol|fuel/.test(s)) return "ev";
@@ -19043,6 +19068,229 @@ async function handle25(request, env, ctx, url, sess) {
   return jr6({ error: "Not found: " + sub }, headers, 404);
 }
 
+// src/routes/chapplins.js
+var CLIENT = "chapplins";
+var SCHEME = "chapplins";
+var _ready = false;
+async function ensureTables2(env, tenantId) {
+  if (_ready) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS site_tenants (
+    tenant_id   INTEGER NOT NULL DEFAULT 1,
+    id          TEXT PRIMARY KEY,        -- stable: <client>:<siteNumber>:<ref|slug(name)>
+    client      TEXT,                    -- portal client id (chapplins)
+    site_number TEXT NOT NULL,           -- the portal site this tenant occupies
+    ref         TEXT,                    -- the customer's own tenant reference (e.g. MYER01)
+    name        TEXT,
+    phone       TEXT,
+    email       TEXT,
+    home_tel    TEXT,
+    notes       TEXT,
+    first_seen  TEXT,                    -- earliest job date we saw this tenant
+    last_seen   TEXT,                    -- latest job date (drives current)
+    is_current  INTEGER DEFAULT 0,       -- 1 = current occupant of the site
+    data        TEXT,                    -- JSON room for extra fields
+    updated_at  TEXT
+  )`).run();
+  try {
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_site_tenants_site ON site_tenants(tenant_id, client, site_number)").run();
+  } catch {
+  }
+  _ready = true;
+}
+var slug3 = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+var nowISO = () => (/* @__PURE__ */ new Date()).toISOString();
+function tenantId2(client, siteNumber, ref, name) {
+  return `${client}:${siteNumber}:${slug3(ref || name || "t")}`;
+}
+async function canManage(env, tid, sess) {
+  if (!sess) return false;
+  try {
+    const p = await permissionsFor(env, tid, sess.user.username);
+    return p.FullAccess === "Yes" || p.Compliance === "Yes" || p.SLAAdmin === "Yes";
+  } catch {
+    return false;
+  }
+}
+function tenantOut(r) {
+  return {
+    id: r.id,
+    siteNumber: r.site_number,
+    ref: r.ref || "",
+    name: r.name || "",
+    phone: r.phone || "",
+    email: r.email || "",
+    homeTel: r.home_tel || "",
+    notes: r.notes || "",
+    firstSeen: r.first_seen || "",
+    lastSeen: r.last_seen || "",
+    current: r.is_current ? 1 : 0
+  };
+}
+async function handle26(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tenantId = sess.tenantId;
+  const db = tenantDB(env, tenantId);
+  await ensureTables2(env, tenantId);
+  if (path === "/chapplins/sites" && method === "GET") {
+    const { results: siteRows } = await db.prepare(
+      "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_name COLLATE NOCASE"
+    ).bind(tenantId, CLIENT).all();
+    const { results: tenRows } = await db.prepare(
+      "SELECT * FROM site_tenants WHERE tenant_id=? AND client=?"
+    ).bind(tenantId, CLIENT).all();
+    const tenBySite = {};
+    for (const r of tenRows || []) (tenBySite[r.site_number] = tenBySite[r.site_number] || []).push(r);
+    const jobCount = {};
+    try {
+      const { results: jc } = await db.prepare(
+        "SELECT site_code, COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND site_code IS NOT NULL GROUP BY site_code"
+      ).bind(tenantId).all();
+      for (const r of jc || []) jobCount[String(r.site_code)] = r.n;
+    } catch {
+    }
+    const dueByCode = {};
+    try {
+      const { results: cs } = await db.prepare(
+        "SELECT code, due FROM compliance_stores WHERE tenant_id=? AND scheme=?"
+      ).bind(tenantId, SCHEME).all();
+      for (const r of cs || []) {
+        try {
+          dueByCode[String(r.code)] = JSON.parse(r.due || "{}") || {};
+        } catch {
+        }
+      }
+    } catch {
+    }
+    const sites = (siteRows || []).map((s) => {
+      const num2 = String(s.site_number);
+      const tens = (tenBySite[num2] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+      const cur = tens.find((t) => t.is_current) || tens[0] || null;
+      return {
+        siteNumber: num2,
+        siteName: s.site_name || "",
+        postcode: s.postcode || "",
+        active: s.active == null ? 1 : s.active,
+        jobCount: jobCount[String(Number(num2))] || jobCount[num2] || 0,
+        tenantCount: tens.length,
+        currentTenant: cur ? { ref: cur.ref || "", name: cur.name || "", phone: cur.phone || "", email: cur.email || "" } : null,
+        due: dueByCode[num2] || {}
+      };
+    });
+    return json({ ok: true, sites, count: sites.length }, {}, env, request);
+  }
+  if (path === "/chapplins/site" && method === "GET") {
+    const num2 = String(q.get("number") || "").trim();
+    if (!num2) return error("number required", 400, env, request);
+    const s = await db.prepare(
+      "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? AND site_number=?"
+    ).bind(tenantId, CLIENT, num2).first();
+    if (!s) return error("Site not found", 404, env, request);
+    let data = {};
+    try {
+      data = JSON.parse(s.data || "{}") || {};
+    } catch {
+    }
+    const { results: tenRows } = await db.prepare(
+      "SELECT * FROM site_tenants WHERE tenant_id=? AND client=? AND site_number=? ORDER BY is_current DESC, last_seen DESC"
+    ).bind(tenantId, CLIENT, num2).all();
+    const tenants = (tenRows || []).map(tenantOut);
+    let jobs = [];
+    try {
+      const code = String(Number(num2));
+      const { results: jr7 } = await db.prepare(
+        "SELECT id, ref, status, created_at, completed_at, data FROM sla_jobs_archive WHERE tenant_id=? AND site_code=? ORDER BY COALESCE(completed_at,created_at) DESC LIMIT 500"
+      ).bind(tenantId, code).all();
+      jobs = (jr7 || []).map((r) => {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}") || {};
+        } catch {
+        }
+        return {
+          id: r.id,
+          ref: r.ref || r.id,
+          status: r.status || "Archived",
+          priority: d.priority || "",
+          date: r.created_at || r.completed_at || null,
+          description: d.description || d.jobName || "",
+          tenantRef: d.tenantRef || "",
+          tenantName: d.tenantName || ""
+        };
+      });
+    } catch {
+    }
+    return json({
+      ok: true,
+      site: { siteNumber: String(s.site_number), siteName: s.site_name || "", postcode: s.postcode || "", active: s.active == null ? 1 : s.active, data },
+      tenants,
+      jobs
+    }, {}, env, request);
+  }
+  if (path === "/chapplins/tenant" && method === "POST") {
+    if (!await canManage(env, tenantId, sess)) return error("Not permitted", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!siteNumber) return error("siteNumber required", 400, env, request);
+    if (!String(b.name || "").trim() && !String(b.ref || "").trim()) return error("name or ref required", 400, env, request);
+    const id = String(b.id || "").trim() || tenantId2(CLIENT, siteNumber, b.ref, b.name);
+    const makeCurrent = b.makeCurrent === void 0 ? true : !!b.makeCurrent;
+    if (makeCurrent) {
+      await db.prepare("UPDATE site_tenants SET is_current=0, updated_at=? WHERE tenant_id=? AND client=? AND site_number=?").bind(nowISO(), tenantId, CLIENT, siteNumber).run();
+    }
+    await db.prepare(`INSERT INTO site_tenants
+        (tenant_id, id, client, site_number, ref, name, phone, email, home_tel, notes, first_seen, last_seen, is_current, data, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET
+        site_number=excluded.site_number, ref=excluded.ref, name=excluded.name,
+        phone=excluded.phone, email=excluded.email, home_tel=excluded.home_tel,
+        notes=excluded.notes, first_seen=COALESCE(excluded.first_seen, site_tenants.first_seen),
+        last_seen=COALESCE(excluded.last_seen, site_tenants.last_seen),
+        is_current=excluded.is_current, updated_at=excluded.updated_at`).bind(
+      tenantId,
+      id,
+      CLIENT,
+      siteNumber,
+      b.ref || null,
+      b.name || null,
+      b.phone || null,
+      b.email || null,
+      b.homeTel || null,
+      b.notes || null,
+      b.firstSeen || null,
+      b.lastSeen || null,
+      makeCurrent ? 1 : 0,
+      JSON.stringify(b.data || {}),
+      nowISO()
+    ).run();
+    const row = await db.prepare("SELECT * FROM site_tenants WHERE tenant_id=? AND id=?").bind(tenantId, id).first();
+    return json({ ok: true, tenant: row ? tenantOut(row) : null }, {}, env, request);
+  }
+  if (path === "/chapplins/tenant/current" && method === "POST") {
+    if (!await canManage(env, tenantId, sess)) return error("Not permitted", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "").trim();
+    if (!id) return error("id required", 400, env, request);
+    const row = await db.prepare("SELECT site_number FROM site_tenants WHERE tenant_id=? AND id=?").bind(tenantId, id).first();
+    if (!row) return error("Tenant not found", 404, env, request);
+    await db.prepare("UPDATE site_tenants SET is_current=0, updated_at=? WHERE tenant_id=? AND client=? AND site_number=?").bind(nowISO(), tenantId, CLIENT, row.site_number).run();
+    await db.prepare("UPDATE site_tenants SET is_current=1, updated_at=? WHERE tenant_id=? AND id=?").bind(nowISO(), tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/chapplins/tenant/delete" && method === "POST") {
+    if (!await canManage(env, tenantId, sess)) return error("Not permitted", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "").trim();
+    if (!id) return error("id required", 400, env, request);
+    await db.prepare("DELETE FROM site_tenants WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown chapplins route", 404, env, request);
+}
+
 // src/routes/po.js
 function staffTypeOf2(u) {
   try {
@@ -19085,7 +19333,7 @@ async function getVehicles(env) {
     return [];
   }
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
@@ -19664,7 +19912,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -20041,7 +20289,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables2(env) {
+async function ensureTables3(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -20178,13 +20426,13 @@ function shapeTask(t) {
     createdBy: t.created_by || ""
   };
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables2(env);
+  await ensureTables3(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
@@ -20641,7 +20889,7 @@ function buildProgrammePdf(data, meta = {}) {
 
 // src/routes/programmes.js
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables3(env) {
+async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -20791,14 +21039,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle29(request, env, ctx, url) {
+async function handle30(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables3(env);
+  await ensureTables4(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -21380,7 +21628,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables4(env) {
+async function ensureTables5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -21518,8 +21766,8 @@ function projectView(row, data, fileCount) {
     todo: computeTodo(row, data, fileCount)
   };
 }
-function canSeeProject(data, me, canManage) {
-  if (canManage) return true;
+function canSeeProject(data, me, canManage2) {
+  if (canManage2) return true;
   const list = Array.isArray(data && data.visibleTo) ? data.visibleTo : [];
   if (!list.length) return true;
   const u = String(me || "").toLowerCase();
@@ -21539,7 +21787,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -21561,9 +21809,9 @@ async function handle30(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const perms = await permissionsFor(env, tenantId, me);
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
-  const canManage = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
+  const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables4(env);
+  await ensureTables5(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -21584,7 +21832,7 @@ async function handle30(request, env, ctx, url, sess) {
     const counts = {};
     const { results: fc } = await db.prepare("SELECT project_id, COUNT(*) AS n FROM project_files WHERE tenant_id=? GROUP BY project_id").bind(db.tenantId).all();
     for (const r of fc || []) counts[r.project_id] = Number(r.n) || 0;
-    let items = (results || []).filter((row) => canSeeProject(parse2(row), me, canManage)).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
+    let items = (results || []).filter((row) => canSeeProject(parse2(row), me, canManage2)).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
     if (status) items = items.filter((p) => (p.status || "live") === status);
     return json({ ok: true, projects: items }, {}, env, request);
   }
@@ -21592,12 +21840,12 @@ async function handle30(request, env, ctx, url, sess) {
     const row = await getRow(url.searchParams.get("id") || "");
     if (!row) return error("Project not found", 404, env, request);
     const data = parse2(row);
-    if (!canSeeProject(data, me, canManage)) return error("Project not found", 404, env, request);
-    if (canManage) ctx?.waitUntil(pushSiteToPO(env, row.name));
-    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage }, {}, env, request);
+    if (!canSeeProject(data, me, canManage2)) return error("Project not found", 404, env, request);
+    if (canManage2) ctx?.waitUntil(pushSiteToPO(env, row.name));
+    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage: canManage2 }, {}, env, request);
   }
   if (path === "/project/create" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const name = String(b.name || "").trim();
     const number = String(b.number || "").trim();
@@ -21656,7 +21904,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, id, project: projectView(row, parse2(row), 0) }, {}, env, request);
   }
   if (path === "/project/update" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -21737,7 +21985,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id)) }, {}, env, request);
   }
   if (path === "/project/link" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -21756,7 +22004,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, links: data.links }, {}, env, request);
   }
   if (path === "/project/todo" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -21779,7 +22027,7 @@ async function handle30(request, env, ctx, url, sess) {
     const origin = url.origin;
     const files = [];
     for (const f of results || []) {
-      if (!canManage && f.hidden) continue;
+      if (!canManage2 && f.hidden) continue;
       files.push({
         id: f.id,
         title: f.title || f.name,
@@ -21793,10 +22041,10 @@ async function handle30(request, env, ctx, url, sess) {
         url: await signedFileUrl(env, origin, "/project/doc", f.r2_key, 86400)
       });
     }
-    return json({ ok: true, files, canManage }, {}, env, request);
+    return json({ ok: true, files, canManage: canManage2 }, {}, env, request);
   }
   if (path === "/project/doc" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const form = await request.formData().catch(() => null);
     const file = form && form.get("file");
     const pid = form && String(form.get("id") || "");
@@ -21824,7 +22072,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, id }, {}, env, request);
   }
   if (path === "/project/doc-update" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const f = await db.prepare("SELECT * FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, String(b.fileId || "")).first();
     if (!f) return error("File not found", 404, env, request);
@@ -21835,7 +22083,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/project/doc-delete" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const f = await db.prepare("SELECT * FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, String(b.fileId || "")).first();
     if (!f) return error("File not found", 404, env, request);
@@ -21847,7 +22095,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/project/create-job" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -21901,7 +22149,7 @@ async function handle30(request, env, ctx, url, sess) {
     const row = await getRow(url.searchParams.get("id") || "");
     if (!row) return error("Project not found", 404, env, request);
     const dataP = parse2(row);
-    if (!canSeeProject(dataP, me, canManage)) return error("Project not found", 404, env, request);
+    if (!canSeeProject(dataP, me, canManage2)) return error("Project not found", 404, env, request);
     const wantName = String(row.name || "").toLowerCase();
     const wantNum = String(row.number || "").toLowerCase();
     const all = await listJobs(env, tenantId);
@@ -21929,7 +22177,7 @@ async function handle30(request, env, ctx, url, sess) {
       manualLab = results || [];
     } catch {
     }
-    if (!jobIds.length && !manualLab.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
+    if (!jobIds.length && !manualLab.length) return json({ ok: true, canManage: canManage2, jobs: [], visits: [], perUser: [] }, {}, env, request);
     const dayOf = (iso) => String(iso || "").slice(0, 10);
     const minsOf = (a, b) => {
       const s = Date.parse(a || ""), e = Date.parse(b || "");
@@ -21972,7 +22220,7 @@ async function handle30(request, env, ctx, url, sess) {
     const meLower = String(me).toLowerCase();
     const normId2 = (u) => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
     let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
-    if (!canManage) {
+    if (!canManage2) {
       const meNorm = normId2(me);
       visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm).map((v) => {
         const { cost, rate, amount, ...rest } = v;
@@ -21980,7 +22228,7 @@ async function handle30(request, env, ctx, url, sess) {
       });
     }
     const perUser = [];
-    if (canManage) {
+    if (canManage2) {
       const byU = /* @__PURE__ */ new Map();
       for (const v of Array.from(visitMap.values())) {
         let r = byU.get(v.user);
@@ -22006,10 +22254,10 @@ async function handle30(request, env, ctx, url, sess) {
       firestopping: !!j.firestopping,
       investigateOnly: !!j.investigateOnly
     })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
-    return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
+    return json({ ok: true, canManage: canManage2, jobs, visits, perUser }, {}, env, request);
   }
   if (path === "/project/costs" && method === "GET") {
-    if (!canManage) return json({ ok: true, costs: [], canManage: false }, {}, env, request);
+    if (!canManage2) return json({ ok: true, costs: [], canManage: false }, {}, env, request);
     const pid = url.searchParams.get("id") || "";
     if (!await getRow(pid)) return error("Project not found", 404, env, request);
     const { results } = await env.DB.prepare(
@@ -22028,10 +22276,10 @@ async function handle30(request, env, ctx, url, sess) {
       createdBy: r.created_by,
       createdAt: r.created_at
     }));
-    return json({ ok: true, costs: rows, canManage }, {}, env, request);
+    return json({ ok: true, costs: rows, canManage: canManage2 }, {}, env, request);
   }
   if (path === "/project/cost" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -22081,7 +22329,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, id, amount }, {}, env, request);
   }
   if (path === "/project/cost-delete" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const id = String(b.costId || "");
     if (!id) return error("costId required", 400, env, request);
@@ -22089,7 +22337,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/project/push-po" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -22097,7 +22345,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok, poBound: !!env.PO_DB }, {}, env, request);
   }
   if (path === "/project/delete" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -22213,6 +22461,8 @@ var ROUTES = [
   // needs-a-human-eye list
   ["*", "/compliance", handle25],
   // Southern Co-op compliance certs (R2 + D1)
+  ["*", "/chapplins", handle26],
+  // Chapplins customer: site tenants (current/previous) + directory
   ["*", "/settings", handle11],
   ["*", "/oncall", handle11],
   ["*", "/daily-logs", handle11],
@@ -22236,17 +22486,17 @@ var ROUTES = [
   // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck", handle17],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle26],
+  ["*", "/po", handle27],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle27],
+  ["*", "/cctv", handle28],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle28],
+  ["*", "/tasks", handle29],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/prog", handle29],
+  ["*", "/prog", handle30],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle30],
+  ["*", "/projects", handle31],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle30]
+  ["*", "/project", handle31]
   // Projects: create/get/update/link/todo/docs
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.

@@ -855,6 +855,7 @@
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
+          { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["chapplins.html", "chapplins-compliance.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["Compliance"], match: ["eicr-check.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },

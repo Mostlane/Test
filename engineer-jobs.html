@@ -175,8 +175,8 @@
   </div>
   <div id="dayMapSeg">
     <button type="button" class="mapseg on" data-r="day">Day</button>
-    <button type="button" class="mapseg" data-r="7">Next 7 days</button>
-    <button type="button" class="mapseg" data-r="30">Next 30 days</button>
+    <button type="button" class="mapseg" data-r="7">± 7 days</button>
+    <button type="button" class="mapseg" data-r="30">± 30 days</button>
     <button type="button" class="mapseg" data-r="year">Year</button>
   </div>
   <div id="dayMapFilterRow" style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
@@ -225,7 +225,7 @@ function jobPostcode(job){
   return pc.toUpperCase().replace(/\s+/g," ");
 }
 async function geocodePostcodes(pcs){
-  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  const todo = [...new Set(pcs.filter(pc => pc && !Array.isArray(geoCache[pc])))];
   for(let i = 0; i < todo.length; i += 100){
     const batch = todo.slice(i, i + 100);
     try{
@@ -235,8 +235,11 @@ async function geocodePostcodes(pcs){
       });
       const data = await res.json();
       (data.result || []).forEach(r => {
-        geoCache[(r.query || "").toUpperCase()] =
-          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+        // Only cache SUCCESSES. Caching a miss as null meant a postcode that
+        // failed once — a bad batch, a rate-limit — never got looked up again
+        // on that device, and its pin stayed missing for good.
+        if (r.result && isFinite(r.result.latitude))
+          geoCache[(r.query || "").toUpperCase()] = [r.result.latitude, r.result.longitude];
       });
     }catch(e){}
   }
@@ -827,15 +830,20 @@ let dayCursor = null;       // the single day shown in "Day" mode (scrollable)
 // The N-day ranges look FORWARD from today so an engineer sees upcoming work to pick.
 function mapRange(mode){
   const now = new Date(); now.setHours(0,0,0,0);
-  if(mode === "7")    return [now, addDays(now, 6)];
-  if(mode === "30")   return [now, addDays(now, 29)];
+  // Windows span BOTH directions around today. They were briefly forward-only,
+  // which emptied the map: work here is booked a day or two ahead, so "next 7
+  // days" held 4 jobs where "last 7 days" held 50 — engineers reported their
+  // jobs had vanished. Either side of today keeps upcoming work for planning
+  // AND the recent jobs they actually look for.
+  if(mode === "7")    return [addDays(now, -7), addDays(now, 7)];
+  if(mode === "30")   return [addDays(now, -30), addDays(now, 30)];
   if(mode === "year") return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31)];
   const c = dayCursor || now;
   return [c, c];           // day
 }
 function mapLabel(mode){
-  if(mode === "7")    return "in the next 7 days";
-  if(mode === "30")   return "in the next 30 days";
+  if(mode === "7")    return "within 7 days of today";
+  if(mode === "30")   return "within 30 days of today";
   if(mode === "year") return "this year";
   const c = dayCursor || new Date();
   return "on " + c.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" });
