@@ -83,11 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=16`)
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=17`)
 All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7–9 the animated wait mark, ?v=13–16 the status-bar cap — 13 had to clear a
+?v=7–9 the animated wait mark, ?v=13–17 the status-bar cap — 13 had to clear a
 concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
-portal-config change must reach them again, bump to ?v=17 across all pages
+portal-config change must reach them again, bump to ?v=18 across all pages
 with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
@@ -2600,6 +2600,15 @@ files to this public repo.
   background at the end of the scroll range — the "blank section bar" Jamie
   reported. The working form is CSS on html:
   `html{box-sizing:border-box; min-height:100vh; padding-top:env(safe-area-inset-top,0px)}`.
+  **Anything else pinned across the top must reserve its space via
+  `--ml-topbar`**: the html padding is
+  `calc(env(safe-area-inset-top,0px) + var(--ml-topbar, 0px))` and the body
+  min-height subtracts both. The van-score banner (`#mlVanScoreNote`, moved into
+  portal-config so it shows portal-wide) is `position:fixed`, so before this it
+  simply covered the first row — a field user saw the Van Check / Holiday tiles
+  sliced in half. It now measures its own height on show (it wraps to two lines
+  on a narrow screen), sets `--ml-topbar`, re-measures on resize, and CLEARS the
+  variable when dismissed. Any future top banner/toast must do the same.
   The **`min-height:100vh` pins html to the FULL screen**: with viewport-fit=cover
   iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA box
   instead of the screen, leaving the page short and a band of canvas below it —
