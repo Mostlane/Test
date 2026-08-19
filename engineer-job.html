@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=15"></script>
+  <script src="/portal-config.js?v=17"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -39,6 +39,12 @@
     .tool{flex:1 1 auto;min-width:30%;border:1px solid var(--line);background:var(--card);border-radius:11px;padding:10px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;color:var(--ink);text-decoration:none}
     .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .ph{aspect-ratio:1.35;border-radius:12px;position:relative;display:flex;align-items:flex-end;padding:9px;color:#fff;font-size:12px;overflow:hidden;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.5);background-size:cover;background-position:center;background-color:#334155}
+    .ph>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
+    .ph>.tag{position:relative;z-index:2}
+    /* Shimmer lives on the tile BACKGROUND (behind the img), so a loaded photo
+       covers it. Never overlay the image or it stays hidden behind the skeleton. */
+    .ph.pend{background:linear-gradient(100deg,#dfe4ec 30%,#eef1f6 50%,#dfe4ec 70%);background-size:200% 100%;animation:phsk 1.1s linear infinite}
+    @keyframes phsk{to{background-position:-200% 0}}
     .ph .tag{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;letter-spacing:.05em;background:rgba(9,20,38,.82);color:#fff;padding:4px 8px;border-radius:7px}
     .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
     .seg{display:flex;background:var(--chip);border-radius:11px;padding:4px;gap:4px;margin-top:12px}
@@ -195,6 +201,53 @@
   var raDone=false, reported=false, signed=false, sigName="", raPicPending=false;
 
   function jfetch(path, opts){ return fetch(SLA_API+path, opts||{}); }
+  // Shrink an image File to a max dimension → JPEG Blob (small thumbnail so the
+  // grid never decodes full-res camera photos).
+  function shrinkImage(file, maxDim, quality){
+    return new Promise(function(resolve){
+      if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
+      var img=new Image(), u=URL.createObjectURL(file);
+      img.onload=function(){
+        URL.revokeObjectURL(u);
+        var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+        w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+        var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+        cv.getContext("2d").drawImage(img,0,0,w,h);
+        cv.toBlob(function(b){ resolve(b); },"image/jpeg",quality||0.7);
+      };
+      img.onerror=function(){ URL.revokeObjectURL(u); resolve(null); };
+      img.src=u;
+    });
+  }
+  // Self-healing for older photos with no stored thumbnail: fetch the full image
+  // (a couple at a time, off the grid), shrink it, store the thumb, swap it in.
+  // New uploads already carry a thumb, so this normally has nothing to do.
+  var _backfilling=false;
+  async function backfillThumbs(){
+    if(_backfilling) return;
+    var todo=(photos||[]).filter(function(p){ return p.hasThumb===false && p.key; });
+    if(!todo.length) return;
+    _backfilling=true;
+    var idx=0;
+    async function worker(){
+      while(idx<todo.length){
+        var p=todo[idx++];
+        try{
+          var blob=await fetch(p.publicURL).then(function(r){ return r.ok?r.blob():null; });
+          if(blob){
+            var thumb=await shrinkImage(new File([blob],"p.jpg",{type:blob.type||"image/jpeg"}),400,0.7);
+            if(thumb){
+              var form=new FormData(); form.append("key",p.key); form.append("thumb",thumb,"thumb.jpg");
+              var r=await jfetch("/site/thumb",{method:"POST",body:form}).then(function(r){ return r.json(); }).catch(function(){ return null; });
+              if(r&&r.ok){ p.hasThumb=true; }
+            }
+          }
+        }catch(e){}
+      }
+    }
+    try{ await Promise.all([worker(),worker()]); }catch(e){}
+    _backfilling=false;
+  }
   // Permission helpers (read the cached session).
   function myPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||{}; }catch(e){ return {}; } }
   function isFullAccess(){ return myPerms().FullAccess==="Yes"; }               // "all access" only
@@ -299,15 +352,28 @@
     var host=$("photos"); if(!host) return;   // firestopping jobs use per-seal photos in the RIA panel
     var html="";
     photos.forEach(function(p,i){
-      var bg=p.publicURL?'background-image:url('+esc(p.publicURL)+')':'';
+      // Load the small THUMBNAIL in the grid, not the full-res photo (native
+      // lazy-load so off-screen tiles don't fetch). Full-res only opens on tap.
+      var src=p.thumb||p.publicURL||"";
+      var pend=(p.hasThumb===false)?" pend":"";
+      var img=src?'<img loading="lazy" decoding="async" alt="" src="'+esc(src)+'">':'';
       var tag=p.stage?'<span class="tag">'+esc(p.stage.toUpperCase())+'</span>':'';
-      html+='<div class="ph" data-i="'+i+'" style="'+bg+'">'+tag+'</div>';
+      html+='<div class="ph'+pend+'" data-i="'+i+'">'+img+tag+'</div>';
     });
     html+='<div class="ph add" id="addPhoto">'+(raDone?'📷<span>Add '+stage+' photo</span>':'🔒<span>RA required</span>')+'</div>';
     host.innerHTML=html;
     $("phcount").textContent=photos.length+(photos.length===1?" photo":" photos");
     $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; $("fileInput").click(); };
     [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
+    [].forEach.call(host.querySelectorAll(".ph[data-i] img"),function(im){
+      // Reveal (stop the skeleton) as soon as the photo has loaded.
+      function done(){ im.parentNode.classList.remove("pend"); }
+      if(im.complete && im.naturalWidth>0){ done(); }
+      im.addEventListener("load",done);
+      // If a thumbnail ever fails, fall back to the full image once so nothing is blank.
+      im.addEventListener("error",function(){ var p=photos[+im.parentNode.dataset.i]; if(p&&p.publicURL&&im.src!==p.publicURL){ im.src=p.publicURL; } });
+    });
+    backfillThumbs();
   }
   function drawStatus(){
     // Projects have a slim status set — just Travelling · In Progress · Complete
@@ -509,6 +575,8 @@
     for(var i=0;i<files.length;i++){
       var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
       var form=new FormData(); form.append("file",f);
+      // Generate a small thumbnail so the grid loads instantly (full-res only opens on tap).
+      try{ var th=await shrinkImage(f,400,0.7); if(th) form.append("thumb",th,"thumb.jpg"); }catch(e){}
       try{ await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?filename="+encodeURIComponent(fn)+"&stage="+encodeURIComponent(useStage),{method:"POST",body:form}); }
       catch(err){ toast("Photo upload failed — will retry when online"); }
     }

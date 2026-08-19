@@ -83,11 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=14`)
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=17`)
 All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7–9 the animated wait mark, ?v=13/14 the status-bar cap — 13 had to clear a
+?v=7–9 the animated wait mark, ?v=13–17 the status-bar cap — 13 had to clear a
 concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
-portal-config change must reach them again, bump to ?v=15 across all pages
+portal-config change must reach them again, bump to ?v=18 across all pages
 with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
@@ -603,6 +603,20 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   gated `isOfficeAdmin() && !isFieldUser()` — a FIELD engineer never gets it even
   if they hold an SLAAdmin grant (it's an office control). isFieldUser reads
   mostlaneStaffType / perms.StaffType.
+  **Job photo thumbnails (Aug 2026 — fixes slow/blank previews in engineer-job.html):**
+  the engineer photo grid used to paint each tile with the FULL-RES `publicURL` as a
+  CSS background — no lazy-load, so every photo downloaded at once and previews were
+  slow or blank (they only appeared once tapped = cached). Now mirrors the site-photo
+  pattern: **POST /sla/jobs/{id}/files** accepts a client-shrunk `thumb` form field →
+  stored as `<key>.thumb`; **GET /sla/jobs/{id}/files** returns `key` + a signed
+  `thumb` URL (via `/sla/site/thumb`, which already accepts `jobs/` keys and edge-
+  caches) + `hasThumb`. engineer-job.html `uploadPhotos` generates a 400px JPEG thumb
+  (`shrinkImage`) alongside each photo; `drawPhotos` renders `<img loading="lazy"
+  decoding="async" src="thumb||publicURL">` (full-res only opens in the lightbox on
+  tap) with a shimmer `.pend` placeholder + a one-shot error fallback to full-res;
+  `backfillThumbs()` self-heals older photos with no thumb (fetch→shrink→POST
+  /site/thumb, 2 lanes) — normally a no-op since new uploads carry their thumb.
+  (job-view.html office view still uses full-res; same treatment could be applied there.)
   **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
   saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
   BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,
@@ -2590,21 +2604,40 @@ files to this public repo.
   is now on every page that LOADS portal-config.js** (117 pages) — without it
   `env()` reports 0 and the cap can't size itself.
   **Two rules learned doing it:**
-  (a) **The body padding is applied in JS, ADDING to the page's own** — measure
-  the cap's rendered height, then `body.style.paddingTop = ownPadding + inset`
-  (re-run on resize/orientationchange; the original padding is cached so it never
-  compounds). A plain CSS `body{padding-top:env(...)}` REPLACED the padding pages
-  set for themselves — the field app (route/inbox/you, engineer-job, vehicle)
-  lost its own 14–16px and content jammed against the bar.
-  (b) **`body{box-sizing:border-box}` ships WITH the padding.** main.html sets
-  `html,body{height:100%}` with the default content-box, so the 47px top padding
-  was ADDED to a full-height body — the document became 47px taller than the
-  screen and you could scroll to a blank strip at the bottom (Jamie spotted it
-  immediately). border-box puts the padding inside that 100%. Pages whose height
-  is content-driven simply get 47px taller, which is correct — the content moved
-  down. Swept all 124 pages for the "fitted before, scrolls now" signature; only
-  daily-logs.html shifts (28px) and that is real content reflow, not a gap.
-  (c) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
+  (a) **The offset goes on `<html>`, never `<body>` — this took three attempts.**
+  A CSS `body{padding-top:env(...)}` REPLACED the padding pages set for
+  themselves (the field app lost its 14px). A JS version that ADDED to the
+  page's own value then broke main.html: `html,body{overflow-x:hidden}` makes
+  **body the scroll container**, and padding a scroll box left a band of
+  background at the end of the scroll range — the "blank section bar" Jamie
+  reported. The working form is CSS on html:
+  `html{box-sizing:border-box; min-height:100vh; padding-top:env(safe-area-inset-top,0px)}`.
+  **Anything else pinned across the top must reserve its space via
+  `--ml-topbar`**: the html padding is
+  `calc(env(safe-area-inset-top,0px) + var(--ml-topbar, 0px))` and the body
+  min-height subtracts both. The van-score banner (`#mlVanScoreNote`, moved into
+  portal-config so it shows portal-wide) is `position:fixed`, so before this it
+  simply covered the first row — a field user saw the Van Check / Holiday tiles
+  sliced in half. It now measures its own height on show (it wraps to two lines
+  on a narrow screen), sets `--ml-topbar`, re-measures on resize, and CLEARS the
+  variable when dismissed. Any future top banner/toast must do the same.
+  The **`min-height:100vh` pins html to the FULL screen**: with viewport-fit=cover
+  iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA box
+  instead of the screen, leaving the page short and a band of canvas below it —
+  main.html (the only page setting `html,body{height:100%}`) kept showing that
+  bottom bar after every other page was right. Chromium does not reproduce it,
+  so that line is belt-and-braces; where html is already full-height it is a no-op.
+  Percentage heights resolve against the parent's CONTENT box, so a
+  `body{height:100%}` shrinks to fit exactly and nothing overflows.
+  **`vh` does NOT** — it measures the full screen and ignores that padding, so
+  portal-config also injects `body{min-height:calc(100vh - env(...))}` to
+  re-base it, and the five pages that used `height:100vh` (login, change/forgot/
+  reset-password, hours-menu) were switched to `min-height:100vh` so that one
+  central rule can win. Check with scratchpad `cap3.cjs`, which flags any page
+  that fitted the screen before and scrolls after. Two known non-issues: hs-docs
+  `.wrap` has its own 60px bottom margin, and daily-logs reflows — both are the
+  pages' own spacing, not a gap the cap created.
+  (b) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
   for the `<script src=…portal-config.js>` tag, NOT the string — programme-view.html
   merely *mentions* it in a comment, and giving that client-facing page the meta
   without a cap pushed its content under the status bar.
@@ -2635,6 +2668,17 @@ files to this public repo.
   site-folder.html `.lb .x`; viewport-fit added to job-view/site-folder/
   my-documents/vehicle-maintenance/project-hub. docviewer bumped `?v=6`.
   Any NEW full-screen overlay close button needs the same treatment.
+- **NEVER put `transform`/`translateZ(0)` on a `position:fixed` bottom bar** (iOS
+  Safari, Aug 2026). The field-app tabbar (route/engineer-jobs/inbox/you `.tabbar`)
+  and the View As "Viewing as…" return bar (portal-config `mlVaBar`) carried
+  `transform:translateZ(0);-webkit-transform:translateZ(0)` as a GPU-promotion hack.
+  On iOS that promotes the fixed element to a compositor layer that is only
+  repositioned at scroll-END, so during a scroll the bar DRIFTS UP with the content
+  and appears stuck mid-page (Jamie saw the purple return bar float into the middle
+  of the jobs list while View As'ing). Chromium pins it perfectly at every scroll
+  offset (verified with scratchpad `repro-bar.cjs`) — it's an iOS-only quirk. Modern
+  iOS handles a plain `position:fixed;bottom:0` bar correctly, so the fix is to
+  REMOVE the transform. Do not re-add translateZ(0) to any fixed bar.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

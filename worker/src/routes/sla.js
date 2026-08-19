@@ -957,6 +957,12 @@ export async function handle(request, env, ctx, url, sess) {
         httpMetadata: { contentType: file.type },
         customMetadata: stage ? { stage } : undefined
       });
+      // A client-shrunk thumbnail rides along → stored as <key>.thumb so the photo
+      // grid loads a tiny image instead of the full-res one.
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
+      }
       return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
     }
 
@@ -967,11 +973,24 @@ export async function handle(request, env, ctx, url, sess) {
       // upload) so a photo can be re-stamped without rewriting the R2 object.
       let overrides = {};
       try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; } catch {}
-      return jsonResponse({ files: listed.objects.map(o => {
+      // A small <key>.thumb rides alongside each photo (client-generated on upload,
+      // or backfilled). The grid loads the thumb, not the full-res original, so it
+      // stays fast even with many photos. Filter out the .thumb objects themselves.
+      const objs = (listed.objects || []).filter(o => !o.key.endsWith(".thumb"));
+      const thumbSet = new Set((listed.objects || []).filter(o => o.key.endsWith(".thumb")).map(o => o.key));
+      const files = [];
+      for (const o of objs) {
         const name = o.key.split("/").pop();
-        return { name, publicURL: r2Url(env, o.key),
-          stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || "" };
-      }) }, headers);
+        files.push({
+          name,
+          key: o.key,
+          publicURL: r2Url(env, o.key),
+          thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
+          hasThumb: thumbSet.has(o.key + ".thumb"),
+          stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || ""
+        });
+      }
+      return jsonResponse({ files }, headers);
     }
 
     // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
