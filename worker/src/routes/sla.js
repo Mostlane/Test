@@ -2894,7 +2894,9 @@ async function autoScheduleDay(env, tenantId, body) {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
     M = { mins, source: "estimate" };
-    warnings.push("Lots of jobs — used estimated driving times to keep it fast and cheap.");
+    // No warning: this fast estimate only DECIDES the assignment; each engineer's
+    // final route is then recomputed with REAL Google times below (cheap — a day
+    // is only a handful of stops).
   }
   const pE = i => i, pJ = k => NE + k;
 
@@ -2992,6 +2994,38 @@ async function autoScheduleDay(env, tenantId, body) {
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter(p => p.legs.length);
 
+  // REAL driving times for the SHOWN routes. The assignment above used a fast
+  // estimate (a full Google matrix over every job would be thousands of elements),
+  // but each engineer's actual day is only a few stops — so recompute just those
+  // legs with Google. Cheap, and every time on screen becomes real.
+  let matrixSource = M.source;
+  if (M.source !== "google" && env.GOOGLE_MAPS_KEY && plan.length) {
+    const coordById = new Map(jobs.map(j => [j.id, j.coord]));
+    const engCoord = new Map(engs.map(e => [e.username, e.coord]));
+    let allReal = true;
+    for (const p of plan) {
+      const home = engCoord.get(p.username);
+      const pts2 = [home, ...p.legs.map(l => coordById.get(l.jobId))];
+      if (!home || pts2.some(c => !c) || pts2.length < 2) { allReal = false; continue; }
+      const dm = await driveMatrix(env, pts2);       // small: home + this day's stops
+      if (dm.source !== "google") { allReal = false; continue; }
+      let t = 0, drive = 0, site = 0, lunchDone = lunch === 0, cur = 0;
+      p.legs.forEach((l, idx) => {
+        const to = idx + 1, dMin = dm.mins[cur][to]; drive += dMin;
+        let arrival = t + dMin;
+        if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
+        l.driveMins = dMin; l.arrivalOffset = arrival;
+        site += l.durationMin; t = arrival + l.durationMin; cur = to;
+      });
+      const homeMin = dm.mins[cur][0]; drive += homeMin;
+      p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
+    }
+    matrixSource = allReal ? "google" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (Google didn't answer for every one).");
+  } else if (M.source !== "google" && !env.GOOGLE_MAPS_KEY) {
+    warnings.push("Live driving times need a Google Maps key on the server — showing estimates.");
+  }
+
   // Plain-English "why these jobs" per engineer + a shared-area explainer.
   const areaCounts = legs => { const m = {}; for (const l of legs) { const a = l.area || ""; if (a) m[a] = (m[a] || 0) + 1; } return Object.entries(m).sort((a, b) => b[1] - a[1]); };
   for (const p of plan) {
@@ -3019,7 +3053,7 @@ async function autoScheduleDay(env, tenantId, body) {
   overlaps.sort((a, b) => b.engineers.reduce((s, e) => s + e.count, 0) - a.engineers.reduce((s, e) => s + e.count, 0));
 
   return {
-    ok: true, dayStart, matrixSource: M.source, plan, unassigned, warnings, overlaps,
+    ok: true, dayStart, matrixSource, plan, unassigned, warnings, overlaps,
     placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length,
     durModel: { typical: dur.typical, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
     estimatedCount: jobs.filter(j => j.estimated).length,
