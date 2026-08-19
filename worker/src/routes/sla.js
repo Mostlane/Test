@@ -1865,7 +1865,7 @@ async function pushJobToEngineers(env, tid, job, engineerIds) {
 }
 // First-time announcement: if the job is visible + has engineers + hasn't been
 // announced, push ALL its engineers and mark it notified (persisting the flag).
-async function reconcileRelease(env, tid, job, allJobs) {
+export async function reconcileRelease(env, tid, job, allJobs) {
   if (!job || job.releaseNotified) return false;
   const engs = assignedList(job);
   if (!engs.length) return false;
@@ -1946,7 +1946,7 @@ async function getShift(env, tenantId, username, date) {
   return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
 }
 
-async function listJobs(env, tenantId) {
+export async function listJobs(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
   return (results || []).map(r => JSON.parse(r.data));
@@ -1998,7 +1998,7 @@ async function saveJob(env, tenantId, job) {
 
 /* ================= CREATE / PATCH ================= */
 
-async function createOrUpdateJobFromPayload(env, tenantId, body) {
+export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig(env, tenantId);
   const id = body.id || body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
@@ -2089,6 +2089,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
+    // Portal-project link: set when this job was raised from a project hub, so
+    // the project can list its jobs + roll up per-engineer visits. Preserved.
+    projectId: body.projectId !== undefined ? (String(body.projectId || "") || null) : (existing?.projectId || null),
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -2171,6 +2174,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
+  if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {

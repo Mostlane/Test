@@ -1694,6 +1694,32 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Jobs & site visits from the project (Aug 2026):** every SLA job now carries
+  an optional **`job.projectId`** (`createOrUpdateJobFromPayload` + `patchJob`
+  accept + preserve it); a job raised from a project is stamped with the
+  project's id so the project can list its jobs and roll up per-engineer visits.
+  New endpoints on projects-api.js:
+  **POST /project/create-job** `{id, description, engineers[], scheduledAt?,
+  durationMinutes?}` (ProjectsAdmin|FullAccess) — creates a **multi-engineer**
+  SLA job in one shot, prefilled from the project's own Pxxxx site
+  (address/postcode/coords), gates all four requirements OFF by default (the
+  Projects rule) and stamps `projectId`; runs through the normal SLA path
+  (`createOrUpdateJobFromPayload` + `reconcileRelease` → assignment push).
+  **GET /project/visits?id=<PID>** — returns `{jobs, visits, perUser}`.
+  Matches jobs by `projectId` first, else by the project's site name/number
+  (legacy jobs). Each visit is one (user, day, job) row aggregated from
+  **`job_time_segments`** (status-tap timing — works whether the site is
+  scanned via SiteLog or not, per Jamie's spec). **Non-manager viewers see only
+  their OWN visits** (case-insensitive + normId match); **admins see all + a
+  `perUser` summary** (days · visits · on-site + travel mins). Front-end:
+  project-hub.html "🛠 Jobs & site visits" card — admin gets a "Create a job"
+  mini-form (description + Start/duration + a filtered engineer tick-list,
+  field engineers first) that POSTs /project/create-job; underneath, every
+  project job (link → job-view) + visits list (grouped by day, "LIVE" chip on
+  open segments) + per-engineer summary with a "open in Job Costing →"
+  shortcut. The seeded project row on /costing/summary now automatically
+  reflects those visits' cost (labour ledger already reads
+  job_time_segments).
 - **Project ↔ Job Costing deep-link (Aug 2026):** every live/complete portal
   project is now **seeded into `/costing/summary`** even at £0 — so a brand-new
   project appears on **job-costing.html** the moment it's created, ready for the

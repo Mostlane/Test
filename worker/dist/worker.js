@@ -6949,6 +6949,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
+    // Portal-project link: set when this job was raised from a project hub, so
+    // the project can list its jobs + roll up per-engineer visits. Preserved.
+    projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -7020,6 +7023,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
+  if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -21370,6 +21374,140 @@ async function handle30(request, env, ctx, url, sess) {
     }
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
     return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/project/create-job" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {
+    }
+    let siteData = {};
+    try {
+      if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
+    } catch {
+    }
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0;
+    const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : void 0;
+    const payload = {
+      description,
+      projectId: row.id,
+      siteCode: row.number,
+      siteName: row.name,
+      storeType: "projects",
+      address: siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ") || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: siteRow && siteRow.postcode || data.postcode || "",
+      lat: data.lat != null ? data.lat : siteData.lat != null ? siteData.lat : void 0,
+      lon: data.lon != null ? data.lon : siteData.lng != null ? siteData.lng : siteData.lon != null ? siteData.lon : void 0,
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : void 0,
+      assignedEngineers: engineers,
+      scheduledAt,
+      durationMinutes,
+      // Projects default all four gates OFF (RA/sig/photo/note) — matches the
+      // add-job.html Projects rule. Explicit values from the form still win.
+      requiresRA: b.requiresRA === true,
+      requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true,
+      requiresNote: b.requiresNote === true,
+      changedBy: me
+    };
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+    }));
+    return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+  if (path === "/project/visits" && method === "GET") {
+    const row = await getRow(url.searchParams.get("id") || "");
+    if (!row) return error("Project not found", 404, env, request);
+    const dataP = parse2(row);
+    if (!canSeeProject(dataP, me, canManage)) return error("Project not found", 404, env, request);
+    const wantName = String(row.name || "").toLowerCase();
+    const wantNum = String(row.number || "").toLowerCase();
+    const all = await listJobs(env, tenantId);
+    const projectJobs = all.filter((j) => {
+      if (String(j.projectId || "") === row.id) return true;
+      const sc = String(j.siteCode || "").toLowerCase(), sn = String(j.siteName || "").toLowerCase();
+      return wantNum && (sc === wantNum || sn === wantNum) || wantName && sn === wantName;
+    });
+    const jobIds = projectJobs.map((j) => String(j.id));
+    if (!jobIds.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
+    const segs = [];
+    for (const jid of jobIds) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT id, username, job_id, job_ref, started_at, ended_at, kind FROM job_time_segments WHERE tenant_id=? AND job_id=? ORDER BY started_at"
+        ).bind(tenantId, jid).all();
+        for (const s of results || []) segs.push(s);
+      } catch {
+      }
+    }
+    const dayOf = (iso) => String(iso || "").slice(0, 10);
+    const minsOf = (a, b) => {
+      const s = Date.parse(a || ""), e = Date.parse(b || "");
+      if (!Number.isFinite(s)) return 0;
+      const end = Number.isFinite(e) ? e : Date.now();
+      return Math.max(0, Math.round((end - s) / 6e4));
+    };
+    const visitMap = /* @__PURE__ */ new Map();
+    for (const s of segs) {
+      const user = s.username || "";
+      const date = dayOf(s.started_at);
+      const key = user + "|" + date + "|" + s.job_id;
+      let v = visitMap.get(key);
+      if (!v) {
+        v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false };
+        visitMap.set(key, v);
+      }
+      const m = minsOf(s.started_at, s.ended_at);
+      if ((s.kind || "onsite") === "travel") v.travelMins += m;
+      else v.onsiteMins += m;
+      if (!s.ended_at) v.live = true;
+    }
+    const meLower = String(me).toLowerCase();
+    const normId2 = (u) => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
+    if (!canManage) {
+      const meNorm = normId2(me);
+      visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm);
+    }
+    const perUser = [];
+    if (canManage) {
+      const byU = /* @__PURE__ */ new Map();
+      for (const v of Array.from(visitMap.values())) {
+        let r = byU.get(v.user);
+        if (!r) {
+          r = { user: v.user, visits: 0, days: /* @__PURE__ */ new Set(), onsiteMins: 0, travelMins: 0 };
+          byU.set(v.user, r);
+        }
+        r.visits++;
+        r.days.add(v.date);
+        r.onsiteMins += v.onsiteMins;
+        r.travelMins += v.travelMins;
+      }
+      for (const r of byU.values()) perUser.push({ user: r.user, visits: r.visits, days: r.days.size, onsiteMins: r.onsiteMins, travelMins: r.travelMins });
+      perUser.sort((a, b) => b.onsiteMins + b.travelMins - (a.onsiteMins + a.travelMins));
+    }
+    const jobs = projectJobs.map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      description: j.description || "",
+      status: j.status || "Pending",
+      scheduledAt: j.scheduledAt || null,
+      engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [],
+      firestopping: !!j.firestopping,
+      investigateOnly: !!j.investigateOnly
+    })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
+    return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
   }
   if (path === "/project/delete" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);

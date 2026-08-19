@@ -27,6 +27,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
+import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned } from "./sla.js";
 
 const PROJ_FIN_KEY = tid => `proj_fin:${tid}`;
 
@@ -417,6 +418,145 @@ export async function handle(request, env, ctx, url, sess) {
     try { await env.JOB_FILES.delete(f.r2_key); } catch {}
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
     return json({ ok: true }, {}, env, request);
+  }
+
+  // ── Create a job for this project (multi-engineer possible) ──────────────
+  // Prefills the site from the project's own Pxxxx site, stamps job.projectId
+  // so the project can list its jobs + roll visits per engineer, and starts
+  // multi-engineer jobs (each on their own timer) via the SLA path everything
+  // else uses. Returns { ok, id, ref, status }.
+  if (path === "/project/create-job" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers)
+      ? b.engineers.map(s => String(s || "").trim()).filter(Boolean) : [];
+    // Look up the project's own Pxxxx site for its address/postcode/coords, so
+    // the created job carries all the site details engineers see (address,
+    // directions) — same as picking it in add-job.html.
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {}
+    let siteData = {}; try { if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data); } catch {}
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt))
+      ? new Date(b.scheduledAt).toISOString() : undefined;
+    const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : undefined;
+    const payload = {
+      description,
+      projectId: row.id,
+      siteCode: row.number, siteName: row.name,
+      storeType: "projects",
+      address: (siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ")) || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: (siteRow && siteRow.postcode) || data.postcode || "",
+      lat: data.lat != null ? data.lat : (siteData.lat != null ? siteData.lat : undefined),
+      lon: data.lon != null ? data.lon : (siteData.lng != null ? siteData.lng : (siteData.lon != null ? siteData.lon : undefined)),
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : undefined,
+      assignedEngineers: engineers,
+      scheduledAt, durationMinutes,
+      // Projects default all four gates OFF (RA/sig/photo/note) — matches the
+      // add-job.html Projects rule. Explicit values from the form still win.
+      requiresRA: b.requiresRA === true, requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true, requiresNote: b.requiresNote === true,
+      changedBy: me,
+    };
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
+    // notifyNewlyAssigned(before, after): brand-new job → before is null so the
+    // release reconciler above sends the assignment push.
+    return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+
+  // ── Site visits for this project (jobs + per-engineer time segments) ──────
+  // Anyone with the Projects perm can call; a non-manager sees ONLY their own
+  // visits (perUserSummary is admin-only). Visits come from job_time_segments,
+  // not SiteLog — status-tap timing works whether the site was scanned or not.
+  if (path === "/project/visits" && method === "GET") {
+    const row = await getRow(url.searchParams.get("id") || "");
+    if (!row) return error("Project not found", 404, env, request);
+    const dataP = parse(row);
+    if (!canSeeProject(dataP, me, canManage)) return error("Project not found", 404, env, request);
+
+    // Match a job to THIS project by projectId first, else by site (name /
+    // number / project's own Pxxxx site code) so legacy jobs still roll up.
+    const wantName = String(row.name || "").toLowerCase();
+    const wantNum = String(row.number || "").toLowerCase();
+    const all = await listJobs(env, tenantId);
+    const projectJobs = all.filter(j => {
+      if (String(j.projectId || "") === row.id) return true;
+      const sc = String(j.siteCode || "").toLowerCase(), sn = String(j.siteName || "").toLowerCase();
+      return (wantNum && (sc === wantNum || sn === wantNum)) || (wantName && sn === wantName);
+    });
+    const jobIds = projectJobs.map(j => String(j.id));
+    if (!jobIds.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
+
+    // Fetch time segments for those jobs. UNION of one prepared statement per id
+    // works fine (job count on a project is small) — and dodges IN(?,?…) binding.
+    const segs = [];
+    for (const jid of jobIds) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT id, username, job_id, job_ref, started_at, ended_at, kind FROM job_time_segments WHERE tenant_id=? AND job_id=? ORDER BY started_at"
+        ).bind(tenantId, jid).all();
+        for (const s of results || []) segs.push(s);
+      } catch {}
+    }
+    const dayOf = iso => String(iso || "").slice(0, 10);
+    const minsOf = (a, b) => {
+      const s = Date.parse(a || ""), e = Date.parse(b || "");
+      if (!Number.isFinite(s)) return 0;
+      const end = Number.isFinite(e) ? e : Date.now();
+      return Math.max(0, Math.round((end - s) / 60000));
+    };
+    // Group by (username, day, jobId) → one visit row per engineer per day per
+    // job. Multiple segments on the same day merge into one row.
+    const visitMap = new Map();   // key -> { date, user, jobId, jobRef, onsiteMins, travelMins, live:bool }
+    for (const s of segs) {
+      const user = s.username || "";
+      const date = dayOf(s.started_at);
+      const key = user + "|" + date + "|" + s.job_id;
+      let v = visitMap.get(key);
+      if (!v) { v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false }; visitMap.set(key, v); }
+      const m = minsOf(s.started_at, s.ended_at);
+      if ((s.kind || "onsite") === "travel") v.travelMins += m; else v.onsiteMins += m;
+      if (!s.ended_at) v.live = true;
+    }
+    const meLower = String(me).toLowerCase();
+    const normId = u => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
+    if (!canManage) {
+      // Field/engineer view: only their own visits (match on either username or
+      // the dotted form some legacy records carry).
+      const meNorm = normId(me);
+      visits = visits.filter(v => v.user.toLowerCase() === meLower || normId(v.user) === meNorm);
+    }
+    const perUser = [];
+    if (canManage) {
+      const byU = new Map();
+      for (const v of Array.from(visitMap.values())) {
+        let r = byU.get(v.user);
+        if (!r) { r = { user: v.user, visits: 0, days: new Set(), onsiteMins: 0, travelMins: 0 }; byU.set(v.user, r); }
+        r.visits++; r.days.add(v.date); r.onsiteMins += v.onsiteMins; r.travelMins += v.travelMins;
+      }
+      for (const r of byU.values()) perUser.push({ user: r.user, visits: r.visits, days: r.days.size, onsiteMins: r.onsiteMins, travelMins: r.travelMins });
+      perUser.sort((a, b) => (b.onsiteMins + b.travelMins) - (a.onsiteMins + a.travelMins));
+    }
+    // Compact job list for the page (title/status/schedule + who's on it).
+    const jobs = projectJobs.map(j => ({
+      id: j.id, ref: j.helpdeskRef || j.id, description: j.description || "",
+      status: j.status || "Pending", scheduledAt: j.scheduledAt || null,
+      engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length
+        ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []),
+      firestopping: !!j.firestopping, investigateOnly: !!j.investigateOnly,
+    })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
+    return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
   }
 
   // ── Delete a whole project (record only; the project-site is kept) ────────
