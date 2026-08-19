@@ -93,9 +93,10 @@
     }
 
     function render() {
-      g("wrap").innerHTML = summaryCard() + todoCard() + `<div id="costingCard"></div>` + docsCard() + sitelogCard() + (CAN ? requiredCard() : "");
+      g("wrap").innerHTML = summaryCard() + todoCard() + `<div id="costingCard"></div>` + docsCard() + sitelogCard() + (CAN ? visibilityCard() : "") + (CAN ? requiredCard() : "");
       wire();
       if (CAN) loadCosting();
+      if (CAN) loadVisibility();
       loadDocs();
       loadRamsRefs();
     }
@@ -173,6 +174,21 @@
       </div>`;
     }
 
+    function visibilityCard() {
+      const list = Array.isArray(P.visibleTo) ? P.visibleTo : [];
+      const mode = list.length ? "picked" : "all";
+      return `<div class="card"><h2>👥 Who can see this project</h2>
+        <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Admins (Full Access / Projects Admin) always see every project. Choose who else this shows up for.</p>
+        <div class="editrow"><label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:0;"><input type="radio" name="visMode" value="all" ${mode === "all" ? "checked" : ""}> Everyone with Projects access</label></div>
+        <div class="editrow"><label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:0;"><input type="radio" name="visMode" value="picked" ${mode === "picked" ? "checked" : ""}> Only the people I pick</label></div>
+        <div id="visPickBox" class="${mode === "picked" ? "" : "hide"}" style="margin-top:8px;">
+          <input type="search" id="visSearch" placeholder="Filter people…" style="margin-bottom:6px;">
+          <div id="visPeople" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;"><p class="muted" style="margin:6px;">Loading people…</p></div>
+        </div>
+        <div style="margin-top:10px;"><button class="btn small" id="visSave">Save</button> <span class="msg" id="visMsg" style="display:inline;"></span></div>
+      </div>`;
+    }
+
     function requiredCard() {
       const r = P.required || {};
       const DT = [["programme","Programme of works"],["rams","Risk Assessment (RAMS)"],["cpp","Construction Phase Plan"],["valuations","Valuations"],["projectDocs","Project Documents"]];
@@ -181,6 +197,30 @@
         ${DT.map(([k, l]) => `<label class="editrow"><input type="checkbox" data-req="${k}" ${r[k] ? "checked" : ""}> ${esc(l)}</label>`).join("")}
         <div style="margin-top:8px;"><button class="btn small" id="reqSave">Save</button> <span class="msg" id="reqMsg" style="display:inline;"></span></div>
       </div>`;
+    }
+
+    // ── Visibility (who can see this project) ─────────────────────────────────
+    let USERS = null, VIS_PICK = new Set();
+    async function loadVisibility() {
+      VIS_PICK = new Set((P.visibleTo || []).map(x => String(x).toLowerCase()));
+      if (!USERS) { try { const d = await authFetch("/users").then(r => r.json()); USERS = (d.Users || d.users || []).filter(u => u.Username && String(u.Status || "Active") !== "Disabled"); } catch { USERS = []; } }
+      renderVisPeople();
+    }
+    function renderVisPeople(filter) {
+      const box = document.getElementById("visPeople"); if (!box || !USERS) return;
+      const q = (filter || "").toLowerCase().trim();
+      const rows = USERS.map(u => {
+        const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
+        return { u, name };
+      })
+      .filter(r => !q || r.name.toLowerCase().includes(q) || String(r.u.Username).toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+      if (!rows.length) { box.innerHTML = `<p class="muted" style="margin:6px;">No matches.</p>`; return; }
+      box.innerHTML = rows.map(r => {
+        const key = String(r.u.Username).toLowerCase();
+        const checked = VIS_PICK.has(key) ? "checked" : "";
+        return `<label class="editrow" style="margin:0;padding:5px 2px;border-top:1px solid #f0f3f7;"><input type="checkbox" data-visu="${esc(r.u.Username)}" ${checked}> ${esc(r.name)} <span class="muted" style="font-size:12px;">${esc(r.u.Username)}</span></label>`;
+      }).join("");
     }
 
     // ── Wiring ────────────────────────────────────────────────────────────────
@@ -200,8 +240,33 @@
         g("coList").addEventListener("click", e => { const b = e.target.closest("[data-corm]"); if (b) { COMPANIES.splice(+b.dataset.corm, 1); renderCo(); } });
         g("slSave").onclick = saveSitelog;
         g("reqSave").onclick = saveRequired;
+        wireVisibility();
         wireDrop();
       }
+    }
+    function wireVisibility() {
+      const box = document.getElementById("visPeople");
+      const pickBox = document.getElementById("visPickBox");
+      if (!box || !pickBox) return;
+      document.querySelectorAll("input[name=visMode]").forEach(r => {
+        r.onchange = () => { pickBox.classList.toggle("hide", r.value !== "picked" || !r.checked); };
+      });
+      box.addEventListener("change", e => {
+        const c = e.target.closest("[data-visu]"); if (!c) return;
+        const key = String(c.dataset.visu).toLowerCase();
+        if (c.checked) VIS_PICK.add(key); else VIS_PICK.delete(key);
+      });
+      document.getElementById("visSearch").addEventListener("input", e => renderVisPeople(e.target.value));
+      document.getElementById("visSave").onclick = saveVisibility;
+    }
+    async function saveVisibility() {
+      const mode = (document.querySelector("input[name=visMode]:checked") || {}).value || "all";
+      const visibleTo = mode === "all" ? [] : Array.from(VIS_PICK);
+      const msg = document.getElementById("visMsg");
+      msg.textContent = "Saving…"; msg.className = "msg";
+      const r = await authFetch("/project/update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, visibleTo }) }).then(r => r.json());
+      if (r.ok) { P = r.project; msg.textContent = visibleTo.length ? `Saved ✓ (only ${visibleTo.length} ${visibleTo.length === 1 ? "person" : "people"} + admins see this project)` : "Saved ✓ (everyone with Projects access sees this project)"; msg.className = "msg ok"; }
+      else { msg.textContent = (r.error || "Couldn't save"); msg.className = "msg err"; }
     }
     function renderCo() { g("coList").innerHTML = COMPANIES.map((c, i) => `<span class="pill">${esc(c)} <button data-corm="${i}" style="background:none;border:none;color:var(--brand);cursor:pointer;">✕</button></span>`).join(""); }
 
