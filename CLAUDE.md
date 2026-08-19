@@ -2656,6 +2656,17 @@ files to this public repo.
   site-folder.html `.lb .x`; viewport-fit added to job-view/site-folder/
   my-documents/vehicle-maintenance/project-hub. docviewer bumped `?v=6`.
   Any NEW full-screen overlay close button needs the same treatment.
+- **NEVER put `transform`/`translateZ(0)` on a `position:fixed` bottom bar** (iOS
+  Safari, Aug 2026). The field-app tabbar (route/engineer-jobs/inbox/you `.tabbar`)
+  and the View As "Viewing as…" return bar (portal-config `mlVaBar`) carried
+  `transform:translateZ(0);-webkit-transform:translateZ(0)` as a GPU-promotion hack.
+  On iOS that promotes the fixed element to a compositor layer that is only
+  repositioned at scroll-END, so during a scroll the bar DRIFTS UP with the content
+  and appears stuck mid-page (Jamie saw the purple return bar float into the middle
+  of the jobs list while View As'ing). Chromium pins it perfectly at every scroll
+  offset (verified with scratchpad `repro-bar.cjs`) — it's an iOS-only quirk. Modern
+  iOS handles a plain `position:fixed;bottom:0` bar correctly, so the fix is to
+  REMOVE the transform. Do not re-add translateZ(0) to any fixed bar.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a
