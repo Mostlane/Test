@@ -1707,6 +1707,34 @@ function openLocationModal(code){
   };
 }
 
+/* Load a site's tenant contacts (current + previous) into an element. Chapplins
+   compliance code == the portal site number, so /chapplins/site resolves it. */
+async function loadTenantInto(el, code){
+  if(!el) return;
+  try{
+    const r = await authFetch('/chapplins/site?number=' + encodeURIComponent(code));
+    if(!r.ok){ el.textContent = 'No tenant on record.'; return; }
+    const j = await r.json();
+    const tens = (j && j.tenants) || [];
+    if(!tens.length){ el.textContent = 'No tenant on record.'; return; }
+    const one = t => {
+      const contact = [
+        t.phone ? `<a href="tel:${esc(String(t.phone).replace(/\s/g,''))}">${esc(t.phone)}</a>` : '',
+        t.email ? `<a href="mailto:${esc(String(t.email).split(';')[0])}">${esc(String(t.email).split(';')[0])}</a>` : '',
+        t.homeTel ? esc(t.homeTel) : ''
+      ].filter(Boolean).join(' · ');
+      const tag = t.current
+        ? '<span style="background:#2e7d32;color:#fff;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700;">CURRENT</span>'
+        : '<span style="background:#e7edf3;color:#5b6b7d;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700;">previous</span>';
+      return `<div style="margin-top:5px;color:#0f172a">${tag} <b>${esc(t.name||t.ref||'—')}</b>${t.ref?` <span style="color:#94a3b8;font-size:12px">[${esc(t.ref)}]</span>`:''}`
+             + (contact?`<div style="font-size:13px;margin-top:1px">${contact}</div>`:'') + `</div>`;
+    };
+    const cur = tens.filter(t=>t.current), prev = tens.filter(t=>!t.current);
+    el.innerHTML = (cur.length?cur.map(one).join(''):'<div style="color:#94a3b8">No current tenant.</div>')
+      + (prev.length?`<details style="margin-top:5px"><summary style="cursor:pointer;color:#64748b;font-size:13px">${prev.length} previous tenant${prev.length>1?'s':''}</summary>${prev.map(one).join('')}</details>`:'');
+  }catch{ el.textContent = 'No tenant on record.'; }
+}
+
 /* ============ 🔑 Access instructions + site contact (view → edit) ============ */
 function openAccessModal(code){
   const rec = allData.find(r=>pad4(r.storeCode)===pad4(code)) || {};
@@ -1727,12 +1755,14 @@ function openAccessModal(code){
       ${block('Access instructions', acc, 'Not set yet')}
       ${block('Keys required', keys, 'Not set yet')}
       ${block('Site contact', con, 'Not set yet')}
+      <div style="margin:8px 0"><div style="font-weight:700;color:#334155">👤 Tenant</div><div id="ak_tenant" style="margin-top:2px;color:#94a3b8">Loading…</div></div>
       <div class="actions">
         ${canEdit?'<button class="btn" id="ak_edit">✏️ Edit</button>':''}
         <button class="btn" style="background:#ccc;color:#000;" id="ak_close">Close</button>
       </div>`;
     host.querySelector('#ak_close').onclick=()=>modal.remove();
     const eb=host.querySelector('#ak_edit'); if(eb) eb.onclick=edit;
+    loadTenantInto(host.querySelector('#ak_tenant'), code);
   }
   function edit(){
     const m = rec.meta || {};
