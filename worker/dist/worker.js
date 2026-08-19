@@ -23040,6 +23040,149 @@ async function runHealthChecks(env, tenantId) {
   await maybeAlert(env, tid, snapshot2);
   return snapshot2;
 }
+var INTEGRITY_CHECKS = [
+  // ── Fleet ──────────────────────────────────────────────────────────────────
+  {
+    id: "assign_user",
+    area: "Fleet",
+    label: "Van assignments point at a real user",
+    sql: "SELECT COUNT(*) n FROM vehicle_assignments va WHERE va.tenant_id=? AND va.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=va.tenant_id AND lower(u.username)=lower(va.username))"
+  },
+  {
+    id: "assign_veh",
+    area: "Fleet",
+    label: "Open van assignments point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM vehicle_assignments va WHERE va.tenant_id=? AND va.end_date IS NULL AND va.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=va.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(va.reg,' ','')))"
+  },
+  {
+    id: "maint_veh",
+    area: "Fleet",
+    label: "Maintenance records point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM vehicle_maintenance m WHERE m.tenant_id=? AND m.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=m.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(m.reg,' ','')))"
+  },
+  {
+    id: "odo_veh",
+    area: "Fleet",
+    label: "Odometer readings point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM odometer_readings o WHERE o.tenant_id=? AND o.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=o.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(o.reg,' ','')))"
+  },
+  {
+    id: "fuel_veh",
+    area: "Fleet",
+    label: "Reg-tagged fuel entries point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM fuel_entries f WHERE f.tenant_id=? AND f.reg IS NOT NULL AND f.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=f.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(f.reg,' ','')))"
+  },
+  {
+    id: "user_veh",
+    area: "Fleet",
+    label: "Each user's assigned van is a real vehicle",
+    sql: "SELECT COUNT(*) n FROM users u WHERE u.tenant_id=? AND u.vehicle_assigned IS NOT NULL AND u.vehicle_assigned<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=u.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(u.vehicle_assigned,' ','')))"
+  },
+  // ── SLA / jobs ───────────────────────────────────────────────────────────────
+  {
+    id: "seg_job",
+    area: "SLA",
+    label: "Time segments point at a real job",
+    sql: "SELECT COUNT(*) n FROM job_time_segments s WHERE s.tenant_id=? AND s.job_id<>'' AND NOT EXISTS(SELECT 1 FROM sla_jobs j WHERE j.tenant_id=s.tenant_id AND j.id=s.job_id)"
+  },
+  {
+    id: "seg_user",
+    area: "SLA",
+    label: "Time segments point at a real user",
+    sql: "SELECT COUNT(*) n FROM job_time_segments s WHERE s.tenant_id=? AND s.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=s.tenant_id AND lower(u.username)=lower(s.username))"
+  },
+  {
+    id: "job_status",
+    area: "SLA",
+    label: "Every job has a status",
+    sql: "SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id=? AND (status IS NULL OR status='')"
+  },
+  {
+    id: "job_site",
+    area: "SLA",
+    label: "Jobs with a store number match a real site",
+    sql: "SELECT COUNT(*) n FROM sla_jobs j WHERE j.tenant_id=? AND j.site_code GLOB '[0-9]*' AND NOT j.site_code GLOB '*[^0-9]*' AND NOT EXISTS(SELECT 1 FROM sites s WHERE s.tenant_id=j.tenant_id AND CAST(s.site_number AS INTEGER)=CAST(j.site_code AS INTEGER))"
+  },
+  {
+    id: "seg_open",
+    area: "SLA",
+    label: "No time segment left open for days (runaway clock)",
+    sql: "SELECT COUNT(*) n FROM job_time_segments WHERE tenant_id=? AND ended_at IS NULL AND started_at < datetime('now','-2 day')"
+  },
+  // ── People ───────────────────────────────────────────────────────────────────
+  {
+    id: "push_user",
+    area: "People",
+    label: "Push subscriptions point at a real user",
+    sql: "SELECT COUNT(*) n FROM push_subscriptions p WHERE p.tenant_id=? AND p.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=p.tenant_id AND lower(u.username)=lower(p.username))"
+  },
+  {
+    id: "device_user",
+    area: "People",
+    label: "Registered devices point at a real user",
+    sql: "SELECT COUNT(*) n FROM devices d WHERE d.tenant_id=? AND d.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=d.tenant_id AND lower(u.username)=lower(d.username))"
+  },
+  {
+    id: "ts_user",
+    area: "People",
+    label: "Engineer timesheets point at a real user",
+    sql: "SELECT COUNT(*) n FROM eng_timesheets t WHERE t.tenant_id=? AND t.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=t.tenant_id AND lower(u.username)=lower(t.username))"
+  },
+  {
+    id: "active_login",
+    area: "People",
+    label: "Active users can actually log in (have a password)",
+    sql: "SELECT COUNT(*) n FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active') AND (password_hash IS NULL OR password_hash='')"
+  },
+  // ── Holidays ─────────────────────────────────────────────────────────────────
+  {
+    id: "hol_user",
+    area: "Holidays",
+    label: "Holiday bookings point at a real user",
+    sql: "SELECT COUNT(*) n FROM holidays h WHERE h.tenant_id=? AND h.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=h.tenant_id AND lower(u.username)=lower(h.username))"
+  },
+  {
+    id: "hol_range",
+    area: "Holidays",
+    label: "No holiday ends before it starts",
+    sql: "SELECT COUNT(*) n FROM holidays WHERE tenant_id=? AND end_date < start_date"
+  },
+  // ── Compliance ───────────────────────────────────────────────────────────────
+  {
+    id: "comp_site",
+    area: "Compliance",
+    label: "Linked compliance stores resolve to a real site",
+    sql: "SELECT COUNT(*) n FROM compliance_stores c WHERE c.tenant_id=? AND c.site_number IS NOT NULL AND c.site_number<>'' AND NOT EXISTS(SELECT 1 FROM sites s WHERE s.tenant_id=c.tenant_id AND s.site_number=c.site_number)"
+  },
+  {
+    id: "comp_coop_link",
+    area: "Compliance",
+    label: "Every Co-op store is linked to its portal site",
+    sql: "SELECT COUNT(*) n FROM compliance_stores WHERE tenant_id=? AND scheme='coop' AND (site_number IS NULL OR site_number='')"
+  }
+];
+async function runIntegrityChecks(env, tenantId) {
+  const tid = tenantId || 1;
+  const checks = [];
+  for (const c of INTEGRITY_CHECKS) {
+    try {
+      const row = await env.DB.prepare(c.sql).bind(tid).first();
+      const n = row && row.n || 0;
+      checks.push({ id: c.id, area: c.area, label: c.label, n, ok: n === 0 });
+    } catch (e) {
+      checks.push({ id: c.id, area: c.area, label: c.label, n: 0, ok: null, error: String(e && e.message || e).slice(0, 140) });
+    }
+  }
+  const failed = checks.filter((c) => c.ok === false);
+  const na = checks.filter((c) => c.ok === null);
+  const snapshot2 = { at: (/* @__PURE__ */ new Date()).toISOString(), total: checks.length, passed: checks.filter((c) => c.ok === true).length, failed: failed.length, na: na.length, checks };
+  try {
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "health:integrity:" + tid, JSON.stringify(snapshot2)).run();
+  } catch (e) {
+    console.error("integrity snapshot save:", e && e.message);
+  }
+  return snapshot2;
+}
 async function maybeAlert(env, tid, snapshot2) {
   try {
     const since = new Date(Date.now() - 15 * 6e4).toISOString();
@@ -23107,8 +23250,8 @@ async function handle32(request, env, ctx, url, sess) {
   await ensureTable2(env);
   const method = request.method.toUpperCase();
   if (url.pathname === "/health/run" && method === "POST") {
-    const snap = await runHealthChecks(env, tid);
-    return json3({ ok: true, snapshot: snap }, 200, env, request);
+    const [snap, integrity] = await Promise.all([runHealthChecks(env, tid), runIntegrityChecks(env, tid)]);
+    return json3({ ok: true, snapshot: snap, integrity }, 200, env, request);
   }
   if (url.pathname === "/health/events" && method === "GET") {
     const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
@@ -23121,10 +23264,15 @@ async function handle32(request, env, ctx, url, sess) {
     const now = Date.now();
     const iso24 = new Date(now - 24 * 36e5).toISOString();
     const iso7 = new Date(now - 7 * 864e5).toISOString();
-    let lastRun = null;
+    let lastRun = null, integrity = null;
     try {
       const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "health:lastrun:" + tid).first();
       if (row) lastRun = JSON.parse(row.value);
+    } catch {
+    }
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "health:integrity:" + tid).first();
+      if (row) integrity = JSON.parse(row.value);
     } catch {
     }
     const first = (sql, ...b) => env.DB.prepare(sql).bind(...b).first();
@@ -23141,6 +23289,7 @@ async function handle32(request, env, ctx, url, sess) {
       ok: true,
       generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
       lastRun,
+      integrity,
       slowMs: SLOW_MS,
       totals: { errors24h: err24 && err24.n || 0, errors7d: err7 && err7.n || 0, slow24h: slow24 && slow24.n || 0 },
       topErrors: topErr,
@@ -23333,6 +23482,7 @@ var index_default = {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
+      ctx.waitUntil(runIntegrityChecks(env, 1).catch((e) => console.error("scheduled integrity sweep:", e)));
       ctx.waitUntil(remindDailyApprovals(env).catch((e) => console.error("scheduled daily approvals:", e)));
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));

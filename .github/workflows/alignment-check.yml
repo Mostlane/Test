@@ -1,0 +1,39 @@
+name: Alignment check
+
+# Deterministic (no AI, no cost) centralisation + endpoint alignment linter. Checks
+# every portal page against the worker's real route table: are all pages pointed at
+# the ONE central API, on the same portal-config version, and calling endpoints that
+# actually exist? Opens an issue listing any drift. Report-only — never edits.
+
+on:
+  schedule:
+    - cron: "15 2 * * *"     # nightly, alongside the AI checks
+  push:
+    branches: [main]
+    paths:
+      - "**/*.html"
+      - "portal-config.js"
+      - "worker/src/index.js"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: alignment-check
+  cancel-in-progress: true
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run alignment check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALWAYS_ISSUE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: node tools/alignment-check/check.mjs

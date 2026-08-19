@@ -2459,6 +2459,35 @@ Two automatic, always-on quality checks — one for the LIVE system, one for the
   the Action passes `secrets.JOBS_INBOUND_TOKEN`, failing soft (the issue is the
   guaranteed record) if it isn't set as a GitHub secret. To WIDEN scope: relax
   `inScope`/`PROTECTED` in autofix.mjs — but keep auth/permissions/routing protected.
+- **Data-integrity catalogue** (health.js `INTEGRITY_CHECKS` + `runIntegrityChecks`,
+  hourly on the cron, gated minute<5). The "do all the areas actually JOIN UP?" layer:
+  ~20 declarative invariants, each a COUNT of VIOLATING rows against the central D1
+  (0 = healthy), written against the REAL schema. Covers Fleet (assignments/maintenance/
+  odometer/fuel/user-van → real vehicle & user), SLA (segments→jobs & users, job→site
+  by numeric store code, empty status, runaway-open segments), People (push/devices/
+  timesheets→users, active users with no password), Holidays (bookings→users, bad date
+  range), Compliance (stores→sites, Co-op link). Each scans a whole table, so ~20 rules
+  = tens of thousands of row-level checks per run. Defensive: a rule that throws (missing
+  table/column) is marked `ok:null` (n/a), never a false pass/fail. Snapshot in app_config
+  `health:integrity:<tid>`; surfaced on health.html grouped by area + folded into the
+  "N/N checks passing" headline. **ADD A CHECK** = push one `{id,area,label,sql}` (sql
+  returns column `n`, one `?` bound to tid). NB the site↔job and segment↔job checks find
+  REAL drift on the live DB (9 orphan job sites, 2 orphan segments at build time).
+- **Alignment / centralisation linter** (`tools/alignment-check/check.mjs` +
+  `.github/workflows/alignment-check.yml`, nightly + on push + on-demand). Deterministic,
+  NO AI/cost. Parses the worker's real route table from index.js, then checks EVERY portal
+  page: (1) **centralisation** — does it hardcode a legacy `*.jamie-def.workers.dev`
+  worker instead of the central MOSTLANE_API? Split into `bridged` (still works via
+  portal-config's rewrite bridge — medium) vs `retired` (an old worker being
+  decommissioned — high); (2) **config version** — is it on the majority
+  `portal-config.js?v=N` or a stale one; (3) **status-bar cap** — loads portal-config but
+  missing `viewport-fit=cover`; (4) **endpoint reality** — for central-only pages, every
+  authFetch/apiFetch path maps to a real route (legacy-host pages are skipped here since
+  their paths are relative to that host — already flagged by #1). Opens an `alignment-check`
+  issue listing drift. At build time it found 17 pages on retired workers (the old
+  Hours/Timesheet/vehicles workers) + 25 on bridged legacy hosts. This is the "all pages
+  point at the centralised database" check. Report-only — never auto-edits (legacy pages
+  are migrations, not one-line fixes).
 
 ## Personalisation
 personalise.html (🎨 tile + sidebar; theme.html is now only a redirect — the
