@@ -78,6 +78,8 @@
       <input type="search" id="q" placeholder="Search site, postcode, tenant name or ref…">
       <a class="lnk" href="chapplins-compliance.html">✔️ Compliance</a>
       <a class="lnk" href="sites.html">🗂️ Sites register</a>
+      <button class="lnk" id="geoBtn" style="display:none;cursor:pointer" onclick="geocodeAll()">📍 Look up map pins</button>
+      <span id="geoStat" class="muted" style="font-size:13px"></span>
     </div>
     <div id="list"><div class="empty muted">Loading…</div></div>
   </div>
@@ -286,6 +288,45 @@ async function refreshSite(num){
   await load();
   await loadDetail(num);
 }
+
+/* ── Look up map pins: geocode every site by postcode (postcodes.io, free) and
+   save via /update-site — which drops the site pin, mirrors the compliance 📍,
+   and pushes the SiteLog geofence. Postcode-level (units at one postcode share a
+   pin); building-level precision would use the Google Maps key server-side. */
+async function geocodeAll(){
+  if(!CAN_MANAGE) return;
+  const btn=document.getElementById('geoBtn'), stat=document.getElementById('geoStat');
+  const withPc = SITES.filter(s=>/[a-z]/i.test(s.postcode||'') && /\d/.test(s.postcode||''));
+  if(!withPc.length){ stat.textContent='No postcodes to look up.'; return; }
+  const ok = window.MLUI ? await MLUI.confirm(`Look up map pins for ${withPc.length} sites by postcode?`,{okLabel:'Look up'}) : confirm(`Look up map pins for ${withPc.length} sites?`);
+  if(!ok) return;
+  btn.disabled=true; stat.textContent='Looking up postcodes…';
+  // 1) bulk-geocode postcodes (chunks of 100)
+  const pcs=[...new Set(withPc.map(s=>String(s.postcode).trim().toUpperCase()))];
+  const coord={};
+  try{
+    for(let i=0;i<pcs.length;i+=100){
+      const r=await fetch('https://api.postcodes.io/postcodes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postcodes:pcs.slice(i,i+100)})});
+      const j=await r.json();
+      for(const row of (j.result||[])){ const res=row.result; if(res&&res.latitude!=null) coord[String(row.query).toUpperCase()]={lat:res.latitude,lng:res.longitude}; }
+    }
+  }catch(e){ stat.textContent='Postcode lookup failed (network).'; btn.disabled=false; return; }
+  // 2) save each site's pin via /update-site
+  let done=0, saved=0, failed=0;
+  for(const s of withPc){
+    const c=coord[String(s.postcode).trim().toUpperCase()];
+    done++;
+    if(!c){ failed++; continue; }
+    try{
+      const r=await authFetch('/update-site?category=chapplins',{method:'POST',body:JSON.stringify({siteNumber:s.siteNumber, client:'chapplins', lat:c.lat, lon:c.lng, lng:c.lng})});
+      if(r.ok) saved++; else failed++;
+    }catch(e){ failed++; }
+    stat.textContent=`Saving pins… ${done}/${withPc.length}`;
+  }
+  stat.textContent=`✓ ${saved} pins set${failed?` · ${failed} without a match`:''}. SiteLog geofences updated.`;
+  btn.disabled=false;
+}
+if(CAN_MANAGE) document.getElementById('geoBtn').style.display='';
 
 document.getElementById('q').addEventListener('input', render);
 load();
