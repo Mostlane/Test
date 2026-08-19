@@ -42,3 +42,33 @@ issues as you deal with them. Every run also writes a summary into the Actions r
 so you can see it ran even when nothing was found.
 
 **Findings are AI-generated — verify each one before acting.** False positives happen.
+
+## Auto-fix (cautious, no merge button)
+
+`autofix.mjs` + `.github/workflows/ai-auto-fix.yml` go one step further: once a night
+(02:30 UTC, or on demand) it asks Claude for fixes to the **worker code** changed that
+day, **applies the safe ones itself, and ships them** — no merge to press.
+
+It is deliberately cautious:
+
+- **Worker logic only** (`worker/src/**`). It never edits your HTML pages.
+- **Never touches** login, permissions, sessions, core routing, or config
+  (`index.js`, `auth.js`, `devices.js`, `users.js`, `push.js`, `health.js`,
+  `wrangler.toml`, `*.sql`). Problems there come to you as a review issue instead.
+- **Only high-confidence, small fixes** are applied, as exact one-spot replacements.
+- **Hard safety gate:** every change is syntax-checked and the worker bundle is rebuilt
+  before anything ships. If it doesn't validate, the whole batch is thrown away and an
+  issue is opened instead.
+- **You always know, and can undo:** each shipped fix opens a `✅ Auto-fixed…` issue
+  with the exact `git revert <sha>` command, and sends you a phone alert.
+
+### Optional: the phone alert
+
+The alert uses the worker's `POST /health/notify`, which is gated by your existing
+`JOBS_INBOUND_TOKEN`. To turn the phone ping on, add that token as a **GitHub secret**
+too (Settings → Secrets and variables → Actions), name `JOBS_INBOUND_TOKEN`, same value
+as in the worker. Without it, the ping is skipped and the `✅ Auto-fixed…` issue is still
+the record.
+
+To make it bolder or more careful later, edit the `inScope` / `PROTECTED` lists and the
+confidence gate in `autofix.mjs`.

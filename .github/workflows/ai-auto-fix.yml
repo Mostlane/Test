@@ -1,0 +1,55 @@
+name: AI auto-fix
+
+# CAUTIOUS auto-fixer. Once a day it asks Claude for small, high-confidence fixes
+# to the WORKER code changed in the last day, applies them, syntax-checks + rebuilds
+# the bundle, and — only if everything validates — commits and pushes to main (which
+# redeploys the worker via Cloudflare Workers Builds). No merge button to press.
+#
+# Safety: it never edits the HTML pages, and never edits login / permissions /
+# sessions / core routing / config (those come to you as review issues instead).
+# Every run that ships a fix opens a "✅ Auto-fixed…" issue with a one-line revert
+# command, and pushes you a phone alert.
+#
+# Uses the same ANTHROPIC_API_KEY secret as the review workflow. For the phone
+# alert, optionally add a secret JOBS_INBOUND_TOKEN (same value as the worker's) —
+# without it the ping is skipped and the issue is still the record.
+#
+# Runs nightly and on demand only (NOT on push) — the push made by this job uses
+# the default token, which by design does not re-trigger workflows, so there is no
+# fix→review→fix loop.
+
+on:
+  schedule:
+    - cron: "30 2 * * *"     # 02:30 UTC — after the 02:00 review run
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: ai-auto-fix
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Propose, apply, validate, ship
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PING_TOKEN: ${{ secrets.JOBS_INBOUND_TOKEN }}
+          API_BASE: https://mostlane-api.jamie-def.workers.dev
+        run: node tools/ai-code-review/autofix.mjs

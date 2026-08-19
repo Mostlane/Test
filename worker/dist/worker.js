@@ -23079,6 +23079,23 @@ async function maybeAlert(env, tid, snapshot2) {
   }
 }
 async function handle32(request, env, ctx, url, sess) {
+  if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
+    const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
+    const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    let diff = tok.length === secret.length ? 0 : 1;
+    for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+    if (diff !== 0) return json3({ ok: false, error: "bad token" }, 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const owner = env.OWNER_USERNAME || "Jamie Line";
+    await sendToUser(env, 1, owner, {
+      title: String(b.title || "Portal").slice(0, 80),
+      body: String(b.body || "").slice(0, 200),
+      url: String(b.url || "/health.html").slice(0, 200),
+      tag: "autofix"
+    });
+    return json3({ ok: true }, 200, env, request);
+  }
   if (!sess) return json3({ error: "Not authenticated" }, 401, env, request);
   const db = tenantDB(env, sess.tenantId);
   const permRows = await db.prepare(
@@ -23465,6 +23482,8 @@ var PUBLIC_ROUTES = [
   ["POST", "/auth/reset-password"],
   // Public self-registration form (login page → "Sign up").
   ["POST", "/onboard"],
+  // Owner phone-ping for the AI auto-fixer — token-gated in-handler (JOBS_INBOUND_TOKEN).
+  ["POST", "/health/notify"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"],

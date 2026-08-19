@@ -362,6 +362,8 @@ const PUBLIC_ROUTES = [
   ["POST", "/auth/reset-password"],
   // Public self-registration form (login page → "Sign up").
   ["POST", "/onboard"],
+  // Owner phone-ping for the AI auto-fixer — token-gated in-handler (JOBS_INBOUND_TOKEN).
+  ["POST", "/health/notify"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"],
