@@ -5120,6 +5120,25 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
     }
   }
+  if (subpath === "/work-areas") {
+    if (method === "GET") return jsonResponse({ areas: await getWorkAreas(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      const list = Array.isArray(body?.areas) ? body.areas : [];
+      return jsonResponse({ ok: true, areas: await setWorkAreas(env, tenantId, list) }, headers);
+    }
+  }
+  if (subpath === "/eng-skills") {
+    if (method === "GET") return jsonResponse({ skills: await getEngSkills(env, tenantId), areas: await getWorkAreas(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      return jsonResponse({ ok: true, skills: await setEngSkills(env, tenantId, body?.skills || {}) }, headers);
+    }
+  }
   if (subpath.startsWith("/firestop")) {
     const r2Bytes = async (key) => {
       try {
@@ -7020,6 +7039,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     scheduledAt,
     scheduledEnd,
     durationMinutes,
+    // Area of work (id from app_config sla_work_areas) — used to match jobs to
+    // engineers competent in that area when suggesting/auto-scheduling. Preserved.
+    workArea: body.workArea !== void 0 ? String(body.workArea || "") || null : existing?.workArea ?? null,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
     release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0 } : void 0 : existing?.release,
@@ -7093,6 +7115,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
+  if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -7863,6 +7886,86 @@ async function setCategories(env, tenantId, list) {
   const db = tenantDB(env, tenantId);
   await db.prepare(
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_categories', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
+}
+var areaSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "area-" + crypto.randomUUID().slice(0, 6);
+var DEFAULT_WORK_AREAS = [
+  "Electrical",
+  "Plumbing",
+  "Fabric / Building",
+  "Firestopping",
+  "Fire alarms",
+  "Heating / HVAC",
+  "Joinery / Carpentry",
+  "Decorating",
+  "General maintenance"
+].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
+async function getWorkAreas(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_work_areas'").bind(tenantId).first();
+  let a;
+  try {
+    a = row ? JSON.parse(row.value) : null;
+  } catch {
+    a = null;
+  }
+  if (!Array.isArray(a)) return DEFAULT_WORK_AREAS.slice();
+  const seen = /* @__PURE__ */ new Set(), out = [];
+  for (const x of a) {
+    const name = String(x && x.name || "").trim();
+    if (!name) continue;
+    let id = String(x && x.id || "").trim() || areaSlug(name);
+    if (seen.has(id)) id = areaSlug(name) + "-" + out.length;
+    seen.add(id);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String(x && x.colour || "")) ? x.colour : "#64748b";
+    out.push({ id, name, colour });
+  }
+  return out;
+}
+async function setWorkAreas(env, tenantId, list) {
+  const seen = /* @__PURE__ */ new Set(), clean = [];
+  for (const x of Array.isArray(list) ? list : []) {
+    const name = String(x && x.name || "").trim();
+    if (!name) continue;
+    let id = String(x && x.id || "").trim() || areaSlug(name);
+    if (seen.has(id)) id = areaSlug(name) + "-" + clean.length;
+    seen.add(id);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String(x && x.colour || "")) ? x.colour : "#64748b";
+    clean.push({ id, name: name.slice(0, 60), colour });
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_work_areas', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
+}
+async function getEngSkills(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_eng_skills'").bind(tenantId).first();
+  let s;
+  try {
+    s = row ? JSON.parse(row.value) : null;
+  } catch {
+    s = null;
+  }
+  return s && typeof s === "object" ? s : {};
+}
+async function setEngSkills(env, tenantId, skills) {
+  const clean = {};
+  for (const [user, areas] of Object.entries(skills || {})) {
+    if (!user || typeof areas !== "object") continue;
+    const u = normId(user);
+    const row = {};
+    for (const [areaId, stars] of Object.entries(areas)) {
+      const n = Math.round(Number(stars) || 0);
+      if (n >= 1 && n <= 5) row[String(areaId)] = n;
+    }
+    if (Object.keys(row).length) clean[u] = row;
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_eng_skills', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
 }
