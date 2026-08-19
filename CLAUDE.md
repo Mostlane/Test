@@ -940,6 +940,20 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   upload bar per section that posts to the right `?scheme=`+code. mostlane-pos is
   retired (migration is one-tap); chart, Sites, job costing and site documents all
   reference the one site by `site_number`.
+  **Auto-recognise a compliance cert in the GENERAL doc areas (Aug 2026):** a cert
+  dropped into an ordinary Site Documents area (not the Compliance tab) used to sit
+  as a plain doc the chart never saw. site-folder.html `uploadBar` now runs
+  `detectComplianceType(filename)` (keyword heuristic → fiveYear/pat/em/pv/ev/pump/
+  asbestos; word-boundary matched so Invoice/Patricia/review don't false-positive)
+  on each non-photo file; if it matches AND the user `canCompliance()`
+  (FullAccess|Compliance), a confirm-and-correct modal (`askCompliance`) pre-selects
+  the detected type (+ a scheme picker when the site has >1 compliance section) and
+  files it via **POST /compliance/file** (bump=1) instead of /sla/site/docs — so it
+  lands on the chart + rolls the due date, exactly like the Compliance-tab upload.
+  Decline → filed as an ordinary document. Never silently files (the modal is the
+  safety net against a mis-named file bumping a due date). Verified: 344/344 coop +
+  24 Fareham compliance stores are linked to a real portal site, so a filed cert
+  surfaces under the site both ways.
   **Compliance store → portal site link (Aug 2026):** `compliance_stores` gained a
   **`site_number`** column = the canonical PORTAL site a store belongs to, so its
   docs surface in that site's Site Documents. **Co-op stores ARE their portal site**
