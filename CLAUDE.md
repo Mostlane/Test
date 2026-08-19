@@ -219,10 +219,19 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
   localStorage `mlUnschedOpen`). Its week list runs **Mon–Sun** (startOfWeek is
-  Monday-based). The **🗺️ map overlay** (`openDayMap`) fetches all the engineer's
-  jobs once (`/jobs/for-engineer` no date) then a **Day/Week/Month/Year segmented
-  slider** (`#dayMapSeg`/`renderMapForRange`) pins whichever range: Day=today,
-  Week=Mon–Sun, Month=calendar month, Year=Jan 1→today; defaults to Day on open.
+  Monday-based). The **🗺️ map overlay** (`openDayMap`) fetches all the engineer's jobs once
+  (`/jobs/for-engineer` no date) then a **Day / ±7 days / ±30 days / Year**
+  segmented slider (`#dayMapSeg`/`renderMapForRange`) pins whichever range,
+  plus a "Show status" filter; defaults to Day on open.
+  **The N-day windows span BOTH directions around today and must stay that way.**
+  They were briefly made forward-only ("Next 7/30 days", 17 Aug) and that emptied
+  the map: work here is booked only a day or two ahead, so at the time "next 7
+  days" held 4 jobs where "last 7 days" held 50, and engineers reported their
+  jobs had vanished (19 Aug). Either side of today keeps upcoming work visible
+  for planning AND the recent jobs engineers actually look for. **Geocoding
+  caches SUCCESSES ONLY** (`mlPostcodeGeo_v1`) — caching a miss as null meant a
+  postcode that failed once, on a bad batch or a rate-limit, was never looked up
+  again on that device and its pin stayed missing for good.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
