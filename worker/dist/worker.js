@@ -10580,6 +10580,7 @@ async function handle10(request, env, ctx, url, sess) {
     ctx?.waitUntil(syncSiteToSiteLog(env, site, oldName));
     ctx?.waitUntil(syncSiteToCompliance(env, tenantId, site).catch(() => {
     }));
+    ctx?.waitUntil(setPOSiteActive(env, site.siteName, site.active !== false));
     const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
     return json({ success: true, site }, { headers }, env, request);
   }
@@ -10798,7 +10799,7 @@ async function syncSiteToSiteLog(env, site, oldName) {
       lng: Number.isFinite(lng) ? lng : void 0,
       category: prettify(site.client || "") || "Projects",
       oldName: oldName && String(oldName).trim() !== name ? String(oldName).trim() : void 0,
-      archived: site.active === false ? 1 : void 0
+      archived: site.active === false ? 1 : 0
     };
     return await slCall(env, "/upsert-site", body);
   } catch (e) {
@@ -10834,6 +10835,7 @@ async function syncSiteToCompliance(env, tenantId, site) {
     const rows = await env.DB.prepare(
       "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
     ).bind(tenantId, num2).all();
+    const activeVal = site.active === false ? 0 : 1;
     for (const r of rows.results || []) {
       let meta = {};
       try {
@@ -10845,11 +10847,12 @@ async function syncSiteToCompliance(env, tenantId, site) {
       if (Number.isFinite(lat)) meta.lat = lat;
       if (Number.isFinite(lng)) meta.lng = lng;
       await env.DB.prepare(
-        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
+        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, active=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
       ).bind(
         site.siteName || null,
         site.postcode || null,
         JSON.stringify(meta),
+        activeVal,
         (/* @__PURE__ */ new Date()).toISOString(),
         tenantId,
         r.scheme,
@@ -10857,6 +10860,16 @@ async function syncSiteToCompliance(env, tenantId, site) {
       ).run();
     }
   } catch {
+  }
+}
+async function setPOSiteActive(env, name, active) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    const val = active ? 1 : 0;
+    await env.PO_DB.prepare("UPDATE sites SET active = ? WHERE name = ?").bind(val, String(name).trim()).run();
+    return true;
+  } catch {
+    return false;
   }
 }
 async function nextProjectNumber(env, tenantId) {
@@ -21659,6 +21672,23 @@ async function handle30(request, env, ctx, url, sess) {
       }
     }
     await db.prepare("UPDATE projects SET name=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(name, status, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, row.id).run();
+    if (status !== row.status) {
+      const nowActive = status !== "archived";
+      try {
+        const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+        let sd = {};
+        try {
+          sd = JSON.parse(s?.data || "{}");
+        } catch {
+        }
+        sd.active = nowActive;
+        await env.DB.prepare("UPDATE sites SET active=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client='projects' AND site_number=?").bind(nowActive ? 1 : 0, JSON.stringify(sd), tenantId, row.number).run();
+        ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat: sd.lat, lon: sd.lon ?? sd.lng, client: "projects", active: nowActive }));
+        ctx?.waitUntil(syncSiteToCompliance(env, tenantId, { siteNumber: row.number, siteName: name, postcode: sd.postcode, lat: sd.lat, lon: sd.lon ?? sd.lng, active: nowActive }));
+        ctx?.waitUntil(setPOSiteActive(env, name, nowActive));
+      } catch {
+      }
+    }
     const fresh = await getRow(row.id);
     return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id)) }, {}, env, request);
   }

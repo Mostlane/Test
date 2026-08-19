@@ -29,7 +29,7 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
 import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned } from "./sla.js";
 import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
-import { syncSiteToSiteLog, removeSiteFromSiteLog } from "./sites.js";
+import { syncSiteToSiteLog, removeSiteFromSiteLog, syncSiteToCompliance, setPOSiteActive } from "./sites.js";
 
 const PROJ_FIN_KEY = tid => `proj_fin:${tid}`;
 
@@ -407,6 +407,27 @@ export async function handle(request, env, ctx, url, sess) {
     }
     await db.prepare("UPDATE projects SET name=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(name, status, JSON.stringify(data), new Date().toISOString(), db.tenantId, row.id).run();
+    // Status → active/inactive on every mirror. A project moved to 'archived'
+    // deactivates its Pxxxx site (which cascades to compliance_stores, PO_DB
+    // and the SiteLog geofence via the sites.js sync helpers). Going back to
+    // 'live'/'complete' re-activates. `complete` stays active — completed
+    // projects are still real sites you might visit for handover / defects.
+    if (status !== row.status) {
+      const nowActive = status !== "archived";
+      try {
+        // Read the current site row so the syncSiteToCompliance / SiteLog / PO
+        // calls all see the same {name, postcode, lat, lon, active} snapshot.
+        const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+        let sd = {}; try { sd = JSON.parse(s?.data || "{}"); } catch {}
+        sd.active = nowActive;
+        await env.DB.prepare("UPDATE sites SET active=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client='projects' AND site_number=?")
+          .bind(nowActive ? 1 : 0, JSON.stringify(sd), tenantId, row.number).run();
+        // Fan out to the mirrors.
+        ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat: sd.lat, lon: sd.lon ?? sd.lng, client: "projects", active: nowActive }));
+        ctx?.waitUntil(syncSiteToCompliance(env, tenantId, { siteNumber: row.number, siteName: name, postcode: sd.postcode, lat: sd.lat, lon: sd.lon ?? sd.lng, active: nowActive }));
+        ctx?.waitUntil(setPOSiteActive(env, name, nowActive));
+      } catch {}
+    }
     const fresh = await getRow(row.id);
     return json({ ok: true, project: projectView(fresh, parse(fresh), await fileCountFor(row.id)) }, {}, env, request);
   }

@@ -132,9 +132,13 @@ export async function handle(request, env, ctx, url, sess) {
     // SiteLog: create-or-update-or-rename in one call. oldName (captured before
     // saveSite) lets a rename find the existing geofence instead of orphaning it.
     ctx?.waitUntil(syncSiteToSiteLog(env, site, oldName));
-    // Mirror name / postcode edits to any linked compliance_stores rows so a
-    // Co-op / Fareham store's row on the compliance chart tracks the site.
+    // Mirror name / postcode edits AND active/archived state to any linked
+    // compliance_stores rows so a Co-op / Fareham store's row on the compliance
+    // chart tracks the site (Active↔Closed toggle mirrors the portal).
     ctx?.waitUntil(syncSiteToCompliance(env, tenantId, site).catch(() => {}));
+    // Flip the PO system's active flag in step — archived site stops appearing
+    // in the PO site picker; un-archived reappears.
+    ctx?.waitUntil(setPOSiteActive(env, site.siteName, site.active !== false));
     const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
     return json({ success: true, site }, { headers }, env, request);
   }
@@ -359,13 +363,15 @@ export async function syncSiteToSiteLog(env, site, oldName) {
     const name = String(site.siteName || "").trim();
     if (!name) return { ok: false, reason: "no-name" };
     const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    // Always send `archived` (0 or 1) so a site flipped Inactive→Active on the
+    // portal ALSO un-archives the geofence — otherwise archive is one-way.
     const body = {
       siteName: name,
       lat: Number.isFinite(lat) ? lat : undefined,
       lng: Number.isFinite(lng) ? lng : undefined,
       category: prettify(site.client || "") || "Projects",
       oldName: oldName && String(oldName).trim() !== name ? String(oldName).trim() : undefined,
-      archived: site.active === false ? 1 : undefined,
+      archived: site.active === false ? 1 : 0,
     };
     return await slCall(env, "/upsert-site", body);
   } catch (e) { return { ok: false, error: e.message }; }
@@ -392,9 +398,10 @@ async function slCall(env, path, body) {
 // Legacy wrapper kept so any lingering callers still fire the sync.
 async function pushSiteToSiteLog(env, site) { return syncSiteToSiteLog(env, site); }
 
-// Mirror portal-site edits (name / postcode / lat / lng) into any linked
-// `compliance_stores` rows so the compliance chart tracks the canonical site.
-// Best-effort — never blocks the caller.
+// Mirror portal-site edits (name / postcode / lat / lng / active-vs-archived)
+// into any linked `compliance_stores` rows so the compliance chart tracks the
+// canonical site. Archive/unarchive moves the store between the Open and
+// Closed views on the chart. Best-effort — never blocks the caller.
 export async function syncSiteToCompliance(env, tenantId, site) {
   try {
     const num = String(site.siteNumber || "").trim();
@@ -402,6 +409,7 @@ export async function syncSiteToCompliance(env, tenantId, site) {
     const rows = await env.DB.prepare(
       "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
     ).bind(tenantId, num).all();
+    const activeVal = site.active === false ? 0 : 1;
     for (const r of rows.results || []) {
       let meta = {}; try { meta = JSON.parse(r.meta || "{}") || {}; } catch {}
       const lat = site.lat != null ? Number(site.lat) : null;
@@ -409,13 +417,24 @@ export async function syncSiteToCompliance(env, tenantId, site) {
       if (Number.isFinite(lat)) meta.lat = lat;
       if (Number.isFinite(lng)) meta.lng = lng;
       await env.DB.prepare(
-        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
+        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, active=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
       ).bind(
         site.siteName || null, site.postcode || null, JSON.stringify(meta),
-        new Date().toISOString(), tenantId, r.scheme, r.code
+        activeVal, new Date().toISOString(), tenantId, r.scheme, r.code
       ).run();
     }
   } catch {}
+}
+
+// Flip a PO-system site's active flag (0/1) to match the portal. Add-only
+// otherwise — never creates a PO row that wasn't already there.
+export async function setPOSiteActive(env, name, active) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    const val = active ? 1 : 0;
+    await env.PO_DB.prepare("UPDATE sites SET active = ? WHERE name = ?").bind(val, String(name).trim()).run();
+    return true;
+  } catch { return false; }
 }
 
 async function nextProjectNumber(env, tenantId) {
