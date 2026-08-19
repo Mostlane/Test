@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=17"></script>
+  <meta charset="UTF-8">
+  <title>Mostlane • Health</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --ink:#0f172a; --muted:#64748b; --border:#e2e8f0; --panel:#ffffff; --bg:#eef1f5;
+           --ok:#16a34a; --okbg:#f0fdf4; --bad:#dc2626; --badbg:#fef2f2; --warn:#d97706; --warnbg:#fffbeb; }
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+    .shell{max-width:1000px;margin:16px auto 48px;padding:0 14px;}
+    header.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+    header.top h1{margin:0;font-size:22px;color:var(--ml-blue);display:flex;align-items:center;gap:8px;}
+    .sub{font-size:12px;color:var(--muted);}
+    .btn{border:1px solid var(--border);border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;background:#fff;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
+    .btn:hover{background:#f8fafc;}
+
+    .banner{border-radius:14px;padding:16px 18px;margin-bottom:14px;display:flex;align-items:center;gap:14px;font-size:15px;border:1px solid var(--border);}
+    .banner .big{font-size:20px;font-weight:700;}
+    .banner.ok{background:var(--okbg);border-color:#bbf7d0;color:#166534;}
+    .banner.bad{background:var(--badbg);border-color:#fecaca;color:#991b1b;}
+    .banner .ic{font-size:30px;line-height:1;}
+
+    .grid{display:grid;gap:12px;}
+    .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
+    .cards{grid-template-columns:repeat(auto-fit,minmax(320px,1fr));margin-top:12px;}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 2px 10px rgba(6,24,54,.05);}
+    .card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}
+    .kpi{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:0 2px 10px rgba(6,24,54,.05);}
+    .kpi .v{font-size:28px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums;color:var(--ml-blue);}
+    .kpi .v.warn{color:var(--warn);} .kpi .v.bad{color:var(--bad);}
+    .kpi .l{font-size:12px;color:var(--muted);margin-top:3px;}
+
+    .probe{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:14px;}
+    .probe:last-child{border-bottom:0;}
+    .probe .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;}
+    .probe .dot.ok{background:var(--ok);} .probe .dot.bad{background:var(--bad);} .probe .dot.slow{background:var(--warn);}
+    .probe .nm{font-weight:600;} .probe .de{color:var(--muted);font-size:12px;}
+    .probe .ms{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px;flex:0 0 auto;}
+
+    table.mini{width:100%;border-collapse:collapse;font-size:13px;}
+    table.mini td,table.mini th{padding:6px 4px;border-bottom:1px solid #f1f5f9;text-align:left;}
+    table.mini th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;}
+    table.mini td.r,table.mini th.r{text-align:right;font-variant-numeric:tabular-nums;}
+    .ep{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;}
+    .pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;}
+    .pill.error{background:var(--badbg);color:var(--bad);}
+    .pill.slow{background:var(--warnbg);color:var(--warn);}
+    .pill.probe{background:#eff6ff;color:var(--ml-blue);}
+    .muted{color:var(--muted);}
+    .empty{color:var(--muted);font-size:13px;padding:8px 2px;}
+    #err{display:none;background:var(--badbg);border:1px solid #fca5a5;color:#b91c1c;border-radius:12px;padding:14px;}
+    .full{grid-column:1/-1;}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div>
+      <h1>🩺 Portal health</h1>
+      <div class="sub" id="genAt">Loading…</div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" id="run">↻ Run checks now</button>
+      <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+    </div>
+  </header>
+
+  <div id="err"></div>
+  <div id="body" style="display:none;">
+    <div id="banner"></div>
+    <div class="grid kpis" id="kpis"></div>
+    <div class="grid cards" id="cards"></div>
+  </div>
+  <div id="loading" class="muted" style="padding:30px 4px;">Checking the portal…</div>
+</div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts = {}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
+  return fetch(API + path, opts);
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function ago(iso){
+  if(!iso) return "—";
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime())/1000);
+  if(s < 60) return Math.round(s)+"s ago";
+  if(s < 3600) return Math.round(s/60)+"m ago";
+  if(s < 86400) return Math.round(s/3600)+"h ago";
+  return Math.round(s/86400)+"d ago";
+}
+function fmtMs(ms){ return (ms||0) >= 1000 ? ((ms/1000).toFixed(1)+"s") : (Math.round(ms||0)+"ms"); }
+
+async function load(){
+  $("err").style.display = "none";
+  try{
+    const res = await authFetch("/health/status?t=" + Date.now());
+    if(res.status === 403) throw new Error("This dashboard is for Full-access users only.");
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    render(await res.json());
+  }catch(e){
+    $("loading").style.display = "none"; $("body").style.display = "none";
+    $("err").style.display = "block";
+    $("err").textContent = "⚠️ " + e.message + " (If you've just updated the worker, give it a moment and refresh.)";
+  }
+}
+
+function render(d){
+  $("loading").style.display = "none"; $("body").style.display = "block";
+  $("genAt").textContent = "Checked " + new Date(d.generatedAt).toLocaleString("en-GB");
+
+  const lr = d.lastRun;
+  const t = d.totals || {};
+
+  // Status banner
+  const allOk = lr ? lr.ok : true;
+  const nfail = lr ? (lr.failed||0) : 0;
+  $("banner").className = "banner " + (allOk ? "ok" : "bad");
+  $("banner").innerHTML = allOk
+    ? `<div class="ic">✅</div><div><div class="big">All systems healthy</div><div class="sub">Last probe ${lr?ago(lr.at):"—"}${t.errors24h?` · ${t.errors24h} server error${t.errors24h==1?"":"s"} in the last 24h`:""}</div></div>`
+    : `<div class="ic">⛔</div><div><div class="big">${nfail} check${nfail==1?"":"s"} failing</div><div class="sub">${esc((lr.checks||[]).filter(c=>!c.ok).map(c=>c.desc).join(", "))}</div></div>`;
+
+  // KPI row
+  $("kpis").innerHTML = [
+    kpi(nfail ? nfail : (lr?(lr.checks||[]).length:"—"), nfail ? "Checks failing" : "Checks passing", nfail?"bad":""),
+    kpi(t.errors24h||0, "Errors (24h)", (t.errors24h?"bad":"")),
+    kpi(t.errors7d||0, "Errors (7 days)", (t.errors7d?"warn":"")),
+    kpi(t.slow24h||0, "Slow responses (24h)", (t.slow24h?"warn":"")),
+  ].join("");
+
+  const cards = [];
+
+  // Probes card
+  if(lr && lr.checks){
+    cards.push(`<div class="card"><h2>Live checks — ${lr?ago(lr.at):""}</h2>${
+      lr.checks.map(c => `<div class="probe">
+        <span class="dot ${c.ok ? (c.slow?"slow":"ok") : "bad"}"></span>
+        <span><span class="nm">${esc(c.desc||c.name)}</span> <span class="de">${esc(c.detail||"")}</span></span>
+        <span class="ms">${fmtMs(c.ms)}</span>
+      </div>`).join("")
+    }</div>`);
+  }
+
+  // Top errors
+  cards.push(`<div class="card"><h2>Endpoints with errors (7 days)</h2>${
+    (d.topErrors&&d.topErrors.length) ? table(["Endpoint","","Errors","Last"],
+      d.topErrors.map(r => [`<span class="ep">${esc(r.endpoint)}</span>`, `<span class="pill error">500</span>`, {r:r.n}, {r:ago(r.last)}]))
+      : `<div class="empty">✓ No server errors logged — nothing has thrown.</div>`
+  }</div>`);
+
+  // Top slow
+  cards.push(`<div class="card"><h2>Slowest endpoints (7 days, &gt;${fmtMs(d.slowMs)})</h2>${
+    (d.topSlow&&d.topSlow.length) ? table(["Endpoint","Worst","Avg","Hits"],
+      d.topSlow.map(r => [`<span class="ep">${esc(r.endpoint)}</span>`, {r:fmtMs(r.worst)}, {r:fmtMs(r.avg)}, {r:r.n}]))
+      : `<div class="empty">✓ Nothing slower than ${fmtMs(d.slowMs)}.</div>`
+  }</div>`);
+
+  // Recent events
+  cards.push(`<div class="card full"><h2>Recent events</h2>${
+    (d.recent&&d.recent.length) ? table(["When","Type","Endpoint","Detail"],
+      d.recent.map(r => [ {r:ago(r.at)}, `<span class="pill ${esc(r.kind)}">${esc(r.kind)}</span>`,
+        `<span class="ep">${esc(r.endpoint)}</span>`, `<span class="muted">${esc((r.message||"").slice(0,80))}${r.ms?` · ${fmtMs(r.ms)}`:""}</span>` ]))
+      : `<div class="empty">✓ No errors or slow responses recorded. The watchdog is running and quiet.</div>`
+  }</div>`);
+
+  $("cards").innerHTML = cards.join("");
+}
+
+function kpi(v, l, tone){ return `<div class="kpi"><div class="v ${tone||""}">${esc(v)}</div><div class="l">${esc(l)}</div></div>`; }
+function table(head, rows){
+  const th = head.map((h,i) => `<th class="${i?'r':''}">${esc(h)}</th>`).join("");
+  const tr = rows.map(cells => `<tr>${cells.map(c => typeof c === "object" && c && "r" in c
+      ? `<td class="r">${esc(c.r)}</td>` : `<td>${c}</td>`).join("")}</tr>`).join("");
+  return `<table class="mini"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+}
+
+$("run").addEventListener("click", async () => {
+  const b = $("run"); const old = b.textContent; b.textContent = "Running…"; b.disabled = true;
+  try{ await authFetch("/health/run", { method:"POST" }); await load(); }
+  catch{ /* load() surfaces errors */ }
+  finally{ b.textContent = old; b.disabled = false; }
+});
+
+load();
+// Quietly refresh every 60s so the wall dashboard stays current.
+setInterval(load, 60000);
+</script>
+</body>
+</html>

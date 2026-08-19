@@ -852,6 +852,7 @@
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users", "DeviceAdmin"], hrefBy: [["Users", "users-admin.html"], ["DeviceAdmin", "device-admin.html"]], match: ["users-admin.html", "device-admin.html"] },
           { label: "Stats", href: "stats.html", icon: "chart", perms: ["__fullOnly"] },
+          { label: "Health", href: "health.html", icon: "chart", perms: ["__fullOnly"] },
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },

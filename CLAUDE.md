@@ -2406,6 +2406,60 @@ Failed actions flagged red. Linked from Users Admin + Device Management top bar 
 deliberately NO menu tile. 12-month retention. **To add before→after to another
 endpoint:** set the `X-Audit-Note` header on its response (see sites.js update-site).
 
+## Portal health watchdog + AI code review (Aug 2026)
+Two automatic, always-on quality checks — one for the LIVE system, one for the CODE.
+- **Live watchdog** (`routes/health.js` + `health.html`, 🩺 tile + sidebar, `__fullOnly`).
+  Folded into the existing 5-min cron — NO separate worker. Three signals:
+  (1) **Synthetic probes** every tick (`runHealthChecks`): D1 `SELECT 1`, core tables
+  (users/sla_jobs/sites/vehicles/app_config counts), R2 JOB_FILES + ASSET_BUCKET
+  `.list`, and optional PO_DB / SITELOG_DB — each timed. Latest snapshot stored in
+  app_config `health:lastrun:<tid>`. (2) **Real 500 capture**: index.js's top-level
+  `catch` calls `health.recordEvent(kind:'error')` for every server error a user hits.
+  (3) **Slow-response capture**: index.js times every request and records
+  `kind:'slow'` when a response exceeds `SLOW_MS` (2500ms; /health/* excluded so the
+  dashboard's own polling can't pollute it). Table **health_events** (self-migrating,
+  pruned ~30 days; the ONLY new D1 table). **Alerts**: `maybeAlert` pushes the owner
+  (`OWNER_USERNAME`) via `sendToUser` when a probe fails OR ≥8 errors land in 15 min —
+  deduped per problem-signature to once/hour so a 5-min cron is never a siren. Routes
+  (FullAccess): GET /health/status (dashboard: probe snapshot + error/slow aggregates
+  24h/7d + top error/slow endpoints + recent events), GET /health/events, POST
+  /health/run (manual re-probe). health.html auto-refreshes every 60s. NB the bare
+  `/health` liveness JSON in index.js is unchanged — the routes are under `/health/`.
+  **To watch a new dependency**: add a probe to `probeList()`. **To flag a new event
+  kind**: call `recordEvent` from the relevant handler.
+- **AI code review** (`.github/workflows/ai-code-review.yml` + `tools/ai-code-review/
+  review.mjs`) — a GitHub Action (NOT the worker: a worker can't read its own source).
+  Runs nightly (02:00 UTC, last-day changes), on every push to `main` (that push's
+  diff), and on-demand (Actions → Run workflow, recent|full). Dependency-free Node:
+  raw fetch to the Anthropic Messages API (model `claude-opus-5`, override with repo
+  var `ANTHROPIC_MODEL=claude-sonnet-5` to cut cost) reviews changed source (capped 30
+  files / 260 KB) for correctness bugs / efficiency / missing auth, returns JSON
+  findings, and opens a GitHub issue (label `ai-code-review`) when it finds something
+  (manual runs always open one). **Setup Jamie must do once**: add repo secret
+  `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions) — GitHub Actions
+  secrets are SEPARATE from the Cloudflare worker secrets, so the key must be added
+  there too. Fails SOFT (no key / API error → skips, exits 0, never breaks a deploy).
+  Findings are AI-generated — verify before acting.
+- **AI AUTO-FIX (cautious, no-merge)** (`.github/workflows/ai-auto-fix.yml` +
+  `tools/ai-code-review/autofix.mjs`) — nightly (02:30 UTC) + on-demand. Asks Claude
+  for fixes to the WORKER code changed in the last day, applies ONLY the ones marked
+  confidence=high + risk=small as exact single-occurrence text replacements, then a
+  HARD GATE: `node --check` every changed file + rebuild `dist` — if anything fails it
+  `git checkout`s the lot and opens an issue instead of shipping. On success it commits
+  `[ai-autofix] …`, pushes to `main` (deploys via Workers Builds) and opens a
+  "✅ Auto-fixed…" issue carrying the exact `git revert <sha>` undo, plus a phone push.
+  **SCOPE IS DELIBERATELY NARROW:** worker/src/**/*.js only (never the HTML pages), and
+  **PROTECTED files are never auto-edited** — index.js, lib/auth.js, routes/auth.js,
+  devices.js, users.js, push.js, health.js, wrangler.toml, *.sql (those still surface as
+  review issues). HTML is excluded on purpose: a push by the default GITHUB_TOKEN does
+  NOT trigger GitHub workflows (so no fix→review loop, and no Pages rebuild), but
+  Cloudflare Workers Builds is a separate webhook so worker pushes DO deploy. **Phone
+  ping** = the worker's token-gated public **POST /health/notify** (reuses
+  `JOBS_INBOUND_TOKEN`, verified in-handler, sends `sendToUser` to `OWNER_USERNAME`);
+  the Action passes `secrets.JOBS_INBOUND_TOKEN`, failing soft (the issue is the
+  guaranteed record) if it isn't set as a GitHub secret. To WIDEN scope: relax
+  `inScope`/`PROTECTED` in autofix.mjs — but keep auth/permissions/routing protected.
+
 ## Personalisation
 personalise.html (🎨 tile + sidebar; theme.html is now only a redirect — the
 old URL got cache-poisoned on phones). 8 accent themes + menu background
