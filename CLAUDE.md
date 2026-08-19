@@ -1680,6 +1680,18 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Per-project visibility (Aug 2026):** `data.visibleTo` = array of usernames.
+  Empty/missing = visible to **everyone with the Projects permission** (default).
+  Non-empty = only those usernames see it in **projects-live.html** / can open
+  its **project-hub.html**. **FullAccess|ProjectsAdmin always see every project**
+  regardless of the list (they manage). Enforced server-side in projects-api.js
+  `canSeeProject(data, me, canManage)` on both **GET /projects/list** (filter)
+  and **GET /project/get** (404 to a non-viewer, so a direct link can't leak).
+  UI: **project-new.html** step 2 has a "👥 Who can see this project?" section
+  (radio: everyone / only-picked → checkbox list of active users, searchable);
+  **project-hub.html** shows a matching **👥 Who can see this project** card
+  (admins only — same UI) saving via **POST /project/update** `{visibleTo:[…]}`.
+  Case-insensitive match; `sanitiseVisible` dedupes/caps 200.
 - **Endpoints (routes/projects-api.js, mounted /project + /projects):** GET
   /projects/list, GET /project/get, POST /project/create|update|link|todo|delete
   (manage=ProjectsAdmin|FullAccess), GET /project/docs, POST /project/doc (multipart)

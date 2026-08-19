@@ -21069,8 +21069,30 @@ function projectView(row, data, fileCount) {
     contractValue: data.contractValue ?? null,
     links: data.links || {},
     costingKey: data.links && data.links.costingKey || normName2(row.name),
+    visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
     todo: computeTodo(row, data, fileCount)
   };
+}
+function canSeeProject(data, me, canManage) {
+  if (canManage) return true;
+  const list = Array.isArray(data && data.visibleTo) ? data.visibleTo : [];
+  if (!list.length) return true;
+  const u = String(me || "").toLowerCase();
+  return list.some((v) => String(v || "").toLowerCase() === u);
+}
+function sanitiseVisible(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [], seen = /* @__PURE__ */ new Set();
+  for (const x of v) {
+    const s = String(x || "").trim();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+    if (out.length >= 200) break;
+  }
+  return out;
 }
 async function handle30(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -21117,14 +21139,16 @@ async function handle30(request, env, ctx, url, sess) {
     const counts = {};
     const { results: fc } = await db.prepare("SELECT project_id, COUNT(*) AS n FROM project_files WHERE tenant_id=? GROUP BY project_id").bind(db.tenantId).all();
     for (const r of fc || []) counts[r.project_id] = Number(r.n) || 0;
-    let items = (results || []).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
+    let items = (results || []).filter((row) => canSeeProject(parse2(row), me, canManage)).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
     if (status) items = items.filter((p) => (p.status || "live") === status);
     return json({ ok: true, projects: items }, {}, env, request);
   }
   if (path === "/project/get" && method === "GET") {
     const row = await getRow(url.searchParams.get("id") || "");
     if (!row) return error("Project not found", 404, env, request);
-    return json({ ok: true, project: projectView(row, parse2(row), await fileCountFor(row.id)), canManage }, {}, env, request);
+    const data = parse2(row);
+    if (!canSeeProject(data, me, canManage)) return error("Project not found", 404, env, request);
+    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage }, {}, env, request);
   }
   if (path === "/project/create" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);
@@ -21152,6 +21176,7 @@ async function handle30(request, env, ctx, url, sess) {
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
       links: { programmeId: "", ramsIds: [], cppRef: "", costingKey },
+      visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {}
     };
     await db.prepare(`INSERT INTO projects (id, tenant_id, number, name, site_client, site_number, status, data, created_by, created_at, updated_at)
@@ -21200,6 +21225,7 @@ async function handle30(request, env, ctx, url, sess) {
       const key = data.links && data.links.costingKey || normName2(name);
       if (data.contractValue) await setProjFinValue(db, key, data.contractValue, name);
     }
+    if (Array.isArray(b.visibleTo)) data.visibleTo = sanitiseVisible(b.visibleTo);
     await db.prepare("UPDATE projects SET name=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(name, status, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, row.id).run();
     const fresh = await getRow(row.id);
     return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id)) }, {}, env, request);
