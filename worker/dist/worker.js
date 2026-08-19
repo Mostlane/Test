@@ -18208,6 +18208,18 @@ var SCHEME_DEFAULTS = {
     emYearly: { years: 1, amberDays: 90, redDays: 30 },
     pat: { years: 1, amberDays: 90, redDays: 30 },
     pv: { years: 1, amberDays: 90, redDays: 30 }
+  },
+  // Projects scheme — one row per portal project (auto-created on
+  // /project/create). Every project appears here so a lost approval /
+  // certificate has one canonical home. Types kept short + editable per project:
+  //   elec = Electrical Certificate (EICR / EIC / Minor Works)
+  //   gas  = Gas Safety Certificate
+  //   bldg = Building Control (approval / completion)
+  // "other" (drawings + everything else) is always available on every scheme.
+  projects: {
+    elec: { years: 5, amberDays: 90, redDays: 30 },
+    gas: { years: 1, amberDays: 90, redDays: 30 },
+    bldg: { years: 10, amberDays: 90, redDays: 30 }
   }
 };
 var DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;
@@ -18315,7 +18327,11 @@ var TYPE_LABELS = {
   forecourt: "EV/Forecourt",
   pump: "Pump",
   asbestos: "Asbestos Register",
-  other: "Other"
+  other: "Other",
+  // Projects scheme
+  elec: "Electrical Certificate",
+  gas: "Gas Safety",
+  bldg: "Building Control"
 };
 function typeOptionsFor(scheme) {
   const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
@@ -18323,7 +18339,7 @@ function typeOptionsFor(scheme) {
   if (!keys.includes("other")) keys.push("other");
   return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
 }
-var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "other"];
+var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "elec", "gas", "bldg", "other"];
 function canonType(t) {
   const s = String(t || "").toLowerCase();
   const exact = KNOWN_TYPES.find((k2) => k2.toLowerCase() === s);
@@ -18338,6 +18354,9 @@ function canonType(t) {
   if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
   if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
   if (/pump|sump/.test(s)) return "pump";
+  if (/build.*control|\bbldg\b|building/.test(s)) return "bldg";
+  if (/gas\s*safe|gas/.test(s)) return "gas";
+  if (/electr|\belec\b|eic\b|minor\s*works/.test(s)) return "elec";
   const k = s.replace(/[^a-z0-9]+/g, "");
   return k ? k.slice(0, 20) : "other";
 }
@@ -18565,6 +18584,23 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true }, headers);
   }
   if (sub === "/stores" && method === "GET") {
+    if (scheme === "projects") {
+      try {
+        const { results: projRows } = await env.DB.prepare(
+          "SELECT id, number, name, status FROM projects WHERE tenant_id=? AND status IN ('live','complete')"
+        ).bind(tid).all();
+        for (const p of projRows || []) {
+          const code = String(p.number || "").trim();
+          if (!code) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+              VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, p.name || null, code, (/* @__PURE__ */ new Date()).toISOString()).run();
+        }
+      } catch {
+      }
+    }
     if (scheme !== "coop") {
       try {
         await env.DB.prepare(
@@ -21608,6 +21644,14 @@ async function handle30(request, env, ctx, url, sess) {
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
     }
     ctx?.waitUntil(pushSiteToPO(env, name));
+    try {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO compliance_stores
+          (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+          VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+      ).bind(tenantId, number, name, number, now).run();
+    } catch {
+    }
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse2(row), 0) }, {}, env, request);
   }
@@ -22090,6 +22134,20 @@ async function handle30(request, env, ctx, url, sess) {
           }
         }
       }
+    } catch {
+    }
+    try {
+      const { results: cf } = await env.DB.prepare(
+        "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?"
+      ).bind(tenantId, row.number).all();
+      for (const f of cf || []) {
+        try {
+          await env.JOB_FILES.delete(f.r2_key);
+        } catch {
+        }
+      }
+      await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+      await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
     } catch {
     }
     ctx?.waitUntil(removeSiteFromPO(env, row.name));

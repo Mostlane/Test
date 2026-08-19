@@ -336,6 +336,16 @@ export async function handle(request, env, ctx, url, sess) {
     // pick it — and once priced, its cost automatically appears against the
     // project in job-costing (costing.js matches po_log.site by name).
     ctx?.waitUntil(pushSiteToPO(env, name));
+    // Register a compliance row in the "projects" scheme so this project
+    // appears on the projects compliance chart from day one. Best-effort;
+    // self-heal on the chart's GET catches any that missed.
+    try {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO compliance_stores
+          (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+          VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+      ).bind(tenantId, number, name, number, now).run();
+    } catch {}
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse(row), 0) }, {}, env, request);
   }
@@ -810,7 +820,16 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
     } catch {}
-    // 6. Mirror stores (best-effort).
+    // 6. Compliance (projects scheme): remove the row + its files (R2 + DB).
+    try {
+      const { results: cf } = await env.DB.prepare(
+        "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?"
+      ).bind(tenantId, row.number).all();
+      for (const f of cf || []) { try { await env.JOB_FILES.delete(f.r2_key); } catch {} }
+      await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+      await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+    } catch {}
+    // 7. Mirror stores (best-effort).
     ctx?.waitUntil(removeSiteFromPO(env, row.name));
     ctx?.waitUntil(removeSiteFromSiteLog(env, row.name, { archive: true }));
     // 7. Finally the project row.

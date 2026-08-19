@@ -1694,6 +1694,28 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Projects compliance chart (Aug 2026):** a third compliance scheme
+  **`projects`** joins `coop` + `fareham`. Types: **elec** (Electrical
+  Certificate, 5y), **gas** (Gas Safety, 1y), **bldg** (Building Control, 10y),
+  plus **other** for drawings + everything else. Wired end-to-end:
+  - `SCHEME_DEFAULTS.projects` + TYPE_LABELS + KNOWN_TYPES + `canonType` all
+    recognise the new keys.
+  - `/project/create` inserts a `compliance_stores` row (`scheme='projects'`,
+    `code=<Pxxxx>`, `site_number=<Pxxxx>`) so every project appears on the
+    chart from day one.
+  - `/compliance/stores?scheme=projects` self-heals: any live/complete project
+    without a compliance row is INSERT-OR-IGNORE'd on GET, backfilling anything
+    the create hook missed.
+  - `/project/delete` cascades to compliance_files (R2 + DB) and compliance_stores.
+  - Archive cascade already carries: project.status=archived → Pxxxx site inactive
+    → syncSiteToCompliance sets `compliance_stores.active=0` → project appears in
+    the chart's Closed Sites view.
+  - **compliance-projects.html** (new page, copied from fareham.html and
+    adapted): `SCHEME='projects'`, columns Electrical/Gas/Building Control,
+    "Add site" replaced with a redirect to the Projects wizard (this chart is
+    read-only for project creation — the projects area owns it).
+  - **compliance.html** landing page now offers Projects alongside Southern
+    Co-op and Fareham.
 - **Centralisation pass (Aug 2026):** the portal now propagates edits between
   its parallel stores so one source of truth stays in step.
   - **Sites → SiteLog** is now UPSERT (not add-only): `sitelog-api.js`

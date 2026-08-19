@@ -129,6 +129,18 @@ const SCHEME_DEFAULTS = {
     pat:       { years: 1, amberDays: 90, redDays: 30 },
     pv:        { years: 1, amberDays: 90, redDays: 30 },
   },
+  // Projects scheme — one row per portal project (auto-created on
+  // /project/create). Every project appears here so a lost approval /
+  // certificate has one canonical home. Types kept short + editable per project:
+  //   elec = Electrical Certificate (EICR / EIC / Minor Works)
+  //   gas  = Gas Safety Certificate
+  //   bldg = Building Control (approval / completion)
+  // "other" (drawings + everything else) is always available on every scheme.
+  projects: {
+    elec: { years: 5, amberDays: 90, redDays: 30 },
+    gas:  { years: 1, amberDays: 90, redDays: 30 },
+    bldg: { years: 10, amberDays: 90, redDays: 30 },
+  },
 };
 const DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;   // back-compat alias
 function numOr(v, d, min, max) {
@@ -235,6 +247,8 @@ const TYPE_LABELS = {
   fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly",
   emYearly: "EM Yearly", pv: "PV", ev: "EV/Forecourt", forecourt: "EV/Forecourt",
   pump: "Pump", asbestos: "Asbestos Register", other: "Other",
+  // Projects scheme
+  elec: "Electrical Certificate", gas: "Gas Safety", bldg: "Building Control",
 };
 function typeOptionsFor(scheme) {
   const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
@@ -243,8 +257,8 @@ function typeOptionsFor(scheme) {
   return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
 }
 
-// Canonical compliance type keys across both schemes.
-const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","other"];
+// Canonical compliance type keys across every scheme (coop, fareham, projects).
+const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","elec","gas","bldg","other"];
 // Normalise any incoming type label (a chart type key, a SharePoint subfolder, or
 // a table key) to a canonical compliance type.
 function canonType(t) {
@@ -263,6 +277,10 @@ function canonType(t) {
   if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
   if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
   if (/pump|sump/.test(s)) return "pump";
+  // Projects scheme
+  if (/build.*control|\bbldg\b|building/.test(s)) return "bldg";
+  if (/gas\s*safe|gas/.test(s)) return "gas";
+  if (/electr|\belec\b|eic\b|minor\s*works/.test(s)) return "elec";
   const k = s.replace(/[^a-z0-9]+/g, "");
   return k ? k.slice(0, 20) : "other";
 }
@@ -495,6 +513,25 @@ export async function handle(request, env, ctx, url, sess) {
   // from the sites table (fallback to the cached copy), its category + due dates,
   // and which types already have a document on file (drives the 📄 links).
   if (sub === "/stores" && method === "GET") {
+    // Projects scheme: every portal project has a row on this chart. Auto-heal
+    // any missing rows (e.g. projects created before this scheme existed) by
+    // inserting them here — link stays via site_number = project.number.
+    if (scheme === "projects") {
+      try {
+        const { results: projRows } = await env.DB.prepare(
+          "SELECT id, number, name, status FROM projects WHERE tenant_id=? AND status IN ('live','complete')"
+        ).bind(tid).all();
+        for (const p of projRows || []) {
+          const code = String(p.number || "").trim();
+          if (!code) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+              VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, p.name || null, code, new Date().toISOString()).run();
+        }
+      } catch {}
+    }
     // Non-Co-op stores link to a portal site by NAME. Portal sites for other
     // schemes may be created by a separate workflow AFTER the compliance chart,
     // so self-heal on load: link any still-unlinked store whose name now matches
