@@ -2440,6 +2440,25 @@ Two automatic, always-on quality checks — one for the LIVE system, one for the
   secrets are SEPARATE from the Cloudflare worker secrets, so the key must be added
   there too. Fails SOFT (no key / API error → skips, exits 0, never breaks a deploy).
   Findings are AI-generated — verify before acting.
+- **AI AUTO-FIX (cautious, no-merge)** (`.github/workflows/ai-auto-fix.yml` +
+  `tools/ai-code-review/autofix.mjs`) — nightly (02:30 UTC) + on-demand. Asks Claude
+  for fixes to the WORKER code changed in the last day, applies ONLY the ones marked
+  confidence=high + risk=small as exact single-occurrence text replacements, then a
+  HARD GATE: `node --check` every changed file + rebuild `dist` — if anything fails it
+  `git checkout`s the lot and opens an issue instead of shipping. On success it commits
+  `[ai-autofix] …`, pushes to `main` (deploys via Workers Builds) and opens a
+  "✅ Auto-fixed…" issue carrying the exact `git revert <sha>` undo, plus a phone push.
+  **SCOPE IS DELIBERATELY NARROW:** worker/src/**/*.js only (never the HTML pages), and
+  **PROTECTED files are never auto-edited** — index.js, lib/auth.js, routes/auth.js,
+  devices.js, users.js, push.js, health.js, wrangler.toml, *.sql (those still surface as
+  review issues). HTML is excluded on purpose: a push by the default GITHUB_TOKEN does
+  NOT trigger GitHub workflows (so no fix→review loop, and no Pages rebuild), but
+  Cloudflare Workers Builds is a separate webhook so worker pushes DO deploy. **Phone
+  ping** = the worker's token-gated public **POST /health/notify** (reuses
+  `JOBS_INBOUND_TOKEN`, verified in-handler, sends `sendToUser` to `OWNER_USERNAME`);
+  the Action passes `secrets.JOBS_INBOUND_TOKEN`, failing soft (the issue is the
+  guaranteed record) if it isn't set as a GitHub secret. To WIDEN scope: relax
+  `inScope`/`PROTECTED` in autofix.mjs — but keep auth/permissions/routing protected.
 
 ## Personalisation
 personalise.html (🎨 tile + sidebar; theme.html is now only a redirect — the
