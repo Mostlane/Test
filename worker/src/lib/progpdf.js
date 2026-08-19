@@ -25,7 +25,10 @@ const LOGO_W = 76, LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);   // k
 
 const PW = 842, PH = 595;                 // A4 landscape
 const M = 26;                             // page margin
-const ROW_H = 14.5;
+const ROW_H = 14.5;                       // single-line row height
+const LINE_H = 10;                        // added height per extra wrapped line
+const ROW_PAD = 4.5;                      // so 1 line = ROW_H (10 + 4.5)
+const MAX_NAME_LINES = 5;                 // cap so one task can't fill a page
 const HDR_H = 22;                         // day-grid header band
 const COLS = [                            // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
@@ -83,6 +86,37 @@ function fitText(str, w, size) {
   return s + "...";
 }
 
+// Wrap a string into lines that each fit within width w, so task names read in
+// full (matches the wrapping Works column on screen). Breaks an over-long single
+// word by character; caps at maxLines (the overflow collapses into a "..." on the
+// last kept line) so a giant note can't consume a whole page.
+function wrapLines(str, w, size, maxLines) {
+  const words = String(str || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (let word of words) {
+    // a single word wider than the column: hard-break it
+    while (textWidth(word, size) > w && word.length > 1) {
+      if (line) { lines.push(line); line = ""; }
+      let k = word.length;
+      while (k > 1 && textWidth(word.slice(0, k), size) > w) k--;
+      lines.push(word.slice(0, k));
+      word = word.slice(k);
+    }
+    const test = line ? line + " " + word : word;
+    if (textWidth(test, size) <= w) line = test;
+    else { if (line) lines.push(line); line = word; }
+  }
+  if (line) lines.push(line);
+  if (!lines.length) lines.push("");
+  if (maxLines && lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    kept[maxLines - 1] = fitText(lines.slice(maxLines - 1).join(" "), w, size);
+    return kept;
+  }
+  return lines;
+}
+
 export function buildProgrammePdf(data, meta = {}) {
   data = data || {};
   applyWorksWidth(data.worksW);
@@ -95,6 +129,12 @@ export function buildProgrammePdf(data, meta = {}) {
     _end: endOf(t, hs),
     _c: byC[t.contractor] || null,
   }));
+  // Per-task wrapped Works lines + row height (variable), so long names read in
+  // full instead of being truncated. 3pt left inset, so usable width = w - 6.
+  for (const t of tasks) {
+    t._lines = wrapLines(t.name || "", COLS[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._h = Math.max(ROW_H, t._lines.length * LINE_H + ROW_PAD);
+  }
 
   // Overall span (clamped like the on-screen chart so one wild date can't
   // produce a thousand pages).
@@ -123,7 +163,7 @@ export function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;   // room for a wrapped (2-line) contractor legend
   const footerH = 18;
-  const rowsPerPage = Math.max(8, Math.floor((PH - M - headerBlockH - HDR_H - footerH - M) / ROW_H));
+  const bodyH = PH - M - headerBlockH - HDR_H - footerH - M;   // rows area per page
 
   // Build the page list FIRST, pairing each date window only with the tasks
   // that actually fall inside it. Previously every window was crossed with
@@ -140,22 +180,24 @@ export function buildProgrammePdf(data, meta = {}) {
   for (const win of windows) {
     const winTasks = tasks.filter(t => inWindow(t, win));
     if (!winTasks.length) continue;
-    // Spread the rows EVENLY over however many pages they need, so a window of
-    // 30 rows at 28-per-page gives 15+15 rather than 28 and an orphan 2-row page.
-    const nPages = Math.max(1, Math.ceil(winTasks.length / rowsPerPage));
-    const per = Math.ceil(winTasks.length / nPages);
-    for (let i = 0; i < winTasks.length; i += per) {
-      pages.push({ win, rows: winTasks.slice(i, i + per) });
+    // Pack rows onto pages by their (variable) heights until the next one would
+    // overflow the body area — so wrapped multi-line names never spill off page.
+    let cur = [], curH = 0;
+    for (const t of winTasks) {
+      if (cur.length && curH + t._h > bodyH) { pages.push({ win, rows: cur }); cur = []; curH = 0; }
+      cur.push(t); curH += t._h;
     }
+    if (cur.length) pages.push({ win, rows: cur });
   }
   // Nothing datable at all (e.g. a programme of blank rows) — still emit one
   // page so the export is never a zero-page file.
-  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, rowsPerPage) });
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H))) });
 
   const doc = new PdfDoc(PW, PH);
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
+  let lastGridBot = M + 100;   // bottom Y of the final page's chart (for the notes box)
 
   {   // (block kept so the page body below stays at its original indentation)
     for (const page of pages) {
@@ -208,7 +250,8 @@ export function buildProgrammePdf(data, meta = {}) {
       y = M + headerBlockH;
 
       // ── Column headers ────────────────────────────────────────────────
-      const gridTop = y, gridBot = gridTop + HDR_H + rows.length * ROW_H;
+      const pageRowsH = rows.reduce((a, t) => a + t._h, 0);   // variable row heights
+      const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
       doc.rect(M, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
       let cx = M;
       for (const col of COLS) {
@@ -221,8 +264,8 @@ export function buildProgrammePdf(data, meta = {}) {
         const d = addDays(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
-        if (we) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.937, 0.949, 0.963] });
-        if (bh) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.992, 0.953, 0.898] });
+        if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
+        if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         let label = dayW >= 15 ? true : d.getUTCDay() === 1;    // Mondays (or all when roomy)
         // A label on one of the last columns would spill past the frame.
         if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
@@ -236,11 +279,12 @@ export function buildProgrammePdf(data, meta = {}) {
       doc.line(M, gridTop + HDR_H, M + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
 
       // ── Rows ──────────────────────────────────────────────────────────
-      rows.forEach((t, ri) => {
-        const ry = gridTop + HDR_H + ri * ROW_H;
+      let ry = gridTop + HDR_H;
+      rows.forEach((t) => {
+        const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        // left cells
-        doc.text(M + 3, ry + 10.5, fitText(t.name, COLS[0].w - 8, 8.5), { size: 8.5 });
+        // Works name — wrapped onto as many lines as it needs.
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
           doc.rect(M + COLS[0].w + 2, ry + 3.5, 7, 7, { fill: col });
           doc.text(M + COLS[0].w + 12, ry + 10.5, fitText(t._c.name, COLS[1].w - 16, 8), { size: 8 });
@@ -248,7 +292,7 @@ export function buildProgrammePdf(data, meta = {}) {
         if (t._start) doc.text(M + COLS[0].w + COLS[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
         if (t._end) doc.text(M + COLS[0].w + COLS[1].w + COLS[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
         doc.text(M + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M, ry + ROW_H, M + LEFT_W + win.days * dayW, ry + ROW_H, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        doc.line(M, ry + rh, M + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
 
         // bars — runs of worked days clipped to this window
         if (t._start && t._end) {
@@ -259,28 +303,31 @@ export function buildProgrammePdf(data, meta = {}) {
             if (off >= 0 && off < win.days) marked.push(off);
           }
           if (t.milestone && marked.length) {
-            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + ROW_H / 2;
+            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + rh / 2;
             doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
           } else {
+            const bh = ROW_H - 5;
+            const barTop = ry + (rh - bh) / 2;   // centre the bar in a (possibly taller) row
             let i = 0;
             while (i < marked.length) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
-              const bh = ROW_H - 5;
               const bw = (j - i + 1) * dayW - 1;
               // Cap the corner radius by the bar's own width. At a fully
               // rounded bh/2 a one-day bar (~8pt wide, 9.5pt tall) came out as
               // a circular blob you couldn't read off the date grid.
               const r = Math.max(1, Math.min(2.5, bh / 2, bw / 2));
-              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, bw, bh, r, { fill: col });
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, barTop, bw, bh, r, { fill: col });
               i = j + 1;
             }
           }
         }
+        ry += rh;
       });
       // frame
-      doc.rect(M, gridTop, LEFT_W + win.days * dayW, HDR_H + rows.length * ROW_H, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
+      lastGridBot = gridBot;   // remember where this page's chart ends
 
       // ── Footer ────────────────────────────────────────────────────────
       const fy = PH - M + 6;
@@ -290,19 +337,44 @@ export function buildProgrammePdf(data, meta = {}) {
     }
   }
 
-  // Notes block on the last page if there's room, else its own page.
+  // Notes & items to discuss — a themed rounded box. It sits DIRECTLY BELOW the
+  // chart on the last page when there's room (so a short programme stays two
+  // pages), otherwise it starts a fresh page.
   const notes = String(data.notes || meta.notes || "").trim();
-  if (notes) {
-    doc.newPage(PW, PH);
-    doc.text(M, M + 14, "Notes", { size: 12, bold: true });
-    const words = notes.split(/\s+/);
-    let line = "", ny = M + 32;
-    for (const w of words) {
-      if (textWidth(line + " " + w, 10) > PW - 2 * M) { doc.text(M, ny, line, { size: 10 }); ny += 14; line = w; }
-      else line = line ? line + " " + w : w;
+  const items = Array.isArray(data.noteItems) ? data.noteItems.filter(n => n && String(n.text || "").trim()) : [];
+  if (notes || items.length) {
+    const plain = items.filter(n => !n.discuss), disc = items.filter(n => n.discuss);
+    const PAD = 10, LH = 12, contentW = PW - 2 * M - 2 * PAD;
+    // Pre-wrap so the box height can be measured before it's drawn.
+    const notesLines = notes ? wrapLines(notes, contentW, 10, 0) : [];
+    const plainW = plain.map(n => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    const discW = disc.map(n => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    let adv = 16;                                          // title line
+    if (notesLines.length) adv += notesLines.length * LH + 4;
+    for (const w of plainW) adv += w.length * LH;
+    if (disc.length) { adv += 6 + 16; for (const w of discW) adv += w.length * LH; }
+    const boxH = 2 * PAD + adv;
+
+    let boxTop, ownPage = false;
+    if (lastGridBot + 14 + boxH <= PH - M) {
+      boxTop = lastGridBot + 14;                           // tuck under the chart
+    } else {
+      doc.newPage(PW, PH); boxTop = M + 14; ownPage = true;
     }
-    if (line) doc.text(M, ny, line, { size: 10 });
-    doc.text(M, PH - M + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    doc.roundRect(M, boxTop, PW - 2 * M, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+
+    const x0 = M + PAD;
+    let ny = boxTop + PAD + 10;
+    const para = (lines, x) => { for (const ln of lines) { doc.text(x, ny, ln, { size: 10 }); ny += LH; } };
+    doc.text(x0, ny, "Notes", { size: 12, bold: true, color: [0.0, 0.22, 0.41] }); ny += 16;
+    if (notesLines.length) { para(notesLines, x0); ny += 4; }
+    for (const w of plainW) { doc.text(x0, ny, "•", { size: 10 }); para(w, x0 + 12); }
+    if (disc.length) {
+      ny += 6;
+      doc.text(x0, ny, "To discuss", { size: 11, bold: true, color: [0.57, 0.38, 0.04] }); ny += 16;
+      for (const w of discW) { doc.text(x0, ny, "•", { size: 10 }); para(w, x0 + 12); }
+    }
+    if (ownPage) doc.text(M, PH - M + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
 
   return doc.bytes();

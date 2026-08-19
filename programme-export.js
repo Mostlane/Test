@@ -21,6 +21,22 @@
   const fmtFull = d => p2(d.getUTCDate()) + "/" + p2(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear();
   const escXml = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+  // Rough count of wrapped lines for a string in a column `cols` chars wide —
+  // used to set an Excel row height tall enough to show a wrapped task name.
+  // Deliberately errs generous (more lines) so text is never clipped.
+  function wrapCount(str, cols) {
+    const words = String(str || "").split(/\s+/).filter(Boolean);
+    if (!words.length) return 1;
+    let lines = 1, len = 0;
+    for (const w of words) {
+      const add = (len ? 1 : 0) + w.length;
+      if (len && len + add > cols) { lines++; len = w.length; }
+      else len += add;
+      while (len > cols) { lines++; len -= cols; }
+    }
+    return Math.max(1, lines);
+  }
+
   const nonWork = (d, hs) => isWeekend(d) || hs.has(ymd(d));
   function endOf(t, hs) {
     const s = parse(t.start);
@@ -96,7 +112,7 @@
   // ── One worksheet's XML ───────────────────────────────────────────────────
   // Styles (cellXfs index): 0 default · 1 bold · 2 title · 3 grey · 4 header ·
   // 5 weekend · 6 bank holiday · 7+ one per contractor (X blocks).
-  function sheetXml(data, meta, tasks, styleOfContractor, pwHash) {
+  function sheetXml(data, meta, tasks, styleOfContractor, pwHash, wrapStyle) {
     const hs = new Set((data.holidays || []).map(String));
     let s0 = null, e0 = null;
     for (const t of tasks) {
@@ -109,6 +125,10 @@
     const days = Math.min(550, Math.round((e0 - s0) / DAY) + 1);
     const FIRST_DAY_COL = 6;              // G
     const HEADER_ROW = 9, DOW_ROW = 10, FIRST_TASK_ROW = 11;
+    // Works column width (chars) — needed up-front to size wrapped row heights.
+    const worksXlW = Math.max(12, Math.min(80, Math.round((Number(data.worksW) || 230) * (34 / 230))));
+    const nameCols = Math.max(6, Math.floor(worksXlW * 0.98));
+    const rowHt = {};                     // row index → custom height (pt)
 
     const rows = [];
     const cell = (r, c, v, style, num) => {
@@ -138,7 +158,9 @@
     tasks.forEach((t, ti) => {
       const r = FIRST_TASK_ROW - 1 + ti;
       const s = parse(t.start), e = endOf(t, hs);
-      cell(r, 0, t.name || "", 0);
+      cell(r, 0, t.name || "", wrapStyle);
+      const nLines = wrapCount(t.name || "", nameCols);
+      if (nLines > 1) rowHt[r] = Math.round(nLines * 15);   // ~15pt per line
       cell(r, 1, (byC[t.contractor] || {}).name || "", styleOfContractor[t.contractor] ? 0 : 0);
       cell(r, 2, s ? fmtFull(s) : "", 0);
       cell(r, 3, e ? fmtFull(e) : "", 0);
@@ -154,9 +176,13 @@
       }
     });
 
-    const rowXml = rows.map((cells, r) => cells ? `<row r="${r + 1}">${cells.join("")}</row>` : "").join("");
+    // Tall rows (custom height) where a wrapped task name needs more than one line.
+    const rowXml = rows.map((cells, r) => {
+      if (!cells) return "";
+      const h = rowHt[r] ? ` ht="${rowHt[r]}" customHeight="1"` : "";
+      return `<row r="${r + 1}"${h}>${cells.join("")}</row>`;
+    }).join("");
     // Works column width follows the on-screen worksW (230px ≈ 34 Excel chars).
-    const worksXlW = Math.max(12, Math.min(80, Math.round((Number(data.worksW) || 230) * (34 / 230))));
     const lastCol = colName(FIRST_DAY_COL + days - 1);
     const lastRow = FIRST_TASK_ROW + Math.max(1, tasks.length);
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -197,6 +223,9 @@
     contractors.forEach((c, i) => {
       xfs.push(`<xf numFmtId="0" fontId="0" fillId="${5 + i}" borderId="0" applyFill="1" applyAlignment="1"><alignment horizontal="center"/></xf>`);
     });
+    // Wrapping style for the Works cell so long task names wrap + read in full.
+    const wrapStyle = xfs.length;
+    xfs.push('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>');
     const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="15"/><color rgb="FF003366"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF667085"/><name val="Calibri"/></font></fonts>
@@ -206,7 +235,7 @@
 <cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
-    return { xml, styleOfContractor };
+    return { xml, styleOfContractor, wrapStyle };
   }
 
   const safeSheetName = (name, used) => {
@@ -220,7 +249,7 @@
   function build(data, meta) {
     data = data || {}; meta = meta || {};
     const contractors = (data.contractors || []).filter(c => c && c.name);
-    const { xml: styles, styleOfContractor } = stylesXml(contractors);
+    const { xml: styles, styleOfContractor, wrapStyle } = stylesXml(contractors);
     const pwHash = legacyHash("Mostlane");
     const used = new Set();
     const sheets = [{ name: safeSheetName("Programme", used), tasks: data.tasks || [] }];
@@ -262,7 +291,7 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       { name: "xl/styles.xml", text: styles },
     ];
     sheets.forEach((s, i) => {
-      files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, text: sheetXml(data, meta, s.tasks, styleOfContractor, pwHash) });
+      files.push({ name: `xl/worksheets/sheet${i + 1}.xml`, text: sheetXml(data, meta, s.tasks, styleOfContractor, pwHash, wrapStyle) });
     });
     return zip(files);
   }

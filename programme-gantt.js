@@ -210,7 +210,7 @@
       }
       body += `<tr class="mlp-row" data-row="${t.id}">
         <td class="mlp-sticky mlp-actcol">${editable
-          ? `<input class="mlp-act" data-op="name" value="${esc(t.name)}" placeholder="Works / task">`
+          ? `<textarea class="mlp-act" data-op="name" rows="1" placeholder="Works / task">${esc(t.name)}</textarea>`
           : `<span class="mlp-actro">${esc(t.name) || "&nbsp;"}</span>`}</td>
         <td class="mlp-small">${editable
           ? `<select class="mlp-sel" data-op="contractor" style="border-left:5px solid ${esc(colour)};">
@@ -258,6 +258,20 @@
     if (!editable) return;
     const rerender = () => { render(host, data, opts); if (opts.onChange) opts.onChange(data); };
     const tbody = host.querySelector("tbody");
+
+    // The task-name field is a textarea so long names WRAP and can be read in
+    // full. Auto-grow it to its content (JS fallback for browsers without
+    // field-sizing:content); size the ones already on screen after render.
+    const sizeTA = el => { el.style.height = "auto"; el.style.height = (el.scrollHeight + 2) + "px"; };
+    tbody.querySelectorAll("textarea.mlp-act").forEach(sizeTA);
+    tbody.addEventListener("input", e => {
+      if (e.target.getAttribute("data-op") !== "name") return;
+      const tr = e.target.closest("tr");
+      const t = (data.tasks || []).find(x => x.id === tr.getAttribute("data-row"));
+      if (t) t.name = e.target.value;
+      sizeTA(e.target);
+      if (opts.onChange) opts.onChange(data);
+    });
 
     tbody.addEventListener("change", e => {
       const op = e.target.getAttribute("data-op"); if (!op) return;
@@ -371,19 +385,19 @@
   .mlp-addsec button,.mlp-tools button{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:2px 7px;font:600 11.5px 'Segoe UI';cursor:pointer;color:#334155;margin-left:3px;}
   .mlp-addsec button{font-size:12.5px;padding:6px 12px;}
   .mlp-tools button.on{background:#003b82;color:#fff;border-color:#003b82;}
-  .mlp-act{width:100%;border:1px solid transparent;background:transparent;font:13px 'Segoe UI';padding:4px 6px;border-radius:6px;}
+  .mlp-act{display:block;width:100%;border:1px solid transparent;background:transparent;font:13px 'Segoe UI';padding:4px 6px;border-radius:6px;resize:none;overflow:hidden;line-height:1.3;min-height:26px;white-space:pre-wrap;word-break:break-word;field-sizing:content;}
   .mlp-act:focus{border-color:#94a3b8;background:#fff;outline:none;}
-  .mlp-actro{display:block;padding:4px 2px;font-weight:600;}
+  .mlp-actro{display:block;padding:4px 2px;font-weight:600;white-space:pre-wrap;word-break:break-word;line-height:1.3;}
   .mlp-date{border:1px solid #dbe3ec;border-radius:6px;font:11.5px 'Segoe UI';padding:3px 4px;width:118px;}
   .mlp-num{border:1px solid #dbe3ec;border-radius:6px;font:12px 'Segoe UI';padding:3px 4px;width:52px;}
   .mlp-sel{border:1px solid #dbe3ec;border-radius:6px;font:12px 'Segoe UI';padding:3px 4px;max-width:130px;}
   .mlp-tl{padding:0 !important;position:relative;}
-  .mlp-tlin{position:relative;height:30px;background:repeating-linear-gradient(90deg,transparent 0,transparent ${DAYW - 1}px,#eef2f7 ${DAYW - 1}px,#eef2f7 ${DAYW}px);}
+  .mlp-tlin{position:absolute;top:0;bottom:0;left:0;min-height:30px;background:repeating-linear-gradient(90deg,transparent 0,transparent ${DAYW - 1}px,#eef2f7 ${DAYW - 1}px,#eef2f7 ${DAYW}px);}
   .mlp-webg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#f1f4f9;}
   .mlp-bhbg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#fdf3e5;}
-  .mlp-bar{position:absolute;top:5px;height:20px;border-radius:999px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,58,.25);}
+  .mlp-bar{position:absolute;top:50%;transform:translateY(-50%);height:20px;border-radius:999px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,58,.25);}
   .mlp-bar i{display:block;position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.4);}
-  .mlp-dia{position:absolute;top:9px;width:12px;height:12px;transform:rotate(45deg);border-radius:2px;box-shadow:0 1px 2px rgba(16,32,58,.35);}
+  .mlp-dia{position:absolute;top:calc(50% - 6px);width:12px;height:12px;transform:rotate(45deg);border-radius:2px;box-shadow:0 1px 2px rgba(16,32,58,.35);}
   .mlp-today{position:absolute;top:0;bottom:0;width:2px;background:#e0344b;opacity:.65;z-index:1;}
   .mlp-wm{text-align:center;font:600 11.5px 'Segoe UI';color:#94a3b8;padding:8px 4px 2px;}
   @media print{.mlp-scroll{overflow:visible;border:none;} .mlp-tools,.mlp-addsec{display:none !important;}}

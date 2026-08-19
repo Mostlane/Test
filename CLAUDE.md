@@ -1368,6 +1368,40 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
 - Legacy `vehicles.jamie-def.workers.dev` is now import-only; the standalone
   /vehicles and /fsm sub-app folders are separate and unmigrated.
 
+## Chapplins customer (routes/chapplins.js + chapplins.html + chapplins-compliance.html — Aug 2026)
+A whole customer (Chapplins Lettings, `support@chapplins.co.uk`) built from their
+emailed **job-report PDFs**, imported via the **Microsoft 365 / Outlook connector**
+(the job emails are structured: Tenant ref/Name/Property/contacts/Job Number/Date/
+Description; extraction pass lived in the session scratchpad). Modelled as a full
+customer like Co-op/Fareham — NOT a silo:
+- **Sites**: normal `sites` register, **client=`chapplins`**, numbered **4001–4047**
+  (added to the sites.html category dropdown + `ucClient`). 47 sites (unit-level:
+  32A/32B/32C/Communal are distinct). Loaded direct to D1 (PII stays out of the
+  public repo — never commit customer data).
+- **Tenants** (the genuinely new bit): table **`site_tenants`** (self-migrating;
+  tenant_id INTEGER, keyed `id=<client>:<siteNumber>:<slug(ref|name)>`), generic
+  per-site tenant with **current + previous history** (`is_current`, first/last_seen
+  from job dates → newest = current). Route **/chapplins** (session-gated; manage =
+  FullAccess|Compliance|SLAAdmin): GET /chapplins/sites (directory + current tenant
+  + job count + compliance due), GET /chapplins/site?number= (tenants current-first +
+  jobs), POST /chapplins/tenant (upsert, makeCurrent unsets siblings), /tenant/current,
+  /tenant/delete. A real handover is captured at 4039 (BIS44→BISH01).
+- **Jobs**: the 73 job reports live in **`sla_jobs_archive`** (id `CHAP-<jobNumber>`,
+  `site_code`=numeric site number) so each site's **Previous Jobs** tab + the Job
+  Archive search surface them for free. Skeletons now; enrich later from Workever.
+- **Compliance**: new **`chapplins` scheme** in compliance.js (SCHEME_DEFAULTS/
+  SCHEME_LABELS/TYPE_LABELS/canonType) — six landlord cert types **fiveYear(EICR 5y),
+  gas(1y), epc(10y), alarms(1y), fire(1y), legionella(2y)**. compliance_stores rows
+  (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
+  a framework to populate going forward). Page **chapplins-compliance.html** = a clone
+  of fareham.html on scheme=chapplins.
+- **Nav**: 🏠 Chapplins tile on main.html (MAP `Chapplins:["Compliance","SLAAdmin"]`),
+  sidebar entry in portal-config, a card on compliance.html → chapplins-compliance.html.
+  Hub page **chapplins.html** = the directory (search, per-site current tenant +
+  contacts, previous tenants, jobs, links to site-folder + compliance).
+- **Ongoing intake (TODO/next):** new Chapplins job emails could auto-import via the
+  Outlook connector on a schedule (like the Zapier /sla/inbound path) — not built yet.
+
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job
 P&L** that unifies labour (SiteLog scans + SLA job-status taps), materials (PO
@@ -1501,6 +1535,17 @@ hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
 
 ## Job programmes (routes/programmes.js + programmes.html / programme-edit.html / programme-view.html — Aug 2026)
+**Notes & items to discuss (Aug 2026):** below the Gantt the builder has a
+"📝 Notes & items to discuss" card editing **`data.noteItems` = [{id,text,discuss}]**
+(separate from the top settings `data.notes` free-text "assumptions/exclusions"
+blob, which still exists). Each row is a note with a "To discuss" toggle;
+autosaves via the normal `queueSave` (part of `data`, no worker/route change).
+It flows read-only to **programme-view.html** (`renderNoteItems`: plain notes as
+bullets + a highlighted "❓ To discuss" box, blanks skipped, card hidden when
+empty) and to the **PDF** (`lib/progpdf.js` notes page: free-text notes, then note
+bullets, then a "To discuss" list; page-break guarded). (PDF: a themed box directly below the chart when it fits — keeps a short programme to 2 pages — else its own page.) NOT yet in the Excel
+export (progpdf/PDF is the primary locked share format). No programme-gantt.js
+change (kept off the shared renderer), so no `?v=` bump.
 Build a **programme of works** (Gantt: sections + activity rows on a weekly grid)
 in the portal and share it with clients by **revocable link — never a file**
 (Jamie's "locked hard" requirement: Excel can't be locked, so nothing leaves the
@@ -1592,7 +1637,23 @@ the handle on the Works header to widen/narrow it; the width is stored on the
 programme as **`data.worksW`** (px) and flows through to BOTH exports — progpdf.js
 `applyWorksWidth()` scales it to PDF points (230px≈168pt), and programme-export.js
 scales it to Excel char-width (230px≈34). `programme-gantt.js?v=5`,
-`programme-export.js?v=2`. **PDF truncation fix:** progpdf `fitText` now uses ASCII
+`programme-export.js?v=2`.
+**Task text WRAPS everywhere (Aug 2026) — read in full, no truncation:** the Works
+column now wraps long task names in all three outputs with VARIABLE row heights.
+On screen (`programme-gantt.js?v=6`): the editable name field is a `<textarea>`
+(auto-grows to its content; `field-sizing:content` + a JS `sizeTA` fallback), the
+read-only `.mlp-actro` wraps, `.mlp-tlin` is `position:absolute;inset:0` so the
+timeline fills the taller row, and `.mlp-bar`/`.mlp-dia` are vertically CENTRED
+(`top:50%`) so bars line up in wrapped rows. PDF (`lib/progpdf.js`): `wrapLines()`
+splits the name to the column width (hard-breaks over-long words, caps at
+MAX_NAME_LINES=5 → "..."), each task carries `_lines`+`_h`, and pagination PACKS
+rows by cumulative height (`bodyH`) instead of a fixed row count — so wrapped rows
+never overflow a page; bars centre with `barTop = ry + (rh-bh)/2`. Excel
+(`programme-export.js?v=3`): the Works cell uses a new `wrapText` cellXf and each
+task row gets a computed `ht`/`customHeight` (≈15pt × wrapped lines via
+`wrapCount`); still values-only (0 formulas, verified with openpyxl). Bump both JS
+`?v=` together when touched.
+**PDF truncation fix:** progpdf `fitText` now uses ASCII
 "..." not "…" (U+2026) — the WinAnsi PDF font has no ellipsis glyph, so it was
 rendering as "?" after every truncated task/contractor label.
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
