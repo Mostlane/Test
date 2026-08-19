@@ -2631,6 +2631,30 @@ async function engineerHome(env, tenantId, username) {
   return null;
 }
 // Full driving-time + distance matrix over an array of [lat,lng] points. Google
+// FREE real road-time matrix via OSRM (OpenStreetMap routing — no API key, no
+// cost). One request returns an N×N duration matrix. Public server allows ~100
+// coordinates per request; returns null on any problem so callers fall back.
+async function osrmTable(pts) {
+  if (!pts || pts.length < 2 || pts.length > 100) return null;
+  const coords = pts.map(p => `${p[1]},${p[0]}`).join(";");   // OSRM wants lng,lat
+  try {
+    const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`, { signal: AbortSignal.timeout(7000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.code !== "Ok" || !Array.isArray(data.durations)) return null;
+    const mins = data.durations.map(row => row.map(s => (s == null ? 0 : Math.max(1, Math.round(s / 60)))));
+    return { mins, source: "osrm" };
+  } catch { return null; }
+}
+// Free real times (OSRM) when they fit one request, else a haversine estimate.
+async function roadMatrix(pts) {
+  const osrm = await osrmTable(pts);
+  if (osrm) return osrm;
+  const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) mins[i][j] = Math.max(1, Math.round(haversineMi(pts[i], pts[j]) * 1.25 / 30 * 60));
+  return { mins, source: "estimate" };
+}
+
 // Distance Matrix (chunked to the 100-element-per-request cap); on any failure /
 // no key, a haversine × 1.25 road-factor estimate at ~30 mph.
 async function driveMatrix(env, pts) {
@@ -2888,15 +2912,15 @@ async function autoScheduleDay(env, tenantId, body) {
   // One matrix over all points: engineer homes first, then jobs. Cap Google use.
   const pts = [...engs.map(e => e.coord), ...jobs.map(j => j.coord)];
   const NE = engs.length;
+  // Free real road times (OSRM) when the whole set fits one request; otherwise a
+  // fast haversine estimate just to DECIDE the assignment — each engineer's final
+  // route is then re-timed with real OSRM below (a day is only a few stops).
   let M;
-  if (pts.length <= 45) M = await driveMatrix(env, pts);
+  if (pts.length <= 90) M = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
     M = { mins, source: "estimate" };
-    // No warning: this fast estimate only DECIDES the assignment; each engineer's
-    // final route is then recomputed with REAL Google times below (cheap — a day
-    // is only a handful of stops).
   }
   const pE = i => i, pJ = k => NE + k;
 
@@ -2994,12 +3018,12 @@ async function autoScheduleDay(env, tenantId, body) {
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter(p => p.legs.length);
 
-  // REAL driving times for the SHOWN routes. The assignment above used a fast
-  // estimate (a full Google matrix over every job would be thousands of elements),
-  // but each engineer's actual day is only a few stops — so recompute just those
-  // legs with Google. Cheap, and every time on screen becomes real.
+  // REAL driving times for the SHOWN routes, FREE via OSRM. The assignment above
+  // may have used a fast estimate (a full matrix over every job is too big for one
+  // request), but each engineer's actual day is only a few stops — so re-time just
+  // those legs with OSRM. No API key, no cost, and every time on screen is real.
   let matrixSource = M.source;
-  if (M.source !== "google" && env.GOOGLE_MAPS_KEY && plan.length) {
+  if (M.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map(j => [j.id, j.coord]));
     const engCoord = new Map(engs.map(e => [e.username, e.coord]));
     let allReal = true;
@@ -3007,8 +3031,8 @@ async function autoScheduleDay(env, tenantId, body) {
       const home = engCoord.get(p.username);
       const pts2 = [home, ...p.legs.map(l => coordById.get(l.jobId))];
       if (!home || pts2.some(c => !c) || pts2.length < 2) { allReal = false; continue; }
-      const dm = await driveMatrix(env, pts2);       // small: home + this day's stops
-      if (dm.source !== "google") { allReal = false; continue; }
+      const dm = await roadMatrix(pts2);             // small: home + this day's stops
+      if (dm.source !== "osrm") { allReal = false; continue; }
       let t = 0, drive = 0, site = 0, lunchDone = lunch === 0, cur = 0;
       p.legs.forEach((l, idx) => {
         const to = idx + 1, dMin = dm.mins[cur][to]; drive += dMin;
@@ -3020,10 +3044,8 @@ async function autoScheduleDay(env, tenantId, body) {
       const homeMin = dm.mins[cur][0]; drive += homeMin;
       p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
     }
-    matrixSource = allReal ? "google" : "estimate";
-    if (!allReal) warnings.push("Some routes fell back to estimated driving times (Google didn't answer for every one).");
-  } else if (M.source !== "google" && !env.GOOGLE_MAPS_KEY) {
-    warnings.push("Live driving times need a Google Maps key on the server — showing estimates.");
+    matrixSource = allReal ? "osrm" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (the free routing service didn't answer for every one — try again in a moment).");
   }
 
   // Plain-English "why these jobs" per engineer + a shared-area explainer.
