@@ -86,6 +86,7 @@
       <div id="gantt"></div>
     </div>
     <div class="card hide" id="notesCard"><b style="color:var(--navy);">Notes</b><div class="muted" id="pNotes" style="white-space:pre-line;font-size:13px;margin-top:4px;"></div></div>
+    <div class="card hide" id="noteItemsCard"><b style="color:var(--navy);">Notes &amp; items to discuss</b><div id="pNoteItems" style="margin-top:6px;"></div></div>
   </div>
 
   <!-- Send suggestions -->
@@ -109,6 +110,20 @@
   const API = "https://mostlane-api.jamie-def.workers.dev";
   const g = id => document.getElementById(id);
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  // Notes & items to discuss (read-only): plain notes as bullets, flagged ones
+  // highlighted under "To discuss".
+  function renderNoteItems(items){
+    const list = Array.isArray(items) ? items.filter(n => n && String(n.text||"").trim()) : [];
+    if(!list.length) return;
+    const notes = list.filter(n => !n.discuss), disc = list.filter(n => n.discuss);
+    let html = "";
+    if(notes.length) html += '<ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#334155;">' + notes.map(n => '<li style="margin:2px 0;">'+esc(n.text)+'</li>').join("") + '</ul>';
+    if(disc.length) html += '<div style="margin-top:'+(notes.length?"10px":"4px")+';background:#fff8ec;border:1px solid #f6d488;border-radius:8px;padding:8px 10px;">'
+      + '<div style="font-weight:700;color:#92600a;font-size:12px;margin-bottom:4px;">❓ To discuss</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:13px;color:#5b4708;">' + disc.map(n => '<li style="margin:2px 0;">'+esc(n.text)+'</li>').join("") + '</ul></div>';
+    g("pNoteItems").innerHTML = html;
+    g("noteItemsCard").classList.remove("hide");
+  }
   const TOKEN = new URLSearchParams(location.search).get("t") || "";
   let CODE = "", VIEW = null, ORIG = null, COPY = null, suggesting = false;
 
@@ -131,6 +146,7 @@
     const when = d.issuedAt ? new Date(d.issuedAt).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}) : "";
     g("pRev").textContent = "Rev "+d.rev+(when?" · issued "+when:"");
     if((d.data||{}).notes){ g("notesCard").classList.remove("hide"); g("pNotes").textContent = d.data.notes; }
+    renderNoteItems((d.data||{}).noteItems);
     if(d.allowSuggest) g("suggestBtn").classList.remove("hide");
     g("pdfBtn").classList.remove("hide"); g("xlsBtn").classList.remove("hide");
     draw(ORIG,false);

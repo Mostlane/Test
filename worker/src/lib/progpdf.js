@@ -290,18 +290,37 @@ export function buildProgrammePdf(data, meta = {}) {
     }
   }
 
-  // Notes block on the last page if there's room, else its own page.
+  // Notes & items to discuss — its own page. Free-text notes, then plain note
+  // bullets, then a highlighted "To discuss" list.
   const notes = String(data.notes || meta.notes || "").trim();
-  if (notes) {
+  const items = Array.isArray(data.noteItems) ? data.noteItems.filter(n => n && String(n.text || "").trim()) : [];
+  if (notes || items.length) {
     doc.newPage(PW, PH);
-    doc.text(M, M + 14, "Notes", { size: 12, bold: true });
-    const words = notes.split(/\s+/);
-    let line = "", ny = M + 32;
-    for (const w of words) {
-      if (textWidth(line + " " + w, 10) > PW - 2 * M) { doc.text(M, ny, line, { size: 10 }); ny += 14; line = w; }
-      else line = line ? line + " " + w : w;
+    let ny = M + 14;
+    const RIGHT = PW - M;
+    const guard = () => { if (ny > PH - M - 6) { doc.newPage(PW, PH); ny = M + 14; } };
+    const para = (text, x, size, opts) => {
+      opts = opts || {};
+      const words = String(text).split(/\s+/);
+      let line = "";
+      for (const w of words) {
+        const test = line ? line + " " + w : w;
+        if (textWidth(test, size) > RIGHT - x) { guard(); doc.text(x, ny, line, { size, ...opts }); ny += size + 4; line = w; }
+        else line = test;
+      }
+      if (line) { guard(); doc.text(x, ny, line, { size, ...opts }); ny += size + 4; }
+    };
+    const bullet = (text, size) => { guard(); doc.text(M, ny, "•", { size }); para(text, M + 12, size); };
+
+    doc.text(M, ny, "Notes", { size: 12, bold: true }); ny += 18;
+    if (notes) { para(notes, M, 10); ny += 6; }
+    const plain = items.filter(n => !n.discuss), disc = items.filter(n => n.discuss);
+    for (const n of plain) bullet(String(n.text).trim(), 10);
+    if (disc.length) {
+      ny += 8; guard();
+      doc.text(M, ny, "To discuss", { size: 11, bold: true }); ny += 16;
+      for (const n of disc) bullet(String(n.text).trim(), 10);
     }
-    if (line) doc.text(M, ny, line, { size: 10 });
     doc.text(M, PH - M + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
 

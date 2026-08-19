@@ -1480,6 +1480,17 @@ hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
 
 ## Job programmes (routes/programmes.js + programmes.html / programme-edit.html / programme-view.html — Aug 2026)
+**Notes & items to discuss (Aug 2026):** below the Gantt the builder has a
+"📝 Notes & items to discuss" card editing **`data.noteItems` = [{id,text,discuss}]**
+(separate from the top settings `data.notes` free-text "assumptions/exclusions"
+blob, which still exists). Each row is a note with a "To discuss" toggle;
+autosaves via the normal `queueSave` (part of `data`, no worker/route change).
+It flows read-only to **programme-view.html** (`renderNoteItems`: plain notes as
+bullets + a highlighted "❓ To discuss" box, blanks skipped, card hidden when
+empty) and to the **PDF** (`lib/progpdf.js` notes page: free-text notes, then note
+bullets, then a "To discuss" list; page-break guarded). NOT yet in the Excel
+export (progpdf/PDF is the primary locked share format). No programme-gantt.js
+change (kept off the shared renderer), so no `?v=` bump.
 Build a **programme of works** (Gantt: sections + activity rows on a weekly grid)
 in the portal and share it with clients by **revocable link — never a file**
 (Jamie's "locked hard" requirement: Excel can't be locked, so nothing leaves the

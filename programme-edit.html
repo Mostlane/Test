@@ -107,6 +107,13 @@
       <div id="gantt"></div>
     </div>
 
+    <div class="card" id="notesCard">
+      <h3 style="margin:0 0 4px;color:var(--navy);font-size:16px;">📝 Notes &amp; items to discuss</h3>
+      <p class="muted" style="margin:0 0 8px;">Add notes for this programme and flag any points that need discussing. These show at the bottom of the client's shared copy and the PDF; flagged points are highlighted as <b>“To discuss”</b>.</p>
+      <div id="noteRows"></div>
+      <button type="button" class="btn ghost small" id="addNoteBtn" style="margin-top:6px;">＋ Add note</button>
+    </div>
+
     <div class="card" id="suggCard">
       <h3 style="margin:0 0 4px;color:var(--navy);font-size:16px;" id="suggestions">💬 Client suggestions</h3>
       <p class="muted" style="margin:0 0 6px;">When a client suggests changes on a share link, their copy lands here. Your issued programme is never altered by a suggestion.</p>
@@ -241,7 +248,47 @@
     g("fNotes").value = DATA.notes||"";
     g("pageTitle").textContent = DATA.title ? DATA.title : "Programme builder";
     renderContractors();
+    renderNotes();
   }
+
+  // ── Notes & items to discuss (bottom of the programme) ──────────────────────
+  // Structured list DATA.noteItems = [{id,text,discuss}]; flows to the client
+  // share page + PDF. Plain notes are bullets; "To discuss" ones are highlighted.
+  function ensureNotes(){ if(!Array.isArray(DATA.noteItems)) DATA.noteItems = []; }
+  function renderNotes(){
+    ensureNotes();
+    const host = g("noteRows");
+    if(!DATA.noteItems.length){ host.innerHTML = '<div class="muted" style="font-size:13px;">No notes yet — add points to share with the client or flag for discussion.</div>'; return; }
+    host.innerHTML = DATA.noteItems.map(n => `
+      <div class="note-row" data-id="${esc(n.id)}" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;${n.discuss?"background:#fff8ec;border:1px solid #f6d488;border-radius:8px;padding:6px;":""}">
+        <textarea class="note-text" rows="2" placeholder="Type a note…" style="flex:1;min-width:0;">${esc(n.text||"")}</textarea>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;padding-top:6px;color:#92600a;font-weight:600;"><input type="checkbox" class="note-disc" ${n.discuss?"checked":""}> To discuss</label>
+        <button type="button" class="btn ghost small note-del" title="Remove this note" style="flex:none;">✕</button>
+      </div>`).join("");
+  }
+  g("noteRows").addEventListener("input", e => {
+    const row = e.target.closest(".note-row"); if(!row) return;
+    const n = DATA.noteItems.find(x => x.id === row.getAttribute("data-id")); if(!n) return;
+    if(e.target.classList.contains("note-text")){ n.text = e.target.value; queueSave(); }
+  });
+  g("noteRows").addEventListener("change", e => {
+    const row = e.target.closest(".note-row"); if(!row) return;
+    const n = DATA.noteItems.find(x => x.id === row.getAttribute("data-id")); if(!n) return;
+    if(e.target.classList.contains("note-disc")){ n.discuss = e.target.checked; renderNotes(); queueSave(); }
+  });
+  g("noteRows").addEventListener("click", e => {
+    if(!e.target.classList.contains("note-del")) return;
+    const row = e.target.closest(".note-row"); if(!row) return;
+    DATA.noteItems = DATA.noteItems.filter(x => x.id !== row.getAttribute("data-id"));
+    renderNotes(); queueSave();
+  });
+  g("addNoteBtn").addEventListener("click", () => {
+    ensureNotes();
+    DATA.noteItems.push({ id: MLProg.uid(), text:"", discuss:false });
+    renderNotes();
+    const areas = g("noteRows").querySelectorAll(".note-text"); if(areas.length) areas[areas.length-1].focus();
+    queueSave();
+  });
 
   // ── Contractors legend (name + colour per contractor; bars follow) ────────
   let FILTER = "";                       // "" = all, else contractor id
