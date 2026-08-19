@@ -228,10 +228,22 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the map: work here is booked only a day or two ahead, so at the time "next 7
   days" held 4 jobs where "last 7 days" held 50, and engineers reported their
   jobs had vanished (19 Aug). Either side of today keeps upcoming work visible
-  for planning AND the recent jobs engineers actually look for. **Geocoding
-  caches SUCCESSES ONLY** (`mlPostcodeGeo_v1`) — caching a miss as null meant a
-  postcode that failed once, on a bad batch or a rate-limit, was never looked up
-  again on that device and its pin stayed missing for good.
+  for planning AND the recent jobs engineers actually look for. An **All** segment sits
+  after Year: it drops the date filter entirely and is the ONLY view that can show
+  jobs **assigned but not booked in** (no `scheduledAt`, so they fall inside no
+  window) — those pin with a dashed outline and a "📌 Not booked in yet" popup.
+  Every range's status line now names what ISN'T pinned ("· 2 with no usable
+  postcode · 3 not booked in (tap All)") so a missing job is never a mystery.
+  **Geocoding caches SUCCESSES ONLY** (`mlPostcodeGeo_v1`) — caching a miss as
+  null meant a postcode that failed once, on a bad batch or a rate-limit, was
+  never looked up again on that device and its pin stayed missing for good.
+  **That cache is SHARED by engineer-jobs.html, route.html AND
+  sla-scheduler.html** — fixing only one page is not a fix, because the other two
+  re-poison it on the next visit (this is what made the pins come back and vanish
+  again). All three now: strip any nulls left by an older build when they load the
+  cache, keep failures in an in-memory `geoMiss` for the page load only, and
+  persist arrays exclusively. sla-scheduler's "postcode not recognised"
+  diagnostic reads `geoMiss`, not a stored null.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256

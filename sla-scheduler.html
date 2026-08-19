@@ -1105,7 +1105,13 @@ const mapFilter = new Set(MAP_STATUSES);
 let siteMeta = null;                 // "0123" -> { pc, lat, lon }
 const GEO_KEY = "mlPostcodeGeo_v1";
 let geoCache = {};
-try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+let geoMiss = {};   // postcodes that failed THIS page load — never persisted
+try{
+  const raw = JSON.parse(localStorage.getItem(GEO_KEY)) || {};
+  // Successes only. A miss cached as null (older builds) meant a postcode that
+  // failed once was never retried on that device, and its pin stayed missing.
+  Object.keys(raw).forEach(k => { if(Array.isArray(raw[k])) geoCache[k] = raw[k]; });
+}catch{ geoCache = {}; }
 
 async function loadSiteMeta(){
   if(siteMeta) return;
@@ -1147,7 +1153,7 @@ function postcodeFor(job){
 let geoFetchError = false;
 async function geocodePostcodes(pcs){
   geoFetchError = false;
-  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  const todo = [...new Set(pcs.filter(pc => pc && !Array.isArray(geoCache[pc]) && !geoMiss[pc]))];
   for(let i = 0; i < todo.length; i += 100){
     const batch = todo.slice(i, i + 100);
     try{
@@ -1158,8 +1164,9 @@ async function geocodePostcodes(pcs){
       });
       const data = await res.json();
       (data.result || []).forEach(r => {
-        geoCache[(r.query || "").toUpperCase()] =
-          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+        const q = (r.query || "").toUpperCase();
+        if(r.result && isFinite(r.result.latitude)) geoCache[q] = [r.result.latitude, r.result.longitude];
+        else geoMiss[q] = 1;
       });
     }catch(e){ geoFetchError = true; }
   }
@@ -1242,7 +1249,7 @@ function plotJobs(){
       const pc = postcodeFor(job);
       problems.push(`${job.ref || job.id}: ` + (
         !pc ? "no postcode on the job, its site, or its address"
-            : (geoCache[pc] === null ? `postcode "${pc}" not recognised`
+            : (geoMiss[pc] ? `postcode "${pc}" not recognised`
                                      : `postcode "${pc}" not looked up yet${geoFetchError ? " (postcode lookup unreachable)" : ""}`)
       ));
       return;
