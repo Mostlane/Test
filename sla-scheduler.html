@@ -1602,7 +1602,15 @@ function renderAutoPreview(d){
     </details>`);
   });
   if(d.unassigned && d.unassigned.length){
-    parts.push(`<div style="font-size:12px;color:#b45309;margin-bottom:6px;">⚠ ${d.unassigned.length} couldn't be placed (day full or no location): ${d.unassigned.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${d.unassigned.length>6?"…":""}</div>`);
+    const held = d.unassigned.filter(u => /planned trip/.test(u.reason||""));
+    const other = d.unassigned.filter(u => !/planned trip/.test(u.reason||""));
+    if(held.length){
+      const urgent = held.filter(u => /1/.test(u.priority||"")).length;
+      parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:6px;">🧭 <b>${held.length} held for a planned trip</b> — too far to be efficient today${urgent?` · <b style="color:#b91c1c;">⚠ ${urgent} Priority 1</b>`:""}: ${held.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${held.length>6?"…":""}. <span style="color:var(--muted);">Do these on a deliberate trip — schedule one manually if it's urgent.</span></div>`);
+    }
+    if(other.length){
+      parts.push(`<div style="font-size:12px;color:#b45309;margin-bottom:6px;">⚠ ${other.length} couldn't be placed (day full or no location): ${other.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${other.length>6?"…":""}</div>`);
+    }
   }
   (d.warnings||[]).forEach(w => parts.push(`<div style="font-size:12px;color:var(--muted);">${escapeHtml(w)}</div>`));
   $("autoStatus").textContent = "";

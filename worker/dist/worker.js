@@ -7735,7 +7735,16 @@ async function autoScheduleDay(env, tenantId, body) {
         bestE = ei;
       }
     });
-    if (bestE < 0) continue;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M3.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
+    const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
+    if (!justified) {
+      for (const k of ks) {
+        handled.add(k);
+        unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `held for a planned trip \u2014 ${area} is ~${hmm(oneWay === Infinity ? 0 : oneWay)} each way and today isn't worth a dedicated run (${ks.length} job${ks.length > 1 ? "s" : ""}, ${hmm(areaSite2)} on site)` });
+      }
+      continue;
+    }
     const e = engs[bestE];
     for (const k of ks) {
       handled.add(k);
@@ -7743,7 +7752,7 @@ async function autoScheduleDay(env, tenantId, body) {
       if (newLoad <= cap) {
         e.seq.splice(ins.pos - 1, 0, k);
         e.load = newLoad;
-      } else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, reason: `${area} is a long-haul trip kept to one engineer (${e.name}) \u2014 this one won't fit today; do it on a dedicated ${area} run` });
+      } else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full \u2014 this one won't fit today` });
     }
   }
   for (const k of order) {

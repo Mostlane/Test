@@ -2929,13 +2929,22 @@ async function autoScheduleDay(env, tenantId, body) {
     const ks = remoteByArea[area];
     let bestE = -1, bestCost = Infinity;
     engs.forEach((_, ei) => { const c = Math.min(...ks.map(k => M.mins[pE(ei)][pJ(k)])); if (c < bestCost) { bestCost = c; bestE = ei; } });
-    if (bestE < 0) continue;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map(k => M.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const areaSite = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
+    // EFFICIENCY-FIRST: only do a dedicated run when there's at least as much
+    // on-site work as the round-trip driving. Otherwise the whole area is HELD for
+    // a planned trip — never drag an engineer across the county for a quick job.
+    const justified = bestE >= 0 && areaSite >= oneWay * 2;
+    if (!justified) {
+      for (const k of ks) { handled.add(k); unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `held for a planned trip — ${area} is ~${hmm(oneWay === Infinity ? 0 : oneWay)} each way and today isn't worth a dedicated run (${ks.length} job${ks.length > 1 ? "s" : ""}, ${hmm(areaSite)} on site)` }); }
+      continue;
+    }
     const e = engs[bestE];
     for (const k of ks) {
       handled.add(k);
       const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
       if (newLoad <= cap) { e.seq.splice(ins.pos - 1, 0, k); e.load = newLoad; }
-      else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, reason: `${area} is a long-haul trip kept to one engineer (${e.name}) — this one won't fit today; do it on a dedicated ${area} run` });
+      else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full — this one won't fit today` });
     }
   }
 
