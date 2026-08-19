@@ -231,6 +231,7 @@
   let PROG_ID = new URLSearchParams(location.search).get("id") || "";
   let DATA = MLProg.blank();
   let REVISIONS = [], SHARES = [], SUGGESTIONS = [];
+  let DRAFT_REV = null;   // Rev the current draft equals (unchanged since issue), else null → DRAFT
   let saveTimer = null, dirty = false, saving = false;
   let VERSION;              // the updated_at we last loaded/saved — concurrency stamp
   let conflictOpen = false;
@@ -348,7 +349,7 @@
   // EVERYTHING AUTOSAVES — debounced ~1s, keepalive flush on pagehide.
   // Every save carries the version we last saw (baseVersion); if another
   // device saved in between the server refuses with 409 and we ask the user.
-  function queueSave(){ dirty = true; g("saveState").textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000); }
+  function queueSave(){ dirty = true; DRAFT_REV = null; g("saveState").textContent = "…"; clearTimeout(saveTimer); saveTimer = setTimeout(save, 1000); }
   async function save(){
     if(saving || conflictOpen){ queueSave(); return; }
     saving = true; dirty = false;
@@ -635,7 +636,7 @@
   }
   function exportXlsx(){
     metaToData();
-    try{ MLProgXlsx.download(DATA, { title: DATA.title, client: DATA.client, site: DATA.site, ref: DATA.ref, rev: "" }); }
+    try{ MLProgXlsx.download(DATA, { title: DATA.title, client: DATA.client, site: DATA.site, ref: DATA.ref, rev: DRAFT_REV || "" }); }
     catch(e){ alert("Couldn't build the Excel file."); }
   }
 
@@ -660,6 +661,7 @@
     // skip them — and so issued revisions keep the dates they were planned with.
     if(Array.isArray(d.bankHolidays)) DATA.holidays = d.bankHolidays;
     REVISIONS = d.revisions||[]; SHARES = d.shares||[]; SUGGESTIONS = d.suggestions||[];
+    DRAFT_REV = d.draftRev || null;
     dataToMeta(); drawGantt(); renderRevState(); renderSuggestions();
   }
 
