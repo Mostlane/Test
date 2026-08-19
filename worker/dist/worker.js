@@ -5960,6 +5960,13 @@ async function handle8(request, env, ctx, url, sess) {
         httpMetadata: { contentType: file.type },
         customMetadata: stage ? { stage } : void 0
       });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try {
+          await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+        } catch {
+        }
+      }
       return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
     }
     if (parts[2] === "files" && method === "GET") {
@@ -5970,14 +5977,21 @@ async function handle8(request, env, ctx, url, sess) {
         overrides = j && j.photoStages || {};
       } catch {
       }
-      return jsonResponse({ files: listed.objects.map((o) => {
+      const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
+      const thumbSet = new Set((listed.objects || []).filter((o) => o.key.endsWith(".thumb")).map((o) => o.key));
+      const files = [];
+      for (const o of objs) {
         const name = o.key.split("/").pop();
-        return {
+        files.push({
           name,
+          key: o.key,
           publicURL: r2Url(env, o.key),
+          thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
+          hasThumb: thumbSet.has(o.key + ".thumb"),
           stage: overrides[name] || o.customMetadata && o.customMetadata.stage || ""
-        };
-      }) }, headers);
+        });
+      }
+      return jsonResponse({ files }, headers);
     }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
