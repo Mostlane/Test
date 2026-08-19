@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=17"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>FRA Works Tracker</title>
+  <link rel="stylesheet" href="/portal.css?v=1" />
+  <script src="auth.js"></script>
+<style>
+  :root{ --blue:#003b82; --line:#e2e8f0; --grey:#64748b; }
+  html,body{ margin:0; background:#eef1f5; color:#0f172a; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; }
+  .wrap{ max-width:1200px; margin:14px auto 60px; padding:0 12px; }
+  header.page{ display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap; }
+  header.page h1{ font-size:19px; color:var(--blue); margin:0; }
+  .sub{ color:var(--grey); font-size:13px; }
+  .card{ background:#fff; border-radius:14px; box-shadow:0 8px 22px rgba(0,0,0,.08); border:1px solid rgba(15,23,42,.05); padding:14px; margin-top:12px; }
+
+  /* Stats */
+  .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+  .stat{ border:1px solid var(--line); border-radius:12px; padding:11px 13px; background:#f8fafc; }
+  .stat .n{ font-size:24px; font-weight:800; line-height:1; }
+  .stat .l{ font-size:11.5px; color:var(--grey); text-transform:uppercase; letter-spacing:.3px; font-weight:700; margin-top:5px; }
+  .stat.done .n{ color:#16a34a; } .stat.prog .n{ color:#f59e0b; } .stat.travel .n{ color:#0ea5e9; } .stat.todo .n{ color:#6366f1; }
+  .progwrap{ margin-top:12px; }
+  .progbar{ height:14px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
+  .progbar > span{ display:block; height:100%; background:linear-gradient(90deg,#16a34a,#22c55e); width:0; transition:width .5s; }
+  .prog-label{ font-size:13px; color:var(--grey); margin-top:6px; }
+
+  /* Toolbar */
+  .toolbar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .toolbar input[type=search], .toolbar select{ border:1px solid #cbd5e1; border-radius:9px; padding:9px 11px; font-size:14px; }
+  .toolbar input[type=search]{ flex:1; min-width:150px; }
+  .btn{ border:none; border-radius:10px; padding:9px 14px; font-size:14px; font-weight:700; cursor:pointer; background:#eef1f5; color:#334155; }
+  .btn.primary{ background:linear-gradient(90deg,#003b82,#1e66ff); color:#fff; }
+  .updated{ font-size:12px; color:var(--grey); margin-left:auto; }
+
+  /* Spreadsheet */
+  .tablewrap{ overflow-x:auto; -webkit-overflow-scrolling:touch; margin-top:12px; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:820px; }
+  th,td{ text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ position:sticky; top:0; background:#f1f5f9; color:#334155; font-weight:700; font-size:12px; cursor:pointer; white-space:nowrap; z-index:1; }
+  th .arr{ color:#94a3b8; font-size:10px; }
+  tbody tr:nth-child(even){ background:#f8fafc; }
+  tbody tr:hover{ background:#eef4ff; }
+  td.num{ color:var(--grey); }
+  td.site{ font-weight:600; white-space:nowrap; }
+  td.pc{ white-space:nowrap; color:#334155; }
+  td.works{ min-width:280px; max-width:440px; line-height:1.4; color:#334155; }
+  td.nowrap{ white-space:nowrap; }
+  .chip{ display:inline-block; font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:999px; color:#fff; white-space:nowrap; }
+  .open-lnk{ color:#1d4ed8; font-weight:700; text-decoration:none; white-space:nowrap; }
+  .muted{ color:var(--grey); }
+  #empty{ text-align:center; color:var(--grey); padding:30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div>
+      <h1>🔥 FRA Works — live tracker</h1>
+      <div class="sub" id="sub">Loading…</div>
+    </div>
+    <a class="ml-back" href="sla-main.html" title="Back to SLA">‹ Back to SLA</a>
+  </header>
+
+  <div class="card">
+    <div class="stats" id="stats"></div>
+    <div class="progwrap">
+      <div class="progbar"><span id="progFill"></span></div>
+      <div class="prog-label" id="progLabel"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search site, postcode, works…" autocomplete="off">
+      <select id="statusFilter"><option value="all">All statuses</option></select>
+      <button class="btn" id="csvBtn">⬇ Export CSV</button>
+      <button class="btn primary" id="refreshBtn">🔄 Refresh</button>
+      <span class="updated" id="updated"></span>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr id="head"></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="empty" style="display:none;">No jobs found for this batch.</div>
+  </div>
+</div>
+
+<script>
+const MOSTLANE_API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function authFetch(url, init={}){ init.headers=new Headers(init.headers||{}); const t=localStorage.getItem("mostlaneToken"); if(t&&!init.headers.has("Authorization")) init.headers.set("Authorization","Bearer "+t); return fetch(url, init); }
+
+// This batch = the FRA works created for Connor on 17 Aug 18:00.
+const BATCH_MIN = "2026-08-17T18:00";
+const ENGINEER = "connor";
+function inBatch(j){
+  const created = String(j.createdAt || j.raisedAt || "");
+  const eng = ((j.assignedEngineers||[]).join(" ") + " " + (j.assignedTo||"")).toLowerCase();
+  return created.slice(0,16) === BATCH_MIN && eng.includes(ENGINEER);
+}
+
+const SC = { "Pending":"#94a3b8","Scheduled":"#6366f1","Travelling":"#0ea5e9","In Progress":"#f59e0b","On Hold":"#a855f7","Quote":"#8b5cf6","Order":"#8b5cf6","Complete":"#16a34a","Closed Jobs":"#16a34a","Invoiced":"#0e7a3b","Cancelled":"#ef4444" };
+const EMO = { "Pending":"⏳","Scheduled":"📅","Travelling":"🚗","In Progress":"🔧","On Hold":"⏸","Quote":"💬","Order":"📦","Complete":"✅","Closed Jobs":"✅","Invoiced":"🧾","Cancelled":"✖️" };
+const isDone = s => /^(complete|closed|closed jobs|invoiced)$/i.test(String(s||""));
+function fmtDT(x){ if(!x) return ""; const d=new Date(x); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+function durMins(j){
+  if(Number.isFinite(+j.durationMinutes) && +j.durationMinutes>0) return +j.durationMinutes;
+  if(j.scheduledAt && j.scheduledEnd){ const d=(new Date(j.scheduledEnd)-new Date(j.scheduledAt))/60000; if(d>0) return Math.round(d); }
+  return 0;
+}
+function fmtHours(mins){ if(!mins) return "—"; const h=Math.floor(mins/60), m=mins%60; return m? (h+"h "+m+"m") : (h+"h"); }
+function lastUpdate(j){
+  const h = j.statusHistory||[]; let t = j.updatedAt || "";
+  if(h.length){ const last = h[h.length-1].at; if(!t || new Date(last)>new Date(t)) t = last; }
+  return t;
+}
+
+const COLS = [
+  { k:"idx",    label:"#",         get:(j,i)=>String(i+1),                    cls:"num" },
+  { k:"site",   label:"Site",      get:j=>`${esc(j.siteCode||"")} · ${esc(j.siteName||"")}`, cls:"site", raw:j=>((j.siteCode||"")+" "+(j.siteName||"")) },
+  { k:"pc",     label:"Postcode",  get:j=>esc(j.postcode||""),                cls:"pc" },
+  { k:"works",  label:"Works required", get:j=>esc(j.description||"—"),        cls:"works", raw:j=>j.description||"" },
+  { k:"status", label:"Status",    get:j=>`<span class="chip" style="background:${SC[j.status]||"#94a3b8"}">${EMO[j.status]||""} ${esc(j.status)}</span>`, cls:"nowrap", raw:j=>j.status||"" },
+  { k:"sched",  label:"Scheduled", get:j=> j.scheduledAt ? esc(fmtDT(j.scheduledAt) + (j.scheduledEnd? " – "+fmtDT(j.scheduledEnd):"")) : '<span class="muted">—</span>', cls:"nowrap", raw:j=>j.scheduledAt||"" },
+  { k:"dur",    label:"Duration",  get:j=>esc(fmtHours(durMins(j))),          cls:"nowrap", raw:j=>durMins(j) },
+  { k:"upd",    label:"Updated",   get:j=>esc(fmtDT(lastUpdate(j))),          cls:"nowrap muted", raw:j=>lastUpdate(j) },
+  { k:"open",   label:"",          get:j=>`<a class="open-lnk" href="job-view.html?id=${encodeURIComponent(j.id)}" target="_blank">Open ↗</a>`, cls:"nowrap" }
+];
+
+let batch = [];
+let sortKey = "site", sortDir = 1;
+
+async function load(){
+  try{
+    const res = await authFetch(`${MOSTLANE_API}/sla/jobs?t=` + Date.now(), { cache:"no-store" });
+    const all = await res.json();
+    batch = (Array.isArray(all)?all:[]).filter(inBatch);
+  }catch(e){ $("sub").textContent = "Couldn't load jobs — check your connection."; return; }
+  $("updated").textContent = "Updated " + new Date().toLocaleTimeString("en-GB");
+  renderStats();
+  buildStatusFilter();
+  renderHead();
+  renderRows();
+}
+
+function renderStats(){
+  const total = batch.length;
+  const done = batch.filter(j=>isDone(j.status)).length;
+  const prog = batch.filter(j=>/in progress/i.test(j.status)).length;
+  const travel = batch.filter(j=>/travelling/i.test(j.status)).length;
+  const hold = batch.filter(j=>/on hold/i.test(j.status)).length;
+  const todo = total - done - prog - travel - hold;
+  const pct = total ? Math.round(done/total*100) : 0;
+  $("sub").textContent = `Connor Brady · window 18–21 Aug · ${total} jobs · ${done} complete`;
+  $("stats").innerHTML =
+    stat("total","", total, "Total jobs") +
+    stat("done","✅", done, "Complete") +
+    stat("prog","🔧", prog, "In progress") +
+    stat("travel","🚗", travel, "Travelling") +
+    stat("todo","📅", todo, "Not started") +
+    (hold? stat("","⏸", hold, "On hold") : "");
+  $("progFill").style.width = pct + "%";
+  $("progLabel").textContent = `${pct}% complete — ${done} of ${total} done, ${total-done} remaining`;
+}
+function stat(cls,emo,n,label){ return `<div class="stat ${cls}"><div class="n">${emo?emo+" ":""}${n}</div><div class="l">${label}</div></div>`; }
+
+function buildStatusFilter(){
+  const cur = $("statusFilter").value || "all";
+  const set = Array.from(new Set(batch.map(j=>j.status))).sort();
+  $("statusFilter").innerHTML = '<option value="all">All statuses</option>' + set.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  $("statusFilter").value = cur;
+}
+
+function renderHead(){
+  $("head").innerHTML = COLS.map(c => {
+    const arr = (sortKey===c.k) ? `<span class="arr">${sortDir>0?"▲":"▼"}</span>` : "";
+    return `<th data-k="${c.k}">${esc(c.label)} ${arr}</th>`;
+  }).join("");
+  $("head").querySelectorAll("th").forEach(th => th.onclick = () => {
+    const k = th.dataset.k; if(!k || k==="idx" || k==="open") return;
+    if(sortKey===k) sortDir=-sortDir; else { sortKey=k; sortDir=1; }
+    renderHead(); renderRows();
+  });
+}
+
+function renderRows(){
+  const q = ($("search").value||"").trim().toLowerCase();
+  const sf = $("statusFilter").value;
+  let list = batch.slice();
+  if(sf && sf!=="all") list = list.filter(j=>j.status===sf);
+  if(q) list = list.filter(j => ((j.siteCode||"")+" "+(j.siteName||"")+" "+(j.postcode||"")+" "+(j.description||"")).toLowerCase().includes(q));
+  const col = COLS.find(c=>c.k===sortKey);
+  if(col && col.raw){ list.sort((a,b)=>{ const x=String(col.raw(a)||""), y=String(col.raw(b)||""); return x.localeCompare(y, undefined, {numeric:true}) * sortDir; }); }
+  $("empty").style.display = list.length ? "none" : "block";
+  $("rows").innerHTML = list.map((j,i) =>
+    "<tr>" + COLS.map(c => `<td class="${c.cls||""}">${c.get(j,i)}</td>`).join("") + "</tr>"
+  ).join("");
+}
+
+function exportCSV(){
+  const cols = COLS.filter(c=>c.k!=="open" && c.k!=="idx");
+  const head = cols.map(c=>c.label);
+  const rows = batch.map(j => cols.map(c => {
+    let v = c.raw ? c.raw(j) : String(j[c.k]==null?"":j[c.k]);
+    if(c.k==="sched") v = (j.scheduledAt?fmtDT(j.scheduledAt):"") + (j.scheduledEnd?" - "+fmtDT(j.scheduledEnd):"");
+    if(c.k==="dur") v = fmtHours(durMins(j));
+    if(c.k==="upd") v = fmtDT(lastUpdate(j));
+    return '"' + String(v==null?"":v).replace(/"/g,'""').replace(/\r?\n/g," ") + '"';
+  }));
+  const csv = [head.map(h=>'"'+h+'"').join(","), ...rows.map(r=>r.join(","))].join("\r\n");
+  const blob = new Blob(["﻿"+csv], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "FRA-works-" + new Date().toISOString().slice(0,10) + ".csv";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+$("search").addEventListener("input", renderRows);
+$("statusFilter").addEventListener("change", renderRows);
+$("refreshBtn").addEventListener("click", load);
+$("csvBtn").addEventListener("click", exportCSV);
+load();
+setInterval(load, 45000);   // live progress
+</script>
+</body>
+</html>

@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>H&amp;S Documents</title>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <script src="auth.js"></script>
   <script src="hs-rams-library.js?v=2"></script>
   <script src="hs-rams-render.js?v=2"></script>
@@ -448,7 +448,25 @@
     } catch (e) {}
     buildHub();
     showHub();
+    // Deep-links from a Project: ?open=<docId> opens a RAMS; ?newRams=1&site=&project=
+    // starts a new RAMS pre-filled with the site and remembers the project to link back.
+    try {
+      const qs = new URLSearchParams(location.search);
+      if (qs.get("project")) PENDING_PROJECT = qs.get("project");
+      if (qs.get("open")) { openDoc(qs.get("open")); }
+      else if (qs.get("newRams")) {
+        newRams();
+        const site = qs.get("site") || "";
+        if (site) { g("r_site").value = site; g("r_task").value = site; }
+      }
+    } catch (e) {}
   })();
+  // When a RAMS is built from a Project, link it back so the project's To-Do ticks.
+  let PENDING_PROJECT = null;
+  async function linkRamsToProject(docId) {
+    if (!PENDING_PROJECT || !docId) return;
+    try { await authFetch("/project/link", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PENDING_PROJECT, kind:"rams", value: docId }) }); } catch (e) {}
+  }
 
   function buildHub() {
     g("tiles").innerHTML = TYPES.map(t => `
@@ -977,6 +995,7 @@
       if (!r.ok) throw new Error(r.error || "save failed");
       const id = editId || r.id; editId = id;
       if (r.ref) { g("r_ref").value = r.ref; g("ramsFormTitle").textContent = "Edit Risk Assessment — " + r.ref; }
+      await linkRamsToProject(id);
       msg.className = "msg ok"; msg.textContent = "Saved" + (r.ref ? " as " + r.ref : "") + ".";
       if (openAfter) openDoc(id); else showList("rams");
     } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't save — " + e.message; }

@@ -20,7 +20,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
-import { sendToUser, sendToPermission } from "./push.js";
+import { sendToUser, sendToPermission, resolveNotificationsByTag, remindPermission } from "./push.js";
 
 // ── Shared: approved leave as per-day markers ────────────────────────────────
 // Used by the engineer timesheet + the SLA scheduler so an approved holiday
@@ -47,6 +47,25 @@ export async function approvedLeaveInRange(env, tid, from, to, username) {
     }
   } catch { /* fail soft → no leave overlay */ }
   return out;
+}
+
+// Daily re-nudge to holiday admins about requests still Pending. Push-only (the
+// outstanding bell alert already exists). Called once a day from the cron.
+export async function remindPendingHolidays(env, tid = 1) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, username, start_date, end_date FROM holidays WHERE tenant_id=? AND status='Pending'"
+    ).bind(tid).all();
+    const rows = results || [];
+    if (!rows.length) return;
+    for (const r of rows) {
+      await remindPermission(env, tid, ["FullAccess", "HolidayAdmin"], {
+        title: "Holiday still awaiting approval",
+        body: `${r.username}'s request (${r.start_date} → ${r.end_date}) hasn't been actioned yet.`,
+        url: "/holiday-admin.html", tag: "holiday-admin:" + r.id
+      }).catch(() => {});
+    }
+  } catch { /* best-effort */ }
 }
 
 export async function handle(request, env, ctx, url, sess) {
@@ -241,7 +260,7 @@ export async function handle(request, env, ctx, url, sess) {
     ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
       title: "Holiday request",
       body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} → ${end}).`,
-      url: "/holiday-admin.html", tag: "holiday-admin"
+      url: "/holiday-admin.html", tag: "holiday-admin:" + id, actionable: true
     }, user));
     return json({ success: true, id });
   }
@@ -370,6 +389,11 @@ export async function handle(request, env, ctx, url, sess) {
       title: `Holiday ${status.toLowerCase()}`,
       body: `Your holiday ${record.start_date} → ${record.end_date} was ${status.toLowerCase()}.`,
       url: "/holiday.html", tag: "holiday-decision"
+    }));
+    // Dealt with — flip the "holiday request" alert to the outcome for every admin.
+    ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "holiday-admin:" + id, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `${record.username}'s holiday ${record.start_date} → ${record.end_date} — ${status === "Approved" ? "✅ approved" : "❌ rejected"} by ${user}.`
     }));
     return json({ success: true });
   }

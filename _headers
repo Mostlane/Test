@@ -103,6 +103,12 @@
   Cache-Control: no-cache
 /van-handover.html
   Cache-Control: no-cache
+/projects-live.html
+  Cache-Control: no-cache
+/project-new.html
+  Cache-Control: no-cache
+/project-hub.html
+  Cache-Control: no-cache
 /fuel-cards.html
   Cache-Control: no-cache
 /cctv.html
@@ -148,4 +154,8 @@
 /programme-gantt.js
   Cache-Control: no-cache
 /programme-export.js
+  Cache-Control: no-cache
+/firestop-admin.html
+  Cache-Control: no-cache
+/firestop-form.js
   Cache-Control: no-cache

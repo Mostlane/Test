@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=14"></script>
+  <script src="sla-jobedit.js?v=15"></script>
+  <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -333,8 +334,9 @@
     }
     .photo-modal-close{
       position:absolute;
-      top:8px;
-      right:8px;
+      top:calc(env(safe-area-inset-top, 0px) + 8px);
+      right:calc(env(safe-area-inset-right, 0px) + 8px);
+      z-index:2;
       border:none;
       border-radius:999px;
       padding:4px 10px;
@@ -410,6 +412,10 @@
     }
     html,body{ background:var(--ml-bg); }
     .shell{ max-width:560px; margin:0 auto; padding:16px 14px 46px; }
+    /* This is the OFFICE job view (opened on desktop from the SLA board /
+       scheduler). The mobile-first restyle above clamped it to 560px at EVERY
+       width; widen it on desktop so it isn't stuck mobile-narrow. */
+    @media(min-width:769px){ .shell{ max-width:1000px; padding:20px 22px 46px; } }
     .card{
       background:#fff; border:1px solid var(--border); border-radius:var(--radius);
       box-shadow:var(--shadow); padding:16px; margin-bottom:14px;
@@ -469,6 +475,7 @@
   </div>
   <!-- HEADER / SUMMARY -->
   <div class="card job-hero">
+    <div id="investigateBanner" style="display:none;background:#fdecec;border:2px solid #d11f2d;border-radius:12px;color:#b00020;font-weight:800;font-size:22px;text-align:center;letter-spacing:.04em;padding:12px;margin-bottom:12px;">⚠ INVESTIGATE ONLY</div>
     <div class="header-row">
       <div>
         <h1 id="jobTitle">Job</h1>
@@ -521,6 +528,12 @@
       <div class="field-label">Description of works</div>
       <div class="field-value" id="jobDesc" style="font-size:21px;line-height:1.5;font-weight:600;color:var(--ml-blue,#003b82);white-space:pre-wrap;margin-top:2px;">—</div>
     </div>
+  </div>
+
+  <!-- FIRESTOPPING (RIA form) — shown only for firestopping jobs -->
+  <div class="card" id="firestopCard" style="display:none;">
+    <h2 class="section-title">🔥 Firestopping record</h2>
+    <div id="firestopHost"></div>
   </div>
 
   <!-- MATERIALS (POs raised against this job) — office/admin only -->
@@ -620,6 +633,13 @@
       <button class="btn primary" id="saveBtn" style="display:none">Save Update</button>
     </div>
     <div id="statusBar">Ready.</div>
+  </div>
+
+  <!-- ENGINEER'S NOTES -->
+  <div class="card">
+    <h2 class="section-title">📝 Engineer's notes</h2>
+    <p class="section-sub">What the engineer wrote on the job — newest first.</p>
+    <div id="engNotes" class="panel-light">No notes yet.</div>
   </div>
 
   <!-- PHOTOS -->
@@ -887,6 +907,7 @@ function renderJob(){
 
   renderSite();
   renderCapture();
+  renderNotes();
   renderTimeline();
 
   const statusSelect = $("statusSelect");
@@ -926,10 +947,26 @@ function renderJob(){
     if(localSig.pending) flushSignature(job.id);
   }
 
+  const invB = $("investigateBanner"); if(invB) invB.style.display = job.investigateOnly ? "" : "none";
   fillPoButton();
   loadJobPOs();
+  mountFirestopView();
 
   startCountdownLoop();
+}
+
+// Firestopping jobs: show the read-only RIA record + Download PDF/bundle.
+let fsViewMounted = false;
+function mountFirestopView(){
+  const card = $("firestopCard"); if(!card || !job) return;
+  card.style.display = job.firestopping ? "" : "none";
+  if(job.firestopping && !fsViewMounted && window.MLFirestop){
+    fsViewMounted = true;
+    window.MLFirestop.mount($("firestopHost"), {
+      jobId: job.id, mode: "office",
+      api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken")
+    });
+  }
 }
 
 /* Materials cost: the POs raised against THIS job (office/admin only). Reads
@@ -1170,14 +1207,34 @@ function renderCapture(){
         kvRow("Status", "⚠️ Skipped (Full-Access override)")
       ]));
     } else {
-    const ticks = [["Safe access", r.safeAccess],["PPE", r.ppe],["Isolation", r.isolation],
-                   ["Height controlled", r.height],["Others protected", r.othersAtRisk],["Hazmat considered", r.hazardous]]
-      .map(([label, ok]) => `${ok ? "✅" : "▫️"} ${label}`).join("   ");
-    body.appendChild(captureSection("🦺 Risk assessment" + (r.by ? ` — ${r.by}` : ""), [
-      kvRow("Checks", ticks),
-      kvRow("Safe to proceed", r.safeToProceed ? "Yes" : "No"),
-      kvRow("Notes", r.note)
-    ]));
+    // Two RA formats exist and BOTH must display correctly:
+    //  • field app (engineer-job.html): { safe, hazards:[{item,answer}],
+    //    declarations:{competent,publicSafeguarded,safeToProceed}, notes, name }
+    //  • job-view's own quick RA: flat booleans { safeAccess, ppe, …, safeToProceed, note }
+    const rows = [];
+    if(Array.isArray(r.hazards) && r.hazards.length){
+      const ticks = r.hazards.map(h => {
+        const ok = /^(ok|yes|safe|n\/?a|na|none|controlled)$/i.test(String(h.answer || ""));
+        return `${ok ? "✅" : "⚠️"} ${h.item}${(h.answer && !ok) ? " ("+h.answer+")" : ""}`;
+      }).join("   ");
+      rows.push(kvRow("Checks", ticks));
+    } else {
+      const ticks = [["Safe access", r.safeAccess],["PPE", r.ppe],["Isolation", r.isolation],
+                     ["Height controlled", r.height],["Others protected", r.othersAtRisk],["Hazmat considered", r.hazardous]]
+        .map(([label, ok]) => `${ok ? "✅" : "▫️"} ${label}`).join("   ");
+      rows.push(kvRow("Checks", ticks));
+    }
+    if(r.declarations){
+      const d = r.declarations;
+      rows.push(kvRow("Declarations", `${d.competent?"✅":"▫️"} Competent   ${d.publicSafeguarded?"✅":"▫️"} Public safeguarded`));
+    }
+    // safeToProceed lives under declarations in the field-app format, flat in the
+    // office format; fall back to the overall `safe` flag.
+    const safeProceed = (r.declarations && r.declarations.safeToProceed !== undefined) ? r.declarations.safeToProceed
+                      : (r.safeToProceed !== undefined ? r.safeToProceed : r.safe);
+    rows.push(kvRow("Safe to proceed", safeProceed ? "Yes" : "No"));
+    rows.push(kvRow("Notes", r.notes != null ? r.notes : r.note));
+    body.appendChild(captureSection("🦺 Risk assessment" + ((r.by || r.name) ? ` — ${r.by || r.name}` : ""), rows));
     }
   }
   if(job.hold){
@@ -1202,6 +1259,37 @@ function renderCapture(){
     body.appendChild(captureSection("🚐 Mileage", [kvRow("Odometer at arrival", job.travelStartMileage + " mi")]));
   }
   $("captureCard").style.display = any ? "block" : "none";
+}
+
+/* ---- Engineer's notes (the compulsory completion note + any note events) ---- */
+function renderNotes(){
+  const el = $("engNotes");
+  if(!el) return;
+  const notes = (job.events || [])
+    .filter(e => (e.type === "note") || (e.note && String(e.note).trim()))
+    .map(e => ({ at: e.at, by: e.by, text: String(e.note || "").trim() }))
+    .filter(n => n.text)
+    .sort((a,b) => new Date(b.at) - new Date(a.at));
+  if(!notes.length){
+    const done = /^(complete|closed|invoiced)$/i.test(job.status || "");
+    el.innerHTML = done
+      ? '<span style="color:#b45309;font-weight:600;">⚠ No completion note was recorded for this job.</span>'
+      : "No notes yet.";
+    return;
+  }
+  el.innerHTML = "";
+  notes.forEach(n => {
+    const row = document.createElement("div");
+    row.style.cssText = "padding:10px 12px;margin-bottom:8px;background:#fff;border:1px solid #e6eaf0;border-left:4px solid #1e66ff;border-radius:8px;";
+    const txt = document.createElement("div");
+    txt.style.cssText = "font-size:14px;color:#0f172a;white-space:pre-wrap;line-height:1.45;";
+    txt.textContent = n.text;
+    const meta = document.createElement("div");
+    meta.style.cssText = "font-size:12px;color:#64748b;margin-top:5px;";
+    meta.textContent = (n.by ? n.by : "Engineer") + (n.at ? " · " + fmtDateTimeLong(parseDate(n.at)) : "");
+    row.append(txt, meta);
+    el.appendChild(row);
+  });
 }
 
 /* ---- Activity timeline (statusHistory + events, newest first) ---- */

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Scheduler</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=14"></script>
+  <script src="sla-jobedit.js?v=15"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -102,6 +102,14 @@
     .day-job-ref{font-weight:700;margin-right:5px;color:#1e3a8a;}
     .day-job.dragging{opacity:0.55;}
     .day-job.multi{border-style:double;border-width:3px;}
+    /* Completed jobs stay on the board: green, locked (not draggable). */
+    .day-job.done{cursor:pointer;border-color:#65a30d;}
+    .day-job.done .day-job-ref{color:#3f6212;}
+    .week-job-chip.done{background:#f0fdf4;}
+    /* Faint tick marking a completed job's ORIGINAL scheduled slot (it moved to
+       the time it was actually worked). */
+    .sched-marker{position:absolute;top:3px;bottom:3px;width:0;border-left:2px dashed #94a3b8;opacity:.75;z-index:1;}
+    .sched-marker::before{content:"🕘";position:absolute;top:-2px;left:-6px;font-size:9px;opacity:.8;}
     .now-line-v{position:absolute;top:0;width:2px;background:rgba(220,38,38,0.9);z-index:3;pointer-events:none;}
 
     .status-bar{margin-top:10px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;}
@@ -129,6 +137,23 @@
     .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:12px;}
     .modal{background:#fff;border-radius:14px;max-width:440px;width:100%;padding:16px;box-shadow:0 20px 40px rgba(15,23,42,0.35);font-size:13px;max-height:92vh;overflow:auto;}
     .modal h2{font-size:16px;margin:0 0 8px;color:var(--ml-blue);}
+    /* Engineer day-summary modal */
+    .day-name.clickable{cursor:pointer;}
+    .week-day-header.clickable{cursor:pointer;}
+    .day-name.clickable:hover,.week-day-header.clickable:hover{text-decoration:underline;color:var(--ml-blue);}
+    .eng-sum{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px;}
+    .eng-sum .sc{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600;background:#fff;}
+    .eng-sum .sc .dot{width:9px;height:9px;border-radius:50%;}
+    .eng-sum .sc.total{background:#f1f5f9;}
+    .eng-jobs{display:flex;flex-direction:column;gap:7px;}
+    .eng-jobrow{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-left-width:4px;border-radius:9px;padding:9px 11px;cursor:pointer;}
+    .eng-jobrow:hover{background:#f8fafc;}
+    .eng-jobrow .ej-main{flex:1;min-width:0;}
+    .eng-jobrow .ej-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .eng-jobrow .ej-meta{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .eng-jobrow .ej-time{font-size:12px;font-weight:700;color:#334155;flex:0 0 auto;}
+    .eng-jobrow .ej-chip{flex:0 0 auto;font-size:11px;font-weight:700;color:#fff;border-radius:999px;padding:3px 9px;}
+    .eng-empty{color:var(--muted);font-size:13px;padding:12px 2px;}
     .modal label{display:block;font-size:12px;font-weight:600;margin-top:8px;margin-bottom:2px;}
     .modal input,.modal select,.modal textarea{width:100%;padding:7px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);}
     .modal textarea{min-height:56px;resize:vertical;}
@@ -270,7 +295,10 @@
       <textarea id="jobNotes"></textarea>
 
       <div class="buttons" style="justify-content:space-between;">
-        <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
+        <span style="display:flex;gap:8px;">
+          <button type="button" class="btn" id="jobCardBtn" title="Open the full job card">🗂 Job card</button>
+          <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
+        </span>
         <span style="display:flex;gap:8px;">
           <button type="button" class="btn" id="jobCancel">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
@@ -280,14 +308,32 @@
   </div>
 </div>
 
+<!-- ENGINEER DAY SUMMARY MODAL -->
+<div class="modal-backdrop" id="engDayBackdrop">
+  <div class="modal" style="max-width:520px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
+      <span style="display:flex;gap:6px;flex:none;">
+        <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
+        <button type="button" class="btn" id="engDayClose">✕</button>
+      </span>
+    </div>
+    <div id="engDayDate" style="font-size:12px;color:var(--muted);margin:2px 0 8px;"></div>
+    <div class="eng-sum" id="engDaySummary"></div>
+    <div class="eng-jobs" id="engDayJobs"></div>
+  </div>
+</div>
+
 <!-- MAP OVERLAY -->
 <div id="mapOverlay">
   <div class="map-top">
-    <h2>🗺️ Job map</h2>
-    <span class="map-chip" data-st="Pending" style="--c:#9f1239">Pending</span>
-    <span class="map-chip" data-st="Scheduled" style="--c:#f59e0b">Scheduled</span>
-    <span class="map-chip" data-st="In Progress" style="--c:#9333ea">In Progress</span>
-    <span class="map-chip" data-st="On Hold" style="--c:#6b7280">On Hold</span>
+    <h2 id="mapTitle">🗺️ Job map</h2>
+    <span id="mapChips">
+      <span class="map-chip" data-st="Pending" style="--c:#9f1239">Pending</span>
+      <span class="map-chip" data-st="Scheduled" style="--c:#f59e0b">Scheduled</span>
+      <span class="map-chip" data-st="In Progress" style="--c:#9333ea">In Progress</span>
+      <span class="map-chip" data-st="On Hold" style="--c:#6b7280">On Hold</span>
+    </span>
     <button class="btn" id="closeMapBtn">✕ Close</button>
   </div>
   <div id="jobsMap"></div>
@@ -317,6 +363,35 @@ const STATUS_COLOUR = {
   "Order":"#0d9488", "Complete":"#84cc16", "Invoiced":"#22c55e", "Closed Jobs":"#701a75"
 };
 const MAP_STATUSES = ["Pending","Scheduled","In Progress","On Hold"];
+// A finished job that stays on the board (green + locked). Closed/Invoiced are
+// filtered out earlier; "Complete" is the one we keep showing.
+function isDoneStatus(s){ return s === "Complete"; }
+// Match the server's engineer id normalisation (spaces → dots), so we can pick
+// this engineer's own entries out of a multi-engineer job's status history.
+const schedNormId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+// The ACTUAL worked window for a finished job in one engineer's lane, read from
+// the status history (In Progress → Complete). Returns {start,end} Dates, or
+// null when we can't tell (→ the block keeps its scheduled slot). Never changes
+// the stored scheduled time — this is display only.
+function actualWindow(job, engineerUsername){
+  const hist = job.statusHistory || [];
+  if(!hist.length) return null;
+  const me = schedNormId(engineerUsername);
+  const mine = e => !e.eng || schedNormId(e.eng) === me;   // shared entries (single-eng) or this engineer's
+  let start = null, end = null;
+  for(const e of hist){
+    if(!mine(e)) continue;
+    const at = e.at ? new Date(e.at) : null;
+    if(!at || isNaN(at.getTime())) continue;
+    const s = String(e.status || "").toLowerCase();
+    if(s === "in progress"){ if(!start || at < start) start = at; }   // first on-site start
+    if(s === "complete") end = at;                                    // last completion
+  }
+  if(!end) return null;                                               // not completed in-app → keep scheduled
+  if(!start) start = new Date(end.getTime() - job.durationMinutes*60000);  // only completion known
+  if(end <= start) end = new Date(start.getTime() + 15*60000);
+  return { start, end };
+}
 
 let currentUser = null;
 let engineers = [];
@@ -378,15 +453,22 @@ function normaliseJob(j){
     lat: j.lat, lon: j.lon,
     scheduledAt: j.scheduledAt || null,
     durationMinutes,
-    assignedEngineers: assigned
+    assignedEngineers: assigned,
+    // Actual worked timestamps (In Progress → Complete) so a finished job can be
+    // shown at the time it was really done. The scheduled time above is kept
+    // untouched — this is display only.
+    statusHistory: Array.isArray(j.statusHistory) ? j.statusHistory : []
   };
 }
 
 async function loadJobs(){
   const res = await authFetch("/sla/jobs?t=" + Date.now());
   const data = await res.json();
+  // Keep COMPLETE jobs on the board (they render green + locked) so the day
+  // still shows what's been done. Closed/Invoiced are downstream accounting
+  // states applied later — those stay off the board.
   jobs = (Array.isArray(data) ? data : []).map(normaliseJob)
-    .filter(j => !["Complete","Closed Jobs","Invoiced"].includes(j.status));
+    .filter(j => !["Closed Jobs","Invoiced"].includes(j.status));
 }
 
 // Approved holidays overlaid on the board so you never schedule someone on leave.
@@ -539,8 +621,10 @@ function renderDayView(container){
     const row = document.createElement("div");
     row.className = "day-row";
     const name = document.createElement("div");
-    name.className = "day-name";
+    name.className = "day-name clickable";
     name.textContent = engineer.name;
+    name.title = "See how " + engineer.name + " is getting on today";
+    name.addEventListener("click", () => openEngDay(engineer.username, engineer.name, dayDate));
     const holD = holFor(engineer.username, dayDate);
     if(holD){ row.classList.add("on-holiday"); const bd=document.createElement("span"); bd.className="hol-badge-inline"; bd.textContent="🌴 "+(holD.half?holD.half+" leave":"Holiday"); name.appendChild(bd); }
     row.appendChild(name);
@@ -563,30 +647,59 @@ function renderDayView(container){
       .filter(j => sameDay(new Date(j.scheduledAt), dayDate));
 
     jobsForEngineer.forEach(job => {
-      const dStart = new Date(job.scheduledAt);
-      let startMins = clamp(minsSinceMidnight(dStart), dayStartMins, dayEndMins - 15);
-      const endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
+      const done = isDoneStatus(job.status);
+      // The scheduled slot (what the office set) — kept, and marked on the lane.
+      const schedStartMins = clamp(minsSinceMidnight(new Date(job.scheduledAt)), dayStartMins, dayEndMins - 15);
+      // A finished job is drawn at the time it was ACTUALLY worked (from the
+      // status history), so an early finish slides left. Falls back to the
+      // scheduled slot when there are no actual times. Only apply when the work
+      // actually happened on this day.
+      const actRaw = done ? actualWindow(job, engineer.username) : null;
+      const act = (actRaw && sameDay(actRaw.start, dayDate)) ? actRaw : null;
+      let startMins, endMins;
+      if(act){
+        startMins = clamp(minsSinceMidnight(act.start), dayStartMins, dayEndMins - 15);
+        const durM = Math.max(15, Math.round((act.end - act.start)/60000));
+        endMins = clamp(startMins + durM, startMins + 15, dayEndMins);
+      } else {
+        startMins = schedStartMins;
+        endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
+      }
+      const shifted = act && Math.abs(startMins - schedStartMins) >= 5;
+
+      // Faint dashed tick at the original scheduled slot when the block moved.
+      if(shifted){
+        const mk = document.createElement("div");
+        mk.className = "sched-marker";
+        mk.style.left = ((schedStartMins - dayStartMins) * pxPerMin) + "px";
+        mk.title = "Scheduled " + pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
+        track.appendChild(mk);
+      }
 
       const el = document.createElement("div");
-      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "");
+      el.className = "day-job" + (job.assignedEngineers.length > 1 ? " multi" : "") + (done ? " done" : "");
       el.dataset.jobId = job.id;
       el.dataset.engineer = engineer.username;
       el.style.left = ((startMins - dayStartMins) * pxPerMin) + "px";
       el.style.width = Math.max(28, (endMins - startMins) * pxPerMin) + "px";
       const colour = STATUS_COLOUR[job.status] || "#60a5fa";
       el.style.borderColor = colour;
-      el.style.background = colour + "22";
+      el.style.background = colour + (done ? "33" : "22");
 
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      if(job.ref) el.querySelector(".day-job-ref").textContent = job.ref;
+      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "");
       el.querySelector(".day-job-label").textContent = job.title;
-      el.title = timeLabel + "  " + (job.ref ? job.ref + "  " : "") + job.title +
+      const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
+      el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
+                 (shifted ? "Scheduled " + schedLabel : timeLabel) + "  " +
+                 (job.ref ? job.ref + "  " : "") + job.title +
                  (job.site ? "  ·  " + job.site : "") +
                  (job.assignedEngineers.length > 1 ? "  ·  " + job.assignedEngineers.length + " engineers" : "");
 
-      attachPointerDrag(el, job, false);
+      // Completed jobs are locked (not draggable) — they still open on click.
+      if(!done) attachPointerDrag(el, job, false);
       el.addEventListener("click", () => { if(!dragState.active && !dragState.moved) openJobModal(job.id); });
       track.appendChild(el);
     });
@@ -632,8 +745,13 @@ function renderWeekView(container){
 
   engineerList.forEach(engineer => {
     const nameCell = document.createElement("div");
-    nameCell.className = "week-day-header";
+    nameCell.className = "week-day-header clickable";
     nameCell.textContent = engineer.name;
+    nameCell.title = "See how " + engineer.name + " is getting on";
+    // No single day in the week grid — show today if it's in view, else the picked date.
+    const now = new Date();
+    const inWeek = now >= monday && now < new Date(monday.getFullYear(), monday.getMonth(), monday.getDate()+7);
+    nameCell.addEventListener("click", () => openEngDay(engineer.username, engineer.name, inWeek ? now : selectedDate));
     grid.appendChild(nameCell);
 
     for(let i = 0; i < 7; i++){
@@ -657,11 +775,12 @@ function renderWeekView(container){
         .filter(j => j.scheduledAt && j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
         .filter(j => sameDay(new Date(j.scheduledAt), date))
         .forEach(job => {
+          const done = isDoneStatus(job.status);
           const chip = document.createElement("div");
-          chip.className = "week-job-chip";
+          chip.className = "week-job-chip" + (done ? " done" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (job.ref ? job.ref + " " : "") + job.title;
+          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title;
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });
@@ -812,6 +931,81 @@ async function onPointerUp(e){
 
 /* ============== MODAL ============== */
 let modalJobId = null;
+/* ── Engineer day summary ─────────────────────────────────────────────────────
+   Click an engineer's name → their jobs for the day, each with a clear status,
+   plus a headline count of Scheduled / In Progress / Complete etc. Uses
+   /sla/jobs/for-engineer which serves THAT engineer's own per-engineer status. */
+// Order statuses sensibly for the summary chips; anything else (custom
+// categories) is appended after these in first-seen order.
+const ENG_STATUS_ORDER = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Invoiced","Closed Jobs"];
+function engStatusColour(s){ return STATUS_COLOUR[s] || "#64748b"; }
+let engDayCtx = null;   // remembers who/when the day-summary modal is showing (for the 🗺️ Map button)
+function openEngDay(username, name, date){
+  engDayCtx = { username, name, date };
+  const iso = formatDateInput(date);
+  $("engDayTitle").textContent = name;
+  const today = sameDay(date, new Date());
+  $("engDayDate").textContent = (today ? "Today · " : "") + date.toDateString();
+  $("engDaySummary").innerHTML = "";
+  $("engDayJobs").innerHTML = '<div class="eng-empty">Loading…</div>';
+  $("engDayBackdrop").style.display = "flex";
+  authFetch("/sla/jobs/for-engineer?engineer=" + encodeURIComponent(username) + "&date=" + iso + "&t=" + Date.now())
+    .then(r => r.json())
+    .then(list => {
+      const arr = Array.isArray(list) ? list : (list.jobs || []);
+      renderEngDay(arr);
+    })
+    .catch(() => { $("engDayJobs").innerHTML = '<div class="eng-empty">Couldn\'t load — try again.</div>'; });
+}
+function renderEngDay(list){
+  // Count by status.
+  const counts = {};
+  list.forEach(j => { const s = j.status || "Scheduled"; counts[s] = (counts[s] || 0) + 1; });
+  const seen = Object.keys(counts);
+  const ordered = ENG_STATUS_ORDER.filter(s => seen.includes(s)).concat(seen.filter(s => !ENG_STATUS_ORDER.includes(s)));
+  const sum = $("engDaySummary");
+  sum.innerHTML =
+    `<span class="sc total"><b>${list.length}</b>&nbsp;job${list.length === 1 ? "" : "s"}</span>` +
+    ordered.map(s => `<span class="sc"><span class="dot" style="background:${engStatusColour(s)}"></span>${s} <b>${counts[s]}</b></span>`).join("");
+  const wrap = $("engDayJobs");
+  if(!list.length){ wrap.innerHTML = '<div class="eng-empty">No jobs scheduled for this day.</div>'; return; }
+  // Sort by scheduled time.
+  const sorted = list.slice().sort((a,b) => new Date(a.scheduledAt||0) - new Date(b.scheduledAt||0));
+  wrap.innerHTML = sorted.map(j => {
+    const c = engStatusColour(j.status);
+    const t = j.scheduledAt ? (() => { const d = new Date(j.scheduledAt); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); })() : "—";
+    // /sla/jobs/for-engineer serves RAW server jobs (description/helpdeskRef/
+    // siteName), not the scheduler's normalised shape — accept either. Lead with
+    // the SITE (where they are); the full job description is deliberately left
+    // off this at-a-glance view (open the job to read it).
+    const ref = j.ref || j.helpdeskRef || "";
+    const site = j.site || j.siteName || j.siteCode || "";
+    const title = site || ref || "(job)";
+    const meta = [site ? ref : "", j.priority].filter(Boolean).join(" · ");
+    return `<div class="eng-jobrow" data-jid="${escapeAttr(j.id)}" style="border-left-color:${c}">
+      <span class="ej-time">${t}</span>
+      <span class="ej-main">
+        <span class="ej-title">${escapeHtml(title)}</span>
+        ${meta ? `<span class="ej-meta">${escapeHtml(meta)}</span>` : ""}
+      </span>
+      <span class="ej-chip" style="background:${c}">${escapeHtml(j.status || "Scheduled")}</span>
+    </div>`;
+  }).join("");
+  wrap.querySelectorAll("[data-jid]").forEach(row => row.addEventListener("click", () => {
+    const id = row.getAttribute("data-jid");
+    $("engDayBackdrop").style.display = "none";
+    // On the board (not finished) → quick modal; finished/off-board jobs
+    // (dropped from the board by loadJobs) → open the full office job view.
+    if(jobs.find(x => x.id === id)) openJobModal(id);
+    else window.open("job-view.html?id=" + encodeURIComponent(id), "_blank");
+  }));
+}
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/'/g, "&#39;"); }
+document.getElementById("engDayClose").addEventListener("click", () => { $("engDayBackdrop").style.display = "none"; });
+document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
+document.getElementById("engDayBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("engDayBackdrop")) document.getElementById("engDayBackdrop").style.display = "none"; });
+
 function openJobModal(jobId){
   const job = jobs.find(j => j.id === jobId);
   if(!job) return;
@@ -840,6 +1034,8 @@ function openJobModal(jobId){
 }
 function closeJobModal(){ modalJobId = null; $("jobModalBackdrop").style.display = "none"; }
 $("jobCancel").addEventListener("click", closeJobModal);
+// Open the full office job card (read-only view, handy for completed jobs).
+$("jobCardBtn").addEventListener("click", () => { if(modalJobId) window.open("job-view.html?jobId=" + encodeURIComponent(modalJobId), "_blank"); });
 // Mouse-wheel stepping on the quick modal's date/time/duration boxes
 // (15 min / 1 day / step-attr per notch — shared helper from sla-jobedit.js).
 if (window.MLJobEdit && window.MLJobEdit.wheelify) window.MLJobEdit.wheelify($("jobModalBackdrop"));
@@ -979,8 +1175,34 @@ function coordsFor(job){
   return null;
 }
 
-function openMap(){
+// Map scope: null = the whole board (open statuses, chip-filtered); or
+// {engineer, name, date} = one engineer's jobs for a day (all statuses).
+let mapScope = null;
+function jobsForMap(){
+  if(mapScope){
+    const me = mapScope.engineer.toLowerCase();
+    return jobs.filter(j => j.scheduledAt
+      && j.assignedEngineers.map(a => a.toLowerCase()).includes(me)
+      && sameDay(new Date(j.scheduledAt), mapScope.date));
+  }
+  return jobs.filter(j => MAP_STATUSES.includes(j.status) && mapFilter.has(j.status));
+}
+// Open the map showing ONE engineer's jobs for a day (from their day-summary modal).
+function openMapForEngineer(username, name, date){
+  $("engDayBackdrop").style.display = "none";
+  openMap({ engineer: username, name: name, date: date });
+}
+function openMap(scope){
+  mapScope = scope || null;
   $("mapOverlay").classList.add("show");
+  // Engineer-scoped view: name the person + day and hide the status chips.
+  if(mapScope){
+    $("mapTitle").textContent = "🗺️ " + mapScope.name + " — " + mapScope.date.toDateString();
+    $("mapChips").style.display = "none";
+  } else {
+    $("mapTitle").textContent = "🗺️ Job map";
+    $("mapChips").style.display = "";
+  }
   if(typeof L === "undefined"){
     $("mapNote").textContent = "⚠️ Map library couldn't load — check the connection and try again.";
     return;
@@ -997,13 +1219,14 @@ function openMap(){
   $("mapNote").textContent = "Placing jobs by postcode…";
   (async () => {
     await loadSiteMeta();
-    const mappable = jobs.filter(j => MAP_STATUSES.includes(j.status));
+    const mappable = jobsForMap();
     await geocodePostcodes(mappable.map(postcodeFor));
     setTimeout(() => { map.invalidateSize(); plotJobs(); }, 60);
   })();
 }
 function closeMap(){
   $("mapOverlay").classList.remove("show");
+  mapScope = null;
   if(location.hash === "#map") history.replaceState(null, "", location.pathname + location.search);
 }
 function plotJobs(){
@@ -1012,7 +1235,7 @@ function plotJobs(){
   const pts = [];
   let noLoc = 0;
   const problems = [];
-  jobs.filter(j => MAP_STATUSES.includes(j.status) && mapFilter.has(j.status)).forEach(job => {
+  jobsForMap().forEach(job => {
     const pt = coordsFor(job);
     if(!pt){
       noLoc++;

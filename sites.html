@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="utf-8"/>
   <title>Mostlane • Site Manager</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <style>
     :root{
@@ -1050,6 +1050,13 @@ if (marker && marker.setPosition) {
   };
 
   btnSave.onclick = async ()=>{
+    // iOS Safari doesn't commit a field's typed value to .value until the field
+    // blurs — tapping Save straight from the Site Number box used to read it as
+    // empty and wrongly demand a number (the workaround was to tap another field
+    // first). Blur the focused field ourselves + let the value settle so Save
+    // always sees what's on screen.
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch(_){}
+    await new Promise(r => setTimeout(r, 0));
     try{
       const oldNum = currentEditing.siteNumber;
       currentEditing.client = editClient.value;

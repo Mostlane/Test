@@ -2,17 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Van Checks — Weekly</title>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <style>
     :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
     * { box-sizing:border-box; }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
-    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
-    header.page h1 { font-size:18px; margin:0; flex:1; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    header.page h1 { font-size:18px; margin:0; flex:1 1 auto; }
+    .hactions { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; align-items:center; }
+    /* On phones the action buttons drop onto their own full-width row under the
+       title (which then no longer squeezes to 3 lines), and the header leaves a
+       gap on the right so the fixed 🔔 bell never sits on top of a button. */
+    @media (max-width:760px) {
+      header.page { padding-right:60px; }
+      header.page h1 { flex-basis:calc(100% - 60px); }
+      .hactions { flex-basis:100%; margin-left:0; margin-top:4px; }
+      .hactions .btn { flex:1 1 auto; justify-content:center; }
+    }
     .wrap { max-width:900px; margin:14px auto 60px; padding:0 12px; }
     .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
     .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
@@ -52,17 +62,48 @@
     .userpick { max-height:160px; overflow:auto; border:1px solid #e2e8f0; border-radius:9px; padding:8px; }
     .userpick label { display:flex; align-items:center; gap:8px; font-weight:500; font-size:14px; margin:3px 0; }
     .userpick input { width:auto; }
+    .itemrow .optbtn { background:#eef2f7; color:var(--brand); border:1px solid #cdd9ea; border-radius:8px; padding:6px 9px; font:600 12px inherit; font-family:inherit; cursor:pointer; white-space:nowrap; }
+    .ir-opts { flex-basis:100%; margin:2px 0 4px 4px; padding:8px 10px; border-left:3px solid #cdd9ea; background:#f8fafc; border-radius:0 8px 8px 0; }
+    .ir-opts .h { font-size:11px; font-weight:700; color:#5b6b7b; margin-bottom:5px; }
+    .optrow { display:flex; gap:6px; align-items:center; margin-bottom:5px; }
+    .optrow input.or-label { flex:1 1 140px; min-width:110px; padding:6px 8px; border:1px solid #ccd5dd; border-radius:7px; font-size:13px; }
+    .optrow select.or-tone { padding:6px; border:1px solid #ccd5dd; border-radius:7px; font-size:12.5px; }
+    .optrow .rm { background:#fdecea; color:var(--bad); border:none; border-radius:7px; width:26px; height:30px; font-size:13px; cursor:pointer; flex:none; }
+    .remrow { display:flex; gap:7px; align-items:center; margin-bottom:6px; }
+    .remrow select, .remrow input { padding:8px; border:1px solid #ccd5dd; border-radius:8px; font-size:13.5px; font-family:inherit; }
+    .remrow .rm { background:#fdecea; color:var(--bad); border:none; border-radius:8px; width:30px; height:34px; font-size:14px; cursor:pointer; }
     .ahint { font-size:12px; color:#6b7a90; margin:2px 0 8px; }
+    /* By-engineer compliance matrix */
+    table.mtx { border-collapse:separate; border-spacing:3px; font-size:12px; }
+    table.mtx th { font-weight:600; color:#5b6b7b; padding:2px 4px; text-align:center; white-space:nowrap; font-size:11px; }
+    table.mtx th.eng { text-align:left; position:sticky; left:0; background:#fff; z-index:2; min-width:130px; }
+    table.mtx td.eng { text-align:left; position:sticky; left:0; background:#fff; z-index:1; white-space:nowrap; padding-right:8px; font-weight:600; }
+    table.mtx td.eng .sub { font-weight:400; color:#8a97a6; font-size:11px; }
+    .mtx-cell { display:inline-block; width:24px; height:24px; border-radius:6px; border:1px solid rgba(0,0,0,.06); vertical-align:middle; }
+    td.mc { text-align:center; padding:0; }
+    td.mc .mtx-cell { cursor:default; }
+    td.mc.clk .mtx-cell { cursor:pointer; }
+    .mtx-cell.done { background:#22c55e; }
+    .mtx-cell.issue { background:#f59e0b; }
+    .mtx-cell.missed { background:#ef4444; }
+    .mtx-cell.skipped { background:#a5b4fc; }
+    .mtx-cell.none { background:#eef1f4; border-style:dashed; }
+    .mtx-key { display:inline-flex; align-items:center; gap:5px; color:#5b6b7b; }
+    .mtx-key .mtx-cell { width:15px; height:15px; border-radius:4px; }
+    .mtx-cur { color:#003366; font-weight:700; }
   </style>
 </head>
 <body>
   <header class="page">
     <a class="ml-back" data-role="home" href="/vehicles.html" style="text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Checks</h1>
-    <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
-    <button class="btn grey small" id="customBtn">🧩 Custom checks</button>
-    <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
-    <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
+    <div class="hactions">
+      <button class="btn grey small" id="matrixBtn">📅 By engineer</button>
+      <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
+      <button class="btn grey small" id="customBtn">🧩 Custom checks</button>
+      <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
+      <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
+    </div>
   </header>
   <div class="wrap">
     <div class="card">
@@ -83,6 +124,27 @@
       </table>
     </div>
     <p class="muted" style="font-size:12.5px;">Drivers = active users with a vehicle allocated in Users Admin. A Story Mode weekly check counts as done too. Drivers do their check at <b>/van-check.html</b> (🚐 tile / red alert). Switch a driver <b>Off</b> to take them out of the weekly cycle — no reminders, no home-screen prompt (they can still do a check if they want).</p>
+
+    <!-- By-engineer compliance matrix (missed weeks) -->
+    <div class="card hide" id="matrixCard">
+      <div class="row" style="justify-content:space-between; align-items:flex-start;">
+        <div>
+          <b style="font-size:15px;">📅 By engineer — weekly compliance</b>
+          <div class="muted" style="font-size:12px; margin-top:2px;" id="mtxRange">Loading…</div>
+        </div>
+        <div class="row" style="gap:6px;">
+          <button class="btn ghost small hide" id="mtxEditBtn">⚙ Statuses</button>
+          <button class="btn ghost small" id="mtxEarlier">← Earlier weeks</button>
+          <button class="btn grey small" id="mtxReset">Recent</button>
+          <button class="btn grey small" id="mtxClose">Hide</button>
+        </div>
+      </div>
+      <div class="row" id="mtxLegend" style="gap:12px; margin:8px 0 4px; font-size:11.5px; flex-wrap:wrap;"></div>
+      <div style="overflow-x:auto;">
+        <table class="mtx" id="mtxTable"><tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody></table>
+      </div>
+      <p class="muted" style="font-size:11.5px; margin:8px 0 0;">Follows the person, not the van — a driver who changes vehicle keeps one row. Hover/tap a cell for the van used and any issue. “Missed” shows only for weeks a driver was assigned a van. Starts at last week — page further back with <b>Earlier weeks</b>.</p>
+    </div>
   </div>
 
   <!-- View a check -->
@@ -108,7 +170,11 @@
           <select id="s_dow"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option></select></div>
         <div style="flex:1;"><label>Due time</label><input type="time" id="s_time"></div>
       </div>
-      <label>Checklist (driver taps OK / Defect)</label>
+      <label style="margin-top:12px;">Reminder notifications</label>
+      <p class="ahint">When to push drivers who haven't done their check. Add as many day + time slots as you like. Leave empty for the default (Monday 07:00 + a chase before the deadline). Reminders fire at or just after the chosen time.</p>
+      <div id="s_reminders"></div>
+      <button type="button" class="addbtn" onclick="addReminderRow()">＋ Add reminder time</button>
+      <label style="margin-top:16px;">Checklist (driver taps the answers you set — default OK / Defect)</label>
       <p class="ahint">Tick <b>Alert if</b> on any item to notify the people below when that answer is given.</p>
       <div id="s_checkRows"></div>
       <button type="button" class="addbtn" onclick="addItemRow('s_checkRows','check')">＋ Add check</button>
@@ -205,6 +271,29 @@
     </div>
   </div>
 
+  <!-- Full-Access: change a grid cell -->
+  <div class="overlay" id="mtxEditModal">
+    <div class="panel" style="max-width:420px;" id="mtxEditBody"></div>
+  </div>
+
+  <!-- Full-Access: edit the configurable grid statuses -->
+  <div class="overlay" id="statusModal">
+    <div class="panel" style="max-width:520px;">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Grid statuses</h2>
+        <button class="btn grey small" onclick="document.getElementById('statusModal').classList.remove('open')">✕</button>
+      </div>
+      <p class="ahint">The statuses you can set on the by-engineer grid (holiday, off sick, van off road…). <b>Excused</b> = not counted as missed; <b>Counts as done</b> = treated like a completed check in stats; <b>Issue</b> = flagged as a problem. “Not required” is the default and can be recoloured but not removed.</p>
+      <div id="statusRows"></div>
+      <button class="addbtn" id="statusAdd">＋ Add status</button>
+      <p class="msg" id="statusMsg"></p>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn green" id="statusSave">Save statuses</button>
+        <button class="btn grey" onclick="document.getElementById('statusModal').classList.remove('open')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div class="viewer" id="viewer" onclick="this.classList.remove('open')"><img id="viewerImg"></div>
 
 <script>
@@ -216,7 +305,7 @@
     return fetch(API + path, opts);
   }
   const fmtDT = s => s ? new Date(s).toLocaleString("en-GB", { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "—";
-  let WEEK = null, DATA = null, ME = null;
+  let WEEK = null, DATA = null, ME = null, IS_FULL = false;
 
   function mondayOf(d) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7)); return x.toISOString().slice(0, 10); }
   function addDays(d, n) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
@@ -226,6 +315,7 @@
       const me = await authFetch("/auth/me").then(r => r.json());
       if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Vehicles === "Yes")) { alert("This page needs Vehicles access."); location.href = "/main.html"; return; }
       ME = me.user;
+      IS_FULL = ME.FullAccess === "Yes";
       g("settingsBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
       g("hoTplBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
     } catch (e) { location.href = "/main.html"; return; }
@@ -338,11 +428,189 @@
   g("prevWk").onclick = () => { WEEK = addDays(WEEK, -7); load(); };
   g("nextWk").onclick = () => { WEEK = addDays(WEEK, 7); load(); };
 
+  // ── By-engineer compliance matrix (missed weeks) ────────────────────────────
+  let MTX_FROM = null, MTX_TO = null, MTX_EDIT = null, GRID_STATUSES = [];
+  function mtxFmt(w) { return new Date(w + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
+  // Default view starts at LAST week (last week + this week) — page further back
+  // with "Earlier weeks". Keeps historic weeks (before people were doing checks)
+  // out of the missed count unless you deliberately look back.
+  g("matrixBtn").onclick = () => {
+    const card = g("matrixCard");
+    const showing = !card.classList.contains("hide");
+    if (showing) { card.classList.add("hide"); return; }
+    card.classList.remove("hide");
+    if (!MTX_TO) { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7); }
+    loadMatrix();
+    card.scrollIntoView({ behavior:"smooth", block:"start" });
+  };
+  g("mtxClose").onclick = () => g("matrixCard").classList.add("hide");
+  g("mtxEarlier").onclick = () => { MTX_FROM = addDays(MTX_FROM, -7 * 4); loadMatrix(); };
+  g("mtxReset").onclick = () => { MTX_TO = mondayOf(new Date().toISOString().slice(0, 10)); MTX_FROM = addDays(MTX_TO, -7); loadMatrix(); };
+
+  async function loadMatrix() {
+    g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">Loading…</td></tr></tbody>';
+    let d;
+    try { d = await authFetch("/vancheck/matrix?from=" + MTX_FROM + "&to=" + MTX_TO).then(r => r.json()); }
+    catch (e) { g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">Couldn’t load — try again.</td></tr></tbody>'; return; }
+    if (!d || !d.ok) { g("mtxTable").innerHTML = '<tbody><tr><td class="muted" style="padding:14px;">' + esc((d && d.error) || "Couldn’t load.") + '</td></tr></tbody>'; return; }
+    renderMatrix(d);
+  }
+  function renderMatrix(d) {
+    const weeks = d.weeks || [];
+    GRID_STATUSES = d.statuses || GRID_STATUSES;
+    renderMtxLegend();
+    g("mtxEditBtn").classList.toggle("hide", !IS_FULL);
+    g("mtxRange").textContent = weeks.length
+      ? ("w/c " + mtxFmt(weeks[0]) + " → w/c " + mtxFmt(weeks[weeks.length - 1]) + " · " + weeks.length + " weeks")
+      : "";
+    const head = "<tr><th class='eng'>Engineer</th>" + weeks.map(w =>
+      `<th class="${w === d.currentWeek ? "mtx-cur" : ""}" title="w/c ${esc(w)}">${esc(mtxFmt(w))}</th>`).join("") + "</tr>";
+    const titleFor = (c) => {
+      if (c.status === "override") return (c.label || "Set") + (c.reg ? " · " + c.reg : "");
+      if (c.status === "done") return "Done" + (c.reg ? " · " + c.reg : "");
+      if (c.status === "issue") return (c.skipped ? "Skipped" : (c.safe === false ? "NOT safe to drive" : (c.issues ? c.issues + " issue" + (c.issues === 1 ? "" : "s") : "Issue"))) + (c.reg ? " · " + c.reg : "");
+      if (c.status === "skipped") return "Not required" + (c.reg ? " · " + c.reg : "");
+      if (c.status === "missed") return "No check this week";
+      return "Not required / no record";
+    };
+    const body = (d.rows || []).length
+      ? d.rows.map(r => {
+          const sub = r.expected ? (r.vehicle ? esc(r.vehicle) : "") : "no van now";
+          const cells = weeks.map(w => {
+            const c = r.cells[w] || { status:"none" };
+            const openable = (c.status === "done" || c.status === "issue") && c.reg;
+            // Full-Access can set/change any non-real-check cell up to this week.
+            const editable = IS_FULL && (c.status === "skipped" || c.status === "override" || c.status === "missed" || c.status === "none") && w <= d.currentWeek;
+            const clk = openable || editable;
+            const attr = `data-user="${esc(r.username)}" data-name="${esc(r.name)}" data-week="${esc(w)}" data-status="${esc(c.status)}"${c.key ? ` data-key="${esc(c.key)}"` : ""}${c.reg ? ` data-reg="${esc(c.reg)}"` : ""}`;
+            const tip = titleFor(c) + (editable ? " — tap to change" : (openable ? " — tap to open" : ""));
+            const style = c.status === "override" && c.colour ? ` style="background:${esc(c.colour)}"` : "";
+            const cellCls = c.status === "override" ? "mtx-cell" : ("mtx-cell " + c.status);
+            return `<td class="mc${clk ? " clk" : ""}" ${attr} title="${esc(tip)}"><span class="${cellCls}"${style}></span></td>`;
+          }).join("");
+          const tally = r.missed ? ` <span class="sub" style="color:#b00020;">${r.missed} missed</span>` : "";
+          return `<tr><td class="eng">${esc(r.name)}${sub ? ` <span class="sub">· ${sub}</span>` : ""}${tally}</td>${cells}</tr>`;
+        }).join("")
+      : `<tr><td class="muted" style="padding:14px;">No drivers to show.</td></tr>`;
+    g("mtxTable").innerHTML = "<thead>" + head + "</thead><tbody>" + body + "</tbody>";
+  }
+  // Legend = the fixed states + every configured override status (its own colour).
+  function renderMtxLegend() {
+    const base = [
+      { colour:"#22c55e", label:"Done" },
+      { colour:"#f59e0b", label:"Issue reported" },
+      { colour:"#ef4444", label:"Missed" },
+    ];
+    const extra = (GRID_STATUSES || []).map(s => ({ colour:s.colour, label:s.label }));
+    const none = [{ colour:"", label:"No record", dashed:true }];
+    g("mtxLegend").innerHTML = base.concat(extra, none).map(k =>
+      `<span class="mtx-key"><span class="mtx-cell${k.dashed ? " none" : ""}" style="${k.colour ? "background:" + esc(k.colour) : ""}"></span> ${esc(k.label)}</span>`).join("");
+  }
+
   document.addEventListener("click", e => {
     if (e.target.dataset.view) openCheck(e.target.dataset.view);
     if (e.target.dataset.toggle) toggleDriver(e.target.dataset.toggle, e.target.dataset.enable === "1");
     if (e.target.closest && e.target.closest("[data-img]")) { g("viewerImg").src = e.target.closest("[data-img]").dataset.img; g("viewer").classList.add("open"); }
+    const mc = e.target.closest && e.target.closest("td.mc.clk");
+    if (mc) {
+      const st = mc.dataset.status;
+      if (IS_FULL && (st === "skipped" || st === "missed" || st === "none")) openMtxEdit(mc.dataset);
+      else if (mc.dataset.reg) location.href = "/vehicle-checks.html?reg=" + encodeURIComponent(mc.dataset.reg);
+    }
   });
+
+  // ── Full-Access: set/change a grid cell to a configured status (double-check) ─
+  function openMtxEdit(ds) {
+    const st = ds.status, reg = ds.reg || "", who = ds.user, name = ds.name || who, week = ds.week, curKey = ds.key || (st === "skipped" ? "skipped" : "");
+    const wLabel = mtxFmt(week);
+    const curStatus = (GRID_STATUSES || []).find(s => s.key === curKey);
+    const statusText = st === "override" || st === "skipped"
+      ? ((curStatus && curStatus.label) || "Set")
+      : ({ done:"Done", issue:"Issue reported", missed:"Missed — no check", none:"No record" }[st] || st);
+    // One button per configured status, coloured; the current one is ticked.
+    const statusBtns = (GRID_STATUSES || []).map(s =>
+      `<button class="btn" style="background:${esc(s.colour)};${["#cbd5e1","#a5b4fc","#e5e7eb"].includes((s.colour||'').toLowerCase()) ? "color:#1f2937;" : ""}" data-mact="set" data-key="${esc(s.key)}">${s.key === curKey ? "✓ " : ""}${esc(s.label)}</button>`
+    ).join("");
+    const clearBtn = (st === "skipped" || st === "override")
+      ? `<button class="btn grey" data-mact="clear">↩ Clear — make this week due again</button>` : "";
+    g("mtxEditBody").innerHTML =
+      `<h3 style="margin:0 0 4px;">${esc(name)}</h3>`
+      + `<p class="muted" style="margin:0 0 10px; font-size:13px;">Week commencing <b>${esc(wLabel)}</b> · currently <b>${esc(statusText)}</b></p>`
+      + `<p class="muted" style="margin:0 0 6px; font-size:12px;">Set this week to:</p>`
+      + `<div style="display:flex; flex-direction:column; gap:7px;">${statusBtns}${clearBtn}`
+      + `<button class="btn ghost" data-mact="cancel" style="margin-top:4px;">Cancel</button></div>`
+      + `<p class="msg" id="mtxEditMsg"></p>`;
+    MTX_EDIT = { who, week, name, wLabel, reg };
+    g("mtxEditModal").classList.add("open");
+  }
+  g("mtxEditModal").addEventListener("click", async e => {
+    if (e.target === g("mtxEditModal")) { g("mtxEditModal").classList.remove("open"); return; }
+    const btn = e.target.closest && e.target.closest("[data-mact]"); if (!btn || !MTX_EDIT) return;
+    const act = btn.dataset.mact;
+    if (act === "cancel") { g("mtxEditModal").classList.remove("open"); return; }
+    const { who, week, name, wLabel } = MTX_EDIT;
+    let q, body;
+    if (act === "set") {
+      const s = (GRID_STATUSES || []).find(x => x.key === btn.dataset.key); if (!s) return;
+      q = `Set ${name}'s week (w/c ${wLabel}) to "${s.label}"?`;
+      body = { username: who, week, action: "set", status: s.key };
+    } else if (act === "clear") {
+      q = `Clear this entry for ${name}, w/c ${wLabel}? Their van check becomes due again for that week.`;
+      body = { username: who, week, action: "clear" };
+    } else return;
+    const ok = window.MLUI ? await MLUI.confirm(q, { title: act === "clear" ? "Clear this week?" : "Change status?", okLabel: "Yes", danger: act === "clear" }) : confirm(q);
+    if (!ok) return;
+    const msg = g("mtxEditMsg"); if (msg) { msg.className = "msg"; msg.textContent = "Saving…"; }
+    try {
+      const r = await authFetch("/vancheck/grid-set", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(body) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "Couldn't save");
+      g("mtxEditModal").classList.remove("open");
+      loadMatrix();
+      if (week === WEEK) load();   // keep the weekly table in step if it's the same week
+    } catch (err) { if (msg) { msg.className = "msg err"; msg.textContent = err.message; } }
+  });
+
+  // ── Full-Access: edit the configurable status list ──────────────────────────
+  const TONE_LABEL = { done:"Counts as done", excused:"Excused (not missed)", issue:"Counts as an issue" };
+  g("mtxEditBtn").onclick = () => { renderStatusEditor(GRID_STATUSES); g("statusModal").classList.add("open"); };
+  function statusRowHtml(s) {
+    s = s || { key:"", label:"", colour:"#a5b4fc", tone:"excused" };
+    const locked = s.key === "skipped";
+    return `<div class="remrow statusrow" data-locked="${locked ? "1" : "0"}">
+      <input type="color" class="sr-colour" value="${esc(/^#[0-9a-fA-F]{6}$/.test(s.colour) ? s.colour : "#a5b4fc")}" style="width:38px;height:34px;padding:2px;">
+      <input type="text" class="sr-label" placeholder="Status name" value="${esc(s.label)}" style="flex:1 1 120px;min-width:100px;"${locked ? " title='The default — you can recolour it but not rename'" : ""}>
+      <select class="sr-tone" style="flex:none;">
+        <option value="excused"${s.tone === "excused" ? " selected" : ""}>Excused</option>
+        <option value="done"${s.tone === "done" ? " selected" : ""}>Counts as done</option>
+        <option value="issue"${s.tone === "issue" ? " selected" : ""}>Issue</option>
+      </select>
+      <button class="rm" data-srrm${locked ? " disabled title='The default status can’t be removed'" : ""}>✕</button>
+    </div>`;
+  }
+  function renderStatusEditor(list) {
+    g("statusRows").innerHTML = (Array.isArray(list) && list.length ? list : [{ key:"skipped", label:"Not required", colour:"#a5b4fc", tone:"excused" }]).map(statusRowHtml).join("");
+  }
+  g("statusAdd").onclick = () => { g("statusRows").insertAdjacentHTML("beforeend", statusRowHtml()); };
+  g("statusRows").addEventListener("click", e => { const b = e.target.closest("[data-srrm]"); if (b && !b.disabled) b.closest(".statusrow").remove(); });
+  g("statusSave").onclick = async () => {
+    const rows = [...g("statusRows").querySelectorAll(".statusrow")].map(r => ({
+      key: r.dataset.locked === "1" ? "skipped" : "",
+      label: r.querySelector(".sr-label").value.trim(),
+      colour: r.querySelector(".sr-colour").value,
+      tone: r.querySelector(".sr-tone").value,
+    })).filter(r => r.label);
+    const msg = g("statusMsg"); msg.className = "msg"; msg.textContent = "Saving…";
+    try {
+      const r = await authFetch("/vancheck/grid-statuses", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ statuses: rows }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "Couldn't save");
+      GRID_STATUSES = r.statuses || rows;
+      msg.className = "msg ok"; msg.textContent = "Saved ✓";
+      g("statusModal").classList.remove("open");
+      loadMatrix();
+    } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+  };
 
   function openCheck(username) {
     const r = (DATA.rows || []).find(x => x.username === username);
@@ -385,27 +653,70 @@
   async function loadUsers() { if (USERS.length) return USERS; try { const d = await authFetch("/users").then(r => r.json()); USERS = (d.Users || d.users || []).filter(u => u.Username); } catch (e) {} return USERS; }
   const uName = u => ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
   const ANS = { check: [["defect", "Defect"], ["ok", "OK"]], equip: [["missing", "Missing"], ["present", "Present"]] };
+  // Custom answer options (per item). tone: ok | issue | na. Empty = default
+  // (OK/Defect for checklist, Present/Missing for equipment).
+  const TONE_OPTS = [["ok", "OK ✓"], ["issue", "Issue ✗"], ["na", "N/A –"]];
+  const DEF_OPTS = { check: [{ label: "OK", tone: "ok" }, { label: "Defect", tone: "issue" }], equip: [{ label: "Present", tone: "ok" }, { label: "Missing", tone: "issue" }] };
+  function optRowHtml(o) {
+    o = o || {}; const t = o.tone || "ok";
+    return `<div class="optrow"><input class="or-label" placeholder="Answer" value="${esc(o.label || "")}"><select class="or-tone">${TONE_OPTS.map(([v, l]) => `<option value="${v}" ${v === t ? "selected" : ""}>${l}</option>`).join("")}</select><button type="button" class="rm" title="Remove answer" onclick="this.closest('.optrow').remove()">✕</button></div>`;
+  }
   function itemRowHtml(kind, it) {
     it = it || {}; const opts = ANS[kind] || ANS.check; const on = it.alertOn || opts[0][0];
     const sel = opts.map(([v, l]) => `<option value="${v}" ${v === on ? "selected" : ""}>${l}</option>`).join("");
-    return `<div class="itemrow">
+    const hasOpts = Array.isArray(it.options) && it.options.length;
+    const optsHtml = (it.options || []).map(optRowHtml).join("");
+    return `<div class="itemrow" data-kind="${kind}">
       <input class="ir-label" placeholder="Item name" value="${esc(it.label || "")}">
-      <span class="ir-alertwrap"><input type="checkbox" class="ir-alertck" ${it.alert ? "checked" : ""} onchange="this.closest('.itemrow').querySelector('.ir-alerton').style.display=this.checked?'':'none'"> Alert if</span>
-      <select class="ir-alerton" style="display:${it.alert ? "" : "none"}">${sel}</select>
+      <button type="button" class="optbtn" onclick="toggleItemOpts(this)">⚙ Answers</button>
+      <span class="ir-alertwrap"><input type="checkbox" class="ir-alertck" ${it.alert ? "checked" : ""} onchange="this.closest('.itemrow').querySelector('.ir-alerton').style.display=(this.checked&&!this.closest('.itemrow').querySelector('.optrow'))?'':'none'"> Alert if</span>
+      <select class="ir-alerton" style="display:${(it.alert && !hasOpts) ? "" : "none"}">${sel}</select>
       <button type="button" class="rm" title="Remove" onclick="this.closest('.itemrow').remove()">✕</button>
+      <div class="ir-opts" style="display:${hasOpts ? "" : "none"}">
+        <div class="h">Answer buttons the driver sees — tag each OK / Issue / N/A. Leave empty for the default (${kind === "equip" ? "Present / Missing" : "OK / Defect"}).</div>
+        <div class="optlist">${optsHtml}</div>
+        <button type="button" class="addbtn" style="padding:5px 9px;font-size:12px;" onclick="addOptRow(this)">＋ Add answer</button>
+      </div>
     </div>`;
   }
+  // Toggle the answers editor; seed with the defaults the first time it's opened.
+  function toggleItemOpts(btn) {
+    const row = btn.closest(".itemrow"); const box = row.querySelector(".ir-opts");
+    const showing = box.style.display !== "none";
+    if (showing) { box.style.display = "none"; return; }
+    box.style.display = "";
+    if (!box.querySelector(".optrow")) {
+      const kind = row.dataset.kind || "check";
+      box.querySelector(".optlist").innerHTML = DEF_OPTS[kind].map(optRowHtml).join("");
+    }
+    // A custom-answer item alerts on any "Issue", so the specific alert-answer
+    // picker isn't needed — hide it while custom answers exist.
+    const on = row.querySelector(".ir-alerton"); if (on) on.style.display = "none";
+  }
+  function addOptRow(btn) { btn.closest(".ir-opts").querySelector(".optlist").insertAdjacentHTML("beforeend", optRowHtml({})); }
   function renderItemRows(containerId, kind, items) { const box = g(containerId); box.dataset.kind = kind; box.innerHTML = (items || []).map(it => itemRowHtml(kind, it)).join(""); }
   function addItemRow(containerId, kind) { g(containerId).insertAdjacentHTML("beforeend", itemRowHtml(kind, {})); }
   function collectItemRows(containerId) {
     const out = [];
     g(containerId).querySelectorAll(".itemrow").forEach(r => {
       const label = r.querySelector(".ir-label").value.trim(); if (!label) return;
-      if (r.querySelector(".ir-alertck").checked) out.push({ label, alert: true, alertOn: r.querySelector(".ir-alerton").value });
-      else out.push({ label });
+      const it = { label };
+      const options = [...r.querySelectorAll(".ir-opts .optrow")].map(o => ({ label: o.querySelector(".or-label").value.trim(), tone: o.querySelector(".or-tone").value })).filter(o => o.label);
+      if (options.length) it.options = options;
+      if (r.querySelector(".ir-alertck").checked) { it.alert = true; if (!options.length) it.alertOn = r.querySelector(".ir-alerton").value; }
+      out.push(it);
     });
     return out;
   }
+  // Reminder times editor.
+  const REM_DAYS = [[1, "Monday"], [2, "Tuesday"], [3, "Wednesday"], [4, "Thursday"], [5, "Friday"], [6, "Saturday"], [7, "Sunday"]];
+  function reminderRowHtml(r) {
+    r = r || {}; const dow = Number(r.dow) || 1;
+    return `<div class="remrow"><select class="rr-dow">${REM_DAYS.map(([v, l]) => `<option value="${v}" ${v === dow ? "selected" : ""}>${l}</option>`).join("")}</select><input type="time" class="rr-time" value="${esc(r.time || "07:00")}"><button type="button" class="rm" title="Remove" onclick="this.closest('.remrow').remove()">✕</button></div>`;
+  }
+  function renderReminders(list) { g("s_reminders").innerHTML = (list || []).map(reminderRowHtml).join(""); }
+  function addReminderRow() { g("s_reminders").insertAdjacentHTML("beforeend", reminderRowHtml({})); }
+  function collectReminders() { return [...g("s_reminders").querySelectorAll(".remrow")].map(r => ({ dow: Number(r.querySelector(".rr-dow").value), time: r.querySelector(".rr-time").value })).filter(r => r.dow && /^\d\d:\d\d$/.test(r.time)); }
   function renderUserPicker(containerId, selected) {
     const sel = new Set(selected || []);
     g(containerId).innerHTML = USERS.length
@@ -421,6 +732,7 @@
     const s = (DATA && DATA.settings) || { dueDow: 5, dueTime: "17:00", checklist: [] };
     g("s_dow").value = String(s.dueDow || 5);
     g("s_time").value = s.dueTime || "17:00";
+    renderReminders(s.reminders || []);
     renderItemRows("s_checkRows", "check", s.checklist || []);
     renderItemRows("s_equipRows", "equip", s.equipment || []);
     g("s_slots").value = slotsToText(s.photoSlots);
@@ -436,9 +748,10 @@
     const equipment = collectItemRows("s_equipRows");
     const photoSlots = textToSlots(g("s_slots").value);
     const alertUsers = collectUserPicker("s_alertUsers");
+    const reminders = collectReminders();
     try {
       const r = await authFetch("/vancheck/settings", { method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist, equipment, photoSlots, alertUsers }) }).then(r => r.json());
+        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist, equipment, photoSlots, alertUsers, reminders }) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "save failed");
       m.className = "msg ok"; m.textContent = "Saved ✓ — applies to everyone from now.";
       load();

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Jobs</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=14"></script>
+  <script src="sla-jobedit.js?v=15"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -223,9 +223,11 @@
         <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
         <a href="engineer-jobs.html" class="btn" id="myJobsLink" style="display:none">📝 My Jobs</a>
         <a href="you.html" class="btn" title="Your personal screen">👤 You</a>
+        <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
         <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
         <a href="sla-data-tools.html" class="btn" id="dataToolsLink" style="display:none">🧰 Data</a>
+        <a href="firestop-admin.html" class="btn" id="firestopLink" style="display:none">🔥 Firestopping</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
       </div>
     </header>
@@ -239,6 +241,7 @@
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
           document.getElementById("dataToolsLink").style.display = "";
+          document.getElementById("firestopLink").style.display = "";
         }
         var isField = (function(){
           if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();
@@ -266,6 +269,7 @@
       </select>
       <button class="btn small" id="bulkApply">Apply</button>
       <button class="btn small" id="catManageBtn" title="Create / edit / delete job categories">🏷️ Categories</button>
+      <button class="btn small" id="sheetCfgBtn" title="Choose what appears on Mostlane vs Client job sheets">🧾 Sheet settings</button>
       <select id="priorityFilter">
         <option value="all">All priorities</option>
         <option value="Priority 1">P1</option>
@@ -413,6 +417,42 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn primary" id="pdfClientBtn">📄 Client Copy</button>
         <button class="btn" id="pdfMostlaneBtn">🏗️ Mostlane Copy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JOB SHEET SETTINGS MODAL (global, tick which fields go on each copy) -->
+<style>
+  #sheetCfgModal{ max-width:560px; width:min(560px, calc(100vw - 24px)); }
+  #sheetCfgModal .modal-body{ overflow-x:hidden; }
+  .scfg-head, .scfg-row{ display:flex; align-items:center; gap:6px; box-sizing:border-box; }
+  .scfg-head{ color:#64748b; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.3px; padding:6px 8px; border-bottom:2px solid #cbd5e1; }
+  .scfg-row{ padding:11px 8px; font-size:14px; border-bottom:1px solid #dbe3ec; }
+  .scfg-row:nth-child(odd){ background:#f8fafc; }
+  .scfg-row:nth-child(even){ background:#e6ecf4; }
+  .scfg-label{ flex:1 1 auto; min-width:0; line-height:1.3; }
+  .scfg-col{ flex:0 0 54px; width:54px; text-align:center; }
+  .scfg-col input[type=checkbox]{ width:23px; height:23px; accent-color:#1e66ff; cursor:pointer; margin:0; }
+</style>
+<div class="modal-backdrop" id="sheetCfgBackdrop">
+  <div class="modal" id="sheetCfgModal">
+    <header>
+      <h2>🧾 Job sheet settings</h2>
+      <button type="button" id="sheetCfgClose">&times;</button>
+    </header>
+    <div class="modal-body">
+      <p style="font-size:13px;color:#475569;margin:0 0 8px;">Tick what appears on each copy of the job sheet. Applies to <b>all</b> jobs.</p>
+      <div class="scfg-head">
+        <span class="scfg-label">Field</span>
+        <span class="scfg-col">🏗️<br>Mostlane</span>
+        <span class="scfg-col">📄<br>Client</span>
+      </div>
+      <div id="sheetCfgRows"><div class="scfg-row"><span class="scfg-label" style="color:#94a3b8;">Loading…</span></div></div>
+      <div id="sheetCfgMsg" style="font-size:13px;min-height:16px;margin-top:8px;"></div>
+      <div style="display:flex;gap:10px;margin-top:8px;">
+        <button class="btn primary" id="sheetCfgSave">Save</button>
+        <button class="btn" id="sheetCfgCancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -922,6 +962,39 @@ function openJobPdf(type){
   closePdfModal();
 }
 
+/* ============ job sheet settings (which fields on Mostlane vs Client) ============ */
+let sheetCfgFields = [];
+async function openSheetCfg(){
+  $("sheetCfgBackdrop").classList.add("show");
+  $("sheetCfgMsg").textContent = "";
+  $("sheetCfgRows").innerHTML = '<tr><td colspan="3" style="padding:14px;color:#94a3b8;">Loading…</td></tr>';
+  try{
+    const r = await authFetch("/sla/sheet-config", { cache:"no-store" });
+    sheetCfgFields = ((await r.json()).fields) || [];
+  }catch(e){ sheetCfgFields = []; }
+  $("sheetCfgRows").innerHTML = sheetCfgFields.map((f,i) => `
+    <div class="scfg-row">
+      <span class="scfg-label">${esc(f.label)}</span>
+      <span class="scfg-col"><input type="checkbox" data-i="${i}" data-c="mostlane" ${f.mostlane?"checked":""}></span>
+      <span class="scfg-col"><input type="checkbox" data-i="${i}" data-c="client" ${f.client?"checked":""}></span>
+    </div>`).join("") || '<div class="scfg-row"><span class="scfg-label" style="color:#b91c1c;">Couldn\'t load settings.</span></div>';
+}
+function closeSheetCfg(){ $("sheetCfgBackdrop").classList.remove("show"); }
+async function saveSheetCfg(){
+  $("sheetCfgRows").querySelectorAll('input[type=checkbox]').forEach(cb => {
+    const f = sheetCfgFields[+cb.dataset.i]; if(f) f[cb.dataset.c] = cb.checked;
+  });
+  $("sheetCfgMsg").style.color = "#475569"; $("sheetCfgMsg").textContent = "Saving…";
+  try{
+    const r = await authFetch("/sla/sheet-config", {
+      method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fields: sheetCfgFields })
+    });
+    const out = await r.json();
+    if(r.ok && out.ok){ $("sheetCfgMsg").style.color = "#0e7a3b"; $("sheetCfgMsg").textContent = "✓ Saved — applies to all job sheets."; setTimeout(closeSheetCfg, 700); }
+    else { $("sheetCfgMsg").style.color = "#b91c1c"; $("sheetCfgMsg").textContent = (out && out.error) || "Couldn't save."; }
+  }catch(e){ $("sheetCfgMsg").style.color = "#b91c1c"; $("sheetCfgMsg").textContent = "Couldn't save — check your connection."; }
+}
+
 /* ============ bulk ============ */
 async function applyBulk(){
   const status = $("bulkAction").value;
@@ -1155,6 +1228,10 @@ function init(){
   });
   $("bulkApply").addEventListener("click", applyBulk);
   $("catManageBtn").addEventListener("click", openCatModal);
+  $("sheetCfgBtn").addEventListener("click", openSheetCfg);
+  $("sheetCfgClose").addEventListener("click", closeSheetCfg);
+  $("sheetCfgCancel").addEventListener("click", closeSheetCfg);
+  $("sheetCfgSave").addEventListener("click", saveSheetCfg);
   $("catClose").addEventListener("click", closeCatModal);
   $("catCancel").addEventListener("click", closeCatModal);
   $("catAddBtn").addEventListener("click", catAdd);

@@ -28,21 +28,52 @@ const W = {
   "w": 722, "x": 500, "y": 500, "z": 500, "£": 556, "·": 278, "–": 556, "—": 1000,
 };
 
+// Characters WinAnsi DOES have, but above the Latin-1 range (Windows-1252's
+// 0x80–0x9F block). Without this an en-dash or an ellipsis came out as "?".
+const WIN1252 = {
+  "\u20AC": 0x80, "\u201A": 0x82, "\u0192": 0x83, "\u201E": 0x84, "\u2026": 0x85,
+  "\u2020": 0x86, "\u2021": 0x87, "\u02C6": 0x88, "\u2030": 0x89, "\u0160": 0x8A,
+  "\u2039": 0x8B, "\u0152": 0x8C, "\u017D": 0x8E, "\u2018": 0x91, "\u2019": 0x92,
+  "\u201C": 0x93, "\u201D": 0x94, "\u2022": 0x95, "\u2013": 0x96, "\u2014": 0x97,
+  "\u02DC": 0x98, "\u2122": 0x99, "\u0161": 0x9A, "\u203A": 0x9B, "\u0153": 0x9C,
+  "\u017E": 0x9E, "\u0178": 0x9F,
+};
+// No WinAnsi glyph exists for these, so spell them in ASCII rather than print a
+// "?" in a document that goes to a client. (An arrow in a date range was doing
+// exactly that.) Applied before encoding, so widths measure the real output.
+const ASCIIFY = {
+  "\u2192": "->", "\u2190": "<-", "\u2194": "<->", "\u21D2": "=>", "\u21D0": "<=",
+  "\u2212": "-", "\u2011": "-", "\u2012": "-", "\u2015": "-", "\u2044": "/",
+  "\u2264": "<=", "\u2265": ">=", "\u2260": "!=", "\u2248": "~",
+  "\u2713": "v", "\u2714": "v", "\u2715": "x", "\u2717": "x", "\u221A": "v",
+  "\u00A0": " ", "\u2009": " ", "\u202F": " ", "\u200B": "",
+};
+// Fold a string to what the base-14 WinAnsi fonts can actually draw. Anything
+// still unrepresentable (emoji, CJK…) is DROPPED rather than turned into "?" —
+// a missing glyph reads as a typo; a stray "?" reads as a broken document.
+export function toWinAnsi(s) {
+  let out = "";
+  for (const ch of String(s == null ? "" : s)) {
+    if (ASCIIFY[ch] != null) { out += ASCIIFY[ch]; continue; }
+    if (WIN1252[ch] != null || ch.charCodeAt(0) <= 255) { out += ch; continue; }
+    // unmappable → drop
+  }
+  return out;
+}
+
 export function textWidth(str, size = 10) {
   let u = 0;
-  for (const ch of String(str)) u += W[ch] != null ? W[ch] : 556;
+  // Measure what will actually be DRAWN — toWinAnsi can change the length
+  // (an arrow becomes "->"), so measuring the raw string would misjudge fits.
+  for (const ch of toWinAnsi(str)) u += W[ch] != null ? W[ch] : 556;
   return (u / 1000) * size;
 }
 
 // Escape a JS string into a PDF literal string using WinAnsi bytes.
 function pdfStr(s) {
   let out = "";
-  for (const ch of String(s)) {
-    let c = ch.charCodeAt(0);
-    if (ch === "–" || ch === "—") c = 45;            // dashes → hyphen
-    if (ch === "’" || ch === "‘") c = 39;
-    if (ch === "“" || ch === "”") c = 34;
-    if (c > 255) c = 63;                              // outside WinAnsi → ?
+  for (const ch of toWinAnsi(s)) {
+    let c = WIN1252[ch] != null ? WIN1252[ch] : ch.charCodeAt(0);
     if (c === 92) out += "\\\\";
     else if (c === 40) out += "\\(";
     else if (c === 41) out += "\\)";

@@ -27,16 +27,26 @@ const PW = 842, PH = 595;                 // A4 landscape
 const M = 26;                             // page margin
 const ROW_H = 14.5;
 const HDR_H = 22;                         // day-grid header band
-const COLS = [                            // fixed left columns
+const COLS = [                            // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
   { key: "contractor", label: "Contractor", w: 62 },
   { key: "start", label: "Start", w: 36 },
   { key: "end", label: "End", w: 36 },
   { key: "days", label: "Days", w: 26 },
 ];
-const LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
-const GRID_X = M + LEFT_W;
-const GRID_W = PW - M - GRID_X;
+// Recomputed per render from data.worksW (the on-screen Works column width).
+let LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
+let GRID_X = M + LEFT_W;
+let GRID_W = PW - M - GRID_X;
+const WORKS_DEFAULT_PX = 230;             // matches the builder's default column
+const PX_TO_PT = 168 / WORKS_DEFAULT_PX;  // 230px on screen ≈ 168pt in the PDF
+function applyWorksWidth(worksW) {
+  const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
+  COLS[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
+  LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
+  GRID_X = M + LEFT_W;
+  GRID_W = PW - M - GRID_X;
+}
 const MIN_DAY_W = 6.5;                    // never squeeze below this — split pages instead
 
 const DAY = 86400000;
@@ -68,12 +78,14 @@ function endOf(t, hs) {
 function fitText(str, w, size) {
   let s = String(str || "");
   if (textWidth(s, size) <= w) return s;
-  while (s.length > 1 && textWidth(s + "…", size) > w) s = s.slice(0, -1);
-  return s + "…";
+  // ASCII "..." — the PDF font is WinAnsi and has no "…" glyph (it renders as "?").
+  while (s.length > 1 && textWidth(s + "...", size) > w) s = s.slice(0, -1);
+  return s + "...";
 }
 
 export function buildProgrammePdf(data, meta = {}) {
   data = data || {};
+  applyWorksWidth(data.worksW);
   const contractors = Array.isArray(data.contractors) ? data.contractors : [];
   const byC = {}; for (const c of contractors) byC[c.id] = c;
   const hs = new Set((data.holidays || []).map(String));
@@ -99,28 +111,57 @@ export function buildProgrammePdf(data, meta = {}) {
   const totalDays = Math.min(550, Math.max(14, Math.round((addDays(e0, 2) - s0) / DAY) + 1));
 
   // Horizontal pagination: windows of whole days at ≥ MIN_DAY_W each.
-  const daysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
+  const maxDaysPerPage = Math.max(7, Math.floor(GRID_W / MIN_DAY_W));
+  // Split the span into EQUAL windows rather than filling each page to the max
+  // and leaving a stub: 77 days at 71-per-page gave a full page and a 6-day
+  // sliver; balanced it gives two ~39-day pages that both fill the width.
+  const nWindows = Math.max(1, Math.ceil(totalDays / maxDaysPerPage));
+  const daysPerPage = Math.ceil(totalDays / nWindows);
   const windows = [];
   for (let off = 0; off < totalDays; off += daysPerPage) {
     windows.push({ from: off, days: Math.min(daysPerPage, totalDays - off) });
   }
-  const headerBlockH = 78;
+  const headerBlockH = 89;   // room for a wrapped (2-line) contractor legend
   const footerH = 18;
   const rowsPerPage = Math.max(8, Math.floor((PH - M - headerBlockH - HDR_H - footerH - M) / ROW_H));
-  const rowChunks = [];
-  for (let i = 0; i < Math.max(1, tasks.length); i += rowsPerPage) {
-    rowChunks.push(tasks.slice(i, i + rowsPerPage));
+
+  // Build the page list FIRST, pairing each date window only with the tasks
+  // that actually fall inside it. Previously every window was crossed with
+  // every row-chunk, so a page could show (say) the December tasks against the
+  // September–November columns — a full page of rows with an empty chart. A
+  // window no task touches is dropped entirely rather than printed blank.
+  const inWindow = (t, win) => {
+    if (!t._start || !t._end) return false;
+    const from = Math.round((t._start - s0) / DAY);
+    const to = Math.round((t._end - s0) / DAY);
+    return to >= win.from && from < win.from + win.days;
+  };
+  const pages = [];
+  for (const win of windows) {
+    const winTasks = tasks.filter(t => inWindow(t, win));
+    if (!winTasks.length) continue;
+    // Spread the rows EVENLY over however many pages they need, so a window of
+    // 30 rows at 28-per-page gives 15+15 rather than 28 and an orphan 2-row page.
+    const nPages = Math.max(1, Math.ceil(winTasks.length / rowsPerPage));
+    const per = Math.ceil(winTasks.length / nPages);
+    for (let i = 0; i < winTasks.length; i += per) {
+      pages.push({ win, rows: winTasks.slice(i, i + per) });
+    }
   }
+  // Nothing datable at all (e.g. a programme of blank rows) — still emit one
+  // page so the export is never a zero-page file.
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, rowsPerPage) });
 
   const doc = new PdfDoc(PW, PH);
   let first = true;
-  const totalPages = windows.length * rowChunks.length;
+  const totalPages = pages.length;
   let pageNo = 0;
 
-  for (const win of windows) {
-    const dayW = Math.min(16, GRID_W / win.days);
-    const winStart = addDays(s0, win.from);
-    for (const rows of rowChunks) {
+  {   // (block kept so the page body below stays at its original indentation)
+    for (const page of pages) {
+      const win = page.win, rows = page.rows;
+      const dayW = Math.min(16, GRID_W / win.days);
+      const winStart = addDays(s0, win.from);
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
@@ -140,18 +181,30 @@ export function buildProgrammePdf(data, meta = {}) {
       if (subBits) { doc.text(tx, y, subBits, { size: 9, grey: true }); }
       doc.text(PW - M, y, `Start ${fmtFull(s0)} · End ${fmtFull(e0)} · ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
-      // Legend
-      let lx = M;
+      // Legend. It WRAPS to a second line rather than running under the
+      // right-hand range label — the old version reserved a flat 80pt for a
+      // label nearly twice that wide, so the last contractor sat on top of it.
+      const rangeLbl = windows.length > 1
+        ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays(winStart, win.days - 1))})`
+        : "";
+      if (rangeLbl) doc.text(PW - M, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      const LEG_LINE_H = 11;
+      const legendRightL1 = PW - M - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M, line = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
-        doc.rect(lx, y - 7, 8, 8, { fill: hex2rgb(c.colour) });
-        doc.text(lx + 11, y, c.name, { size: 8.5 });
-        lx += 11 + textWidth(c.name, 8.5) + 14;
-        if (lx > PW - M - 80) break;
+        const w = 11 + textWidth(c.name, 8.5) + 14;
+        const right = line === 0 ? legendRightL1 : PW - M;
+        if (lx + w > right) {
+          if (line === 0) { line = 1; lx = M; }          // wrap once
+          else { dropped++; continue; }                   // no room for a 3rd line
+        }
+        const ly = y + line * LEG_LINE_H;
+        doc.rect(lx, ly - 7, 8, 8, { fill: hex2rgb(c.colour) });
+        doc.text(lx + 11, ly, c.name, { size: 8.5 });
+        lx += w;
       }
-      if (windows.length > 1) {
-        doc.text(PW - M, y, `Days ${win.from + 1}–${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)} → ${fmtDM(addDays(winStart, win.days - 1))})`, { size: 8.5, alignRight: true, grey: true });
-      }
+      if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M + headerBlockH;
 
       // ── Column headers ────────────────────────────────────────────────
@@ -170,7 +223,9 @@ export function buildProgrammePdf(data, meta = {}) {
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.992, 0.953, 0.898] });
-        const label = dayW >= 15 ? true : d.getUTCDay() === 1;   // Mondays (or all when roomy)
+        let label = dayW >= 15 ? true : d.getUTCDay() === 1;    // Mondays (or all when roomy)
+        // A label on one of the last columns would spill past the frame.
+        if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
         if (label) {
           doc.text(x + 1, gridTop + 9, fmtDM(d), { size: 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
           doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
@@ -212,7 +267,12 @@ export function buildProgrammePdf(data, meta = {}) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
               const bh = ROW_H - 5;
-              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, (j - i + 1) * dayW - 1, bh, bh / 2, { fill: col });
+              const bw = (j - i + 1) * dayW - 1;
+              // Cap the corner radius by the bar's own width. At a fully
+              // rounded bh/2 a one-day bar (~8pt wide, 9.5pt tall) came out as
+              // a circular blob you couldn't read off the date grid.
+              const r = Math.max(1, Math.min(2.5, bh / 2, bw / 2));
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, bw, bh, r, { fill: col });
               i = j + 1;
             }
           }

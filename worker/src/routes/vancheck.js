@@ -70,7 +70,9 @@ const DEFAULT_PHOTO_SLOTS = [
 // Equipment on board (Present/Missing) — off by default (opt-in), editable in
 // van-check settings like the checklist. A missing item counts as an issue.
 const DEFAULT_EQUIPMENT = [];
-const DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, equipment: DEFAULT_EQUIPMENT, photoSlots: DEFAULT_PHOTO_SLOTS }; // Friday 17:00 UK
+// reminders: admin-set list of push times [{dow 1-7, time "HH:MM"}] — empty
+// means the built-in default (Monday 07:00 + a chase before the deadline).
+const DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, equipment: DEFAULT_EQUIPMENT, photoSlots: DEFAULT_PHOTO_SLOTS, reminders: [] }; // Friday 17:00 UK
 
 function londonDate(d = new Date()) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
 function londonHM(d) { return new Date(d).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" }); }
@@ -100,7 +102,20 @@ async function getSettings(db) {
   if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
   if (!Array.isArray(out.equipment)) out.equipment = [];   // opt-in; empty = no equipment section
   if (!Array.isArray(out.alertUsers)) out.alertUsers = []; // who to push when an "Alert if" answer is given
+  if (!Array.isArray(out.reminders)) out.reminders = [];   // custom reminder times; empty = default schedule
   return out;
+}
+// Validate a reminders list from the client: [{dow 1-7, time "HH:MM"}].
+function normReminders(arr) {
+  const out = [], seen = new Set();
+  for (const r of Array.isArray(arr) ? arr : []) {
+    const dow = Math.min(7, Math.max(1, Number(r && r.dow) || 0));
+    const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(r && r.time) ? r.time : "";
+    if (!dow || !time) continue;
+    const key = dow + ":" + time; if (seen.has(key)) continue; seen.add(key);
+    out.push({ dow, time });
+  }
+  return out.slice(0, 21).sort((a, b) => a.dow - b.dow || a.time.localeCompare(b.time));
 }
 
 // ── Custom van checks: saved reusable templates + one-off sends ──────────────
@@ -127,6 +142,44 @@ async function saveCustomTpls(db, list) {
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .bind(db.tenantId, CUSTOM_TPL_KEY(db.tenantId), JSON.stringify(list)).run();
 }
+// ── Manual grid override statuses (Full-Access sets these on the by-engineer
+// grid so stats reflect reality — holiday, off sick, van off road…). `tone`
+// decides how it counts: "done" = a completed check, "excused" = neither done
+// nor missed (drops out of the missed count), "issue" = a problem. Configurable
+// per tenant; "skipped" (Not required) is always the default first option.
+const GRID_STATUS_KEY = tid => `vancheck:gridstatuses:${tid}`;
+const DEFAULT_GRID_STATUSES = [
+  { key: "skipped", label: "Not required", colour: "#a5b4fc", tone: "excused" },
+  { key: "holiday", label: "On holiday", colour: "#2dd4bf", tone: "excused" },
+  { key: "sick", label: "Off sick", colour: "#fb923c", tone: "excused" },
+  { key: "vor", label: "Van off road", colour: "#94a3b8", tone: "excused" },
+  { key: "rest", label: "Not working", colour: "#cbd5e1", tone: "excused" },
+  { key: "manual", label: "Completed (paper)", colour: "#22c55e", tone: "done" },
+];
+function normGridStatuses(arr) {
+  const out = [], seen = new Set();
+  for (const i of Array.isArray(arr) ? arr : []) {
+    const label = String(i && i.label || "").trim(); if (!label) continue;
+    let key = slug(i.key) || slug(label) || ("s" + (out.length + 1));
+    while (seen.has(key)) key = key + "_" + (out.length + 1);
+    seen.add(key);
+    const tone = ["done", "excused", "issue"].includes(i.tone) ? i.tone : "excused";
+    const colour = /^#[0-9a-fA-F]{3,8}$/.test(i.colour || "") ? i.colour : "#a5b4fc";
+    out.push({ key, label: label.slice(0, 40), colour, tone });
+  }
+  // Always guarantee "skipped" (Not required) exists as the default.
+  if (!out.some(s => s.key === "skipped")) out.unshift({ ...DEFAULT_GRID_STATUSES[0] });
+  return out;
+}
+async function getGridStatuses(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, GRID_STATUS_KEY(db.tenantId)).first();
+  if (!row || !row.value) return DEFAULT_GRID_STATUSES.slice();
+  try { const v = JSON.parse(row.value); return normGridStatuses(v); } catch { return DEFAULT_GRID_STATUSES.slice(); }
+}
+async function saveGridStatuses(db, list) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, GRID_STATUS_KEY(db.tenantId), JSON.stringify(normGridStatuses(list))).run();
+}
 async function ensureCustomTable(db) {
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS custom_van_checks (
@@ -144,27 +197,75 @@ async function nameMap(env, tid) {
 }
 // Normalise a checklist/equipment item, keeping an optional "Alert if" rule.
 // failVal = the answer that flags an issue for this list ("defect" / "missing").
+// Default answer palettes (used when an item defines no custom options).
+// tone: "ok" (pass) | "issue" (a problem — counted + alertable) | "na" (neutral).
+const DEF_CHECK_OPTS = [{ value: "ok", label: "OK", tone: "ok" }, { value: "defect", label: "Defect", tone: "issue" }];
+const DEF_EQUIP_OPTS = [{ value: "present", label: "Present", tone: "ok" }, { value: "missing", label: "Missing", tone: "issue" }];
+const optsFor = (item, kind) => (item && Array.isArray(item.options) && item.options.length) ? item.options : (kind === "equip" ? DEF_EQUIP_OPTS : DEF_CHECK_OPTS);
+// Normalise a custom answer-options list; returns null to fall back to defaults.
+function normOptions(arr) {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  const out = [], seen = new Set();
+  for (const o of arr) {
+    const label = String(o && o.label || "").trim(); if (!label) continue;
+    let value = slug(o && o.value) || slug(label); if (!value) continue;
+    while (seen.has(value)) value += "_2";
+    seen.add(value);
+    const tone = (o.tone === "issue" || o.tone === "na") ? o.tone : "ok";
+    out.push({ value, label, tone });
+  }
+  return out.length ? out : null;
+}
 function normAlertItem(i, failVal) {
   const id = String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30);
   const label = String(i.label || "").trim();
   const out = { id, label };
+  const options = normOptions(i && i.options);
+  if (options) out.options = options;
   if (i && i.alert) {
     const on = i.alertOn;
     out.alert = true;
-    out.alertOn = (on === "ok" || on === "present" || on === "defect" || on === "missing") ? on : failVal;
+    // With custom options, "Alert if" fires on any issue-toned answer, so a
+    // specific alertOn isn't needed; keep it for the default OK/Defect items.
+    if (!options) out.alertOn = (on === "ok" || on === "present" || on === "defect" || on === "missing") ? on : failVal;
   }
   return out;
 }
-// Given the answers + a settings/template object, return the fired alerts
-// [{id,label,answer}] (item has alert=true and the answer matches alertOn).
+// The tone of a given answer for an item ("ok" | "issue" | "na").
+function answerTone(item, kind, value) {
+  const o = optsFor(item, kind).find(x => x.value === value);
+  if (o) return o.tone;
+  return (value === "defect" || value === "missing") ? "issue" : (value === "ok" || value === "present") ? "ok" : "na";
+}
+// Given the answers + a settings/template object, return the fired alerts.
+// A tagged item alerts on any issue-toned answer; a default item on alertOn.
 export function evalAlerts(answers, tpl) {
   const out = [];
-  for (const it of [...(tpl.checklist || []), ...(tpl.equipment || [])]) {
-    if (it && it.alert && it.alertOn && answers[it.id] === it.alertOn) {
-      out.push({ id: it.id, label: it.label, answer: answers[it.id] });
+  for (const [arr, kind] of [[tpl.checklist || [], "check"], [tpl.equipment || [], "equip"]]) {
+    for (const it of arr) {
+      if (!it || !it.alert) continue;
+      const val = answers[it.id]; if (val == null) continue;
+      const fired = (Array.isArray(it.options) && it.options.length) ? (answerTone(it, kind, val) === "issue") : (val === it.alertOn);
+      if (fired) out.push({ id: it.id, label: it.label, answer: val });
     }
   }
   return out;
+}
+// Compute the per-answer meta {label,tone} + the list of issue ids, from the
+// template — stored on the check so every viewer is self-describing.
+function answerMetaFor(answers, tpl) {
+  const defMap = {};
+  (tpl.checklist || []).forEach(it => { defMap[it.id] = { item: it, kind: "check" }; });
+  (tpl.equipment || []).forEach(it => { defMap[it.id] = { item: it, kind: "equip" }; });
+  const answerMeta = {}, issues = [];
+  for (const [id, val] of Object.entries(answers || {})) {
+    const d = defMap[id];
+    const tone = d ? answerTone(d.item, d.kind, val) : ((val === "defect" || val === "missing") ? "issue" : "ok");
+    const opt = d ? optsFor(d.item, d.kind).find(x => x.value === val) : null;
+    answerMeta[id] = { label: opt ? opt.label : answerWord(val), tone };
+    if (tone === "issue") issues.push(id);
+  }
+  return { answerMeta, issues };
 }
 // Human word for an answer value (for the push body).
 export function answerWord(v) {
@@ -180,8 +281,8 @@ function shapeCheck(r) {
   if (!r) return null;
   let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
   const answers = items.answers || {};
-  // A defect OR a missing equipment item counts as an issue to flag.
-  const defects = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
+  // Prefer the stored issue ids (tone-aware); fall back to the legacy convention.
+  const defects = Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
   return {
     username: r.username, week: r.week, vehicle: r.vehicle, checkedAt: r.checked_at,
     safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
@@ -189,7 +290,10 @@ function shapeCheck(r) {
     photos: items.photos || [], slotPhotos: items.slotPhotos || {},
     mileage: items.mileage || "", source: items.source || "story",
     defectCount: defects.length, alerts: items.alerts || [],
+    answerMeta: items.answerMeta || {},
     skipped: !!items.skipped, skippedBy: items.skippedBy || "",
+    // Manual Full-Access override (holiday / sick / VOR / completed-on-paper…).
+    override: items.override ? { status: items.status || "skipped", label: items.label || "", tone: items.tone || "excused", colour: items.colour || "", by: items.by || items.skippedBy || "", at: items.at || items.skippedAt || "" } : null,
   };
 }
 
@@ -236,6 +340,8 @@ export async function handle(request, env, ctx, url, sess) {
     }
     // Who gets pushed when an item's "Alert if" answer is given.
     if (Array.isArray(b.alertUsers)) s.alertUsers = b.alertUsers.map(u => String(u || "").trim()).filter(Boolean).slice(0, 50);
+    // Custom reminder times (empty list = default Monday 07:00 + deadline chase).
+    if (Array.isArray(b.reminders)) s.reminders = normReminders(b.reminders);
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(db.tenantId, SETTINGS_KEY, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
@@ -422,6 +528,9 @@ export async function handle(request, env, ctx, url, sess) {
 
     // "Alert if" rules → store fired alerts on the record + push the chosen users.
     const alerts = evalAlerts(answers, s2);
+    // Self-describing answer meta {label,tone} + the issue ids, so every viewer
+    // can count/label answers (incl. custom-toned ones) without the template.
+    const { answerMeta, issues } = answerMetaFor(answers, s2);
     // A custom check carries its own item labels so any viewer can resolve them
     // without the weekly settings, and a `custom` marker so it's tagged/badged.
     const custom = customRow
@@ -430,7 +539,7 @@ export async function handle(request, env, ctx, url, sess) {
     const items = JSON.stringify({
       answers, defectNotes, photos: photoKeys, slotPhotos,
       mileage: String(b.mileage || "").trim(), source: "portal",
-      alerts, ...(custom ? { custom } : {}),
+      alerts, answerMeta, issues, ...(custom ? { custom } : {}),
     });
     const now = new Date().toISOString();
     await db.prepare(`
@@ -480,6 +589,89 @@ export async function handle(request, env, ctx, url, sess) {
     const dueAt = deadlineFor(week, s);
     const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
     return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
+  }
+
+  // ── Compliance matrix: engineer × week (missed weeks), follows the PERSON ────
+  // Returns each driver's status per week over a range, keyed by USERNAME (not
+  // reg) so a driver's record stays whole even when they change vans. One query
+  // over the whole range. Missed = an expected driver with no check that week.
+  if (path === "/vancheck/matrix" && method === "GET") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const curWeek = mondayOf(londonDate());
+    const toRaw = url.searchParams.get("to");
+    const fromRaw = url.searchParams.get("from");
+    const to = mondayOf(toRaw && /^\d{4}-\d{2}-\d{2}$/.test(toRaw) ? toRaw : curWeek);
+    let from = mondayOf(fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : addDays(to, -7 * 7)); // default 8 columns
+    // Oldest → newest, capped so a huge range can't run away.
+    const weeks = [];
+    let w = from;
+    while (w <= to && weeks.length < 80) { weeks.push(w); w = addDays(w, 7); }
+    if (!weeks.length) weeks.push(to);
+    from = weeks[0];
+    const s = await getSettings(db);
+    const off = await getOptedOut(env, db.tenantId);
+    const names = await nameMap(env, db.tenantId);
+    const { results: drivers } = await db.prepare(
+      "SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
+    ).bind(db.tenantId).all();
+    const { results: checks } = await db.prepare(
+      "SELECT * FROM vehicle_checks WHERE tenant_id=? AND week>=? AND week<=?"
+    ).bind(db.tenantId, from, to).all();
+    const rowMap = {};
+    for (const u of drivers || []) {
+      rowMap[u.username] = {
+        username: u.username,
+        name: (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username,
+        vehicle: u.vehicle_assigned || "",
+        expected: !off.has(u.username),
+        cells: {},
+      };
+    }
+    const gridStatuses = await getGridStatuses(db);
+    const gsByKey = {}; for (const gs of gridStatuses) gsByKey[gs.key] = gs;
+    for (const c of checks || []) {
+      let r = rowMap[c.username];
+      if (!r) r = rowMap[c.username] = { username: c.username, name: names[c.username] || c.username, vehicle: "", expected: false, cells: {} };
+      const sc = shapeCheck(c);
+      // A manual override (holiday/sick/VOR/…) wins over the raw check state.
+      if (sc.override) {
+        const gs = gsByKey[sc.override.status] || {};
+        r.cells[c.week] = {
+          status: "override", key: sc.override.status,
+          label: sc.override.label || gs.label || sc.override.status,
+          colour: sc.override.colour || gs.colour || "#a5b4fc",
+          tone: sc.override.tone || gs.tone || "excused",
+          reg: c.vehicle || sc.vehicle || "",
+        };
+      } else {
+        r.cells[c.week] = {
+          status: sc.skipped ? "skipped" : ((sc.defectCount > 0 || (sc.alerts && sc.alerts.length) || sc.safeToDrive === false) ? "issue" : "done"),
+          reg: c.vehicle || sc.vehicle || "",
+          issues: sc.defectCount || 0,
+          safe: sc.safeToDrive,
+          skipped: !!sc.skipped,
+        };
+      }
+    }
+    const rows = Object.values(rowMap).map(r => {
+      const cellWeeks = Object.keys(r.cells).sort();
+      const earliest = cellWeeks.length ? cellWeeks[0] : null;   // don't flag weeks before this driver's first record in range
+      for (const wk of weeks) {
+        if (r.cells[wk]) continue;
+        r.cells[wk] = (r.expected && wk <= curWeek && (earliest === null || wk >= earliest)) ? { status: "missed" } : { status: "none" };
+      }
+      // Per-row tallies for the range shown (an override counts by its tone).
+      let done = 0, missed = 0, issue = 0, excused = 0;
+      for (const wk of weeks) {
+        const cell = r.cells[wk], st = cell.status;
+        const tone = st === "override" ? cell.tone : st;
+        if (tone === "done") done++; else if (tone === "missed") missed++;
+        else if (tone === "issue") issue++; else if (tone === "excused" || st === "skipped") excused++;
+      }
+      return { ...r, done, missed, issue, excused };
+    });
+    rows.sort((a, b) => (a.expected === b.expected ? a.name.localeCompare(b.name) : (a.expected ? -1 : 1)));
+    return json({ ok: true, weeks, currentWeek: curWeek, from, to, rows, statuses: gridStatuses, dueAt: deadlineFor(curWeek, s) }, {}, env, request);
   }
 
   // ── Admin: fire this week's reminder to everyone still outstanding, NOW ──────
@@ -535,6 +727,66 @@ export async function handle(request, env, ctx, url, sess) {
     if (!it.skipped) return json({ ok: false, error: "That is a real check, not a skip." }, {}, env, request);
     await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
     return json({ ok: true, week: wk }, {}, env, request);
+  }
+
+  // ── FULL-ACCESS ONLY: the configurable grid override statuses ───────────────
+  if (path === "/vancheck/grid-statuses" && method === "GET") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    return json({ ok: true, statuses: await getGridStatuses(db) }, {}, env, request);
+  }
+  if (path === "/vancheck/grid-statuses" && method === "POST") {
+    if (!(await isAdmin())) return error("Full Access only.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    await saveGridStatuses(db, Array.isArray(b.statuses) ? b.statuses : []);
+    return json({ ok: true, statuses: await getGridStatuses(db) }, {}, env, request);
+  }
+
+  // ── FULL-ACCESS ONLY: set a grid cell from the by-engineer matrix ───────────
+  // action "set" (+ status key) marks a week with a configured override
+  // (Not required / holiday / sick / VOR / completed-on-paper…); "clear" removes
+  // it (week becomes due again). Legacy "skip"/"unskip" still work.
+  // Deliberately stricter than /vancheck/skip (which allows any Vehicles admin).
+  if (path === "/vancheck/grid-set" && method === "POST") {
+    if (!(await isAdmin())) return error("Full Access only.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    let action = String(b.action || "");
+    if (!who) return error("username required", 400, env, request);
+    const wk = mondayOf(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate());
+    const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
+      .bind(db.tenantId, who, wk).first();
+    let it = {}; if (existing) { try { it = existing.items ? JSON.parse(existing.items) : {}; } catch {} }
+    const isManual = existing ? (!!it.skipped || !!it.override) : false;
+    // "skip" is the legacy alias for setting the "skipped" status.
+    if (action === "skip") { action = "set"; b.status = b.status || "skipped"; }
+    if (action === "unskip") action = "clear";
+    if (action === "set") {
+      // Never overwrite a real completed check.
+      if (existing && !isManual) return json({ ok: false, error: "That week has a real check — open it instead." }, {}, env, request);
+      const statuses = await getGridStatuses(db);
+      const gs = statuses.find(s => s.key === String(b.status || "")) || statuses.find(s => s.key === "skipped") || DEFAULT_GRID_STATUSES[0];
+      const veh = await db.prepare("SELECT vehicle_assigned FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, who).first();
+      const now = new Date().toISOString();
+      const items = JSON.stringify({
+        override: true, status: gs.key, label: gs.label, tone: gs.tone, colour: gs.colour,
+        by: me, at: now, source: "override",
+        // Keep the legacy flags so old readers still treat every override as a skip.
+        skipped: true, skippedBy: me, skippedAt: now,
+      });
+      await db.prepare(`
+        INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
+      `).bind(db.tenantId, who, wk, (veh && veh.vehicle_assigned) || "", now, null, items, gs.label + " (by " + me + ")").run();
+      return json({ ok: true, week: wk, status: "override", key: gs.key, label: gs.label, colour: gs.colour, tone: gs.tone }, {}, env, request);
+    }
+    if (action === "clear") {
+      if (!existing) return json({ ok: true, week: wk, status: "none" }, {}, env, request);
+      if (!isManual) return json({ ok: false, error: "That is a real check, not a manual entry." }, {}, env, request);
+      await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
+      return json({ ok: true, week: wk, status: "none" }, {}, env, request);
+    }
+    return error("Unknown action", 400, env, request);
   }
 
   // ── Admin: turn a driver's weekly van check ON/OFF ──────────────────────────
@@ -664,32 +916,54 @@ export async function sendWeeklyReminders(env, now = new Date()) {
     tenants = (r.results || []).map(t => t.tenant_id);
   } catch { return { ran: false, reason: "no-users" }; }
 
+  const DOWNUM = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+  const lonDowNum = DOWNUM[lonDow] || 0;
+  const lonHM = londonHM(nowMs);   // "HH:MM" London
+
   const out = [];
   for (const tid of tenants) {
     const settings = await readVanSettings(env, tid);
-    const deadlineMs = Date.parse(deadlineFor(week, settings));
-    const withinChase = nowMs < deadlineMs && (deadlineMs - nowMs) <= CHASE_LEAD_MS;
+    const reminders = Array.isArray(settings.reminders) ? settings.reminders : [];
 
     // Per-week dedupe slots.
     const mkey = `vancheck:reminded:${tid}`;
     let slots = [];
     try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, mkey).first(); if (row && row.value) slots = JSON.parse(row.value) || []; } catch {}
-    const mondayDue = isMonday7 && !slots.includes(`mon:${week}`);
-    const chaseDue = withinChase && !slots.includes(`chase:${week}`);
-    if (!mondayDue && !chaseDue) { out.push({ tid, skipped: true }); continue; }
 
-    const dueBy = londonHM(deadlineMs);
-    const payload = chaseDue
-      ? { title: "Van check due soon", body: `Last reminder — your weekly van check is due by ${dueBy} today. Tap to complete it.`, url: "/van-check.html", tag: "vehicle-check" }
-      : { title: "Weekly van check due", body: "Please complete your weekly van check — tap to start.", url: "/van-check.html", tag: "vehicle-check" };
+    let payload = null, slotKey = "", reason = "";
+    if (reminders.length) {
+      // Custom schedule: fire the first configured slot that's due today and not
+      // yet sent this week (fires at or after its time, at the next hourly tick).
+      for (const rem of reminders) {
+        if (rem.dow !== lonDowNum || lonHM < rem.time) continue;
+        const key = `rem:${rem.dow}:${rem.time}:${week}`;
+        if (slots.includes(key)) continue;
+        slotKey = key; reason = "scheduled"; break;
+      }
+      if (slotKey) payload = { title: "Weekly van check due", body: "Please complete your weekly van check — tap to start.", url: "/van-check.html", tag: "vehicle-check" };
+    } else {
+      // Default schedule: Monday 07:00 + a chase within 2h before the deadline.
+      const deadlineMs = Date.parse(deadlineFor(week, settings));
+      const withinChase = nowMs < deadlineMs && (deadlineMs - nowMs) <= CHASE_LEAD_MS;
+      const mondayDue = isMonday7 && !slots.includes(`mon:${week}`);
+      const chaseDue = withinChase && !slots.includes(`chase:${week}`);
+      if (mondayDue || chaseDue) {
+        const dueBy = londonHM(deadlineMs);
+        payload = chaseDue
+          ? { title: "Van check due soon", body: `Last reminder — your weekly van check is due by ${dueBy} today. Tap to complete it.`, url: "/van-check.html", tag: "vehicle-check" }
+          : { title: "Weekly van check due", body: "Please complete your weekly van check — tap to start.", url: "/van-check.html", tag: "vehicle-check" };
+        slotKey = chaseDue ? `chase:${week}` : `mon:${week}`;
+        reason = chaseDue ? "chase" : "monday";
+      }
+    }
+    if (!payload) { out.push({ tid, skipped: true }); continue; }
 
     const { reminded } = await remindDrivers(env, tid, week, payload);
-    if (mondayDue) slots.push(`mon:${week}`);
-    if (chaseDue) slots.push(`chase:${week}`);
-    slots = slots.slice(-30);
+    slots.push(slotKey);
+    slots = slots.slice(-40);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(tid, mkey, JSON.stringify(slots)).run();
-    out.push({ tid, reminded, reason: chaseDue ? "chase" : "monday" });
+    out.push({ tid, reminded, reason });
   }
   return { ran: true, week, tenants: out };
 }

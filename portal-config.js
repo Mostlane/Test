@@ -425,6 +425,191 @@
     window.alert = function (m) { toast(m); };
   })();
 
+  // ── Status-bar cap: the slim branded bar every native app has ───────────────
+  // The installed PWA is `apple-mobile-web-app-status-bar-style: black-translucent`
+  // (set on main.html, the start_url, so it governs the WHOLE app). That makes
+  // every page run full-bleed UNDER the iOS clock/battery. Rather than have each
+  // page pad its own header — which only ever covered the handful of pages that
+  // also set viewport-fit=cover, and left the rest with an untappable back button
+  // — this paints one opaque bar across the status-bar inset and pushes the page
+  // below it, portal-wide. Height is exactly the device's inset (0 on a phone
+  // with no notch, and in a normal browser tab), so it's only ever as slim as it
+  // needs to be. Content scrolling under it looks right because it's opaque.
+  (function statusCap() {
+    // Only the top document paints it — po.html embeds portal pages in an
+    // iframe, and a second cap inside the frame would double the gap.
+    try { if (window.self !== window.top) return; } catch (e) { return; }
+    if (document.getElementById("ml-statuscap-style")) return;
+    var st = document.createElement("style");
+    st.id = "ml-statuscap-style";
+    st.textContent =
+      // The offset goes on <html>, NOT <body>. Two earlier attempts on body both
+      // misfired: a CSS rule replaced whatever padding a page set for itself,
+      // and a JS one that added to it broke pages where BODY is the scroll
+      // container (main.html sets overflow-x:hidden, which makes overflow-y
+      // scrollable on body) — padding a scroll box left a strip of background
+      // at the end of the scroll range. Padding <html> instead shifts the whole
+      // page down, and because percentage heights resolve against the parent's
+      // CONTENT box, a `body{height:100%}` shrinks to fit exactly. Nothing
+      // overflows and no page's own padding is touched.
+      // min-height:100vh pins <html> to the FULL screen. With viewport-fit=cover
+      // iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA
+      // box rather than the screen, which leaves the page ending short and a
+      // band of canvas below it — the bottom bar Jamie kept seeing on main.html
+      // (the one page that sets html,body{height:100%}). Chromium doesn't
+      // reproduce that, so this is belt-and-braces: where html is already
+      // full-height it changes nothing.
+      // `--ml-topbar` is extra room for anything else pinned across the top —
+      // currently the van-score banner. It's fixed, so without reserving space
+      // it simply covered the first row of the page (Jamie saw the Van Check /
+      // Holiday tiles sliced in half). Whatever sets it must clear it again.
+      "html{ box-sizing:border-box; min-height:100vh;"
+      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)); }"
+      // `vh` is measured against the FULL screen and ignores the padding above,
+      // so a page with `body{min-height:100vh}` (route.html and friends) ends up
+      // exactly one inset too tall — the blank strip again. Re-base it. Pages
+      // with no min-height simply gain a full-height body, which is harmless
+      // and makes short pages fill the screen rather than half-paint it.
+      + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px) - var(--ml-topbar, 0px)); }"
+      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px);"
+      + "  padding-right:env(safe-area-inset-right, 0px); } }"
+      + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
+      + "  background:#003468; z-index:2147483000; pointer-events:none; }"
+;
+    (document.head || document.documentElement).appendChild(st);
+
+    var cap = null;
+    function add() {
+      if (!document.body || document.getElementById("mlStatusCap")) return;
+      cap = document.createElement("div");
+      cap.id = "mlStatusCap";
+      document.body.appendChild(cap);
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add);
+    else add();
+  })();
+
+  // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
+  // There are ~200 "Loading…" strings across ~80 pages, written every which way
+  // (static HTML, innerHTML, textContent). Rather than edit them all, this
+  // upgrades any element whose WHOLE text is a loading phrase into the shared
+  // animated mark, keeping the original wording as the label ("Loading sites…"
+  // still reads as such). New code should call MLUI.loading() directly.
+  (function mlLoading() {
+    var ICON = "/icons/icon-192.png";
+    // This component injects its OWN stylesheet rather than riding the sidebar's
+    // (#pnav-style). That block is skipped inside iframes (po.html embeds
+    // po-office.html), on the auth/my-day pages, and for Story users — and
+    // without the CSS the mark would render as a raw 192px icon.
+    function injectCss() {
+      if (document.getElementById("ml-load-style")) return;
+      var st = document.createElement("style");
+      st.id = "ml-load-style";
+      st.textContent =
+        "@keyframes mlSpinStop{ 0%{transform:rotate(0)} 55%{transform:rotate(360deg)} 100%{transform:rotate(360deg)} }"
+        + ".ml-load{ display:inline-flex; align-items:center; gap:.55em; color:inherit; font-size:inherit; vertical-align:middle; }"
+        // Sized in em so it matches whatever it sits in — a small grey footer
+        // status line and a full-size card row both look right.
+        + ".ml-load .ml-load-m{ width:1.45em; height:1.45em; border-radius:.3em; flex:none; display:block;"
+        + "  animation:mlSpinStop 1.7s cubic-bezier(.55,.05,.35,1) infinite; }"
+        // Bigger centred variant for a whole empty panel (MLUI.loading(t,{big:1})).
+        + ".ml-load.big{ flex-direction:column; gap:11px; padding:26px 10px; width:100%; justify-content:center; }"
+        + ".ml-load.big .ml-load-m{ width:44px; height:44px; border-radius:9px; }"
+        // Honour the OS "reduce motion" setting — hold it still rather than spin.
+        + "@media (prefers-reduced-motion: reduce){ .ml-load .ml-load-m{ animation:none; } }";
+      (document.head || document.documentElement).appendChild(st);
+    }
+    injectCss();
+    // ANY wait state, not a fixed word list — the portal says Loading fleet…,
+    // Checking access…, Reading spreadsheet…, Opening Purchase Orders…, Placing
+    // jobs by postcode…, Claude is revising the programme…, and dozens more.
+    // Two signals together identify one, and BOTH are needed:
+    //   1. it ends in an ellipsis, and
+    //   2. it contains a GERUND (an "-ing" word).
+    // The ellipsis alone is not enough — dropdown placeholders ("Select site…",
+    // "Choose a person…") and menu/button labels ("Edit finance…", "🗓 Shift
+    // dates…", "Mark selected as…") all end in one. The gerund alone is not
+    // enough either — the H&S pages carry "Working days" and "Working On or Near
+    // Live Services". Checked against every "…" string in the repo: 100 wait
+    // states matched, and the 22 non-matches are all placeholders or buttons.
+    var STOP = { nothing: 1, something: 1, anything: 1, everything: 1, morning: 1,
+      evening: 1, during: 1, thing: 1, string: 1, spring: 1, ring: 1, king: 1,
+      ceiling: 1, sing: 1, wing: 1, bring: 1 };
+    function isBusy(t) {
+      if (!t || t.length > 40) return false;
+      // Bare "Loading" (no ellipsis) is the one accepted exception.
+      if (!/(…|\.\.\.)$/.test(t)) return /^loading$/i.test(t);
+      if (/^\s*(please wait|one moment)\b/i.test(t)) return true;
+      var re = /\b([a-z]{2,})ing\b/ig, m;   // fresh each call — /g keeps lastIndex
+      while ((m = re.exec(t))) { if (!STOP[(m[1] + "ing").toLowerCase()]) return true; }
+      return false;
+    }
+    var SKIP = { OPTION: 1, OPTGROUP: 1, SELECT: 1, TITLE: 1, SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, BUTTON: 1 };
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+    function markup(label, big) {
+      return '<span class="ml-load' + (big ? " big" : "") + '" role="status" aria-live="polite">'
+        + '<img class="ml-load-m" src="' + ICON + '" alt="" aria-hidden="true">'
+        + '<span class="ml-load-t">' + esc(label == null ? "Loading…" : label) + "</span></span>";
+    }
+    function upgrade(el) {
+      if (!el || el.nodeType !== 1 || SKIP[el.tagName]) return;
+      // Text-only nodes. This ALSO means an already-upgraded element is skipped
+      // (it now holds our <span>), so no permanent "done" flag is needed — and
+      // must not be used: a page that re-shows its status (vehicles.html does
+      // `statusLine.textContent = "Loading fleet…"` on every refresh) wipes the
+      // mark back to plain text, and a sticky flag left it that way for good.
+      if (el.children && el.children.length) return;
+      // Never re-process our own markup (its label would match too).
+      if (el.closest && el.closest(".ml-load")) return;
+      if (!isBusy((el.textContent || "").trim())) return;
+      el.innerHTML = markup((el.textContent || "").trim(), false);
+    }
+    var queue = [], pending = false;
+    function flush() { pending = false; var q = queue; queue = []; for (var i = 0; i < q.length; i++) upgrade(q[i]); }
+    function schedule() {
+      if (pending || !queue.length) return;
+      pending = true;
+      (window.requestAnimationFrame || function (f) { setTimeout(f, 0); })(flush);
+    }
+    function consider(n) {
+      if (!n) return;
+      if (n.nodeType === 3) { queue.push(n.parentElement); return; }
+      if (n.nodeType !== 1) return;
+      queue.push(n);
+      // Cheap: only look inside small subtrees (a rendered list is re-checked
+      // by its own added rows anyway).
+      if (n.children && n.children.length && n.querySelectorAll) {
+        var d = n.querySelectorAll("*");
+        if (d.length <= 60) for (var i = 0; i < d.length; i++) queue.push(d[i]);
+      }
+    }
+    function start() {
+      if (!document.body) return;
+      var all = document.body.querySelectorAll("*");
+      if (all.length <= 8000) for (var i = 0; i < all.length; i++) upgrade(all[i]);
+      try {
+        new MutationObserver(function (muts) {
+          for (var i = 0; i < muts.length; i++) {
+            var m = muts[i];
+            if (m.type === "characterData") queue.push(m.target && m.target.parentElement);
+            else for (var j = 0; j < m.addedNodes.length; j++) consider(m.addedNodes[j]);
+          }
+          schedule();
+        }).observe(document.body, { childList: true, subtree: true, characterData: true });
+      } catch (e) {}
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+    else start();
+    window.MLUI = window.MLUI || {};
+    // MLUI.loading("Loading jobs…")        → inline mark + label (HTML string)
+    // MLUI.loading("Loading jobs…", {big:true}) → large centred, for a whole panel
+    window.MLUI.loading = function (text, opts) { return markup(text, opts && opts.big); };
+  })();
+
   // ── View As (owner only) ────────────────────────────────────────────────────
   // Jamie can open a real session as any user to see exactly what they see.
   // The server locks /auth/impersonate to the owner account and audits each use.
@@ -525,7 +710,10 @@
           if (document.getElementById("mlVaBar")) return;
           var bar = document.createElement("div");
           bar.id = "mlVaBar";
-          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);transform:translateZ(0);-webkit-transform:translateZ(0);";
+          // NB no translateZ(0)/transform here: a transform on a position:fixed
+          // element makes iOS Safari composite it in a layer that lags the scroll,
+          // so the bar drifts up and sticks mid-page. Plain fixed pins correctly.
+          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);";
           var who = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
           var lbl = document.createElement("span");
           lbl.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
@@ -644,7 +832,7 @@
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
           { label: "Plant & Equipment", href: "my-assets.html", icon: "assets", perms: ["Assets"], match: ["my-assets.html", "asset-menu.html", "assets-admin.html", "shared-assets.html"] },
-          { label: "Projects", href: "projects.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], hrefBy: [["Projects", "projects.html"], ["ProjectsAdmin", "projects-admin.html"]], match: ["projects.html", "projects-admin.html"] },
+          { label: "Projects", href: "projects-live.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], match: ["projects-live.html", "project-new.html", "project-hub.html", "projects.html", "projects-admin.html"] },
           { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
@@ -1261,8 +1449,14 @@
           // Standard portal back button (data-role='home' returns to the menu and
           // is hidden on desktop where the sidebar replaces it; data-role='up' is
           // a sub-page back and always stays).
-          + ".ml-back{ display:inline-flex; align-items:center; gap:6px; text-decoration:none; font:600 14px/1 -apple-system,system-ui,'Segoe UI',sans-serif; padding:8px 13px; border-radius:999px; background:#fff; border:1px solid #d7dee6; color:#003366; box-shadow:0 1px 2px rgba(0,0,0,.06); cursor:pointer; }"
-          + ".ml-back:hover{ background:#f4f7fb; }"
+          // The pill's LOOK is forced (!important) so it is identical on every
+          // page. Without it a dark-header page's own `header.page a{color:#fff}`
+          // (specificity 0,1,2) beat this rule and painted white text on the white
+          // pill — a blank, invisible button. `display` is deliberately NOT forced:
+          // the field app hides .ml-back outright (engineer-jobs.html uses its own
+          // .eng-back), and the desktop sidebar rule below still hides the home one.
+          + ".ml-back{ display:inline-flex; align-items:center; gap:6px !important; text-decoration:none !important; font:600 14px/1 -apple-system,system-ui,'Segoe UI',sans-serif !important; padding:8px 13px !important; border-radius:999px !important; background:#fff !important; border:1px solid #d7dee6 !important; color:#003366 !important; box-shadow:0 1px 2px rgba(0,0,0,.06) !important; cursor:pointer; }"
+          + ".ml-back:hover{ background:#f4f7fb !important; }"
           + "@media (min-width:1000px){ body.pnav-on .ml-back[data-role='home']{ display:none !important; } }"
           // ===== Portal shared theme (Batch 3) — one look across every page.
           // Injected after each page parses, so it wins at EQUAL specificity;
@@ -1291,10 +1485,9 @@
   (function chatWidget() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
-      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
-        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
-        "route.html", "engineer-jobs.html", "inbox.html", "you.html"];
-      if (SKIP.indexOf(page) !== -1) return;
+      // The chat bubble lives ONLY on the home page (same reason as the bell —
+      // it floated over full-screen photo/doc close buttons on other pages).
+      if (page !== "main.html") return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var p = {};
@@ -1390,11 +1583,13 @@
   })();
 
   // ── Notification bell (Facebook-style feed) ─────────────────────────────────
-  // ── Hard-refresh button (🔄, top-left) ─────────────────────────────────────
-  // One tap = the closest a page can get to Ctrl+Shift+R: wipe every service-
-  // worker cache, re-fetch the service worker itself, force the core scripts
-  // past the browser HTTP cache, then reload. The cure for "my phone is stuck
-  // on an old version" without asking anyone to find browser settings.
+  // ── Hard refresh: 🔄 button (desktop) + pull-down gesture (touch/PWA) ─────
+  // One action = the closest a page can get to Ctrl+Shift+R: wipe every
+  // service-worker cache, re-fetch the service worker itself, force the core
+  // scripts past the browser HTTP cache, then reload. The cure for "my phone
+  // is stuck on an old version" without asking anyone to find browser settings.
+  // On touch devices (mobile/PWA) the button is hidden and users pull DOWN at
+  // the top of the page instead; on desktop the button stays (no pull-down).
   (function hardRefresh() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
@@ -1404,54 +1599,223 @@
       if (SKIP.indexOf(page) !== -1) return;
       if (!localStorage.getItem(TOKEN_KEY)) return;
 
-      function build() {
+      var isTouch = false;
+      try { isTouch = window.matchMedia && window.matchMedia("(pointer:coarse)").matches; } catch (e) {}
+
+      // The refresh routine — shared by the button + the pull gesture.
+      var refreshing = false;
+      async function doHardRefresh() {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+          // 1. Wipe every Cache Storage cache (the service worker's copies).
+          if (window.caches && caches.keys) {
+            var keys = await caches.keys();
+            await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
+          }
+          // 2. Ask each service worker registration to fetch its newest sw.js.
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            var regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
+          }
+          // 3. Force the core shell past the browser HTTP cache so the reload
+          //    picks up fresh copies immediately (best-effort, failures ignored).
+          var core = ["/portal-config.js?v=17", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+            location.pathname + location.search];
+          await Promise.all(core.map(function (u) {
+            return fetch(u, { cache: "reload" }).catch(function () {});
+          }));
+        } catch (e) {}
+        location.reload();
+      }
+
+      // ── Desktop-only button ────────────────────────────────────────────────
+      function buildButton() {
+        if (isTouch) return;   // touch users get the pull-to-refresh gesture instead
         if (document.getElementById("mlRefresh")) return;
         var btn = document.createElement("button");
         btn.id = "mlRefresh";
         btn.setAttribute("aria-label", "Refresh this page");
         btn.title = "Refresh — fetches the latest version of this page (clears cached copies)";
-        // Sit just BELOW the page header so it never covers a ‹ Back button;
-        // pages without a header get the top corner.
-        var hdr = document.querySelector("header.page, header.main-header");
-        var top = 8;
-        try { if (hdr) top = Math.max(8, Math.round(hdr.getBoundingClientRect().bottom + window.scrollY) + 6); } catch (e) {}
-        btn.style.cssText = "position:fixed;top:calc(" + top + "px + env(safe-area-inset-top,0px));left:8px;z-index:98000;" +
+        // Bottom-LEFT so it never covers a top-corner Back button or a
+        // full-screen photo's ✕. Lifted above the field-app tabbar when present.
+        var bottom = 12;
+        try { var tb = document.querySelector(".tabbar"); if (tb && tb.offsetParent !== null) bottom = Math.round(tb.getBoundingClientRect().height) + 12; } catch (e) {}
+        btn.style.cssText = "position:fixed;bottom:calc(" + bottom + "px + env(safe-area-inset-bottom,0px));left:8px;z-index:98000;" +
           "width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.92);" +
           "box-shadow:0 3px 12px rgba(0,20,60,.28);cursor:pointer;font-size:16px;line-height:34px;padding:0;opacity:.9;";
         btn.textContent = "🔄";
-        var busy = false;
-        btn.onclick = async function () {
-          if (busy) return;
-          busy = true;
+        btn.onclick = function () {
           btn.style.transition = "transform .8s ease";
           btn.style.transform = "rotate(720deg)";
           btn.disabled = true;
-          try {
-            // 1. Wipe every Cache Storage cache (the service worker's copies).
-            if (window.caches && caches.keys) {
-              var keys = await caches.keys();
-              await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
-            }
-            // 2. Ask each service worker registration to fetch its newest sw.js.
-            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-              var regs = await navigator.serviceWorker.getRegistrations();
-              await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
-            }
-            // 3. Force the core shell past the browser HTTP cache so the reload
-            //    picks up fresh copies immediately (best-effort, failures ignored).
-            var core = ["/portal-config.js?v=5", "/portal.css?v=1", "/auth.js", "/device-auth.js",
-              location.pathname + location.search];
-            await Promise.all(core.map(function (u) {
-              return fetch(u, { cache: "reload" }).catch(function () {});
-            }));
-          } catch (e) {}
-          location.reload();
+          doHardRefresh();
         };
         (document.body || document.documentElement).appendChild(btn);
       }
-      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build);
-      else build();
+
+      // ── Touch-only pull-to-refresh ────────────────────────────────────────
+      // Pull DOWN at the very top of the page ~80px, release, and the same
+      // hard refresh fires. A blue banner slides down from the top with a hint
+      // ("↓ Pull to refresh" → "↻ Release to refresh"), matching modern app
+      // conventions. Uses 60% resistance for a native feel.
+      function wirePull() {
+        if (!isTouch) return;
+        // Suppress the browser's native overscroll (would trigger its own,
+        // soft reload on Chromium and fight our gesture).
+        try { document.documentElement.style.overscrollBehaviorY = "contain"; } catch (e) {}
+
+        var THRESH = 80, banner = null, startY = 0, startX = 0, dragging = false, engaged = false;
+        function atTop() {
+          var se = document.scrollingElement || document.documentElement;
+          return (se && se.scrollTop <= 0);
+        }
+        function ensureBanner() {
+          if (banner) return banner;
+          banner = document.createElement("div");
+          banner.id = "mlP2R";
+          banner.style.cssText = "position:fixed;top:0;left:0;right:0;height:0;overflow:hidden;" +
+            "background:linear-gradient(180deg,#003366,#004080);color:#fff;font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;" +
+            "display:flex;align-items:flex-end;justify-content:center;padding-bottom:10px;" +
+            "z-index:100000;box-shadow:0 3px 12px rgba(0,20,60,.28);will-change:height;transition:none;";
+          document.body.appendChild(banner);
+          return banner;
+        }
+        function killBanner() { if (banner) { banner.remove(); banner = null; } }
+
+        document.addEventListener("touchstart", function (e) {
+          if (e.touches.length !== 1 || !atTop()) return;
+          startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+          dragging = true; engaged = false;
+        }, { passive: true });
+
+        document.addEventListener("touchmove", function (e) {
+          if (!dragging) return;
+          var t = e.touches[0], dy = t.clientY - startY, dx = Math.abs(t.clientX - startX);
+          // Ignore upward or sideways drags — user is scrolling / swiping, not pulling.
+          if (dy <= 0 || dx > Math.abs(dy) || !atTop()) { killBanner(); engaged = false; return; }
+          var el = ensureBanner();
+          var h = Math.min(dy * 0.6, THRESH + 30);
+          el.style.height = h + "px";
+          el.textContent = h >= THRESH ? "↻  Release to refresh" : "↓  Pull to refresh";
+          engaged = h >= THRESH;
+        }, { passive: true });
+
+        function finish() {
+          if (!dragging) return;
+          dragging = false;
+          if (engaged) {
+            if (banner) { banner.style.height = "50px"; banner.textContent = "↻  Refreshing…"; }
+            doHardRefresh();
+          } else if (banner) {
+            banner.style.transition = "height .2s ease"; banner.style.height = "0";
+            setTimeout(killBanner, 220);
+          }
+        }
+        document.addEventListener("touchend", finish, { passive: true });
+        document.addEventListener("touchcancel", function () { dragging = false; killBanner(); }, { passive: true });
+      }
+
+      function start() { buildButton(); wirePull(); }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+      else start();
     } catch (e) { console.error("[hard-refresh]", e); }
+  })();
+
+  // ── New van driving-score banner (top of every page for the engineer) ────
+  // A dark navy "🚐 Your new van driving score is ready — tap to view" bar that
+  // sits above the page header until dismissed or opened. Was hardcoded into
+  // route.html only — moved here so it appears on every logged-in portal page.
+  //
+  // Two fixes over the original:
+  //   • The seen marker is now keyed PER-USER (`mlVanScoreSeen:<username>`)
+  //     instead of a shared device key. Without this, View As'ing a user
+  //     inherited whoever's marker was on that phone last — so Jamie viewing
+  //     as Connor saw no banner because Jamie had dismissed his own score.
+  //   • Tapping the WHOLE banner (not only the ✕) now also POSTs to /prefs
+  //     so the seen state syncs cross-device, matching the ✕ behaviour.
+  (function vanScoreBanner() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      // Skip auth flows, gate pages, and the target page itself.
+      var SKIP = ["login.html", "onboard.html", "confirmation.html",
+        "forgot-password.html", "reset-password.html", "change-password.html",
+        "hash.html", "memo-sign.html", "hs-sign.html", "programme-view.html",
+        "my-van-scores.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      if (!localStorage.getItem(TOKEN_KEY)) return;
+
+      // Per-user key so View As doesn't inherit the impersonator's marker.
+      // Empty username → falls back to the shared key (legacy behaviour).
+      function whoNow() {
+        try { return (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").trim(); }
+        catch (e) { return ""; }
+      }
+      function seenKey() {
+        var u = whoNow();
+        return u ? ("mlVanScoreSeen:" + u) : "mlVanScoreSeen";
+      }
+
+      function fetchAndShow() {
+        var t = localStorage.getItem(TOKEN_KEY) || "";
+        if (!t) return;
+        fetch(window.MOSTLANE_API + "/fleet/scores/unseen", {
+          headers: { "Authorization": "Bearer " + t }, cache: "no-store"
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (!d || !d.ok || !d.latest) return;
+          var key = seenKey(), seen = "";
+          try { seen = localStorage.getItem(key) || ""; } catch (e) {}
+          if (seen && seen >= d.latest) return;
+          if (document.getElementById("mlVanScoreNote")) return;
+
+          // Post the seen date to BOTH storages — the ✕ AND the whole-banner
+          // click now do the same thing, so the marker survives on this device
+          // AND on the user's other devices (via /prefs).
+          function markSeen() {
+            try { localStorage.setItem(key, d.latest); } catch (e) {}
+            try { fetch(window.MOSTLANE_API + "/prefs", { method: "POST",
+              headers: { "Authorization": "Bearer " + t, "Content-Type": "application/json" },
+              body: JSON.stringify({ vanScoreSeen: d.latest }) }); } catch (e) {}
+          }
+
+          var a = document.createElement("a");
+          a.id = "mlVanScoreNote";
+          a.href = "/my-van-scores.html";
+          // Sits BELOW the statusCap (which paints the notch inset). Padding
+          // needs no safe-area allowance because statusCap owns that region.
+          a.style.cssText = "position:fixed;top:env(safe-area-inset-top, 0px);left:0;right:0;z-index:99500;" +
+            "background:#003468;color:#fff;text-decoration:none;padding:10px 14px;" +
+            "font:650 13px -apple-system,system-ui,'Segoe UI',Roboto,Arial,sans-serif;" +
+            "display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22);";
+          a.innerHTML = '<span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>' +
+            '<span id="mlVanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>';
+          a.addEventListener("click", function () { markSeen(); });
+          document.body.appendChild(a);
+          // Reserve the space it occupies, or it just covers the top of the
+          // page. Measured rather than assumed — the text wraps to two lines on
+          // a narrow screen. Re-measured on resize/rotate.
+          function reserve() {
+            var h = Math.round(a.getBoundingClientRect().height);
+            document.documentElement.style.setProperty("--ml-topbar", h + "px");
+          }
+          function release() {
+            document.documentElement.style.removeProperty("--ml-topbar");
+            removeEventListener("resize", reserve);
+          }
+          reserve();
+          addEventListener("resize", reserve);
+          var x = document.getElementById("mlVanScoreX");
+          if (x) x.addEventListener("click", function (ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            markSeen();
+            release();
+            a.remove();
+          });
+        }).catch(function () {});
+      }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fetchAndShow);
+      else fetchAndShow();
+    } catch (e) { console.error("[van-score]", e); }
   })();
 
   // A small bell, top-right on every portal page, that anyone can open at any
@@ -1463,10 +1827,9 @@
   (function notifBell() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
-      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
-        "reset-password.html", "change-password.html", "hash.html", "my-day.html",
-        "memo-sign.html", "hs-sign.html"];
-      if (SKIP.indexOf(page) !== -1) return;
+      // The bell lives ONLY on the home page — it used to float top-right on every
+      // page and covered full-screen photo/doc close (✕) buttons.
+      if (page !== "main.html") return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
       var p = {};
@@ -1543,16 +1906,23 @@
             return;
           }
           list.innerHTML = items.map(function (n) {
-            var bg = n.read ? "#fff" : "#eef6ff";
-            var tw = n.read ? "600" : "700";
+            // An actionable alert stays OUTSTANDING (amber, bold, can't be dismissed
+            // by clicking) until the underlying item is dealt with — then it resolves
+            // to a read outcome ("✅ Approved by X").
+            var outstanding = n.actionable && !n.resolved;
+            var bg = outstanding ? "#fff8ec" : (n.read ? "#fff" : "#eef6ff");
+            var tw = (outstanding || !n.read) ? "700" : "600";
             var href = n.url ? esc(n.url) : "";
-            var dot = n.read ? "" : '<span class="mlBellDot" style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:#1e88e5;transform:translateY(-50%);"></span>';
-            return '<a class="mlBellItem" data-id="' + n.id + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + ';">' +
+            var dotC = outstanding ? "#f59e0b" : "#1e88e5";
+            var dot = (outstanding || !n.read) ? '<span class="mlBellDot" style="position:absolute;left:7px;top:50%;width:7px;height:7px;border-radius:50%;background:' + dotC + ';transform:translateY(-50%);"></span>' : "";
+            var pill = outstanding ? '<span style="display:inline-block;margin-top:3px;font-size:10.5px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:6px;padding:1px 6px;">Needs action</span>' : "";
+            return '<a class="mlBellItem" data-id="' + n.id + '" data-out="' + (outstanding ? "1" : "0") + '" href="' + href + '" style="position:relative;display:flex;gap:10px;align-items:flex-start;padding:12px 14px 12px 20px;border-bottom:1px solid #f1f4f7;text-decoration:none;color:inherit;background:' + bg + (outstanding ? ';box-shadow:inset 3px 0 0 #f59e0b' : '') + ';">' +
               dot +
               '<span style="font-size:20px;line-height:1.2;flex:0 0 auto;">' + iconFor(n) + '</span>' +
               '<span style="flex:1;min-width:0;">' +
               '<span class="mlBellTitle" style="display:block;font-weight:' + tw + ';color:#12233d;font-size:13.5px;">' + esc(n.title || "Notification") + '</span>' +
               (n.body ? '<span style="display:block;color:#55647a;font-size:12.5px;margin-top:1px;">' + esc(n.body) + '</span>' : '') +
+              (pill ? '<span style="display:block;">' + pill + '</span>' : '') +
               '<span style="display:block;color:#98a4b3;font-size:11px;margin-top:3px;">' + ago(n.at) + '</span>' +
               '</span></a>';
           }).join("");
@@ -1560,12 +1930,15 @@
             a.addEventListener("click", function (e) {
               var href = a.getAttribute("href");
               var id = a.getAttribute("data-id");
-              // Clicking an item marks THAT one read (un-bolds it) — keepalive so
-              // it still lands while the browser navigates away.
+              var outstanding = a.getAttribute("data-out") === "1";
               if (id) bf("/notify/feed/read", { method: "POST", keepalive: true, body: JSON.stringify({ id: Number(id) }) }).catch(function () {});
-              a.style.background = "#fff";
-              var dt = a.querySelector(".mlBellDot"); if (dt) dt.style.display = "none";
-              var tt = a.querySelector(".mlBellTitle"); if (tt) tt.style.fontWeight = "600";
+              // Outstanding actionable items STAY highlighted — opening them isn't
+              // "dealing with" them, so they keep nudging until actually actioned.
+              if (!outstanding) {
+                a.style.background = "#fff";
+                var dt = a.querySelector(".mlBellDot"); if (dt) dt.style.display = "none";
+                var tt = a.querySelector(".mlBellTitle"); if (tt) tt.style.fontWeight = "600";
+              }
               if (!href) { e.preventDefault(); }   // no target — just a record
             });
           });
@@ -1577,10 +1950,12 @@
           bf("/notify/feed?limit=40").then(function (r) { return r.json(); })
             .then(function (d) {
               render(d && d.items);
-              // opening the bell counts as "seen" — clear the red count, but the
-              // items stay bold until each is clicked (Facebook-style).
-              if (d && d.unread) { setBadge(0); bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ seen: true }) }).catch(function () {}); }
-              else setBadge(0);
+              // Opening the bell marks normal items "seen" (clears their part of the
+              // count), but OUTSTANDING actionable alerts keep counting until they're
+              // actually dealt with — so the badge drops to those, not to zero.
+              var stillOut = ((d && d.items) || []).filter(function (i) { return i.actionable && !i.resolved; }).length;
+              setBadge(stillOut);
+              if (d && d.unread) { bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ seen: true }) }).catch(function () {}); }
             }).catch(function () {
               list.innerHTML = '<div style="padding:22px 16px;color:#c0392b;font-size:13px;text-align:center;">Couldn\'t load notifications.</div>';
             });
@@ -1591,12 +1966,15 @@
         readBtn.addEventListener("click", function (e) {
           e.stopPropagation();
           bf("/notify/feed/read", { method: "POST", body: JSON.stringify({ all: true }) }).catch(function () {});
-          setBadge(0);
+          var out = 0;
           Array.prototype.forEach.call(list.querySelectorAll(".mlBellItem"), function (a) {
+            // Outstanding actionable items can't be "marked read" — they stay until dealt with.
+            if (a.getAttribute("data-out") === "1") { out++; return; }
             a.style.background = "#fff";
             var d = a.querySelector(".mlBellDot"); if (d) d.style.display = "none";
             var t = a.querySelector(".mlBellTitle"); if (t) t.style.fontWeight = "600";
           });
+          setBadge(out);
         });
         document.addEventListener("click", function (e) { if (open && !wrap.contains(e.target)) closePanel(); });
         window.addEventListener("pageshow", pollCount);

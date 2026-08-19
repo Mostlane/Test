@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Job — Mostlane</title>
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
-  <script src="sla-jobedit.js?v=14"></script>
+  <script src="sla-jobedit.js?v=15"></script>
+  <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -20,7 +21,7 @@
     @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
     *{box-sizing:border-box}
     html,body{margin:0}
-    body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top)) 16px calc(60px + env(safe-area-inset-bottom))}
+    body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:14px 16px calc(60px + env(safe-area-inset-bottom))}
     a{color:var(--accent)}
     .backline{font-size:15px;color:var(--muted);margin:0 0 2px -6px;cursor:pointer;background:0;border:0;padding:8px 10px;font:inherit;display:inline-flex;align-items:center;gap:4px;min-height:40px;-webkit-tap-highlight-color:transparent}
     h1.big{font-size:23px;margin:6px 0 4px;letter-spacing:-.02em}
@@ -38,6 +39,12 @@
     .tool{flex:1 1 auto;min-width:30%;border:1px solid var(--line);background:var(--card);border-radius:11px;padding:10px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;color:var(--ink);text-decoration:none}
     .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .ph{aspect-ratio:1.35;border-radius:12px;position:relative;display:flex;align-items:flex-end;padding:9px;color:#fff;font-size:12px;overflow:hidden;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.5);background-size:cover;background-position:center;background-color:#334155}
+    .ph>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
+    .ph>.tag{position:relative;z-index:2}
+    /* Shimmer lives on the tile BACKGROUND (behind the img), so a loaded photo
+       covers it. Never overlay the image or it stays hidden behind the skeleton. */
+    .ph.pend{background:linear-gradient(100deg,#dfe4ec 30%,#eef1f6 50%,#dfe4ec 70%);background-size:200% 100%;animation:phsk 1.1s linear infinite}
+    @keyframes phsk{to{background-position:-200% 0}}
     .ph .tag{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;letter-spacing:.05em;background:rgba(9,20,38,.82);color:#fff;padding:4px 8px;border-radius:7px}
     .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
     .seg{display:flex;background:var(--chip);border-radius:11px;padding:4px;gap:4px;margin-top:12px}
@@ -93,7 +100,7 @@
     #loading{padding:60px 0;text-align:center;color:var(--muted)}
     .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:50}.lightbox.show{display:flex}
     .lightbox img{max-width:94%;max-height:80%;border-radius:8px}
-    .lightbox .lx-close{position:absolute;top:16px;right:20px;color:#fff;font-size:30px;cursor:pointer;background:0;border:0}
+    .lightbox .lx-close{position:absolute;top:calc(env(safe-area-inset-top, 0px) + 14px);right:calc(env(safe-area-inset-right, 0px) + 18px);color:#fff;font-size:34px;line-height:1;padding:6px 10px;cursor:pointer;background:0;border:0;z-index:2}
     .lightbox .lx-nav{position:absolute;top:50%;transform:translateY(-50%);color:#fff;font-size:38px;cursor:pointer;background:0;border:0;padding:12px}
     #lxStage{position:absolute;bottom:24px;left:0;right:0;display:none;justify-content:center;gap:8px;flex-wrap:wrap;padding:0 12px}
     #lxStage.show{display:flex}
@@ -139,11 +146,11 @@
   </div></div>
 
   <div class="modal" id="blockModal"><div class="sheet">
-    <h3>⚠️ Finish your current job first</h3>
+    <h3 id="blockTitle">⚠️ Finish your current job first</h3>
     <p id="blockMsg" style="color:var(--muted);font-size:14.5px;line-height:1.5;margin:8px 0 16px"></p>
     <button class="btn primary wide" id="blockGo"><span id="blockGoRef">Go to that job →</span></button>
     <button class="btn line wide" id="blockStay" style="margin-top:8px">Stay here</button>
-    <div class="hint" style="text-align:center">You can only work one job at a time — wrap up the open one to move on.</div>
+    <div class="hint" id="blockHint" style="text-align:center">You can only work one job at a time — wrap up the open one to move on.</div>
   </div></div>
 
   <div class="lightbox" id="lightbox"><button class="lx-close" id="lxClose">✕</button><button class="lx-nav" id="lxPrev" style="left:6px">‹</button><img id="lxImg" alt=""><button class="lx-nav" id="lxNext" style="right:6px">›</button><div id="lxStage"></div></div>
@@ -194,6 +201,53 @@
   var raDone=false, reported=false, signed=false, sigName="", raPicPending=false;
 
   function jfetch(path, opts){ return fetch(SLA_API+path, opts||{}); }
+  // Shrink an image File to a max dimension → JPEG Blob (small thumbnail so the
+  // grid never decodes full-res camera photos).
+  function shrinkImage(file, maxDim, quality){
+    return new Promise(function(resolve){
+      if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
+      var img=new Image(), u=URL.createObjectURL(file);
+      img.onload=function(){
+        URL.revokeObjectURL(u);
+        var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+        w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+        var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+        cv.getContext("2d").drawImage(img,0,0,w,h);
+        cv.toBlob(function(b){ resolve(b); },"image/jpeg",quality||0.7);
+      };
+      img.onerror=function(){ URL.revokeObjectURL(u); resolve(null); };
+      img.src=u;
+    });
+  }
+  // Self-healing for older photos with no stored thumbnail: fetch the full image
+  // (a couple at a time, off the grid), shrink it, store the thumb, swap it in.
+  // New uploads already carry a thumb, so this normally has nothing to do.
+  var _backfilling=false;
+  async function backfillThumbs(){
+    if(_backfilling) return;
+    var todo=(photos||[]).filter(function(p){ return p.hasThumb===false && p.key; });
+    if(!todo.length) return;
+    _backfilling=true;
+    var idx=0;
+    async function worker(){
+      while(idx<todo.length){
+        var p=todo[idx++];
+        try{
+          var blob=await fetch(p.publicURL).then(function(r){ return r.ok?r.blob():null; });
+          if(blob){
+            var thumb=await shrinkImage(new File([blob],"p.jpg",{type:blob.type||"image/jpeg"}),400,0.7);
+            if(thumb){
+              var form=new FormData(); form.append("key",p.key); form.append("thumb",thumb,"thumb.jpg");
+              var r=await jfetch("/site/thumb",{method:"POST",body:form}).then(function(r){ return r.json(); }).catch(function(){ return null; });
+              if(r&&r.ok){ p.hasThumb=true; }
+            }
+          }
+        }catch(e){}
+      }
+    }
+    try{ await Promise.all([worker(),worker()]); }catch(e){}
+    _backfilling=false;
+  }
   // Permission helpers (read the cached session).
   function myPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||{}; }catch(e){ return {}; } }
   function isFullAccess(){ return myPerms().FullAccess==="Yes"; }               // "all access" only
@@ -260,6 +314,7 @@
     var niceRef=(!rref||rref===String(job.id)||/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rref))?"":rref;
     h+='<button class="backline" id="backBtn">← '+esc(niceRef||"Back")+'</button>';
     h+='<h1 class="big">'+esc(jobName())+'</h1>';
+    if(job.investigateOnly) h+='<div style="background:#fdecec;border:2px solid #d11f2d;border-radius:12px;color:#b00020;font-weight:800;font-size:22px;text-align:center;letter-spacing:.04em;padding:12px;margin:8px 0;">⚠ INVESTIGATE ONLY</div>';
     if(job.description) h+='<div class="works"><div class="works-l">The job</div>'+esc(job.description)+'</div>';
     h+='<div class="metarow">'+(urgent?'<span class="pill urgent">Urgent</span>':'')+'<span class="pill grey" id="curstatus">'+esc(job.status||"")+'</span></div>';
     h+='<div class="banner lock" id="lockBanner"><b>🔒 Risk assessment on arrival.</b> <span id="lockMsg"></span><div class="go" id="lockGo"></div></div>';
@@ -271,13 +326,22 @@
       if(dirDest) h+='<a class="tool" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(dirDest)+'">🗺️ Directions</a>';
       h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
     }
-    h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
-    h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
-    h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
-    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">Set status</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
-    h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
-    h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
-    h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    var fs = !!(job && job.firestopping);
+    if(!fs){
+      h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
+      h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
+      h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
+    }
+    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+(fs?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
+    if(fs){
+      // Firestopping jobs complete via the RIA form (per-seal photos + products +
+      // a signed declaration) — the shared component handles it + the download.
+      h+='<div class="card"><div id="firestopHost"></div></div>';
+    } else {
+      h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
+      h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
+      h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    }
     h+='<div class="card"><div class="sec-h"><span class="t">Activity</span></div><div class="tl" id="timeline"></div></div>';
     h+='<div id="editWrap" style="display:none;text-align:center;margin-top:6px"><button class="btn line" id="editBtn">✏️ Edit details (office)</button></div>';
     $("app").innerHTML=h;
@@ -285,22 +349,39 @@
   }
 
   function drawPhotos(){
-    var host=$("photos"),html="";
+    var host=$("photos"); if(!host) return;   // firestopping jobs use per-seal photos in the RIA panel
+    var html="";
     photos.forEach(function(p,i){
-      var bg=p.publicURL?'background-image:url('+esc(p.publicURL)+')':'';
+      // Load the small THUMBNAIL in the grid, not the full-res photo (native
+      // lazy-load so off-screen tiles don't fetch). Full-res only opens on tap.
+      var src=p.thumb||p.publicURL||"";
+      var pend=(p.hasThumb===false)?" pend":"";
+      var img=src?'<img loading="lazy" decoding="async" alt="" src="'+esc(src)+'">':'';
       var tag=p.stage?'<span class="tag">'+esc(p.stage.toUpperCase())+'</span>':'';
-      html+='<div class="ph" data-i="'+i+'" style="'+bg+'">'+tag+'</div>';
+      html+='<div class="ph'+pend+'" data-i="'+i+'">'+img+tag+'</div>';
     });
     html+='<div class="ph add" id="addPhoto">'+(raDone?'📷<span>Add '+stage+' photo</span>':'🔒<span>RA required</span>')+'</div>';
     host.innerHTML=html;
     $("phcount").textContent=photos.length+(photos.length===1?" photo":" photos");
     $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; $("fileInput").click(); };
     [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
+    [].forEach.call(host.querySelectorAll(".ph[data-i] img"),function(im){
+      // Reveal (stop the skeleton) as soon as the photo has loaded.
+      function done(){ im.parentNode.classList.remove("pend"); }
+      if(im.complete && im.naturalWidth>0){ done(); }
+      im.addEventListener("load",done);
+      // If a thumbnail ever fails, fall back to the full image once so nothing is blank.
+      im.addEventListener("error",function(){ var p=photos[+im.parentNode.dataset.i]; if(p&&p.publicURL&&im.src!==p.publicURL){ im.src=p.publicURL; } });
+    });
+    backfillThumbs();
   }
   function drawStatus(){
     // Projects have a slim status set — just Travelling · In Progress · Complete
     // (no On Hold / Quote packs).
     var list = STATUSES.filter(function(s){ return !(jobIsProject() && (s.n==="On Hold" || s.n==="Quote")); });
+    // Firestopping jobs are completed via the RIA panel, not the status grid —
+    // leave only the "start work" statuses here.
+    if(job && job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
     $("statusGrid").innerHTML=list.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
     [].forEach.call($("statusGrid").querySelectorAll(".sc"),function(el){ el.onclick=function(){ pick(el.dataset.n); }; });
   }
@@ -344,6 +425,9 @@
   }
   function ntrim(id){var el=$(id);return el?String(el.value||"").trim():"";}
   function outcomeMissing(){
+    // Investigate-only jobs have relaxed gates — any status (incl. Quote / Complete)
+    // can be set with nothing required (findings go in the note if he adds one).
+    if(job && job.investigateOnly) return [];
     if(chosen==="Complete"){var m=[];if(noteRequired() && ($("note").value||"").trim().length<15)m.push("a completion note");if(photoRequired() && !photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
     if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
     if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photoRequired() && photos.length<1)m.push("a photo");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
@@ -351,6 +435,7 @@
   }
   function refresh(){
     var wrap=$("completeWrap"),slide=$("slide");
+    if(!wrap||!slide) return;   // firestopping jobs complete via the RIA panel
     var miss = raDone? outcomeMissing():null;
     if(miss===null){ wrap.style.display="none"; return; }
     wrap.style.display="block";
@@ -370,7 +455,7 @@
   function applyLock(){
     var locked=!raDone;
     document.body.classList.toggle("ralock",locked);
-    $("note").readOnly=locked; drawPhotos();
+    var noteEl=$("note"); if(noteEl) noteEl.readOnly=locked; drawPhotos();
     var lb=$("lockBanner");
     if(locked){ lb.classList.add("show");
       if(reported){ $("lockMsg").innerHTML="Reported to the office — they've been alerted and will call you. You're held on this job until they respond. Retry the risk assessment once it's sorted."; $("lockGo").textContent="Retry risk assessment →"; lb.classList.add("reported"); }
@@ -380,21 +465,36 @@
   }
 
   function wire(){
+    var fs = !!(job && job.firestopping);
     $("backBtn").onclick=function(){ location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
-    $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
-    $("fileInput").addEventListener("change",uploadPhotos);
-    $("note").addEventListener("input",refresh);
-    $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
-    $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
+    if(!fs){
+      $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
+      $("fileInput").addEventListener("change",uploadPhotos);
+      $("note").addEventListener("input",refresh);
+      $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
+      $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
+      var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
+      knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
+      knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
+      knob.addEventListener("pointerup",function(){dg=false;});
+      slide.addEventListener("click",function(){if(!slide.classList.contains("locked"))doFinish();});
+    }
     $("lockGo").onclick=openRA;
-    var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
-    knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
-    knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
-    knob.addEventListener("pointerup",function(){dg=false;});
-    slide.addEventListener("click",function(){if(!slide.classList.contains("locked"))doFinish();});
     fillPoButton(); setupOfficeEdit();
     drawStatus(); drawTimeline(); applyLock();
+    if(fs) mountFirestop();
+  }
+  var fsMounted=false;
+  function mountFirestop(){
+    var host=$("firestopHost"); if(!host || fsMounted || !window.MLFirestop) return;
+    fsMounted=true;
+    window.MLFirestop.mount(host, {
+      jobId: jobId, mode: "engineer",
+      api: (window.MOSTLANE_API || MOSTLANE_API), token: localStorage.getItem("mostlaneToken"),
+      patchComplete: function(){ return patchJob({status:"Complete"}); },
+      onComplete: function(){ toast("Firestopping job completed"); setTimeout(function(){ location.href=backTo; }, 1200); }
+    });
   }
   async function fillPoButton(){
     var btn=$("poBtn"); if(!btn) return;
@@ -447,8 +547,25 @@
   var blockedBy=null;
   function showBlockModal(bj, msg){
     blockedBy=bj||null;
-    $("blockMsg").textContent = msg || ("Finish "+((bj&&bj.ref)||"your other job")+" first — "+((bj&&bj.why)||"it's still open")+".");
-    $("blockGoRef").textContent = (bj&&bj.ref) ? ("Go to "+bj.ref+" →") : "Go to that job →";
+    var ref=(bj&&bj.ref)||"your other job";
+    if(bj && bj.kind==="holdPending"){
+      // Nothing the engineer can DO — they're waiting on the office to approve
+      // their on-hold. Don't tell them to "finish" a job they can't act on.
+      $("blockTitle").textContent="⏳ Waiting for the office";
+      $("blockMsg").textContent="You've asked to put "+ref+" on hold. The office needs to approve that before you can start another job — you'll be free to move on as soon as they do. Nothing more to do right now.";
+      $("blockHint").textContent="You'll get a notification the moment it's approved.";
+      $("blockGoRef").textContent=(bj&&bj.ref)?("View "+bj.ref+" →"):"View that job →";
+    } else if(bj && bj.kind==="safety"){
+      $("blockTitle").textContent="⚠️ Waiting for the office";
+      $("blockMsg").textContent=(ref)+" is flagged 'can't proceed safely' and is with the office. You can start another job once they've sorted it.";
+      $("blockHint").textContent="You'll get a notification when it's cleared.";
+      $("blockGoRef").textContent=(bj&&bj.ref)?("View "+bj.ref+" →"):"View that job →";
+    } else {
+      $("blockTitle").textContent="⚠️ Finish your current job first";
+      $("blockMsg").textContent = msg || ("Finish "+ref+" first — "+((bj&&bj.why)||"it's still open")+".");
+      $("blockHint").textContent="You can only work one job at a time — wrap up the open one to move on.";
+      $("blockGoRef").textContent=(bj&&bj.ref)?("Go to "+bj.ref+" →"):"Go to that job →";
+    }
     $("blockModal").classList.add("show");
   }
   async function uploadPhotos(e){
@@ -458,6 +575,8 @@
     for(var i=0;i<files.length;i++){
       var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
       var form=new FormData(); form.append("file",f);
+      // Generate a small thumbnail so the grid loads instantly (full-res only opens on tap).
+      try{ var th=await shrinkImage(f,400,0.7); if(th) form.append("thumb",th,"thumb.jpg"); }catch(e){}
       try{ await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?filename="+encodeURIComponent(fn)+"&stage="+encodeURIComponent(useStage),{method:"POST",body:form}); }
       catch(err){ toast("Photo upload failed — will retry when online"); }
     }

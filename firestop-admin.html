@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Firestopping Setup</title>
+  <script src="/portal-config.js?v=17"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="docviewer.js?v=6"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:860px;margin:14px auto 80px;padding:0 12px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:16px;margin-bottom:14px;}
+    .card h2{margin:0 0 10px;font-size:16px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.grey{background:#5b6b7b;} .btn.green{background:var(--ok);} .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.small{padding:6px 10px;font-size:13px;} .btn.red{background:var(--bad);}
+    label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px;}
+    input[type=text],input[type=number],textarea{width:100%;padding:9px;border:1px solid #ccd5dd;border-radius:9px;font-size:14.5px;font-family:inherit;}
+    textarea{min-height:70px;}
+    .muted{color:#6b7a90;} .hide{display:none!important;}
+    .row2{display:flex;gap:10px;flex-wrap:wrap;} .row2>div{flex:1 1 200px;}
+    .prod{border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:10px;}
+    .prod h3{margin:0 0 2px;font-size:15px;} .prod .sub{font-size:12.5px;color:#6b7a90;}
+    .docrow{display:flex;align-items:center;gap:8px;font-size:13.5px;padding:6px 0;border-top:1px solid #f0f3f7;}
+    .docrow .nm{flex:1;}
+    .msg{font-size:13px;margin:8px 0 0;} .msg.err{color:var(--bad);} .msg.ok{color:var(--ok);}
+    .pill{display:inline-block;background:#eef4ff;color:var(--brand);border:1px solid #cdddf5;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;}
+    .dropzone{border:1px dashed transparent;border-radius:9px;padding:6px;transition:background .12s,border-color .12s;}
+    .dropzone.over{border-color:var(--brand);background:#eef4ff;} .dropzone.over .dz-hint{color:var(--brand);}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
+    <h1>🔥 Firestopping Setup</h1>
+  </header>
+  <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch((path.startsWith("http") ? path : API + path), opts);
+    }
+    let CONFIG = null, MATERIALS = [];
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.SLAAdmin === "Yes")) { alert("This page needs SLA Admin or Full Access."); location.href = "/main.html"; return; }
+      } catch { location.href = "/main.html"; return; }
+      await load();
+    })();
+
+    async function load() {
+      try {
+        CONFIG = await authFetch("/sla/firestop/config").then(r => r.json());
+        MATERIALS = (await authFetch("/sla/firestop/materials").then(r => r.json())).materials || [];
+      } catch { g("wrap").innerHTML = "<p class='muted' style='padding:20px'>Couldn't load — try again.</p>"; return; }
+      render();
+    }
+
+    function render() {
+      g("wrap").innerHTML = `
+        <div class="card">
+          <h2>Form settings</h2>
+          <div class="row2">
+            <div><label>Company name</label><input type="text" id="cCompany" value="${esc(CONFIG.company)}"></div>
+            <div><label>Next RIA number</label><input type="number" id="cNextRef" value="${esc(CONFIG.nextRef)}" min="1"><div class="muted" style="font-size:12px;margin-top:3px;">The next form auto-numbers from here (e.g. ${esc(String(CONFIG.nextRef).padStart(5,"0"))}).</div></div>
+          </div>
+          <label>Seal category</label>
+          <input type="text" id="cSealCat" value="${esc(CONFIG.sealCategory)}">
+          <label>Declaration text</label>
+          <textarea id="cDecl">${esc(CONFIG.declaration)}</textarea>
+          <div style="margin-top:10px;"><button class="btn" id="saveCfg">Save settings</button> <span class="msg" id="cfgMsg" style="display:inline;"></span></div>
+        </div>
+
+        <div class="card">
+          <h2>Materials / products</h2>
+          <p class="muted" style="font-size:12.5px;margin:0 0 10px;">Your usual products. Upload each product's spec sheet(s) — when an engineer selects a product as used, its documents are bundled with the completed form.</p>
+          <div id="prodList"></div>
+          <div style="border:1px dashed #b9c6d6;border-radius:11px;padding:12px;margin-top:8px;">
+            <b style="font-size:13.5px;">➕ Add a product</b>
+            <div class="row2" style="margin-top:6px;">
+              <div><input type="text" id="nManu" placeholder="Manufacturer (e.g. Everbuild)"></div>
+              <div><input type="text" id="nName" placeholder="Component name (e.g. Fire Mat)"></div>
+              <div><input type="text" id="nCat" placeholder="Category (optional)"></div>
+            </div>
+            <div style="margin-top:8px;"><button class="btn green small" id="addProd">Add product</button> <span class="msg" id="addMsg" style="display:inline;"></span></div>
+          </div>
+        </div>`;
+      renderProducts();
+      g("saveCfg").onclick = saveConfig;
+      g("addProd").onclick = addProduct;
+    }
+
+    function renderProducts() {
+      const box = g("prodList");
+      if (!MATERIALS.length) { box.innerHTML = `<p class="muted">No products yet.</p>`; return; }
+      box.innerHTML = MATERIALS.map(m => `
+        <div class="prod">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div><h3>${esc([m.manufacturer, m.name].filter(Boolean).join(" — "))}</h3>${m.category ? `<span class="pill">${esc(m.category)}</span>` : ""}</div>
+            <button class="btn red small" data-del="${esc(m.id)}">Delete</button>
+          </div>
+          <div style="margin-top:8px;">
+            ${(m.docs || []).map(d => `<div class="docrow"><span class="nm">📄 <a href="#" data-open="${esc(d.url)}" data-name="${esc(d.name)}" style="text-decoration:none;">${esc(d.name)}</a></span><button class="btn grey small" data-deldoc="${esc(m.id)}|${esc(d.id)}">✕</button></div>`).join("") || `<div class="muted" style="font-size:12.5px;">No spec documents yet.</div>`}
+          </div>
+          <div class="dropzone" data-drop="${esc(m.id)}" style="margin-top:8px;">
+            <button class="btn ghost small" data-upload="${esc(m.id)}">📎 Add spec document</button>
+            <span class="muted dz-hint" style="font-size:12px;margin-left:6px;">or drop a file here</span>
+          </div>
+        </div>`).join("");
+      box.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault(); if (window.MLDocViewer) MLDocViewer.open(a.dataset.open, a.dataset.name); else window.open(a.dataset.open, "_blank"); });
+      box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => delProduct(b.dataset.del));
+      box.querySelectorAll("[data-deldoc]").forEach(b => b.onclick = () => { const [pid, did] = b.dataset.deldoc.split("|"); delDoc(pid, did); });
+      box.querySelectorAll("[data-upload]").forEach(b => b.onclick = () => uploadDoc(b.dataset.upload));
+      // Drag-and-drop onto a product card uploads to that product.
+      box.querySelectorAll("[data-drop]").forEach(dz => {
+        const pid = dz.dataset.drop;
+        dz.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; dz.classList.add("over"); });
+        dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+        dz.addEventListener("drop", async e => {
+          e.preventDefault(); dz.classList.remove("over");
+          const files = [...(e.dataTransfer.files || [])];
+          if (!files.length) return;
+          const hint = dz.querySelector(".dz-hint"); if (hint) hint.textContent = "Uploading…";
+          for (const f of files) await uploadFile(pid, f);
+          await reloadMaterials();
+        });
+      });
+    }
+
+    async function saveConfig() {
+      g("cfgMsg").textContent = "Saving…"; g("cfgMsg").className = "msg";
+      const body = { company: g("cCompany").value, sealCategory: g("cSealCat").value, declaration: g("cDecl").value, nextRef: g("cNextRef").value };
+      const r = await authFetch("/sla/firestop/config", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+      if (r.ok) { CONFIG = r.config; g("cfgMsg").textContent = "Saved ✓"; g("cfgMsg").className = "msg ok"; }
+      else { g("cfgMsg").textContent = r.error || "Couldn't save"; g("cfgMsg").className = "msg err"; }
+    }
+    async function addProduct() {
+      const manufacturer = g("nManu").value.trim(), name = g("nName").value.trim(), category = g("nCat").value.trim();
+      if (!manufacturer && !name) { g("addMsg").textContent = "Enter a manufacturer or name."; g("addMsg").className = "msg err"; return; }
+      const r = await authFetch("/sla/firestop/materials", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ manufacturer, name, category }) }).then(r => r.json());
+      if (r.ok) { g("nManu").value = g("nName").value = g("nCat").value = ""; await reloadMaterials(); }
+      else { g("addMsg").textContent = r.error || "Couldn't add"; g("addMsg").className = "msg err"; }
+    }
+    async function delProduct(id) {
+      if (!confirm("Delete this product and its spec documents?")) return;
+      await authFetch("/sla/firestop/materials", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id, delete: true }) });
+      await reloadMaterials();
+    }
+    async function delDoc(pid, did) {
+      await authFetch("/sla/firestop/material-doc-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ productId: pid, docId: did }) });
+      await reloadMaterials();
+    }
+    async function uploadFile(pid, file) {
+      const fd = new FormData(); fd.append("file", file); fd.append("productId", pid);
+      await authFetch("/sla/firestop/material-doc", { method:"POST", body: fd });
+    }
+    function uploadDoc(pid) {
+      const inp = document.createElement("input"); inp.type = "file"; inp.multiple = true;
+      inp.onchange = async () => {
+        if (!inp.files.length) return;
+        for (const f of inp.files) await uploadFile(pid, f);
+        await reloadMaterials();
+      };
+      inp.click();
+    }
+    async function reloadMaterials() {
+      MATERIALS = (await authFetch("/sla/firestop/materials").then(r => r.json())).materials || [];
+      renderProducts();
+    }
+  </script>
+</body>
+</html>

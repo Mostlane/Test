@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -80,42 +80,17 @@
     .safe.on{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--card))}
     .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:4000;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
     #loading{padding:60px 0;text-align:center;color:var(--muted)}
-    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:var(--card);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom));transform:translateZ(0);-webkit-transform:translateZ(0)}
+    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:var(--card);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
     .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
     .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
     .tabbar a .badge{display:inline-block;min-width:16px;background:var(--urgent);color:#fff;border-radius:999px;font-size:10px;padding:0 4px;margin-left:2px}
   </style>
 </head>
 <body>
-  <!-- New van-score notice (shown only when the office has sent an unseen score). -->
-  <a id="vanScoreNote" href="/my-van-scores.html" style="display:none;position:fixed;top:0;left:0;right:0;z-index:60;background:#003468;color:#fff;text-decoration:none;padding:10px 14px;font:650 13px -apple-system,system-ui,sans-serif;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22)">
-    <span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>
-    <span id="vanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>
-  </a>
+  <!-- New van-score notice now injected globally by portal-config.js — appears
+       on every logged-in page, not just this one. -->
   <div id="loading">Loading your day…</div>
   <div id="screen" style="display:none"></div>
-  <script>
-  (function(){
-    try{
-      var API=window.MOSTLANE_API||""; var t=localStorage.getItem("mostlaneToken")||"";
-      if(!t) return;
-      fetch(API+"/fleet/scores/unseen",{headers:{"Authorization":"Bearer "+t},cache:"no-store"})
-        .then(function(r){return r.json();}).then(function(d){
-          if(!d||!d.ok||!d.latest) return;
-          var seen=""; try{ seen=localStorage.getItem("mlVanScoreSeen")||""; }catch(e){}
-          if(seen && seen>=d.latest) return;                 // already acknowledged on this device
-          var el=document.getElementById("vanScoreNote"); if(!el) return;
-          el.style.display="flex";
-          var x=document.getElementById("vanScoreX");
-          if(x) x.addEventListener("click",function(ev){ ev.preventDefault(); ev.stopPropagation();
-            try{ localStorage.setItem("mlVanScoreSeen",d.latest); }catch(e){}
-            try{ fetch(API+"/prefs",{method:"POST",headers:{"Authorization":"Bearer "+t,"Content-Type":"application/json"},body:JSON.stringify({vanScoreSeen:d.latest})}); }catch(e){}
-            el.style.display="none";
-          });
-        }).catch(function(){});
-    }catch(e){}
-  })();
-  </script>
 
   <div class="modal" id="vcModal"><div class="sheet">
     <h3>Weekly van check</h3>
@@ -136,18 +111,8 @@
   <nav class="tabbar">
     <a href="route.html?stay=1" class="on"><span class="ic">🧭</span>Route</a>
     <a href="engineer-jobs.html"><span class="ic">📋</span>Jobs</a>
-    <a href="po.html" id="tabPO"><span class="ic">🧾</span>PO</a>
     <a href="main.html"><span class="ic">▦</span>Menu</a>
   </nav>
-  <script>
-  (function(){ try{
-    var API=window.MOSTLANE_API||""; var t=localStorage.getItem("mostlaneToken")||"";
-    var a=document.getElementById("tabPO"); if(!a||!t) return;
-    fetch(API+"/po-config",{headers:{Authorization:"Bearer "+t},cache:"no-store"})
-      .then(function(r){return r.json();}).then(function(c){ if(c&&c.ok&&c.url){ a.href=c.url; } })
-      .catch(function(){});
-  }catch(e){} })();
-  </script>
   <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

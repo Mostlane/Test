@@ -47,6 +47,7 @@ import * as po from "./routes/po.js";              // DONE  (Purchase Orders —
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
+import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -107,6 +108,8 @@ const ROUTES = [
   ["*", "/cctv",       cctv.handle],     // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/tasks",      tasks.handle],    // recurring admin task list (deadlines, auto-complete, per-user stat)
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
+  ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
+  ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -210,7 +213,15 @@ export default {
     // job releases + the 5pm-day-before nudge push within ~5 min; the heavier
     // hourly work is gated to the top of the hour to keep its old cadence.
     ctx.waitUntil(sla.sweepJobReleases(env, 1).catch(e => console.error("scheduled job-release sweep:", e)));
+    // On-hold approvals block the engineer's next job, so chase SLA admins every
+    // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
+    if (new Date().getUTCMinutes() % 10 < 5) {
+      ctx.waitUntil(sla.remindPendingHolds(env, 1).catch(e => console.error("scheduled hold reminder:", e)));
+    }
     if (new Date().getUTCMinutes() < 5) {
+      // Daily chase (~08:00 London, deduped) for holiday requests + equipment
+      // transfers still outstanding.
+      ctx.waitUntil(remindDailyApprovals(env).catch(e => console.error("scheduled daily approvals:", e)));
       ctx.waitUntil(sendWeeklyReminders(env).catch(e => console.error("scheduled van-check reminder:", e)));
       // P4: pull recent SiteLog visits and reconcile them into SLA sessions —
       // close sessions a scan-out ended, and feed project scans into the
@@ -226,6 +237,23 @@ export default {
     }
   },
 };
+
+// Once-a-day (~08:00 London) re-nudge for outstanding holiday requests + equipment
+// transfers, deduped per day so a retry can't double-send.
+async function remindDailyApprovals(env) {
+  const now = new Date();
+  const lonHour = Number(now.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  if (lonHour !== 8) return;
+  const today = now.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const key = "approvals:dailyReminded:1";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=1 AND key=?").bind(key).first();
+    if (row && row.value === today) return;   // already chased today
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (1,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(key, today).run();
+  } catch { /* if the marker fails we just risk a duplicate nudge — harmless */ }
+  await holidays.remindPendingHolidays(env, 1).catch(() => {});
+  await assets.remindPendingTransfers(env, 1).catch(() => {});
+}
 
 // ── Audit trail ───────────────────────────────────────────────────────────────
 // Every state-changing request (POST/PUT/PATCH/DELETE) by a logged-in user is
@@ -357,6 +385,8 @@ const PUBLIC_ROUTES = [
   ["POST", "/prog/shared/open"],
   ["POST", "/prog/shared/suggest"],
   ["POST", "/prog/shared/export"],   // client PDF download — token+code verified in-handler
+  // Project documents streamed for the in-app viewer / new tab — signed URL, verified in-handler.
+  ["GET", "/project/doc"],
 ];
 
 function isPublic(method, pathname) {

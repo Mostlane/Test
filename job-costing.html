@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Job Costing</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <style>
@@ -13,7 +13,6 @@
   body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;}
   header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
   header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:160px;}
-  a.ml-back{text-decoration:none;font-size:15px;}
   .wrap{max-width:1040px;margin:0 auto;padding:16px;}
   .btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:8px 13px;font:600 13px "Segoe UI",system-ui;cursor:pointer;text-decoration:none;display:inline-flex;gap:6px;align-items:center;}
   .btn.on{background:var(--brand);border-color:var(--brand);color:#fff;}
@@ -97,8 +96,8 @@
 </head>
 <body>
   <header class="page">
-    <a class="ml-back" href="sites.html" title="Back to Sites">‹ Back</a>
-    <h1>📊 Job Costing</h1>
+    <a class="ml-back" id="backLink" href="sites.html" title="Back to Sites">‹ Back</a>
+    <h1 id="pageTitle">📊 Job Costing</h1>
     <a class="btn" href="sites.html">🗂️ Sites</a>
     <a class="btn" href="sitelog-links.html">🔗 SiteLog links</a>
   </header>
@@ -111,7 +110,7 @@
     </div>
     <div class="range" id="range">
       <button class="btn" data-d="7">7 days</button>
-      <button class="btn on" data-d="28">28 days</button>
+      <button class="btn" data-d="28">28 days</button>
       <button class="btn" data-d="91">3 months</button>
       <button class="btn" data-d="all">All time</button>
     </div>
@@ -140,9 +139,21 @@
   function hm(m){return Math.floor(m/60)+"h "+(m%60)+"m";}
   function money(n){return "£"+(Math.round(n*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});}
 
-  var days=28;
+  // Deep-link params: come from project-hub.html so the page can jump into ONE
+  // site and hand the back button back to that project.
+  var Q=new URLSearchParams(location.search);
+  var jumpProject=Q.get("project")||"";              // PRJ id (from project-hub)
+  var jumpSite=Q.get("site")||"";                    // site name to expand
+  var fromHub=Q.get("back")==="hub"||!!jumpProject;
+  if(fromHub){
+    var bl=document.getElementById("backLink");
+    if(bl){ bl.href=jumpProject?("project-hub.html?id="+encodeURIComponent(jumpProject)):"projects-live.html"; bl.title="Back to project"; bl.textContent="‹ Back to project"; }
+  }
+
+  var days=(jumpProject||jumpSite)?"all":28;         // deep-link → All time so a new project is always visible
   var lastSites=[], lastSitelog=true, lastSitelogReason="";
   var prefs={pinned:[],hidden:[],order:[]};
+  var didJump=false;
   function inArr(a,k){return a.indexOf(k)>=0;}
   function shortMoney(n){ n=Math.round(n); if(Math.abs(n)>=1000) return "£"+(n/1000).toFixed(n>=10000?0:1)+"k"; return "£"+n; }
   function fmtBucket(b){
@@ -298,7 +309,8 @@
   function cardHtml(s){
     var tot=s.totalMins||1;
     var pinned=inArr(prefs.pinned,s.key);
-    var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'')+(pinned?'<span class="pinbadge">📌</span>':'');
+    var projChip=s.project?('<span class="chip t" title="Portal project '+esc(s.project.number||"")+'">📁 PROJECT'+(s.project.number?" "+esc(s.project.number):"")+'</span>'):'';
+    var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'')+projChip+(pinned?'<span class="pinbadge">📌</span>':'');
     var engs=s.engineers.map(function(e){
       var head='<div class="li eng"><span>👷 '+esc(e.user)+srcBadge(e.src)+'</span><span>'+
         (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.visits?' · '+e.visits+(e.visits===1?' day':' days'):'')+(e.cost!=null?' · '+money(e.cost):''):'')+
@@ -359,6 +371,30 @@
     }
     if(!visible.length){ $("costView").innerHTML=banner+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
     $("costView").innerHTML=banner+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
+    jumpToTarget();
+  }
+  // Deep-link into ONE site: match by project id, else by site name; expand +
+  // scroll + briefly highlight. Also unhide if the user had hidden it.
+  function jumpToTarget(){
+    if(didJump) return;
+    if(!jumpProject && !jumpSite) return;
+    var wantSite=(jumpSite||"").toLowerCase().trim();
+    var target=null;
+    for(var i=0;i<lastSites.length;i++){
+      var s=lastSites[i];
+      if(jumpProject && s.project && s.project.id===jumpProject){ target=s; break; }
+      if(wantSite && (s.site||"").toLowerCase().trim()===wantSite){ target=s; }
+    }
+    if(!target) return;
+    didJump=true;
+    var hi=prefs.hidden.indexOf(target.key);
+    if(hi>=0){ prefs.hidden.splice(hi,1); savePrefs(); renderHidden(); didJump=false; renderCost(); return; }
+    var row=document.querySelector('.siteRow[data-key="'+target.key.replace(/"/g,'\\"')+'"]');
+    if(!row) return;
+    var sub=row.querySelector(".sub"); if(sub) sub.style.display="block";
+    row.style.boxShadow="0 0 0 3px #fde68a";
+    setTimeout(function(){ row.scrollIntoView({behavior:"smooth",block:"start"}); },40);
+    setTimeout(function(){ row.style.boxShadow=""; },2200);
   }
 
   function renderHidden(){
@@ -538,6 +574,13 @@
     [].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});
     days=(b.dataset.d==="all")?"all":+b.dataset.d; loadCost(); loadEx();
   });
+  // Paint the range chip that matches whatever `days` was initialised to
+  // (defaults to "28"; a project deep-link starts on "all").
+  (function paintRangeInit(){
+    var want=String(days);
+    var kids=$("range").children;
+    for(var i=0;i<kids.length;i++){ kids[i].classList.toggle("on", kids[i].getAttribute("data-d")===want); }
+  })();
   (async function(){ await loadPrefs(); loadCost(); loadEx(); })();
 })();
 </script>

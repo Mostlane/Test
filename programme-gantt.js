@@ -163,7 +163,8 @@
       hDows += `<th class="mlp-dow${we}"${tt}>${bh ? "BH" : DOW[d.getDay()]}</th>`;
     }
     const leftCols = editable ? 7 : 6;
-    let head = `<tr><th class="mlp-sticky mlp-actcol" rowspan="2">Works</th>
+    const worksW = Math.max(120, Math.min(560, Number(data.worksW) || 230));
+    let head = `<tr><th class="mlp-sticky mlp-actcol" rowspan="2">Works${editable ? '<div class="mlp-resize" title="Drag to widen the Works column"></div>' : ""}</th>
       <th class="mlp-small" rowspan="2">Contractor</th>
       <th class="mlp-small" rowspan="2">Start</th>
       <th class="mlp-small" rowspan="2">End</th>
@@ -251,7 +252,7 @@
       ? `<div class="mlp-warn">⚠ ${geo.offGrid.length} task${geo.offGrid.length === 1 ? "" : "s"} sit${geo.offGrid.length === 1 ? "s" : ""} far outside this programme's dates and ${geo.offGrid.length === 1 ? "isn't" : "aren't"} drawn — check the date${geo.offGrid.length === 1 ? "" : "s"}: ${geo.offGrid.slice(0, 3).map(o => esc(o.name) + " (" + esc(o.start) + ")").join(", ")}${geo.offGrid.length > 3 ? "…" : ""}</div>`
       : "";
     host.innerHTML = sumLine + offWarn +
-      `<div class="mlp-scroll"><table class="mlp-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>` +
+      `<div class="mlp-scroll"><table class="mlp-table" style="--maw:${worksW}px"><thead>${head}</thead><tbody>${body}</tbody></table></div>` +
       (opts.watermark ? `<div class="mlp-wm">${esc(opts.watermark)}</div>` : "");
 
     if (!editable) return;
@@ -289,6 +290,33 @@
       else if (op === "rowdown" && i < tasks.length - 1) { tasks.splice(i, 1); tasks.splice(i + 1, 0, t); rerender(); }
       else if (op === "mile") { t.milestone = !t.milestone; rerender(); }
     });
+
+    // Drag the Works column edge to widen/narrow it. Live-updates the CSS var so
+    // there's no reflow of the whole table mid-drag; persists on release. The
+    // stored data.worksW flows through to the PDF and Excel exports.
+    const handle = host.querySelector(".mlp-resize");
+    const tableEl = host.querySelector(".mlp-table");
+    if (handle && tableEl) {
+      handle.addEventListener("pointerdown", e => {
+        e.preventDefault(); e.stopPropagation();
+        const startX = e.clientX;
+        const startW = Math.max(120, Math.min(560, Number(data.worksW) || 230));
+        try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+        const move = ev => {
+          const w = Math.max(120, Math.min(560, startW + (ev.clientX - startX)));
+          data.worksW = Math.round(w);
+          tableEl.style.setProperty("--maw", data.worksW + "px");
+        };
+        const up = ev => {
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", up);
+          try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+          if (opts.onChange) opts.onChange(data);
+        };
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", up);
+      });
+    }
   }
 
   // Task-level change list — what did the client's copy change vs the base?
@@ -329,9 +357,12 @@
   th.mlp-we{background:#e8edf4 !important;color:#94a3b8 !important;}
   th.mlp-bh{background:#fdeeda !important;color:#b45309 !important;}
   .mlp-table td{border-bottom:1px solid #eef2f7;padding:3px 6px;vertical-align:middle;background:#fff;}
-  .mlp-sticky{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 0 #e3e8ee;min-width:200px;max-width:280px;}
+  .mlp-sticky{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 0 #e3e8ee;}
   th.mlp-sticky{z-index:4;background:#f4f7fb;}
-  .mlp-actcol{width:230px;}
+  .mlp-actcol{width:var(--maw,230px);min-width:var(--maw,230px);max-width:var(--maw,230px);position:relative;}
+  .mlp-resize{position:absolute;top:0;right:0;bottom:0;width:8px;cursor:col-resize;touch-action:none;}
+  .mlp-resize::after{content:"";position:absolute;top:50%;right:2px;transform:translateY(-50%);width:2px;height:16px;background:#b6c4d6;border-radius:2px;}
+  .mlp-resize:hover::after{background:#1A4F8F;}
   .mlp-small{white-space:nowrap;font-size:12px;color:#475569;}
   .mlp-end{color:#0f766e;font-weight:600;}
   .mlp-chip{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;}

@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Mostlane • Vehicle checks</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
   <style>
@@ -15,7 +15,6 @@
   header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
   header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:180px;}
   header.page h1 small{display:block;font-size:12px;font-weight:400;opacity:.75;margin-top:2px;}
-  a.ml-back{text-decoration:none;font-size:15px;}
   .head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
   .wrap{max-width:820px;margin:0 auto;padding:16px;}
   .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;}
@@ -194,20 +193,28 @@
 
   // ── Issues log + by-question filter (aggregated from checks + handovers) ──
   function answerWord(v){ return v==="defect"?"Defect":v==="missing"?"Missing":v==="present"?"Present":v==="ok"?"OK":esc(v); }
+  // answerMeta (stored on the record) carries {label,tone,value} per answer so
+  // custom answer options ("Not required in this vehicle" etc.) show their own
+  // wording + colour. Fall back to the legacy fixed OK/Defect/Present/Missing.
+  function metaOf(rec, id){ return rec && rec.answerMeta && rec.answerMeta[id]; }
+  function answerText(rec, id, v){ const m=metaOf(rec,id); return (m&&m.label)?m.label:answerWord(v); }
+  function answerToneOf(rec, id, v){ const m=metaOf(rec,id); if(m&&m.tone) return m.tone; return (v==="defect"||v==="missing")?"issue":"ok"; }
+  function isIssueAns(rec, id, v){ return answerToneOf(rec,id,v)==="issue"; }
   function labelMapFrom(tpl){ const m={}; [...(tpl.checklist||[]),...(tpl.equipment||[])].forEach(it=>m[it.id]=it.label); return m; }
-  // Every "issue" answer (defect/missing) across both sources, newest first.
+  // Every "issue" answer across both sources, newest first (tone-aware).
   function allIssues(){
     const lblC=labelMapFrom(VC), lblH=labelMapFrom(HO_TPL);
     const out=[];
     for(const c of CHECKS){
       const alertIds=new Set((c.alerts||[]).map(a=>a.id));
+      const cLbl=c.custom?labelMapFrom(c.custom):lblC;
       for(const id of Object.keys(c.answers||{})){ const v=c.answers[id];
-        if(v==="defect"||v==="missing") out.push({date:c.checkedAt,who:c.name,label:lblC[id]||id,answer:v,source:"Van check",alert:alertIds.has(id),note:(c.defectNotes||{})[id]||""}); }
+        if(isIssueAns(c,id,v)) out.push({date:c.checkedAt,who:c.name,label:(metaOf(c,id)&&metaOf(c,id).itemLabel)||cLbl[id]||id,answer:answerText(c,id,v),source:"Van check",alert:alertIds.has(id),note:(c.defectNotes||{})[id]||""}); }
     }
     for(const h of HANDOVERS){ if(h.status!=="done")continue;
       const alertIds=new Set((h.alerts||[]).map(a=>a.id));
       for(const id of Object.keys(h.answers||{})){ const v=h.answers[id];
-        if(v==="defect"||v==="missing") out.push({date:h.completedAt||h.requestedAt,who:h.name,label:lblH[id]||id,answer:v,source:"Handover",alert:alertIds.has(id),note:(h.defectNotes||{})[id]||""}); }
+        if(isIssueAns(h,id,v)) out.push({date:h.completedAt||h.requestedAt,who:h.name,label:lblH[id]||id,answer:answerText(h,id,v),source:"Handover",alert:alertIds.has(id),note:(h.defectNotes||{})[id]||""}); }
     }
     out.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
     return out;
@@ -219,7 +226,7 @@
     if(!iss.length){ $("issList").innerHTML='<span class="empty">No issues recorded. 🎉</span>'; return; }
     $("issList").innerHTML=iss.map(x=>`<div class="iss ${x.alert?"alerted":""}">
       <span class="d">${fmtDMY(x.date)}</span>
-      <span class="lab">${x.alert?"⚠ ":""}${esc(x.label)}<span class="pill ${x.answer==="missing"||x.answer==="defect"?"bad":"info"}" style="margin-left:6px">${answerWord(x.answer)}</span>${x.note?` <span class="who" style="font-weight:400">— ${esc(x.note)}</span>`:""}</span>
+      <span class="lab">${x.alert?"⚠ ":""}${esc(x.label)}<span class="pill bad" style="margin-left:6px">${esc(x.answer)}</span>${x.note?` <span class="who" style="font-weight:400">— ${esc(x.note)}</span>`:""}</span>
       <span class="who" style="flex:none">${esc(x.who)} · ${esc(x.source)}</span>
     </div>`).join("");
   }
@@ -236,17 +243,18 @@
     const id=$("qSel").value;
     if(!id){ $("qList").innerHTML='<span class="empty">Pick a question to see every answer over time.</span>'; return; }
     const rows=[];
-    for(const c of CHECKS){ if(c.answers&&c.answers[id]!==undefined) rows.push({date:c.checkedAt,who:c.name,answer:c.answers[id],source:"Van check"}); }
-    for(const h of HANDOVERS){ if(h.status==="done"&&h.answers&&h.answers[id]!==undefined) rows.push({date:h.completedAt||h.requestedAt,who:h.name,answer:h.answers[id],source:"Handover"}); }
+    for(const c of CHECKS){ if(c.answers&&c.answers[id]!==undefined) rows.push({date:c.checkedAt,who:c.name,text:answerText(c,id,c.answers[id]),issue:isIssueAns(c,id,c.answers[id]),source:"Van check"}); }
+    for(const h of HANDOVERS){ if(h.status==="done"&&h.answers&&h.answers[id]!==undefined) rows.push({date:h.completedAt||h.requestedAt,who:h.name,text:answerText(h,id,h.answers[id]),issue:isIssueAns(h,id,h.answers[id]),source:"Handover"}); }
     rows.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
     if(!rows.length){ $("qList").innerHTML='<span class="empty">No answers recorded for that item yet.</span>'; return; }
-    const bad=v=>v==="missing"||v==="defect";
-    $("qList").innerHTML=rows.map(r=>`<div class="qrow"><span class="who"><b>${esc(r.who)}</b></span><span class="d">${fmtDMY(r.date)}</span><span class="pill ${bad(r.answer)?"bad":"ok"}">${answerWord(r.answer)}</span></div>`).join("");
+    $("qList").innerHTML=rows.map(r=>`<div class="qrow"><span class="who"><b>${esc(r.who)}</b></span><span class="d">${fmtDMY(r.date)}</span><span class="pill ${r.issue?"bad":"ok"}">${esc(r.text)}</span></div>`).join("");
   }
 
   // ── Detail views ──
   function labelFor(list, id){ const it=(list||[]).find(x=>x.id===id); return it?it.label:id; }
-  function answerChip(v){
+  function answerChip(v, rec, id){
+    const m = (rec && id!==undefined) ? metaOf(rec,id) : null;
+    if(m){ const cls = m.tone==="issue"?"bad":m.tone==="na"?"info":"ok"; return '<span class="pill '+cls+'">'+esc(m.label||v)+'</span>'; }
     if(v==="ok"||v==="present") return '<span class="pill ok">'+(v==="present"?"Present":"OK")+'</span>';
     if(v==="defect") return '<span class="pill bad">Defect</span>';
     if(v==="missing") return '<span class="pill bad">Missing</span>';
@@ -261,14 +269,14 @@
   function closeDetail(){ $("detailBackdrop").style.display="none"; }
   function alertBanner(rec){
     const a=rec&&rec.alerts; if(!a||!a.length) return "";
-    return `<div style="background:#fee2e2;color:#b91c1c;padding:10px 14px;font-size:13.5px;font-weight:600;">⚠ Alert: ${a.map(x=>esc(x.label)+" — "+(x.answer==="missing"?"Missing":x.answer==="defect"?"Defect":esc(x.answer))).join("; ")}</div>`;
+    return `<div style="background:#fee2e2;color:#b91c1c;padding:10px 14px;font-size:13.5px;font-weight:600;">⚠ Alert: ${a.map(x=>esc(x.label)+" — "+esc(answerWord(x.answer))).join("; ")}</div>`;
   }
 
   function openCheck(i){
     const c=CHECKS[i]; if(!c)return;
     // A custom check carries its OWN item labels; otherwise use the weekly template.
     const vcLabels = c.custom ? [...(c.custom.checklist||[]),...(c.custom.equipment||[])] : [...(VC.checklist||[]),...(VC.equipment||[])];
-    const checks=Object.keys(c.answers||{}).map(id=>`<div class="chk"><span>${esc(labelFor(vcLabels,id))}</span><span>${answerChip(c.answers[id])}${c.defectNotes&&c.defectNotes[id]?` <span class="n">${esc(c.defectNotes[id])}</span>`:""}</span></div>`).join("");
+    const checks=Object.keys(c.answers||{}).map(id=>`<div class="chk"><span>${esc(labelFor(vcLabels,id))}</span><span>${answerChip(c.answers[id],c,id)}${c.defectNotes&&c.defectNotes[id]?` <span class="n">${esc(c.defectNotes[id])}</span>`:""}</span></div>`).join("");
     const title = c.custom ? `🧩 Custom check · ${esc(c.custom.name||"")} · ${fmtDMY(c.checkedAt)}` : `Van check · ${fmtDMY(c.checkedAt)}`;
     showDetail(`
       <div class="mhead"><h3>${title}</h3><button class="btn small" onclick="closeDetail()">✕ Close</button></div>

@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Weekly Van Check</title>
-  <script src="/portal-config.js?v=5"></script>
+  <script src="/portal-config.js?v=17"></script>
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
   <style>
@@ -32,6 +32,8 @@
     .seg button { border:none; background:#fff; padding:9px 13px; font:600 13px inherit; font-family:inherit; cursor:pointer; color:#5b6b7b; }
     .seg button.on-ok { background:var(--ok); color:#fff; }
     .seg button.on-bad { background:var(--bad); color:#fff; }
+    .seg button.on-na { background:#64748b; color:#fff; }
+    .seg { flex-wrap:wrap; }
     .defnote { margin:2px 0 8px; display:none; }
     .defnote.show { display:block; }
     .photos { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
@@ -167,6 +169,11 @@
     catch (e) { document.querySelector(".wrap").innerHTML = "<p class='muted'>Couldn't load — check your connection and try again.</p>"; return; }
     if (!d.ok) { document.querySelector(".wrap").innerHTML = "<p class='muted'>" + esc(d.error || "Couldn't load this check.") + "</p>"; return; }
     CFG = d;
+    // Make every checklist/equipment item carry a stable id, so the driver can
+    // always answer them however the office adds or removes items. (The worker
+    // assigns ids on save too — this is belt-and-braces for any legacy/edge data.)
+    CFG.checklist = normItems(CFG.checklist);
+    CFG.equipment = normItems(CFG.equipment);
     // Auto-fill the engineer's assigned registration: prefer the server's
     // vehicle_assigned, fall back to the reg cached at login (VehicleAssigned).
     try { CFG.vehicle = CFG.vehicle || localStorage.getItem("mostlaneVehicle") || sessionStorage.getItem("mostlaneVehicle") || ""; } catch (e) {}
@@ -233,48 +240,83 @@
     renderItems(); renderEquip(); renderSlots(); renderPhotos(); renderSafe();
   }
 
-  // Equipment on board (Present/Missing) — only shown if the office added items.
+  // Answer options — an item can define its own {value,label,tone} list; else the
+  // default OK/Defect (checklist) or Present/Missing (equipment). Tone drives the
+  // button colour + whether a note box is shown ("issue" = note prompt).
+  const DEF_DRIVER_OPTS = {
+    check: [{ value: "ok", label: "OK", tone: "ok" }, { value: "defect", label: "Defect", tone: "issue" }],
+    equip: [{ value: "present", label: "Present", tone: "ok" }, { value: "missing", label: "Missing", tone: "issue" }]
+  };
+  function driverOpts(it, kind) {
+    return (Array.isArray(it.options) && it.options.length) ? it.options : DEF_DRIVER_OPTS[kind];
+  }
+  // Give every item a guaranteed, stable id (same slug rule the worker uses:
+  // lower-case, non-alphanumerics → "_"). Keeps the driver form working no
+  // matter how items are added/removed, and never lets two items collide.
+  function slugId(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40); }
+  function normItems(list) {
+    const seen = {}, out = [];
+    (Array.isArray(list) ? list : []).forEach(function (it, idx) {
+      if (!it) return;
+      const o = (typeof it === "object") ? it : { label: String(it) };
+      const label = String(o.label != null ? o.label : "").trim(); if (!label) return;
+      let id = String(o.id || "").trim() || slugId(label) || ("item_" + idx);
+      while (seen[id]) id = id + "_" + idx;
+      seen[id] = 1;
+      out.push(Object.assign({}, o, { id: id, label: label }));
+    });
+    return out;
+  }
+  function toneClass(tone) { return tone === "issue" ? "on-bad" : tone === "na" ? "on-na" : "on-ok"; }
+  function toneOf(it, kind, val) {
+    const o = driverOpts(it, kind).find(x => x.value === val);
+    return o ? (o.tone || "ok") : "ok";
+  }
+  function itemHtml(it, kind) {
+    const cur = answers[it.id];
+    const isIssue = cur != null && toneOf(it, kind, cur) === "issue";
+    const btns = driverOpts(it, kind).map(o =>
+      `<button type="button" class="${cur === o.value ? toneClass(o.tone) : ""}" data-id="${esc(it.id)}" data-val="${esc(o.value)}">${esc(o.label)}</button>`
+    ).join("");
+    return `
+      <div class="item">
+        <span class="lbl">${esc(it.label)}</span>
+        <span class="seg">${btns}</span>
+      </div>
+      <div class="defnote ${isIssue ? "show" : ""}" id="dn_${esc(it.id)}">
+        <input type="text" placeholder="${kind === "check" ? "What's wrong?" : "Note (optional)"}" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
+      </div>`;
+  }
+
+  // Equipment on board — only shown if the office added items.
   function renderEquip() {
     const eq = (CFG.equipment || []);
     g("equipCard").style.display = eq.length ? "block" : "none";
     if (!eq.length) return;
-    g("equipItems").innerHTML = eq.map(it => `
-      <div class="item">
-        <span class="lbl">${esc(it.label)}</span>
-        <span class="seg">
-          <button type="button" class="${answers[it.id] === "present" ? "on-ok" : ""}" data-pres="${esc(it.id)}">Present</button>
-          <button type="button" class="${answers[it.id] === "missing" ? "on-bad" : ""}" data-miss="${esc(it.id)}">Missing</button>
-        </span>
-      </div>
-      <div class="defnote ${answers[it.id] === "missing" ? "show" : ""}">
-        <input type="text" placeholder="Note (optional)" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
-      </div>`).join("");
+    g("equipItems").innerHTML = eq.map(it => itemHtml(it, "equip")).join("");
   }
-  g("equipItems").addEventListener("click", e => {
-    const pres = e.target.dataset.pres, miss = e.target.dataset.miss;
-    if (pres) { answers[pres] = "present"; delete defectNotes[pres]; renderEquip(); saveDraft(); }
-    if (miss) { answers[miss] = "missing"; renderEquip(); saveDraft(); }
-  });
+  // Read the CURRENT items from CFG on every tap (never a captured snapshot) so
+  // the handler can't go stale, and can't crash while CFG is still loading.
+  function onPick(kind, render) {
+    return e => {
+      const btn = e.target.closest ? e.target.closest("button[data-id]") : null;
+      if (!btn) return;
+      const id = btn.dataset.id, val = btn.dataset.val;
+      if (!id || val == null || !CFG) return;
+      const items = kind === "equip" ? (CFG.equipment || []) : (CFG.checklist || []);
+      const it = items.find(x => x.id === id); if (!it) return;
+      answers[id] = val;
+      if (toneOf(it, kind, val) !== "issue") delete defectNotes[id];
+      render(); saveDraft();
+    };
+  }
+  g("equipItems").addEventListener("click", onPick("equip", renderEquip));
   g("equipItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
 
   function renderItems() {
-    g("checkItems").innerHTML = CFG.checklist.map(it => `
-      <div class="item">
-        <span class="lbl">${esc(it.label)}</span>
-        <span class="seg">
-          <button type="button" class="${answers[it.id] === "ok" ? "on-ok" : ""}" data-ok="${esc(it.id)}">OK</button>
-          <button type="button" class="${answers[it.id] === "defect" ? "on-bad" : ""}" data-bad="${esc(it.id)}">Defect</button>
-        </span>
-      </div>
-      <div class="defnote ${answers[it.id] === "defect" ? "show" : ""}" id="dn_${esc(it.id)}">
-        <input type="text" placeholder="What's wrong?" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
-      </div>`).join("");
+    g("checkItems").innerHTML = (CFG.checklist || []).map(it => itemHtml(it, "check")).join("");
   }
-  g("checkItems").addEventListener("click", e => {
-    const ok = e.target.dataset.ok, bad = e.target.dataset.bad;
-    if (ok) { answers[ok] = "ok"; delete defectNotes[ok]; renderItems(); saveDraft(); }
-    if (bad) { answers[bad] = "defect"; renderItems(); saveDraft(); }
-  });
+  g("checkItems").addEventListener("click", onPick("check", renderItems));
   g("checkItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
   ["f_vehicle", "f_mileage", "f_note"].forEach(id => g(id).addEventListener("input", saveDraft));
 
@@ -349,7 +391,8 @@
     if (safe === null) { msg.className = "msg err"; msg.textContent = "Tap whether the van is safe to drive."; return; }
     const missingSlots = (CFG.photoSlots || []).filter(sl => sl.required !== false && !slotPhotos[sl.id]);
     if (missingSlots.length) { msg.className = "msg err"; msg.textContent = "Photos still needed: " + missingSlots.map(sl => sl.label).join(", "); return; }
-    const hasDefects = Object.values(answers).some(v => v === "defect");
+    const hasDefects = (CFG.checklist || []).some(it => answers[it.id] && toneOf(it, "check", answers[it.id]) === "issue")
+      || (CFG.equipment || []).some(it => answers[it.id] && toneOf(it, "equip", answers[it.id]) === "issue");
     if (hasDefects && safe === true && !confirm("You've reported defects but marked it SAFE to drive. Continue?")) return;
     g("submitBtn").disabled = true; msg.textContent = "Sending…";
     try {

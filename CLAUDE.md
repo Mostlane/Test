@@ -83,11 +83,16 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=4`)
-All pages reference `?v=4` (cache-bust; bumped from ?v=3 on 14 Aug to force the
-Timesheet/My-Hours menu-gating fix onto stubborn phone caches). If a
-portal-config change must reach stubborn phone caches again, bump to ?v=5
-across all pages with sed. Provides:
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=17`)
+All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
+?v=7–9 the animated wait mark, ?v=13–17 the status-bar cap — 13 had to clear a
+concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
+portal-config change must reach them again, bump to ?v=18 across all pages
+with sed — and check the
+count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
+should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
+was silently running an ancient portal-config). NB `grep` treats programmes.html
+as binary — use `grep -a` or it drops out of every sweep. Provides:
 - `window.MOSTLANE_API` = https://mostlane-api.jamie-def.workers.dev
 - Legacy-host fetch bridge: rewrites calls to the migrated old workers
   (login, mostlane-users, mostlane-holidays, mostlane-assets, mostlane-sla
@@ -106,6 +111,40 @@ across all pages with sed. Provides:
   its own fallback copies — must work against a stale portal-config).
 - **Page-view beacon**: POST /audit/pageview once per page open (logged-in
   only; login/reset/onboard pages excluded).
+- **Busy mark — the spinning Mostlane "M"** (`mlLoading()` IIFE, 17 Aug):
+  EVERY busy state in the portal shows `/icons/icon-192.png` (the M tile)
+  animating `mlSpinStop` — one eased revolution in ~0.9s, then a ~0.8s rest,
+  repeating (spin · stop · spin · stop), 1.7s cycle, held still under
+  `prefers-reduced-motion`. Sized in **em** (1.45em) so a small grey footer
+  status line and a full-size card row both look right. **New code should call
+  `MLUI.loading("Loading jobs…")`** → an HTML string (mark + label);
+  `MLUI.loading(txt,{big:true})` is the large centred variant for a whole panel.
+  Existing pages need NO edit: ~250 busy strings across ~90 pages are written
+  every which way (static HTML, innerHTML, textContent), so an initial pass + a
+  MutationObserver upgrade any element whose WHOLE text is a busy phrase,
+  keeping the original wording as the label ("Loading fleet…" still reads).
+  **Detection is NOT a word list** — it needs BOTH signals: the text **ends in an
+  ellipsis** AND **contains a gerund** (an "-ing" word), ≤40 chars, no element
+  children. Either signal alone is wrong: the ellipsis alone catches dropdown
+  placeholders ("Select site…", "Choose a person…") and menu/button labels
+  ("Edit finance…", "🗓 Shift dates…", "Mark selected as…"); the gerund alone
+  catches the H&S pages' "Working days" / "Working On or Near Live Services".
+  A STOP set drops non-verbs that end in -ing (nothing/something/morning/…) so
+  "Nothing new…" and "Something went wrong…" stay plain. Bare "Loading" (no
+  ellipsis) is the one accepted exception. **Validated against every "…" string
+  in the repo: 100 wait states matched, and the 22 non-matches are all
+  placeholders or buttons** — re-run that sweep if the rule is ever touched.
+  (b) **NO sticky "already done" flag.** An early version set `data-mlload` and
+  skipped flagged elements, which broke any page that re-shows its status —
+  vehicles.html does `statusLine.textContent = "Loading fleet…"` on every
+  refresh, wiping the mark back to plain text for good (Jamie caught this on his
+  phone). The `el.children.length` test already skips an upgraded element (it
+  now holds our span), so the flag was both redundant and harmful.
+  `<button>` is in the SKIP list so a "Saving…" button label never gets a mark.
+  **The component injects its OWN `<style id="ml-load-style">` rather than riding
+  the sidebar's `#pnav-style`** — that block is skipped inside iframes (po.html
+  embeds po-office.html), on auth/my-day pages and for Story users, and without
+  the CSS the mark renders as a raw 192px icon.
 - **Embossed logo watermark** (added 14 Jul): one fixed `html::before` layer
   (`#mlEmbossCss`, `/Mostlane_Embossed.png`, z-index:-1, behind all content),
   so it shows on EVERY portal page without touching per-page `body`
@@ -120,10 +159,14 @@ across all pages with sed. Provides:
   field app's **engineer-jobs.html also has a top-left header back** (`.eng-back`
   → route.html; its own class since `.ml-back` is force-hidden there) so there's
   always an escape the bottom bar can't block.
-- **Field-app bottom tabbar (Aug 2026 rework)** — the four tabs on route.html /
-  engineer-jobs.html / inbox.html / you.html are now **Route · Jobs · PO · Menu**
-  (were Route/Jobs/Inbox/You). **PO** (`#tabPO`) resolves to the engineer's
-  personal PO link via GET /po-config (falls back to po.html); **Menu** →
+- **Field-app bottom tabbar (Aug 2026 rework)** — the tabs on route.html /
+  engineer-jobs.html / inbox.html / you.html are now **Route · Jobs · Menu**
+  (were Route/Jobs/Inbox/You, then briefly Route·Jobs·PO·Menu). **The PO tab
+  (`#tabPO`) was REMOVED (Aug 2026)** — it pointed at the old standalone PO
+  system, and engineers are now pushed to raise POs **from the job** (job-view
+  "Raise PO for this job", which stamps job_id for costing linkage) so nothing is
+  unlinked. The `/po-config` resolver script was removed from all four pages too.
+  **Menu** →
   main.html (field users use the full office tile menu — everything they can open
   is a permitted tile there, so the old you.html permission-launcher is no longer
   linked, though the file remains). **Field-user "home" = main.html**:
@@ -176,10 +219,19 @@ across all pages with sed. Provides:
   the "• ref — status" list. engineer-jobs.html's **"📌 Assigned — not booked in"** box is
   now a **collapsible** (default collapsed, tap the banner; per-device state in
   localStorage `mlUnschedOpen`). Its week list runs **Mon–Sun** (startOfWeek is
-  Monday-based). The **🗺️ map overlay** (`openDayMap`) fetches all the engineer's
-  jobs once (`/jobs/for-engineer` no date) then a **Day/Week/Month/Year segmented
-  slider** (`#dayMapSeg`/`renderMapForRange`) pins whichever range: Day=today,
-  Week=Mon–Sun, Month=calendar month, Year=Jan 1→today; defaults to Day on open.
+  Monday-based). The **🗺️ map overlay** (`openDayMap`) fetches all the engineer's jobs once
+  (`/jobs/for-engineer` no date) then a **Day / ±7 days / ±30 days / Year**
+  segmented slider (`#dayMapSeg`/`renderMapForRange`) pins whichever range,
+  plus a "Show status" filter; defaults to Day on open.
+  **The N-day windows span BOTH directions around today and must stay that way.**
+  They were briefly made forward-only ("Next 7/30 days", 17 Aug) and that emptied
+  the map: work here is booked only a day or two ahead, so at the time "next 7
+  days" held 4 jobs where "last 7 days" held 50, and engineers reported their
+  jobs had vanished (19 Aug). Either side of today keeps upcoming work visible
+  for planning AND the recent jobs engineers actually look for. **Geocoding
+  caches SUCCESSES ONLY** (`mlPostcodeGeo_v1`) — caching a miss as null meant a
+  postcode that failed once, on a bad batch or a rate-limit, was never looked up
+  again on that device and its pin stayed missing for good.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
@@ -364,6 +416,48 @@ across all pages with sed. Provides:
   The standard back-button markup portal-wide is
   `<a class="ml-back" href="…" title="Back">‹ Back</a>` placed FIRST in the header
   (no `data-role` → visible on desktop).
+  **The pill's LOOK is owned by portal-config.js and FORCED with `!important`
+  (17 Aug) — never restyle `.ml-back` on a page.** It is a white pill, 999px
+  radius, 1px #d7dee6 border, navy #003366 text, 14px/600. Why forced: a page with
+  a dark header band declares `header.page a{color:#fff}` (specificity 0,1,2),
+  which beat the old un-forced `.ml-back{color:#003366}` (0,1,0) and painted WHITE
+  text on the WHITE pill — a blank, invisible button. That hit 16 pages (all the
+  po-*, timesheets-admin, engineer-timesheet, van-timesheet, fleet-report,
+  programmes/programme-edit, compliance-review, my-van-scores, cctv…). All 19
+  per-page `.ml-back` rules were deleted; **only engineer-jobs.html keeps one**
+  (`display:none !important`, because the field app uses its own `.eng-back`) —
+  which still works because `display` is deliberately the ONE property portal-config
+  does NOT force. Verified by rendering all 97 pages headless and measuring computed
+  colour/contrast (scratchpad `audit-back.cjs`): 93 measurable pages all report
+  identical `rgb(0,51,102)` on `rgb(255,255,255)`, 999px, 14px.
+  **Engineer day summary (Aug 2026):** clicking an engineer's NAME on the
+  scheduler (day-lane header or week-grid name cell — `.day-name.clickable` /
+  `.week-day-header.clickable`) opens the **#engDayBackdrop** modal (`openEngDay`)
+  showing how that engineer is getting on for the day: a **status count strip**
+  (N jobs · Scheduled N · In Progress N · Complete N …, coloured by STATUS_COLOUR,
+  known statuses ordered by `ENG_STATUS_ORDER` then custom categories) + a
+  time-sorted **list of their jobs** each with time · ref/title · site/priority ·
+  a coloured status chip. Data = **GET /sla/jobs/for-engineer?engineer=&date=**
+  (serves THAT engineer's own per-engineer status). Day view uses the selected
+  date; week view uses today if it's in the shown week, else the picked date.
+  Tapping a job row opens the quick edit modal (board jobs) or job-view.html
+  (finished jobs, which loadJobs drops from the board). The modal has a **🗺️ Map**
+  button (`openMapForEngineer`) that opens the shared map overlay scoped to that
+  engineer's jobs for the day (`mapScope` = {engineer,name,date}; `jobsForMap()`
+  filters, the status chips hide, title shows the name+date). The scheduler's
+  **quick edit modal** also has a **🗂 Job card** button → `job-view.html?jobId=`
+  (the full office card — handy for completed jobs).
+  **Completed jobs stay on the board (Aug 2026):** loadJobs no longer drops
+  "Complete" (only Closed Jobs / Invoiced stay off). A Complete job renders GREEN
+  with a ✓ and is LOCKED (not draggable). **Day view positions a finished job at
+  the time it was ACTUALLY worked** — `actualWindow(job, engineer)` reads the
+  In Progress → Complete timestamps from `job.statusHistory` (normaliseJob now
+  passes statusHistory through; multi-eng entries carry `eng`=normId matched via
+  `schedNormId`) so an early finish slides left behind the now-line. The stored
+  `scheduledAt` is NEVER changed — a faint dashed 🕘 `.sched-marker` is drawn at
+  the original scheduled slot and the hover shows "Scheduled HH:MM (worked HH:MM)".
+  Falls back to the scheduled slot when there are no actual times (office-marked
+  complete) or the work wasn't on the shown day. Week view just greens the chip.
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference
@@ -518,6 +612,20 @@ across all pages with sed. Provides:
   gated `isOfficeAdmin() && !isFieldUser()` — a FIELD engineer never gets it even
   if they hold an SLAAdmin grant (it's an office control). isFieldUser reads
   mostlaneStaffType / perms.StaffType.
+  **Job photo thumbnails (Aug 2026 — fixes slow/blank previews in engineer-job.html):**
+  the engineer photo grid used to paint each tile with the FULL-RES `publicURL` as a
+  CSS background — no lazy-load, so every photo downloaded at once and previews were
+  slow or blank (they only appeared once tapped = cached). Now mirrors the site-photo
+  pattern: **POST /sla/jobs/{id}/files** accepts a client-shrunk `thumb` form field →
+  stored as `<key>.thumb`; **GET /sla/jobs/{id}/files** returns `key` + a signed
+  `thumb` URL (via `/sla/site/thumb`, which already accepts `jobs/` keys and edge-
+  caches) + `hasThumb`. engineer-job.html `uploadPhotos` generates a 400px JPEG thumb
+  (`shrinkImage`) alongside each photo; `drawPhotos` renders `<img loading="lazy"
+  decoding="async" src="thumb||publicURL">` (full-res only opens in the lightbox on
+  tap) with a shimmer `.pend` placeholder + a one-shot error fallback to full-res;
+  `backfillThumbs()` self-heals older photos with no thumb (fetch→shrink→POST
+  /site/thumb, 2 lanes) — normally a no-op since new uploads carry their thumb.
+  (job-view.html office view still uses full-res; same treatment could be applied there.)
   **Signature capture is LOCAL-FIRST (never lost on no signal / navigation):**
   saveSignature writes the drawn PNG to localStorage `mlSig:<jobId>` (pending)
   BEFORE the upload, sets job.signature so the Complete gate is satisfied at once,
@@ -540,6 +648,27 @@ across all pages with sed. Provides:
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
   /office/timesheet), `email.js` lib (Resend templates).
+  **Approved leave shows on the office clock (Aug 2026):** a holiday used to
+  read as a BLANK day on "My Hours" (office-my-hours.html) — as if the person
+  never clocked in — and the week came up short. `weekDetail()` now overlays
+  `approvedLeaveInRange()` (the same holidays.js helper the engineer timesheet
+  and SLA scheduler use), so each day may carry
+  `holiday:{type,half,seconds,paid}`. A full day is **8h** (`LEAVE_DAY_SECONDS`),
+  a half day 4h; **Unpaid leave marks the day but is worth 0h** (`isPaidLeave`).
+  `weekTotal` deliberately stays CLOCKED-only so existing consumers don't change
+  meaning — the new **`holidayTotal`** and **`paidTotal`** carry the leave, and
+  My Hours shows `paidTotal` with a "Nh clocked + Nh leave" split underneath.
+  Applies to /office/my, /office/user-week AND the office master timesheet
+  **/office/timesheet** (office-timesheet.html, 18 Aug): each user row carries
+  `holidays`/`holidayTotal`/`paidTotal`, a leave day renders as a green cell with
+  🌴, the Total column shows the paid figure with a "20h 0m + 12h 0m leave" split,
+  and the CSV's day columns match the screen plus explicit Clocked / Leave /
+  Total-paid columns. Someone signed off ALL week has no clock rows at all, so
+  the leave pass calls `ensure()` to give them a line rather than letting them
+  vanish — but only for OfficeClock holders (`officeUsers` set), or a field
+  engineer's holiday would appear on the office sheet. The per-person ✏️ Edit
+  modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
+  clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
 - **Per-job PO materials cost** (job-view.html "🧾 Materials — purchase orders"
   card, **office/admin only** — FullAccess|SLAAdmin): reads live from the PO
   system via **GET /costing/job-pos?jobId=** (costing.js `jobPoRows`), which sums
@@ -820,6 +949,20 @@ across all pages with sed. Provides:
   upload bar per section that posts to the right `?scheme=`+code. mostlane-pos is
   retired (migration is one-tap); chart, Sites, job costing and site documents all
   reference the one site by `site_number`.
+  **Auto-recognise a compliance cert in the GENERAL doc areas (Aug 2026):** a cert
+  dropped into an ordinary Site Documents area (not the Compliance tab) used to sit
+  as a plain doc the chart never saw. site-folder.html `uploadBar` now runs
+  `detectComplianceType(filename)` (keyword heuristic → fiveYear/pat/em/pv/ev/pump/
+  asbestos; word-boundary matched so Invoice/Patricia/review don't false-positive)
+  on each non-photo file; if it matches AND the user `canCompliance()`
+  (FullAccess|Compliance), a confirm-and-correct modal (`askCompliance`) pre-selects
+  the detected type (+ a scheme picker when the site has >1 compliance section) and
+  files it via **POST /compliance/file** (bump=1) instead of /sla/site/docs — so it
+  lands on the chart + rolls the due date, exactly like the Compliance-tab upload.
+  Decline → filed as an ordinary document. Never silently files (the modal is the
+  safety net against a mis-named file bumping a due date). Verified: 344/344 coop +
+  24 Fareham compliance stores are linked to a real portal site, so a filed cert
+  surfaces under the site both ways.
   **Compliance store → portal site link (Aug 2026):** `compliance_stores` gained a
   **`site_number`** column = the canonical PORTAL site a store belongs to, so its
   docs surface in that site's Site Documents. **Co-op stores ARE their portal site**
@@ -1165,6 +1308,18 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   XLS + driver-score PDF, parsed client-side): `/fleet/report` POST (save
   standalone HTML to R2) / `/fleet/reports` GET / `/fleet/report-delete`;
   `/fleet/drivers` GET/POST (remembered reg→driver overrides for the report).
+  **Driver table autosaves (Aug 2026):** the "🧑‍🔧 Vehicle drivers" selects
+  (reg → driver for the week) now save the moment one is changed — debounced
+  500ms, "Saved ✓" beside the heading, retry on failure, `keepalive` flush on
+  pagehide/visibilitychange (NOT sendBeacon — it can't carry the Bearer header
+  and the worker takes no `?token=`). Previously they were only written when a
+  report was generated, so the table had to be redone every week.
+  **Gotcha:** POST /fleet/drivers REPLACES the whole map, and load merges it OVER
+  `/fleet/current` (the registry) — so a deliberate "— unassigned —" must be sent
+  as an explicit `""` or the registry's driver silently reappears on reload.
+  `DRIVER_BLANKS` tracks those, seeded on load from stored blanks so it survives
+  a refresh; getDriverSelections() still omits untouched blanks so an unedited
+  van keeps following the registry.
   **Auto-save (Aug 2026):** every generated report saves to the portal
   automatically (generate() calls saveReport({auto:true})); the POST **dedupes by
   week range** (deletes any earlier report with the same weekStart+weekEnd) so
@@ -1379,6 +1534,55 @@ suggestion carries the contractor, the builder diffs against the same-filtered
 base (no false "removed"), and "Load into my draft" **merges only that
 contractor's tasks** (everyone else's untouched). The workbook's VBA
 (theme/dropdown refresh, sheet password) is NOT needed — the portal replaces it.
+**AI draft-from-a-document (Aug 2026):** a "🤖 Draft from a document" button on
+programmes.html opens a modal that reads a **specification/scope (PDF via PDF.js,
+.xlsx via xlsx-lite, or text/CSV) ENTIRELY IN THE BROWSER** (nothing uploaded —
+only the extracted text is sent) — or the office can paste the scope.
+**Scanned / image-only PDFs (no text layer, e.g. "Print to PDF" of pictures):**
+when browser extraction yields < 40 chars the client base64-encodes the PDF and
+posts it as `pdfBase64`; the worker sends it to Claude as a **`document` content
+block** (`{type:"document",source:{type:"base64",media_type:"application/pdf"}}` —
+GA, no beta header) so Claude OCRs it with its own vision (capped ~6 MB; this is
+the one path where the file itself is sent, surfaced in the modal status). A **"Notes
+for the AI"** box passes free-text steering (who's subcontracting which trade,
+timing/sequencing constraints) that is sent as **prioritised INSTRUCTIONS** ahead
+of the document in the prompt (`notes` in the POST body; the endpoint accepts a
+notes-only draft with no document too). **POST
+/prog/ai-draft** (Programmes|FullAccess) calls the **Anthropic Messages API**
+(`env.ANTHROPIC_API_KEY` secret; model `env.ANTHROPIC_MODEL` || `claude-sonnet-5`)
+with a **forced tool** (`build_programme` input_schema → structured JSON: title,
+contractors[], tasks[] with `startOffset` in working-days + `days` + milestone),
+then materialises it into a BRAND-NEW `job_programmes` **draft** (contractor names
+→ ids + palette colours; `startOffset` → real dates by adding working days to the
+chosen start date, default next Monday, weekends skipped) and returns its id →
+the page navigates to programme-edit.html?id= so Jamie refines and issues as
+normal. **Nothing is issued or shared automatically.** Fails gracefully with a
+plain-English message when the secret is missing / the key is rejected / the
+model isn't available on the key (tells Jamie exactly what to add in the
+dashboard). Pair it with the builder's **"Auto-order"** button (sorts task lines
+by start date so a drafted or hand-built list staggers correctly).
+**Date-shift tools + AI edit (Aug 2026):** the builder toolbar adds **🗓 Shift
+dates** (a modal: move the WHOLE programme to a new start date or by ±N days;
+or **move one task to a date and ripple every task starting on/after its
+original date** by the same delta, keeping the sequence — pure client-side date
+maths, `dParse`/`addDaysISO`/`daysBetween`), a single-level **↩ Undo** (stashes
+a JSON snapshot before any shift/AI edit), and an **"✨ Ask AI" edit box** — a
+plain-English instruction ("compress into two weeks", "push everything back a
+week", "make the M&E take 5 days") POSTed with the current draft to **POST
+/prog/ai-edit** (Programmes|FullAccess). That endpoint (shared `anthropicStructured`
+helper, forced `revise_programme` tool → full revised programme with absolute
+`start` YYYY-MM-DD + working `days` + `wknd`/milestone) returns a complete revised
+programme the client adopts into the DRAFT (issued revisions untouched; contractor
+COLOURS preserved by matching names to the existing legend). Undo reverts it.
+The whole reshaping set (Auto-order, Shift dates, Ask AI, Undo) lives under one
+**🛠 Tools** dropdown in the builder toolbar. **Resizable "Works" column:** drag
+the handle on the Works header to widen/narrow it; the width is stored on the
+programme as **`data.worksW`** (px) and flows through to BOTH exports — progpdf.js
+`applyWorksWidth()` scales it to PDF points (230px≈168pt), and programme-export.js
+scales it to Excel char-width (230px≈34). `programme-gantt.js?v=5`,
+`programme-export.js?v=2`. **PDF truncation fix:** progpdf `fitText` now uses ASCII
+"..." not "…" (U+2026) — the WinAnsi PDF font has no ellipsis glyph, so it was
+rendering as "?" after every truncated task/contractor label.
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
 snapshots the Holidays admin's GOV.UK bank-holiday list (app_config
 `holiday:bankholidays:<year>`, read across y-1..y+2 by `bankHolidayDates()` in
@@ -1392,6 +1596,34 @@ mismatch returns **409 {conflict, updatedAt, updatedBy}** → the builder pauses
 autosave and asks "Load theirs (recommended) / Keep mine" (Keep mine = ONE
 unstamped save that deliberately overwrites, then re-stamps). The pagehide
 keepalive save also carries baseVersion so closing a stale tab can't clobber.
+**PDF export fixes (18 Aug, from a real tender programme Jamie exported):** four
+faults, in `lib/progpdf.js` / `lib/pdf.js` —
+(a) **pages of empty rows.** Pagination crossed EVERY date window with EVERY
+row-chunk, so a page could show the December tasks against the Sept-Nov columns
+with a completely blank chart. The page list is now built first, pairing each
+window only with the tasks that intersect it (`inWindow`), and a window no task
+touches is dropped. A 4-page export became a correct 2-page one.
+(b) **"?" in the date range.** `pdfStr` mapped only a few typographic chars and
+turned everything else >255 into "?" - the arrow in "(28/09 -> 21/11)" was the
+visible one. `lib/pdf.js` now carries a real **WIN1252** map (en/em dash,
+ellipsis, curly quotes, bullet, euro, tm) plus an **ASCIIFY** map (arrows,
+<=, >=, ticks), exported as **`toWinAnsi()`**; anything still unmappable (emoji,
+CJK) is DROPPED rather than printed as "?" - a stray "?" reads as a broken
+document to a client. `textWidth()` measures the transliterated string so fits
+stay accurate. Supersedes the old fitText "..." workaround.
+(c) **legend overlapped the range label** - it reserved a flat 80pt for a label
+nearly twice that wide, so the last contractor sat on top of it. The legend now
+WRAPS to a second line (headerBlockH 78->89) and reserves the label's measured
+width; anything beyond two lines becomes "+N more".
+(d) **bars rendered as blobs.** The corner radius was `barHeight/2`, so a 1-day
+bar (~8pt wide, 9.5pt tall) came out a circle. The radius is now capped by the
+bar's own width. Also: date windows and rows are both split EVENLY (77 days over
+2 pages = 39+38, not 71+6; 30 rows = 15+15, not 28+orphan), and a date label that
+would spill past the grid's right edge is suppressed.
+Regression-tested by rebuilding the programme from the exported PDF and
+re-generating (scratchpad `gen.mjs`): 32/32 tasks drawn, zero stray "?", every
+page's chart populated. The firestop RIA PDF was smoke-tested too (shared encoder).
+
 **Exports (⬇ PDF / ⬇ Excel, on the builder AND the client share link):** the PDF
 is a VECTOR A4-landscape Gantt drawn server-side by **`lib/progpdf.js`**
 (`buildProgrammePdf(data, meta)` — never a screenshot; paginates rows AND long
@@ -1408,6 +1640,247 @@ workbook protection (legacy hash — a deterrent like the original workbook's).
 Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
+
+## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
+A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
+from the engineer's per-seal photos + a signed declaration, bundled with the
+product spec sheets for the materials used. **Tickable when raising a job**:
+add-job.html "🔥 Firestopping job" → `job.firestopping` (patchJob accepts it;
+ticking it sends requiresRA/Sig/Photo/Note=false — the RIA record IS the
+completion). **Completion gate:** `completionMissing()` short-circuits to
+`firestopMissing()` for firestopping jobs — needs ≥1 seal with before+after
+photos + a signed declaration (NOT the standard note/photo/signature).
+- **Record** lives on `job.firestop` = {ref, dateOfIssue, company, installer,
+  siteAddress, sealCategory, declaration, signatureKey, seals:[{id, location,
+  aperture, frp, manufacturer, componentName, comments, productIds[],
+  beforePhotos:[{key,url}], afterPhotos[]}]}. Photos in R2
+  `firestop/<tid>/<jobId>/<sealId>/<stage>-<ts>.jpg`; signature is sealId `_sig`.
+- **Config + materials** in app_config (`firestop_config` = company/sealCategory/
+  declaration/**nextRef** auto-sequence; `firestop_materials` = preset products
+  {id,manufacturer,name,category,docs:[{id,name,key}]}). Spec docs in R2
+  `firestopspec/<tid>/<productId>/`. RIA number auto-assigned from nextRef on
+  first save (padded to 5 digits, e.g. 00161), manual override honoured.
+- **Endpoints** (all `/sla/firestop/*`): config GET/POST (POST=SLA admin),
+  materials GET (session)/POST (admin), material-doc POST + material-doc-delete
+  (admin, R2), spec-file + photo-file GET (session OR signed), record GET
+  (returns record + header defaults + presets)/POST (saves `job.firestop`,
+  assigns ref), photo POST (multipart)/photo-delete, **pdf** GET (lib/firestoppdf.js
+  → application/pdf), **bundle** GET (lib/zip.js → ZIP: "RIA form N.pdf" at top +
+  "Product specification/" subfolder of each used product's docs).
+- **lib/firestoppdf.js** builds the RIA layout (header grid, declaration +
+  embedded signature, one bordered block per seal with fields + before/after
+  photo thumbnails, page numbers) via lib/pdf.js (JPEG images). **lib/zip.js** =
+  dependency-free STORED-zip writer (CRC32, folder paths in entry names) — no
+  Node zlib, WebCrypto-only. Both validated in Node (PDF opens, `unzip -t` OK).
+- **Front-end:** **firestop-form.js** = shared `window.MLFirestop.mount(el,{jobId,
+  mode:"engineer"|"office",api,token,patchComplete,onComplete})` — the whole RIA
+  UI (header, seals, product chips that autofill manufacturer/name, per-seal
+  before/after camera photos client-shrunk to JPEG, signature pad, autosave,
+  ⬇PDF/⬇Bundle, engineer "✅ Complete" that validates then PATCHes Complete).
+  **engineer-job.html** mounts it for firestopping jobs (replaces the standard
+  photo/note/signature/slider; status grid trimmed to Travelling/In Progress;
+  the photo/refresh/applyLock helpers are null-guarded). **job-view.html** mounts
+  it read-only + downloads. **firestop-admin.html** (🔥 Firestopping button on
+  sla-main, SLA-admin) manages config + products + spec-doc uploads.
+
+## Projects (routes/projects-api.js + project-new.html / projects-live.html / project-hub.html — Aug 2026)
+A **first-class project record** that is the SPINE linking a job together — before
+this, programmes/RAMS/costing joined only by loose name strings. Permission
+**Projects** (viewer) / **ProjectsAdmin|FullAccess** (manage); the "Projects"
+tile + sidebar now open **projects-live.html** (the old external
+`projects-ml-portal` doc-repo is absorbed — projects.html/projects-admin.html are
+redirect stubs to projects-live; existing external docs were NOT migrated).
+- **Tables (self-migrating):** `projects` (id PRJ-…, number=P-number, name,
+  site_client/site_number = its own project-site, status live|complete|archived,
+  `data` JSON) + `project_files` (docs in R2 JOB_FILES `projectdocs/<tid>/<pid>/`).
+  `data` JSON holds: postcode/lat/lon, mileageRoundTrip/OneWay, fromExisting,
+  required{programme,rams,cpp,valuations,projectDocs}, sitelog{rules,visitorRules,
+  companies[]}, contractValue, links{programmeId,ramsIds[],cppRef,costingKey},
+  doneOverride{}. **costingKey = normName(project name)** — the SAME key costing
+  uses, so PO/labour/valuations roll up automatically.
+- **Wizard (project-new.html)** — 4 steps: **1** site (existing → search+copy
+  coords, or new) + **always creates its own Pxxxx project-site** via `/add-site?
+  category=projects` (auto P-number, pushes the SiteLog geofence, PO picks it up
+  via its add-only mirror) + confirm/drop coords (Leaflet, postcodes.io geocode) +
+  **round-trip mileage** computed client-side (haversine ×1.25×2 from HQ PO15 5RQ,
+  saved to site_miles) + name/number; **2** required-docs tick-box; **3** SiteLog
+  message (→ site_rules) + companies-on-site (pick from PO `/po/api/subcontractors`
+  + free add); **4** review → POST **/project/create** → project-hub.
+- **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
+  the links + presence; manual tick via /project/todo), build actions
+  (**Programme**: POST /prog/save then /project/link → programme-edit; **RAMS**:
+  → `hs-docs.html?newRams=1&site=&project=<id>` which links back on save;
+  **CPP**: link-out to `hs-plan/#…&projectName=&projectNo=` PRE-FILLED (hs-plan
+  applyLaunchParams reads those hash params); **Valuations**: sets proj_fin value),
+  **Project Documents** (drag-drop upload, hide/show, delete; engineers with
+  Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
+  the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
+  valuations for FullAccess/costing perm; silently omitted otherwise), and
+  **Required-docs editor** (add/remove later).
+- **Projects compliance chart (Aug 2026):** a third compliance scheme
+  **`projects`** joins `coop` + `fareham`. Types: **elec** (Electrical
+  Certificate, 5y), **gas** (Gas Safety, 1y), **bldg** (Building Control, 10y),
+  plus **other** for drawings + everything else. Wired end-to-end:
+  - `SCHEME_DEFAULTS.projects` + TYPE_LABELS + KNOWN_TYPES + `canonType` all
+    recognise the new keys.
+  - `/project/create` inserts a `compliance_stores` row (`scheme='projects'`,
+    `code=<Pxxxx>`, `site_number=<Pxxxx>`) so every project appears on the
+    chart from day one.
+  - `/compliance/stores?scheme=projects` self-heals: any live/complete project
+    without a compliance row is INSERT-OR-IGNORE'd on GET, backfilling anything
+    the create hook missed.
+  - `/project/delete` cascades to compliance_files (R2 + DB) and compliance_stores.
+  - Archive cascade already carries: project.status=archived → Pxxxx site inactive
+    → syncSiteToCompliance sets `compliance_stores.active=0` → project appears in
+    the chart's Closed Sites view.
+  - **compliance-projects.html** (new page, copied from fareham.html and
+    adapted): `SCHEME='projects'`, columns Electrical/Gas/Building Control,
+    "Add site" replaced with a redirect to the Projects wizard (this chart is
+    read-only for project creation — the projects area owns it).
+  - **compliance.html** landing page now offers Projects alongside Southern
+    Co-op and Fareham.
+- **Centralisation pass (Aug 2026):** the portal now propagates edits between
+  its parallel stores so one source of truth stays in step.
+  - **Sites → SiteLog** is now UPSERT (not add-only): `sitelog-api.js`
+    `/upsert-site` and `/delete-site` accept a name+coord change (or an
+    `oldName` for rename). `sites.js syncSiteToSiteLog(site, oldName?)` fires on
+    every /add-site + /update-site, and `removeSiteFromSiteLog` (soft-archive)
+    fires on /delete-site — postcode/coord/rename edits and deletes propagate
+    to the geofence instead of being silently ignored.
+  - **Projects cascade on rename + delete:** `/project/update` — when the name
+    changes — renames the Pxxxx `sites` row, calls **`renameSiteInPO`** (which
+    also rewrites historical `po_log.site` so costing rolls up onto the new
+    name), fires `syncSiteToSiteLog(oldName)` and re-applies the arrival
+    rules, and calls **`renameProjFinKey`** so the contract-value carries
+    across. `/project/delete` cascades to project_files (R2), project_costs,
+    the Pxxxx `sites` row, `proj_fin` (`deleteProjFinKey`), soft-delete on
+    PO's site (active=0 keeps historical po_log rows), soft-archive on the
+    SiteLog geofence, and nulls out `job.projectId` on any linked SLA jobs
+    (jobs are kept). Response returns `cascaded` for visibility.
+  - **Contract value: single writer.** `costing.js` exports
+    **`writeProjFin(env,tid,key,{value,planned,name})`** (+ `renameProjFinKey`
+    / `deleteProjFinKey`). Both `/costing/fin` and `/project/update` now go
+    through it, so the two pages share ONE code path (no drift, null clears).
+  - **Compliance PDFs on Site Documents.** `/sla/site/docs` GET now injects
+    a **"Compliance Certificates"** area for any site that matches a
+    compliance store (by `site_number` OR the compliance `code`). Files stream
+    via signed `/compliance/file` URLs. Each row carries `complianceDoc:true`
+    and site-folder.html shows a "· from compliance chart" hint + hides
+    Delete (managed on the chart).
+  - **Compliance ↔ Sites bidirectional edits.** `/store` name/postcode edits
+    cascade to the linked `sites` row (`site_name` + `postcode` + `data`).
+    `/store-meta` lat/lng edits cascade to `sites.data.lat/lng` AND fire
+    `syncSiteToSiteLog` so the SiteLog geofence moves too. In reverse,
+    `sites.js /update-site` mirrors name / postcode / lat / lng into any
+    linked `compliance_stores` row via **`syncSiteToCompliance`** — so an
+    admin can edit in either place and the other tracks.
+  - **sitelog_scans fallback.** `buildDay` (costing.js) now falls back to
+    live `SITELOG_DB.visits` when the local `sitelog_scans` mirror has no
+    rows for the day — exceptions/mismatch detection keeps working even if
+    the HMAC bridge is dark, so `/costing/summary` £s and `/exceptions`
+    stay consistent.
+- **Project docs surface as "Site Documents" (Aug 2026):** the SLA
+  **`/sla/site/docs`** GET now injects a **"Project Documents"** area whenever
+  the requested siteCode matches a portal project's number
+  (`SELECT id FROM projects WHERE number=? OR site_number=?`). Files come from
+  `project_files` (non-hidden only) with a signed URL pointing at
+  `/project/doc` (CORS-enabled, PUBLIC_ROUTES sig-verified). Effect:
+  **site-folder.html** shows the project's docs as a first tab, and
+  **engineer-job.html** — whose "Site documents" button navigates to
+  site-folder — surfaces them too. A `projectDoc:true` marker on each row makes
+  site-folder show a "· from project" hint and HIDE the Delete button (project
+  docs are managed on the project hub). Also: **project-hub.html's doc opener
+  was fixed** — it was calling `MLDocViewer.open(url, name)` (positional)
+  instead of the object form docviewer expects, so the modal never sniffed the
+  PDF; now passes `{url,fetchUrl,name,downloadUrl}` so PDFs render inline.
+  **"🔄 Sync to PO" button** added to the P&L card header — a one-tap admin
+  backfill (`POST /project/push-po`) for projects created before the auto-push
+  landed (SCF Furniture). The hub also opportunistically re-runs pushSiteToPO
+  on every /project/get, so opening a project once is enough.
+- **Auto-push project site to PO + manual labour/materials + P&L (Aug 2026):**
+  Creating a project now **auto-registers its site name in the PO system's
+  `sites` table** (env.PO_DB) via `pushSiteToPO()` (add-only, idempotent), so a
+  PO raised for the project can pick it — and once priced, its cost automatically
+  appears against the project in job-costing (costing.js already matches
+  `po_log.site` by name). Existing projects self-heal on the next
+  /project/get, and there's a **POST /project/push-po** admin backfill (called
+  from a hub button when needed). NEW table **`project_costs`** (self-migrating)
+  + endpoints: **GET /project/costs**, **POST /project/cost** (kind=labour → the
+  hours are auto-costed from the engineer's `engts:cfg` rate — an explicit
+  override in £/hr wins; kind=material → £ ex-VAT + supplier), **POST
+  /project/cost-delete**. Manual entries are folded into `/costing/summary` for
+  the project's site: labour → `s.cost` + per-engineer + `s.manualLabour`;
+  materials → `s.poTotal` + `s.manualMaterials` + a supplier row (default
+  "Manual entry"). Front-end (project-hub.html "💷 Job costing & P&L" card):
+  clear headline (Contract value · Total cost · Projected profit/loss · Margin
+  %; green/red by sign), a 4-line **breakdown** (Captured labour · Manual
+  labour · PO materials · Manual materials), the People + Suppliers rows as
+  before, and two admin-only mini-forms: **Log a labour shift** (engineer +
+  date + hours + optional rate override + note) and **Add a material cost**
+  (date + description + supplier + £ ex-VAT). Every manual entry lists below
+  with a delete button. `ratesMap` is now exported from costing.js so
+  projects-api.js can snapshot the rate at entry time.
+- **Jobs & site visits from the project (Aug 2026):** every SLA job now carries
+  an optional **`job.projectId`** (`createOrUpdateJobFromPayload` + `patchJob`
+  accept + preserve it); a job raised from a project is stamped with the
+  project's id so the project can list its jobs and roll up per-engineer visits.
+  New endpoints on projects-api.js:
+  **POST /project/create-job** `{id, description, engineers[], scheduledAt?,
+  durationMinutes?}` (ProjectsAdmin|FullAccess) — creates a **multi-engineer**
+  SLA job in one shot, prefilled from the project's own Pxxxx site
+  (address/postcode/coords), gates all four requirements OFF by default (the
+  Projects rule) and stamps `projectId`; runs through the normal SLA path
+  (`createOrUpdateJobFromPayload` + `reconcileRelease` → assignment push).
+  **GET /project/visits?id=<PID>** — returns `{jobs, visits, perUser}`.
+  Matches jobs by `projectId` first, else by the project's site name/number
+  (legacy jobs). Each visit is one (user, day, job) row aggregated from
+  **`job_time_segments`** (status-tap timing — works whether the site is
+  scanned via SiteLog or not, per Jamie's spec). **Non-manager viewers see only
+  their OWN visits** (case-insensitive + normId match); **admins see all + a
+  `perUser` summary** (days · visits · on-site + travel mins). Front-end:
+  project-hub.html "🛠 Jobs & site visits" card — admin gets a "Create a job"
+  mini-form (description + Start/duration + a filtered engineer tick-list,
+  field engineers first) that POSTs /project/create-job; underneath, every
+  project job (link → job-view) + visits list (grouped by day, "LIVE" chip on
+  open segments) + per-engineer summary with a "open in Job Costing →"
+  shortcut. The seeded project row on /costing/summary now automatically
+  reflects those visits' cost (labour ledger already reads
+  job_time_segments).
+- **Project ↔ Job Costing deep-link (Aug 2026):** every live/complete portal
+  project is now **seeded into `/costing/summary`** even at £0 — so a brand-new
+  project appears on **job-costing.html** the moment it's created, ready for the
+  admin to set its contract value + valuations. The seeded row goes through
+  `resolveSite`, so once real labour/PO activity lands, it merges into the same
+  row (no duplicate). Returned rows carry a `project:{id,number}` field when the
+  site IS a portal project; job-costing shows a **📁 PROJECT Pxxxx chip** on
+  those cards. The project-hub.html "💷 Job costing" card + the To-Do row's
+  "View valuations" button + the "Manage valuations →" link all target
+  **`/job-costing.html?project=<id>&site=<name>&back=hub`**; job-costing.html
+  reads those params, defaults to **All time** so a new project is always
+  visible, auto-expands + scrolls to that site card, and rewrites its **‹ Back**
+  to `/project-hub.html?id=<id>`. The site is matched by `project.id` first (so a
+  renamed project still resolves), else by key/name.
+- **Per-project visibility (Aug 2026):** `data.visibleTo` = array of usernames.
+  Empty/missing = visible to **everyone with the Projects permission** (default).
+  Non-empty = only those usernames see it in **projects-live.html** / can open
+  its **project-hub.html**. **FullAccess|ProjectsAdmin always see every project**
+  regardless of the list (they manage). Enforced server-side in projects-api.js
+  `canSeeProject(data, me, canManage)` on both **GET /projects/list** (filter)
+  and **GET /project/get** (404 to a non-viewer, so a direct link can't leak).
+  UI: **project-new.html** step 2 has a "👥 Who can see this project?" section
+  (radio: everyone / only-picked → checkbox list of active users, searchable);
+  **project-hub.html** shows a matching **👥 Who can see this project** card
+  (admins only — same UI) saving via **POST /project/update** `{visibleTo:[…]}`.
+  Case-insensitive match; `sanitiseVisible` dedupes/caps 200.
+- **Endpoints (routes/projects-api.js, mounted /project + /projects):** GET
+  /projects/list, GET /project/get, POST /project/create|update|link|todo|delete
+  (manage=ProjectsAdmin|FullAccess), GET /project/docs, POST /project/doc (multipart)
+  |doc-update|doc-delete, GET **/project/doc** (PUBLIC_ROUTES, sig-verified R2
+  stream). **Valuations reuse costing's `proj_fin`** (keyed by costingKey) — nothing
+  new to learn on the costing side. SiteLog rules applied via `applySiteLogRules`
+  (in-process sitelogApi.handle when SITELOG_DB, else remote, best-effort). The
+  wizard front-end orchestrates the /add-site call (D1) so the P-number + geofence
+  come from the existing sites path.
 
 ## Home hub / dashboard (main.html — Aug 2026, extensible)
 The home page (`#hubDash` / `#hubGrid` on main.html) shows a **permission-gated
@@ -1511,18 +1984,28 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
 → my-tasks.html; admin manages from its "🗂 Manage tasks" button (Full-Access).
 
 ## Notifications system
-- **🔄 Hard-refresh button (Aug 2026)** — portal-config `hardRefresh()` injects a
-  small fixed button top-LEFT on every logged-in page (positioned just BELOW the
-  page header so it never covers a ‹ Back link; skipped on auth/sign/my-day +
-  programme-view). One tap ≈ Ctrl+Shift+R: deletes every Cache Storage cache,
-  `registration.update()`s the service worker, re-fetches the core shell
-  (portal-config/portal.css/auth/device-auth + current page) with
+- **🔄 Hard refresh (Aug 2026)** — portal-config `hardRefresh()` gives users
+  the closest thing to Ctrl+Shift+R without leaving the app: deletes every Cache
+  Storage cache, `registration.update()`s the service worker, re-fetches the
+  core shell (portal-config/portal.css/auth/device-auth + current page) with
   `{cache:"reload"}` to punch through the browser HTTP cache, then reloads.
-  The user-facing cure for "my phone is stuck on an old version".
-- **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected
-  portal-wide by portal-config.js (`notifBell()`, fixed top-right, `#mlBell`),
-  for EVERY logged-in user (field engineers too; skipped only on auth/sign/
-  my-day pages + Story users). A durable per-user history of every notification:
+  **How it's triggered depends on the device** — `window.matchMedia("(pointer:coarse)")`
+  splits them: touch devices (mobile/PWA) get **pull-to-refresh** (drag DOWN
+  ≥80px at the top of the page → blue banner "↓ Pull to refresh" → "↻ Release
+  to refresh" → same routine on release; 60% resistance, HTML gets
+  `overscroll-behavior-y:contain` to stop Chromium's own soft reload fighting
+  the gesture); desktops keep the small fixed **🔄 button** BOTTOM-LEFT (so it
+  never covers a ‹ Back link or a full-screen photo's ✕; lifted above the
+  field-app `.tabbar` when present; `env(safe-area-inset-bottom)`-aware). Skipped
+  on the same set of pages (auth/sign/my-day/programme-view). Same underlying
+  `doHardRefresh()` for both. The user-facing cure for "my phone is stuck on an
+  old version" — no button-hunting required on mobile.
+- **Notification bell / feed (Aug 2026)** — a Facebook-style 🔔 injected by
+  portal-config.js (`notifBell()`, fixed top-right, `#mlBell`). **It lives ONLY
+  on main.html (Aug 2026)** — it used to float top-right on EVERY page and
+  covered full-screen photo/doc close (✕) buttons in the field app; the same
+  applies to the 💬 chat bubble (`chatWidget()` also gated to main.html only).
+  A durable per-user history of every notification:
   each event that fires a push is ALSO written to a feed row, so the bell is
   complete even if the phone never enabled push. **Mechanism:** `push.js
   sendToUser()` calls **`recordNotification(env,tid,user,{title,body,url,tag})`**
@@ -1539,6 +2022,27 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
   (clears the red badge); a "Mark all read" button too. Icons derived client-side
   from tag/url/title (`iconFor`). NB the bell is the read-back history; the
   blocking attention gate + red tile badges are unchanged and separate.
+  **Actionable alerts — stay outstanding until DEALT WITH (Aug 2026):**
+  `user_notifications` gained **`actionable`** (0/1) + **`resolved_at`**. An alert
+  sent with `actionable:true` (per-item tag) stays OUTSTANDING for every recipient
+  — bold + amber "Needs action", always counted, NOT cleared by opening/clicking —
+  until the underlying item is dealt with. **Outstanding = `resolved_at IS NULL AND
+  (actionable=1 OR seen_at IS NULL)`** (portal.js feed/count + feed). On resolution,
+  **`push.js resolveNotificationsByTag(env,tid,tag,{title,body})`** stamps resolved_at
+  + read + seen on EVERY recipient's row AND rewrites it to the outcome ("Dave's
+  holiday — ✅ approved by Jamie"), so it drops off everyone's outstanding list and
+  sits read in each log. (`markNotificationsReadByTag` is now a thin wrapper.) Wired:
+  on-hold (`hold-approve:<jobId>`), holiday (`holiday-admin:<id>`), transfers
+  (`asset-transfer:<reqId>`); the actor's own follow-up notice uses a DIFFERENT tag
+  (`hold-decided`/`holiday-decision`) so it's untouched. Client: portal-config bell
+  renders outstanding items amber, opening never dismisses them, the badge = count
+  of still-outstanding actionable items (openPanel + Mark-all-read both respect it).
+  **Re-reminders (cron, push-only via `remindUser`/`remindPermission` — no new feed
+  rows):** on-hold chased **every ~10 min** (`sla.remindPendingHolds`, gated
+  `minute%10<5`); holiday + transfer chased **daily ~08:00 London**
+  (`holidays.remindPendingHolidays` + `assets.remindPendingTransfers`, deduped via
+  app_config `approvals:dailyReminded:1`). To extend: send with a per-item tag +
+  `actionable:true`, resolve with an outcome, and add a reminder sweep.
 - Red badges on tiles (main.html) + sidebar (portal-config) from
   /asset/transfers/pending-count, /holiday/my (unseen decisions),
   /holiday/all (pending + staff cancellations). "Seen" markers are per-USER
@@ -1560,7 +2064,12 @@ user with outstanding tasks. Menu tile **✅ My Tasks** (always visible, like He
   notification (identified by page+count; counts shared across devices via
   prefs), then enforced. A note may carry **`maxSnooze`** to override the 2×
   default (the **van handover** uses `maxSnooze:1` — one 4h snooze then
-  enforced). Every shown/snoozed/opened/dismissed is POSTed to
+  enforced). **The weekly van-check note is TIME-gated, not count-gated**
+  (`timeGated:true` + `snoozeUntil` = van-check `dueAt` − 2h): the driver can
+  keep snoozing right up to 2h before the deadline however many times, then it's
+  enforced; each snooze is capped (`dueMs`) so it can't bury the reminder past
+  the deadline, and an OVERDUE check (`snoozeUntil:0`) is never snoozable.
+  `itemCanSnooze(i,now)` is the shared rule. Every shown/snoozed/opened/dismissed is POSTed to
   /notify/log → viewer notify-log.html (FullAccess, linked from Users Admin)
   — proof against "mine never showed that".
 
@@ -1891,8 +2400,11 @@ is kept as documentation of the hot pages.)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
 SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
 **COMPLIANCE_IMPORT_TOKEN** (m2m token for the SharePoint→R2 compliance
-extractor; POST /compliance/file + GET /compliance/has verify it in-handler)
-(secrets); EMAIL_FROM, R2_PUBLIC_BASE,
+extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
+**ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
+POST /prog/ai-draft calls api.anthropic.com; feature fails soft with a clear
+"add the key" message when unset) (secrets); optional var **ANTHROPIC_MODEL**
+(defaults to `claude-sonnet-5`); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB
@@ -1913,7 +2425,14 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   encryption (RFC 8291) on WebCrypto only (no libs). `sendPush(env, sub, str)`.
   Verified against http_ece + RFC-style round-trips.
 - **routes/push.js** — /push/public-key (VAPID pub for subscribe),
-  /push/subscribe, /push/unsubscribe, /push/test. Table push_subscriptions
+  /push/subscribe, /push/unsubscribe, /push/test, **/push/status-all**
+  (FullAccess: every active user + whether they have push ON — device count,
+  last-confirmed-send time; groups push_subscriptions by lower(username), merges
+  the active users list, off-first sort; surfaced on **notification-centre.html**
+  "📱 Who has notifications on" card with an Off-only filter + refresh — so Jamie
+  can see at any time who's enabled. NB a subscription row = "on" but can be
+  stale until a send returns 404/410 and prunes it; the card shows last-confirmed
+  age as the freshness signal). Table push_subscriptions
   (self-migrating: endpoint PK, username, p256dh, auth, ua). `sendToUser(env,
   tid, username, {title,body,url})` fans out to a user's devices + prunes dead
   (404/410) — **Phase 2 event hooks will call this**.
@@ -2167,6 +2686,30 @@ engineer-report, hours-dashboard.html, add-site chain (Zapier), theme.html
 files to this public repo.
 
 ## Known quirks
+- **Compliance codes are ZERO-PADDED to 4 digits; portal site numbers are not.**
+  `pad4()` makes a Co-op store "0649", but the portal site created back in July is
+  `site_number = "649"`. The old `/compliance/stores/import` set `site_number = code`
+  blindly, so those stores missed the site that already existed and (with
+  `createSites:true`) minted a DUPLICATE 3-digit/4-digit site pair — 6 of them
+  (0649/0650/0665/0667/0668/0670, ELS + ELS Private funeral directors), each a
+  minimal stub next to the real record. Fixed 17 Aug: **`coopSiteNumber(env,tid,code)`**
+  in compliance.js resolves the link NUMERICALLY (shortest match wins, so the
+  original unpadded row is used) and only falls back to the padded code when the
+  store genuinely has no site yet — used by /stores/import, /store, /store-meta and
+  bumpDue. The `/stores` GET join also matches numerically (and dedupes by code) so
+  a padded code still resolves an unpadded site's live name/postcode. The 6 stores
+  were repointed and the 6 stub sites deleted in D1. **Any new site↔code matching
+  must compare numerically, never as strings.**
+- **Mobile-first `.shell{max-width:560px}` clamps a page to mobile width on
+  DESKTOP too** (a "field-friendly restyle" that unconditionally overrode an
+  earlier `max-width:1100px`). Symptom: an OFFICE page (e.g. **job-view.html**)
+  opens narrow like mobile on desktop; a refresh sometimes "fixes" it only
+  because the SW served an older, wider cached copy — pure cache lottery, not a
+  real fix. The cure is a desktop widen rule AFTER the 560 clamp:
+  `@media(min-width:769px){ .shell{ max-width:1000px } }` (applied Aug 2026 to
+  job-view / daily-logs / oncall_current; **my-day.html is a FIELD phone page —
+  left narrow on purpose**). When restyling any office page mobile-first, always
+  re-add a desktop `.shell` width or it'll be stuck at 560px on desktop.
 - **Manual D1 inserts into worker tables: tenant_id must be the string '1.0'**
   (not 1, not '1') when the table declares `tenant_id TEXT` (job_programmes,
   admin_tasks, the programme_* tables…). The worker binds the JS number 1,
@@ -2207,6 +2750,101 @@ files to this public repo.
 - Site images: sites.data JSON carries imageURL/_svAt/_noImagery flags.
 - Worker delivery: always give commit + line count + expected tail so a
   truncated paste is detectable. Chat-pasting the worker truncates — never.
+- **van-check.html answer buttons must read CFG LIVE, never a captured array.**
+  The driver form's answer handlers were bound as `onPick(CFG.checklist||[], …)`
+  at load — but `CFG` is fetched async, so at bind time it was null → an empty
+  array was captured (or it threw) and NO answer could be selected once items
+  existed. Fix: `onPick(kind, render)` looks up `CFG.checklist`/`CFG.equipment`
+  on every tap (+ `e.target.closest("button[data-id]")`), and `normItems()`
+  guarantees every item a stable id (`slugId(label)`, matching the worker's
+  underscore slug) so items added/removed in settings always stay answerable and
+  never collide on `answers[undefined]`. Same pattern applies to any config-driven
+  tap list — bind once, read the live config in the handler.
+- **Status-bar cap: ONE slim branded bar, portal-wide (18 Aug).** main.html (the
+  PWA start_url) sets `apple-mobile-web-app-status-bar-style: black-translucent`,
+  which governs the WHOLE installed app — so EVERY page runs full-bleed under the
+  iOS clock/battery, and a header's back button sat under the clock, untappable.
+  Fixed centrally by **`statusCap()` in portal-config.js**: it paints
+  `#mlStatusCap` (fixed, full width, `height:env(safe-area-inset-top,0px)`, navy
+  #003468, z-index 2147483000) and pushes the page below it. **`viewport-fit=cover`
+  is now on every page that LOADS portal-config.js** (117 pages) — without it
+  `env()` reports 0 and the cap can't size itself.
+  **Two rules learned doing it:**
+  (a) **The offset goes on `<html>`, never `<body>` — this took three attempts.**
+  A CSS `body{padding-top:env(...)}` REPLACED the padding pages set for
+  themselves (the field app lost its 14px). A JS version that ADDED to the
+  page's own value then broke main.html: `html,body{overflow-x:hidden}` makes
+  **body the scroll container**, and padding a scroll box left a band of
+  background at the end of the scroll range — the "blank section bar" Jamie
+  reported. The working form is CSS on html:
+  `html{box-sizing:border-box; min-height:100vh; padding-top:env(safe-area-inset-top,0px)}`.
+  **Anything else pinned across the top must reserve its space via
+  `--ml-topbar`**: the html padding is
+  `calc(env(safe-area-inset-top,0px) + var(--ml-topbar, 0px))` and the body
+  min-height subtracts both. The van-score banner (`#mlVanScoreNote`, moved into
+  portal-config so it shows portal-wide) is `position:fixed`, so before this it
+  simply covered the first row — a field user saw the Van Check / Holiday tiles
+  sliced in half. It now measures its own height on show (it wraps to two lines
+  on a narrow screen), sets `--ml-topbar`, re-measures on resize, and CLEARS the
+  variable when dismissed. Any future top banner/toast must do the same.
+  The **`min-height:100vh` pins html to the FULL screen**: with viewport-fit=cover
+  iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA box
+  instead of the screen, leaving the page short and a band of canvas below it —
+  main.html (the only page setting `html,body{height:100%}`) kept showing that
+  bottom bar after every other page was right. Chromium does not reproduce it,
+  so that line is belt-and-braces; where html is already full-height it is a no-op.
+  Percentage heights resolve against the parent's CONTENT box, so a
+  `body{height:100%}` shrinks to fit exactly and nothing overflows.
+  **`vh` does NOT** — it measures the full screen and ignores that padding, so
+  portal-config also injects `body{min-height:calc(100vh - env(...))}` to
+  re-base it, and the five pages that used `height:100vh` (login, change/forgot/
+  reset-password, hours-menu) were switched to `min-height:100vh` so that one
+  central rule can win. Check with scratchpad `cap3.cjs`, which flags any page
+  that fitted the screen before and scrolls after. Two known non-issues: hs-docs
+  `.wrap` has its own 60px bottom margin, and daily-logs reflows — both are the
+  pages' own spacing, not a gap the cap created.
+  (b) **Only add `viewport-fit=cover` where portal-config actually loads.** Grep
+  for the `<script src=…portal-config.js>` tag, NOT the string — programme-view.html
+  merely *mentions* it in a comment, and giving that client-facing page the meta
+  without a cap pushed its content under the status bar.
+  The cap skips iframes (po.html embeds portal pages; a second cap would double
+  the gap) and collapses to 0 in a browser, so nothing changes off-device.
+  Per-page header insets were REMOVED as part of this (my-documents,
+  vehicle-maintenance, memo-sign, project-hub, site-folder, the seven po-*,
+  engineer-timesheet, engineer-job) — the cap owns the top inset now, so never
+  add `env(safe-area-inset-top)` to a header again. Fixed OVERLAY buttons still
+  need it themselves (they ignore body padding): job-view `.photo-modal-close`,
+  site-folder `.lb .x`, engineer-job `.lx-close`, docviewer `.mldv-bar`, and
+  portal-config's own 🔔 bell. offline.html carries its own inline cap (it never
+  loads portal-config). Verified across all 124 portal-config pages
+  (scratchpad `cap.cjs`): cap present, 0px at rest, and with a 47px inset the bar
+  is exactly 47px with each page's own padding preserved beneath it.
+  **A FIXED `top:0` element still needs the inset itself** — it is positioned
+  against the viewport, so the cap's body padding doesn't move it. route.html's
+  `#vanScoreNote` "new van driving score" banner sat under the clock until its
+  padding became `calc(env(safe-area-inset-top, 0px) + 10px)` (18 Aug, found in
+  a concurrent session); same for any toast or banner pinned to the top edge.
+- **Full-screen photo/doc close (✕) buttons must clear the iOS status bar.**
+  On installed PWAs the ✕ sat at a fixed `top` under the notch/clock/battery.
+  Fix pattern (Apple-standard): the page's `<meta viewport>` needs
+  **`viewport-fit=cover`** AND the button's `top`/`right` use
+  **`calc(env(safe-area-inset-top, 0px) + Npx)`** (both are required — without
+  viewport-fit the env() inset is 0). Applied to engineer-job.html `.lx-close`,
+  docviewer.js `.mldv-bar` (padding-top), job-view.html `.photo-modal-close`,
+  site-folder.html `.lb .x`; viewport-fit added to job-view/site-folder/
+  my-documents/vehicle-maintenance/project-hub. docviewer bumped `?v=6`.
+  Any NEW full-screen overlay close button needs the same treatment.
+- **NEVER put `transform`/`translateZ(0)` on a `position:fixed` bottom bar** (iOS
+  Safari, Aug 2026). The field-app tabbar (route/engineer-jobs/inbox/you `.tabbar`)
+  and the View As "Viewing as…" return bar (portal-config `mlVaBar`) carried
+  `transform:translateZ(0);-webkit-transform:translateZ(0)` as a GPU-promotion hack.
+  On iOS that promotes the fixed element to a compositor layer that is only
+  repositioned at scroll-END, so during a scroll the bar DRIFTS UP with the content
+  and appears stuck mid-page (Jamie saw the purple return bar float into the middle
+  of the jobs list while View As'ing). Chromium pins it perfectly at every scroll
+  offset (verified with scratchpad `repro-bar.cjs`) — it's an iOS-only quirk. Modern
+  iOS handles a plain `position:fixed;bottom:0` bar correctly, so the fix is to
+  REMOVE the transform. Do not re-add translateZ(0) to any fixed bar.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

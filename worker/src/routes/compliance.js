@@ -13,6 +13,7 @@ import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor, requireSession } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { syncSiteToSiteLog } from "./sites.js";
 
 let READY = false;
 async function ensure(env) {
@@ -128,6 +129,18 @@ const SCHEME_DEFAULTS = {
     pat:       { years: 1, amberDays: 90, redDays: 30 },
     pv:        { years: 1, amberDays: 90, redDays: 30 },
   },
+  // Projects scheme — one row per portal project (auto-created on
+  // /project/create). Every project appears here so a lost approval /
+  // certificate has one canonical home. Types kept short + editable per project:
+  //   elec = Electrical Certificate (EICR / EIC / Minor Works)
+  //   gas  = Gas Safety Certificate
+  //   bldg = Building Control (approval / completion)
+  // "other" (drawings + everything else) is always available on every scheme.
+  projects: {
+    elec: { years: 5, amberDays: 90, redDays: 30 },
+    gas:  { years: 1, amberDays: 90, redDays: 30 },
+    bldg: { years: 10, amberDays: 90, redDays: 30 },
+  },
 };
 const DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;   // back-compat alias
 function numOr(v, d, min, max) {
@@ -188,7 +201,7 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
   let due = {}; if (row && row.due) { try { due = JSON.parse(row.due) || {}; } catch {} }
   due[type] = next;
   if (row) await env.DB.prepare("UPDATE compliance_stores SET due=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(due), at, tid, scheme, code).run();
-  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(due), (scheme === "coop" ? code : null), at).run();
+  else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, due, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(due), (scheme === "coop" ? await coopSiteNumber(env, tid, code) : null), at).run();
 }
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
@@ -198,6 +211,27 @@ const safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 
 // "" so it never resolves onto a real store's certs (stripping the letter would
 // turn "P0002" into "0002"). An empty/no-digit code is also "" (not "0000").
 const pad4 = (v) => { const s = String(v ?? ""); if (/[a-z]/i.test(s)) return ""; const d = s.replace(/\D/g, ""); return d ? d.padStart(4, "0") : ""; };
+
+// A Co-op store's compliance code IS its portal site number — but the chart pads
+// codes to 4 digits ("0649") while older portal sites are stored UNPADDED ("649").
+// A blind site_number = code therefore missed the site that was already there and
+// (with createSites) minted a duplicate 3-digit/4-digit pair. So resolve the link
+// NUMERICALLY: use the existing site's own number when one matches, and only fall
+// back to the padded code when that store genuinely has no portal site yet.
+// Shortest-first so the original unpadded row wins over any legacy stub.
+async function coopSiteNumber(env, tid, code) {
+  if (!code) return null;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT site_number FROM sites
+        WHERE tenant_id=? AND site_number <> '' AND site_number NOT GLOB '*[^0-9]*'
+          AND CAST(site_number AS INTEGER) = CAST(? AS INTEGER)
+        ORDER BY LENGTH(site_number), site_number LIMIT 1`
+    ).bind(tid, code).first();
+    if (row && row.site_number) return String(row.site_number);
+  } catch {}
+  return code;
+}
 
 // ── Scheme identity: display label. 'coop' compliance stores ARE portal sites
 // (site_number = code). Other schemes (Fareham) attach to an EXISTING portal
@@ -213,6 +247,8 @@ const TYPE_LABELS = {
   fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly",
   emYearly: "EM Yearly", pv: "PV", ev: "EV/Forecourt", forecourt: "EV/Forecourt",
   pump: "Pump", asbestos: "Asbestos Register", other: "Other",
+  // Projects scheme
+  elec: "Electrical Certificate", gas: "Gas Safety", bldg: "Building Control",
 };
 function typeOptionsFor(scheme) {
   const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
@@ -221,8 +257,8 @@ function typeOptionsFor(scheme) {
   return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
 }
 
-// Canonical compliance type keys across both schemes.
-const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","other"];
+// Canonical compliance type keys across every scheme (coop, fareham, projects).
+const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","elec","gas","bldg","other"];
 // Normalise any incoming type label (a chart type key, a SharePoint subfolder, or
 // a table key) to a canonical compliance type.
 function canonType(t) {
@@ -241,6 +277,10 @@ function canonType(t) {
   if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
   if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
   if (/pump|sump/.test(s)) return "pump";
+  // Projects scheme
+  if (/build.*control|\bbldg\b|building/.test(s)) return "bldg";
+  if (/gas\s*safe|gas/.test(s)) return "gas";
+  if (/electr|\belec\b|eic\b|minor\s*works/.test(s)) return "elec";
   const k = s.replace(/[^a-z0-9]+/g, "");
   return k ? k.slice(0, 20) : "other";
 }
@@ -473,6 +513,25 @@ export async function handle(request, env, ctx, url, sess) {
   // from the sites table (fallback to the cached copy), its category + due dates,
   // and which types already have a document on file (drives the 📄 links).
   if (sub === "/stores" && method === "GET") {
+    // Projects scheme: every portal project has a row on this chart. Auto-heal
+    // any missing rows (e.g. projects created before this scheme existed) by
+    // inserting them here — link stays via site_number = project.number.
+    if (scheme === "projects") {
+      try {
+        const { results: projRows } = await env.DB.prepare(
+          "SELECT id, number, name, status FROM projects WHERE tenant_id=? AND status IN ('live','complete')"
+        ).bind(tid).all();
+        for (const p of projRows || []) {
+          const code = String(p.number || "").trim();
+          if (!code) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+              VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, p.name || null, code, new Date().toISOString()).run();
+        }
+      } catch {}
+    }
     // Non-Co-op stores link to a portal site by NAME. Portal sites for other
     // schemes may be created by a separate workflow AFTER the compliance chart,
     // so self-heal on load: link any still-unlinked store whose name now matches
@@ -493,10 +552,18 @@ export async function handle(request, env, ctx, url, sess) {
     // (Fareham) store them directly on the compliance row.
     const { results } = scheme === "coop"
       ? await env.DB.prepare(
+          // Resolve the live site by the store's LINK (site_number), falling back
+          // to its code — and match numerically as well as exactly, so a padded
+          // code ("0649") still finds an unpadded portal site ("649") instead of
+          // showing as unlinked. Duplicate matches are collapsed below by code.
           `SELECT cs.code, cs.category, cs.name AS cname, cs.postcode AS cpost, cs.due, cs.active, cs.meta, cs.site_number,
                   s.site_name AS sname, s.postcode AS spost
              FROM compliance_stores cs
-             LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND s.site_number = cs.code
+             LEFT JOIN sites s ON s.tenant_id = cs.tenant_id AND (
+                    s.site_number = COALESCE(NULLIF(cs.site_number, ''), cs.code)
+                 OR (s.site_number <> '' AND s.site_number NOT GLOB '*[^0-9]*'
+                     AND COALESCE(NULLIF(cs.site_number, ''), cs.code) NOT GLOB '*[^0-9]*'
+                     AND CAST(s.site_number AS INTEGER) = CAST(COALESCE(NULLIF(cs.site_number, ''), cs.code) AS INTEGER)))
             WHERE cs.tenant_id = ? AND cs.scheme = ?`
         ).bind(tid, scheme).all()
       : await env.DB.prepare(
@@ -508,7 +575,14 @@ export async function handle(request, env, ctx, url, sess) {
     const idx = {};
     const fi = await env.DB.prepare("SELECT code, type, COUNT(*) AS n FROM compliance_files WHERE tenant_id=? AND scheme=? GROUP BY code, type").bind(tid, scheme).all();
     for (const r of fi.results || []) { (idx[r.code] = idx[r.code] || {})[r.type] = r.n; }
-    const stores = (results || []).map(r => {
+    // One row per store: the numeric-tolerant join above can match twice if a
+    // duplicate padded/unpadded site pair ever exists — keep the resolved one.
+    const byCode = new Map();
+    for (const r of results || []) {
+      const prev = byCode.get(r.code);
+      if (!prev || (!prev.sname && r.sname)) byCode.set(r.code, r);
+    }
+    const stores = [...byCode.values()].map(r => {
       let due = {}; if (r.due) { try { due = JSON.parse(r.due) || {}; } catch {} }
       let meta = {}; if (r.meta) { try { meta = JSON.parse(r.meta) || {}; } catch {} }
       return {
@@ -551,7 +625,7 @@ export async function handle(request, env, ctx, url, sess) {
       // matched by name — a separate workflow owns creating those sites, so we
       // never invent a duplicate here; unmatched stores link once their site lands.
       let siteNo = null;
-      if (scheme === "coop") siteNo = code;
+      if (scheme === "coop") siteNo = await coopSiteNumber(env, tid, code);
       else {
         const match = await env.DB.prepare(
           "SELECT site_number FROM sites WHERE tenant_id=? AND LOWER(TRIM(site_name))=LOWER(TRIM(?)) ORDER BY site_number LIMIT 1"
@@ -644,12 +718,28 @@ export async function handle(request, env, ctx, url, sess) {
     // store's code IS its site number, but other schemes (Fareham) use their own
     // 0001-style codes, so the link must be given. Falls back to the coop rule.
     const explicitSite = (b.siteNumber != null ? String(b.siteNumber) : (b.site_number != null ? String(b.site_number) : "")).trim();
-    const siteNo = explicitSite || (scheme === "coop" ? code : null);
+    const siteNo = explicitSite || (scheme === "coop" ? await coopSiteNumber(env, tid, code) : null);
     await env.DB.prepare(
       `INSERT INTO compliance_stores (tenant_id, scheme, code, category, name, postcode, due, active, site_number, updated_at)
        VALUES (?,?,?,?,?,?,?,1,?,?)
        ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(excluded.site_number, compliance_stores.site_number), updated_at=excluded.updated_at`
     ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), siteNo, at).run();
+    // Cascade name / postcode edits to the linked portal site so an admin who
+    // edits the store here doesn't have to also edit sites.html. Best-effort;
+    // only touches columns supplied. NOP when the store isn't linked yet.
+    if (siteNo && (b.name != null || b.postcode != null)) {
+      try {
+        const s = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+        if (s) {
+          let d = {}; try { d = JSON.parse(s.data || "{}"); } catch {}
+          if (b.name != null) d.siteName = String(name || d.siteName || "").slice(0, 200);
+          if (b.postcode != null) d.postcode = String(postcode || "").slice(0, 20);
+          await env.DB.prepare(
+            "UPDATE sites SET site_name=?, postcode=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?"
+          ).bind(d.siteName || null, d.postcode || null, JSON.stringify(d), tid, s.client, siteNo).run();
+        }
+      } catch {}
+    }
     return jr({ ok: true, code, due, siteNumber: siteNo }, headers);
   }
 
@@ -671,7 +761,29 @@ export async function handle(request, env, ctx, url, sess) {
     if ("contact" in b) meta.contact = String(b.contact || "").slice(0, 2000) || null;
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2000) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
-    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), (scheme === "coop" ? code : null), at).run();
+    else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), (scheme === "coop" ? await coopSiteNumber(env, tid, code) : null), at).run();
+    // Cascade lat/lng edits to the linked portal site (and hence to SiteLog's
+    // geofence), so a coord pin on the compliance chart moves the map + the
+    // scanner geofence in one action.
+    if ("lat" in b || "lng" in b) {
+      try {
+        const linkRow = await env.DB.prepare("SELECT site_number FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
+        const siteNo = linkRow && linkRow.site_number;
+        if (siteNo) {
+          const s = await env.DB.prepare("SELECT client, site_name, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+          if (s) {
+            let d = {}; try { d = JSON.parse(s.data || "{}"); } catch {}
+            if ("lat" in b) d.lat = meta.lat;
+            if ("lng" in b) { d.lng = meta.lng; d.lon = meta.lng; }
+            await env.DB.prepare("UPDATE sites SET data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?")
+              .bind(JSON.stringify(d), tid, s.client, siteNo).run();
+            // Push the new coord to SiteLog too (upsert, so an existing geofence
+            // gets moved instead of a duplicate). Best-effort.
+            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client }));
+          }
+        }
+      } catch {}
+    }
     return jr({ ok: true, code, meta }, headers);
   }
 

@@ -155,6 +155,8 @@
     });
 
     const rowXml = rows.map((cells, r) => cells ? `<row r="${r + 1}">${cells.join("")}</row>` : "").join("");
+    // Works column width follows the on-screen worksW (230px ≈ 34 Excel chars).
+    const worksXlW = Math.max(12, Math.min(80, Math.round((Number(data.worksW) || 230) * (34 / 230))));
     const lastCol = colName(FIRST_DAY_COL + days - 1);
     const lastRow = FIRST_TASK_ROW + Math.max(1, tasks.length);
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -162,7 +164,7 @@
 <dimension ref="A1:${lastCol}${lastRow}"/>
 <sheetViews><sheetView workbookViewId="0"><pane xSplit="6" ySplit="10" topLeftCell="G11" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>
 <sheetFormatPr defaultRowHeight="15"/>
-<cols><col min="1" max="1" width="34" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/><col min="3" max="4" width="11" customWidth="1"/><col min="5" max="6" width="6" customWidth="1"/><col min="7" max="${6 + days}" width="4" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="${worksXlW}" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/><col min="3" max="4" width="11" customWidth="1"/><col min="5" max="6" width="6" customWidth="1"/><col min="7" max="${6 + days}" width="4" customWidth="1"/></cols>
 <sheetData>${rowXml}</sheetData>
 <sheetProtection password="${pwHash}" sheet="1" objects="1" scenarios="1" formatCells="1" formatColumns="1" formatRows="1" insertColumns="1" insertRows="1" deleteColumns="1" deleteRows="1" sort="1" autoFilter="1"/>
 </worksheet>`;
