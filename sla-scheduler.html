@@ -457,8 +457,9 @@
     </div>
     <div id="autoStatus" style="font-size:13px;color:var(--muted);margin:10px 0;">Building a plan…</div>
     <div id="autoResult"></div>
-    <div id="autoFoot" style="display:none;margin-top:12px;text-align:right;">
-      <button type="button" class="btn btn-primary" id="autoApply">✓ Apply this plan</button>
+    <div id="autoFoot" style="display:none;margin-top:12px;justify-content:space-between;align-items:center;gap:10px;">
+      <span style="font-size:12px;color:var(--muted);">Untick any engineer you don't want to add.</span>
+      <button type="button" class="btn btn-primary" id="autoApply">✓ Add ticked days</button>
     </div>
   </div>
 </div>
@@ -1586,7 +1587,8 @@ function renderAutoPreview(d){
   d.plan.forEach((p, i) => {
     const s = p.summary;
     parts.push(`<details ${i===0?"open":""} style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">
-      <summary style="cursor:pointer;padding:9px 11px;list-style:none;display:flex;align-items:baseline;gap:8px;">
+      <summary style="cursor:pointer;padding:9px 11px;list-style:none;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" class="autoPick" data-user="${escapeAttr(p.username)}" checked onclick="event.stopPropagation()" title="Add this engineer's day to the scheduler" style="width:18px;height:18px;flex:none;">
         <span style="font-weight:700;">${escapeHtml(p.name)}</span>
         <span style="margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;">${s.jobs} jobs · ${optFmtMins(s.dayLengthMins)} · 🚗 ${optFmtMins(s.driveMins)}</span>
       </summary>
@@ -1605,14 +1607,18 @@ function renderAutoPreview(d){
   (d.warnings||[]).forEach(w => parts.push(`<div style="font-size:12px;color:var(--muted);">${escapeHtml(w)}</div>`));
   $("autoStatus").textContent = "";
   $("autoResult").innerHTML = parts.join("");
-  $("autoFoot").style.display = d.placed ? "" : "none";
+  $("autoFoot").style.display = d.placed ? "flex" : "none";
 }
 async function applyAutoPlan(){
   if(!autoPlan || !autoPlan.plan) return;
-  const btn = $("autoApply"); btn.disabled = true; btn.textContent = "Applying…";
+  // Apply only the engineers' days that are ticked (each section has a checkbox).
+  const picked = new Set([...document.querySelectorAll(".autoPick:checked")].map(c => c.getAttribute("data-user")));
+  const plans = autoPlan.plan.filter(p => picked.has(p.username));
+  if(!plans.length){ $("autoStatus").textContent = "Tick at least one engineer's day to add it to the scheduler."; return; }
+  const btn = $("autoApply"); btn.disabled = true; btn.textContent = "Adding…";
   const [Y,Mo,Da] = formatDateInput(autoDate || selectedDate).split("-").map(Number);
   let done = 0, fail = 0;
-  for(const p of autoPlan.plan){
+  for(const p of plans){
     for(const l of p.legs){
       const at = new Date(Y, Mo-1, Da, 0, 0, 0, 0); at.setMinutes(8*60 + Number(l.arrivalOffset||0));
       try{
@@ -1620,11 +1626,13 @@ async function applyAutoPlan(){
         if(res.ok) done++; else fail++;
       }catch(e){ fail++; }
     }
+    // Once applied, drop that engineer's day from the preview + untick it.
+    autoPlan.plan = autoPlan.plan.filter(x => x.username !== p.username);
   }
-  $("autoStatus").textContent = `✓ Scheduled ${done} job${done!==1?"s":""}${fail?`, ${fail} failed`:""}.`;
-  btn.textContent = "Done";
+  $("autoStatus").textContent = `✓ Added ${done} job${done!==1?"s":""} for ${plans.length} engineer${plans.length!==1?"s":""} to the scheduler${fail?`, ${fail} failed`:""}.`;
   await loadJobs(); render();
-  setTimeout(()=>{ $("autoBackdrop").style.display="none"; btn.disabled=false; btn.textContent="✓ Apply this plan"; }, 1200);
+  if(autoPlan.plan.length){ renderAutoPreview(autoPlan); btn.disabled=false; btn.textContent="✓ Add ticked days"; }
+  else { btn.textContent = "Done"; setTimeout(()=>{ $("autoBackdrop").style.display="none"; btn.disabled=false; btn.textContent="✓ Add ticked days"; }, 1200); }
 }
 $("openAutoBtn").addEventListener("click", ()=> runAutoSchedule(null, "Whole team"));
 $("autoClose").addEventListener("click", ()=> $("autoBackdrop").style.display="none");
