@@ -1694,6 +1694,20 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Project ↔ Job Costing deep-link (Aug 2026):** every live/complete portal
+  project is now **seeded into `/costing/summary`** even at £0 — so a brand-new
+  project appears on **job-costing.html** the moment it's created, ready for the
+  admin to set its contract value + valuations. The seeded row goes through
+  `resolveSite`, so once real labour/PO activity lands, it merges into the same
+  row (no duplicate). Returned rows carry a `project:{id,number}` field when the
+  site IS a portal project; job-costing shows a **📁 PROJECT Pxxxx chip** on
+  those cards. The project-hub.html "💷 Job costing" card + the To-Do row's
+  "View valuations" button + the "Manage valuations →" link all target
+  **`/job-costing.html?project=<id>&site=<name>&back=hub`**; job-costing.html
+  reads those params, defaults to **All time** so a new project is always
+  visible, auto-expands + scrolls to that site card, and rewrites its **‹ Back**
+  to `/project-hub.html?id=<id>`. The site is matched by `project.id` first (so a
+  renamed project still resolves), else by key/name.
 - **Per-project visibility (Aug 2026):** `data.visibleTo` = array of usernames.
   Empty/missing = visible to **everyone with the Projects permission** (default).
   Non-empty = only those usernames see it in **projects-live.html** / can open

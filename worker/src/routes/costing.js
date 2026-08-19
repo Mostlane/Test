@@ -402,6 +402,7 @@ export async function handle(request, env, ctx, url, sess) {
     const projFin = await cfgGet(env, tid, "proj_fin", {});   // per-site contract value + valuations
 
     const bySite = {};   // norm -> aggregate
+    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
       return bySite[key] || (bySite[key] = {
@@ -432,6 +433,26 @@ export async function handle(request, env, ctx, url, sess) {
     // cost across their actual visit dates (from /admin) for the labour line.
     const slRate = {};
 
+    // ── Seed every live/complete PROJECT so it appears here even at £0 ───────
+    // Without this a brand-new project (no labour, no PO) can't be found on the
+    // costing page for the admin to set its contract value / valuations.
+    // Archived projects are skipped so retired work doesn't clutter the list.
+    // Matching goes through resolveSite, so once real activity lands (labour /
+    // PO), it merges into this same row rather than creating a duplicate.
+    const seededProjects = {};   // sKey -> { id, number }
+    try {
+      const { results: projRows } = await env.DB.prepare(
+        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
+      ).bind(tid).all();
+      for (const p of projRows || []) {
+        const name = String(p.name || "").trim(); if (!name) continue;
+        const resolved = resolveSite(reg, name);
+        const s = siteFor(name, resolved);
+        const sKey = siteKeyOf(resolved, name);
+        seededProjects[sKey] = { id: p.id, number: p.number };
+      }
+    } catch {}
+
     // ── SiteLog labour (authoritative per site+person) ───────────────────────
     // Pull SiteLog's own job costing and fold it in FIRST, so we know which
     // (site, person) pairs SiteLog covers and can drop the matching SLA time
@@ -441,7 +462,6 @@ export async function handle(request, env, ctx, url, sess) {
     // SiteLog is unreachable, slSites is null and costing is SLA-only as before.
     const slSites = await fetchSitelogCosting(env, from, to);
     const slCovered = new Set();   // `${siteKey}::${normName(person)}` handled by SiteLog
-    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
     if (slSites) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
@@ -559,6 +579,7 @@ export async function handle(request, env, ctx, url, sess) {
       return {
         ...s,
         key,   // stable per-site id the front-end pins/hides/orders against
+        project: seededProjects[key] || null,   // { id, number } when this site IS a portal project
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,

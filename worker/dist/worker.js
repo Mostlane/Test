@@ -16708,6 +16708,7 @@ async function handle24(request, env, ctx, url, sess) {
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
     const projFin = await cfgGet(env, tid, "proj_fin", {});
     const bySite = {};
+    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
       return bySite[key] || (bySite[key] = {
@@ -16743,9 +16744,23 @@ async function handle24(request, env, ctx, url, sess) {
       map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
     };
     const slRate = {};
+    const seededProjects = {};
+    try {
+      const { results: projRows } = await env.DB.prepare(
+        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
+      ).bind(tid).all();
+      for (const p of projRows || []) {
+        const name = String(p.name || "").trim();
+        if (!name) continue;
+        const resolved = resolveSite(reg, name);
+        const s = siteFor(name, resolved);
+        const sKey = siteKeyOf2(resolved, name);
+        seededProjects[sKey] = { id: p.id, number: p.number };
+      }
+    } catch {
+    }
     const slSites = await fetchSitelogCosting(env, from, to);
     const slCovered = /* @__PURE__ */ new Set();
-    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     if (slSites) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
@@ -16855,6 +16870,8 @@ async function handle24(request, env, ctx, url, sess) {
         ...s,
         key,
         // stable per-site id the front-end pins/hides/orders against
+        project: seededProjects[key] || null,
+        // { id, number } when this site IS a portal project
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost,
         poTotal,

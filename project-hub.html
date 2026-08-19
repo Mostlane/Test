@@ -143,7 +143,8 @@
       if (key === "rams") return CAN ? `<button class="btn small" data-build="rams">${BUILD.rams.build}</button>` : "";
       if (key === "cpp") return CAN
         ? `<button class="btn small" data-build="cpp">${L.cppRef ? BUILD.cpp.open : BUILD.cpp.build}</button>` : "";
-      if (key === "valuations") return `<a class="btn small ghost" href="/job-costing.html">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : "");
+      if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
+        return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
       if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="document.getElementById('docsCardEl').scrollIntoView({behavior:'smooth'});return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
       return "";
     }
@@ -375,9 +376,10 @@
       catch { return; }
       if (!d || !d.ok) return;   // no costing permission — silently omit
       const key = P.costingKey;
-      const s = (d.sites || []).find(x => x.key === key) || (d.sites || []).find(x => (x.site || "").toLowerCase() === (P.name || "").toLowerCase());
+      const s = (d.sites || []).find(x => x.project && x.project.id === PID) || (d.sites || []).find(x => x.key === key) || (d.sites || []).find(x => (x.site || "").toLowerCase() === (P.name || "").toLowerCase());
       const fin = s && s.fin;
       const labour = s ? s.laborCost : 0, po = s ? s.poTotal : 0, grand = s ? s.grandTotal : 0;
+      const costingHref = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
       let finHtml = "";
       if (fin) {
         finHtml = `<h2 style="margin-top:14px;">📈 Valuations</h2>
@@ -388,11 +390,14 @@
             <div class="stat"><div class="n">${money(fin.retentionHeld)}</div><div class="l">Retention held</div></div>
           </div>
           ${fin.suggestedNext ? `<p class="muted" style="font-size:12.5px;margin-top:6px;">💡 Suggested next valuation: <b>${money(fin.suggestedNext)}</b></p>` : ""}
-          <p style="margin-top:6px;"><a class="btn ghost small" href="/job-costing.html">Manage valuations →</a></p>`;
+          <p style="margin-top:6px;"><a class="btn ghost small" href="${costingHref}">Manage valuations →</a></p>`;
       } else if (P.required && P.required.valuations) {
         finHtml = `<p class="muted" style="margin-top:10px;">No contract value set yet — use “Set contract value” in the to-do above to start tracking valuations.</p>`;
       }
-      card.innerHTML = `<div class="card"><h2>💷 Job costing</h2>
+      card.innerHTML = `<div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span>💷 Job costing</span>
+          <a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing to enter costs / valuations">Open in Job Costing →</a>
+        </h2>
         <div class="money">
           <div class="stat"><div class="n">${money(grand)}</div><div class="l">Total cost</div></div>
           <div class="stat"><div class="n">${money(labour)}</div><div class="l">Labour</div></div>
