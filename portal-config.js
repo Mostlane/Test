@@ -459,13 +459,18 @@
       // (the one page that sets html,body{height:100%}). Chromium doesn't
       // reproduce that, so this is belt-and-braces: where html is already
       // full-height it changes nothing.
-      "html{ box-sizing:border-box; min-height:100vh; padding-top:env(safe-area-inset-top, 0px); }"
+      // `--ml-topbar` is extra room for anything else pinned across the top —
+      // currently the van-score banner. It's fixed, so without reserving space
+      // it simply covered the first row of the page (Jamie saw the Van Check /
+      // Holiday tiles sliced in half). Whatever sets it must clear it again.
+      "html{ box-sizing:border-box; min-height:100vh;"
+      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)); }"
       // `vh` is measured against the FULL screen and ignores the padding above,
       // so a page with `body{min-height:100vh}` (route.html and friends) ends up
       // exactly one inset too tall — the blank strip again. Re-base it. Pages
       // with no min-height simply gain a full-height body, which is harmless
       // and makes short pages fill the screen rather than half-paint it.
-      + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px)); }"
+      + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px) - var(--ml-topbar, 0px)); }"
       + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px);"
       + "  padding-right:env(safe-area-inset-right, 0px); } }"
       + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
@@ -1783,10 +1788,24 @@
             '<span id="mlVanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>';
           a.addEventListener("click", function () { markSeen(); });
           document.body.appendChild(a);
+          // Reserve the space it occupies, or it just covers the top of the
+          // page. Measured rather than assumed — the text wraps to two lines on
+          // a narrow screen. Re-measured on resize/rotate.
+          function reserve() {
+            var h = Math.round(a.getBoundingClientRect().height);
+            document.documentElement.style.setProperty("--ml-topbar", h + "px");
+          }
+          function release() {
+            document.documentElement.style.removeProperty("--ml-topbar");
+            removeEventListener("resize", reserve);
+          }
+          reserve();
+          addEventListener("resize", reserve);
           var x = document.getElementById("mlVanScoreX");
           if (x) x.addEventListener("click", function (ev) {
             ev.preventDefault(); ev.stopPropagation();
             markSeen();
+            release();
             a.remove();
           });
         }).catch(function () {});
