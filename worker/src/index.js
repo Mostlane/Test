@@ -49,6 +49,7 @@ import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR s
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
+import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -112,6 +113,7 @@ const ROUTES = [
   ["*", "/prog",       programmes.handle], // job programmes (builder, revisions, client share links)
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
+  ["*", "/health/",    health.handle],     // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -186,6 +188,7 @@ export default {
     // Keep a copy of the body for the audit trail (the handler consumes the original).
     const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
 
+    const reqT0 = Date.now();
     try {
       // Handlers receive the verified session (with its tenantId) as the 5th
       // argument. For public routes sess is null and the handler resolves the
@@ -196,10 +199,25 @@ export default {
       // trail uses it verbatim instead of the raw request body fields.
       const auditNote = (resp && resp.headers && resp.headers.get("X-Audit-Note")) || "";
       auditAction(env, ctx, sess, request, url, resp.status, auditClone, auditNote);
+      // Watchdog: a response the handler completed but which was SLOW is worth
+      // knowing about (efficiency). The health endpoints are excluded so the
+      // dashboard's own polling can't pollute the "slowest endpoints" list.
+      const dur = Date.now() - reqT0;
+      if (dur > health.SLOW_MS && !url.pathname.startsWith("/health/")) {
+        ctx.waitUntil(health.recordEvent(env, sess ? sess.tenantId : 1, {
+          kind: "slow", endpoint: request.method + " " + url.pathname, message: "slow response", status: resp.status, ms: dur,
+        }).catch(() => {}));
+      }
       return resp;
     } catch (err) {
       console.error("Handler error:", err);
       auditAction(env, ctx, sess, request, url, 500, auditClone, "");
+      // Watchdog: capture every 500 a real user hits — the primary "a bug is
+      // live right now" signal (surfaced + alerted on health.html).
+      ctx.waitUntil(health.recordEvent(env, sess ? sess.tenantId : 1, {
+        kind: "error", endpoint: request.method + " " + url.pathname,
+        message: String(err && err.message || err), status: 500, ms: Date.now() - reqT0,
+      }).catch(() => {}));
       return error("Server error: " + err.message, 500, env, request);
     }
   },
@@ -215,6 +233,10 @@ export default {
     // job releases + the 5pm-day-before nudge push within ~5 min; the heavier
     // hourly work is gated to the top of the hour to keep its old cadence.
     ctx.waitUntil(sla.sweepJobReleases(env, 1).catch(e => console.error("scheduled job-release sweep:", e)));
+    // Watchdog probes run EVERY tick (every 5 min) — cheap D1/R2 liveness touches
+    // that keep health.html fresh and push the owner (deduped) the moment a probe
+    // fails or server errors spike. Fails soft; never blocks the other cron work.
+    ctx.waitUntil(health.runHealthChecks(env, 1).catch(e => console.error("scheduled health probe:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
     if (new Date().getUTCMinutes() % 10 < 5) {
