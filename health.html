@@ -126,11 +126,19 @@ function render(d){
     ? `<div class="ic">✅</div><div><div class="big">All systems healthy</div><div class="sub">Last probe ${lr?ago(lr.at):"—"}${t.errors24h?` · ${t.errors24h} server error${t.errors24h==1?"":"s"} in the last 24h`:""}</div></div>`
     : `<div class="ic">⛔</div><div><div class="big">${nfail} check${nfail==1?"":"s"} failing</div><div class="sub">${esc((lr.checks||[]).filter(c=>!c.ok).map(c=>c.desc).join(", "))}</div></div>`;
 
+  const ig = d.integrity;
+  // Total checks = live probes + integrity rules; passing = both green.
+  const probeTotal = lr ? (lr.checks||[]).length : 0;
+  const probePass = lr ? (lr.checks||[]).filter(c=>c.ok).length : 0;
+  const totalChecks = probeTotal + (ig?ig.total:0);
+  const totalPass = probePass + (ig?ig.passed:0);
+  const igFail = ig ? ig.failed : 0;
+
   // KPI row
   $("kpis").innerHTML = [
-    kpi(nfail ? nfail : (lr?(lr.checks||[]).length:"—"), nfail ? "Checks failing" : "Checks passing", nfail?"bad":""),
+    kpi(totalChecks ? (totalPass + "/" + totalChecks) : "—", "Checks passing", (nfail||igFail)?"warn":""),
+    kpi(igFail, "Integrity issues", igFail?"bad":""),
     kpi(t.errors24h||0, "Errors (24h)", (t.errors24h?"bad":"")),
-    kpi(t.errors7d||0, "Errors (7 days)", (t.errors7d?"warn":"")),
     kpi(t.slow24h||0, "Slow responses (24h)", (t.slow24h?"warn":"")),
   ].join("");
 
@@ -145,6 +153,24 @@ function render(d){
         <span class="ms">${fmtMs(c.ms)}</span>
       </div>`).join("")
     }</div>`);
+  }
+
+  // Data integrity — areas joining up
+  if(ig && ig.checks){
+    const byArea = {};
+    for(const c of ig.checks){ (byArea[c.area] ||= []).push(c); }
+    const areas = Object.keys(byArea).sort();
+    const sub = ig.failed ? `${ig.failed} issue${ig.failed==1?"":"s"} found` : "all joined up ✓";
+    cards.push(`<div class="card full"><h2>Data integrity — areas joining up (${sub}${ig.na?` · ${ig.na} n/a`:""})</h2>${
+      areas.map(area => `<div style="margin-bottom:10px;">
+        <div class="de" style="font-weight:600;color:var(--ink);margin:4px 0;">${esc(area)}</div>
+        ${byArea[area].map(c => `<div class="probe">
+          <span class="dot ${c.ok===false?"bad":(c.ok===null?"slow":"ok")}"></span>
+          <span><span class="nm" style="font-weight:400;">${esc(c.label)}</span>${c.error?` <span class="de">(couldn't run)</span>`:""}</span>
+          <span class="ms">${c.ok===false?`<b style="color:var(--bad)">${c.n} to fix</b>`:(c.ok===null?"n/a":"✓")}</span>
+        </div>`).join("")}
+      </div>`).join("")
+    }<div class="de" style="margin-top:6px;">Each check scans every row in that area. Runs hourly.</div></div>`);
   }
 
   // Top errors
