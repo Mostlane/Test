@@ -452,7 +452,14 @@
       // page down, and because percentage heights resolve against the parent's
       // CONTENT box, a `body{height:100%}` shrinks to fit exactly. Nothing
       // overflows and no page's own padding is touched.
-      "html{ box-sizing:border-box; padding-top:env(safe-area-inset-top, 0px); }"
+      // min-height:100vh pins <html> to the FULL screen. With viewport-fit=cover
+      // iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA
+      // box rather than the screen, which leaves the page ending short and a
+      // band of canvas below it — the bottom bar Jamie kept seeing on main.html
+      // (the one page that sets html,body{height:100%}). Chromium doesn't
+      // reproduce that, so this is belt-and-braces: where html is already
+      // full-height it changes nothing.
+      "html{ box-sizing:border-box; min-height:100vh; padding-top:env(safe-area-inset-top, 0px); }"
       // `vh` is measured against the FULL screen and ignores the padding above,
       // so a page with `body{min-height:100vh}` (route.html and friends) ends up
       // exactly one inset too tall — the blank strip again. Re-base it. Pages
