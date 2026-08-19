@@ -1395,6 +1395,23 @@ customer like Co-op/Fareham — NOT a silo:
   (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
   a framework to populate going forward). Page **chapplins-compliance.html** = a clone
   of fareham.html on scheme=chapplins.
+  **📍 Fill missing pins (Aug 2026):** all 95 Chapplins sites carried a postcode
+  but NONE had a location pin, and 95 by hand is not realistic. A
+  **"📍 Fill missing pins"** button in the utility bar (Compliance|FullAccess)
+  looks up every store with NO pin via postcodes.io **in the browser** (the same
+  lookup the scheduler and sites register use — the worker can't be the one to
+  call it) and saves each through the normal **POST /compliance/store-meta**, so
+  the linked portal site's lat/lng and its SiteLog geofence move with it exactly
+  as if the pin had been dropped by hand. A pin already set is never touched
+  (w3w/access/contact survive — the route merges); a postcode centroid is a
+  starting point, so rows stay draggable. The outcome goes in a **modal**, not an
+  `alert()` — portal-wide `alert` is an MLUI toast and can't carry the list of
+  what was skipped (postcode not recognised / no postcode at all). NB 4073
+  "Communal Area, 22 London Street, Andover" had no postcode; set to SP10 2PE
+  from the two sibling flats at the same address. 4074 (The Crawford Apartments,
+  Percy Road, Exeter) still has none. The button is Chapplins-only for now:
+  Fareham's 24 stores have no postcodes to look up (2 exceptions) and the Co-op
+  chart (eicr-portal.html) has no 📍 column at all.
 - **Nav**: 🏠 Chapplins tile on main.html (MAP `Chapplins:["Compliance","SLAAdmin"]`),
   sidebar entry in portal-config, a card on compliance.html → chapplins-compliance.html.
   Hub page **chapplins.html** = the directory (search, per-site current tenant +

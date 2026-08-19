@@ -237,6 +237,7 @@
       <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
       <button class="bubble" id="summaryBtn">％ Summary</button>
       <button class="bubble" id="clearBtn">✕ Clear filters</button>
+      <button class="bubble" id="fillPinsBtn" style="display:none;" title="Look up every site with no pin by its postcode">📍 Fill missing pins</button>
       <button class="bubble" id="settingsBtn" style="display:none;">⚙ Settings</button>
     </div>
 
@@ -1707,6 +1708,109 @@ function openLocationModal(code){
   };
 }
 
+/* ============ 📍 Fill missing pins from the postcode ============ */
+/* Every site here carries a postcode but hardly any had a pin, and dropping
+   ninety-odd by hand is not realistic. This looks up the ones with NO pin via
+   postcodes.io — the same lookup the scheduler and the sites register use — and
+   saves each through the normal /compliance/store-meta route, so the linked
+   portal site and its SiteLog geofence move with it exactly as if the pin had
+   been placed by hand. A pin that is already set is never touched; a postcode
+   centroid is a starting point, so drag any of them afterwards to refine. */
+function normPc(v){ return String(v||'').replace(/\*+$/,'').toUpperCase().replace(/\s+/g,' ').trim(); }
+function needsPin(r){ const m = r.meta || {}; return m.lat == null || m.lng == null; }
+/* window.alert is a portal-wide toast, which can't carry a list — so the
+   outcome (and anything skipped) goes in a normal modal you can read. */
+function pinReport(title, html){
+  const modal=document.createElement('div'); modal.className='modal'; modal.style.display='block';
+  modal.innerHTML=`<div class="modal-content" style="max-width:560px">
+    <h2>${esc(title)}</h2>${html}
+    <div class="actions"><button class="btn" id="pr_close">Close</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#pr_close').onclick=()=>modal.remove();
+}
+function pinList(rows, extra){
+  return '<ul style="margin:6px 0 0 18px;padding:0;font-size:13px;color:#334155">'
+    + rows.slice(0,12).map(r=>`<li>${esc(r.siteName||r.storeCode)}${extra?' — '+esc(extra(r)):''}</li>`).join('')
+    + (rows.length>12?`<li>…and ${rows.length-12} more</li>`:'') + '</ul>';
+}
+
+async function fillMissingPins(){
+  const btn = document.getElementById('fillPinsBtn');
+  const todo  = allData.filter(r => needsPin(r) && normPc(r.postcode));
+  const noPc  = allData.filter(r => needsPin(r) && !normPc(r.postcode));
+  if(!todo.length){
+    pinReport('📍 Nothing to look up', noPc.length
+      ? `<p>Every site with a postcode already has a pin.</p><p><b>${noPc.length} site(s) have no postcode yet</b> — add one and run this again:</p>${pinList(noPc)}`
+      : '<p>Every site already has a location pin.</p>');
+    return;
+  }
+  const msg = `Look up ${todo.length} site(s) by postcode and drop a pin on each?\n\n`
+    + 'Pins already set are left alone. A postcode puts the pin on the street rather than the exact door, so drag any of them afterwards to fine-tune.';
+  const ok = window.MLUI ? await MLUI.confirm(msg, { title:'📍 Fill missing pins', okLabel:'Look them up' }) : confirm(msg);
+  if(!ok) return;
+
+  const label = btn ? btn.textContent : '';
+  const say = t => { if(btn) btn.textContent = t; };
+  if(btn) btn.disabled = true;
+
+  // 1. One bulk lookup per 100 postcodes (postcodes.io's limit).
+  say('📍 Looking up postcodes…');
+  const wanted = [...new Set(todo.map(r => normPc(r.postcode)))];
+  const found = {};
+  const badPc = [];
+  for(let i = 0; i < wanted.length; i += 100){
+    const batch = wanted.slice(i, i + 100);
+    try{
+      const res = await fetch('https://api.postcodes.io/postcodes', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ postcodes: batch })
+      });
+      const data = await res.json();
+      (data.result || []).forEach(r => {
+        const q = normPc(r.query);
+        if(r.result && isFinite(r.result.latitude)) found[q] = [r.result.latitude, r.result.longitude];
+        else badPc.push(q);
+      });
+    }catch(e){
+      if(btn){ btn.disabled = false; btn.textContent = label; }
+      pinReport('📍 Lookup unavailable', '<p>Could not reach the postcode lookup. Check your connection and try again.</p>');
+      return;
+    }
+  }
+
+  // 2. Save each pin through the normal route, a few at a time.
+  const queue = todo.filter(r => found[normPc(r.postcode)]);
+  let done = 0, failed = 0;
+  async function lane(){
+    while(queue.length){
+      const rec = queue.shift();
+      const [lat, lng] = found[normPc(rec.postcode)];
+      try{
+        const r = await authFetch('/compliance/store-meta', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ code: rec.storeCode, lat, lng })
+        });
+        const j = await r.json();
+        if(r.ok && j.ok){ rec.meta = j.meta; done++; } else failed++;
+      }catch(e){ failed++; }
+      say(`📍 ${done + failed}/${todo.length}…`);
+    }
+  }
+  await Promise.all([lane(), lane(), lane(), lane()]);
+
+  if(btn){ btn.disabled = false; btn.textContent = label; }
+  applyFilters();
+
+  // Say plainly what did NOT get a pin, so a missing one is never a mystery.
+  const unresolved = todo.filter(r => !found[normPc(r.postcode)]);
+  let out = `<p><b>${done} pin(s) set.</b> Open 📍 on any row to drag it to the exact door.</p>`;
+  if(failed) out += `<p style="color:#b45309">${failed} could not be saved — run it again.</p>`;
+  if(unresolved.length) out += `<p><b>${unresolved.length} postcode(s) not recognised</b> — check the postcode on these:</p>`
+    + pinList(unresolved, r => normPc(r.postcode));
+  if(noPc.length) out += `<p><b>${noPc.length} site(s) have no postcode at all:</b></p>` + pinList(noPc);
+  pinReport('📍 Pins updated', out);
+}
+
 /* Load a site's tenant contacts (current + previous) into an element. Chapplins
    compliance code == the portal site number, so /chapplins/site resolves it. */
 async function loadTenantInto(el, code){
@@ -1798,6 +1902,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('reloadBtn').onclick = loadFromPortal;
   const settingsBtn = document.getElementById('settingsBtn');
   if (canEditCompliance()) { settingsBtn.style.display = ''; settingsBtn.onclick = openSettingsModal; }
+  const fillPinsBtn = document.getElementById('fillPinsBtn');
+  if (fillPinsBtn && canEditCompliance()) { fillPinsBtn.style.display = ''; fillPinsBtn.onclick = fillMissingPins; }
   document.getElementById('overdueBtn').onclick = ()=> {
     document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
     document.getElementById('overdueBtn').classList.add('active');
