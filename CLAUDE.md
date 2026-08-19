@@ -83,11 +83,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   localStorage mostlaneToken/mostlaneLoggedIn/mostlaneExpiry/mostlaneBypassUntil
   + sessionStorage mostlaneLoggedIn/mostlaneUsername/mostlaneMasterLogin.
 
-## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=15`)
+## portal-config.js (every page includes it FIRST — as `/portal-config.js?v=16`)
 All 123 pages reference `?v=13` (cache-bust; ?v=6 forced the `.ml-back` styling,
-?v=7–9 the animated wait mark, ?v=13/14/15 the status-bar cap — 13 had to clear a
+?v=7–9 the animated wait mark, ?v=13–16 the status-bar cap — 13 had to clear a
 concurrent session's ?v=12 or phones would have kept the pre-cap file). If a
-portal-config change must reach them again, bump to ?v=16 across all pages
+portal-config change must reach them again, bump to ?v=17 across all pages
 with sed — and check the
 count afterwards (`grep -aho 'portal-config\.js?v=[0-9]*' *.html | sort | uniq -c`
 should show ONE version; cctv.html had been left behind on ?v=2 for weeks, so it
@@ -2585,7 +2585,13 @@ files to this public repo.
   **body the scroll container**, and padding a scroll box left a band of
   background at the end of the scroll range — the "blank section bar" Jamie
   reported. The working form is CSS on html:
-  `html{box-sizing:border-box; padding-top:env(safe-area-inset-top,0px)}`.
+  `html{box-sizing:border-box; min-height:100vh; padding-top:env(safe-area-inset-top,0px)}`.
+  The **`min-height:100vh` pins html to the FULL screen**: with viewport-fit=cover
+  iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA box
+  instead of the screen, leaving the page short and a band of canvas below it —
+  main.html (the only page setting `html,body{height:100%}`) kept showing that
+  bottom bar after every other page was right. Chromium does not reproduce it,
+  so that line is belt-and-braces; where html is already full-height it is a no-op.
   Percentage heights resolve against the parent's CONTENT box, so a
   `body{height:100%}` shrinks to fit exactly and nothing overflows.
   **`vh` does NOT** — it measures the full screen and ignores that padding, so
