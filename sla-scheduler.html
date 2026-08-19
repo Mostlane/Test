@@ -1544,7 +1544,7 @@ async function runAutoSchedule(usernames, titleWho, dateObj){
   const homeNote = autoFromHQ ? ` · ${autoFromHQ} routed from HQ (no home set)` : "";
   $("autoStatus").textContent = `Building a plan for ${engs.length} engineer${engs.length>1?"s":""} from ${pool.length} unscheduled job${pool.length>1?"s":""}…${homeNote}`;
   const payload = {
-    date: formatDateInput(date), dayStart: "08:00", dayMinutes: 480, lunchMinutes: 30,
+    date: formatDateInput(date), dayStart: "08:00", dayMinutes: 540, lunchMinutes: 30,
     engineers: engs,
     jobs: pool.map(j => { const c = coordsFor(j); return { id:j.id, ref:j.ref, site:j.site, priority:j.priority, durationMinutes:j.durationMinutes, workArea:j.workArea, lat:c?c[0]:undefined, lng:c?c[1]:undefined, postcode:j.postcode }; })
   };
@@ -1558,17 +1558,25 @@ function autoOffToClock(off){ const base = 8*60 + Number(off||0); return String(
 function renderAutoPreview(d){
   const parts = [];
   parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs${d.matrixSource!=="google"?' <span style="color:var(--muted)">(estimated drive times)</span>':''}.</div>`);
+  if(d.durModel){
+    const dm = d.durModel;
+    parts.push(`<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">⏱ Job lengths estimated from ${dm.sampleCount} past job${dm.sampleCount===1?"":"s"} — typical ${optFmtMins(dm.typical)}${d.estimatedCount?` · ${d.estimatedCount} job${d.estimatedCount===1?"":"s"} used an estimate (tap a job to set its real length)`:""}.</div>`);
+    if(d.overruns && d.overruns.length){
+      const eg = d.overruns.slice(0,3).map(o=>`${escapeHtml(o.ref)} ${optFmtMins(o.allocated)}→${optFmtMins(o.actual)}`).join(", ");
+      parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">📈 ${d.overruns.length} recent job${d.overruns.length===1?"":"s"} ran well over the time allowed — e.g. ${eg}. Estimates learn from these automatically.</div>`);
+    }
+  }
   if(autoFromHQ){
     parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">ℹ ${autoFromHQ} engineer${autoFromHQ>1?"s were":" was"} routed from HQ (${HQ_POSTCODE}) — no home postcode saved. Set each engineer's home in Users Admin for accurate start/finish times.</div>`);
   }
   d.plan.forEach(p => {
     const s = p.summary;
     parts.push(`<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;margin-bottom:8px;">
-      <div style="font-weight:700;">${escapeHtml(p.name)} <span style="font-weight:400;color:var(--muted);font-size:12px;">— ${s.jobs} jobs · ${Math.round(s.dayLengthMins/6)/10}h · ${s.driveMins} min drive</span></div>
+      <div style="font-weight:700;">${escapeHtml(p.name)} <span style="font-weight:400;color:var(--muted);font-size:12px;">— ${s.jobs} jobs · ${optFmtMins(s.dayLengthMins)} door-to-door · ${optFmtMins(s.driveMins)} driving</span></div>
       ${p.legs.map(l => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0;align-items:baseline;">
         <span style="width:44px;color:#0a7d33;font-weight:700;flex:none;">${autoOffToClock(l.arrivalOffset)}</span>
-        <span style="flex:1;">${escapeHtml(l.ref||l.site||"Job")}${l.priority?` · ${escapeHtml(l.priority)}`:""}${l.workArea?skillBadge(p.username,l.workArea):""}</span>
-        <span style="color:var(--muted);flex:none;">+${l.driveMins}m</span></div>`).join("")}
+        <span style="flex:1;">${escapeHtml(l.ref||l.site||"Job")}${l.priority?` · ${escapeHtml(l.priority)}`:""}${l.workArea?skillBadge(p.username,l.workArea):""} <span style="color:var(--muted);">· ${optFmtMins(l.durationMin)} on site${l.estimated?" (est)":""}</span></span>
+        <span style="color:var(--muted);flex:none;">+${optFmtMins(l.driveMins)}</span></div>`).join("")}
     </div>`);
   });
   if(d.unassigned && d.unassigned.length){

@@ -7580,13 +7580,19 @@ async function optimiseEngineerRoute(env, tenantId, body) {
 async function autoScheduleDay(env, tenantId, body) {
   const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
   const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
-  const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 480));
+  const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 540));
   const cap = Math.max(120, dayMinutes - lunch);
   const warnings = [];
   const skills = await getEngSkills(env, tenantId);
+  const dur = await estimateJobDurations(env, tenantId);
   const normPrio = (p) => {
     const m = /(\d)/.exec(String(p || ""));
     return m ? Number(m[1]) : 5;
+  };
+  const estimateFor = (p) => {
+    const m = /(\d)/.exec(String(p || ""));
+    const key = m ? "Priority " + m[1] : "";
+    return dur.byPriority && dur.byPriority[key] || dur.typical;
   };
   const engs = [];
   for (const e of Array.isArray(body.engineers) ? body.engineers : []) {
@@ -7623,7 +7629,10 @@ async function autoScheduleDay(env, tenantId, body) {
       warnings.push(`${j.ref || j.site || "A job"} has no map location \u2014 left unscheduled.`);
       continue;
     }
-    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin: Math.max(15, Math.round(Number(j.durationMinutes)) || 60), workArea: String(j.workArea || ""), coord });
+    const explicit = Number(j.durationMinutes);
+    const hasExplicit = Number.isFinite(explicit) && explicit > 0;
+    const durationMin = hasExplicit ? Math.max(15, Math.round(explicit)) : Math.max(15, Math.round(estimateFor(j.priority)));
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), coord });
   }
   if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
@@ -7686,7 +7695,7 @@ async function autoScheduleDay(env, tenantId, body) {
         lunchDone = true;
       }
       const j = jobs[k];
-      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
       site += j.durationMin;
       t = arrival + j.durationMin;
       cur = p;
@@ -7695,7 +7704,86 @@ async function autoScheduleDay(env, tenantId, body) {
     drive += homeMin;
     return { username: e.username, name: e.name, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
-  return { ok: true, dayStart, matrixSource: M3.source, plan, unassigned, warnings, placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length };
+  return {
+    ok: true,
+    dayStart,
+    matrixSource: M3.source,
+    plan,
+    unassigned,
+    warnings,
+    placed: plan.reduce((a, p) => a + p.legs.length, 0),
+    total: jobs.length,
+    durModel: { typical: dur.typical, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
+    estimatedCount: jobs.filter((j) => j.estimated).length,
+    overruns: dur.overruns
+  };
+}
+var _durCache = null;
+var _durCacheAt = 0;
+async function estimateJobDurations(env, tid) {
+  if (_durCache && Date.now() - _durCacheAt < 5 * 6e4) return _durCache;
+  const db = tenantDB(env, tid);
+  let rows = [];
+  try {
+    rows = (await db.prepare("SELECT id, helpdesk_ref, priority, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const norm = (p) => {
+    const m = /(\d)/.exec(String(p || ""));
+    return m ? "Priority " + m[1] : "";
+  };
+  const actuals = [], actualByPrio = {}, setVals = [], setByPrio = {}, overruns = [];
+  const MIN = 5;
+  for (const r of rows) {
+    let d;
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+      continue;
+    }
+    const prio = norm(r.priority || d.priority);
+    const explicit = Number(d.durationMinutes);
+    let actual = null, ip = null;
+    for (const e of Array.isArray(d.statusHistory) ? d.statusHistory : []) {
+      const st = String(e.status || "");
+      if (st === "In Progress") ip = Date.parse(e.at);
+      else if (st === "Complete" && ip) {
+        const mins = Math.round((Date.parse(e.at) - ip) / 6e4);
+        if (mins >= 5 && mins <= 600) actual = mins;
+        ip = null;
+      }
+    }
+    if (Number.isFinite(explicit) && explicit > 0 && explicit <= 600) {
+      setVals.push(explicit);
+      if (prio) (setByPrio[prio] ||= []).push(explicit);
+    }
+    if (actual != null) {
+      actuals.push(actual);
+      if (prio) (actualByPrio[prio] ||= []).push(actual);
+    }
+    if (Number.isFinite(explicit) && explicit > 0 && actual != null && actual > Math.max(explicit * 1.5, explicit + 30))
+      overruns.push({ ref: r.helpdesk_ref || d.helpdeskRef || r.id, allocated: Math.round(explicit), actual });
+  }
+  const median = (a) => {
+    if (!a.length) return null;
+    const s = [...a].sort((x, y) => x - y);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+  };
+  const clamp = (v) => v == null ? null : Math.max(30, Math.min(240, v));
+  const typical = clamp(actuals.length >= MIN ? median(actuals) : median(actuals.concat(setVals))) ?? 90;
+  const byPriority = {};
+  const prios = /* @__PURE__ */ new Set([...Object.keys(actualByPrio), ...Object.keys(setByPrio)]);
+  for (const p of prios) {
+    const a = actualByPrio[p] || [], s = setByPrio[p] || [];
+    const v = clamp(a.length >= MIN ? median(a) : a.concat(s).length >= MIN ? median(a.concat(s)) : null);
+    if (v != null) byPriority[p] = v;
+  }
+  overruns.sort((a, b) => b.actual - b.allocated - (a.actual - a.allocated));
+  _durCache = { typical, byPriority, sampleCount: actuals.length + setVals.length, actualCount: actuals.length, overruns: overruns.slice(0, 10) };
+  _durCacheAt = Date.now();
+  return _durCache;
 }
 var _archiveReady = false;
 async function ensureArchive(env, tenantId) {
