@@ -1694,6 +1694,24 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Project docs surface as "Site Documents" (Aug 2026):** the SLA
+  **`/sla/site/docs`** GET now injects a **"Project Documents"** area whenever
+  the requested siteCode matches a portal project's number
+  (`SELECT id FROM projects WHERE number=? OR site_number=?`). Files come from
+  `project_files` (non-hidden only) with a signed URL pointing at
+  `/project/doc` (CORS-enabled, PUBLIC_ROUTES sig-verified). Effect:
+  **site-folder.html** shows the project's docs as a first tab, and
+  **engineer-job.html** — whose "Site documents" button navigates to
+  site-folder — surfaces them too. A `projectDoc:true` marker on each row makes
+  site-folder show a "· from project" hint and HIDE the Delete button (project
+  docs are managed on the project hub). Also: **project-hub.html's doc opener
+  was fixed** — it was calling `MLDocViewer.open(url, name)` (positional)
+  instead of the object form docviewer expects, so the modal never sniffed the
+  PDF; now passes `{url,fetchUrl,name,downloadUrl}` so PDFs render inline.
+  **"🔄 Sync to PO" button** added to the P&L card header — a one-tap admin
+  backfill (`POST /project/push-po`) for projects created before the auto-push
+  landed (SCF Furniture). The hub also opportunistically re-runs pushSiteToPO
+  on every /project/get, so opening a project once is enough.
 - **Auto-push project site to PO + manual labour/materials + P&L (Aug 2026):**
   Creating a project now **auto-registers its site name in the PO system's
   `sites` table** (env.PO_DB) via `pushSiteToPO()` (add-only, idempotent), so a

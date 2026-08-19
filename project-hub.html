@@ -477,7 +477,10 @@
         <span class="nm">📄 <a href="#" data-open="${esc(f.url)}" data-name="${esc(f.title)}" style="text-decoration:none;">${esc(f.title)}</a>${f.hidden ? ' <span class="muted">(hidden)</span>' : ""}<br><span class="muted" style="font-size:12px;">${esc(f.section || "")} · ${esc(f.uploadedBy || "")}</span></span>
         ${CAN ? `<button class="btn grey small" data-hide="${f.id}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${f.id}" style="background:#b00020;">✕</button>` : ""}
       </div>`).join("");
-      list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault(); if (window.MLDocViewer) MLDocViewer.open(a.dataset.open, a.dataset.name); else window.open(a.dataset.open, "_blank"); });
+      list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault();
+        if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.open, fetchUrl: a.dataset.open, name: a.dataset.name, downloadUrl: a.dataset.open });
+        else window.open(a.dataset.open, "_blank");
+      });
       if (CAN) {
         list.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => { await authFetch("/project/doc-update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.hide, hidden: b.dataset.h !== "1" }) }); loadDocs(); });
         list.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this document?")) return; await authFetch("/project/doc-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.del }) }); loadDocs(); loadProject(); });
@@ -593,9 +596,10 @@
           return `<div class="frow"><span>${esc(r.date)} · ${who}${r.description ? " · <span class='muted' style='font-size:12.5px;'>" + esc(r.description) + "</span>" : ""}</span><span><b>${money(r.amount)}</b> ${CAN ? `<button class="btn small grey" data-costdel="${esc(r.id)}" style="padding:3px 8px;font-size:12px;">✕</button>` : ""}</span></div>`;
         }).join("")}
       </div>` : "";
+      const poBtn = CAN ? `<button class="btn small ghost" id="poSyncBtn" title="Register this project's site in the PO system so a PO can pick it (add-only)">🔄 Sync to PO</button>` : "";
       card.innerHTML = `<div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
           <span>💷 Job costing &amp; P&amp;L</span>
-          <a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing">Open in Job Costing →</a>
+          <span style="display:flex;gap:6px;flex-wrap:wrap;">${poBtn}<a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing">Open in Job Costing →</a></span>
         </h2>
         ${pnlBlock}
         ${breakdown}
@@ -612,6 +616,16 @@
       const labAdd = document.getElementById("labAdd"), matAdd = document.getElementById("matAdd");
       if (labAdd) labAdd.onclick = addLabour;
       if (matAdd) matAdd.onclick = addMaterial;
+      const po = document.getElementById("poSyncBtn");
+      if (po) po.onclick = async () => {
+        po.disabled = true; const oldTxt = po.textContent; po.textContent = "Syncing…";
+        try {
+          const r = await authFetch("/project/push-po", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID }) }).then(r => r.json());
+          if (r.ok) po.textContent = "✓ Synced";
+          else po.textContent = r.poBound === false ? "✗ PO_DB not bound" : "✗ Sync failed";
+        } catch { po.textContent = "✗ Sync failed"; }
+        setTimeout(() => { po.textContent = oldTxt; po.disabled = false; }, 3200);
+      };
       document.querySelectorAll("[data-costdel]").forEach(b => b.onclick = async () => {
         if (!(window.MLUI ? await MLUI.confirm("Delete this entry?", { danger: true }) : confirm("Delete this entry?"))) return;
         await authFetch("/project/cost-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, costId: b.dataset.costdel }) });

@@ -386,13 +386,16 @@ async function renderDocs(area){
   files.forEach(f => {
     const isImg = /\.(png|jpe?g|webp|gif)$/i.test(f.name || "");
     const row = document.createElement("div"); row.className = "docrow";
+    // Project documents (injected for project sites) can't be deleted from here
+    // — they belong to the project hub and must be managed there. Show a badge.
+    const canDel = admin && !f.projectDoc;
     row.innerHTML = `
       <span class="ic">${fileIcon(f.name)}</span>
-      <div class="nm">${esc(f.name)}<div class="meta">${esc(fmt(f.at))}${f.by ? " · " + esc(f.by) : ""}</div></div>
+      <div class="nm">${esc(f.name)}${f.projectDoc ? ' <span class="muted" style="font-size:11px;">· from project</span>' : ""}<div class="meta">${esc(fmt(f.at))}${f.by ? " · " + esc(f.by) : ""}</div></div>
       <button class="btn small" data-open>${isImg ? "View" : "Open"}</button>
-      ${admin ? `<button class="btn small danger" data-del="${esc(f.key)}">Delete</button>` : ""}`;
+      ${canDel ? `<button class="btn small danger" data-del="${esc(f.key)}">Delete</button>` : ""}`;
     row.querySelector("[data-open]").addEventListener("click", () => openDoc(f));
-    if(admin){ row.querySelector("[data-del]").addEventListener("click", () => delDoc(f.key)); }
+    if(canDel){ row.querySelector("[data-del]").addEventListener("click", () => delDoc(f.key)); }
     list.appendChild(row);
   });
   c.appendChild(list);
