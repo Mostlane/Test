@@ -1518,7 +1518,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (!user) return text("Unauthorised", 401);
   const year = getYear(url);
   const isAdmin = ["Admin", "Director"].includes(role);
-  async function cfgGet3(key) {
+  async function cfgGet2(key) {
     const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
     return row ? JSON.parse(row.value) : null;
   }
@@ -1528,16 +1528,16 @@ async function handle5(request, env, ctx, url, sess) {
     ).bind(db.tenantId, key, JSON.stringify(val)).run();
   }
   async function getYearConfig() {
-    return await cfgGet3(`holiday:config:${year}`) || { defaultAllowance: 28 };
+    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
   }
   async function getDefaultAllowance() {
     return Number((await getYearConfig()).defaultAllowance ?? 28);
   }
   async function getBankHolidays() {
-    return await cfgGet3(`holiday:bankholidays:${year}`) || [];
+    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
   }
   async function getShutdownDays() {
-    return await cfgGet3(`holiday:shutdown:${year}`) || [];
+    return await cfgGet2(`holiday:shutdown:${year}`) || [];
   }
   async function getUserAllowance(username) {
     const row = await db.prepare(
@@ -6361,6 +6361,64 @@ async function handle8(request, env, ctx, url, sess) {
         size: o.size
       })))).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     }
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        const proj = await env.DB.prepare(
+          "SELECT id FROM projects WHERE tenant_id=? AND (number=? OR site_number=?) LIMIT 1"
+        ).bind(tenantId, raw, raw).first();
+        if (proj) {
+          const { results: pfs } = await env.DB.prepare(
+            "SELECT id, r2_key, title, name, uploaded_at, uploaded_by FROM project_files WHERE tenant_id=? AND project_id=? AND (hidden=0 OR hidden IS NULL) ORDER BY uploaded_at DESC"
+          ).bind(tenantId, proj.id).all();
+          if ((pfs || []).length) {
+            const AREA = "Project Documents";
+            if (!areas.includes(AREA)) areas.unshift(AREA);
+            docs[AREA] = await Promise.all(pfs.map(async (f) => ({
+              url: await signedFileUrl(env, url.origin, "/project/doc", f.r2_key, 86400),
+              key: f.r2_key,
+              name: f.title || f.name || f.r2_key.split("/").pop(),
+              at: f.uploaded_at,
+              by: f.uploaded_by,
+              size: 0,
+              projectDoc: true
+              // marker: engineers/office see it but can't delete via /site/doc-delete
+            })));
+          }
+        }
+      }
+    } catch {
+    }
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        const { results: files } = await env.DB.prepare(
+          `SELECT f.id, f.scheme, f.code, f.type, f.year, f.filename, f.label, f.r2_key, f.uploaded_at, f.uploaded_by
+             FROM compliance_files f
+             LEFT JOIN compliance_stores s
+                    ON s.tenant_id = f.tenant_id AND s.scheme = f.scheme AND s.code = f.code
+            WHERE f.tenant_id = ?
+              AND (s.site_number = ? OR f.code = ?)
+            ORDER BY f.uploaded_at DESC`
+        ).bind(tenantId, raw, raw).all();
+        if ((files || []).length) {
+          const AREA = "Compliance Certificates";
+          if (!areas.includes(AREA)) areas.unshift(AREA);
+          const TYPE_LBL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly", emYearly: "EM Yearly", pv: "PV", ev: "EV", forecourt: "EV", pump: "Pump", other: "Other" };
+          docs[AREA] = await Promise.all(files.map(async (f) => ({
+            url: await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 86400),
+            key: f.r2_key,
+            name: (f.label || f.filename || f.r2_key.split("/").pop()) + " \xB7 " + (TYPE_LBL[f.type] || f.type || "compliance"),
+            at: f.uploaded_at,
+            by: f.uploaded_by,
+            size: 0,
+            complianceDoc: true
+            // marker: managed on the compliance chart
+          })));
+        }
+      }
+    } catch {
+    }
     return jsonResponse({ areas, docs }, headers);
   }
   if (subpath === "/site/docs" && method === "POST") {
@@ -6949,6 +7007,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
+    // Portal-project link: set when this job was raised from a project hub, so
+    // the project can list its jobs + roll up per-engineer visits. Preserved.
+    projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -7020,6 +7081,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
+  if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -7671,716 +7733,6 @@ async function saveFsMaterials(env, tenantId, mats) {
   return mats;
 }
 
-// src/routes/sites.js
-var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
-async function handle9(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const method = request.method;
-  const q = url.searchParams;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (path === "/get-sites" && method === "GET") {
-    const cat = (q.get("category") || "all").toLowerCase();
-    let rows;
-    if (cat === "all") {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
-    } else {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
-    }
-    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
-  }
-  if (path === "/delete-site" && method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, tenantId, sess.user.username);
-    if (perms.FullAccess !== "Yes")
-      return error("Deleting a site needs Full Access", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const client = ((q.get("category") || b.client || "") + "").toLowerCase().trim();
-    const siteNumber = String(b.siteNumber || "").trim();
-    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
-    const existing = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
-    if (!existing) return error("Site not found", 404, env, request);
-    let name = siteNumber;
-    try {
-      name = JSON.parse(existing.data).siteName || siteNumber;
-    } catch {
-    }
-    await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).run();
-    const res = json({ success: true, deleted: siteNumber }, {}, env, request);
-    try {
-      res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} \u2014 "${name}"`));
-    } catch {
-    }
-    return res;
-  }
-  if ((path === "/add-site" || path === "/update-site") && method === "POST") {
-    let site = await request.json().catch(() => ({}));
-    const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
-    if (!client) return error("client (category) required", 400, env, request);
-    site.client = client;
-    if (path === "/add-site" && client === "projects") {
-      if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
-      if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
-    }
-    const siteNumber = String(site.siteNumber || "").trim();
-    if (!siteNumber) return error("siteNumber required", 400, env, request);
-    site.siteNumber = siteNumber;
-    const oldNum = q.get("oldSiteNumber");
-    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
-      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
-    }
-    let auditNote = "";
-    if (path === "/update-site") {
-      const lookNum = String(oldNum || siteNumber).trim();
-      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
-      if (row) {
-        let cur = {};
-        try {
-          cur = JSON.parse(row.data) || {};
-        } catch {
-        }
-        const merged = { ...cur };
-        const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
-        const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").replace(/ · /g, " ").trim();
-        const chg = [];
-        for (const [k, v] of Object.entries(site)) {
-          if (v !== void 0 && v !== null && v !== "") {
-            if (NOTE_FIELDS[k] && clean(cur[k]) !== clean(v)) chg.push(`${NOTE_FIELDS[k]} "${clean(cur[k]) || "\u2014"}" \u2192 "${clean(v)}"`);
-            merged[k] = v;
-          }
-        }
-        if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" \u2192 "${clean(siteNumber)}"`);
-        merged.siteNumber = siteNumber;
-        merged.client = client;
-        site = merged;
-        const label = clean(merged.name) || siteNumber;
-        auditNote = (chg.length ? `${label} \u2014 ${chg.join(", ")}` : label).slice(0, 380);
-      }
-    }
-    await saveSite(env, tenantId, site);
-    await ensureCustomer(env, tenantId, client);
-    await pushSiteToSiteLog(env, site);
-    const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
-    return json({ success: true, site }, { headers }, env, request);
-  }
-  if (path === "/next-project-job-number" && method === "GET") {
-    return json({ next: await nextProjectNumber(env, tenantId) }, {}, env, request);
-  }
-  if (path === "/upload-image" && method === "POST") {
-    const form = await request.formData().catch(() => null);
-    const file = form && form.get("file");
-    const siteNumber = form && String(form.get("siteNumber") || "").trim();
-    const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
-    if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName4 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName4}`;
-    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
-    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
-    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
-  }
-  if (path === "/customers" && method === "GET") {
-    const { results } = await db.prepare(`
-      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.tenant_id = ? AND s.client = c.id) AS site_count
-      FROM customers c WHERE c.tenant_id = ? ORDER BY c.name COLLATE NOCASE
-    `).bind(db.tenantId, db.tenantId).all();
-    return json({ customers: results || [] }, {}, env, request);
-  }
-  if (path === "/customers" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const id = slug(b.id || b.name);
-    if (!id) return error("name required", 400, env, request);
-    await db.prepare(`
-      INSERT INTO customers (tenant_id, id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
-        phone=excluded.phone, invoice_email=excluded.invoice_email,
-        billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
-    `).bind(
-      db.tenantId,
-      id,
-      b.name || id,
-      b.contactName || null,
-      b.email || null,
-      b.phone || null,
-      b.invoiceEmail || null,
-      b.billingAddress || null,
-      b.notes || null
-    ).run();
-    return json({ ok: true, id }, {}, env, request);
-  }
-  if (path === "/customers/delete" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    if (!b.id) return error("id required", 400, env, request);
-    const n = await db.prepare("SELECT COUNT(*) AS n FROM sites WHERE tenant_id=? AND client=?").bind(db.tenantId, b.id).first();
-    if (n && n.n > 0) return error(`Customer has ${n.n} site(s) \u2014 move or delete them first.`, 400, env, request);
-    await db.prepare("DELETE FROM customers WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/sites/street-images" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const key = b.key || env.GOOGLE_MAPS_KEY;
-    if (!key) return error("Google Maps API key required", 400, env, request);
-    const overwrite = !!b.overwrite;
-    const since = b.since || "";
-    const brands = b.brands || {};
-    const limit = Math.min(Number(b.limit) || 8, 10);
-    const size = b.size || "640x400";
-    const { results } = await db.prepare("SELECT data FROM sites WHERE tenant_id=?").bind(db.tenantId).all();
-    const all = (results || []).map((r) => JSON.parse(r.data));
-    const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
-    const ownImage = (s) => !s.imageURL || /\/streetview\.jpg(\?|$)/.test(s.imageURL);
-    const todo = all.filter((s) => (overwrite || !s._noImagery) && // an overwrite run retries previously-failed sites
-    (overwrite ? ownImage(s) && (!s._svAt || s._svAt < since) : !s.imageURL) && locOf(s));
-    const batch = todo.slice(0, limit);
-    let updated = 0;
-    const failed = [];
-    let sampleError = "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    for (const site of batch) {
-      let loc = locOf(site);
-      let buf = null;
-      try {
-        const q2 = [
-          brands[site.client] || "",
-          site.siteName || "",
-          (site.postcode || "").replace(/\*+$/, "")
-        ].filter(Boolean).join(" ");
-        const fp = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q2)}&inputtype=textquery&fields=photos,geometry&key=${key}`);
-        const fpj = await fp.json();
-        const cand = fpj.candidates && fpj.candidates[0];
-        if (cand) {
-          if (cand.geometry && cand.geometry.location) loc = `${cand.geometry.location.lat},${cand.geometry.location.lng}`;
-          const ref = cand.photos && cand.photos[0] && cand.photos[0].photo_reference;
-          if (ref) {
-            const ph = await fetch(`https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${encodeURIComponent(ref)}&key=${key}`);
-            if (ph.ok && (ph.headers.get("content-type") || "").startsWith("image/")) buf = await ph.arrayBuffer();
-          }
-        }
-      } catch (e) {
-        if (!sampleError) sampleError = "Places: " + e.message;
-      }
-      if (!buf) try {
-        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
-        const res = await fetch(svUrl);
-        if (res.ok) buf = await res.arrayBuffer();
-        else if (!sampleError) sampleError = `StreetView ${res.status}: ${(await res.text()).slice(0, 160)}`;
-      } catch (e) {
-        if (!sampleError) sampleError = "StreetView: " + e.message;
-      }
-      if (!buf) {
-        try {
-          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
-          const res = await fetch(smUrl);
-          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
-          else if (!sampleError) sampleError = `StaticMap ${res.status}: ${(await res.text()).slice(0, 160)}`;
-        } catch (e) {
-          if (!sampleError) sampleError = "StaticMap: " + e.message;
-        }
-      }
-      if (buf) {
-        const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
-        await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
-        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
-        site._svAt = now;
-        delete site._noImagery;
-        await saveSite(env, tenantId, site);
-        updated++;
-      } else {
-        site._noImagery = true;
-        site._svAt = now;
-        await saveSite(env, tenantId, site);
-        failed.push(String(site.siteNumber));
-      }
-    }
-    return json({
-      ok: true,
-      updated,
-      failed,
-      sampleError,
-      remaining: Math.max(0, todo.length - batch.length)
-    }, {}, env, request);
-  }
-  if (path === "/import-sites" && method === "POST") {
-    const body = await request.json().catch(() => ({}));
-    const imagesOnly = !!body.imagesOnly;
-    let list = Array.isArray(body.sites) ? body.sites : [];
-    if (!list.length) {
-      try {
-        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
-        list = await res.json();
-        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
-      } catch (e) {
-        return error("Could not read the old sites worker: " + e.message, 502, env, request);
-      }
-    }
-    let imported = 0;
-    const clients = /* @__PURE__ */ new Set();
-    for (const site of list) {
-      const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
-      const siteNumber = String(site.siteNumber || "").trim();
-      if (!siteNumber) continue;
-      if (imagesOnly) {
-        if (!site.imageURL) continue;
-        const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
-        if (!row) continue;
-        const cur = JSON.parse(row.data);
-        cur.imageURL = site.imageURL;
-        await saveSite(env, tenantId, cur);
-        imported++;
-        continue;
-      }
-      site.client = client;
-      await saveSite(env, tenantId, site);
-      clients.add(client);
-      imported++;
-    }
-    for (const c of clients) await ensureCustomer(env, tenantId, c);
-    return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
-  }
-  return error("Unknown sites route", 404, env, request);
-}
-async function saveSite(env, tenantId, site) {
-  const db = tenantDB(env, tenantId);
-  await db.prepare(`
-    INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, job_number, data, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,datetime('now'))
-    ON CONFLICT(client, site_number) DO UPDATE SET
-      site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
-      job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
-  `).bind(
-    db.tenantId,
-    site.client,
-    String(site.siteNumber).trim(),
-    site.siteName || null,
-    site.postcode || null,
-    site.active === false ? 0 : 1,
-    site.jobNumber || null,
-    JSON.stringify(site)
-  ).run();
-}
-async function ensureCustomer(env, tenantId, id) {
-  if (!id) return;
-  const db = tenantDB(env, tenantId);
-  await db.prepare(
-    "INSERT INTO customers (tenant_id, id, name) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING"
-  ).bind(db.tenantId, id, prettify(id)).run();
-}
-async function pushSiteToSiteLog(env, site) {
-  try {
-    if (!env.SITELOG_ADMIN_SECRET) return;
-    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    const name = String(site.siteName || "").trim();
-    if (!name) return;
-    await fetch("https://api.site-log.co.uk/bulk-add-sites", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
-      body: JSON.stringify({ sites: [{
-        siteName: name,
-        lat,
-        lng,
-        radius: 500,
-        category: prettify(site.client || "") || "Projects"
-      }] })
-    });
-  } catch (e) {
-  }
-}
-async function nextProjectNumber(env, tenantId) {
-  const db = tenantDB(env, tenantId);
-  const { results } = await db.prepare(
-    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
-  ).bind(db.tenantId).all();
-  let max = 0;
-  for (const r of results || []) {
-    const m = String(r.job_number).match(/(\d+)\s*$/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return "P" + String(max + 1).padStart(4, "0");
-}
-function slug(s) {
-  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-function prettify(id) {
-  return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// src/routes/portal.js
-var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
-function vanWeek() {
-  const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
-  return d.toISOString().slice(0, 10);
-}
-var SETTINGS_KEY = "portal:settings";
-async function requireFullAccess(env, request) {
-  const sess = await requireSession(env, request);
-  if (!sess) return { err: error("Not authenticated", 401, env, request) };
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
-  return { sess };
-}
-async function handle10(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const method = request.method;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (path === "/settings" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, SETTINGS_KEY).first();
-    let settings = {};
-    try {
-      settings = row ? JSON.parse(row.value) : {};
-    } catch {
-    }
-    return json({ ok: true, settings }, {}, env, request);
-  }
-  if (path === "/settings" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    await db.prepare(`
-      INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value
-    `).bind(db.tenantId, SETTINGS_KEY, JSON.stringify(b || {})).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/menu-config" && method === "GET") {
-    const s = await requireSession(env, request);
-    if (!s) return error("Not authenticated", 401, env, request);
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "menu:hidden").first();
-    let hidden = [];
-    try {
-      hidden = row ? JSON.parse(row.value) : [];
-    } catch {
-    }
-    if (!Array.isArray(hidden)) hidden = [];
-    return json({ ok: true, hidden }, {}, env, request);
-  }
-  if (path === "/menu-config" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const hidden = Array.isArray(b.hidden) ? b.hidden.map(String).slice(0, 200) : [];
-    await db.prepare(
-      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-    ).bind(db.tenantId, "menu:hidden", JSON.stringify(hidden)).run();
-    return json({ ok: true, hidden }, {}, env, request);
-  }
-  if (path === "/oncall/current" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const cur = async (role) => await db.prepare(
-      "SELECT name, set_by, set_at FROM oncall_log WHERE tenant_id=? AND role=? ORDER BY id DESC LIMIT 1"
-    ).bind(db.tenantId, role).first();
-    return json({ ok: true, engineer: await cur("engineer"), manager: await cur("manager") }, {}, env, request);
-  }
-  if (path === "/oncall/set" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    const by = sess2.user.username;
-    const stmts = [];
-    if (b.engineer) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'engineer', ?, ?)").bind(db.tenantId, String(b.engineer), by));
-    if (b.manager) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'manager', ?, ?)").bind(db.tenantId, String(b.manager), by));
-    if (!stmts.length) return error("Nothing to set \u2014 send engineer and/or manager", 400, env, request);
-    await db.batch(stmts);
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/oncall/history" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const { results } = await db.prepare(
-      "SELECT role, name, set_by, set_at FROM oncall_log WHERE tenant_id=? ORDER BY id DESC LIMIT 200"
-    ).bind(db.tenantId).all();
-    return json({ ok: true, history: results || [] }, {}, env, request);
-  }
-  if (path === "/daily-logs" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    if (!b.engineer || !b.date) return error("engineer and date required", 400, env, request);
-    await db.prepare(`
-      INSERT INTO daily_logs (tenant_id, engineer, date, site, standard_hours, overtime_hours, travel_time, mileage, notes, submitted_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-    `).bind(
-      db.tenantId,
-      b.engineer,
-      b.date,
-      b.site || null,
-      num(b.standardHours),
-      num(b.overtimeHours),
-      num(b.travelTime),
-      num(b.mileage),
-      b.notes || null,
-      sess2.user.username
-    ).run();
-    return json({ ok: true }, { status: 201 }, env, request);
-  }
-  if (path === "/daily-logs" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const q = url.searchParams;
-    const conds = ["tenant_id = ?"], binds = [db.tenantId];
-    if (q.get("engineer")) {
-      conds.push("engineer = ?");
-      binds.push(q.get("engineer"));
-    }
-    if (q.get("from")) {
-      conds.push("date >= ?");
-      binds.push(q.get("from"));
-    }
-    if (q.get("to")) {
-      conds.push("date <= ?");
-      binds.push(q.get("to"));
-    }
-    let sql = "SELECT * FROM daily_logs";
-    sql += " WHERE " + conds.join(" AND ");
-    sql += " ORDER BY date DESC, id DESC LIMIT 500";
-    const { results } = await db.prepare(sql).bind(...binds).all();
-    return json({ ok: true, logs: results || [] }, {}, env, request);
-  }
-  if (path === "/prefs" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
-    let profile = {};
-    try {
-      profile = row?.profile ? JSON.parse(row.profile) : {};
-    } catch {
-    }
-    return json({ ok: true, prefs: profile.prefs || {} }, {}, env, request);
-  }
-  if (path === "/prefs" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => null);
-    if (!b || typeof b !== "object" || Array.isArray(b)) return error("Send an object of keys to merge", 400, env, request);
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
-    let profile = {};
-    try {
-      profile = row?.profile ? JSON.parse(row.profile) : {};
-    } catch {
-    }
-    const prefs = profile.prefs || {};
-    for (const k of Object.keys(b)) {
-      if (b[k] === null) delete prefs[k];
-      else prefs[k] = b[k];
-    }
-    if (JSON.stringify(prefs).length > 8e3) return error("Preferences too large", 400, env, request);
-    profile.prefs = prefs;
-    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(profile), db.tenantId, sess2.user.username).run();
-    return json({ ok: true, prefs }, {}, env, request);
-  }
-  if (path === "/audit/pageview" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    const page = String(b.page || "").slice(0, 80);
-    if (!/^[\w.-]+\.html$/.test(page)) return error("Bad page", 400, env, request);
-    await db.prepare(
-      "INSERT INTO audit_log (tenant_id, username, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
-    ).bind(db.tenantId, sess2.user.username, "VIEW", "/" + page, "", 200, (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/audit/log" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const q = url.searchParams;
-    const days = Math.min(365, Math.max(1, Number(q.get("days")) || 7));
-    const since = new Date(Date.now() - days * 864e5).toISOString();
-    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
-    if (q.get("user")) {
-      conds.push("username = ?");
-      binds.push(q.get("user"));
-    }
-    if (q.get("type") === "view") conds.push("method = 'VIEW'");
-    if (q.get("type") === "action") conds.push("method != 'VIEW'");
-    try {
-      await db.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run();
-    } catch {
-    }
-    const { results } = await db.prepare(
-      "SELECT username, method, path, detail, status, at, ref FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
-    ).bind(...binds).all();
-    return json({ ok: true, log: results || [] }, {}, env, request);
-  }
-  if (path === "/notify/log" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    const action = String(b.action || "");
-    if (["shown", "snoozed", "dismissed", "opened"].indexOf(action) === -1)
-      return error("Bad action", 400, env, request);
-    const surface = String(b.surface || "").slice(0, 20);
-    const items = JSON.stringify(Array.isArray(b.items) ? b.items : []).slice(0, 4e3);
-    await db.prepare(
-      "INSERT INTO notify_log (tenant_id, username, action, surface, items, at) VALUES (?,?,?,?,?,?)"
-    ).bind(db.tenantId, sess2.user.username, action, surface, items, (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/notify/log" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const q = url.searchParams;
-    const days = Math.min(90, Math.max(1, Number(q.get("days")) || 14));
-    const since = new Date(Date.now() - days * 864e5).toISOString();
-    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
-    if (q.get("user")) {
-      conds.push("username = ?");
-      binds.push(q.get("user"));
-    }
-    const { results } = await db.prepare(
-      "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
-    ).bind(...binds).all();
-    return json({ ok: true, log: results || [] }, {}, env, request);
-  }
-  if (path === "/notify/feed/count" && method === "GET") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    await ensureFeedTable(env);
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
-    ).bind(db.tenantId, sess.user.username).first();
-    return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
-  }
-  if (path === "/notify/feed" && method === "GET") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    await ensureFeedTable(env);
-    const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
-    const { results } = await db.prepare(
-      "SELECT id, title, body, url, tag, created_at, read_at, actionable, resolved_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
-    ).bind(db.tenantId, sess.user.username, limit).all();
-    const items = (results || []).map((r) => ({
-      id: r.id,
-      title: r.title || "",
-      body: r.body || "",
-      url: r.url || "",
-      tag: r.tag || "",
-      at: r.created_at,
-      read: !!r.read_at,
-      // actionable-but-unresolved stays "outstanding" (bold, counts) until dealt with.
-      actionable: !!r.actionable,
-      resolved: !!r.resolved_at
-    }));
-    const cRow = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
-    ).bind(db.tenantId, sess.user.username).first();
-    return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
-  }
-  if (path === "/notify/feed/read" && method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    await ensureFeedTable(env);
-    const b = await request.json().catch(() => ({}));
-    const at = (/* @__PURE__ */ new Date()).toISOString();
-    if (b.seen) {
-      await db.prepare("UPDATE user_notifications SET seen_at=? WHERE tenant_id=? AND username=? AND seen_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
-    } else if (b.all) {
-      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND username=? AND (read_at IS NULL OR seen_at IS NULL)").bind(at, at, db.tenantId, sess.user.username).run();
-    } else if (b.id != null) {
-      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE id=? AND tenant_id=? AND username=?").bind(at, at, Number(b.id), db.tenantId, sess.user.username).run();
-    } else {
-      return error("Send seen:true, id, or all:true", 400, env, request);
-    }
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/notify/suppress" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    return json({ ok: true, rules: await getRules(env, tenantId) }, {}, env, request);
-  }
-  if (path === "/notify/suppress" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const type = String(b.type || "");
-    if (SUPPRESS_TYPES.indexOf(type) === -1) return error("Bad type", 400, env, request);
-    const rule = {
-      id: "s" + Date.now(),
-      type,
-      user: b.user ? String(b.user) : null,
-      key: b.key != null && b.key !== "" ? String(b.key) : null,
-      label: String(b.label || "").slice(0, 140),
-      by: gate.sess.user.username,
-      at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    const rules = (await getRules(env, tenantId)).filter((r) => !(r.type === rule.type && (r.user || null) === (rule.user || null) && (r.key || null) === (rule.key || null)));
-    rules.push(rule);
-    await saveRules(env, tenantId, rules);
-    return json({ ok: true, rules }, {}, env, request);
-  }
-  if (path === "/notify/suppress/remove" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const id = String(b.id || "");
-    const rules = (await getRules(env, tenantId)).filter((r) => r.id !== id);
-    await saveRules(env, tenantId, rules);
-    return json({ ok: true, rules }, {}, env, request);
-  }
-  if (path === "/notify/overview" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const assetMap = {};
-    const confirmations = [];
-    try {
-      const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id=?").bind(db.tenantId).all();
-      for (const r of results || []) {
-        let a;
-        try {
-          a = JSON.parse(r.data);
-        } catch {
-          continue;
-        }
-        assetMap[a.id] = a.name || a.assetName || a.id;
-        const holder = String(a.assignedTo || "").trim();
-        if (a.confirm && a.confirm.status === "pending" && holder && holder.toLowerCase() !== "shared")
-          confirmations.push({ user: holder, key: String(a.id), name: assetMap[a.id] });
-      }
-    } catch {
-    }
-    const transfers = [];
-    try {
-      const { results } = await db.prepare(
-        "SELECT id, asset_id, to_user, requested_at FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
-      ).bind(db.tenantId).all();
-      for (const t of results || [])
-        transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || "Asset " + t.asset_id, at: t.requested_at });
-    } catch {
-    }
-    const week = vanWeek();
-    const vehicleChecks = [];
-    const skippedVanChecks = [];
-    try {
-      const { results: drivers } = await db.prepare(
-        "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
-      ).bind(db.tenantId).all();
-      const { results: doneRows } = await db.prepare(
-        "SELECT username, items FROM vehicle_checks WHERE tenant_id=? AND week=?"
-      ).bind(db.tenantId, week).all();
-      const doneSet = new Set((doneRows || []).map((r) => r.username));
-      for (const u of drivers || [])
-        if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check \u2014 week of " + week });
-      for (const r of doneRows || []) {
-        try {
-          const it = r.items ? JSON.parse(r.items) : {};
-          if (it.skipped) skippedVanChecks.push({ user: r.username, week, by: it.skippedBy || "" });
-        } catch {
-        }
-      }
-    } catch {
-    }
-    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, skippedVanChecks, week }, {}, env, request);
-  }
-  return error("Unknown portal route", 404, env, request);
-}
-function num(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 // src/routes/sitelog-api.js
 var ALLOWED_ORIGINS = [
   "https://site-log.co.uk",
@@ -8908,7 +8260,7 @@ async function getArrivalRulesFor(env, site, type) {
   if (!rules.length) rules = await getArrivalDefaultRules(env, type);
   return rules;
 }
-async function handle11(request, env, ctx) {
+async function handle9(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsFor(request) });
@@ -9523,6 +8875,93 @@ async function handle11(request, env, ctx) {
       String(category || "").trim() || "Projects"
     ).run();
     return json3({ ok: true, siteName });
+  }
+  if (url.pathname === "/upsert-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const name = String(body.siteName || "").trim();
+    if (!name) return json3({ error: "Missing siteName" }, 400);
+    const lat = body.lat !== void 0 ? Number(body.lat) : null;
+    const lng = body.lng !== void 0 ? Number(body.lng ?? body.lon) : null;
+    const cat = String(body.category || "").trim() || null;
+    const radius = body.radius !== void 0 ? Number(body.radius) : null;
+    const oldName = String(body.oldName || "").trim();
+    const lookupName = oldName || name;
+    const existing = await env.SITELOG_DB.prepare(
+      "SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1"
+    ).bind(lookupName).first();
+    if (existing) {
+      const sets = ["site_name = ?"];
+      const binds = [name];
+      if (lat !== null && isFiniteNumber(lat)) {
+        sets.push("lat = ?");
+        binds.push(lat);
+      }
+      if (lng !== null && isFiniteNumber(lng)) {
+        sets.push("lng = ?");
+        binds.push(lng);
+      }
+      if (radius !== null && isFiniteNumber(radius)) {
+        sets.push("radius_m = ?");
+        binds.push(radius);
+      }
+      if (cat) {
+        sets.push("category = ?");
+        binds.push(cat);
+      }
+      if (body.siteRules !== void 0) {
+        sets.push("site_rules = ?");
+        binds.push(body.siteRules || null);
+      }
+      if (body.siteRulesVisitor !== void 0) {
+        sets.push("site_rules_visitor = ?");
+        binds.push(body.siteRulesVisitor || null);
+      }
+      if (body.archived !== void 0) {
+        sets.push("archived = ?");
+        binds.push(body.archived ? 1 : 0);
+      }
+      binds.push(existing.id);
+      await env.SITELOG_DB.prepare(`UPDATE sites SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+      return json3({ ok: true, id: existing.id, updated: true, renamed: !!(oldName && oldName.toLowerCase() !== name.toLowerCase()) });
+    }
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      return json3({ ok: false, reason: "no-coords" });
+    }
+    const id = crypto.randomUUID();
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived, category, site_rules, site_rules_visitor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      id,
+      name,
+      lat,
+      lng,
+      isFiniteNumber(radius) ? radius : 500,
+      body.archived ? 1 : 0,
+      cat || "Projects",
+      body.siteRules || null,
+      body.siteRulesVisitor || null
+    ).run();
+    return json3({ ok: true, id, created: true });
+  }
+  if (url.pathname === "/delete-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const name = String(body.siteName || "").trim();
+    const id = String(body.id || "").trim();
+    if (!name && !id) return json3({ error: "Missing siteName or id" }, 400);
+    const row = id ? await env.SITELOG_DB.prepare("SELECT id FROM sites WHERE id = ?").bind(id).first() : await env.SITELOG_DB.prepare("SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1").bind(name).first();
+    if (!row) return json3({ ok: true, missing: true });
+    if (body.archive) {
+      await env.SITELOG_DB.prepare("UPDATE sites SET archived = 1 WHERE id = ?").bind(row.id).run();
+      return json3({ ok: true, id: row.id, archived: true });
+    }
+    await env.SITELOG_DB.prepare("DELETE FROM sites WHERE id = ?").bind(row.id).run();
+    return json3({ ok: true, id: row.id, deleted: true });
   }
   if (url.pathname === "/bulk-add-sites" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -11047,6 +10486,786 @@ async function sweepAutoClose(env) {
   }
 }
 
+// src/routes/sites.js
+var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
+async function handle10(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (path === "/get-sites" && method === "GET") {
+    const cat = (q.get("category") || "all").toLowerCase();
+    let rows;
+    if (cat === "all") {
+      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
+    } else {
+      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
+    }
+    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
+  }
+  if (path === "/delete-site" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes")
+      return error("Deleting a site needs Full Access", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || b.client || "") + "").toLowerCase().trim();
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    const existing = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
+    if (!existing) return error("Site not found", 404, env, request);
+    let name = siteNumber;
+    try {
+      name = JSON.parse(existing.data).siteName || siteNumber;
+    } catch {
+    }
+    await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).run();
+    ctx?.waitUntil(removeSiteFromSiteLog(env, name, { archive: true }));
+    const res = json({ success: true, deleted: siteNumber }, {}, env, request);
+    try {
+      res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} \u2014 "${name}"`));
+    } catch {
+    }
+    return res;
+  }
+  if ((path === "/add-site" || path === "/update-site") && method === "POST") {
+    let site = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
+    if (!client) return error("client (category) required", 400, env, request);
+    site.client = client;
+    if (path === "/add-site" && client === "projects") {
+      if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
+      if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
+    }
+    const siteNumber = String(site.siteNumber || "").trim();
+    if (!siteNumber) return error("siteNumber required", 400, env, request);
+    site.siteNumber = siteNumber;
+    const oldNum = q.get("oldSiteNumber");
+    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
+      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
+    }
+    let auditNote = "";
+    let oldName = null;
+    if (path === "/update-site") {
+      const lookNum = String(oldNum || siteNumber).trim();
+      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
+      if (row) {
+        let cur = {};
+        try {
+          cur = JSON.parse(row.data) || {};
+        } catch {
+        }
+        oldName = String(cur.siteName || "").trim() || null;
+        const merged = { ...cur };
+        const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
+        const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").replace(/ · /g, " ").trim();
+        const chg = [];
+        for (const [k, v] of Object.entries(site)) {
+          if (v !== void 0 && v !== null && v !== "") {
+            if (NOTE_FIELDS[k] && clean(cur[k]) !== clean(v)) chg.push(`${NOTE_FIELDS[k]} "${clean(cur[k]) || "\u2014"}" \u2192 "${clean(v)}"`);
+            merged[k] = v;
+          }
+        }
+        if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" \u2192 "${clean(siteNumber)}"`);
+        merged.siteNumber = siteNumber;
+        merged.client = client;
+        site = merged;
+        const label = clean(merged.name) || siteNumber;
+        auditNote = (chg.length ? `${label} \u2014 ${chg.join(", ")}` : label).slice(0, 380);
+      }
+    }
+    await saveSite(env, tenantId, site);
+    await ensureCustomer(env, tenantId, client);
+    ctx?.waitUntil(syncSiteToSiteLog(env, site, oldName));
+    ctx?.waitUntil(syncSiteToCompliance(env, tenantId, site).catch(() => {
+    }));
+    ctx?.waitUntil(setPOSiteActive(env, site.siteName, site.active !== false));
+    const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
+    return json({ success: true, site }, { headers }, env, request);
+  }
+  if (path === "/next-project-job-number" && method === "GET") {
+    return json({ next: await nextProjectNumber(env, tenantId) }, {}, env, request);
+  }
+  if (path === "/upload-image" && method === "POST") {
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const siteNumber = form && String(form.get("siteNumber") || "").trim();
+    const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
+    if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
+    const safeName4 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName4}`;
+    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
+    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
+  }
+  if (path === "/customers" && method === "GET") {
+    const { results } = await db.prepare(`
+      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.tenant_id = ? AND s.client = c.id) AS site_count
+      FROM customers c WHERE c.tenant_id = ? ORDER BY c.name COLLATE NOCASE
+    `).bind(db.tenantId, db.tenantId).all();
+    return json({ customers: results || [] }, {}, env, request);
+  }
+  if (path === "/customers" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = slug(b.id || b.name);
+    if (!id) return error("name required", 400, env, request);
+    await db.prepare(`
+      INSERT INTO customers (tenant_id, id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
+        phone=excluded.phone, invoice_email=excluded.invoice_email,
+        billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
+    `).bind(
+      db.tenantId,
+      id,
+      b.name || id,
+      b.contactName || null,
+      b.email || null,
+      b.phone || null,
+      b.invoiceEmail || null,
+      b.billingAddress || null,
+      b.notes || null
+    ).run();
+    return json({ ok: true, id }, {}, env, request);
+  }
+  if (path === "/customers/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("id required", 400, env, request);
+    const n = await db.prepare("SELECT COUNT(*) AS n FROM sites WHERE tenant_id=? AND client=?").bind(db.tenantId, b.id).first();
+    if (n && n.n > 0) return error(`Customer has ${n.n} site(s) \u2014 move or delete them first.`, 400, env, request);
+    await db.prepare("DELETE FROM customers WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/sites/street-images" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const key = b.key || env.GOOGLE_MAPS_KEY;
+    if (!key) return error("Google Maps API key required", 400, env, request);
+    const overwrite = !!b.overwrite;
+    const since = b.since || "";
+    const brands = b.brands || {};
+    const limit = Math.min(Number(b.limit) || 8, 10);
+    const size = b.size || "640x400";
+    const { results } = await db.prepare("SELECT data FROM sites WHERE tenant_id=?").bind(db.tenantId).all();
+    const all = (results || []).map((r) => JSON.parse(r.data));
+    const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
+    const ownImage = (s) => !s.imageURL || /\/streetview\.jpg(\?|$)/.test(s.imageURL);
+    const todo = all.filter((s) => (overwrite || !s._noImagery) && // an overwrite run retries previously-failed sites
+    (overwrite ? ownImage(s) && (!s._svAt || s._svAt < since) : !s.imageURL) && locOf(s));
+    const batch = todo.slice(0, limit);
+    let updated = 0;
+    const failed = [];
+    let sampleError = "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    for (const site of batch) {
+      let loc = locOf(site);
+      let buf = null;
+      try {
+        const q2 = [
+          brands[site.client] || "",
+          site.siteName || "",
+          (site.postcode || "").replace(/\*+$/, "")
+        ].filter(Boolean).join(" ");
+        const fp = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q2)}&inputtype=textquery&fields=photos,geometry&key=${key}`);
+        const fpj = await fp.json();
+        const cand = fpj.candidates && fpj.candidates[0];
+        if (cand) {
+          if (cand.geometry && cand.geometry.location) loc = `${cand.geometry.location.lat},${cand.geometry.location.lng}`;
+          const ref = cand.photos && cand.photos[0] && cand.photos[0].photo_reference;
+          if (ref) {
+            const ph = await fetch(`https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${encodeURIComponent(ref)}&key=${key}`);
+            if (ph.ok && (ph.headers.get("content-type") || "").startsWith("image/")) buf = await ph.arrayBuffer();
+          }
+        }
+      } catch (e) {
+        if (!sampleError) sampleError = "Places: " + e.message;
+      }
+      if (!buf) try {
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
+        const res = await fetch(svUrl);
+        if (res.ok) buf = await res.arrayBuffer();
+        else if (!sampleError) sampleError = `StreetView ${res.status}: ${(await res.text()).slice(0, 160)}`;
+      } catch (e) {
+        if (!sampleError) sampleError = "StreetView: " + e.message;
+      }
+      if (!buf) {
+        try {
+          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
+          const res = await fetch(smUrl);
+          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
+          else if (!sampleError) sampleError = `StaticMap ${res.status}: ${(await res.text()).slice(0, 160)}`;
+        } catch (e) {
+          if (!sampleError) sampleError = "StaticMap: " + e.message;
+        }
+      }
+      if (buf) {
+        const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
+        await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
+        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
+        site._svAt = now;
+        delete site._noImagery;
+        await saveSite(env, tenantId, site);
+        updated++;
+      } else {
+        site._noImagery = true;
+        site._svAt = now;
+        await saveSite(env, tenantId, site);
+        failed.push(String(site.siteNumber));
+      }
+    }
+    return json({
+      ok: true,
+      updated,
+      failed,
+      sampleError,
+      remaining: Math.max(0, todo.length - batch.length)
+    }, {}, env, request);
+  }
+  if (path === "/import-sites" && method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const imagesOnly = !!body.imagesOnly;
+    let list = Array.isArray(body.sites) ? body.sites : [];
+    if (!list.length) {
+      try {
+        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
+        list = await res.json();
+        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
+      } catch (e) {
+        return error("Could not read the old sites worker: " + e.message, 502, env, request);
+      }
+    }
+    let imported = 0;
+    const clients = /* @__PURE__ */ new Set();
+    for (const site of list) {
+      const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
+      const siteNumber = String(site.siteNumber || "").trim();
+      if (!siteNumber) continue;
+      if (imagesOnly) {
+        if (!site.imageURL) continue;
+        const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
+        if (!row) continue;
+        const cur = JSON.parse(row.data);
+        cur.imageURL = site.imageURL;
+        await saveSite(env, tenantId, cur);
+        imported++;
+        continue;
+      }
+      site.client = client;
+      await saveSite(env, tenantId, site);
+      clients.add(client);
+      imported++;
+    }
+    for (const c of clients) await ensureCustomer(env, tenantId, c);
+    return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
+  }
+  return error("Unknown sites route", 404, env, request);
+}
+async function saveSite(env, tenantId, site) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`
+    INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, job_number, data, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+    ON CONFLICT(client, site_number) DO UPDATE SET
+      site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
+      job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
+  `).bind(
+    db.tenantId,
+    site.client,
+    String(site.siteNumber).trim(),
+    site.siteName || null,
+    site.postcode || null,
+    site.active === false ? 0 : 1,
+    site.jobNumber || null,
+    JSON.stringify(site)
+  ).run();
+}
+async function ensureCustomer(env, tenantId, id) {
+  if (!id) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO customers (tenant_id, id, name) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING"
+  ).bind(db.tenantId, id, prettify(id)).run();
+}
+async function syncSiteToSiteLog(env, site, oldName) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "no-secret" };
+    const name = String(site.siteName || "").trim();
+    if (!name) return { ok: false, reason: "no-name" };
+    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    const body = {
+      siteName: name,
+      lat: Number.isFinite(lat) ? lat : void 0,
+      lng: Number.isFinite(lng) ? lng : void 0,
+      category: prettify(site.client || "") || "Projects",
+      oldName: oldName && String(oldName).trim() !== name ? String(oldName).trim() : void 0,
+      archived: site.active === false ? 1 : 0
+    };
+    return await slCall(env, "/upsert-site", body);
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function removeSiteFromSiteLog(env, siteName, { archive } = {}) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(siteName || "").trim()) return { ok: false };
+    return await slCall(env, "/delete-site", { siteName: String(siteName).trim(), archive: !!archive });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function slCall(env, path, body) {
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const init = { method: "POST", headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET }, body: JSON.stringify(body) };
+  const req = new Request(base + path, init);
+  if (env.SITELOG_DB) {
+    try {
+      const r = await handle9(req, env);
+      if (r) return await r.json().catch(() => ({ ok: r.ok }));
+    } catch (e) {
+    }
+  }
+  const res = await fetch(base + path, init);
+  return await res.json().catch(() => ({ ok: res.ok }));
+}
+async function syncSiteToCompliance(env, tenantId, site) {
+  try {
+    const num2 = String(site.siteNumber || "").trim();
+    if (!num2) return;
+    const rows = await env.DB.prepare(
+      "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
+    ).bind(tenantId, num2).all();
+    const activeVal = site.active === false ? 0 : 1;
+    for (const r of rows.results || []) {
+      let meta = {};
+      try {
+        meta = JSON.parse(r.meta || "{}") || {};
+      } catch {
+      }
+      const lat = site.lat != null ? Number(site.lat) : null;
+      const lng = site.lon != null ? Number(site.lon) : site.lng != null ? Number(site.lng) : null;
+      if (Number.isFinite(lat)) meta.lat = lat;
+      if (Number.isFinite(lng)) meta.lng = lng;
+      await env.DB.prepare(
+        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, active=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
+      ).bind(
+        site.siteName || null,
+        site.postcode || null,
+        JSON.stringify(meta),
+        activeVal,
+        (/* @__PURE__ */ new Date()).toISOString(),
+        tenantId,
+        r.scheme,
+        r.code
+      ).run();
+    }
+  } catch {
+  }
+}
+async function setPOSiteActive(env, name, active) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    const val = active ? 1 : 0;
+    await env.PO_DB.prepare("UPDATE sites SET active = ? WHERE name = ?").bind(val, String(name).trim()).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function nextProjectNumber(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
+  ).bind(db.tenantId).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = String(r.job_number).match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "P" + String(max + 1).padStart(4, "0");
+}
+function slug(s) {
+  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function prettify(id) {
+  return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// src/routes/portal.js
+var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
+function vanWeek() {
+  const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+  return d.toISOString().slice(0, 10);
+}
+var SETTINGS_KEY = "portal:settings";
+async function requireFullAccess(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle11(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (path === "/settings" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, SETTINGS_KEY).first();
+    let settings = {};
+    try {
+      settings = row ? JSON.parse(row.value) : {};
+    } catch {
+    }
+    return json({ ok: true, settings }, {}, env, request);
+  }
+  if (path === "/settings" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    await db.prepare(`
+      INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    `).bind(db.tenantId, SETTINGS_KEY, JSON.stringify(b || {})).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/menu-config" && method === "GET") {
+    const s = await requireSession(env, request);
+    if (!s) return error("Not authenticated", 401, env, request);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "menu:hidden").first();
+    let hidden = [];
+    try {
+      hidden = row ? JSON.parse(row.value) : [];
+    } catch {
+    }
+    if (!Array.isArray(hidden)) hidden = [];
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+  if (path === "/menu-config" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const hidden = Array.isArray(b.hidden) ? b.hidden.map(String).slice(0, 200) : [];
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(db.tenantId, "menu:hidden", JSON.stringify(hidden)).run();
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+  if (path === "/oncall/current" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const cur = async (role) => await db.prepare(
+      "SELECT name, set_by, set_at FROM oncall_log WHERE tenant_id=? AND role=? ORDER BY id DESC LIMIT 1"
+    ).bind(db.tenantId, role).first();
+    return json({ ok: true, engineer: await cur("engineer"), manager: await cur("manager") }, {}, env, request);
+  }
+  if (path === "/oncall/set" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const by = sess2.user.username;
+    const stmts = [];
+    if (b.engineer) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'engineer', ?, ?)").bind(db.tenantId, String(b.engineer), by));
+    if (b.manager) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'manager', ?, ?)").bind(db.tenantId, String(b.manager), by));
+    if (!stmts.length) return error("Nothing to set \u2014 send engineer and/or manager", 400, env, request);
+    await db.batch(stmts);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/oncall/history" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const { results } = await db.prepare(
+      "SELECT role, name, set_by, set_at FROM oncall_log WHERE tenant_id=? ORDER BY id DESC LIMIT 200"
+    ).bind(db.tenantId).all();
+    return json({ ok: true, history: results || [] }, {}, env, request);
+  }
+  if (path === "/daily-logs" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!b.engineer || !b.date) return error("engineer and date required", 400, env, request);
+    await db.prepare(`
+      INSERT INTO daily_logs (tenant_id, engineer, date, site, standard_hours, overtime_hours, travel_time, mileage, notes, submitted_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).bind(
+      db.tenantId,
+      b.engineer,
+      b.date,
+      b.site || null,
+      num(b.standardHours),
+      num(b.overtimeHours),
+      num(b.travelTime),
+      num(b.mileage),
+      b.notes || null,
+      sess2.user.username
+    ).run();
+    return json({ ok: true }, { status: 201 }, env, request);
+  }
+  if (path === "/daily-logs" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const conds = ["tenant_id = ?"], binds = [db.tenantId];
+    if (q.get("engineer")) {
+      conds.push("engineer = ?");
+      binds.push(q.get("engineer"));
+    }
+    if (q.get("from")) {
+      conds.push("date >= ?");
+      binds.push(q.get("from"));
+    }
+    if (q.get("to")) {
+      conds.push("date <= ?");
+      binds.push(q.get("to"));
+    }
+    let sql = "SELECT * FROM daily_logs";
+    sql += " WHERE " + conds.join(" AND ");
+    sql += " ORDER BY date DESC, id DESC LIMIT 500";
+    const { results } = await db.prepare(sql).bind(...binds).all();
+    return json({ ok: true, logs: results || [] }, {}, env, request);
+  }
+  if (path === "/prefs" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, prefs: profile.prefs || {} }, {}, env, request);
+  }
+  if (path === "/prefs" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) return error("Send an object of keys to merge", 400, env, request);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    const prefs = profile.prefs || {};
+    for (const k of Object.keys(b)) {
+      if (b[k] === null) delete prefs[k];
+      else prefs[k] = b[k];
+    }
+    if (JSON.stringify(prefs).length > 8e3) return error("Preferences too large", 400, env, request);
+    profile.prefs = prefs;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(profile), db.tenantId, sess2.user.username).run();
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/audit/pageview" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const page = String(b.page || "").slice(0, 80);
+    if (!/^[\w.-]+\.html$/.test(page)) return error("Bad page", 400, env, request);
+    await db.prepare(
+      "INSERT INTO audit_log (tenant_id, username, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
+    ).bind(db.tenantId, sess2.user.username, "VIEW", "/" + page, "", 200, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/audit/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(365, Math.max(1, Number(q.get("days")) || 7));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
+    if (q.get("user")) {
+      conds.push("username = ?");
+      binds.push(q.get("user"));
+    }
+    if (q.get("type") === "view") conds.push("method = 'VIEW'");
+    if (q.get("type") === "action") conds.push("method != 'VIEW'");
+    try {
+      await db.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run();
+    } catch {
+    }
+    const { results } = await db.prepare(
+      "SELECT username, method, path, detail, status, at, ref FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+  if (path === "/notify/log" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const action = String(b.action || "");
+    if (["shown", "snoozed", "dismissed", "opened"].indexOf(action) === -1)
+      return error("Bad action", 400, env, request);
+    const surface = String(b.surface || "").slice(0, 20);
+    const items = JSON.stringify(Array.isArray(b.items) ? b.items : []).slice(0, 4e3);
+    await db.prepare(
+      "INSERT INTO notify_log (tenant_id, username, action, surface, items, at) VALUES (?,?,?,?,?,?)"
+    ).bind(db.tenantId, sess2.user.username, action, surface, items, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/notify/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(90, Math.max(1, Number(q.get("days")) || 14));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
+    if (q.get("user")) {
+      conds.push("username = ?");
+      binds.push(q.get("user"));
+    }
+    const { results } = await db.prepare(
+      "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+  if (path === "/notify/feed/count" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const row = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
+    const { results } = await db.prepare(
+      "SELECT id, title, body, url, tag, created_at, read_at, actionable, resolved_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
+    ).bind(db.tenantId, sess.user.username, limit).all();
+    const items = (results || []).map((r) => ({
+      id: r.id,
+      title: r.title || "",
+      body: r.body || "",
+      url: r.url || "",
+      tag: r.tag || "",
+      at: r.created_at,
+      read: !!r.read_at,
+      // actionable-but-unresolved stays "outstanding" (bold, counts) until dealt with.
+      actionable: !!r.actionable,
+      resolved: !!r.resolved_at
+    }));
+    const cRow = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed/read" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const b = await request.json().catch(() => ({}));
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    if (b.seen) {
+      await db.prepare("UPDATE user_notifications SET seen_at=? WHERE tenant_id=? AND username=? AND seen_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
+    } else if (b.all) {
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND username=? AND (read_at IS NULL OR seen_at IS NULL)").bind(at, at, db.tenantId, sess.user.username).run();
+    } else if (b.id != null) {
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE id=? AND tenant_id=? AND username=?").bind(at, at, Number(b.id), db.tenantId, sess.user.username).run();
+    } else {
+      return error("Send seen:true, id, or all:true", 400, env, request);
+    }
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    return json({ ok: true, rules: await getRules(env, tenantId) }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const type = String(b.type || "");
+    if (SUPPRESS_TYPES.indexOf(type) === -1) return error("Bad type", 400, env, request);
+    const rule = {
+      id: "s" + Date.now(),
+      type,
+      user: b.user ? String(b.user) : null,
+      key: b.key != null && b.key !== "" ? String(b.key) : null,
+      label: String(b.label || "").slice(0, 140),
+      by: gate.sess.user.username,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const rules = (await getRules(env, tenantId)).filter((r) => !(r.type === rule.type && (r.user || null) === (rule.user || null) && (r.key || null) === (rule.key || null)));
+    rules.push(rule);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/suppress/remove" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rules = (await getRules(env, tenantId)).filter((r) => r.id !== id);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/overview" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const assetMap = {};
+    const confirmations = [];
+    try {
+      const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const r of results || []) {
+        let a;
+        try {
+          a = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        assetMap[a.id] = a.name || a.assetName || a.id;
+        const holder = String(a.assignedTo || "").trim();
+        if (a.confirm && a.confirm.status === "pending" && holder && holder.toLowerCase() !== "shared")
+          confirmations.push({ user: holder, key: String(a.id), name: assetMap[a.id] });
+      }
+    } catch {
+    }
+    const transfers = [];
+    try {
+      const { results } = await db.prepare(
+        "SELECT id, asset_id, to_user, requested_at FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+      ).bind(db.tenantId).all();
+      for (const t of results || [])
+        transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || "Asset " + t.asset_id, at: t.requested_at });
+    } catch {
+    }
+    const week = vanWeek();
+    const vehicleChecks = [];
+    const skippedVanChecks = [];
+    try {
+      const { results: drivers } = await db.prepare(
+        "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
+      ).bind(db.tenantId).all();
+      const { results: doneRows } = await db.prepare(
+        "SELECT username, items FROM vehicle_checks WHERE tenant_id=? AND week=?"
+      ).bind(db.tenantId, week).all();
+      const doneSet = new Set((doneRows || []).map((r) => r.username));
+      for (const u of drivers || [])
+        if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check \u2014 week of " + week });
+      for (const r of doneRows || []) {
+        try {
+          const it = r.items ? JSON.parse(r.items) : {};
+          if (it.skipped) skippedVanChecks.push({ user: r.username, week, by: it.skippedBy || "" });
+        } catch {
+        }
+      }
+    } catch {
+    }
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, skippedVanChecks, week }, {}, env, request);
+  }
+  return error("Unknown portal route", 404, env, request);
+}
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 // src/routes/sitelog.js
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
@@ -11091,7 +11310,7 @@ async function handle12(request, env, ctx, url, sess) {
   let res;
   try {
     if (env.SITELOG_DB) {
-      res = await handle11(new Request(target, init), env, ctx);
+      res = await handle9(new Request(target, init), env, ctx);
     } else {
       res = await fetch(target, init);
     }
@@ -16355,7 +16574,7 @@ async function sitelogAdminFetch(env, pathQuery, ms) {
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     try {
-      const res = await handle11(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      const res = await handle9(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
       if (res && res.ok) return res;
     } catch (e) {
     }
@@ -16415,7 +16634,7 @@ async function handle24(request, env, ctx, url, sess) {
         num2
       ).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog2(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
       return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/add") {
@@ -16440,7 +16659,7 @@ async function handle24(request, env, ctx, url, sess) {
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog2(env, name, ll.lat, ll.lng, client);
+      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
       return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
@@ -16662,13 +16881,7 @@ async function handle24(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const key = String(b.key || "").trim();
     if (!key) return error("key required", 400, env, request);
-    const fin = await cfgGet(env, tid, "proj_fin", {});
-    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
-    if (b.value !== void 0) cur.value = Math.max(0, Number(b.value) || 0);
-    if (b.planned !== void 0) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
-    if (b.name !== void 0) cur.name = String(b.name || "").slice(0, 120);
-    fin[key] = cur;
-    await cfgSet(env, tid, "proj_fin", fin);
+    const cur = await writeProjFin(env, tid, key, { value: b.value, planned: b.planned, name: b.name });
     return json({ ok: true, fin: cur }, {}, env, request);
   }
   if (path === "/costing/fin/valuation" && method === "POST") {
@@ -16708,6 +16921,7 @@ async function handle24(request, env, ctx, url, sess) {
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
     const projFin = await cfgGet(env, tid, "proj_fin", {});
     const bySite = {};
+    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
       return bySite[key] || (bySite[key] = {
@@ -16743,9 +16957,23 @@ async function handle24(request, env, ctx, url, sess) {
       map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
     };
     const slRate = {};
+    const seededProjects = {};
+    try {
+      const { results: projRows } = await env.DB.prepare(
+        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
+      ).bind(tid).all();
+      for (const p of projRows || []) {
+        const name = String(p.name || "").trim();
+        if (!name) continue;
+        const resolved = resolveSite(reg, name);
+        const s = siteFor(name, resolved);
+        const sKey = siteKeyOf2(resolved, name);
+        seededProjects[sKey] = { id: p.id, number: p.number };
+      }
+    } catch {
+    }
     const slSites = await fetchSitelogCosting(env, from, to);
     const slCovered = /* @__PURE__ */ new Set();
-    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     if (slSites) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
@@ -16849,12 +17077,59 @@ async function handle24(request, env, ctx, url, sess) {
         if (hrs > 0) addDay(site.labD, londonDate3(v.check_in_at), hrs * (rt.cost / rt.hrs));
       }
     }
+    try {
+      const projKeyById = {};
+      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
+      const projIds = Object.keys(projKeyById);
+      if (projIds.length) {
+        for (const pid of projIds) {
+          const { results } = await env.DB.prepare(
+            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
+          ).bind(tid, pid).all();
+          const sKey = projKeyById[pid];
+          const s = bySite[sKey];
+          if (!s) continue;
+          for (const r of results || []) {
+            const amt = Number(r.amount) || 0;
+            if (r.kind === "labour") {
+              s.cost = Math.round((s.cost + amt) * 100) / 100;
+              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
+              addDay(s.labD, r.date, amt);
+              const who = canonEng(r.username || "(manual)");
+              const eng = engFor(s, who);
+              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
+              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+              if (mins) {
+                s.onsiteMins += mins;
+                eng.mins += mins;
+                if (!eng.days) eng.days = /* @__PURE__ */ new Set();
+                eng.days.add(r.date);
+              }
+              addSrc(eng, "sla");
+            } else {
+              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
+              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
+              addDay(s.poD, r.date, amt);
+              const supName = (r.supplier || "").trim() || "Manual entry";
+              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+              sup.count++;
+              sup.total = Math.round((sup.total + amt) * 100) / 100;
+            }
+          }
+        }
+      }
+    } catch {
+    }
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
         ...s,
         key,
         // stable per-site id the front-end pins/hides/orders against
+        project: seededProjects[key] || null,
+        // { id, number } when this site IS a portal project
+        manualLabour: s.manualLabour || 0,
+        manualMaterials: s.manualMaterials || 0,
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost,
         poTotal,
@@ -17082,7 +17357,27 @@ async function buildDay(env, tid, user, date, reg) {
     const { results } = await env.DB.prepare(
       "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at"
     ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
-    const scans = (results || []).filter((s) => londonDate3(s.at) === date);
+    let scans = (results || []).filter((s) => londonDate3(s.at) === date);
+    if (!scans.length && env.SITELOG_DB) {
+      const from = new Date(dayStart).toISOString().slice(0, 10);
+      const to = new Date(dayEnd).toISOString().slice(0, 10);
+      try {
+        const visits2 = await fetchSitelogVisits(env, from, to);
+        const nameLike = jcNameLike;
+        for (const v of visits2 || []) {
+          const who = String(v.portal_username || "").trim() || nameLike(v);
+          if (String(who).toLowerCase() !== String(user).toLowerCase()) continue;
+          if (v.check_in_at && londonDate3(v.check_in_at) === date) {
+            scans.push({ at: v.check_in_at, direction: "in", site: v.site_code || v.site_name || "" });
+          }
+          if (v.check_out_at && londonDate3(v.check_out_at) === date) {
+            scans.push({ at: v.check_out_at, direction: "out", site: v.site_code || v.site_name || "" });
+          }
+        }
+        scans.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      } catch {
+      }
+    }
     const open = {};
     const visits = [];
     for (const s of scans) {
@@ -17269,7 +17564,7 @@ function parseLatLngPair(latIn, lngIn) {
   if (lat === 0 && lng === 0) return null;
   return { lat, lng };
 }
-async function pushSiteToSiteLog2(env, name, lat, lng, client) {
+async function pushSiteToSiteLog(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
     const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
@@ -17282,7 +17577,7 @@ async function pushSiteToSiteLog2(env, name, lat, lng, client) {
     let res;
     if (env.SITELOG_DB) {
       try {
-        res = await handle11(new Request(target, init), env);
+        res = await handle9(new Request(target, init), env);
       } catch (e) {
         res = null;
       }
@@ -17675,6 +17970,38 @@ async function ensure4(env) {
   } catch {
   }
 }
+async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
+  if (!costingKey) return null;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  const cur = fin[costingKey] || { value: 0, planned: 0, valuations: [] };
+  if (value !== void 0) cur.value = value === null ? 0 : Math.max(0, Number(value) || 0);
+  if (planned !== void 0) cur.planned = Math.max(0, Math.round(Number(planned) || 0));
+  if (name !== void 0) cur.name = String(name || "").slice(0, 120);
+  if (!Array.isArray(cur.valuations)) cur.valuations = [];
+  if ((!cur.value || cur.value === 0) && !cur.valuations.length && !cur.planned) {
+    delete fin[costingKey];
+  } else {
+    fin[costingKey] = cur;
+  }
+  await cfgSet(env, tid, "proj_fin", fin);
+  return fin[costingKey] || null;
+}
+async function renameProjFinKey(env, tid, oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return false;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[oldKey]) return false;
+  fin[newKey] = fin[oldKey];
+  delete fin[oldKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
+async function deleteProjFinKey(env, tid, costingKey) {
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[costingKey]) return false;
+  delete fin[costingKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
 async function cfgGet(env, tid, name, fallback) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
@@ -17881,6 +18208,18 @@ var SCHEME_DEFAULTS = {
     emYearly: { years: 1, amberDays: 90, redDays: 30 },
     pat: { years: 1, amberDays: 90, redDays: 30 },
     pv: { years: 1, amberDays: 90, redDays: 30 }
+  },
+  // Projects scheme — one row per portal project (auto-created on
+  // /project/create). Every project appears here so a lost approval /
+  // certificate has one canonical home. Types kept short + editable per project:
+  //   elec = Electrical Certificate (EICR / EIC / Minor Works)
+  //   gas  = Gas Safety Certificate
+  //   bldg = Building Control (approval / completion)
+  // "other" (drawings + everything else) is always available on every scheme.
+  projects: {
+    elec: { years: 5, amberDays: 90, redDays: 30 },
+    gas: { years: 1, amberDays: 90, redDays: 30 },
+    bldg: { years: 10, amberDays: 90, redDays: 30 }
   }
 };
 var DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;
@@ -17988,7 +18327,11 @@ var TYPE_LABELS = {
   forecourt: "EV/Forecourt",
   pump: "Pump",
   asbestos: "Asbestos Register",
-  other: "Other"
+  other: "Other",
+  // Projects scheme
+  elec: "Electrical Certificate",
+  gas: "Gas Safety",
+  bldg: "Building Control"
 };
 function typeOptionsFor(scheme) {
   const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
@@ -17996,7 +18339,7 @@ function typeOptionsFor(scheme) {
   if (!keys.includes("other")) keys.push("other");
   return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
 }
-var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "other"];
+var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "elec", "gas", "bldg", "other"];
 function canonType(t) {
   const s = String(t || "").toLowerCase();
   const exact = KNOWN_TYPES.find((k2) => k2.toLowerCase() === s);
@@ -18011,6 +18354,9 @@ function canonType(t) {
   if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
   if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
   if (/pump|sump/.test(s)) return "pump";
+  if (/build.*control|\bbldg\b|building/.test(s)) return "bldg";
+  if (/gas\s*safe|gas/.test(s)) return "gas";
+  if (/electr|\belec\b|eic\b|minor\s*works/.test(s)) return "elec";
   const k = s.replace(/[^a-z0-9]+/g, "");
   return k ? k.slice(0, 20) : "other";
 }
@@ -18238,6 +18584,23 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true }, headers);
   }
   if (sub === "/stores" && method === "GET") {
+    if (scheme === "projects") {
+      try {
+        const { results: projRows } = await env.DB.prepare(
+          "SELECT id, number, name, status FROM projects WHERE tenant_id=? AND status IN ('live','complete')"
+        ).bind(tid).all();
+        for (const p of projRows || []) {
+          const code = String(p.number || "").trim();
+          if (!code) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+              VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, p.name || null, code, (/* @__PURE__ */ new Date()).toISOString()).run();
+        }
+      } catch {
+      }
+    }
     if (scheme !== "coop") {
       try {
         await env.DB.prepare(
@@ -18423,6 +18786,24 @@ async function handle25(request, env, ctx, url, sess) {
        VALUES (?,?,?,?,?,?,?,1,?,?)
        ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(excluded.site_number, compliance_stores.site_number), updated_at=excluded.updated_at`
     ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), siteNo, at).run();
+    if (siteNo && (b.name != null || b.postcode != null)) {
+      try {
+        const s = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+        if (s) {
+          let d = {};
+          try {
+            d = JSON.parse(s.data || "{}");
+          } catch {
+          }
+          if (b.name != null) d.siteName = String(name || d.siteName || "").slice(0, 200);
+          if (b.postcode != null) d.postcode = String(postcode || "").slice(0, 20);
+          await env.DB.prepare(
+            "UPDATE sites SET site_name=?, postcode=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?"
+          ).bind(d.siteName || null, d.postcode || null, JSON.stringify(d), tid, s.client, siteNo).run();
+        }
+      } catch {
+      }
+    }
     return jr6({ ok: true, code, due, siteNumber: siteNo }, headers);
   }
   if (sub === "/store-meta" && method === "POST") {
@@ -18451,6 +18832,30 @@ async function handle25(request, env, ctx, url, sess) {
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2e3) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
     else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), scheme === "coop" ? await coopSiteNumber(env, tid, code) : null, at).run();
+    if ("lat" in b || "lng" in b) {
+      try {
+        const linkRow = await env.DB.prepare("SELECT site_number FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
+        const siteNo = linkRow && linkRow.site_number;
+        if (siteNo) {
+          const s = await env.DB.prepare("SELECT client, site_name, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+          if (s) {
+            let d = {};
+            try {
+              d = JSON.parse(s.data || "{}");
+            } catch {
+            }
+            if ("lat" in b) d.lat = meta.lat;
+            if ("lng" in b) {
+              d.lng = meta.lng;
+              d.lon = meta.lng;
+            }
+            await env.DB.prepare("UPDATE sites SET data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(d), tid, s.client, siteNo).run();
+            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client }));
+          }
+        }
+      } catch {
+      }
+    }
     return jr6({ ok: true, code, meta }, headers);
   }
   if (sub === "/store-delete" && method === "POST") {
@@ -20959,7 +21364,6 @@ async function handle29(request, env, ctx, url) {
 }
 
 // src/routes/projects-api.js
-var PROJ_FIN_KEY = (tid) => `proj_fin:${tid}`;
 var DOC_TYPES = [
   { key: "programme", label: "Programme of works" },
   { key: "rams", label: "Risk Assessment (RAMS)" },
@@ -20985,28 +21389,55 @@ async function ensureTables4(env) {
     id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, title TEXT, section TEXT,
     r2_key TEXT, name TEXT, type TEXT, hidden INTEGER DEFAULT 0,
     downloadable INTEGER DEFAULT 1, uploaded_by TEXT, uploaded_at TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS project_costs (
+    id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, kind TEXT,
+    date TEXT, username TEXT, hours REAL, rate REAL,
+    supplier TEXT, description TEXT, amount REAL,
+    created_by TEXT, created_at TEXT)`).run();
 }
-async function cfgGet2(db, key) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+async function setProjFinValue(env, tid, costingKey, value, name) {
+  return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
+}
+async function pushSiteToPO(env, name) {
   try {
-    return row && row.value ? JSON.parse(row.value) : null;
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare(
+      "INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1"
+    ).bind(String(name).trim()).run();
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
-async function cfgSet2(db, key, obj) {
-  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
+async function renameSiteInPO(env, oldName, newName) {
+  try {
+    if (!env.PO_DB) return false;
+    const a = String(oldName || "").trim(), b = String(newName || "").trim();
+    if (!a || !b || a === b) return false;
+    const clash = await env.PO_DB.prepare("SELECT id FROM sites WHERE name = ?").bind(b).first();
+    if (clash) {
+      await env.PO_DB.prepare("DELETE FROM sites WHERE name = ?").bind(a).run();
+      await env.PO_DB.prepare("UPDATE sites SET active = 1 WHERE name = ?").bind(b).run();
+    } else {
+      await env.PO_DB.prepare("UPDATE sites SET name = ? WHERE name = ?").bind(b, a).run();
+    }
+    try {
+      await env.PO_DB.prepare("UPDATE po_log SET site = ? WHERE site = ?").bind(b, a).run();
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
-async function setProjFinValue(db, costingKey, value, name) {
-  if (!costingKey) return;
-  const all = await cfgGet2(db, PROJ_FIN_KEY(db.tenantId)) || {};
-  const cur = all[costingKey] || { value: 0, planned: 1, valuations: [] };
-  cur.value = Number(value) || 0;
-  cur.name = name || cur.name;
-  if (!Array.isArray(cur.valuations)) cur.valuations = [];
-  if (!cur.planned) cur.planned = 1;
-  all[costingKey] = cur;
-  await cfgSet2(db, PROJ_FIN_KEY(db.tenantId), all);
+async function removeSiteFromPO(env, name) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare("UPDATE sites SET active = 0 WHERE name = ?").bind(String(name).trim()).run();
+    return true;
+  } catch {
+    return false;
+  }
 }
 async function applySiteLogRules(env, siteName, rules, visitorRules) {
   try {
@@ -21017,7 +21448,7 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
       const req = new Request(base + path, init);
       if (env.SITELOG_DB) {
         try {
-          const r = await handle11(req, env);
+          const r = await handle9(req, env);
           if (r && r.ok) return r;
         } catch {
         }
@@ -21083,8 +21514,30 @@ function projectView(row, data, fileCount) {
     contractValue: data.contractValue ?? null,
     links: data.links || {},
     costingKey: data.links && data.links.costingKey || normName2(row.name),
+    visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
     todo: computeTodo(row, data, fileCount)
   };
+}
+function canSeeProject(data, me, canManage) {
+  if (canManage) return true;
+  const list = Array.isArray(data && data.visibleTo) ? data.visibleTo : [];
+  if (!list.length) return true;
+  const u = String(me || "").toLowerCase();
+  return list.some((v) => String(v || "").toLowerCase() === u);
+}
+function sanitiseVisible(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [], seen = /* @__PURE__ */ new Set();
+  for (const x of v) {
+    const s = String(x || "").trim();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+    if (out.length >= 200) break;
+  }
+  return out;
 }
 async function handle30(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -21131,14 +21584,17 @@ async function handle30(request, env, ctx, url, sess) {
     const counts = {};
     const { results: fc } = await db.prepare("SELECT project_id, COUNT(*) AS n FROM project_files WHERE tenant_id=? GROUP BY project_id").bind(db.tenantId).all();
     for (const r of fc || []) counts[r.project_id] = Number(r.n) || 0;
-    let items = (results || []).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
+    let items = (results || []).filter((row) => canSeeProject(parse2(row), me, canManage)).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
     if (status) items = items.filter((p) => (p.status || "live") === status);
     return json({ ok: true, projects: items }, {}, env, request);
   }
   if (path === "/project/get" && method === "GET") {
     const row = await getRow(url.searchParams.get("id") || "");
     if (!row) return error("Project not found", 404, env, request);
-    return json({ ok: true, project: projectView(row, parse2(row), await fileCountFor(row.id)), canManage }, {}, env, request);
+    const data = parse2(row);
+    if (!canSeeProject(data, me, canManage)) return error("Project not found", 404, env, request);
+    if (canManage) ctx?.waitUntil(pushSiteToPO(env, row.name));
+    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage }, {}, env, request);
   }
   if (path === "/project/create" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);
@@ -21166,6 +21622,7 @@ async function handle30(request, env, ctx, url, sess) {
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
       links: { programmeId: "", ramsIds: [], cppRef: "", costingKey },
+      visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {}
     };
     await db.prepare(`INSERT INTO projects (id, tenant_id, number, name, site_client, site_number, status, data, created_by, created_at, updated_at)
@@ -21182,9 +21639,18 @@ async function handle30(request, env, ctx, url, sess) {
       now,
       now
     ).run();
-    if (required.valuations && contractValue) await setProjFinValue(db, costingKey, contractValue, name);
+    if (required.valuations && contractValue) await setProjFinValue(env, tenantId, costingKey, contractValue, name);
     if (data.sitelog.rules || data.sitelog.visitorRules) {
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
+    }
+    ctx?.waitUntil(pushSiteToPO(env, name));
+    try {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO compliance_stores
+          (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+          VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+      ).bind(tenantId, number, name, number, now).run();
+    } catch {
     }
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse2(row), 0) }, {}, env, request);
@@ -21195,6 +21661,7 @@ async function handle30(request, env, ctx, url, sess) {
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
     const data = parse2(row);
+    const oldName = row.name;
     let name = row.name, status = row.status;
     if (typeof b.name === "string" && b.name.trim()) name = b.name.trim().slice(0, 200);
     if (typeof b.status === "string" && ["live", "complete", "archived"].includes(b.status)) status = b.status;
@@ -21209,12 +21676,63 @@ async function handle30(request, env, ctx, url, sess) {
       if (Array.isArray(b.sitelog.companies)) data.sitelog.companies = b.sitelog.companies.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 60);
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
     }
+    const oldKey = data.links && data.links.costingKey || normName2(oldName);
+    const newKey = normName2(name);
     if (b.contractValue !== void 0) {
       data.contractValue = b.contractValue === null || b.contractValue === "" ? null : Number(b.contractValue);
-      const key = data.links && data.links.costingKey || normName2(name);
-      if (data.contractValue) await setProjFinValue(db, key, data.contractValue, name);
+      const key = newKey || oldKey;
+      await setProjFinValue(env, tenantId, key, data.contractValue, name);
+      data.links = data.links || {};
+      data.links.costingKey = key;
+    }
+    if (Array.isArray(b.visibleTo)) data.visibleTo = sanitiseVisible(b.visibleTo);
+    const renamed = name && oldName && name !== oldName;
+    if (renamed) {
+      await renameProjFinKey(env, tenantId, oldKey, newKey);
+      data.links = data.links || {};
+      data.links.costingKey = newKey;
+      try {
+        await env.DB.prepare("UPDATE sites SET site_name=?, data=json_patch(data, ?) WHERE tenant_id=? AND client='projects' AND site_number=?").bind(name, JSON.stringify({ siteName: name }), tenantId, row.number).run();
+      } catch {
+        try {
+          const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+          if (s) {
+            let d = {};
+            try {
+              d = JSON.parse(s.data || "{}");
+            } catch {
+            }
+            d.siteName = name;
+            await env.DB.prepare("UPDATE sites SET site_name=?, data=? WHERE tenant_id=? AND client='projects' AND site_number=?").bind(name, JSON.stringify(d), tenantId, row.number).run();
+          }
+        } catch {
+        }
+      }
+      ctx?.waitUntil(renameSiteInPO(env, oldName, name));
+      const lat = data.lat != null ? Number(data.lat) : null, lon = data.lon != null ? Number(data.lon) : null;
+      ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat, lon, client: "projects" }, oldName));
+      if (data.sitelog && (data.sitelog.rules || data.sitelog.visitorRules)) {
+        ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
+      }
     }
     await db.prepare("UPDATE projects SET name=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(name, status, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, row.id).run();
+    if (status !== row.status) {
+      const nowActive = status !== "archived";
+      try {
+        const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+        let sd = {};
+        try {
+          sd = JSON.parse(s?.data || "{}");
+        } catch {
+        }
+        sd.active = nowActive;
+        await env.DB.prepare("UPDATE sites SET active=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client='projects' AND site_number=?").bind(nowActive ? 1 : 0, JSON.stringify(sd), tenantId, row.number).run();
+        ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat: sd.lat, lon: sd.lon ?? sd.lng, client: "projects", active: nowActive }));
+        ctx?.waitUntil(syncSiteToCompliance(env, tenantId, { siteNumber: row.number, siteName: name, postcode: sd.postcode, lat: sd.lat, lon: sd.lon ?? sd.lng, active: nowActive }));
+        ctx?.waitUntil(setPOSiteActive(env, name, nowActive));
+      } catch {
+      }
+    }
     const fresh = await getRow(row.id);
     return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id)) }, {}, env, request);
   }
@@ -21328,11 +21846,263 @@ async function handle30(request, env, ctx, url, sess) {
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
     return json({ ok: true }, {}, env, request);
   }
+  if (path === "/project/create-job" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {
+    }
+    let siteData = {};
+    try {
+      if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
+    } catch {
+    }
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0;
+    const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : void 0;
+    const payload = {
+      description,
+      projectId: row.id,
+      siteCode: row.number,
+      siteName: row.name,
+      storeType: "projects",
+      address: siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ") || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: siteRow && siteRow.postcode || data.postcode || "",
+      lat: data.lat != null ? data.lat : siteData.lat != null ? siteData.lat : void 0,
+      lon: data.lon != null ? data.lon : siteData.lng != null ? siteData.lng : siteData.lon != null ? siteData.lon : void 0,
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : void 0,
+      assignedEngineers: engineers,
+      scheduledAt,
+      durationMinutes,
+      // Projects default all four gates OFF (RA/sig/photo/note) — matches the
+      // add-job.html Projects rule. Explicit values from the form still win.
+      requiresRA: b.requiresRA === true,
+      requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true,
+      requiresNote: b.requiresNote === true,
+      changedBy: me
+    };
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+    }));
+    return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+  if (path === "/project/visits" && method === "GET") {
+    const row = await getRow(url.searchParams.get("id") || "");
+    if (!row) return error("Project not found", 404, env, request);
+    const dataP = parse2(row);
+    if (!canSeeProject(dataP, me, canManage)) return error("Project not found", 404, env, request);
+    const wantName = String(row.name || "").toLowerCase();
+    const wantNum = String(row.number || "").toLowerCase();
+    const all = await listJobs(env, tenantId);
+    const projectJobs = all.filter((j) => {
+      if (String(j.projectId || "") === row.id) return true;
+      const sc = String(j.siteCode || "").toLowerCase(), sn = String(j.siteName || "").toLowerCase();
+      return wantNum && (sc === wantNum || sn === wantNum) || wantName && sn === wantName;
+    });
+    const jobIds = projectJobs.map((j) => String(j.id));
+    const segs = [];
+    for (const jid of jobIds) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT id, username, job_id, job_ref, started_at, ended_at, kind FROM job_time_segments WHERE tenant_id=? AND job_id=? ORDER BY started_at"
+        ).bind(tenantId, jid).all();
+        for (const s of results || []) segs.push(s);
+      } catch {
+      }
+    }
+    let manualLab = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, username, date, hours, amount, description FROM project_costs WHERE tenant_id=? AND project_id=? AND kind='labour' ORDER BY date"
+      ).bind(tenantId, row.id).all();
+      manualLab = results || [];
+    } catch {
+    }
+    if (!jobIds.length && !manualLab.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
+    const dayOf = (iso) => String(iso || "").slice(0, 10);
+    const minsOf = (a, b) => {
+      const s = Date.parse(a || ""), e = Date.parse(b || "");
+      if (!Number.isFinite(s)) return 0;
+      const end = Number.isFinite(e) ? e : Date.now();
+      return Math.max(0, Math.round((end - s) / 6e4));
+    };
+    const visitMap = /* @__PURE__ */ new Map();
+    for (const s of segs) {
+      const user = s.username || "";
+      const date = dayOf(s.started_at);
+      const key = user + "|" + date + "|" + s.job_id;
+      let v = visitMap.get(key);
+      if (!v) {
+        v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false, manual: false, cost: 0, note: "" };
+        visitMap.set(key, v);
+      }
+      const m = minsOf(s.started_at, s.ended_at);
+      if ((s.kind || "onsite") === "travel") v.travelMins += m;
+      else v.onsiteMins += m;
+      if (!s.ended_at) v.live = true;
+    }
+    for (const r of manualLab) {
+      const user = r.username || "";
+      const date = String(r.date || "").slice(0, 10);
+      const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+      visitMap.set("m|" + r.id, {
+        date,
+        user,
+        jobId: "",
+        jobRef: "Manual shift",
+        onsiteMins: mins,
+        travelMins: 0,
+        live: false,
+        manual: true,
+        cost: Number(r.amount) || 0,
+        note: r.description || ""
+      });
+    }
+    const meLower = String(me).toLowerCase();
+    const normId2 = (u) => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
+    if (!canManage) {
+      const meNorm = normId2(me);
+      visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm).map((v) => {
+        const { cost, rate, amount, ...rest } = v;
+        return rest;
+      });
+    }
+    const perUser = [];
+    if (canManage) {
+      const byU = /* @__PURE__ */ new Map();
+      for (const v of Array.from(visitMap.values())) {
+        let r = byU.get(v.user);
+        if (!r) {
+          r = { user: v.user, visits: 0, days: /* @__PURE__ */ new Set(), onsiteMins: 0, travelMins: 0 };
+          byU.set(v.user, r);
+        }
+        r.visits++;
+        r.days.add(v.date);
+        r.onsiteMins += v.onsiteMins;
+        r.travelMins += v.travelMins;
+      }
+      for (const r of byU.values()) perUser.push({ user: r.user, visits: r.visits, days: r.days.size, onsiteMins: r.onsiteMins, travelMins: r.travelMins });
+      perUser.sort((a, b) => b.onsiteMins + b.travelMins - (a.onsiteMins + a.travelMins));
+    }
+    const jobs = projectJobs.map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      description: j.description || "",
+      status: j.status || "Pending",
+      scheduledAt: j.scheduledAt || null,
+      engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [],
+      firestopping: !!j.firestopping,
+      investigateOnly: !!j.investigateOnly
+    })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
+    return json({ ok: true, canManage, jobs, visits, perUser }, {}, env, request);
+  }
+  if (path === "/project/costs" && method === "GET") {
+    if (!canManage) return json({ ok: true, costs: [], canManage: false }, {}, env, request);
+    const pid = url.searchParams.get("id") || "";
+    if (!await getRow(pid)) return error("Project not found", 404, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM project_costs WHERE tenant_id=? AND project_id=? ORDER BY date DESC, created_at DESC"
+    ).bind(tenantId, pid).all();
+    const rows = (results || []).map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      date: r.date,
+      username: r.username || "",
+      hours: r.hours != null ? Number(r.hours) : null,
+      rate: r.rate != null ? Number(r.rate) : null,
+      supplier: r.supplier || "",
+      description: r.description || "",
+      amount: Number(r.amount) || 0,
+      createdBy: r.created_by,
+      createdAt: r.created_at
+    }));
+    return json({ ok: true, costs: rows, canManage }, {}, env, request);
+  }
+  if (path === "/project/cost" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const kind = b.kind === "material" ? "material" : "labour";
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const description = String(b.description || "").slice(0, 400);
+    let username = "", hours = null, rate = null, amount = 0, supplier = "";
+    if (kind === "labour") {
+      username = String(b.username || "").trim();
+      if (!username) return error("Engineer required", 400, env, request);
+      hours = Number(b.hours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return error("Hours must be between 0 and 24", 400, env, request);
+      const explicit = Number(b.rate);
+      if (Number.isFinite(explicit) && explicit > 0) rate = explicit;
+      else {
+        const rates = await ratesMap(env, tenantId);
+        const r = rates[username];
+        rate = r && r.rateType === "hour" ? r.rate : null;
+      }
+      amount = rate ? Math.round(hours * rate * 100) / 100 : 0;
+    } else {
+      supplier = String(b.supplier || "").trim().slice(0, 120);
+      const amt = Number(b.amount);
+      if (!Number.isFinite(amt) || amt <= 0) return error("Amount required", 400, env, request);
+      amount = Math.round(amt * 100) / 100;
+      if (!description) return error("Description required", 400, env, request);
+    }
+    const id = newId3("PC");
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare(`INSERT INTO project_costs
+      (id, tenant_id, project_id, kind, date, username, hours, rate, supplier, description, amount, created_by, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      id,
+      tenantId,
+      row.id,
+      kind,
+      date,
+      username,
+      hours,
+      rate,
+      supplier,
+      description,
+      amount,
+      me,
+      now
+    ).run();
+    return json({ ok: true, id, amount }, {}, env, request);
+  }
+  if (path === "/project/cost-delete" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.costId || "");
+    if (!id) return error("costId required", 400, env, request);
+    await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/project/push-po" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const ok = await pushSiteToPO(env, row.name);
+    return json({ ok, poBound: !!env.PO_DB }, {}, env, request);
+  }
   if (path === "/project/delete" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const key = data.links && data.links.costingKey || normName2(row.name);
     const { results } = await db.prepare("SELECT r2_key FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).all();
     for (const f of results || []) {
       try {
@@ -21341,8 +22111,49 @@ async function handle30(request, env, ctx, url, sess) {
       }
     }
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).run();
+    try {
+      await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND project_id=?").bind(tenantId, row.id).run();
+    } catch {
+    }
+    try {
+      await env.DB.prepare("DELETE FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).run();
+    } catch {
+    }
+    try {
+      await deleteProjFinKey(env, tenantId, key);
+    } catch {
+    }
+    try {
+      const jobs = await listJobs(env, tenantId);
+      for (const j of jobs) {
+        if (j.projectId === row.id) {
+          try {
+            j.projectId = null;
+            await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(j), tenantId, j.id).run();
+          } catch {
+          }
+        }
+      }
+    } catch {
+    }
+    try {
+      const { results: cf } = await env.DB.prepare(
+        "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?"
+      ).bind(tenantId, row.number).all();
+      for (const f of cf || []) {
+        try {
+          await env.JOB_FILES.delete(f.r2_key);
+        } catch {
+        }
+      }
+      await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+      await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+    } catch {
+    }
+    ctx?.waitUntil(removeSiteFromPO(env, row.name));
+    ctx?.waitUntil(removeSiteFromSiteLog(env, row.name, { archive: true }));
     await db.prepare("DELETE FROM projects WHERE tenant_id=? AND id=?").bind(db.tenantId, row.id).run();
-    return json({ ok: true }, {}, env, request);
+    return json({ ok: true, cascaded: { po: true, sitelog: true, projFin: true, pxxxSite: true } }, {}, env, request);
   }
   return error("Unknown projects route", 404, env, request);
 }
@@ -21382,15 +22193,15 @@ var ROUTES = [
   // company memos (draft/send/sign)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
-  ["*", "/get-sites", handle9],
-  ["*", "/add-site", handle9],
-  ["*", "/update-site", handle9],
-  ["*", "/delete-site", handle9],
-  ["*", "/next-project-job-number", handle9],
-  ["*", "/upload-image", handle9],
-  ["*", "/customers", handle9],
-  ["*", "/import-sites", handle9],
-  ["*", "/sites", handle9],
+  ["*", "/get-sites", handle10],
+  ["*", "/add-site", handle10],
+  ["*", "/update-site", handle10],
+  ["*", "/delete-site", handle10],
+  ["*", "/next-project-job-number", handle10],
+  ["*", "/upload-image", handle10],
+  ["*", "/customers", handle10],
+  ["*", "/import-sites", handle10],
+  ["*", "/sites", handle10],
   // /sites/street-images (bulk imagery)
   ["*", "/sites/register", handle24],
   // master site register (longest prefix wins over /sites)
@@ -21402,16 +22213,16 @@ var ROUTES = [
   // needs-a-human-eye list
   ["*", "/compliance", handle25],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/settings", handle10],
-  ["*", "/oncall", handle10],
-  ["*", "/daily-logs", handle10],
-  ["*", "/notify", handle10],
+  ["*", "/settings", handle11],
+  ["*", "/oncall", handle11],
+  ["*", "/daily-logs", handle11],
+  ["*", "/notify", handle11],
   // notification audit log
-  ["*", "/prefs", handle10],
+  ["*", "/prefs", handle11],
   // per-user cross-device markers
-  ["*", "/menu-config", handle10],
+  ["*", "/menu-config", handle11],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle10],
+  ["*", "/audit", handle11],
   // activity log (page views + viewer)
   ["*", "/sitelog", handle12],
   ["*", "/sitelog-launch", handle12],
@@ -21444,7 +22255,7 @@ var index_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
-      return handle11(request, env, ctx);
+      return handle9(request, env, ctx);
     }
     if (request.method === "OPTIONS") return preflight(env, request);
     if (url.pathname === "/" || url.pathname === "/health") {

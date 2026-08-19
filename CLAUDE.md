@@ -1694,6 +1694,161 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Projects compliance chart (Aug 2026):** a third compliance scheme
+  **`projects`** joins `coop` + `fareham`. Types: **elec** (Electrical
+  Certificate, 5y), **gas** (Gas Safety, 1y), **bldg** (Building Control, 10y),
+  plus **other** for drawings + everything else. Wired end-to-end:
+  - `SCHEME_DEFAULTS.projects` + TYPE_LABELS + KNOWN_TYPES + `canonType` all
+    recognise the new keys.
+  - `/project/create` inserts a `compliance_stores` row (`scheme='projects'`,
+    `code=<Pxxxx>`, `site_number=<Pxxxx>`) so every project appears on the
+    chart from day one.
+  - `/compliance/stores?scheme=projects` self-heals: any live/complete project
+    without a compliance row is INSERT-OR-IGNORE'd on GET, backfilling anything
+    the create hook missed.
+  - `/project/delete` cascades to compliance_files (R2 + DB) and compliance_stores.
+  - Archive cascade already carries: project.status=archived → Pxxxx site inactive
+    → syncSiteToCompliance sets `compliance_stores.active=0` → project appears in
+    the chart's Closed Sites view.
+  - **compliance-projects.html** (new page, copied from fareham.html and
+    adapted): `SCHEME='projects'`, columns Electrical/Gas/Building Control,
+    "Add site" replaced with a redirect to the Projects wizard (this chart is
+    read-only for project creation — the projects area owns it).
+  - **compliance.html** landing page now offers Projects alongside Southern
+    Co-op and Fareham.
+- **Centralisation pass (Aug 2026):** the portal now propagates edits between
+  its parallel stores so one source of truth stays in step.
+  - **Sites → SiteLog** is now UPSERT (not add-only): `sitelog-api.js`
+    `/upsert-site` and `/delete-site` accept a name+coord change (or an
+    `oldName` for rename). `sites.js syncSiteToSiteLog(site, oldName?)` fires on
+    every /add-site + /update-site, and `removeSiteFromSiteLog` (soft-archive)
+    fires on /delete-site — postcode/coord/rename edits and deletes propagate
+    to the geofence instead of being silently ignored.
+  - **Projects cascade on rename + delete:** `/project/update` — when the name
+    changes — renames the Pxxxx `sites` row, calls **`renameSiteInPO`** (which
+    also rewrites historical `po_log.site` so costing rolls up onto the new
+    name), fires `syncSiteToSiteLog(oldName)` and re-applies the arrival
+    rules, and calls **`renameProjFinKey`** so the contract-value carries
+    across. `/project/delete` cascades to project_files (R2), project_costs,
+    the Pxxxx `sites` row, `proj_fin` (`deleteProjFinKey`), soft-delete on
+    PO's site (active=0 keeps historical po_log rows), soft-archive on the
+    SiteLog geofence, and nulls out `job.projectId` on any linked SLA jobs
+    (jobs are kept). Response returns `cascaded` for visibility.
+  - **Contract value: single writer.** `costing.js` exports
+    **`writeProjFin(env,tid,key,{value,planned,name})`** (+ `renameProjFinKey`
+    / `deleteProjFinKey`). Both `/costing/fin` and `/project/update` now go
+    through it, so the two pages share ONE code path (no drift, null clears).
+  - **Compliance PDFs on Site Documents.** `/sla/site/docs` GET now injects
+    a **"Compliance Certificates"** area for any site that matches a
+    compliance store (by `site_number` OR the compliance `code`). Files stream
+    via signed `/compliance/file` URLs. Each row carries `complianceDoc:true`
+    and site-folder.html shows a "· from compliance chart" hint + hides
+    Delete (managed on the chart).
+  - **Compliance ↔ Sites bidirectional edits.** `/store` name/postcode edits
+    cascade to the linked `sites` row (`site_name` + `postcode` + `data`).
+    `/store-meta` lat/lng edits cascade to `sites.data.lat/lng` AND fire
+    `syncSiteToSiteLog` so the SiteLog geofence moves too. In reverse,
+    `sites.js /update-site` mirrors name / postcode / lat / lng into any
+    linked `compliance_stores` row via **`syncSiteToCompliance`** — so an
+    admin can edit in either place and the other tracks.
+  - **sitelog_scans fallback.** `buildDay` (costing.js) now falls back to
+    live `SITELOG_DB.visits` when the local `sitelog_scans` mirror has no
+    rows for the day — exceptions/mismatch detection keeps working even if
+    the HMAC bridge is dark, so `/costing/summary` £s and `/exceptions`
+    stay consistent.
+- **Project docs surface as "Site Documents" (Aug 2026):** the SLA
+  **`/sla/site/docs`** GET now injects a **"Project Documents"** area whenever
+  the requested siteCode matches a portal project's number
+  (`SELECT id FROM projects WHERE number=? OR site_number=?`). Files come from
+  `project_files` (non-hidden only) with a signed URL pointing at
+  `/project/doc` (CORS-enabled, PUBLIC_ROUTES sig-verified). Effect:
+  **site-folder.html** shows the project's docs as a first tab, and
+  **engineer-job.html** — whose "Site documents" button navigates to
+  site-folder — surfaces them too. A `projectDoc:true` marker on each row makes
+  site-folder show a "· from project" hint and HIDE the Delete button (project
+  docs are managed on the project hub). Also: **project-hub.html's doc opener
+  was fixed** — it was calling `MLDocViewer.open(url, name)` (positional)
+  instead of the object form docviewer expects, so the modal never sniffed the
+  PDF; now passes `{url,fetchUrl,name,downloadUrl}` so PDFs render inline.
+  **"🔄 Sync to PO" button** added to the P&L card header — a one-tap admin
+  backfill (`POST /project/push-po`) for projects created before the auto-push
+  landed (SCF Furniture). The hub also opportunistically re-runs pushSiteToPO
+  on every /project/get, so opening a project once is enough.
+- **Auto-push project site to PO + manual labour/materials + P&L (Aug 2026):**
+  Creating a project now **auto-registers its site name in the PO system's
+  `sites` table** (env.PO_DB) via `pushSiteToPO()` (add-only, idempotent), so a
+  PO raised for the project can pick it — and once priced, its cost automatically
+  appears against the project in job-costing (costing.js already matches
+  `po_log.site` by name). Existing projects self-heal on the next
+  /project/get, and there's a **POST /project/push-po** admin backfill (called
+  from a hub button when needed). NEW table **`project_costs`** (self-migrating)
+  + endpoints: **GET /project/costs**, **POST /project/cost** (kind=labour → the
+  hours are auto-costed from the engineer's `engts:cfg` rate — an explicit
+  override in £/hr wins; kind=material → £ ex-VAT + supplier), **POST
+  /project/cost-delete**. Manual entries are folded into `/costing/summary` for
+  the project's site: labour → `s.cost` + per-engineer + `s.manualLabour`;
+  materials → `s.poTotal` + `s.manualMaterials` + a supplier row (default
+  "Manual entry"). Front-end (project-hub.html "💷 Job costing & P&L" card):
+  clear headline (Contract value · Total cost · Projected profit/loss · Margin
+  %; green/red by sign), a 4-line **breakdown** (Captured labour · Manual
+  labour · PO materials · Manual materials), the People + Suppliers rows as
+  before, and two admin-only mini-forms: **Log a labour shift** (engineer +
+  date + hours + optional rate override + note) and **Add a material cost**
+  (date + description + supplier + £ ex-VAT). Every manual entry lists below
+  with a delete button. `ratesMap` is now exported from costing.js so
+  projects-api.js can snapshot the rate at entry time.
+- **Jobs & site visits from the project (Aug 2026):** every SLA job now carries
+  an optional **`job.projectId`** (`createOrUpdateJobFromPayload` + `patchJob`
+  accept + preserve it); a job raised from a project is stamped with the
+  project's id so the project can list its jobs and roll up per-engineer visits.
+  New endpoints on projects-api.js:
+  **POST /project/create-job** `{id, description, engineers[], scheduledAt?,
+  durationMinutes?}` (ProjectsAdmin|FullAccess) — creates a **multi-engineer**
+  SLA job in one shot, prefilled from the project's own Pxxxx site
+  (address/postcode/coords), gates all four requirements OFF by default (the
+  Projects rule) and stamps `projectId`; runs through the normal SLA path
+  (`createOrUpdateJobFromPayload` + `reconcileRelease` → assignment push).
+  **GET /project/visits?id=<PID>** — returns `{jobs, visits, perUser}`.
+  Matches jobs by `projectId` first, else by the project's site name/number
+  (legacy jobs). Each visit is one (user, day, job) row aggregated from
+  **`job_time_segments`** (status-tap timing — works whether the site is
+  scanned via SiteLog or not, per Jamie's spec). **Non-manager viewers see only
+  their OWN visits** (case-insensitive + normId match); **admins see all + a
+  `perUser` summary** (days · visits · on-site + travel mins). Front-end:
+  project-hub.html "🛠 Jobs & site visits" card — admin gets a "Create a job"
+  mini-form (description + Start/duration + a filtered engineer tick-list,
+  field engineers first) that POSTs /project/create-job; underneath, every
+  project job (link → job-view) + visits list (grouped by day, "LIVE" chip on
+  open segments) + per-engineer summary with a "open in Job Costing →"
+  shortcut. The seeded project row on /costing/summary now automatically
+  reflects those visits' cost (labour ledger already reads
+  job_time_segments).
+- **Project ↔ Job Costing deep-link (Aug 2026):** every live/complete portal
+  project is now **seeded into `/costing/summary`** even at £0 — so a brand-new
+  project appears on **job-costing.html** the moment it's created, ready for the
+  admin to set its contract value + valuations. The seeded row goes through
+  `resolveSite`, so once real labour/PO activity lands, it merges into the same
+  row (no duplicate). Returned rows carry a `project:{id,number}` field when the
+  site IS a portal project; job-costing shows a **📁 PROJECT Pxxxx chip** on
+  those cards. The project-hub.html "💷 Job costing" card + the To-Do row's
+  "View valuations" button + the "Manage valuations →" link all target
+  **`/job-costing.html?project=<id>&site=<name>&back=hub`**; job-costing.html
+  reads those params, defaults to **All time** so a new project is always
+  visible, auto-expands + scrolls to that site card, and rewrites its **‹ Back**
+  to `/project-hub.html?id=<id>`. The site is matched by `project.id` first (so a
+  renamed project still resolves), else by key/name.
+- **Per-project visibility (Aug 2026):** `data.visibleTo` = array of usernames.
+  Empty/missing = visible to **everyone with the Projects permission** (default).
+  Non-empty = only those usernames see it in **projects-live.html** / can open
+  its **project-hub.html**. **FullAccess|ProjectsAdmin always see every project**
+  regardless of the list (they manage). Enforced server-side in projects-api.js
+  `canSeeProject(data, me, canManage)` on both **GET /projects/list** (filter)
+  and **GET /project/get** (404 to a non-viewer, so a direct link can't leak).
+  UI: **project-new.html** step 2 has a "👥 Who can see this project?" section
+  (radio: everyone / only-picked → checkbox list of active users, searchable);
+  **project-hub.html** shows a matching **👥 Who can see this project** card
+  (admins only — same UI) saving via **POST /project/update** `{visibleTo:[…]}`.
+  Case-insensitive match; `sanitiseVisible` dedupes/caps 200.
 - **Endpoints (routes/projects-api.js, mounted /project + /projects):** GET
   /projects/list, GET /project/get, POST /project/create|update|link|todo|delete
   (manage=ProjectsAdmin|FullAccess), GET /project/docs, POST /project/doc (multipart)

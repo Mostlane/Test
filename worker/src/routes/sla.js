@@ -1389,6 +1389,69 @@ export async function handle(request, env, ctx, url, sess) {
         size: o.size
       })))).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     }
+    // If this site IS a portal project's site (siteCode matches its Pxxxx
+    // number), inject the project's own documents as a "Project Documents"
+    // area — engineers on the job and Sites both surface them here without a
+    // separate lookup. Non-hidden files only.
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        const proj = await env.DB.prepare(
+          "SELECT id FROM projects WHERE tenant_id=? AND (number=? OR site_number=?) LIMIT 1"
+        ).bind(tenantId, raw, raw).first();
+        if (proj) {
+          const { results: pfs } = await env.DB.prepare(
+            "SELECT id, r2_key, title, name, uploaded_at, uploaded_by FROM project_files WHERE tenant_id=? AND project_id=? AND (hidden=0 OR hidden IS NULL) ORDER BY uploaded_at DESC"
+          ).bind(tenantId, proj.id).all();
+          if ((pfs || []).length) {
+            const AREA = "Project Documents";
+            if (!areas.includes(AREA)) areas.unshift(AREA);
+            docs[AREA] = await Promise.all(pfs.map(async f => ({
+              url: await signedFileUrl(env, url.origin, "/project/doc", f.r2_key, 86400),
+              key: f.r2_key,
+              name: f.title || f.name || f.r2_key.split("/").pop(),
+              at: f.uploaded_at, by: f.uploaded_by, size: 0,
+              projectDoc: true,   // marker: engineers/office see it but can't delete via /site/doc-delete
+            })));
+          }
+        }
+      }
+    } catch {}
+    // Compliance certificates — the same files eicr-portal / fareham chart
+    // shows. Surface them here as a "Compliance Certificates" area so an
+    // engineer opening Site Documents finds a store's EICR / PAT / EM etc.
+    // without leaving the page. Non-destructive read; delete/upload still
+    // owned by the compliance chart. Matches by site_number → compliance_stores
+    // via siteKeyOf-of-the-request (portal site number OR compliance code).
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        // Two match paths: (a) the compliance store links directly to this site's
+        // number, (b) the compliance code IS the request code (Co-op stores).
+        const { results: files } = await env.DB.prepare(
+          `SELECT f.id, f.scheme, f.code, f.type, f.year, f.filename, f.label, f.r2_key, f.uploaded_at, f.uploaded_by
+             FROM compliance_files f
+             LEFT JOIN compliance_stores s
+                    ON s.tenant_id = f.tenant_id AND s.scheme = f.scheme AND s.code = f.code
+            WHERE f.tenant_id = ?
+              AND (s.site_number = ? OR f.code = ?)
+            ORDER BY f.uploaded_at DESC`
+        ).bind(tenantId, raw, raw).all();
+        if ((files || []).length) {
+          const AREA = "Compliance Certificates";
+          if (!areas.includes(AREA)) areas.unshift(AREA);
+          const TYPE_LBL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly", emYearly: "EM Yearly", pv: "PV", ev: "EV", forecourt: "EV", pump: "Pump", other: "Other" };
+          docs[AREA] = await Promise.all(files.map(async f => ({
+            url: await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 86400),
+            key: f.r2_key,
+            name: (f.label || f.filename || f.r2_key.split("/").pop())
+              + " · " + (TYPE_LBL[f.type] || f.type || "compliance"),
+            at: f.uploaded_at, by: f.uploaded_by, size: 0,
+            complianceDoc: true,   // marker: managed on the compliance chart
+          })));
+        }
+      }
+    } catch {}
     return jsonResponse({ areas, docs }, headers);
   }
 
@@ -1865,7 +1928,7 @@ async function pushJobToEngineers(env, tid, job, engineerIds) {
 }
 // First-time announcement: if the job is visible + has engineers + hasn't been
 // announced, push ALL its engineers and mark it notified (persisting the flag).
-async function reconcileRelease(env, tid, job, allJobs) {
+export async function reconcileRelease(env, tid, job, allJobs) {
   if (!job || job.releaseNotified) return false;
   const engs = assignedList(job);
   if (!engs.length) return false;
@@ -1946,7 +2009,7 @@ async function getShift(env, tenantId, username, date) {
   return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
 }
 
-async function listJobs(env, tenantId) {
+export async function listJobs(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
   return (results || []).map(r => JSON.parse(r.data));
@@ -1998,7 +2061,7 @@ async function saveJob(env, tenantId, job) {
 
 /* ================= CREATE / PATCH ================= */
 
-async function createOrUpdateJobFromPayload(env, tenantId, body) {
+export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig(env, tenantId);
   const id = body.id || body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
@@ -2089,6 +2152,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
+    // Portal-project link: set when this job was raised from a project hub, so
+    // the project can list its jobs + roll up per-engineer visits. Preserved.
+    projectId: body.projectId !== undefined ? (String(body.projectId || "") || null) : (existing?.projectId || null),
     scheduledAt,
     scheduledEnd,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
@@ -2171,6 +2237,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
+  if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {

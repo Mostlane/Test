@@ -46,6 +46,15 @@
     .editrow input[type=checkbox] { width:19px; height:19px; }
     .drop { border:2px dashed #b9c6d6; border-radius:12px; padding:16px; text-align:center; color:#6b7a90; cursor:pointer; font-size:13.5px; }
     .drop.over { background:#eef4ff; border-color:var(--brand); }
+    /* Collapsible cards — each section is a <details class="card"> with a
+       <summary> heading. State persisted per-project in localStorage. */
+    details.card { padding:0; overflow:hidden; }
+    details.card > summary { list-style:none; cursor:pointer; padding:14px 40px 14px 16px; font-size:16px; font-weight:600; position:relative; user-select:none; }
+    details.card > summary::-webkit-details-marker { display:none; }
+    details.card > summary::after { content:"▾"; position:absolute; right:16px; top:14px; color:#6b7a90; font-size:13px; transition:transform .15s; }
+    details.card:not([open]) > summary::after { transform:rotate(-90deg); }
+    details.card > summary h2 { display:inline; font-size:inherit; font-weight:inherit; margin:0; }
+    details.card > .card-body { padding:0 16px 16px; }
   </style>
 </head>
 <body>
@@ -66,15 +75,35 @@
       return fetch((path.startsWith("http") ? path : API + path), opts);
     }
     const PID = new URLSearchParams(location.search).get("id") || "";
-    let P = null, CAN = false, RAMS_DOCS = [];
+    let P = null, CAN = false, FIELD = false, RAMS_DOCS = [];
 
     (async () => {
       try {
         const me = await authFetch("/auth/me").then(r => r.json());
         if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Projects === "Yes" || me.user.ProjectsAdmin === "Yes")) { alert("This page needs Projects access."); location.href = "/main.html"; return; }
+        FIELD = String(me.user.StaffType || "").toLowerCase() === "field";
       } catch (e) { location.href = "/main.html"; return; }
       await loadProject();
     })();
+
+    // Wrap a card body as a <details> that remembers its open/closed state per
+    // project (localStorage). Default open state per key set via `defOpen`.
+    function sectCard(key, title, bodyHtml, defOpen) {
+      const storeKey = "mlProjHubOpen:" + PID + ":" + key;
+      let open;
+      try { const v = localStorage.getItem(storeKey); open = v == null ? !!defOpen : v === "1"; } catch { open = !!defOpen; }
+      return `<details class="card" ${open ? "open" : ""} data-collapse="${esc(key)}">
+        <summary><h2>${title}</h2></summary>
+        <div class="card-body">${bodyHtml}</div>
+      </details>`;
+    }
+    function wireCollapse() {
+      document.querySelectorAll("details.card[data-collapse]").forEach(d => {
+        d.addEventListener("toggle", () => {
+          try { localStorage.setItem("mlProjHubOpen:" + PID + ":" + d.dataset.collapse, d.open ? "1" : "0"); } catch {}
+        });
+      });
+    }
 
     async function loadProject() {
       let d;
@@ -93,9 +122,21 @@
     }
 
     function render() {
-      g("wrap").innerHTML = summaryCard() + todoCard() + `<div id="costingCard"></div>` + docsCard() + sitelogCard() + (CAN ? requiredCard() : "");
+      // Field engineers don't see the To-do or SiteLog settings sections —
+      // those are admin/office concerns. Everything else is collapsible.
+      g("wrap").innerHTML = summaryCard()
+        + (FIELD ? "" : todoCard())
+        + `<div id="costingCard"></div>`
+        + jobsVisitsCard()
+        + docsCard()
+        + (FIELD ? "" : sitelogCard())
+        + (CAN ? visibilityCard() : "")
+        + (CAN ? requiredCard() : "");
       wire();
+      wireCollapse();
       if (CAN) loadCosting();
+      if (CAN) loadVisibility();
+      loadJobsVisits();
       loadDocs();
       loadRamsRefs();
     }
@@ -123,15 +164,14 @@
     };
     function todoCard() {
       const items = P.todo || [];
-      if (!items.length) return `<div class="card"><h2>✅ To-do</h2><p class="muted">No documents required. ${CAN ? "Add some below." : ""}</p></div>`;
+      if (!items.length) return sectCard("todo", "✅ To-do", `<p class="muted">No documents required. ${CAN ? "Add some below." : ""}</p>`, false);
       const done = items.filter(i => i.done).length;
-      return `<div class="card"><h2>✅ To-do — ${done}/${items.length} done</h2>
-        ${items.map(it => `<div class="todo">
+      const body = items.map(it => `<div class="todo">
           <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${it.key}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
           <span class="lbl">${esc(it.label)}${it.key === "rams" ? `<small id="ramsRefLine"></small>` : ""}</span>
           <span class="act" data-actfor="${it.key}"></span>
-        </div>`).join("")}
-      </div>`;
+        </div>`).join("");
+      return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
     }
 
     function actionsFor(key) {
@@ -142,45 +182,200 @@
       if (key === "rams") return CAN ? `<button class="btn small" data-build="rams">${BUILD.rams.build}</button>` : "";
       if (key === "cpp") return CAN
         ? `<button class="btn small" data-build="cpp">${L.cppRef ? BUILD.cpp.open : BUILD.cpp.build}</button>` : "";
-      if (key === "valuations") return `<a class="btn small ghost" href="/job-costing.html">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : "");
-      if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="document.getElementById('docsCardEl').scrollIntoView({behavior:'smooth'});return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
+      if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
+        return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
+      if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="var el=document.getElementById('docsCardEl');if(el){el.setAttribute('open','');el.scrollIntoView({behavior:'smooth'});}return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
       return "";
     }
 
     function docsCard() {
-      return `<div class="card" id="docsCardEl"><h2>📁 Project Documents</h2>
-        ${CAN ? `<div class="drop" id="dropZone">Drop a file here, or tap to choose. <br><span class="muted">Engineers with Projects access can view these (unless you hide them).</span></div>
+      const body = `${CAN ? `<div class="drop" id="dropZone">Drop a file here, or tap to choose. <br><span class="muted">Engineers with Projects access can view these (unless you hide them).</span></div>
           <div style="margin:8px 0;"><input type="text" id="docSection" placeholder="Section (e.g. Drawings) — optional" style="max-width:280px;display:inline-block;width:auto;"></div>` : ""}
         <div class="doclist" id="docList"><p class="muted">Loading…</p></div>
-        <p class="msg" id="docMsg"></p>
-      </div>`;
+        <p class="msg" id="docMsg"></p>`;
+      const html = sectCard("docs", "📁 Project Documents", body, false);
+      // Keep the historic anchor id used by other buttons that scroll to it.
+      return html.replace('<details class="card"', '<details class="card" id="docsCardEl"');
     }
 
     function sitelogCard() {
       const sl = P.sitelog || {};
-      if (!CAN) return `<div class="card"><h2>📲 SiteLog</h2>
-        ${sl.rules ? `<div class="kv"><b>Arrival message:</b><br>${esc(sl.rules).replace(/\n/g, "<br>")}</div>` : `<p class="muted">No arrival message set.</p>`}
-        ${(sl.companies || []).length ? `<div class="kv"><b>Companies on site:</b> ${sl.companies.map(esc).join(", ")}</div>` : ""}</div>`;
-      return `<div class="card"><h2>📲 SiteLog</h2>
-        <label class="muted" style="font-size:12px;font-weight:600;">Arrival message — everyone</label>
+      if (!CAN) {
+        const body = `${sl.rules ? `<div class="kv"><b>Arrival message:</b><br>${esc(sl.rules).replace(/\n/g, "<br>")}</div>` : `<p class="muted">No arrival message set.</p>`}
+          ${(sl.companies || []).length ? `<div class="kv"><b>Companies on site:</b> ${sl.companies.map(esc).join(", ")}</div>` : ""}`;
+        return sectCard("sitelog", "📲 SiteLog", body, false);
+      }
+      const body = `<label class="muted" style="font-size:12px;font-weight:600;">Arrival message — everyone</label>
         <textarea id="slRules">${esc(sl.rules || "")}</textarea>
         <label class="muted" style="font-size:12px;font-weight:600;margin-top:8px;display:block;">Visitors-only extra</label>
         <textarea id="slVisitor">${esc(sl.visitorRules || "")}</textarea>
         <label class="muted" style="font-size:12px;font-weight:600;margin-top:8px;display:block;">Companies on site</label>
         <div id="coList" style="margin:4px 0;">${(sl.companies || []).map((c, i) => `<span class="pill">${esc(c)} <button data-corm="${i}" style="background:none;border:none;color:var(--brand);cursor:pointer;">✕</button></span>`).join("")}</div>
         <div style="display:flex;gap:8px;"><input type="text" id="coInput" placeholder="Add a company…" style="flex:1;"><button class="btn ghost small" id="coAdd" type="button">＋</button></div>
-        <div style="margin-top:10px;"><button class="btn small" id="slSave">Save SiteLog settings</button> <span class="msg" id="slMsg" style="display:inline;"></span></div>
-      </div>`;
+        <div style="margin-top:10px;"><button class="btn small" id="slSave">Save SiteLog settings</button> <span class="msg" id="slMsg" style="display:inline;"></span></div>`;
+      return sectCard("sitelog", "📲 SiteLog", body, false);
+    }
+
+    function visibilityCard() {
+      const list = Array.isArray(P.visibleTo) ? P.visibleTo : [];
+      const mode = list.length ? "picked" : "all";
+      const body = `<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Admins (Full Access / Projects Admin) always see every project. Choose who else this shows up for.</p>
+        <div class="editrow"><label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:0;"><input type="radio" name="visMode" value="all" ${mode === "all" ? "checked" : ""}> Everyone with Projects access</label></div>
+        <div class="editrow"><label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:0;"><input type="radio" name="visMode" value="picked" ${mode === "picked" ? "checked" : ""}> Only the people I pick</label></div>
+        <div id="visPickBox" class="${mode === "picked" ? "" : "hide"}" style="margin-top:8px;">
+          <input type="search" id="visSearch" placeholder="Filter people…" style="margin-bottom:6px;">
+          <div id="visPeople" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;"><p class="muted" style="margin:6px;">Loading people…</p></div>
+        </div>
+        <div style="margin-top:10px;"><button class="btn small" id="visSave">Save</button> <span class="msg" id="visMsg" style="display:inline;"></span></div>`;
+      return sectCard("visibility", "👥 Who can see this project", body, false);
     }
 
     function requiredCard() {
       const r = P.required || {};
       const DT = [["programme","Programme of works"],["rams","Risk Assessment (RAMS)"],["cpp","Construction Phase Plan"],["valuations","Valuations"],["projectDocs","Project Documents"]];
-      return `<div class="card"><h2>⚙ Required documents</h2>
-        <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Change your mind later — tick or untick what this project needs.</p>
+      const body = `<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Change your mind later — tick or untick what this project needs.</p>
         ${DT.map(([k, l]) => `<label class="editrow"><input type="checkbox" data-req="${k}" ${r[k] ? "checked" : ""}> ${esc(l)}</label>`).join("")}
-        <div style="margin-top:8px;"><button class="btn small" id="reqSave">Save</button> <span class="msg" id="reqMsg" style="display:inline;"></span></div>
-      </div>`;
+        <div style="margin-top:8px;"><button class="btn small" id="reqSave">Save</button> <span class="msg" id="reqMsg" style="display:inline;"></span></div>`;
+      return sectCard("required", "⚙ Required documents", body, false);
+    }
+
+    // ── Jobs & site visits (project spine) ────────────────────────────────────
+    function jobsVisitsCard() {
+      const body = `${CAN ? `<div id="jvNew"><p class="muted" style="font-size:12.5px;margin:0 0 8px;">Create a job for this project — sends it to the engineer(s) you pick; each runs their own timer.</p>
+          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:3px;">What's the job?</label>
+          <textarea id="jvDesc" placeholder="What needs doing, access notes…" style="min-height:60px;"></textarea>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+            <div style="flex:1 1 200px;"><label style="font-size:13px;font-weight:600;">Start</label><input type="datetime-local" id="jvStart"></div>
+            <div style="flex:0 0 140px;"><label style="font-size:13px;font-weight:600;">Duration (mins)</label><input type="number" id="jvDur" placeholder="60" min="15" step="15"></div>
+          </div>
+          <label style="font-size:13px;font-weight:600;display:block;margin-top:10px;">Assign to (tick one or more)</label>
+          <input type="search" id="jvSearch" placeholder="Filter engineers…" style="margin-bottom:4px;">
+          <div id="jvEngs" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:14px;"><p class="muted" style="margin:6px;">Loading engineers…</p></div>
+          <div style="margin-top:10px;"><button class="btn" id="jvCreate">➕ Create job</button> <span class="msg" id="jvMsg" style="display:inline;"></span></div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+        </div>` : ""}
+        <h3 style="margin:2px 0 6px;font-size:14.5px;">Project jobs</h3>
+        <div id="jvJobs"><p class="muted">Loading…</p></div>
+        <h3 style="margin:14px 0 6px;font-size:14.5px;">${CAN ? "Site visits — everyone" : "My site visits"}</h3>
+        <div id="jvVisits"></div>
+        <div id="jvPerUser"></div>`;
+      const html = sectCard("jobs", "🛠 Jobs &amp; site visits", body, false);
+      return html.replace('<details class="card"', '<details class="card" id="jobsCardEl"');
+    }
+
+    async function loadJobsVisits() {
+      // Users list — for the "assign to" tick-list (admins only).
+      if (CAN && !ENGS) { try { const d = await authFetch("/users").then(r => r.json()); ENGS = (d.Users || d.users || []).filter(u => u.Username && String(u.Status || "Active") !== "Disabled"); } catch { ENGS = []; } renderEngList(""); }
+      let d;
+      try { d = await authFetch("/project/visits?id=" + encodeURIComponent(PID)).then(r => r.json()); }
+      catch { document.getElementById("jvJobs").innerHTML = `<p class="muted">Couldn't load — try again.</p>`; return; }
+      if (!d || !d.ok) { document.getElementById("jvJobs").innerHTML = `<p class="muted">${esc((d && d.error) || "Couldn't load")}</p>`; return; }
+      renderProjJobs(d.jobs || []);
+      renderVisits(d.visits || []);
+      if (CAN) renderPerUser(d.perUser || []);
+    }
+
+    function fmtMins(m) { m = Math.max(0, Math.round(m || 0)); const h = Math.floor(m / 60), r = m % 60; return h ? (h + "h" + (r ? " " + r + "m" : "")) : (r + "m"); }
+    function fmtDate(iso) { if (!iso) return ""; try { const d = new Date(iso); return d.toLocaleString("en-GB", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }); } catch { return iso; } }
+    function niceName(u) {
+      if (!ENGS) return u;
+      const found = ENGS.find(x => String(x.Username || "").toLowerCase() === String(u || "").toLowerCase());
+      if (!found) return u;
+      const n = ((found.FirstName || "") + " " + (found.LastName || "")).trim();
+      return n || u;
+    }
+
+    function renderProjJobs(jobs) {
+      const el = document.getElementById("jvJobs");
+      if (!jobs.length) { el.innerHTML = `<p class="muted">No jobs yet.${CAN ? " Create one above." : ""}</p>`; return; }
+      el.innerHTML = jobs.map(j => {
+        const tags = (j.firestopping ? '<span class="badge" style="background:#fee2e2;color:#991b1b;">🔥 Firestopping</span> ' : "")
+          + (j.investigateOnly ? '<span class="badge" style="background:#fee2e2;color:#991b1b;">🔍 Investigate</span> ' : "");
+        const engs = (j.engineers || []).map(niceName).join(", ") || "unassigned";
+        const dt = j.scheduledAt ? " · 🗓 " + esc(fmtDate(j.scheduledAt)) : "";
+        return `<div class="frow"><span style="flex:1;">
+            <a href="/job-view.html?jobId=${encodeURIComponent(j.id)}" style="text-decoration:none;color:var(--brand);font-weight:600;">${esc(j.ref)}</a> ${tags}
+            <span class="muted" style="font-size:12.5px;">${esc(j.description || "").slice(0, 90)}${(j.description || "").length > 90 ? "…" : ""}</span>
+            <br><span class="muted" style="font-size:12px;">👷 ${esc(engs)}${dt}</span>
+          </span><span class="badge b-${esc(String(j.status || "live").toLowerCase().replace(/[^a-z]/g, ""))}" style="background:#e0e7ff;color:#3730a3;">${esc(j.status)}</span></div>`;
+      }).join("");
+    }
+    function renderVisits(visits) {
+      const el = document.getElementById("jvVisits");
+      if (!visits.length) { el.innerHTML = `<p class="muted">No visits captured yet — status changes to Travelling / In Progress on a project job will show here, and any manual shifts logged on the P&L card too.</p>`; return; }
+      // Group by day
+      const byDay = {};
+      for (const v of visits) { (byDay[v.date] = byDay[v.date] || []).push(v); }
+      const days = Object.keys(byDay).sort().reverse();
+      el.innerHTML = days.map(day => {
+        const rows = byDay[day];
+        return `<div style="margin:6px 0 10px;"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;">${esc(day)}</div>
+          ${rows.map(v => {
+            const jobLink = v.jobId
+              ? " · <a href='/job-view.html?jobId=" + encodeURIComponent(v.jobId) + "' style='text-decoration:none;color:var(--brand);'>" + esc(v.jobRef) + "</a>"
+              : (v.manual ? ' · <span class="badge" style="background:#fef3c7;color:#92400e;">MANUAL</span>' : "");
+            const live = v.live ? ' <span class="badge" style="background:#dcfce7;color:#166534;">LIVE</span>' : "";
+            const note = v.note ? ' <span class="muted" style="font-size:12px;">— ' + esc(v.note) + '</span>' : "";
+            // Engineers must NEVER see £ — only admins get the cost line, even
+            // if the server had somehow sent it. (Server also strips it.)
+            const cost = (CAN && v.manual && v.cost) ? " · £" + v.cost.toFixed(2) : "";
+            return `<div class="frow">
+              <span>👷 ${esc(niceName(v.user))}${jobLink}${live}${note}</span>
+              <span>🛠 ${esc(fmtMins(v.onsiteMins))} on-site${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}${cost}</span>
+            </div>`;
+          }).join("")}
+        </div>`;
+      }).join("");
+    }
+    function renderPerUser(perUser) {
+      const el = document.getElementById("jvPerUser");
+      if (!perUser.length) { el.innerHTML = ""; return; }
+      el.innerHTML = `<h3 style="margin:14px 0 6px;font-size:14.5px;">Per-engineer summary</h3>
+        ${perUser.map(r => `<div class="frow">
+          <span>👷 ${esc(niceName(r.user))} <span class="muted" style="font-size:12px;">${r.days} day${r.days === 1 ? "" : "s"} · ${r.visits} visit${r.visits === 1 ? "" : "s"}</span></span>
+          <span>🛠 ${esc(fmtMins(r.onsiteMins))} on-site${r.travelMins ? " · 🚐 " + esc(fmtMins(r.travelMins)) + " travel" : ""}</span>
+        </div>`).join("")}
+        <p class="muted" style="font-size:11.5px;margin-top:6px;">Every minute here is job-costed against this project — <a href="${"/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub"}">open in Job Costing →</a></p>`;
+    }
+
+    let ENGS = null, JV_PICK = new Set();
+    function renderEngList(filter) {
+      const box = document.getElementById("jvEngs"); if (!box || !ENGS) return;
+      const q = (filter || "").toLowerCase().trim();
+      // Field engineers first (they're the ones jobs go to) — everyone else after.
+      const rows = ENGS.map(u => ({ u, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username, field: String(u.StaffType || "").toLowerCase() === "field" }))
+        .filter(r => !q || r.name.toLowerCase().includes(q) || String(r.u.Username).toLowerCase().includes(q))
+        .sort((a, b) => (a.field === b.field ? a.name.localeCompare(b.name) : (a.field ? -1 : 1)));
+      if (!rows.length) { box.innerHTML = `<p class="muted" style="margin:6px;">No matches.</p>`; return; }
+      box.innerHTML = rows.map(r => {
+        const key = String(r.u.Username);
+        const checked = JV_PICK.has(key) ? "checked" : "";
+        return `<label style="display:flex;gap:8px;align-items:center;padding:5px 2px;border-top:1px solid #f0f3f7;margin:0;font-weight:500;"><input type="checkbox" data-jveng="${esc(key)}" ${checked} style="width:19px;height:19px;"> ${esc(r.name)}${r.field ? "" : ' <span class="muted" style="font-size:11.5px;">(office)</span>'}</label>`;
+      }).join("");
+    }
+
+    // ── Visibility (who can see this project) ─────────────────────────────────
+    let USERS = null, VIS_PICK = new Set();
+    async function loadVisibility() {
+      VIS_PICK = new Set((P.visibleTo || []).map(x => String(x).toLowerCase()));
+      if (!USERS) { try { const d = await authFetch("/users").then(r => r.json()); USERS = (d.Users || d.users || []).filter(u => u.Username && String(u.Status || "Active") !== "Disabled"); } catch { USERS = []; } }
+      renderVisPeople();
+    }
+    function renderVisPeople(filter) {
+      const box = document.getElementById("visPeople"); if (!box || !USERS) return;
+      const q = (filter || "").toLowerCase().trim();
+      const rows = USERS.map(u => {
+        const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
+        return { u, name };
+      })
+      .filter(r => !q || r.name.toLowerCase().includes(q) || String(r.u.Username).toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+      if (!rows.length) { box.innerHTML = `<p class="muted" style="margin:6px;">No matches.</p>`; return; }
+      box.innerHTML = rows.map(r => {
+        const key = String(r.u.Username).toLowerCase();
+        const checked = VIS_PICK.has(key) ? "checked" : "";
+        return `<label class="editrow" style="margin:0;padding:5px 2px;border-top:1px solid #f0f3f7;"><input type="checkbox" data-visu="${esc(r.u.Username)}" ${checked}> ${esc(r.name)} <span class="muted" style="font-size:12px;">${esc(r.u.Username)}</span></label>`;
+      }).join("");
     }
 
     // ── Wiring ────────────────────────────────────────────────────────────────
@@ -200,8 +395,61 @@
         g("coList").addEventListener("click", e => { const b = e.target.closest("[data-corm]"); if (b) { COMPANIES.splice(+b.dataset.corm, 1); renderCo(); } });
         g("slSave").onclick = saveSitelog;
         g("reqSave").onclick = saveRequired;
+        wireVisibility();
+        wireCreateJob();
         wireDrop();
       }
+    }
+    function wireCreateJob() {
+      const box = document.getElementById("jvEngs"), search = document.getElementById("jvSearch"), btn = document.getElementById("jvCreate");
+      if (!box || !btn) return;
+      search.addEventListener("input", e => renderEngList(e.target.value));
+      box.addEventListener("change", e => {
+        const c = e.target.closest("[data-jveng]"); if (!c) return;
+        if (c.checked) JV_PICK.add(c.dataset.jveng); else JV_PICK.delete(c.dataset.jveng);
+      });
+      btn.onclick = createProjectJob;
+    }
+    async function createProjectJob() {
+      const desc = document.getElementById("jvDesc").value.trim();
+      const msg = document.getElementById("jvMsg");
+      if (!desc) { msg.textContent = "Say what the job is."; msg.className = "msg err"; return; }
+      const engineers = Array.from(JV_PICK);
+      const scheduledAt = document.getElementById("jvStart").value ? new Date(document.getElementById("jvStart").value).toISOString() : null;
+      const durationMinutes = document.getElementById("jvDur").value ? Number(document.getElementById("jvDur").value) : null;
+      msg.textContent = "Creating…"; msg.className = "msg";
+      try {
+        const r = await authFetch("/project/create-job", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, description: desc, engineers, scheduledAt, durationMinutes }) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't create");
+        msg.innerHTML = `Created ✓ <a href="/job-view.html?jobId=${encodeURIComponent(r.id)}" style="color:var(--ok);font-weight:600;">Open ${esc(r.ref)} →</a>`; msg.className = "msg ok";
+        document.getElementById("jvDesc").value = ""; document.getElementById("jvStart").value = ""; document.getElementById("jvDur").value = "";
+        JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
+        loadJobsVisits();
+      } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    }
+    function wireVisibility() {
+      const box = document.getElementById("visPeople");
+      const pickBox = document.getElementById("visPickBox");
+      if (!box || !pickBox) return;
+      document.querySelectorAll("input[name=visMode]").forEach(r => {
+        r.onchange = () => { pickBox.classList.toggle("hide", r.value !== "picked" || !r.checked); };
+      });
+      box.addEventListener("change", e => {
+        const c = e.target.closest("[data-visu]"); if (!c) return;
+        const key = String(c.dataset.visu).toLowerCase();
+        if (c.checked) VIS_PICK.add(key); else VIS_PICK.delete(key);
+      });
+      document.getElementById("visSearch").addEventListener("input", e => renderVisPeople(e.target.value));
+      document.getElementById("visSave").onclick = saveVisibility;
+    }
+    async function saveVisibility() {
+      const mode = (document.querySelector("input[name=visMode]:checked") || {}).value || "all";
+      const visibleTo = mode === "all" ? [] : Array.from(VIS_PICK);
+      const msg = document.getElementById("visMsg");
+      msg.textContent = "Saving…"; msg.className = "msg";
+      const r = await authFetch("/project/update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, visibleTo }) }).then(r => r.json());
+      if (r.ok) { P = r.project; msg.textContent = visibleTo.length ? `Saved ✓ (only ${visibleTo.length} ${visibleTo.length === 1 ? "person" : "people"} + admins see this project)` : "Saved ✓ (everyone with Projects access sees this project)"; msg.className = "msg ok"; }
+      else { msg.textContent = (r.error || "Couldn't save"); msg.className = "msg err"; }
     }
     function renderCo() { g("coList").innerHTML = COMPANIES.map((c, i) => `<span class="pill">${esc(c)} <button data-corm="${i}" style="background:none;border:none;color:var(--brand);cursor:pointer;">✕</button></span>`).join(""); }
 
@@ -276,7 +524,10 @@
         <span class="nm">📄 <a href="#" data-open="${esc(f.url)}" data-name="${esc(f.title)}" style="text-decoration:none;">${esc(f.title)}</a>${f.hidden ? ' <span class="muted">(hidden)</span>' : ""}<br><span class="muted" style="font-size:12px;">${esc(f.section || "")} · ${esc(f.uploadedBy || "")}</span></span>
         ${CAN ? `<button class="btn grey small" data-hide="${f.id}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${f.id}" style="background:#b00020;">✕</button>` : ""}
       </div>`).join("");
-      list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault(); if (window.MLDocViewer) MLDocViewer.open(a.dataset.open, a.dataset.name); else window.open(a.dataset.open, "_blank"); });
+      list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault();
+        if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.open, fetchUrl: a.dataset.open, name: a.dataset.name, downloadUrl: a.dataset.open });
+        else window.open(a.dataset.open, "_blank");
+      });
       if (CAN) {
         list.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => { await authFetch("/project/doc-update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.hide, hidden: b.dataset.h !== "1" }) }); loadDocs(); });
         list.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this document?")) return; await authFetch("/project/doc-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.del }) }); loadDocs(); loadProject(); });
@@ -303,41 +554,165 @@
     }
 
     // ── Job costing ───────────────────────────────────────────────────────────
+    // Contract value vs total cost = projected profit/loss + margin. Admins can
+    // also add manual labour shifts (hours × rate → auto-cost) and material
+    // costs — both feed into the same totals via /costing/summary.
     async function loadCosting() {
       const card = g("costingCard"); if (!card) return;
-      let d;
+      // Engineer dropdown for manual labour shifts needs the user list; if the
+      // Jobs & site visits card hasn't loaded it yet, fetch it here.
+      if (CAN && !ENGS) { try { const u = await authFetch("/users").then(r => r.json()); ENGS = (u.Users || u.users || []).filter(x => x.Username && String(x.Status || "Active") !== "Disabled"); } catch { ENGS = []; } }
+      let d, costs = { costs: [] };
       try { d = await authFetch("/costing/summary?site=" + encodeURIComponent(P.name) + "&from=2000-01-01").then(r => r.json()); }
       catch { return; }
       if (!d || !d.ok) return;   // no costing permission — silently omit
-      const key = P.costingKey;
-      const s = (d.sites || []).find(x => x.key === key) || (d.sites || []).find(x => (x.site || "").toLowerCase() === (P.name || "").toLowerCase());
+      try { costs = await authFetch("/project/costs?id=" + encodeURIComponent(PID)).then(r => r.json()) || costs; } catch {}
+      const s = (d.sites || []).find(x => x.project && x.project.id === PID) || (d.sites || []).find(x => x.key === P.costingKey) || (d.sites || []).find(x => (x.site || "").toLowerCase() === (P.name || "").toLowerCase());
       const fin = s && s.fin;
-      const labour = s ? s.laborCost : 0, po = s ? s.poTotal : 0, grand = s ? s.grandTotal : 0;
+      const labour = s ? (s.laborCost || 0) : 0;
+      const po = s ? (s.poTotal || 0) : 0;
+      const manualLab = s ? (s.manualLabour || 0) : 0;
+      const manualMat = s ? (s.manualMaterials || 0) : 0;
+      const grand = s ? (s.grandTotal || 0) : 0;
+      const contract = (fin && fin.value) || P.contractValue || 0;
+      const pnl = contract ? Math.round((contract - grand) * 100) / 100 : null;
+      const margin = contract ? Math.round(((contract - grand) / contract) * 1000) / 10 : null;
+      const pos = pnl == null ? "" : (pnl >= 0 ? "var(--ok)" : "var(--bad)");
+      const costingHref = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
+
+      // P&L headline
+      const pnlBlock = `<div class="money" style="margin-top:8px;">
+        <div class="stat"><div class="n">${money(contract)}</div><div class="l">Contract value</div></div>
+        <div class="stat"><div class="n">${money(grand)}</div><div class="l">Total cost</div></div>
+        <div class="stat"><div class="n" style="color:${pos}">${pnl == null ? "—" : money(pnl)}</div><div class="l">Projected ${pnl != null && pnl < 0 ? "loss" : "profit"}</div></div>
+        <div class="stat"><div class="n" style="color:${pos}">${margin == null ? "—" : margin + "%"}</div><div class="l">Margin</div></div>
+      </div>`;
+      const breakdown = `<div style="margin-top:10px;font-size:13.5px;">
+        <div class="frow"><span>🛠 Captured labour <span class="muted" style="font-size:12px;">(status-tap timers + SiteLog)</span></span><b>${money(labour - manualLab)}</b></div>
+        <div class="frow"><span>➕ Manual labour shifts</span><b>${money(manualLab)}</b></div>
+        <div class="frow"><span>🧾 PO materials <span class="muted" style="font-size:12px;">(from the PO system)</span></span><b>${money(po - manualMat)}</b></div>
+        <div class="frow"><span>➕ Manual materials</span><b>${money(manualMat)}</b></div>
+      </div>`;
+      // Valuations block (unchanged behaviour; existing proj_fin)
       let finHtml = "";
       if (fin) {
         finHtml = `<h2 style="margin-top:14px;">📈 Valuations</h2>
           <div class="money">
-            <div class="stat"><div class="n">${money(fin.value)}</div><div class="l">Contract value</div></div>
             <div class="stat"><div class="n">${money(fin.valued)}</div><div class="l">Valued to date</div></div>
             <div class="stat"><div class="n" style="color:${fin.position >= 0 ? "var(--ok)" : "var(--bad)"}">${money(fin.position)}</div><div class="l">Position (valued − cost)</div></div>
             <div class="stat"><div class="n">${money(fin.retentionHeld)}</div><div class="l">Retention held</div></div>
+            <div class="stat"><div class="n">${money(fin.remainingValue)}</div><div class="l">Left to value</div></div>
           </div>
           ${fin.suggestedNext ? `<p class="muted" style="font-size:12.5px;margin-top:6px;">💡 Suggested next valuation: <b>${money(fin.suggestedNext)}</b></p>` : ""}
-          <p style="margin-top:6px;"><a class="btn ghost small" href="/job-costing.html">Manage valuations →</a></p>`;
+          <p style="margin-top:6px;"><a class="btn ghost small" href="${costingHref}">Manage valuations →</a></p>`;
       } else if (P.required && P.required.valuations) {
         finHtml = `<p class="muted" style="margin-top:10px;">No contract value set yet — use “Set contract value” in the to-do above to start tracking valuations.</p>`;
       }
-      card.innerHTML = `<div class="card"><h2>💷 Job costing</h2>
-        <div class="money">
-          <div class="stat"><div class="n">${money(grand)}</div><div class="l">Total cost</div></div>
-          <div class="stat"><div class="n">${money(labour)}</div><div class="l">Labour</div></div>
-          <div class="stat"><div class="n">${money(po)}</div><div class="l">Materials / PO</div></div>
-        </div>
+      // Manual entry forms (admin only)
+      const engOpts = (ENGS || []).filter(u => String(u.StaffType || "").toLowerCase() === "field").sort((a, b) => ((a.FirstName || a.Username) + "").localeCompare((b.FirstName || b.Username) + ""))
+        .map(u => `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("");
+      const manualForms = CAN ? `
+        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px;">
+          <h3 style="margin:0 0 8px;font-size:14.5px;">➕ Log a labour shift <span class="muted" style="font-size:12px;font-weight:400;">(auto-costed from the engineer's rate)</span></h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+            <div style="flex:1 1 180px;"><label style="font-size:12px;font-weight:600;">Engineer</label><select id="labUser"><option value="">Select…</option>${engOpts}</select></div>
+            <div style="flex:0 0 140px;"><label style="font-size:12px;font-weight:600;">Date</label><input type="date" id="labDate" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div style="flex:0 0 90px;"><label style="font-size:12px;font-weight:600;">Hours</label><input type="number" id="labHours" min="0" step="0.25" placeholder="8"></div>
+            <div style="flex:0 0 120px;"><label style="font-size:12px;font-weight:600;">Rate £/hr <span class="muted" style="font-size:11px;">(opt)</span></label><input type="number" id="labRate" min="0" step="0.5" placeholder="auto"></div>
+            <div style="flex:1 1 200px;"><label style="font-size:12px;font-weight:600;">Note (opt)</label><input type="text" id="labNote" placeholder="e.g. Second fix"></div>
+            <button class="btn small" id="labAdd">Add shift</button>
+          </div>
+          <p class="msg" id="labMsg" style="margin-top:6px;"></p>
+
+          <h3 style="margin:12px 0 8px;font-size:14.5px;">➕ Add a material cost</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+            <div style="flex:0 0 140px;"><label style="font-size:12px;font-weight:600;">Date</label><input type="date" id="matDate" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div style="flex:1 1 200px;"><label style="font-size:12px;font-weight:600;">Description</label><input type="text" id="matDesc" placeholder="e.g. Screws / plaster"></div>
+            <div style="flex:1 1 160px;"><label style="font-size:12px;font-weight:600;">Supplier (opt)</label><input type="text" id="matSup" placeholder="e.g. Screwfix"></div>
+            <div style="flex:0 0 120px;"><label style="font-size:12px;font-weight:600;">Amount £ ex-VAT</label><input type="number" id="matAmt" min="0" step="0.01" placeholder="123.45"></div>
+            <button class="btn small" id="matAdd">Add material</button>
+          </div>
+          <p class="msg" id="matMsg" style="margin-top:6px;"></p>
+        </div>` : "";
+      // Recent manual entries
+      const rows = (costs.costs || []);
+      const rowsHtml = rows.length ? `<div style="margin-top:14px;">
+        <h3 style="margin:0 0 6px;font-size:14.5px;">Manual entries</h3>
+        ${rows.map(r => {
+          const who = r.kind === "labour" ? `👷 ${esc(r.username)} · ${r.hours}h${r.rate ? " @ £" + r.rate : ""}` : `🧾 ${esc(r.supplier || "material")}`;
+          return `<div class="frow"><span>${esc(r.date)} · ${who}${r.description ? " · <span class='muted' style='font-size:12.5px;'>" + esc(r.description) + "</span>" : ""}</span><span><b>${money(r.amount)}</b> ${CAN ? `<button class="btn small grey" data-costdel="${esc(r.id)}" style="padding:3px 8px;font-size:12px;">✕</button>` : ""}</span></div>`;
+        }).join("")}
+      </div>` : "";
+      const poBtn = CAN ? `<button class="btn small ghost" id="poSyncBtn" title="Register this project's site in the PO system so a PO can pick it (add-only)">🔄 Sync to PO</button>` : "";
+      const body = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${poBtn}<a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing">Open in Job Costing →</a></div>
+        ${pnlBlock}
+        ${breakdown}
         ${s && s.engineers && s.engineers.length ? `<div style="margin-top:10px;"><b style="font-size:13px;">People</b>${s.engineers.map(e => `<div class="frow"><span>${esc(e.name || e.user || "")}</span><span>${money(e.cost || 0)}</span></div>`).join("")}</div>` : ""}
         ${s && s.suppliers && s.suppliers.length ? `<div style="margin-top:10px;"><b style="font-size:13px;">Suppliers</b>${s.suppliers.map(su => `<div class="frow"><span>${esc(su.name || su.supplier || "")}</span><span>${money(su.total || su.cost || 0)}</span></div>`).join("")}</div>` : ""}
         ${!s ? `<p class="muted" style="margin-top:8px;">No costs recorded against this project yet.</p>` : ""}
-        ${finHtml}
-      </div>`;
+        ${manualForms}
+        ${rowsHtml}
+        ${finHtml}`;
+      card.innerHTML = sectCard("costing", "💷 Job costing &amp; P&amp;L", body, false);
+      wireCollapse();
+      if (CAN) wireCostForms();
+    }
+    function wireCostForms() {
+      const labAdd = document.getElementById("labAdd"), matAdd = document.getElementById("matAdd");
+      if (labAdd) labAdd.onclick = addLabour;
+      if (matAdd) matAdd.onclick = addMaterial;
+      const po = document.getElementById("poSyncBtn");
+      if (po) po.onclick = async () => {
+        po.disabled = true; const oldTxt = po.textContent; po.textContent = "Syncing…";
+        try {
+          const r = await authFetch("/project/push-po", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID }) }).then(r => r.json());
+          if (r.ok) po.textContent = "✓ Synced";
+          else po.textContent = r.poBound === false ? "✗ PO_DB not bound" : "✗ Sync failed";
+        } catch { po.textContent = "✗ Sync failed"; }
+        setTimeout(() => { po.textContent = oldTxt; po.disabled = false; }, 3200);
+      };
+      document.querySelectorAll("[data-costdel]").forEach(b => b.onclick = async () => {
+        if (!(window.MLUI ? await MLUI.confirm("Delete this entry?", { danger: true }) : confirm("Delete this entry?"))) return;
+        await authFetch("/project/cost-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, costId: b.dataset.costdel }) });
+        loadCosting(); loadJobsVisits();
+      });
+    }
+    async function addLabour() {
+      const msg = document.getElementById("labMsg"); msg.className = "msg"; msg.textContent = "";
+      const body = { id: PID, kind: "labour",
+        username: document.getElementById("labUser").value,
+        date: document.getElementById("labDate").value,
+        hours: Number(document.getElementById("labHours").value),
+        rate: document.getElementById("labRate").value ? Number(document.getElementById("labRate").value) : undefined,
+        description: document.getElementById("labNote").value };
+      if (!body.username) { msg.className = "msg err"; msg.textContent = "Pick an engineer."; return; }
+      if (!(body.hours > 0)) { msg.className = "msg err"; msg.textContent = "Hours must be > 0."; return; }
+      msg.textContent = "Saving…";
+      try {
+        const r = await authFetch("/project/cost", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't save");
+        msg.className = "msg ok"; msg.textContent = "Added ✓ (£" + (r.amount || 0).toFixed(2) + ")";
+        document.getElementById("labHours").value = ""; document.getElementById("labRate").value = ""; document.getElementById("labNote").value = "";
+        loadCosting(); loadJobsVisits();
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
+    }
+    async function addMaterial() {
+      const msg = document.getElementById("matMsg"); msg.className = "msg"; msg.textContent = "";
+      const body = { id: PID, kind: "material",
+        date: document.getElementById("matDate").value,
+        description: document.getElementById("matDesc").value,
+        supplier: document.getElementById("matSup").value,
+        amount: Number(document.getElementById("matAmt").value) };
+      if (!body.description) { msg.className = "msg err"; msg.textContent = "Enter a description."; return; }
+      if (!(body.amount > 0)) { msg.className = "msg err"; msg.textContent = "Amount must be > 0."; return; }
+      msg.textContent = "Saving…";
+      try {
+        const r = await authFetch("/project/cost", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't save");
+        msg.className = "msg ok"; msg.textContent = "Added ✓";
+        document.getElementById("matDesc").value = ""; document.getElementById("matSup").value = ""; document.getElementById("matAmt").value = "";
+        loadCosting(); loadJobsVisits();
+      } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
     }
   </script>
 </body>
