@@ -20792,6 +20792,7 @@ function buildProgrammePdf(data, meta = {}) {
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
+  let lastGridBot = M2 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
@@ -20910,6 +20911,7 @@ function buildProgrammePdf(data, meta = {}) {
       });
       doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
+      lastGridBot = gridBot;
       const fy = PH - M2 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
       doc.text(M2, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
@@ -20919,55 +20921,56 @@ function buildProgrammePdf(data, meta = {}) {
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
-    doc.newPage(PW, PH);
-    let ny = M2 + 14;
-    const RIGHT = PW - M2;
-    const guard = () => {
-      if (ny > PH - M2 - 6) {
-        doc.newPage(PW, PH);
-        ny = M2 + 14;
-      }
-    };
-    const para = (text, x, size, opts) => {
-      opts = opts || {};
-      const words = String(text).split(/\s+/);
-      let line = "";
-      for (const w of words) {
-        const test = line ? line + " " + w : w;
-        if (textWidth(test, size) > RIGHT - x) {
-          guard();
-          doc.text(x, ny, line, { size, ...opts });
-          ny += size + 4;
-          line = w;
-        } else line = test;
-      }
-      if (line) {
-        guard();
-        doc.text(x, ny, line, { size, ...opts });
-        ny += size + 4;
-      }
-    };
-    const bullet = (text, size) => {
-      guard();
-      doc.text(M2, ny, "\u2022", { size });
-      para(text, M2 + 12, size);
-    };
-    doc.text(M2, ny, "Notes", { size: 12, bold: true });
-    ny += 18;
-    if (notes) {
-      para(notes, M2, 10);
-      ny += 6;
-    }
     const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
-    for (const n of plain) bullet(String(n.text).trim(), 10);
+    const PAD = 10, LH = 12, contentW = PW - 2 * M2 - 2 * PAD;
+    const notesLines = notes ? wrapLines(notes, contentW, 10, 0) : [];
+    const plainW = plain.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    const discW = disc.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    let adv = 16;
+    if (notesLines.length) adv += notesLines.length * LH + 4;
+    for (const w of plainW) adv += w.length * LH;
     if (disc.length) {
-      ny += 8;
-      guard();
-      doc.text(M2, ny, "To discuss", { size: 11, bold: true });
-      ny += 16;
-      for (const n of disc) bullet(String(n.text).trim(), 10);
+      adv += 6 + 16;
+      for (const w of discW) adv += w.length * LH;
     }
-    doc.text(M2, PH - M2 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    const boxH = 2 * PAD + adv;
+    let boxTop, ownPage = false;
+    if (lastGridBot + 14 + boxH <= PH - M2) {
+      boxTop = lastGridBot + 14;
+    } else {
+      doc.newPage(PW, PH);
+      boxTop = M2 + 14;
+      ownPage = true;
+    }
+    doc.roundRect(M2, boxTop, PW - 2 * M2, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M2 + PAD;
+    let ny = boxTop + PAD + 10;
+    const para = (lines, x) => {
+      for (const ln of lines) {
+        doc.text(x, ny, ln, { size: 10 });
+        ny += LH;
+      }
+    };
+    doc.text(x0, ny, "Notes", { size: 12, bold: true, color: [0, 0.22, 0.41] });
+    ny += 16;
+    if (notesLines.length) {
+      para(notesLines, x0);
+      ny += 4;
+    }
+    for (const w of plainW) {
+      doc.text(x0, ny, "\u2022", { size: 10 });
+      para(w, x0 + 12);
+    }
+    if (disc.length) {
+      ny += 6;
+      doc.text(x0, ny, "To discuss", { size: 11, bold: true, color: [0.57, 0.38, 0.04] });
+      ny += 16;
+      for (const w of discW) {
+        doc.text(x0, ny, "\u2022", { size: 10 });
+        para(w, x0 + 12);
+      }
+    }
+    if (ownPage) doc.text(M2, PH - M2 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }

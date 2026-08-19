@@ -197,6 +197,7 @@ export function buildProgrammePdf(data, meta = {}) {
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
+  let lastGridBot = M + 100;   // bottom Y of the final page's chart (for the notes box)
 
   {   // (block kept so the page body below stays at its original indentation)
     for (const page of pages) {
@@ -326,6 +327,7 @@ export function buildProgrammePdf(data, meta = {}) {
       // frame
       doc.rect(M, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
+      lastGridBot = gridBot;   // remember where this page's chart ends
 
       // ── Footer ────────────────────────────────────────────────────────
       const fy = PH - M + 6;
@@ -335,38 +337,44 @@ export function buildProgrammePdf(data, meta = {}) {
     }
   }
 
-  // Notes & items to discuss — its own page. Free-text notes, then plain note
-  // bullets, then a highlighted "To discuss" list.
+  // Notes & items to discuss — a themed rounded box. It sits DIRECTLY BELOW the
+  // chart on the last page when there's room (so a short programme stays two
+  // pages), otherwise it starts a fresh page.
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter(n => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
-    doc.newPage(PW, PH);
-    let ny = M + 14;
-    const RIGHT = PW - M;
-    const guard = () => { if (ny > PH - M - 6) { doc.newPage(PW, PH); ny = M + 14; } };
-    const para = (text, x, size, opts) => {
-      opts = opts || {};
-      const words = String(text).split(/\s+/);
-      let line = "";
-      for (const w of words) {
-        const test = line ? line + " " + w : w;
-        if (textWidth(test, size) > RIGHT - x) { guard(); doc.text(x, ny, line, { size, ...opts }); ny += size + 4; line = w; }
-        else line = test;
-      }
-      if (line) { guard(); doc.text(x, ny, line, { size, ...opts }); ny += size + 4; }
-    };
-    const bullet = (text, size) => { guard(); doc.text(M, ny, "•", { size }); para(text, M + 12, size); };
-
-    doc.text(M, ny, "Notes", { size: 12, bold: true }); ny += 18;
-    if (notes) { para(notes, M, 10); ny += 6; }
     const plain = items.filter(n => !n.discuss), disc = items.filter(n => n.discuss);
-    for (const n of plain) bullet(String(n.text).trim(), 10);
-    if (disc.length) {
-      ny += 8; guard();
-      doc.text(M, ny, "To discuss", { size: 11, bold: true }); ny += 16;
-      for (const n of disc) bullet(String(n.text).trim(), 10);
+    const PAD = 10, LH = 12, contentW = PW - 2 * M - 2 * PAD;
+    // Pre-wrap so the box height can be measured before it's drawn.
+    const notesLines = notes ? wrapLines(notes, contentW, 10, 0) : [];
+    const plainW = plain.map(n => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    const discW = disc.map(n => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    let adv = 16;                                          // title line
+    if (notesLines.length) adv += notesLines.length * LH + 4;
+    for (const w of plainW) adv += w.length * LH;
+    if (disc.length) { adv += 6 + 16; for (const w of discW) adv += w.length * LH; }
+    const boxH = 2 * PAD + adv;
+
+    let boxTop, ownPage = false;
+    if (lastGridBot + 14 + boxH <= PH - M) {
+      boxTop = lastGridBot + 14;                           // tuck under the chart
+    } else {
+      doc.newPage(PW, PH); boxTop = M + 14; ownPage = true;
     }
-    doc.text(M, PH - M + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    doc.roundRect(M, boxTop, PW - 2 * M, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+
+    const x0 = M + PAD;
+    let ny = boxTop + PAD + 10;
+    const para = (lines, x) => { for (const ln of lines) { doc.text(x, ny, ln, { size: 10 }); ny += LH; } };
+    doc.text(x0, ny, "Notes", { size: 12, bold: true, color: [0.0, 0.22, 0.41] }); ny += 16;
+    if (notesLines.length) { para(notesLines, x0); ny += 4; }
+    for (const w of plainW) { doc.text(x0, ny, "•", { size: 10 }); para(w, x0 + 12); }
+    if (disc.length) {
+      ny += 6;
+      doc.text(x0, ny, "To discuss", { size: 11, bold: true, color: [0.57, 0.38, 0.04] }); ny += 16;
+      for (const w of discW) { doc.text(x0, ny, "•", { size: 10 }); para(w, x0 + 12); }
+    }
+    if (ownPage) doc.text(M, PH - M + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
 
   return doc.bytes();
