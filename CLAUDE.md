@@ -1738,6 +1738,26 @@ Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
 
+## Engineer skills & skills-aware scheduling (sla.js + engineer-skills.html — Aug 2026)
+A **competency "rock sheet"** so the scheduler can prefer the right engineer for a
+job. **Phase 1 (DONE):** managed **areas of work** (app_config `sla_work_areas` =
+`[{id,name,colour}]`, GET any session / POST SLA admin — defaults Electrical/
+Plumbing/Fabric/Firestopping/Fire alarms/HVAC/Joinery/Decorating/General) + an
+**engineer×area star matrix** (app_config `sla_eng_skills` =
+`{normId(username):{areaId:1-5}}`, **GET /sla/eng-skills** returns `{skills,areas}`
+any session / **POST** SLA admin) + a **`job.workArea`** field (areaId) threaded
+through `createOrUpdateJobFromPayload` + `patchJob` (PATCH /sla/jobs/{id} forwards
+it; the scheduler quick-modal PUT /job/{id} does not — set it on add-job/editor).
+Page **engineer-skills.html** (SLA-admin gated; 🧭 Engineer skills button in the
+sla-scheduler header) = editable areas list + a sticky-first-column grid of
+tap-to-set 1–5 stars per engineer×area, all autosaving. Star=0 means not competent
+(dropped). Field engineers shown by default (StaffType field), "Show all staff"
+toggle. Chosen design: **1–5 stars · AI suggests a job's area (office confirms) ·
+SOFT preference in suggestions (⚠ flag, never a hard block) · both per-engineer and
+whole-team auto-day.** **TODO (next phases):** (2) AI infer `workArea` on add-job/
+editor; (3) weight the scheduler fill-in/route suggestions by skill (soft, ⚠ when
+none rated); (4) auto-make-a-day (per-engineer + whole-team).
+
 ## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
 Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal
 `#engDayBackdrop`, alongside 🗺️ Map) that auto-orders that engineer's jobs for a
