@@ -1503,15 +1503,25 @@ function autoLoosePool(){
     return !!coordsFor(j);
   });
 }
+// Depot / HQ — the provisional start point for any engineer who hasn't got a home
+// postcode saved yet, so the whole team can be planned without waiting on data
+// entry. (Same HQ the mileage + projects tools default to.)
+const HQ_POSTCODE = "PO15 5RQ";
 function autoEngPayload(usernames, date){
   return engineers.filter(e =>
     (!usernames || usernames.includes(e.username)) &&
-    ((e.homeLat && e.homeLng) || e.homePostcode) &&
     !holFor(e.username, date || selectedDate) &&
     (usernames || e.staffType === "field")
-  ).map(e => ({ username:e.username, name:e.name, homeLat:e.homeLat, homeLng:e.homeLng, homePostcode:e.homePostcode }));
+  ).map(e => {
+    const hasHome = (e.homeLat && e.homeLng) || !!e.homePostcode;
+    return { username:e.username, name:e.name,
+      homeLat: hasHome ? e.homeLat : undefined,
+      homeLng: hasHome ? e.homeLng : undefined,
+      homePostcode: hasHome ? e.homePostcode : HQ_POSTCODE,
+      _hq: !hasHome };
+  });
 }
-let autoSkippedNoHome = 0;
+let autoFromHQ = 0;
 async function runAutoSchedule(usernames, titleWho, dateObj){
   const date = dateObj || selectedDate;
   autoDate = date;
@@ -1526,13 +1536,12 @@ async function runAutoSchedule(usernames, titleWho, dateObj){
   await ensureAllJobGeocodes();
   const pool = autoLoosePool();
   const engs = autoEngPayload(usernames, date);
-  // Field engineers dropped purely for having no home postcode — surface this
-  // loudly (the planner skips them, so "whole team" quietly becomes one person).
-  const candidates = usernames ? engineers.filter(e => usernames.includes(e.username)) : engineers.filter(e => e.staffType === "field");
-  autoSkippedNoHome = candidates.filter(e => !((e.homeLat && e.homeLng) || e.homePostcode) && !holFor(e.username, date)).length;
-  if(!engs.length){ $("autoStatus").textContent = "No engineers have a home postcode set (or all are on leave). Add home postcodes in Users Admin so the planner can route from each engineer's start point."; return; }
+  // Engineers with no home postcode are still included, routed provisionally from
+  // HQ — count them so the plan can say so (better than silently dropping them).
+  autoFromHQ = engs.filter(e => e._hq).length;
+  if(!engs.length){ $("autoStatus").textContent = "No engineers are available (all on leave, or none are field staff)."; return; }
   if(!pool.length){ $("autoStatus").textContent = "There are no unscheduled jobs with a location to place."; return; }
-  const homeNote = autoSkippedNoHome ? ` · ⚠ ${autoSkippedNoHome} engineer${autoSkippedNoHome>1?"s":""} skipped (no home postcode)` : "";
+  const homeNote = autoFromHQ ? ` · ${autoFromHQ} routed from HQ (no home set)` : "";
   $("autoStatus").textContent = `Building a plan for ${engs.length} engineer${engs.length>1?"s":""} from ${pool.length} unscheduled job${pool.length>1?"s":""}…${homeNote}`;
   const payload = {
     date: formatDateInput(date), dayStart: "08:00", dayMinutes: 480, lunchMinutes: 30,
@@ -1549,8 +1558,8 @@ function autoOffToClock(off){ const base = 8*60 + Number(off||0); return String(
 function renderAutoPreview(d){
   const parts = [];
   parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs${d.matrixSource!=="google"?' <span style="color:var(--muted)">(estimated drive times)</span>':''}.</div>`);
-  if(autoSkippedNoHome){
-    parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">⚠ ${autoSkippedNoHome} field engineer${autoSkippedNoHome>1?"s were":" was"} left out — no home postcode saved. Add each engineer's home postcode in Users Admin and they'll share the day too.</div>`);
+  if(autoFromHQ){
+    parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">ℹ ${autoFromHQ} engineer${autoFromHQ>1?"s were":" was"} routed from HQ (${HQ_POSTCODE}) — no home postcode saved. Set each engineer's home in Users Admin for accurate start/finish times.</div>`);
   }
   d.plan.forEach(p => {
     const s = p.summary;
