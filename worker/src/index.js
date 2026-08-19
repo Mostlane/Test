@@ -43,6 +43,7 @@ import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer
 import * as memos from "./routes/memos.js";        // DONE  (company memos: draft/send/sign, filed to My Documents)
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
+import * as chapplins from "./routes/chapplins.js";   // DONE (Chapplins customer: site tenants current/previous + directory)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
@@ -90,6 +91,7 @@ const ROUTES = [
   ["*", "/costing",    costing.handle],  // per-site labour cost roll-up
   ["*", "/exceptions", costing.handle],  // needs-a-human-eye list
   ["*", "/compliance", compliance.handle], // Southern Co-op compliance certs (R2 + D1)
+  ["*", "/chapplins",  chapplins.handle], // Chapplins customer: site tenants (current/previous) + directory
   ["*", "/settings",   portal.handle],
   ["*", "/oncall",     portal.handle],
   ["*", "/daily-logs", portal.handle],
