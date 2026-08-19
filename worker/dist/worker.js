@@ -21296,12 +21296,15 @@ async function handle30(request, env, ctx, url) {
     const suggestions = (await db.prepare(
       "SELECT id, rev, author, note, status, created_at, decided_by, decided_at, contractor FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
     ).bind(id, db.tenantId).all()).results || [];
+    const latest = await latestRevision(db, id);
+    const draftRev = latest && latest.data === p.data ? latest.rev : null;
     return json3({
       ok: true,
       prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, updatedBy: p.updated_by || "", data },
       revisions,
       shares,
       suggestions,
+      draftRev,
       bankHolidays: await bankHolidayDates(db)
     });
   }
@@ -21629,6 +21632,11 @@ async function handle30(request, env, ctx, url) {
       try {
         data = JSON.parse(p.data);
       } catch {
+      }
+      const latest = await latestRevision(db, p.id);
+      if (latest && latest.data === p.data) {
+        revLbl = latest.rev;
+        issuedAt = latest.issued_at;
       }
     }
     const bytes = buildProgrammePdf(data, {
