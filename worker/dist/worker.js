@@ -20629,6 +20629,9 @@ var PW = 842;
 var PH = 595;
 var M2 = 26;
 var ROW_H = 14.5;
+var LINE_H = 10;
+var ROW_PAD = 4.5;
+var MAX_NAME_LINES = 5;
 var HDR_H = 22;
 var COLS = [
   // left columns; "Works" width is dynamic
@@ -20690,6 +20693,37 @@ function fitText(str, w, size) {
   while (s.length > 1 && textWidth(s + "...", size) > w) s = s.slice(0, -1);
   return s + "...";
 }
+function wrapLines(str, w, size, maxLines) {
+  const words = String(str || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (let word of words) {
+    while (textWidth(word, size) > w && word.length > 1) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      let k = word.length;
+      while (k > 1 && textWidth(word.slice(0, k), size) > w) k--;
+      lines.push(word.slice(0, k));
+      word = word.slice(k);
+    }
+    const test = line ? line + " " + word : word;
+    if (textWidth(test, size) <= w) line = test;
+    else {
+      if (line) lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  if (!lines.length) lines.push("");
+  if (maxLines && lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    kept[maxLines - 1] = fitText(lines.slice(maxLines - 1).join(" "), w, size);
+    return kept;
+  }
+  return lines;
+}
 function buildProgrammePdf(data, meta = {}) {
   data = data || {};
   applyWorksWidth(data.worksW);
@@ -20703,6 +20737,10 @@ function buildProgrammePdf(data, meta = {}) {
     _end: endOf(t, hs),
     _c: byC[t.contractor] || null
   }));
+  for (const t of tasks) {
+    t._lines = wrapLines(t.name || "", COLS[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._h = Math.max(ROW_H, t._lines.length * LINE_H + ROW_PAD);
+  }
   const starts = tasks.map((t) => t._start).filter(Boolean).sort((a, b) => a - b);
   const anchor = starts.length ? starts[Math.floor(starts.length / 2)] : /* @__PURE__ */ new Date();
   const near = (t) => t._start && Math.abs(t._start - anchor) / DAY <= 550;
@@ -20726,7 +20764,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const rowsPerPage = Math.max(8, Math.floor((PH - M2 - headerBlockH - HDR_H - footerH - M2) / ROW_H));
+  const bodyH = PH - M2 - headerBlockH - HDR_H - footerH - M2;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -20737,13 +20775,19 @@ function buildProgrammePdf(data, meta = {}) {
   for (const win of windows) {
     const winTasks = tasks.filter((t) => inWindow(t, win));
     if (!winTasks.length) continue;
-    const nPages = Math.max(1, Math.ceil(winTasks.length / rowsPerPage));
-    const per = Math.ceil(winTasks.length / nPages);
-    for (let i = 0; i < winTasks.length; i += per) {
-      pages.push({ win, rows: winTasks.slice(i, i + per) });
+    let cur = [], curH = 0;
+    for (const t of winTasks) {
+      if (cur.length && curH + t._h > bodyH) {
+        pages.push({ win, rows: cur });
+        cur = [];
+        curH = 0;
+      }
+      cur.push(t);
+      curH += t._h;
     }
+    if (cur.length) pages.push({ win, rows: cur });
   }
-  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, rowsPerPage) });
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H))) });
   const doc = new PdfDoc(PW, PH);
   let first = true;
   const totalPages = pages.length;
@@ -20801,7 +20845,8 @@ function buildProgrammePdf(data, meta = {}) {
       }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M2 + headerBlockH;
-      const gridTop = y, gridBot = gridTop + HDR_H + rows.length * ROW_H;
+      const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
+      const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
       doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
       let cx = M2;
       for (const col of COLS) {
@@ -20812,8 +20857,8 @@ function buildProgrammePdf(data, meta = {}) {
         const d = addDays2(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
-        if (we) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.937, 0.949, 0.963] });
-        if (bh) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.992, 0.953, 0.898] });
+        if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
+        if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         let label = dayW >= 15 ? true : d.getUTCDay() === 1;
         if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
         if (label) {
@@ -20824,10 +20869,11 @@ function buildProgrammePdf(data, meta = {}) {
       }
       doc.line(M2, gridTop, M2 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
       doc.line(M2, gridTop + HDR_H, M2 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
-      rows.forEach((t, ri) => {
-        const ry = gridTop + HDR_H + ri * ROW_H;
+      let ry = gridTop + HDR_H;
+      rows.forEach((t) => {
+        const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        doc.text(M2 + 3, ry + 10.5, fitText(t.name, COLS[0].w - 8, 8.5), { size: 8.5 });
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M2 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
           doc.rect(M2 + COLS[0].w + 2, ry + 3.5, 7, 7, { fill: col });
           doc.text(M2 + COLS[0].w + 12, ry + 10.5, fitText(t._c.name, COLS[1].w - 16, 8), { size: 8 });
@@ -20835,7 +20881,7 @@ function buildProgrammePdf(data, meta = {}) {
         if (t._start) doc.text(M2 + COLS[0].w + COLS[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
         if (t._end) doc.text(M2 + COLS[0].w + COLS[1].w + COLS[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
         doc.text(M2 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M2, ry + ROW_H, M2 + LEFT_W + win.days * dayW, ry + ROW_H, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        doc.line(M2, ry + rh, M2 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
@@ -20844,23 +20890,25 @@ function buildProgrammePdf(data, meta = {}) {
             if (off >= 0 && off < win.days) marked.push(off);
           }
           if (t.milestone && marked.length) {
-            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + ROW_H / 2;
+            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + rh / 2;
             doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
           } else {
+            const bh = ROW_H - 5;
+            const barTop = ry + (rh - bh) / 2;
             let i = 0;
             while (i < marked.length) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
-              const bh = ROW_H - 5;
               const bw = (j - i + 1) * dayW - 1;
               const r = Math.max(1, Math.min(2.5, bh / 2, bw / 2));
-              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, bw, bh, r, { fill: col });
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, barTop, bw, bh, r, { fill: col });
               i = j + 1;
             }
           }
         }
+        ry += rh;
       });
-      doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H + rows.length * ROW_H, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
       const fy = PH - M2 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;

@@ -1625,7 +1625,23 @@ the handle on the Works header to widen/narrow it; the width is stored on the
 programme as **`data.worksW`** (px) and flows through to BOTH exports — progpdf.js
 `applyWorksWidth()` scales it to PDF points (230px≈168pt), and programme-export.js
 scales it to Excel char-width (230px≈34). `programme-gantt.js?v=5`,
-`programme-export.js?v=2`. **PDF truncation fix:** progpdf `fitText` now uses ASCII
+`programme-export.js?v=2`.
+**Task text WRAPS everywhere (Aug 2026) — read in full, no truncation:** the Works
+column now wraps long task names in all three outputs with VARIABLE row heights.
+On screen (`programme-gantt.js?v=6`): the editable name field is a `<textarea>`
+(auto-grows to its content; `field-sizing:content` + a JS `sizeTA` fallback), the
+read-only `.mlp-actro` wraps, `.mlp-tlin` is `position:absolute;inset:0` so the
+timeline fills the taller row, and `.mlp-bar`/`.mlp-dia` are vertically CENTRED
+(`top:50%`) so bars line up in wrapped rows. PDF (`lib/progpdf.js`): `wrapLines()`
+splits the name to the column width (hard-breaks over-long words, caps at
+MAX_NAME_LINES=5 → "..."), each task carries `_lines`+`_h`, and pagination PACKS
+rows by cumulative height (`bodyH`) instead of a fixed row count — so wrapped rows
+never overflow a page; bars centre with `barTop = ry + (rh-bh)/2`. Excel
+(`programme-export.js?v=3`): the Works cell uses a new `wrapText` cellXf and each
+task row gets a computed `ht`/`customHeight` (≈15pt × wrapped lines via
+`wrapCount`); still values-only (0 formulas, verified with openpyxl). Bump both JS
+`?v=` together when touched.
+**PDF truncation fix:** progpdf `fitText` now uses ASCII
 "..." not "…" (U+2026) — the WinAnsi PDF font has no ellipsis glyph, so it was
 rendering as "?" after every truncated task/contractor label.
 **Bank holidays + concurrency (v3, `programme-gantt.js?v=4 (v4: pill/bubble bars + table-layout:fixed so short programmes on wide screens can never stretch columns out of line with the bars)`):** the builder
