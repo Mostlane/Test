@@ -85,7 +85,8 @@
     tbody td.site{ cursor:pointer; }
     tr.row-sel td{ box-shadow: inset 0 0 0 9999px rgba(37,99,235,.16); }
     tr.row-sel td.site{ font-weight:700; }
-    /* Location / access buttons that aren't set yet show a faint ❓. */
+    /* A location button that isn't set yet shows a faint ❓; the key is always
+       a plain 🔑 (the ❓ read as something being wrong with the site). */
     .doc-btn.loc, .doc-btn.key{ font-size:14px; }
     /* Status colours — the Status light AND each due-date cell tint green/amber/red
        based on that compliance's own warning settings. */
@@ -899,7 +900,7 @@ function renderTable(d){
     const pinSet = (m.lat!=null && m.lng!=null) || m.w3w;
     const keySet = (m.access && m.access.trim()) || (m.contact && m.contact.trim()) || (m.keys && m.keys.trim());
     const locCell = `<button class="doc-btn loc" data-code="${e.storeCode}" title="${pinSet?'Location set — view/edit':'Set location'}">${pinSet?'📍':'📍❓'}</button>`;
-    const keyCell = `<button class="doc-btn key" data-code="${e.storeCode}" title="${keySet?'Access info — view/edit':'Add access info'}">${keySet?'🔑':'🔑❓'}</button>`;
+    const keyCell = `<button class="doc-btn key" data-code="${e.storeCode}" title="${keySet?'Access info — view/edit':'Add access info'}">🔑</button>`;
     const ws = worstStatus(e);
     const dtd = (type) => { const s = typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
     tr.innerHTML = `
@@ -1851,14 +1852,12 @@ function openAccessModal(code){
 
   function view(){
     const m = rec.meta || {};
-    const acc = (m.access||'').trim(), con = (m.contact||'').trim(), keys = (m.keys||'').trim();
+    const acc = (m.access||'').trim();
     const block = (label,val,ph) => `<div style="margin:8px 0"><div style="font-weight:700;color:#334155">${label}</div>`
       + (val ? `<div style="white-space:pre-wrap;margin-top:2px">${nl(val)}</div>` : `<div style="color:#94a3b8;margin-top:2px">${ph}</div>`) + `</div>`;
     host.innerHTML = `
       <h2>🔑 Access — ${esc(rec.siteName||code)}</h2>
       ${block('Access instructions', acc, 'Not set yet')}
-      ${block('Keys required', keys, 'Not set yet')}
-      ${block('Site contact', con, 'Not set yet')}
       <div style="margin:8px 0"><div style="font-weight:700;color:#334155">👤 Tenant</div><div id="ak_tenant" style="margin-top:2px;color:#94a3b8">Loading…</div></div>
       <div class="actions">
         ${canEdit?'<button class="btn" id="ak_edit">✏️ Edit</button>':''}
@@ -1873,11 +1872,7 @@ function openAccessModal(code){
     host.innerHTML = `
       <h2>🔑 Access — ${esc(rec.siteName||code)}</h2>
       <label>Access instructions</label>
-      <textarea id="ak_access" rows="4" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="e.g. By appointment — Mon-Fri 8am-5pm">${esc(m.access||'')}</textarea>
-      <label style="margin-top:8px">Keys required</label>
-      <textarea id="ak_keys" rows="3" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="e.g. Fire brigade key (FB2), padlock key held in office">${esc(m.keys||'')}</textarea>
-      <label style="margin-top:8px">Site contact</label>
-      <textarea id="ak_contact" rows="3" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="Name / phone / email (where relevant)">${esc(m.contact||'')}</textarea>
+      <textarea id="ak_access" rows="5" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box" placeholder="e.g. By appointment — Mon-Fri 8am-5pm">${esc(m.access||'')}</textarea>
       <div class="actions">
         <button class="btn" id="ak_save">Save</button>
         <button class="btn" style="background:#ccc;color:#000;" id="ak_cancel">Cancel</button>
@@ -1886,7 +1881,7 @@ function openAccessModal(code){
     const sb=host.querySelector('#ak_save');
     sb.onclick=async()=>{
       sb.disabled=true; sb.textContent='Saving…';
-      const body={ code, access:host.querySelector('#ak_access').value, keys:host.querySelector('#ak_keys').value, contact:host.querySelector('#ak_contact').value };
+      const body={ code, access:host.querySelector('#ak_access').value };
       try{ const r=await authFetch('/compliance/store-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const j=await r.json(); if(r.ok&&j.ok){ rec.meta=j.meta; applyFilters(); view(); }
         else { sb.disabled=false; sb.textContent='Save'; alert('Could not save.'); }

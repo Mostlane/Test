@@ -1395,6 +1395,13 @@ customer like Co-op/Fareham — NOT a silo:
   (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
   a framework to populate going forward). Page **chapplins-compliance.html** = a clone
   of fareham.html on scheme=chapplins.
+  **🔑 column + access modal (Aug 2026):** the key button is always a plain 🔑
+  (the "🔑❓" not-set variant read as something being wrong with the site; the
+  📍 pin keeps its ❓), and its modal shows **Access instructions only** — the
+  "Keys required" and "Site contact" blocks were dropped from both the view and
+  the edit form. Any `meta.keys`/`meta.contact` already stored is untouched
+  (the save now sends only `access`, and /store-meta merges), so re-adding the
+  fields later would show the old values.
   **📍 Fill missing pins (Aug 2026):** all 95 Chapplins sites carried a postcode
   but NONE had a location pin, and 95 by hand is not realistic. A
   **"📍 Fill missing pins"** button in the utility bar (Compliance|FullAccess)
