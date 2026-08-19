@@ -1754,9 +1754,30 @@ tap-to-set 1–5 stars per engineer×area, all autosaving. Star=0 means not comp
 (dropped). Field engineers shown by default (StaffType field), "Show all staff"
 toggle. Chosen design: **1–5 stars · AI suggests a job's area (office confirms) ·
 SOFT preference in suggestions (⚠ flag, never a hard block) · both per-engineer and
-whole-team auto-day.** **TODO (next phases):** (2) AI infer `workArea` on add-job/
-editor; (3) weight the scheduler fill-in/route suggestions by skill (soft, ⚠ when
-none rated); (4) auto-make-a-day (per-engineer + whole-team).
+whole-team auto-day.**
+**Phase 2 (DONE):** **POST /sla/infer-work-area** (Claude classifies a description
+→ one work-area id; shared `anthropicTool()` helper) — add-job.html + sla-jobedit.js
+(`?v=17`) both have an "Area of work" picker + 🤖 Suggest (add-job auto-suggests once
+on description blur if none picked); office confirms.
+**Phase 3 (DONE):** the scheduler loads `/sla/eng-skills` and SOFT-weights its fill-in
+suggestions — `engStars(user,area)` + `skillAdjust(mins,stars)` shaves ~4 detour-min
+per star, so a competent engineer floats up but a much-closer un-rated one still wins;
+rows show `★N <area>` or `⚠ not rated` (`skillBadge`). normaliseJob carries `workArea`.
+**Phase 4 (DONE) — auto-make-a-day:** **POST /sla/auto-schedule** (SLA admin,
+`autoScheduleDay()`) assigns + orders a pool of UNSCHEDULED located jobs across one or
+many engineers by skill-weighted cheapest-insertion + per-day capacity (480−lunch),
+2-opts each route, returns a per-engineer PREVIEW. **Deterministic — Distance-Matrix/
+haversine only, NO Claude, ~0 AI cost** (estimate when >45 points). sla-scheduler.html:
+**🤖 Auto day** (header, whole team) + **🪄 Auto-build day** (engineer-day modal, one)
+→ #autoBackdrop preview (times + skill badges + unplaced list) → **✓ Apply** PATCHes
+each job (assignedEngineers + scheduledAt + durationMinutes). Only ever touches
+unscheduled jobs.
+**AI usage meter + soft daily cap (DONE):** every paid scheduler AI call bumps
+app_config `ai_usage:<yyyy-mm>` (`bumpAiUsage`); a soft **daily** cap (`ai_daily_cap`,
+default 400) makes route-optimise/infer fall back to non-AI when hit. **GET/POST
+/sla/ai-usage** (SLA admin) reads month/today totals + sets the cap — shown on
+engineer-skills.html "📊 AI usage this month". (Programme AI is occasional + NOT yet
+metered.)
 
 ## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
 Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal

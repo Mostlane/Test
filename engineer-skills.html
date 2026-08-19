@@ -64,6 +64,18 @@
     <label class="tgl" style="margin-bottom:8px;"><input type="checkbox" id="showAll"> Show all staff (not just field engineers)</label>
     <div class="gridwrap"><div id="grid"><div class="empty">Loading…</div></div></div>
   </div>
+
+  <div class="card">
+    <h2>📊 AI usage this month</h2>
+    <p class="sub">The scheduler's AI features (route optimise, work-area suggestion) are cheap but metered. Set a soft daily limit — over it, those features fall back to the non-AI behaviour for the rest of the day (0 = no limit).</p>
+    <div id="aiUsage" style="font-size:14px;color:#334155;">Loading…</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+      <label style="font-size:13px;">Daily limit</label>
+      <input type="number" id="aiCap" min="0" step="50" style="width:100px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;">
+      <button type="button" class="btn small" id="aiCapSave">Save limit</button>
+      <span id="aiCapState" style="font-size:12px;color:#16a34a;"></span>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -180,6 +192,23 @@ function renderGrid(){
 }
 $("showAll").addEventListener("change", renderGrid);
 
+// ── AI usage meter + cap ────────────────────────────────────────────────────
+async function loadAiUsage(){
+  try{
+    const d = await (await authFetch("/sla/ai-usage")).json();
+    if(!d.ok){ $("aiUsage").textContent = "Couldn't load usage."; return; }
+    const kinds = Object.entries(d.kinds||{}).map(([k,n])=>`${esc(k)}: ${n}`).join(" · ");
+    $("aiUsage").innerHTML = `This month: <b>${d.monthTotal}</b> AI call${d.monthTotal===1?"":"s"} · Today: <b>${d.today}</b>${d.cap?` of ${d.cap}`:""}` + (kinds?`<div class="sub" style="margin:4px 0 0;">${kinds}</div>`:"");
+    $("aiCap").value = d.cap || 0;
+  }catch(e){ $("aiUsage").textContent = "Couldn't load usage."; }
+}
+async function saveAiCap(){
+  const n = Math.max(0, parseInt($("aiCap").value,10)||0);
+  $("aiCapState").textContent = "…";
+  try{ await authFetch("/sla/ai-usage",{method:"POST",body:JSON.stringify({dailyCap:n})}); $("aiCapState").textContent = "Saved ✓"; loadAiUsage(); }
+  catch(e){ $("aiCapState").textContent = "⚠ not saved"; }
+}
+
 (async function(){
   // SLA-admin gate.
   try{
@@ -196,6 +225,8 @@ $("showAll").addEventListener("change", renderGrid);
     USERS = (us.Users||us.users||[]).filter(u=>(u.Username||u.username));
     renderAreas(); renderGrid();
   }catch(e){ $("grid").innerHTML='<div class="empty">Couldn\'t load skills.</div>'; }
+  $("aiCapSave").addEventListener("click", saveAiCap);
+  loadAiUsage();
 })();
 </script>
 </body>
