@@ -1531,7 +1531,7 @@ autosaves via the normal `queueSave` (part of `data`, no worker/route change).
 It flows read-only to **programme-view.html** (`renderNoteItems`: plain notes as
 bullets + a highlighted "❓ To discuss" box, blanks skipped, card hidden when
 empty) and to the **PDF** (`lib/progpdf.js` notes page: free-text notes, then note
-bullets, then a "To discuss" list; page-break guarded). NOT yet in the Excel
+bullets, then a "To discuss" list; page-break guarded). (PDF: a themed box directly below the chart when it fits — keeps a short programme to 2 pages — else its own page.) NOT yet in the Excel
 export (progpdf/PDF is the primary locked share format). No programme-gantt.js
 change (kept off the shared renderer), so no `?v=` bump.
 Build a **programme of works** (Gantt: sections + activity rows on a weekly grid)
