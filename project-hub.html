@@ -46,6 +46,15 @@
     .editrow input[type=checkbox] { width:19px; height:19px; }
     .drop { border:2px dashed #b9c6d6; border-radius:12px; padding:16px; text-align:center; color:#6b7a90; cursor:pointer; font-size:13.5px; }
     .drop.over { background:#eef4ff; border-color:var(--brand); }
+    /* Collapsible cards — each section is a <details class="card"> with a
+       <summary> heading. State persisted per-project in localStorage. */
+    details.card { padding:0; overflow:hidden; }
+    details.card > summary { list-style:none; cursor:pointer; padding:14px 40px 14px 16px; font-size:16px; font-weight:600; position:relative; user-select:none; }
+    details.card > summary::-webkit-details-marker { display:none; }
+    details.card > summary::after { content:"▾"; position:absolute; right:16px; top:14px; color:#6b7a90; font-size:13px; transition:transform .15s; }
+    details.card:not([open]) > summary::after { transform:rotate(-90deg); }
+    details.card > summary h2 { display:inline; font-size:inherit; font-weight:inherit; margin:0; }
+    details.card > .card-body { padding:0 16px 16px; }
   </style>
 </head>
 <body>
@@ -66,15 +75,35 @@
       return fetch((path.startsWith("http") ? path : API + path), opts);
     }
     const PID = new URLSearchParams(location.search).get("id") || "";
-    let P = null, CAN = false, RAMS_DOCS = [];
+    let P = null, CAN = false, FIELD = false, RAMS_DOCS = [];
 
     (async () => {
       try {
         const me = await authFetch("/auth/me").then(r => r.json());
         if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Projects === "Yes" || me.user.ProjectsAdmin === "Yes")) { alert("This page needs Projects access."); location.href = "/main.html"; return; }
+        FIELD = String(me.user.StaffType || "").toLowerCase() === "field";
       } catch (e) { location.href = "/main.html"; return; }
       await loadProject();
     })();
+
+    // Wrap a card body as a <details> that remembers its open/closed state per
+    // project (localStorage). Default open state per key set via `defOpen`.
+    function sectCard(key, title, bodyHtml, defOpen) {
+      const storeKey = "mlProjHubOpen:" + PID + ":" + key;
+      let open;
+      try { const v = localStorage.getItem(storeKey); open = v == null ? !!defOpen : v === "1"; } catch { open = !!defOpen; }
+      return `<details class="card" ${open ? "open" : ""} data-collapse="${esc(key)}">
+        <summary><h2>${title}</h2></summary>
+        <div class="card-body">${bodyHtml}</div>
+      </details>`;
+    }
+    function wireCollapse() {
+      document.querySelectorAll("details.card[data-collapse]").forEach(d => {
+        d.addEventListener("toggle", () => {
+          try { localStorage.setItem("mlProjHubOpen:" + PID + ":" + d.dataset.collapse, d.open ? "1" : "0"); } catch {}
+        });
+      });
+    }
 
     async function loadProject() {
       let d;
@@ -93,8 +122,18 @@
     }
 
     function render() {
-      g("wrap").innerHTML = summaryCard() + todoCard() + `<div id="costingCard"></div>` + jobsVisitsCard() + docsCard() + sitelogCard() + (CAN ? visibilityCard() : "") + (CAN ? requiredCard() : "");
+      // Field engineers don't see the To-do or SiteLog settings sections —
+      // those are admin/office concerns. Everything else is collapsible.
+      g("wrap").innerHTML = summaryCard()
+        + (FIELD ? "" : todoCard())
+        + `<div id="costingCard"></div>`
+        + jobsVisitsCard()
+        + docsCard()
+        + (FIELD ? "" : sitelogCard())
+        + (CAN ? visibilityCard() : "")
+        + (CAN ? requiredCard() : "");
       wire();
+      wireCollapse();
       if (CAN) loadCosting();
       if (CAN) loadVisibility();
       loadJobsVisits();
@@ -125,15 +164,14 @@
     };
     function todoCard() {
       const items = P.todo || [];
-      if (!items.length) return `<div class="card"><h2>✅ To-do</h2><p class="muted">No documents required. ${CAN ? "Add some below." : ""}</p></div>`;
+      if (!items.length) return sectCard("todo", "✅ To-do", `<p class="muted">No documents required. ${CAN ? "Add some below." : ""}</p>`, false);
       const done = items.filter(i => i.done).length;
-      return `<div class="card"><h2>✅ To-do — ${done}/${items.length} done</h2>
-        ${items.map(it => `<div class="todo">
+      const body = items.map(it => `<div class="todo">
           <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${it.key}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
           <span class="lbl">${esc(it.label)}${it.key === "rams" ? `<small id="ramsRefLine"></small>` : ""}</span>
           <span class="act" data-actfor="${it.key}"></span>
-        </div>`).join("")}
-      </div>`;
+        </div>`).join("");
+      return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
     }
 
     function actionsFor(key) {
@@ -146,66 +184,64 @@
         ? `<button class="btn small" data-build="cpp">${L.cppRef ? BUILD.cpp.open : BUILD.cpp.build}</button>` : "";
       if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
         return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
-      if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="document.getElementById('docsCardEl').scrollIntoView({behavior:'smooth'});return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
+      if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="var el=document.getElementById('docsCardEl');if(el){el.setAttribute('open','');el.scrollIntoView({behavior:'smooth'});}return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
       return "";
     }
 
     function docsCard() {
-      return `<div class="card" id="docsCardEl"><h2>📁 Project Documents</h2>
-        ${CAN ? `<div class="drop" id="dropZone">Drop a file here, or tap to choose. <br><span class="muted">Engineers with Projects access can view these (unless you hide them).</span></div>
+      const body = `${CAN ? `<div class="drop" id="dropZone">Drop a file here, or tap to choose. <br><span class="muted">Engineers with Projects access can view these (unless you hide them).</span></div>
           <div style="margin:8px 0;"><input type="text" id="docSection" placeholder="Section (e.g. Drawings) — optional" style="max-width:280px;display:inline-block;width:auto;"></div>` : ""}
         <div class="doclist" id="docList"><p class="muted">Loading…</p></div>
-        <p class="msg" id="docMsg"></p>
-      </div>`;
+        <p class="msg" id="docMsg"></p>`;
+      const html = sectCard("docs", "📁 Project Documents", body, false);
+      // Keep the historic anchor id used by other buttons that scroll to it.
+      return html.replace('<details class="card"', '<details class="card" id="docsCardEl"');
     }
 
     function sitelogCard() {
       const sl = P.sitelog || {};
-      if (!CAN) return `<div class="card"><h2>📲 SiteLog</h2>
-        ${sl.rules ? `<div class="kv"><b>Arrival message:</b><br>${esc(sl.rules).replace(/\n/g, "<br>")}</div>` : `<p class="muted">No arrival message set.</p>`}
-        ${(sl.companies || []).length ? `<div class="kv"><b>Companies on site:</b> ${sl.companies.map(esc).join(", ")}</div>` : ""}</div>`;
-      return `<div class="card"><h2>📲 SiteLog</h2>
-        <label class="muted" style="font-size:12px;font-weight:600;">Arrival message — everyone</label>
+      if (!CAN) {
+        const body = `${sl.rules ? `<div class="kv"><b>Arrival message:</b><br>${esc(sl.rules).replace(/\n/g, "<br>")}</div>` : `<p class="muted">No arrival message set.</p>`}
+          ${(sl.companies || []).length ? `<div class="kv"><b>Companies on site:</b> ${sl.companies.map(esc).join(", ")}</div>` : ""}`;
+        return sectCard("sitelog", "📲 SiteLog", body, false);
+      }
+      const body = `<label class="muted" style="font-size:12px;font-weight:600;">Arrival message — everyone</label>
         <textarea id="slRules">${esc(sl.rules || "")}</textarea>
         <label class="muted" style="font-size:12px;font-weight:600;margin-top:8px;display:block;">Visitors-only extra</label>
         <textarea id="slVisitor">${esc(sl.visitorRules || "")}</textarea>
         <label class="muted" style="font-size:12px;font-weight:600;margin-top:8px;display:block;">Companies on site</label>
         <div id="coList" style="margin:4px 0;">${(sl.companies || []).map((c, i) => `<span class="pill">${esc(c)} <button data-corm="${i}" style="background:none;border:none;color:var(--brand);cursor:pointer;">✕</button></span>`).join("")}</div>
         <div style="display:flex;gap:8px;"><input type="text" id="coInput" placeholder="Add a company…" style="flex:1;"><button class="btn ghost small" id="coAdd" type="button">＋</button></div>
-        <div style="margin-top:10px;"><button class="btn small" id="slSave">Save SiteLog settings</button> <span class="msg" id="slMsg" style="display:inline;"></span></div>
-      </div>`;
+        <div style="margin-top:10px;"><button class="btn small" id="slSave">Save SiteLog settings</button> <span class="msg" id="slMsg" style="display:inline;"></span></div>`;
+      return sectCard("sitelog", "📲 SiteLog", body, false);
     }
 
     function visibilityCard() {
       const list = Array.isArray(P.visibleTo) ? P.visibleTo : [];
       const mode = list.length ? "picked" : "all";
-      return `<div class="card"><h2>👥 Who can see this project</h2>
-        <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Admins (Full Access / Projects Admin) always see every project. Choose who else this shows up for.</p>
+      const body = `<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Admins (Full Access / Projects Admin) always see every project. Choose who else this shows up for.</p>
         <div class="editrow"><label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:0;"><input type="radio" name="visMode" value="all" ${mode === "all" ? "checked" : ""}> Everyone with Projects access</label></div>
         <div class="editrow"><label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:0;"><input type="radio" name="visMode" value="picked" ${mode === "picked" ? "checked" : ""}> Only the people I pick</label></div>
         <div id="visPickBox" class="${mode === "picked" ? "" : "hide"}" style="margin-top:8px;">
           <input type="search" id="visSearch" placeholder="Filter people…" style="margin-bottom:6px;">
           <div id="visPeople" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;"><p class="muted" style="margin:6px;">Loading people…</p></div>
         </div>
-        <div style="margin-top:10px;"><button class="btn small" id="visSave">Save</button> <span class="msg" id="visMsg" style="display:inline;"></span></div>
-      </div>`;
+        <div style="margin-top:10px;"><button class="btn small" id="visSave">Save</button> <span class="msg" id="visMsg" style="display:inline;"></span></div>`;
+      return sectCard("visibility", "👥 Who can see this project", body, false);
     }
 
     function requiredCard() {
       const r = P.required || {};
       const DT = [["programme","Programme of works"],["rams","Risk Assessment (RAMS)"],["cpp","Construction Phase Plan"],["valuations","Valuations"],["projectDocs","Project Documents"]];
-      return `<div class="card"><h2>⚙ Required documents</h2>
-        <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Change your mind later — tick or untick what this project needs.</p>
+      const body = `<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Change your mind later — tick or untick what this project needs.</p>
         ${DT.map(([k, l]) => `<label class="editrow"><input type="checkbox" data-req="${k}" ${r[k] ? "checked" : ""}> ${esc(l)}</label>`).join("")}
-        <div style="margin-top:8px;"><button class="btn small" id="reqSave">Save</button> <span class="msg" id="reqMsg" style="display:inline;"></span></div>
-      </div>`;
+        <div style="margin-top:8px;"><button class="btn small" id="reqSave">Save</button> <span class="msg" id="reqMsg" style="display:inline;"></span></div>`;
+      return sectCard("required", "⚙ Required documents", body, false);
     }
 
     // ── Jobs & site visits (project spine) ────────────────────────────────────
     function jobsVisitsCard() {
-      return `<div class="card" id="jobsCardEl">
-        <h2>🛠 Jobs &amp; site visits</h2>
-        ${CAN ? `<div id="jvNew"><p class="muted" style="font-size:12.5px;margin:0 0 8px;">Create a job for this project — sends it to the engineer(s) you pick; each runs their own timer.</p>
+      const body = `${CAN ? `<div id="jvNew"><p class="muted" style="font-size:12.5px;margin:0 0 8px;">Create a job for this project — sends it to the engineer(s) you pick; each runs their own timer.</p>
           <label style="font-size:13px;font-weight:600;display:block;margin-bottom:3px;">What's the job?</label>
           <textarea id="jvDesc" placeholder="What needs doing, access notes…" style="min-height:60px;"></textarea>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
@@ -222,8 +258,9 @@
         <div id="jvJobs"><p class="muted">Loading…</p></div>
         <h3 style="margin:14px 0 6px;font-size:14.5px;">${CAN ? "Site visits — everyone" : "My site visits"}</h3>
         <div id="jvVisits"></div>
-        <div id="jvPerUser"></div>
-      </div>`;
+        <div id="jvPerUser"></div>`;
+      const html = sectCard("jobs", "🛠 Jobs &amp; site visits", body, false);
+      return html.replace('<details class="card"', '<details class="card" id="jobsCardEl"');
     }
 
     async function loadJobsVisits() {
@@ -265,7 +302,7 @@
     }
     function renderVisits(visits) {
       const el = document.getElementById("jvVisits");
-      if (!visits.length) { el.innerHTML = `<p class="muted">No visits captured yet — status changes to Travelling / In Progress on a project job will show here.</p>`; return; }
+      if (!visits.length) { el.innerHTML = `<p class="muted">No visits captured yet — status changes to Travelling / In Progress on a project job will show here, and any manual shifts logged on the P&L card too.</p>`; return; }
       // Group by day
       const byDay = {};
       for (const v of visits) { (byDay[v.date] = byDay[v.date] || []).push(v); }
@@ -273,10 +310,18 @@
       el.innerHTML = days.map(day => {
         const rows = byDay[day];
         return `<div style="margin:6px 0 10px;"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;">${esc(day)}</div>
-          ${rows.map(v => `<div class="frow">
-            <span>👷 ${esc(niceName(v.user))}${v.jobRef ? " · <a href='/job-view.html?jobId=" + encodeURIComponent(v.jobId) + "' style='text-decoration:none;color:var(--brand);'>" + esc(v.jobRef) + "</a>" : ""}${v.live ? ' <span class="badge" style="background:#dcfce7;color:#166534;">LIVE</span>' : ""}</span>
-            <span>🛠 ${esc(fmtMins(v.onsiteMins))} on-site${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}</span>
-          </div>`).join("")}
+          ${rows.map(v => {
+            const jobLink = v.jobId
+              ? " · <a href='/job-view.html?jobId=" + encodeURIComponent(v.jobId) + "' style='text-decoration:none;color:var(--brand);'>" + esc(v.jobRef) + "</a>"
+              : (v.manual ? ' · <span class="badge" style="background:#fef3c7;color:#92400e;">MANUAL</span>' : "");
+            const live = v.live ? ' <span class="badge" style="background:#dcfce7;color:#166534;">LIVE</span>' : "";
+            const note = v.note ? ' <span class="muted" style="font-size:12px;">— ' + esc(v.note) + '</span>' : "";
+            const cost = v.manual && v.cost ? " · £" + v.cost.toFixed(2) : "";
+            return `<div class="frow">
+              <span>👷 ${esc(niceName(v.user))}${jobLink}${live}${note}</span>
+              <span>🛠 ${esc(fmtMins(v.onsiteMins))} on-site${v.travelMins ? " · 🚐 " + esc(fmtMins(v.travelMins)) + " travel" : ""}${cost}</span>
+            </div>`;
+          }).join("")}
         </div>`;
       }).join("");
     }
@@ -597,10 +642,7 @@
         }).join("")}
       </div>` : "";
       const poBtn = CAN ? `<button class="btn small ghost" id="poSyncBtn" title="Register this project's site in the PO system so a PO can pick it (add-only)">🔄 Sync to PO</button>` : "";
-      card.innerHTML = `<div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span>💷 Job costing &amp; P&amp;L</span>
-          <span style="display:flex;gap:6px;flex-wrap:wrap;">${poBtn}<a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing">Open in Job Costing →</a></span>
-        </h2>
+      const body = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${poBtn}<a class="btn small ghost" href="${costingHref}" title="Open this project in Job Costing">Open in Job Costing →</a></div>
         ${pnlBlock}
         ${breakdown}
         ${s && s.engineers && s.engineers.length ? `<div style="margin-top:10px;"><b style="font-size:13px;">People</b>${s.engineers.map(e => `<div class="frow"><span>${esc(e.name || e.user || "")}</span><span>${money(e.cost || 0)}</span></div>`).join("")}</div>` : ""}
@@ -608,8 +650,9 @@
         ${!s ? `<p class="muted" style="margin-top:8px;">No costs recorded against this project yet.</p>` : ""}
         ${manualForms}
         ${rowsHtml}
-        ${finHtml}
-      </div>`;
+        ${finHtml}`;
+      card.innerHTML = sectCard("costing", "💷 Job costing &amp; P&amp;L", body, false);
+      wireCollapse();
       if (CAN) wireCostForms();
     }
     function wireCostForms() {
@@ -629,7 +672,7 @@
       document.querySelectorAll("[data-costdel]").forEach(b => b.onclick = async () => {
         if (!(window.MLUI ? await MLUI.confirm("Delete this entry?", { danger: true }) : confirm("Delete this entry?"))) return;
         await authFetch("/project/cost-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, costId: b.dataset.costdel }) });
-        loadCosting();
+        loadCosting(); loadJobsVisits();
       });
     }
     async function addLabour() {
@@ -648,7 +691,7 @@
         if (!r.ok) throw new Error(r.error || "Couldn't save");
         msg.className = "msg ok"; msg.textContent = "Added ✓ (£" + (r.amount || 0).toFixed(2) + ")";
         document.getElementById("labHours").value = ""; document.getElementById("labRate").value = ""; document.getElementById("labNote").value = "";
-        loadCosting();
+        loadCosting(); loadJobsVisits();
       } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
     }
     async function addMaterial() {
@@ -666,7 +709,7 @@
         if (!r.ok) throw new Error(r.error || "Couldn't save");
         msg.className = "msg ok"; msg.textContent = "Added ✓";
         document.getElementById("matDesc").value = ""; document.getElementById("matSup").value = ""; document.getElementById("matAmt").value = "";
-        loadCosting();
+        loadCosting(); loadJobsVisits();
       } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
     }
   </script>

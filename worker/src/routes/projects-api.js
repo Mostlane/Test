@@ -525,8 +525,6 @@ export async function handle(request, env, ctx, url, sess) {
       return (wantNum && (sc === wantNum || sn === wantNum)) || (wantName && sn === wantName);
     });
     const jobIds = projectJobs.map(j => String(j.id));
-    if (!jobIds.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
-
     // Fetch time segments for those jobs. UNION of one prepared statement per id
     // works fine (job count on a project is small) — and dodges IN(?,?…) binding.
     const segs = [];
@@ -538,6 +536,17 @@ export async function handle(request, env, ctx, url, sess) {
         for (const s of results || []) segs.push(s);
       } catch {}
     }
+    // Manually-logged labour shifts (project_costs) count as visits too — even
+    // when the project has no SLA jobs. Each row → one visit stamped `manual`,
+    // with hours + cost. Empty results are fine (table may not exist yet).
+    let manualLab = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, username, date, hours, amount, description FROM project_costs WHERE tenant_id=? AND project_id=? AND kind='labour' ORDER BY date"
+      ).bind(tenantId, row.id).all();
+      manualLab = results || [];
+    } catch {}
+    if (!jobIds.length && !manualLab.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
     const dayOf = iso => String(iso || "").slice(0, 10);
     const minsOf = (a, b) => {
       const s = Date.parse(a || ""), e = Date.parse(b || "");
@@ -547,16 +556,28 @@ export async function handle(request, env, ctx, url, sess) {
     };
     // Group by (username, day, jobId) → one visit row per engineer per day per
     // job. Multiple segments on the same day merge into one row.
-    const visitMap = new Map();   // key -> { date, user, jobId, jobRef, onsiteMins, travelMins, live:bool }
+    const visitMap = new Map();   // key -> { date, user, jobId, jobRef, onsiteMins, travelMins, live:bool, manual:bool, cost:num, note:string }
     for (const s of segs) {
       const user = s.username || "";
       const date = dayOf(s.started_at);
       const key = user + "|" + date + "|" + s.job_id;
       let v = visitMap.get(key);
-      if (!v) { v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false }; visitMap.set(key, v); }
+      if (!v) { v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false, manual: false, cost: 0, note: "" }; visitMap.set(key, v); }
       const m = minsOf(s.started_at, s.ended_at);
       if ((s.kind || "onsite") === "travel") v.travelMins += m; else v.onsiteMins += m;
       if (!s.ended_at) v.live = true;
+    }
+    // Manual shifts as visits — each row is one entry, keyed by its id so an
+    // admin adding two shifts on the same day for the same engineer keeps them
+    // as two rows (dates + rates might differ).
+    for (const r of manualLab) {
+      const user = r.username || "";
+      const date = String(r.date || "").slice(0, 10);
+      const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+      visitMap.set("m|" + r.id, {
+        date, user, jobId: "", jobRef: "Manual shift", onsiteMins: mins, travelMins: 0,
+        live: false, manual: true, cost: Number(r.amount) || 0, note: r.description || "",
+      });
     }
     const meLower = String(me).toLowerCase();
     const normId = u => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();

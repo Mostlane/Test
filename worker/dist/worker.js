@@ -21531,7 +21531,6 @@ async function handle30(request, env, ctx, url, sess) {
       return wantNum && (sc === wantNum || sn === wantNum) || wantName && sn === wantName;
     });
     const jobIds = projectJobs.map((j) => String(j.id));
-    if (!jobIds.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
     const segs = [];
     for (const jid of jobIds) {
       try {
@@ -21542,6 +21541,15 @@ async function handle30(request, env, ctx, url, sess) {
       } catch {
       }
     }
+    let manualLab = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, username, date, hours, amount, description FROM project_costs WHERE tenant_id=? AND project_id=? AND kind='labour' ORDER BY date"
+      ).bind(tenantId, row.id).all();
+      manualLab = results || [];
+    } catch {
+    }
+    if (!jobIds.length && !manualLab.length) return json({ ok: true, canManage, jobs: [], visits: [], perUser: [] }, {}, env, request);
     const dayOf = (iso) => String(iso || "").slice(0, 10);
     const minsOf = (a, b) => {
       const s = Date.parse(a || ""), e = Date.parse(b || "");
@@ -21556,13 +21564,30 @@ async function handle30(request, env, ctx, url, sess) {
       const key = user + "|" + date + "|" + s.job_id;
       let v = visitMap.get(key);
       if (!v) {
-        v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false };
+        v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false, manual: false, cost: 0, note: "" };
         visitMap.set(key, v);
       }
       const m = minsOf(s.started_at, s.ended_at);
       if ((s.kind || "onsite") === "travel") v.travelMins += m;
       else v.onsiteMins += m;
       if (!s.ended_at) v.live = true;
+    }
+    for (const r of manualLab) {
+      const user = r.username || "";
+      const date = String(r.date || "").slice(0, 10);
+      const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+      visitMap.set("m|" + r.id, {
+        date,
+        user,
+        jobId: "",
+        jobRef: "Manual shift",
+        onsiteMins: mins,
+        travelMins: 0,
+        live: false,
+        manual: true,
+        cost: Number(r.amount) || 0,
+        note: r.description || ""
+      });
     }
     const meLower = String(me).toLowerCase();
     const normId2 = (u) => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
