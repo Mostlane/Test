@@ -1417,6 +1417,41 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
     } catch {}
+    // Compliance certificates — the same files eicr-portal / fareham chart
+    // shows. Surface them here as a "Compliance Certificates" area so an
+    // engineer opening Site Documents finds a store's EICR / PAT / EM etc.
+    // without leaving the page. Non-destructive read; delete/upload still
+    // owned by the compliance chart. Matches by site_number → compliance_stores
+    // via siteKeyOf-of-the-request (portal site number OR compliance code).
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        // Two match paths: (a) the compliance store links directly to this site's
+        // number, (b) the compliance code IS the request code (Co-op stores).
+        const { results: files } = await env.DB.prepare(
+          `SELECT f.id, f.scheme, f.code, f.type, f.year, f.filename, f.label, f.r2_key, f.uploaded_at, f.uploaded_by
+             FROM compliance_files f
+             LEFT JOIN compliance_stores s
+                    ON s.tenant_id = f.tenant_id AND s.scheme = f.scheme AND s.code = f.code
+            WHERE f.tenant_id = ?
+              AND (s.site_number = ? OR f.code = ?)
+            ORDER BY f.uploaded_at DESC`
+        ).bind(tenantId, raw, raw).all();
+        if ((files || []).length) {
+          const AREA = "Compliance Certificates";
+          if (!areas.includes(AREA)) areas.unshift(AREA);
+          const TYPE_LBL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly", emYearly: "EM Yearly", pv: "PV", ev: "EV", forecourt: "EV", pump: "Pump", other: "Other" };
+          docs[AREA] = await Promise.all(files.map(async f => ({
+            url: await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 86400),
+            key: f.r2_key,
+            name: (f.label || f.filename || f.r2_key.split("/").pop())
+              + " · " + (TYPE_LBL[f.type] || f.type || "compliance"),
+            at: f.uploaded_at, by: f.uploaded_by, size: 0,
+            complianceDoc: true,   // marker: managed on the compliance chart
+          })));
+        }
+      }
+    } catch {}
     return jsonResponse({ areas, docs }, headers);
   }
 

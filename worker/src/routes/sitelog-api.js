@@ -1486,6 +1486,78 @@ export async function handle(request, env, ctx) {
       return json({ ok: true, siteName });
     }
 
+    // POST /upsert-site — add-or-update by NAME (or by explicit oldName rename).
+    // The portal calls this on any site create + edit + rename so a coord /
+    // postcode / rules edit propagates instead of silently being ignored. Body:
+    //   { siteName, lat?, lng?, radius?, category?, siteRules?, siteRulesVisitor?,
+    //     archived?, oldName? }
+    if (url.pathname === "/upsert-site" && request.method === "POST") {
+      const guard = requireAdmin();
+      if (guard) return guard;
+      await ensureOfflineSchema(env);
+      const body = await readBody(request);
+      const name = String(body.siteName || "").trim();
+      if (!name) return json({ error: "Missing siteName" }, 400);
+      const lat = body.lat !== undefined ? Number(body.lat) : null;
+      const lng = body.lng !== undefined ? Number(body.lng ?? body.lon) : null;
+      const cat = String(body.category || "").trim() || null;
+      const radius = body.radius !== undefined ? Number(body.radius) : null;
+      const oldName = String(body.oldName || "").trim();
+      // Lookup: prefer the old name (rename), else the new name.
+      const lookupName = oldName || name;
+      const existing = await env.SITELOG_DB.prepare(
+        "SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1"
+      ).bind(lookupName).first();
+      if (existing) {
+        const sets = ["site_name = ?"]; const binds = [name];
+        if (lat !== null && isFiniteNumber(lat)) { sets.push("lat = ?"); binds.push(lat); }
+        if (lng !== null && isFiniteNumber(lng)) { sets.push("lng = ?"); binds.push(lng); }
+        if (radius !== null && isFiniteNumber(radius)) { sets.push("radius_m = ?"); binds.push(radius); }
+        if (cat) { sets.push("category = ?"); binds.push(cat); }
+        if (body.siteRules !== undefined) { sets.push("site_rules = ?"); binds.push(body.siteRules || null); }
+        if (body.siteRulesVisitor !== undefined) { sets.push("site_rules_visitor = ?"); binds.push(body.siteRulesVisitor || null); }
+        if (body.archived !== undefined) { sets.push("archived = ?"); binds.push(body.archived ? 1 : 0); }
+        binds.push(existing.id);
+        await env.SITELOG_DB.prepare(`UPDATE sites SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+        return json({ ok: true, id: existing.id, updated: true, renamed: !!(oldName && oldName.toLowerCase() !== name.toLowerCase()) });
+      }
+      // Create — needs coords. (An upsert without coords for a name we don't have
+      // yet is a no-op, mirroring bulk-add-sites' rule that a geofence needs lat/lng.)
+      if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+        return json({ ok: false, reason: "no-coords" });
+      }
+      const id = crypto.randomUUID();
+      await env.SITELOG_DB.prepare(
+        "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived, category, site_rules, site_rules_visitor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).bind(id, name, lat, lng, isFiniteNumber(radius) ? radius : 500,
+        body.archived ? 1 : 0, cat || "Projects",
+        body.siteRules || null, body.siteRulesVisitor || null).run();
+      return json({ ok: true, id, created: true });
+    }
+
+    // POST /delete-site — remove (or archive) a geofence by NAME or id. Called
+    // from the portal when a site is deleted, so scans don't keep landing on a
+    // dead site. Body: { siteName?|id?, archive?:true } (archive→soft-delete).
+    if (url.pathname === "/delete-site" && request.method === "POST") {
+      const guard = requireAdmin();
+      if (guard) return guard;
+      await ensureOfflineSchema(env);
+      const body = await readBody(request);
+      const name = String(body.siteName || "").trim();
+      const id = String(body.id || "").trim();
+      if (!name && !id) return json({ error: "Missing siteName or id" }, 400);
+      const row = id
+        ? await env.SITELOG_DB.prepare("SELECT id FROM sites WHERE id = ?").bind(id).first()
+        : await env.SITELOG_DB.prepare("SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1").bind(name).first();
+      if (!row) return json({ ok: true, missing: true });
+      if (body.archive) {
+        await env.SITELOG_DB.prepare("UPDATE sites SET archived = 1 WHERE id = ?").bind(row.id).run();
+        return json({ ok: true, id: row.id, archived: true });
+      }
+      await env.SITELOG_DB.prepare("DELETE FROM sites WHERE id = ?").bind(row.id).run();
+      return json({ ok: true, id: row.id, deleted: true });
+    }
+
     // POST /bulk-add-sites  — import many sites at once; skips names that already exist
     if (url.pathname === "/bulk-add-sites" && request.method === "POST") {
       const guard = requireAdmin();

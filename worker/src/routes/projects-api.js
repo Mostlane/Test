@@ -28,7 +28,8 @@ import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
 import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned } from "./sla.js";
-import { ratesMap } from "./costing.js";
+import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
+import { syncSiteToSiteLog, removeSiteFromSiteLog } from "./sites.js";
 
 const PROJ_FIN_KEY = tid => `proj_fin:${tid}`;
 
@@ -72,6 +73,22 @@ async function ensureTables(env) {
     created_by TEXT, created_at TEXT)`).run();
 }
 
+async function cfgGet(db, key) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+  try { return row && row.value ? JSON.parse(row.value) : null; } catch { return null; }
+}
+async function cfgSet(db, key, obj) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(db.tenantId, key, JSON.stringify(obj)).run();
+}
+
+// Set the project's contract value via the shared writer in costing.js — so
+// edits on the project hub AND job-costing use ONE code path (no drift when
+// either side evolves). Clearing = writeProjFin(value:null).
+async function setProjFinValue(env, tid, costingKey, value, name) {
+  return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
+}
+
 // Add-only push of the project's site name to the PO system's sites table
 // (env.PO_DB — separate D1), so raising a PO can pick this project. Same
 // idempotent shape as po.js addSite. Best-effort; must never break the caller.
@@ -84,28 +101,37 @@ export async function pushSiteToPO(env, name) {
     return true;
   } catch { return false; }
 }
-
-async function cfgGet(db, key) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
-  try { return row && row.value ? JSON.parse(row.value) : null; } catch { return null; }
+// Rename a project's site row in the PO system so a PO raised after the
+// rename picks the new name AND historical POs (matched by name) roll into the
+// same row on job-costing.
+export async function renameSiteInPO(env, oldName, newName) {
+  try {
+    if (!env.PO_DB) return false;
+    const a = String(oldName || "").trim(), b = String(newName || "").trim();
+    if (!a || !b || a === b) return false;
+    // Existing name check — avoid a unique-constraint clash.
+    const clash = await env.PO_DB.prepare("SELECT id FROM sites WHERE name = ?").bind(b).first();
+    if (clash) {
+      // Merge: retire the old row, keep the (already-existing) new one active.
+      await env.PO_DB.prepare("DELETE FROM sites WHERE name = ?").bind(a).run();
+      await env.PO_DB.prepare("UPDATE sites SET active = 1 WHERE name = ?").bind(b).run();
+    } else {
+      await env.PO_DB.prepare("UPDATE sites SET name = ? WHERE name = ?").bind(b, a).run();
+    }
+    // Historical POs also carry the site NAME (po_log.site). Rewrite them so
+    // job-costing rolls old + new spend onto the one card.
+    try { await env.PO_DB.prepare("UPDATE po_log SET site = ? WHERE site = ?").bind(b, a).run(); } catch {}
+    return true;
+  } catch { return false; }
 }
-async function cfgSet(db, key, obj) {
-  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-    .bind(db.tenantId, key, JSON.stringify(obj)).run();
-}
-
-// Set (or clear) the project's contract value in costing's proj_fin, keyed by
-// the same costing key so valuations show on the job-costing card + hub.
-async function setProjFinValue(db, costingKey, value, name) {
-  if (!costingKey) return;
-  const all = (await cfgGet(db, PROJ_FIN_KEY(db.tenantId))) || {};
-  const cur = all[costingKey] || { value: 0, planned: 1, valuations: [] };
-  cur.value = Number(value) || 0;
-  cur.name = name || cur.name;
-  if (!Array.isArray(cur.valuations)) cur.valuations = [];
-  if (!cur.planned) cur.planned = 1;
-  all[costingKey] = cur;
-  await cfgSet(db, PROJ_FIN_KEY(db.tenantId), all);
+// Remove (deactivate) the PO site so it stops appearing in the picker. Uses
+// soft-delete via active=0 to preserve any po_log rows already keyed to it.
+export async function removeSiteFromPO(env, name) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare("UPDATE sites SET active = 0 WHERE name = ?").bind(String(name).trim()).run();
+    return true;
+  } catch { return false; }
 }
 
 // Push the SiteLog arrival message ("what SiteLog should say") onto the site's
@@ -301,7 +327,7 @@ export async function handle(request, env, ctx, url, sess) {
       id, db.tenantId, number, name, String(b.siteClient || "projects"), siteNumber, "live", JSON.stringify(data), me, now, now
     ).run();
     // Valuations: seed the contract value into costing's proj_fin.
-    if (required.valuations && contractValue) await setProjFinValue(db, costingKey, contractValue, name);
+    if (required.valuations && contractValue) await setProjFinValue(env, tenantId, costingKey, contractValue, name);
     // SiteLog arrival message (best-effort; the geofence was created by /add-site).
     if (data.sitelog.rules || data.sitelog.visitorRules) {
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
@@ -315,12 +341,16 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ── Update (edit required/status/sitelog/companies/value) ─────────────────
+  // Renaming the project cascades to every place its name lives: the Pxxxx
+  // site row, the PO system's site row (add-only sync missed), the SiteLog
+  // geofence (via oldName), the proj_fin key, and any SLA jobs linked to it.
   if (path === "/project/update" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
     const data = parse(row);
+    const oldName = row.name;
     let name = row.name, status = row.status;
     if (typeof b.name === "string" && b.name.trim()) name = b.name.trim().slice(0, 200);
     if (typeof b.status === "string" && ["live", "complete", "archived"].includes(b.status)) status = b.status;
@@ -335,12 +365,46 @@ export async function handle(request, env, ctx, url, sess) {
       if (Array.isArray(b.sitelog.companies)) data.sitelog.companies = b.sitelog.companies.map(s => String(s || "").trim()).filter(Boolean).slice(0, 60);
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
     }
+    // Contract value: shared writer, so it's null-clearable AND matches
+    // /costing/fin exactly. Rename also moves the fin row to the new key.
+    const oldKey = (data.links && data.links.costingKey) || normName(oldName);
+    const newKey = normName(name);
     if (b.contractValue !== undefined) {
       data.contractValue = b.contractValue === null || b.contractValue === "" ? null : Number(b.contractValue);
-      const key = (data.links && data.links.costingKey) || normName(name);
-      if (data.contractValue) await setProjFinValue(db, key, data.contractValue, name);
+      const key = newKey || oldKey;
+      await setProjFinValue(env, tenantId, key, data.contractValue, name);
+      data.links = data.links || {}; data.links.costingKey = key;
     }
     if (Array.isArray(b.visibleTo)) data.visibleTo = sanitiseVisible(b.visibleTo);
+    // Rename cascade — everything that keys on the project's name.
+    const renamed = name && oldName && name !== oldName;
+    if (renamed) {
+      // 1. proj_fin key follows the project.
+      await renameProjFinKey(env, tenantId, oldKey, newKey);
+      data.links = data.links || {}; data.links.costingKey = newKey;
+      // 2. Pxxxx site row.
+      try {
+        await env.DB.prepare("UPDATE sites SET site_name=?, data=json_patch(data, ?) WHERE tenant_id=? AND client='projects' AND site_number=?")
+          .bind(name, JSON.stringify({ siteName: name }), tenantId, row.number).run();
+      } catch {
+        // json_patch may not exist in D1 — fall back to a merge read/write.
+        try {
+          const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+          if (s) { let d = {}; try { d = JSON.parse(s.data || "{}"); } catch {} d.siteName = name;
+            await env.DB.prepare("UPDATE sites SET site_name=?, data=? WHERE tenant_id=? AND client='projects' AND site_number=?").bind(name, JSON.stringify(d), tenantId, row.number).run();
+          }
+        } catch {}
+      }
+      // 3. PO system: rename + rewrite historical po_log.site so costing rolls up.
+      ctx?.waitUntil(renameSiteInPO(env, oldName, name));
+      // 4. SiteLog geofence follows via oldName.
+      const lat = data.lat != null ? Number(data.lat) : null, lon = data.lon != null ? Number(data.lon) : null;
+      ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat, lon, client: "projects" }, oldName));
+      // 5. Also re-apply arrival rules under the new name (best-effort).
+      if (data.sitelog && (data.sitelog.rules || data.sitelog.visitorRules)) {
+        ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
+      }
+    }
     await db.prepare("UPDATE projects SET name=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(name, status, JSON.stringify(data), new Date().toISOString(), db.tenantId, row.id).run();
     const fresh = await getRow(row.id);
@@ -689,17 +753,48 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok, poBound: !!env.PO_DB }, {}, env, request);
   }
 
-  // ── Delete a whole project (record only; the project-site is kept) ────────
+  // ── Delete a whole project — CASCADES to every mirror ────────────────────
+  // 1) Project record + files (R2), 2) Pxxxx site row, 3) PO system's site
+  // (soft-delete active=0 so historical po_log rows keep their site name),
+  // 4) SiteLog geofence (soft archive so in-flight scans close cleanly),
+  // 5) proj_fin key, 6) any SLA jobs' projectId link (nulled — jobs stay).
   if (path === "/project/delete" && method === "POST") {
     if (!canManage) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
+    const data = parse(row);
+    const key = (data.links && data.links.costingKey) || normName(row.name);
+    // 1. R2 project docs + project_files rows.
     const { results } = await db.prepare("SELECT r2_key FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).all();
     for (const f of results || []) { try { await env.JOB_FILES.delete(f.r2_key); } catch {} }
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).run();
+    // 2. Manual project_costs rows.
+    try { await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND project_id=?").bind(tenantId, row.id).run(); } catch {}
+    // 3. Pxxxx site row (keyed by number, client=projects).
+    try { await env.DB.prepare("DELETE FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).run(); } catch {}
+    // 4. proj_fin key.
+    try { await deleteProjFinKey(env, tenantId, key); } catch {}
+    // 5. Break the projectId link on any SLA jobs so they aren't orphaned —
+    //    jobs themselves are kept so the history stays intact.
+    try {
+      const jobs = await listJobs(env, tenantId);
+      for (const j of jobs) {
+        if (j.projectId === row.id) {
+          try {
+            j.projectId = null;
+            await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?")
+              .bind(JSON.stringify(j), tenantId, j.id).run();
+          } catch {}
+        }
+      }
+    } catch {}
+    // 6. Mirror stores (best-effort).
+    ctx?.waitUntil(removeSiteFromPO(env, row.name));
+    ctx?.waitUntil(removeSiteFromSiteLog(env, row.name, { archive: true }));
+    // 7. Finally the project row.
     await db.prepare("DELETE FROM projects WHERE tenant_id=? AND id=?").bind(db.tenantId, row.id).run();
-    return json({ ok: true }, {}, env, request);
+    return json({ ok: true, cascaded: { po: true, sitelog: true, projFin: true, pxxxSite: true } }, {}, env, request);
   }
 
   return error("Unknown projects route", 404, env, request);

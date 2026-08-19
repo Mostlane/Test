@@ -13,6 +13,7 @@ import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor, requireSession } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { syncSiteToSiteLog } from "./sites.js";
 
 let READY = false;
 async function ensure(env) {
@@ -686,6 +687,22 @@ export async function handle(request, env, ctx, url, sess) {
        VALUES (?,?,?,?,?,?,?,1,?,?)
        ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(excluded.site_number, compliance_stores.site_number), updated_at=excluded.updated_at`
     ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), siteNo, at).run();
+    // Cascade name / postcode edits to the linked portal site so an admin who
+    // edits the store here doesn't have to also edit sites.html. Best-effort;
+    // only touches columns supplied. NOP when the store isn't linked yet.
+    if (siteNo && (b.name != null || b.postcode != null)) {
+      try {
+        const s = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+        if (s) {
+          let d = {}; try { d = JSON.parse(s.data || "{}"); } catch {}
+          if (b.name != null) d.siteName = String(name || d.siteName || "").slice(0, 200);
+          if (b.postcode != null) d.postcode = String(postcode || "").slice(0, 20);
+          await env.DB.prepare(
+            "UPDATE sites SET site_name=?, postcode=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?"
+          ).bind(d.siteName || null, d.postcode || null, JSON.stringify(d), tid, s.client, siteNo).run();
+        }
+      } catch {}
+    }
     return jr({ ok: true, code, due, siteNumber: siteNo }, headers);
   }
 
@@ -708,6 +725,28 @@ export async function handle(request, env, ctx, url, sess) {
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2000) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
     else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), (scheme === "coop" ? await coopSiteNumber(env, tid, code) : null), at).run();
+    // Cascade lat/lng edits to the linked portal site (and hence to SiteLog's
+    // geofence), so a coord pin on the compliance chart moves the map + the
+    // scanner geofence in one action.
+    if ("lat" in b || "lng" in b) {
+      try {
+        const linkRow = await env.DB.prepare("SELECT site_number FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
+        const siteNo = linkRow && linkRow.site_number;
+        if (siteNo) {
+          const s = await env.DB.prepare("SELECT client, site_name, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+          if (s) {
+            let d = {}; try { d = JSON.parse(s.data || "{}"); } catch {}
+            if ("lat" in b) d.lat = meta.lat;
+            if ("lng" in b) { d.lng = meta.lng; d.lon = meta.lng; }
+            await env.DB.prepare("UPDATE sites SET data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?")
+              .bind(JSON.stringify(d), tid, s.client, siteNo).run();
+            // Push the new coord to SiteLog too (upsert, so an existing geofence
+            // gets moved instead of a duplicate). Best-effort.
+            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client }));
+          }
+        }
+      } catch {}
+    }
     return jr({ ok: true, code, meta }, headers);
   }
 

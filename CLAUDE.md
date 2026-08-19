@@ -1694,6 +1694,46 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
+- **Centralisation pass (Aug 2026):** the portal now propagates edits between
+  its parallel stores so one source of truth stays in step.
+  - **Sites → SiteLog** is now UPSERT (not add-only): `sitelog-api.js`
+    `/upsert-site` and `/delete-site` accept a name+coord change (or an
+    `oldName` for rename). `sites.js syncSiteToSiteLog(site, oldName?)` fires on
+    every /add-site + /update-site, and `removeSiteFromSiteLog` (soft-archive)
+    fires on /delete-site — postcode/coord/rename edits and deletes propagate
+    to the geofence instead of being silently ignored.
+  - **Projects cascade on rename + delete:** `/project/update` — when the name
+    changes — renames the Pxxxx `sites` row, calls **`renameSiteInPO`** (which
+    also rewrites historical `po_log.site` so costing rolls up onto the new
+    name), fires `syncSiteToSiteLog(oldName)` and re-applies the arrival
+    rules, and calls **`renameProjFinKey`** so the contract-value carries
+    across. `/project/delete` cascades to project_files (R2), project_costs,
+    the Pxxxx `sites` row, `proj_fin` (`deleteProjFinKey`), soft-delete on
+    PO's site (active=0 keeps historical po_log rows), soft-archive on the
+    SiteLog geofence, and nulls out `job.projectId` on any linked SLA jobs
+    (jobs are kept). Response returns `cascaded` for visibility.
+  - **Contract value: single writer.** `costing.js` exports
+    **`writeProjFin(env,tid,key,{value,planned,name})`** (+ `renameProjFinKey`
+    / `deleteProjFinKey`). Both `/costing/fin` and `/project/update` now go
+    through it, so the two pages share ONE code path (no drift, null clears).
+  - **Compliance PDFs on Site Documents.** `/sla/site/docs` GET now injects
+    a **"Compliance Certificates"** area for any site that matches a
+    compliance store (by `site_number` OR the compliance `code`). Files stream
+    via signed `/compliance/file` URLs. Each row carries `complianceDoc:true`
+    and site-folder.html shows a "· from compliance chart" hint + hides
+    Delete (managed on the chart).
+  - **Compliance ↔ Sites bidirectional edits.** `/store` name/postcode edits
+    cascade to the linked `sites` row (`site_name` + `postcode` + `data`).
+    `/store-meta` lat/lng edits cascade to `sites.data.lat/lng` AND fire
+    `syncSiteToSiteLog` so the SiteLog geofence moves too. In reverse,
+    `sites.js /update-site` mirrors name / postcode / lat / lng into any
+    linked `compliance_stores` row via **`syncSiteToCompliance`** — so an
+    admin can edit in either place and the other tracks.
+  - **sitelog_scans fallback.** `buildDay` (costing.js) now falls back to
+    live `SITELOG_DB.visits` when the local `sitelog_scans` mirror has no
+    rows for the day — exceptions/mismatch detection keeps working even if
+    the HMAC bridge is dark, so `/costing/summary` £s and `/exceptions`
+    stay consistent.
 - **Project docs surface as "Site Documents" (Aug 2026):** the SLA
   **`/sla/site/docs`** GET now injects a **"Project Documents"** area whenever
   the requested siteCode matches a portal project's number

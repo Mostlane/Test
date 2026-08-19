@@ -355,13 +355,7 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const key = String(b.key || "").trim();
     if (!key) return error("key required", 400, env, request);
-    const fin = await cfgGet(env, tid, "proj_fin", {});
-    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
-    if (b.value !== undefined) cur.value = Math.max(0, Number(b.value) || 0);
-    if (b.planned !== undefined) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
-    if (b.name !== undefined) cur.name = String(b.name || "").slice(0, 120);
-    fin[key] = cur;
-    await cfgSet(env, tid, "proj_fin", fin);
+    const cur = await writeProjFin(env, tid, key, { value: b.value, planned: b.planned, name: b.name });
     return json({ ok: true, fin: cur }, {}, env, request);
   }
   if (path === "/costing/fin/valuation" && method === "POST") {
@@ -801,12 +795,38 @@ async function buildDay(env, tid, user, date, reg) {
     });
   }
 
-  // SiteLog scans → visit intervals, clipped to time not already covered
+  // SiteLog scans → visit intervals, clipped to time not already covered.
+  // Primary source is the local `sitelog_scans` mirror (fed by the HMAC bridge
+  // from the old standalone SiteLog worker). When the mirror is empty for the
+  // day but SITELOG_DB is bound (in-process SiteLog), fall back to live
+  // visits from that DB — so exceptions/mismatch still work even if the
+  // bridge is dark, keeping /costing/summary £ figures and this day view in step.
   try {
     const { results } = await env.DB.prepare(
       "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at")
       .bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
-    const scans = (results || []).filter(s => londonDate(s.at) === date);
+    let scans = (results || []).filter(s => londonDate(s.at) === date);
+    if (!scans.length && env.SITELOG_DB) {
+      const from = new Date(dayStart).toISOString().slice(0, 10);
+      const to = new Date(dayEnd).toISOString().slice(0, 10);
+      try {
+        const visits = await fetchSitelogVisits(env, from, to);
+        const nameLike = jcNameLike;
+        // Turn visits (check_in_at/check_out_at) into scan-in/scan-out rows so
+        // the reconstruction below is unchanged.
+        for (const v of (visits || [])) {
+          const who = String(v.portal_username || "").trim() || nameLike(v);
+          if (String(who).toLowerCase() !== String(user).toLowerCase()) continue;
+          if (v.check_in_at && londonDate(v.check_in_at) === date) {
+            scans.push({ at: v.check_in_at, direction: "in", site: v.site_code || v.site_name || "" });
+          }
+          if (v.check_out_at && londonDate(v.check_out_at) === date) {
+            scans.push({ at: v.check_out_at, direction: "out", site: v.site_code || v.site_name || "" });
+          }
+        }
+        scans.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      } catch {}
+    }
     const open = {};   // site -> inAt
     const visits = [];
     for (const s of scans) {
@@ -1322,6 +1342,43 @@ async function ensure(env) {
       username TEXT NOT NULL, site TEXT NOT NULL, direction TEXT NOT NULL,
       at TEXT NOT NULL, source TEXT)`).run();
   } catch {}
+}
+
+// Single writer for `proj_fin` — used by both /costing/fin and projects-api.js
+// so contract-value edits on either page share one canonical helper. Pass
+// value:null (or 0) to clear the row entirely.
+export async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
+  if (!costingKey) return null;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  const cur = fin[costingKey] || { value: 0, planned: 0, valuations: [] };
+  if (value !== undefined) cur.value = value === null ? 0 : Math.max(0, Number(value) || 0);
+  if (planned !== undefined) cur.planned = Math.max(0, Math.round(Number(planned) || 0));
+  if (name !== undefined) cur.name = String(name || "").slice(0, 120);
+  if (!Array.isArray(cur.valuations)) cur.valuations = [];
+  // Empty out: no value + no valuations means the project's fin row is dead.
+  if ((!cur.value || cur.value === 0) && !cur.valuations.length && !cur.planned) {
+    delete fin[costingKey];
+  } else {
+    fin[costingKey] = cur;
+  }
+  await cfgSet(env, tid, "proj_fin", fin);
+  return fin[costingKey] || null;
+}
+// Rename a project's fin row when the project (and its normalised key) changes.
+export async function renameProjFinKey(env, tid, oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return false;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[oldKey]) return false;
+  fin[newKey] = fin[oldKey]; delete fin[oldKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
+export async function deleteProjFinKey(env, tid, costingKey) {
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[costingKey]) return false;
+  delete fin[costingKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
 }
 
 async function cfgGet(env, tid, name, fallback) {
