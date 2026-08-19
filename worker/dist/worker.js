@@ -7667,7 +7667,8 @@ async function autoScheduleDay(env, tenantId, body) {
     const explicit = Number(j.durationMinutes);
     const hasExplicit = Number.isFinite(explicit) && explicit > 0;
     const durationMin = hasExplicit ? Math.max(15, Math.round(explicit)) : Math.max(15, Math.round(estimateFor(j.priority)));
-    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), area: outward(j.postcode) || String(j.site || "").split(/[,\s]/)[0] || "", coord });
+    const ow = outward(j.postcode);
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), area: ow || String(j.site || "").split(/[,\s]/)[0] || "", iow: /^PO(3\d|4[01])$/.test(ow), coord });
   }
   if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
   let aiUsed = 0, aiSource = "history";
@@ -7702,31 +7703,63 @@ async function autoScheduleDay(env, tenantId, body) {
     warnings.push("Lots of jobs \u2014 used estimated driving times to keep it fast and cheap.");
   }
   const pE = (i) => i, pJ = (k) => NE + k;
+  const FERRY = 90, REMOTE = 75;
+  const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M3.mins[i][k2] += FERRY;
+  const insertCost = (ei, k) => {
+    const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
+    let bDelta = Infinity, bPos = 1;
+    for (let pos = 1; pos < route.length; pos++) {
+      const a = route[pos - 1], b = route[pos];
+      const delta = M3.mins[a][p] + M3.mins[p][b] - M3.mins[a][b];
+      if (delta < bDelta) {
+        bDelta = delta;
+        bPos = pos;
+      }
+    }
+    return { pos: bPos, delta: bDelta };
+  };
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M3.mins[pE(ei)][pJ(k)]));
   const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
-  const unassigned = [];
+  const unassigned = [], handled = /* @__PURE__ */ new Set();
+  const remoteByArea = {};
+  for (const k of order) if (nearestHome(k) > REMOTE) (remoteByArea[jobs[k].area || "_" + k] ||= []).push(k);
+  const remoteAreas = Object.keys(remoteByArea).sort((a, b) => Math.min(...remoteByArea[b].map(nearestHome)) - Math.min(...remoteByArea[a].map(nearestHome)));
+  for (const area of remoteAreas) {
+    const ks = remoteByArea[area];
+    let bestE = -1, bestCost = Infinity;
+    engs.forEach((_, ei) => {
+      const c = Math.min(...ks.map((k) => M3.mins[pE(ei)][pJ(k)]));
+      if (c < bestCost) {
+        bestCost = c;
+        bestE = ei;
+      }
+    });
+    if (bestE < 0) continue;
+    const e = engs[bestE];
+    for (const k of ks) {
+      handled.add(k);
+      const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
+      if (newLoad <= cap) {
+        e.seq.splice(ins.pos - 1, 0, k);
+        e.load = newLoad;
+      } else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, reason: `${area} is a long-haul trip kept to one engineer (${e.name}) \u2014 this one won't fit today; do it on a dedicated ${area} run` });
+    }
+  }
   for (const k of order) {
+    if (handled.has(k)) continue;
     const j = jobs[k];
     let best = null;
     engs.forEach((e, ei) => {
-      const route = [pE(ei), ...e.seq.map((x) => pJ(x)), pE(ei)];
-      const p = pJ(k);
-      let bDelta = Infinity, bPos = 1;
-      for (let pos = 1; pos < route.length; pos++) {
-        const a = route[pos - 1], b = route[pos];
-        const delta = M3.mins[a][p] + M3.mins[p][b] - M3.mins[a][b];
-        if (delta < bDelta) {
-          bDelta = delta;
-          bPos = pos;
-        }
-      }
-      const newLoad = e.load + bDelta + j.durationMin;
+      const ins = insertCost(ei, k);
+      const newLoad = e.load + ins.delta + j.durationMin;
       if (newLoad > cap) return;
       const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
       const sameArea = j.area && e.seq.some((x) => jobs[x].area === j.area);
-      let eff = bDelta;
+      let eff = ins.delta;
       if (stars > 0) eff -= stars * 4;
       if (sameArea) eff -= 25;
-      if (best === null || eff < best.eff) best = { ei, pos: bPos, newLoad, eff };
+      if (best === null || eff < best.eff) best = { ei, pos: ins.pos, newLoad, eff };
     });
     if (!best) {
       unassigned.push({ id: j.id, ref: j.ref, reason: "no engineer had room in the day" });
