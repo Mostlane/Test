@@ -129,6 +129,15 @@ const SCHEME_DEFAULTS = {
     pat:       { years: 1, amberDays: 90, redDays: 30 },
     pv:        { years: 1, amberDays: 90, redDays: 30 },
   },
+  // Chapplins (residential lettings): statutory landlord certificates.
+  chapplins: {
+    fiveYear:   { years: 5,  amberDays: 90, redDays: 30 },  // EICR (electrical), 5-yearly
+    gas:        { years: 1,  amberDays: 60, redDays: 21 },  // Gas Safety (CP12), annual
+    epc:        { years: 10, amberDays: 180, redDays: 60 }, // EPC, 10-yearly
+    alarms:     { years: 1,  amberDays: 60, redDays: 21 },  // Smoke/CO alarms
+    fire:       { years: 1,  amberDays: 90, redDays: 30 },  // Fire / emergency lighting (communal)
+    legionella: { years: 2,  amberDays: 90, redDays: 30 },  // Legionella risk assessment
+  },
 };
 const DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;   // back-compat alias
 function numOr(v, d, min, max) {
@@ -225,7 +234,7 @@ async function coopSiteNumber(env, tid, code) {
 // (site_number = code). Other schemes (Fareham) attach to an EXISTING portal
 // site matched by name — a separate workflow owns creating those sites — so a
 // store links up when its site exists and shows nothing extra until then.
-const SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council" };
+const SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council", chapplins: "Chapplins" };
 const schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 
 // Human labels + the pickable upload types for a scheme (drives the Site
@@ -234,7 +243,11 @@ const schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + 
 const TYPE_LABELS = {
   fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly",
   emYearly: "EM Yearly", pv: "PV", ev: "EV/Forecourt", forecourt: "EV/Forecourt",
-  pump: "Pump", asbestos: "Asbestos Register", other: "Other",
+  pump: "Pump", asbestos: "Asbestos Register",
+  // Chapplins lettings types
+  gas: "Gas Safety", epc: "EPC", alarms: "Smoke/CO Alarms",
+  fire: "Fire / Emergency Lighting", legionella: "Legionella",
+  other: "Other",
 };
 function typeOptionsFor(scheme) {
   const keys = Object.keys(SCHEME_DEFAULTS[scheme] || SCHEME_DEFAULTS.coop);
@@ -244,7 +257,7 @@ function typeOptionsFor(scheme) {
 }
 
 // Canonical compliance type keys across both schemes.
-const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","other"];
+const KNOWN_TYPES = ["fiveYear","pat","em","emMonthly","emYearly","pv","ev","pump","asbestos","gas","epc","alarms","fire","legionella","other"];
 // Normalise any incoming type label (a chart type key, a SharePoint subfolder, or
 // a table key) to a canonical compliance type.
 function canonType(t) {
@@ -255,7 +268,13 @@ function canonType(t) {
   if (/em\s*month|month.*\bem\b|emmonthly/.test(s)) return "emMonthly";
   if (/em\s*year|year.*\bem\b|emyearly/.test(s)) return "emYearly";
   if (/asbestos/.test(s)) return "asbestos";
+  // Chapplins lettings types (checked before the generic ones below).
+  if (/legionella|\blra\b/.test(s)) return "legionella";
+  if (/\bepc\b|energy\s*perf/.test(s)) return "epc";
+  if (/\bgas\b|cp12|gsc|landlord.*gas|gas.*safety/.test(s)) return "gas";
+  if (/smoke|\bco\b|carbon\s*monox|alarm/.test(s)) return "alarms";
   if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
+  if (/\bfire\b|\bfra\b/.test(s)) return "fire";
   if (/\bpat\b/.test(s)) return "pat";
   if (/emergency|\bem\b|em\s*light/.test(s)) return "em";
   // Forecourt (PFS) is merged with EV on the chart → one "EV/Forecourt" column.

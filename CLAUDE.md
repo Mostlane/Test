@@ -1333,6 +1333,40 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
 - Legacy `vehicles.jamie-def.workers.dev` is now import-only; the standalone
   /vehicles and /fsm sub-app folders are separate and unmigrated.
 
+## Chapplins customer (routes/chapplins.js + chapplins.html + chapplins-compliance.html — Aug 2026)
+A whole customer (Chapplins Lettings, `support@chapplins.co.uk`) built from their
+emailed **job-report PDFs**, imported via the **Microsoft 365 / Outlook connector**
+(the job emails are structured: Tenant ref/Name/Property/contacts/Job Number/Date/
+Description; extraction pass lived in the session scratchpad). Modelled as a full
+customer like Co-op/Fareham — NOT a silo:
+- **Sites**: normal `sites` register, **client=`chapplins`**, numbered **4001–4047**
+  (added to the sites.html category dropdown + `ucClient`). 47 sites (unit-level:
+  32A/32B/32C/Communal are distinct). Loaded direct to D1 (PII stays out of the
+  public repo — never commit customer data).
+- **Tenants** (the genuinely new bit): table **`site_tenants`** (self-migrating;
+  tenant_id INTEGER, keyed `id=<client>:<siteNumber>:<slug(ref|name)>`), generic
+  per-site tenant with **current + previous history** (`is_current`, first/last_seen
+  from job dates → newest = current). Route **/chapplins** (session-gated; manage =
+  FullAccess|Compliance|SLAAdmin): GET /chapplins/sites (directory + current tenant
+  + job count + compliance due), GET /chapplins/site?number= (tenants current-first +
+  jobs), POST /chapplins/tenant (upsert, makeCurrent unsets siblings), /tenant/current,
+  /tenant/delete. A real handover is captured at 4039 (BIS44→BISH01).
+- **Jobs**: the 73 job reports live in **`sla_jobs_archive`** (id `CHAP-<jobNumber>`,
+  `site_code`=numeric site number) so each site's **Previous Jobs** tab + the Job
+  Archive search surface them for free. Skeletons now; enrich later from Workever.
+- **Compliance**: new **`chapplins` scheme** in compliance.js (SCHEME_DEFAULTS/
+  SCHEME_LABELS/TYPE_LABELS/canonType) — six landlord cert types **fiveYear(EICR 5y),
+  gas(1y), epc(10y), alarms(1y), fire(1y), legionella(2y)**. compliance_stores rows
+  (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
+  a framework to populate going forward). Page **chapplins-compliance.html** = a clone
+  of fareham.html on scheme=chapplins.
+- **Nav**: 🏠 Chapplins tile on main.html (MAP `Chapplins:["Compliance","SLAAdmin"]`),
+  sidebar entry in portal-config, a card on compliance.html → chapplins-compliance.html.
+  Hub page **chapplins.html** = the directory (search, per-site current tenant +
+  contacts, previous tenants, jobs, links to site-folder + compliance).
+- **Ongoing intake (TODO/next):** new Chapplins job emails could auto-import via the
+  Outlook connector on a schedule (like the Zapier /sla/inbound path) — not built yet.
+
 ## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
 The big Aug workstream: one **master site register** and a **per-site/per-job
 P&L** that unifies labour (SiteLog scans + SLA job-status taps), materials (PO
