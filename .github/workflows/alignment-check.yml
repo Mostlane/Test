@@ -6,14 +6,12 @@ name: Alignment check
 # actually exist? Opens an issue listing any drift. Report-only — never edits.
 
 on:
-  schedule:
-    - cron: "15 2 * * *"     # nightly, alongside the AI checks
-  push:
-    branches: [main]
-    paths:
-      - "**/*.html"
-      - "portal-config.js"
-      - "worker/src/index.js"
+  # MANUAL ONLY — run from the Actions tab when you want a drift report.
+  # The nightly cron + push-to-main triggers were removed (Aug 2026): every push
+  # that touched an HTML page opened a brand-new GitHub issue, which spammed the
+  # owner's inbox. Findings are mostly retired/dead pages + benign legacy-bridge
+  # notices, so an on-demand check is enough. When it does run it now UPDATES one
+  # tracking issue instead of opening a fresh one each time (see check.mjs).
   workflow_dispatch:
 
 permissions:
