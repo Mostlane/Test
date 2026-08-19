@@ -233,6 +233,23 @@
         </div>
       </div>
 
+      <!-- Expected duration (drives the scheduler's route/day prediction) -->
+      <div class="field-group">
+        <label for="expectedDuration">Expected duration <span class="hint">(time on site)</span></label>
+        <select id="expectedDuration" name="expectedDuration">
+          <option value="30">30 minutes</option>
+          <option value="45">45 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1½ hours</option>
+          <option value="120">2 hours</option>
+          <option value="180">3 hours</option>
+          <option value="240">4 hours</option>
+          <option value="300">5 hours</option>
+          <option value="480">Full day</option>
+        </select>
+        <div class="hint">Used to predict the engineer's day length when optimising routes.</div>
+      </div>
+
       <!-- Firestopping job -->
       <div class="field-group">
         <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
@@ -560,6 +577,7 @@ async function handleSubmit(evt){
     description,
     assignedTo: $("assignedTo").value.trim() || undefined,
     scheduledAt: toIsoOrNull($("scheduledAt").value),
+    durationMinutes: Number($("expectedDuration").value) || 60,
     requiresRA: $("firestopping").checked ? false : $("reqRA").checked,
     requiresSignature: $("firestopping").checked ? false : $("reqSig").checked,
     requiresPhoto: $("firestopping").checked ? false : $("reqPhoto").checked,

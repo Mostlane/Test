@@ -170,6 +170,20 @@
         </div>
         <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (15&nbsp;min / 1&nbsp;day steps). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
 
+        <label for="mljeDuration">Expected duration <small style="font-weight:400;color:#64748b;">(time on site — used to predict the route/day)</small></label>
+        <select id="mljeDuration" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;">
+          <option value="30">30 minutes</option>
+          <option value="45">45 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1½ hours</option>
+          <option value="120">2 hours</option>
+          <option value="180">3 hours</option>
+          <option value="240">4 hours</option>
+          <option value="300">5 hours</option>
+          <option value="480">Full day</option>
+        </select>
+        <div class="mlje-hint">If you set a finish time above, that wins; otherwise this sets it.</div>
+
         <label style="margin-top:12px;">When the engineer sees this job</label>
         <button type="button" id="mljeVisBtn" class="mlje-visbtn">👁 Visible now ▾</button>
         <div id="mljeVisPanel" class="mlje-vispanel" style="display:none;">
@@ -456,6 +470,20 @@
     $("mljeSchedDate").value = (sAt && !isNaN(sAt)) ? pd(sAt) : "";
     $("mljeSchedStart").value = (sAt && !isNaN(sAt)) ? p2(sAt.getHours()) + ":" + p2(sAt.getMinutes()) : "";
     $("mljeSchedEnd").value = (sEnd && !isNaN(sEnd)) ? p2(sEnd.getHours()) + ":" + p2(sEnd.getMinutes()) : "";
+    // Expected duration: the job's own field, else derived from start→finish, else 1h.
+    {
+      let dm = (job.durationMinutes && job.durationMinutes >= 15) ? Math.round(job.durationMinutes)
+        : ((sAt && sEnd && !isNaN(sAt) && !isNaN(sEnd) && sEnd > sAt) ? Math.round((sEnd - sAt) / 60000) : 60);
+      const sel = $("mljeDuration"), v = String(Math.max(15, dm));
+      if (sel) {
+        if (![...sel.options].some(o => o.value === v)) {
+          const o = document.createElement("option");
+          o.value = v; o.textContent = (Number(v) % 60 === 0 ? (Number(v) / 60 + " hour" + (Number(v) === 60 ? "" : "s")) : v + " minutes");
+          sel.insertBefore(o, sel.firstChild);
+        }
+        sel.value = v;
+      }
+    }
     const tgt = job.targetAt ? new Date(job.targetAt) : null;
     $("mljeDueHint").textContent = (tgt && !isNaN(tgt))
       ? ` · SLA due by ${pd(tgt)} ${p2(tgt.getHours())}:${p2(tgt.getMinutes())}` : "";
@@ -605,6 +633,13 @@
         }
       }
     }
+    // Expected duration: a typed finish wins (so the picker never fights the
+    // finish box); otherwise the duration picker. Persisted even when unscheduled.
+    let durationMinutes = Number($("mljeDuration") && $("mljeDuration").value) || null;
+    if (scheduledAt && scheduledEnd) {
+      const dm = Math.round((Date.parse(scheduledEnd) - Date.parse(scheduledAt)) / 60000);
+      if (dm >= 15) durationMinutes = dm;
+    }
     const assignedEngineers = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
 
     // Visibility ("release"): null = visible now, else the chosen mode.
@@ -635,6 +670,7 @@
       // No finish typed: omit the field so the server keeps the job's duration
       // (sending null would erase the finish time). Cleared schedule: null both.
       scheduledEnd: scheduledAt === null ? null : (scheduledEnd || undefined),
+      durationMinutes: durationMinutes || undefined,
       assignedEngineers: assignedEngineers,
       assignedTo: assignedEngineers[0] || "",
       requiresRA: $("mljeReqRA").checked,

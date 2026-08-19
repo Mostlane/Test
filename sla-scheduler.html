@@ -7,7 +7,7 @@
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=15"></script>
+  <script src="sla-jobedit.js?v=16"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -154,6 +154,57 @@
     .eng-jobrow .ej-time{font-size:12px;font-weight:700;color:#334155;flex:0 0 auto;}
     .eng-jobrow .ej-chip{flex:0 0 auto;font-size:11px;font-weight:700;color:#fff;border-radius:999px;padding:3px 9px;}
     .eng-empty{color:var(--muted);font-size:13px;padding:12px 2px;}
+    /* Route optimiser */
+    .opt-sum{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px;}
+    .opt-sum > div{flex:1;min-width:88px;background:#f1f5f9;border:1px solid var(--border);border-radius:9px;padding:8px 10px;text-align:center;}
+    .opt-sum > div b{display:block;font-size:16px;color:#0f172a;}
+    .opt-sum > div span{font-size:11px;color:var(--muted);}
+    .opt-reason{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 10px;font-size:12.5px;color:#3730a3;margin:6px 0;}
+    .opt-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;font-size:12px;color:#92400e;margin:6px 0;}
+    .opt-leg{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:9px;padding:8px 11px;margin-bottom:6px;}
+    .opt-leg .opt-time{font-size:12px;font-weight:800;color:#334155;flex:0 0 46px;padding-top:1px;}
+    .opt-leg .opt-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+    .opt-leg .opt-main b{font-size:13px;}
+    .opt-leg .opt-meta{font-size:11.5px;color:var(--muted);}
+    .opt-leg .opt-drive{font-size:11.5px;color:#2563eb;font-weight:600;margin-top:1px;}
+    .opt-leg.opt-home{background:#f8fafc;font-size:12.5px;font-weight:600;color:#334155;align-items:center;}
+    .opt-leg.opt-lunch{background:#f0fdf4;border-color:#bbf7d0;font-size:12.5px;font-weight:600;color:#166534;align-items:center;}
+    .opt-bf-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:14px 0 8px;font-size:13.5px;flex-wrap:wrap;border-top:1px dashed var(--border);padding-top:12px;}
+    .opt-thr{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+    .opt-thr input[type=range]{width:110px;}
+    .opt-bf-empty{color:var(--muted);font-size:12.5px;padding:6px 2px;}
+    .opt-bf-row{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:7px 10px;margin-bottom:6px;}
+    .opt-bf-row:hover{background:#f8fafc;}
+    .opt-bf-lbl{display:flex;align-items:center;gap:9px;flex:1;min-width:0;cursor:pointer;}
+    .opt-bf-row input{width:auto;flex:0 0 auto;}
+    .opt-bf-view{flex:0 0 auto;}
+    .opt-bf-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+    .opt-bf-main b{font-size:13px;}
+    .opt-bf-meta{font-size:11.5px;color:var(--muted);}
+    .opt-owner{color:#b45309;font-weight:700;margin-left:4px;}
+    .opt-new{color:#2563eb;font-weight:700;margin-left:4px;}
+    .opt-bf-cost{flex:0 0 auto;text-align:right;font-size:12px;font-weight:800;color:#16a34a;line-height:1.25;}
+    .opt-bf-cost small{font-weight:500;color:var(--muted);}
+    .opt-bf-foot{margin-top:8px;}
+    .fill-engs{display:flex;flex-wrap:wrap;gap:6px;}
+    .fill-eng{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12.5px;font-weight:600;cursor:pointer;background:#fff;}
+    .fill-eng.nohome{opacity:.55;cursor:default;}
+    .fill-eng input{width:auto;}
+    .fill-row{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:9px;padding:8px 11px;margin-bottom:6px;}
+    .fill-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+    .fill-main b{font-size:13px;}
+    .fill-meta{font-size:11.5px;color:var(--muted);}
+    .fill-best{flex:0 0 auto;text-align:right;font-size:12px;color:#334155;line-height:1.25;}
+    .fill-best small{color:#16a34a;font-weight:700;}
+    .fill-acts{flex:0 0 auto;display:flex;gap:4px;align-items:center;}
+    .fill-accept{background:#16a34a;color:#fff;}
+    .fill-reject{color:#b91c1c;}
+    /* Job-card sub-modal */
+    .jc-desc{font-size:13.5px;line-height:1.45;margin-bottom:10px;white-space:pre-wrap;}
+    .jc-tbl{width:100%;border-collapse:collapse;font-size:13px;}
+    .jc-tbl th{text-align:left;color:var(--muted);font-weight:600;padding:5px 10px 5px 0;vertical-align:top;white-space:nowrap;width:1%;}
+    .jc-tbl td{padding:5px 0;vertical-align:top;}
+    .jc-chip{display:inline-block;color:#fff;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;}
     .modal label{display:block;font-size:12px;font-weight:600;margin-top:8px;margin-bottom:2px;}
     .modal input,.modal select,.modal textarea{width:100%;padding:7px 8px;font-size:13px;border-radius:6px;border:1px solid var(--border);}
     .modal textarea{min-height:56px;resize:vertical;}
@@ -201,6 +252,7 @@
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
         <button class="btn" id="openMapBtn">🗺️ Map view</button>
       </div>
     </header>
@@ -314,6 +366,7 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
       <span style="display:flex;gap:6px;flex:none;">
+        <button type="button" class="btn" id="engDayOptimise" title="Auto-order this engineer's day into the most efficient route">🧭 Optimise route</button>
         <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
         <button type="button" class="btn" id="engDayClose">✕</button>
       </span>
@@ -321,6 +374,82 @@
     <div id="engDayDate" style="font-size:12px;color:var(--muted);margin:2px 0 8px;"></div>
     <div class="eng-sum" id="engDaySummary"></div>
     <div class="eng-jobs" id="engDayJobs"></div>
+  </div>
+</div>
+
+<!-- ROUTE OPTIMISER MODAL -->
+<div class="modal-backdrop" id="optBackdrop">
+  <div class="modal" style="max-width:600px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 id="optTitle" style="margin:0;">Optimise route</h2>
+        <div id="optDate" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button type="button" class="btn" id="optClose" style="flex:none;">✕</button>
+    </div>
+
+    <div class="opt-controls" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;">
+      <label style="flex:1;min-width:120px;">Start of day
+        <input type="time" id="optStart" value="08:00" step="300" style="width:100%;">
+      </label>
+      <label style="flex:1;min-width:120px;">Lunch break
+        <select id="optLunch" style="width:100%;">
+          <option value="0">None</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="45">45 minutes</option>
+          <option value="60">1 hour</option>
+        </select>
+      </label>
+    </div>
+    <label style="display:block;">Anomalies / instructions for the AI <span style="font-weight:400;color:var(--muted);font-size:12px;">(optional)</span>
+      <textarea id="optNotes" rows="2" placeholder="e.g. The Tesco Fareham job must be done at 14:00. Do the Southampton one last." style="width:100%;margin-top:4px;"></textarea>
+    </label>
+
+    <div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary" id="optRun">🧭 Work out the best route</button>
+      <button type="button" class="btn" id="optApply" style="display:none;background:#16a34a;color:#fff;">✓ Apply to schedule</button>
+    </div>
+
+    <div id="optStatus" style="font-size:13px;color:var(--muted);margin-bottom:8px;"></div>
+    <div id="optSummary"></div>
+    <div id="optResult"></div>
+    <div id="optBackfill"></div>
+  </div>
+</div>
+
+<!-- CROSS-ENGINEER FILL-INS MODAL -->
+<div class="modal-backdrop" id="fillBackdrop">
+  <div class="modal" style="max-width:660px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 style="margin:0;">💡 Jobs that could be worked in</h2>
+        <div id="fillDate" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button type="button" class="btn" id="fillClose" style="flex:none;">✕</button>
+    </div>
+    <div style="margin:12px 0 6px;font-size:12px;font-weight:700;">Engineers to include</div>
+    <div id="fillEngs" class="fill-engs"></div>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:10px 0;">
+      <label class="opt-thr">within <input type="range" id="fillThreshold" min="5" max="45" step="5" value="20"><span id="fillThrVal">20 min</span> extra</label>
+      <button type="button" class="btn btn-primary" id="fillScan">💡 Find fill-ins</button>
+    </div>
+    <div id="fillStatus" style="font-size:13px;color:var(--muted);margin-bottom:6px;"></div>
+    <div id="fillResult"></div>
+  </div>
+</div>
+
+<!-- JOB CARD SUB-MODAL (stacks over the suggestion modals; closing returns to
+     them with their state untouched — no re-scan) -->
+<div class="modal-backdrop" id="jobCardBackdrop" style="z-index:10001;">
+  <div class="modal" style="max-width:520px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <h2 id="jcTitle" style="margin:0;font-size:18px;">Job</h2>
+      <button type="button" class="btn" id="jcClose" style="flex:none;">‹ Back</button>
+    </div>
+    <div id="jcBody" style="margin-top:10px;"></div>
+    <div style="margin-top:12px;">
+      <button type="button" class="btn" id="jcOpenFull">Open full job ↗</button>
+    </div>
   </div>
 </div>
 
@@ -421,11 +550,18 @@ async function loadEngineers(){
   const arr = data.Users || [];
   let list = arr.filter(u => (u.Status||"").toLowerCase() === "active");
   if(window.mlOrderUsers) list = window.mlOrderUsers(list);
-  engineers = list.map(u => ({
-    username: u.Username,
-    name: ((u.FirstName||"")+" "+(u.LastName||"")).trim() || u.Username,
-    staffType: u.StaffType || "field"
-  }));
+  engineers = list.map(u => {
+    const p = u.Profile || {};
+    const hl = Number(p.homeLat), hn = Number(p.homeLng ?? p.homeLon);
+    return {
+      username: u.Username,
+      name: ((u.FirstName||"")+" "+(u.LastName||"")).trim() || u.Username,
+      staffType: u.StaffType || "field",
+      homePostcode: (p.homePostcode || "").toUpperCase().replace(/\s+/g," ").trim(),
+      homeLat: isFinite(hl) ? hl : null,
+      homeLng: isFinite(hn) ? hn : null
+    };
+  });
   if(!engineers.length) throw new Error("No active engineers");
 }
 
@@ -1006,6 +1142,330 @@ document.getElementById("engDayClose").addEventListener("click", () => { $("engD
 document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
 document.getElementById("engDayBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("engDayBackdrop")) document.getElementById("engDayBackdrop").style.display = "none"; });
 
+/* ===== Route optimiser ===== */
+let optCtx = null, optResult = null, optAddedIds = new Set(), optThreshold = 20;
+async function ensureAllJobGeocodes(){
+  const actives = jobs.filter(j => !isDoneStatus(j.status) && !["Closed Jobs","Invoiced"].includes(j.status));
+  try{ await loadSiteMeta(); await geocodePostcodes(actives.map(postcodeFor)); }catch{}
+}
+function optFmtMins(m){ m = Math.round(m || 0); const h = Math.floor(m / 60), mm = m % 60; return h ? (h + "h" + (mm ? " " + mm + "m" : "")) : (mm + "m"); }
+function optWallClock(dateObj, dayStart, offsetMin){
+  const [h, m] = dayStart.split(":").map(Number);
+  const base = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), h, m, 0, 0);
+  const d = new Date(base.getTime() + Math.round(offsetMin) * 60000);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function openRouteOptimise(){
+  if(!engDayCtx) return;
+  optCtx = { username: engDayCtx.username, name: engDayCtx.name, date: engDayCtx.date };
+  optResult = null; optAddedIds = new Set();
+  $("engDayBackdrop").style.display = "none";
+  $("optTitle").textContent = "Optimise route — " + optCtx.name;
+  $("optDate").textContent = optCtx.date.toDateString();
+  $("optApply").style.display = "none";
+  $("optSummary").innerHTML = ""; $("optResult").innerHTML = ""; $("optBackfill").innerHTML = ""; $("optStatus").textContent = "";
+  $("optBackdrop").style.display = "flex";
+}
+function optDayJobs(){
+  const eng = (optCtx.username || "").toLowerCase();
+  const iso = formatDateInput(optCtx.date);
+  return jobs.filter(j => {
+    if(!j.assignedEngineers.some(a => (a || "").toLowerCase() === eng)) return false;
+    if(!j.scheduledAt) return false;
+    if(new Date(j.scheduledAt).toISOString().slice(0, 10) !== iso) return false;
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return false;
+    return true;
+  });
+}
+async function runOptimise(){
+  const dayJobs = optDayJobs();
+  const added = jobs.filter(j => optAddedIds.has(j.id) && !dayJobs.some(d => d.id === j.id));
+  const allJobs = dayJobs.concat(added);
+  if(allJobs.length < 2){ $("optStatus").textContent = "Need at least two active jobs scheduled on this day for this engineer."; return; }
+  $("optStatus").textContent = "Looking up locations…";
+  $("optRun").disabled = true; $("optApply").style.display = "none";
+  await ensureAllJobGeocodes();
+  const payloadJobs = allJobs.map(j => {
+    const c = coordsFor(j);
+    return { id: j.id, ref: j.ref || j.site || j.siteCode, site: j.site, priority: j.priority,
+      durationMinutes: j.durationMinutes || 60,
+      lat: c ? c[0] : undefined, lng: c ? c[1] : undefined, postcode: postcodeFor(j) || undefined };
+  });
+  $("optStatus").textContent = "Working out the most efficient route…";
+  try{
+    const res = await authFetch("/sla/route-optimize", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ engineer: optCtx.username, name: optCtx.name, date: formatDateInput(optCtx.date),
+        dayStart: $("optStart").value || "08:00", lunchMinutes: Number($("optLunch").value) || 0,
+        notes: $("optNotes").value || "", jobs: payloadJobs }) });
+    const data = await res.json();
+    if(!data.ok){ $("optStatus").textContent = data.error || "Couldn't optimise this route."; $("optRun").disabled = false; return; }
+    optResult = data;
+    renderOptimise(data);
+  }catch(e){ $("optStatus").textContent = "Couldn't reach the optimiser — try again."; }
+  $("optRun").disabled = false;
+}
+function renderOptimise(data){
+  const s = data.summary, dayStart = data.dayStart;
+  const endClock = optWallClock(optCtx.date, dayStart, s.dayLengthMins);
+  const srcLabel = data.matrixSource === "google" ? "live driving times" : "estimated distances (no Maps key)";
+  $("optStatus").innerHTML = (data.aiUsed ? "🤖 AI-ordered · " : "📐 Shortest-driving · ") + srcLabel;
+  $("optSummary").innerHTML =
+    `<div class="opt-sum">
+      <div><b>${optFmtMins(s.driveMins)}</b><span>driving</span></div>
+      <div><b>${optFmtMins(s.siteMins)}</b><span>on site</span></div>
+      ${s.lunchMins ? `<div><b>${optFmtMins(s.lunchMins)}</b><span>lunch</span></div>` : ""}
+      <div><b>${s.driveMiles} mi</b><span>round trip</span></div>
+      <div><b>${optFmtMins(s.dayLengthMins)}</b><span>day · ends ~${endClock}</span></div>
+    </div>` +
+    (data.aiReason ? `<div class="opt-reason">🤖 ${escapeHtml(data.aiReason)}</div>` : "") +
+    ((data.warnings && data.warnings.length) ? `<div class="opt-warn">⚠ ${data.warnings.map(escapeHtml).join("<br>")}</div>` : "");
+  const rows = [];
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${dayStart}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
+  data.legs.forEach((l, i) => {
+    if(data.lunch && data.lunch.beforeJobId === l.jobId){
+      rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(optCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
+    }
+    const arrive = optWallClock(optCtx.date, dayStart, l.arrivalOffset);
+    rows.push(
+      `<div class="opt-leg"><span class="opt-time">${arrive}</span>
+        <span class="opt-main"><b>${i + 1}. ${escapeHtml(l.ref || l.site || "Job")}</b>
+          <span class="opt-meta">${escapeHtml(l.site || "")}${l.priority ? " · " + escapeHtml(l.priority) : ""} · ${l.durationMin} min on site</span>
+          <span class="opt-drive">🚗 ${optFmtMins(l.driveMins)} · ${l.driveMiles} mi from previous</span>
+        </span></div>`);
+  });
+  if(data.lunch && !data.lunch.beforeJobId){
+    rows.push(`<div class="opt-leg opt-lunch"><span class="opt-time">${optWallClock(optCtx.date, dayStart, data.lunch.offset)}</span><span>🍽 Lunch (${data.lunch.minutes} min)</span></div>`);
+  }
+  rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${endClock}</span><span>🏠 Back home · 🚗 ${optFmtMins(s.homeDriveMins)} · ${s.homeDriveMiles} mi</span></div>`);
+  $("optResult").innerHTML = rows.join("");
+  $("optApply").style.display = "";
+  renderBackfill(data);
+}
+// "Jobs you could add" — a free, local straight-line scan for jobs that fit this
+// engineer's optimised day with little detour. Google is only spent later, when
+// the office ticks some and RE-optimises (so the added jobs get real times).
+function renderBackfill(data){
+  const wrap = $("optBackfill");
+  const home = engHomeCoord(optCtx.username);
+  if(!home){ wrap.innerHTML = `<div class="opt-warn" style="margin-top:12px;">Add a home postcode for ${escapeHtml(optCtx.name)} in Users Admin to see jobs they could work in.</div>`; return; }
+  const orderIds = data.legs.map(l => l.jobId);
+  const daySet = new Set(orderIds);
+  const dayPts = [home];
+  orderIds.forEach(id => { const j = jobs.find(x => x.id === id); const c = j && coordsFor(j); if(c) dayPts.push(c); });
+  dayPts.push(home);
+  const iso = formatDateInput(optCtx.date);
+  const cand = [];
+  jobs.forEach(j => {
+    if(daySet.has(j.id)) return;
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return;
+    // Only unscheduled jobs or ones already on THIS day (from another engineer) —
+    // never pull a job that's deliberately booked for a different day.
+    const sched = j.scheduledAt ? new Date(j.scheduledAt).toISOString().slice(0, 10) : null;
+    if(sched && sched !== iso) return;
+    const c = coordsFor(j); if(!c) return;
+    const ins = cheapestInsertion(dayPts, c);
+    const mins = miToMin(ins.detourMi);
+    if(mins > optThreshold) return;
+    let slot;
+    if(ins.index === 1) slot = "first call";
+    else if(ins.index === dayPts.length - 1) slot = "last call";
+    else { const bj = jobs.find(x => x.id === orderIds[ins.index - 2]); slot = "after " + (bj ? (bj.ref || bj.site || "a job") : "a job"); }
+    cand.push({ job: j, detourMi: Math.round(ins.detourMi * 10) / 10, detourMin: mins, slot });
+  });
+  cand.sort((a, b) => a.detourMin - b.detourMin);
+  const top = cand.slice(0, 12);
+  let html = `<div class="opt-bf-head"><b>➕ Jobs you could work in</b>
+    <label class="opt-thr">within <input type="range" id="optThreshold" min="5" max="45" step="5" value="${optThreshold}"><span id="optThrVal">${optThreshold} min</span> extra</label></div>`;
+  if(!top.length){ html += `<div class="opt-bf-empty">Nothing else is within ${optThreshold} min of this route.</div>`; }
+  else html += top.map(c => {
+    const j = c.job, mine = j.assignedEngineers.some(a => (a || "").toLowerCase() === optCtx.username.toLowerCase());
+    const owner = j.assignedEngineers.length
+      ? (mine ? "" : `<span class="opt-owner">⚠ currently ${escapeHtml(ownerLabel(j))}</span>`)
+      : `<span class="opt-new">🆕 unscheduled</span>`;
+    return `<div class="opt-bf-row" data-id="${escapeAttr(j.id)}">
+      <label class="opt-bf-lbl"><input type="checkbox" class="opt-bf-cb" data-id="${escapeAttr(j.id)}" ${optAddedIds.has(j.id) ? "checked" : ""}>
+        <span class="opt-bf-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
+          <span class="opt-bf-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
+        <span class="opt-bf-cost">≈ +${c.detourMin}m<br><small>+${c.detourMi} mi · ${escapeHtml(c.slot)}</small></span></label>
+      <button type="button" class="btn tiny opt-bf-view" data-id="${escapeAttr(j.id)}" title="View the job card">👁</button>
+    </div>`;
+  }).join("");
+  html += `<div class="opt-bf-foot"><button type="button" class="btn btn-primary" id="optReopt" ${optAddedIds.size ? "" : "disabled"}>↻ Re-optimise with ${optAddedIds.size} added</button></div>`;
+  wrap.innerHTML = html;
+  $("optThreshold").addEventListener("input", e => { optThreshold = Number(e.target.value) || 20; $("optThrVal").textContent = optThreshold + " min"; renderBackfill(data); });
+  wrap.querySelectorAll(".opt-bf-view").forEach(b => b.addEventListener("click", () => openJobCard(b.getAttribute("data-id"))));
+  wrap.querySelectorAll(".opt-bf-cb").forEach(cb => cb.addEventListener("change", () => {
+    const id = cb.getAttribute("data-id");
+    if(cb.checked) optAddedIds.add(id); else optAddedIds.delete(id);
+    const btn = $("optReopt"); if(btn){ btn.disabled = optAddedIds.size === 0; btn.textContent = "↻ Re-optimise with " + optAddedIds.size + " added"; }
+  }));
+  const ro = $("optReopt"); if(ro) ro.addEventListener("click", () => runOptimise());
+}
+async function applyOptimise(){
+  if(!optResult || !optResult.legs) return;
+  $("optApply").disabled = true;
+  $("optStatus").textContent = "Applying new times…";
+  const dayStart = optResult.dayStart;
+  const [h, m] = dayStart.split(":").map(Number);
+  let ok = 0, fail = 0;
+  for(const l of optResult.legs){
+    const base = new Date(optCtx.date.getFullYear(), optCtx.date.getMonth(), optCtx.date.getDate(), h, m, 0, 0);
+    const start = new Date(base.getTime() + Math.round(l.arrivalOffset) * 60000);
+    const end = new Date(start.getTime() + Math.round(l.durationMin) * 60000);
+    const patch = { scheduledAt: start.toISOString(), scheduledEnd: end.toISOString(),
+      durationMinutes: l.durationMin, changedBy: currentUser || "scheduler" };
+    // A job worked in from the tray or another engineer's day is reassigned to
+    // this engineer as part of applying the route.
+    if(optAddedIds.has(l.jobId)){ patch.assignedEngineers = [optCtx.username]; patch.assignedTo = optCtx.username; }
+    try{
+      const res = await authFetch("/sla/jobs/" + encodeURIComponent(l.jobId), { method: "PATCH",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      if(res.ok) ok++; else fail++;
+    }catch{ fail++; }
+  }
+  $("optStatus").textContent = `Applied ${ok} job${ok === 1 ? "" : "s"}${fail ? ", " + fail + " failed" : ""}.`;
+  optAddedIds = new Set();
+  await loadJobs();
+  render();
+  $("optApply").disabled = false;
+  if(!fail) setTimeout(() => { $("optBackdrop").style.display = "none"; }, 800);
+}
+document.getElementById("engDayOptimise").addEventListener("click", openRouteOptimise);
+document.getElementById("optClose").addEventListener("click", () => { $("optBackdrop").style.display = "none"; });
+document.getElementById("optBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("optBackdrop")) $("optBackdrop").style.display = "none"; });
+document.getElementById("optRun").addEventListener("click", runOptimise);
+document.getElementById("optApply").addEventListener("click", applyOptimise);
+
+/* ===== Cross-engineer fill-ins (local scan; no API calls until you assign) ===== */
+let fillThreshold = 20, fillRejected = new Set();
+function engName(username){ const e = engineers.find(x => (x.username || "").toLowerCase() === (username || "").toLowerCase()); return e ? e.name : username; }
+function openFillins(){
+  $("fillDate").textContent = "Loose jobs for " + selectedDate.toDateString();
+  const rows = engineers.map(e => {
+    const hasHome = (e.homeLat != null) || !!e.homePostcode;
+    return `<label class="fill-eng${hasHome ? "" : " nohome"}">
+      <input type="checkbox" class="fill-eng-cb" value="${escapeAttr(e.username)}" ${hasHome ? "checked" : "disabled"}>
+      <span>${escapeHtml(e.name)}${hasHome ? "" : " <small>(no home set)</small>"}</span></label>`;
+  }).join("");
+  $("fillEngs").innerHTML = rows || '<div class="opt-bf-empty">No engineers.</div>';
+  $("fillThreshold").value = fillThreshold; $("fillThrVal").textContent = fillThreshold + " min";
+  $("fillStatus").textContent = ""; $("fillResult").innerHTML = ""; fillRejected = new Set();
+  $("fillBackdrop").style.display = "flex";
+}
+async function runFillScan(){
+  const ticked = [...document.querySelectorAll(".fill-eng-cb:checked")].map(c => c.value);
+  if(!ticked.length){ $("fillStatus").textContent = "Tick at least one engineer."; $("fillResult").innerHTML = ""; return; }
+  $("fillStatus").textContent = "Scanning…"; $("fillScan").disabled = true;
+  await ensureAllJobGeocodes(); await ensureHomeGeocodes(ticked);
+  const iso = formatDateInput(selectedDate);
+  const routes = {};
+  ticked.forEach(u => { if(engHomeCoord(u) && !holFor(u, selectedDate)){ const rp = engRoutePoints(u, selectedDate); if(rp) routes[u] = rp.points; } });
+  const engs = Object.keys(routes);
+  if(!engs.length){ $("fillStatus").textContent = "None of the ticked engineers has a home postcode set (or all are on leave that day)."; $("fillResult").innerHTML = ""; $("fillScan").disabled = false; return; }
+  const tickedSet = new Set(ticked.map(t => t.toLowerCase()));
+  const cand = [];
+  jobs.forEach(j => {
+    if(fillRejected.has(j.id)) return;                                  // dismissed this session
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return;
+    const c = coordsFor(j); if(!c) return;
+    const sched = j.scheduledAt ? new Date(j.scheduledAt).toISOString().slice(0, 10) : null;
+    if(sched && sched !== iso) return;                                  // booked another day — leave it
+    const owners = j.assignedEngineers.map(a => (a || "").toLowerCase());
+    if(sched === iso && owners.some(o => tickedSet.has(o))) return;     // already placed on a ticked engineer's day
+    let best = null;
+    engs.forEach(u => {
+      if(owners.includes(u.toLowerCase())) return;
+      const ins = cheapestInsertion(routes[u], c);
+      const mins = miToMin(ins.detourMi);
+      if(best === null || mins < best.mins) best = { u, mins, mi: Math.round(ins.detourMi * 10) / 10 };
+    });
+    if(!best || best.mins > fillThreshold) return;
+    cand.push({ job: j, best });
+  });
+  cand.sort((a, b) => a.best.mins - b.best.mins);
+  if(!cand.length){ $("fillStatus").textContent = `No loose jobs fit within ${fillThreshold} min of the ticked engineers' days.`; $("fillResult").innerHTML = ""; $("fillScan").disabled = false; return; }
+  $("fillResult").innerHTML = cand.map(c => {
+    const j = c.job;
+    const owner = j.assignedEngineers.length ? `<span class="opt-owner">⚠ currently ${escapeHtml(ownerLabel(j))}</span>` : `<span class="opt-new">🆕 unscheduled</span>`;
+    return `<div class="fill-row" data-id="${escapeAttr(j.id)}">
+      <span class="fill-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
+        <span class="fill-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
+      <span class="fill-best">→ <b>${escapeHtml(engName(c.best.u))}</b><br><small>≈ +${c.best.mins}m · +${c.best.mi} mi</small></span>
+      <span class="fill-acts">
+        <button type="button" class="btn tiny fill-view" data-id="${escapeAttr(j.id)}" title="View the job card">👁</button>
+        <button type="button" class="btn tiny fill-reject" data-id="${escapeAttr(j.id)}" title="Reject this suggestion">✕</button>
+        <button type="button" class="btn tiny fill-accept" data-id="${escapeAttr(j.id)}" data-eng="${escapeAttr(c.best.u)}" data-sched="${j.scheduledAt ? 1 : 0}">✓ Accept</button>
+      </span>
+    </div>`;
+  }).join("");
+  $("fillResult").querySelectorAll(".fill-view").forEach(b => b.addEventListener("click", () => openJobCard(b.getAttribute("data-id"))));
+  $("fillResult").querySelectorAll(".fill-reject").forEach(b => b.addEventListener("click", () => rejectFillin(b.getAttribute("data-id"))));
+  $("fillResult").querySelectorAll(".fill-accept").forEach(b => b.addEventListener("click", () => acceptFillin(b)));
+  updateFillCount();
+  $("fillScan").disabled = false;
+}
+function updateFillCount(){
+  const n = $("fillResult").querySelectorAll(".fill-row").length;
+  $("fillStatus").textContent = n ? `${n} job${n === 1 ? "" : "s"} could be worked in — accept, reject or 👁 view each:` : "All suggestions dealt with. Press 💡 Find fill-ins to scan again.";
+}
+function rejectFillin(id){
+  fillRejected.add(id);
+  const row = $("fillResult").querySelector(`.fill-row[data-id="${CSS.escape(id)}"]`);
+  if(row) row.remove();
+  updateFillCount();
+}
+async function acceptFillin(btn){
+  const id = btn.getAttribute("data-id"), eng = btn.getAttribute("data-eng"), wasSched = btn.getAttribute("data-sched") === "1";
+  btn.disabled = true; btn.textContent = "…";
+  const patch = { assignedEngineers: [eng], assignedTo: eng, changedBy: currentUser || "scheduler" };
+  if(!wasSched){ const d = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 8, 0, 0, 0); patch.scheduledAt = d.toISOString(); }
+  try{
+    const res = await authFetch("/sla/jobs/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+    if(!res.ok) throw new Error();
+    // Remove just this row — the rest of the suggestions stay as-is (no re-scan).
+    const row = $("fillResult").querySelector(`.fill-row[data-id="${CSS.escape(id)}"]`);
+    if(row) row.remove();
+    const n = $("fillResult").querySelectorAll(".fill-row").length;
+    $("fillStatus").innerHTML = `✓ Assigned to <b>${escapeHtml(engName(eng))}</b> — open their day and Optimise to slot it in.` + (n ? ` <span style="color:var(--muted)">${n} left.</span>` : "");
+    await loadJobs(); render();
+  }catch{ btn.disabled = false; btn.textContent = "✓ Accept"; alert("Couldn't assign — try again."); }
+}
+$("openFillBtn").addEventListener("click", openFillins);
+$("fillClose").addEventListener("click", () => { $("fillBackdrop").style.display = "none"; });
+$("fillBackdrop").addEventListener("click", e => { if(e.target === $("fillBackdrop")) $("fillBackdrop").style.display = "none"; });
+$("fillThreshold").addEventListener("input", e => { fillThreshold = Number(e.target.value) || 20; $("fillThrVal").textContent = fillThreshold + " min"; });
+$("fillScan").addEventListener("click", runFillScan);
+
+/* Job-card sub-modal — read-only, rendered from the in-memory job (no fetch, no
+   re-scan). Stacks over whichever suggestion modal is open; ‹ Back just hides it. */
+let jcJobId = null;
+function openJobCard(id){
+  jcJobId = id;
+  const j = jobs.find(x => x.id === id);
+  if(!j){ $("jcTitle").textContent = "Job"; $("jcBody").innerHTML = '<div class="opt-bf-empty">Couldn\'t load this job.</div>'; }
+  else {
+    $("jcTitle").textContent = j.ref || j.site || "Job";
+    const c = STATUS_COLOUR[j.status] || "#64748b";
+    const when = j.scheduledAt ? new Date(j.scheduledAt) : null;
+    const engs = (j.assignedEngineers || []).map(engName).join(", ") || "—";
+    const rowsHtml = [
+      ["Status", `<span class="jc-chip" style="background:${c}">${escapeHtml(j.status || "—")}</span>`],
+      ["Priority", escapeHtml(j.priority || "—")],
+      ["Site", escapeHtml(j.site || j.siteCode || "—")],
+      ["Address", escapeHtml(j.address || "—")],
+      ["Scheduled", when ? (when.toLocaleDateString() + " " + pad2(when.getHours()) + ":" + pad2(when.getMinutes()) + " · " + (j.durationMinutes || 60) + " min") : "Not scheduled"],
+      ["Engineer(s)", escapeHtml(engs)]
+    ];
+    $("jcBody").innerHTML =
+      (j.title ? `<div class="jc-desc">${escapeHtml(j.title)}</div>` : "") +
+      `<table class="jc-tbl">` + rowsHtml.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join("") + `</table>`;
+  }
+  $("jobCardBackdrop").style.display = "flex";
+}
+$("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.display = "none"; });
+$("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
+$("jcOpenFull").addEventListener("click", () => { if(jcJobId){ const e = encodeURIComponent(jcJobId); window.open("job-view.html?jobId=" + e + "&id=" + e, "_blank"); } });
+
 function openJobModal(jobId){
   const job = jobs.find(j => j.id === jobId);
   if(!job) return;
@@ -1105,7 +1565,13 @@ const mapFilter = new Set(MAP_STATUSES);
 let siteMeta = null;                 // "0123" -> { pc, lat, lon }
 const GEO_KEY = "mlPostcodeGeo_v1";
 let geoCache = {};
-try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+let geoMiss = {};   // postcodes that failed THIS page load — never persisted
+try{
+  const raw = JSON.parse(localStorage.getItem(GEO_KEY)) || {};
+  // Successes only. A miss cached as null (older builds) meant a postcode that
+  // failed once was never retried on that device, and its pin stayed missing.
+  Object.keys(raw).forEach(k => { if(Array.isArray(raw[k])) geoCache[k] = raw[k]; });
+}catch{ geoCache = {}; }
 
 async function loadSiteMeta(){
   if(siteMeta) return;
@@ -1147,7 +1613,7 @@ function postcodeFor(job){
 let geoFetchError = false;
 async function geocodePostcodes(pcs){
   geoFetchError = false;
-  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  const todo = [...new Set(pcs.filter(pc => pc && !Array.isArray(geoCache[pc]) && !geoMiss[pc]))];
   for(let i = 0; i < todo.length; i += 100){
     const batch = todo.slice(i, i + 100);
     try{
@@ -1158,8 +1624,9 @@ async function geocodePostcodes(pcs){
       });
       const data = await res.json();
       (data.result || []).forEach(r => {
-        geoCache[(r.query || "").toUpperCase()] =
-          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+        const q = (r.query || "").toUpperCase();
+        if(r.result && isFinite(r.result.latitude)) geoCache[q] = [r.result.latitude, r.result.longitude];
+        else geoMiss[q] = 1;
       });
     }catch(e){ geoFetchError = true; }
   }
@@ -1173,6 +1640,78 @@ function coordsFor(job){
   const s = siteFor(job);
   if(s && s.lat != null && s.lon != null && (s.lat || s.lon)) return [s.lat, s.lon];
   return null;
+}
+
+/* ===== Suggestion geometry (all local — no API calls) =====
+   "Jobs you could work in" and the cross-engineer fill-in view are pure
+   straight-line maths on coordinates we already have. Google is only ever spent
+   later, when a chosen route is actually optimised. */
+const ROAD_FACTOR = 1.25, EST_MPH = 30;
+function haversineMiC(a, b){
+  const R = 3958.8, toR = x => x*Math.PI/180;
+  const dLat = toR(b[0]-a[0]), dLng = toR(b[1]-a[1]), la1 = toR(a[0]), la2 = toR(b[0]);
+  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.min(1, Math.sqrt(h)));
+}
+const roadMi = (a, b) => haversineMiC(a, b) * ROAD_FACTOR;
+const miToMin = mi => Math.round(mi / EST_MPH * 60);
+// An engineer's home coordinate (pinned lat/lng, else geocoded home postcode).
+function engHomeCoord(username){
+  const e = engineers.find(x => (x.username||"").toLowerCase() === (username||"").toLowerCase());
+  if(!e) return null;
+  if(e.homeLat != null && e.homeLng != null) return [e.homeLat, e.homeLng];
+  if(e.homePostcode && Array.isArray(geoCache[e.homePostcode])) return geoCache[e.homePostcode];
+  return null;
+}
+// Cheapest place to slot coord x into a polyline of points (home at both ends).
+// Returns the extra ROAD miles and the gap index (insert between points[i-1],points[i]).
+function cheapestInsertion(points, x){
+  let best = Infinity, at = 1;
+  for(let i = 1; i < points.length; i++){
+    const add = roadMi(points[i-1], x) + roadMi(x, points[i]) - roadMi(points[i-1], points[i]);
+    if(add < best){ best = add; at = i; }
+  }
+  return { detourMi: Math.max(0, best), index: at };
+}
+// The engineer's route points for a date: home → their scheduled jobs (in the
+// given order, or by time) → home. Returns { points, jobsInOrder } or null.
+function engRoutePoints(username, dateObj, orderedJobIds){
+  const home = engHomeCoord(username);
+  if(!home) return null;
+  const eng = (username||"").toLowerCase(), iso = formatDateInput(dateObj);
+  let dayJobs = jobs.filter(j =>
+    j.assignedEngineers.some(a => (a||"").toLowerCase() === eng) &&
+    j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0,10) === iso &&
+    !isDoneStatus(j.status) && !["Closed Jobs","Invoiced"].includes(j.status));
+  if(orderedJobIds){
+    const idx = new Map(orderedJobIds.map((id,i) => [id,i]));
+    dayJobs = dayJobs.slice().sort((a,b) => (idx.has(a.id)?idx.get(a.id):999) - (idx.has(b.id)?idx.get(b.id):999));
+  } else {
+    dayJobs = dayJobs.slice().sort((a,b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+  }
+  const pts = [home];
+  const inOrder = [];
+  for(const j of dayJobs){ const c = coordsFor(j); if(c){ pts.push(c); inOrder.push(j); } }
+  pts.push(home);
+  return { points: pts, jobsInOrder: inOrder };
+}
+// Make sure every engineer home postcode we might need is geocoded (one free
+// postcodes.io batch, cached on the device).
+async function ensureHomeGeocodes(usernames){
+  const pcs = [];
+  (usernames || engineers.map(e => e.username)).forEach(u => {
+    const e = engineers.find(x => x.username === u);
+    if(e && e.homeLat == null && e.homePostcode) pcs.push(e.homePostcode);
+  });
+  if(pcs.length) await geocodePostcodes(pcs);
+}
+// Who currently holds a job, for the "already with…" flag.
+function ownerLabel(job){
+  const names = (job.assignedEngineers || []).map(u => {
+    const e = engineers.find(x => (x.username||"").toLowerCase() === (u||"").toLowerCase());
+    return e ? e.name : u;
+  }).filter(Boolean);
+  return names.length ? names.join(", ") : "";
 }
 
 // Map scope: null = the whole board (open statuses, chip-filtered); or
@@ -1242,7 +1781,7 @@ function plotJobs(){
       const pc = postcodeFor(job);
       problems.push(`${job.ref || job.id}: ` + (
         !pc ? "no postcode on the job, its site, or its address"
-            : (geoCache[pc] === null ? `postcode "${pc}" not recognised`
+            : (geoMiss[pc] ? `postcode "${pc}" not recognised`
                                      : `postcode "${pc}" not looked up yet${geoFetchError ? " (postcode lookup unreachable)" : ""}`)
       ));
       return;

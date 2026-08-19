@@ -228,10 +228,22 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the map: work here is booked only a day or two ahead, so at the time "next 7
   days" held 4 jobs where "last 7 days" held 50, and engineers reported their
   jobs had vanished (19 Aug). Either side of today keeps upcoming work visible
-  for planning AND the recent jobs engineers actually look for. **Geocoding
-  caches SUCCESSES ONLY** (`mlPostcodeGeo_v1`) — caching a miss as null meant a
-  postcode that failed once, on a bad batch or a rate-limit, was never looked up
-  again on that device and its pin stayed missing for good.
+  for planning AND the recent jobs engineers actually look for. An **All** segment sits
+  after Year: it drops the date filter entirely and is the ONLY view that can show
+  jobs **assigned but not booked in** (no `scheduledAt`, so they fall inside no
+  window) — those pin with a dashed outline and a "📌 Not booked in yet" popup.
+  Every range's status line now names what ISN'T pinned ("· 2 with no usable
+  postcode · 3 not booked in (tap All)") so a missing job is never a mystery.
+  **Geocoding caches SUCCESSES ONLY** (`mlPostcodeGeo_v1`) — caching a miss as
+  null meant a postcode that failed once, on a bad batch or a rate-limit, was
+  never looked up again on that device and its pin stayed missing for good.
+  **That cache is SHARED by engineer-jobs.html, route.html AND
+  sla-scheduler.html** — fixing only one page is not a fix, because the other two
+  re-poison it on the next visit (this is what made the pins come back and vanish
+  again). All three now: strip any nulls left by an older build when they load the
+  cache, keep failures in an in-memory `geoMiss` for the page load only, and
+  persist arrays exclusively. sla-scheduler's "postcode not recognised"
+  diagnostic reads `geoMiss`, not a stored null.
 
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
@@ -1383,6 +1395,30 @@ customer like Co-op/Fareham — NOT a silo:
   (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
   a framework to populate going forward). Page **chapplins-compliance.html** = a clone
   of fareham.html on scheme=chapplins.
+  **🔑 column + access modal (Aug 2026):** the key button is always a plain 🔑
+  (the "🔑❓" not-set variant read as something being wrong with the site; the
+  📍 pin keeps its ❓), and its modal shows **Access instructions only** — the
+  "Keys required" and "Site contact" blocks were dropped from both the view and
+  the edit form. Any `meta.keys`/`meta.contact` already stored is untouched
+  (the save now sends only `access`, and /store-meta merges), so re-adding the
+  fields later would show the old values.
+  **📍 Fill missing pins (Aug 2026):** all 95 Chapplins sites carried a postcode
+  but NONE had a location pin, and 95 by hand is not realistic. A
+  **"📍 Fill missing pins"** button in the utility bar (Compliance|FullAccess)
+  looks up every store with NO pin via postcodes.io **in the browser** (the same
+  lookup the scheduler and sites register use — the worker can't be the one to
+  call it) and saves each through the normal **POST /compliance/store-meta**, so
+  the linked portal site's lat/lng and its SiteLog geofence move with it exactly
+  as if the pin had been dropped by hand. A pin already set is never touched
+  (w3w/access/contact survive — the route merges); a postcode centroid is a
+  starting point, so rows stay draggable. The outcome goes in a **modal**, not an
+  `alert()` — portal-wide `alert` is an MLUI toast and can't carry the list of
+  what was skipped (postcode not recognised / no postcode at all). NB 4073
+  "Communal Area, 22 London Street, Andover" had no postcode; set to SP10 2PE
+  from the two sibling flats at the same address. 4074 (The Crawford Apartments,
+  Percy Road, Exeter) still has none. The button is Chapplins-only for now:
+  Fareham's 24 stores have no postcodes to look up (2 exceptions) and the Co-op
+  chart (eicr-portal.html) has no 📍 column at all.
 - **Nav**: 🏠 Chapplins tile on main.html (MAP `Chapplins:["Compliance","SLAAdmin"]`),
   sidebar entry in portal-config, a card on compliance.html → chapplins-compliance.html.
   Hub page **chapplins.html** = the directory (search, per-site current tenant +
@@ -1701,6 +1737,85 @@ workbook protection (legacy hash — a deterrent like the original workbook's).
 Validated with openpyxl (parse, fills, protection, zero formulas) — NB
 LibreOffice is broken in the dev sandbox (loads nothing), that's not a file
 problem. progpdf.js is unit-testable in Node (imports only lib/pdf.js). **Mostlane logo** is embedded top-left of the PDF header (lib/logo.js base64 JPEG via doc.image, fail-soft) and shown beside the title on the client share page (programme-view.html /mostlane-logo.jpg).
+
+## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
+Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal
+`#engDayBackdrop`, alongside 🗺️ Map) that auto-orders that engineer's jobs for a
+day into the most efficient **round trip** (home → jobs → home) and previews the
+predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
+- **POST /sla/route-optimize** (SLA-admin gated; `isSlaAdmin`). Body `{engineer,
+  date, dayStart, lunchMinutes, notes, jobs:[{id,ref,site,priority,durationMinutes,
+  lat,lng,postcode}]}`. The CLIENT sends the day's jobs WITH resolved coords (it
+  already geocodes postcodes for the map via `coordsFor`); the worker resolves the
+  engineer's **home** from `users.profile.homeLat/homeLng` else geocodes
+  `profile.homePostcode` (postcodes.io, edge-cached), builds a **Google Distance
+  Matrix** driving-time+miles matrix (`driveMatrix`, chunked to the 100-element
+  cap; haversine ×1.25 @30mph fallback when `GOOGLE_MAPS_KEY` is unset or the call
+  fails — `matrixSource` says which), solves a **nearest-neighbour + 2-opt**
+  baseline (`solveRoute`), then calls **Claude** (`anthropicRouteOrder`, forced
+  `set_route` tool, `env.ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL`) with the matrix +
+  the office's plain-English `notes` to RE-ORDER for anomalies ("the Tesco job must
+  be at 14:00", "do Southampton last"). AI order is validated as a full permutation
+  else the baseline is used; every fallback is surfaced in `warnings`. Returns a
+  PREVIEW only — `legs` (per stop: arrivalOffset minutes-from-start, driveMins,
+  driveMiles, durationMin), a fixed **lunch** allowance (inserted ~13:00, else after
+  the last job), and a **summary** (driveMins, driveMiles round-trip, siteMins,
+  lunchMins, dayLengthMins). Times are OFFSETS in minutes — the client owns the
+  local wall-clock conversion (it knows the date + start in London time).
+- **Apply** writes the new times back: the client builds each `scheduledAt`/
+  `scheduledEnd` from date + dayStart + offset and PATCHes each job (nothing is
+  written until the office presses ✓ Apply).
+- **Per-job expected duration**: a real persisted **`job.durationMinutes`** field
+  (create + patch in sla.js) so an UNSCHEDULED job still carries its on-site time
+  (the finish time only exists once scheduled). Input on **add-job.html** (allocate
+  section) + the shared **sla-jobedit.js** editor (a typed finish time still wins,
+  so the picker never fights the finish box). `sla-jobedit.js?v=16`.
+- **Engineer home** lives on `users.profile.homePostcode` (+ optional
+  `homeLat/homeLng` pin) — edited in **users-admin.html** (postcode field always;
+  a "📍 Set on map" Leaflet pin modal, lazy-loaded from unpkg, that overrides the
+  postcode). Postcode alone is enough (worker geocodes it); the pin is a fine-tune.
+- Uses the **already-present** `GOOGLE_MAPS_KEY` (same key sitelog-api's
+  `getTravelData` uses) and the OPTIONAL `ANTHROPIC_API_KEY` (the programme AI's
+  key). No new secrets; both fail soft with a clear reason in `warnings`.
+- **"Jobs you could work in" + cross-engineer fill-ins (front-end only, ZERO API
+  cost):** the whole suggestion engine is **local straight-line geometry** on
+  coordinates the page already has — `haversineMiC`/`roadMi` (×1.25) +
+  `cheapestInsertion(points, x)` (min added road-miles to slot a job into a
+  polyline home→…→home). `loadEngineers` now carries each engineer's home
+  (`Profile.homePostcode`/`homeLat`/`homeLng` from GET /users), so every
+  engineer's start point is known client-side (`engHomeCoord`, geocoded via the
+  same free postcodes.io cache). **Google is NEVER spent on the scan** — only when
+  a chosen route is actually (re-)optimised. Two surfaces, both in
+  sla-scheduler.html:
+  - **Backfill panel** inside the optimiser (`renderBackfill`): after a route, it
+    scans every active job NOT already on that day (unscheduled OR same-day; never
+    a job booked for another day), ranks by detour into the optimised route,
+    filters by a **max-detour slider** (`optThreshold`, default 20 min), and shows
+    each with `≈ +Nm · +N mi · <slot>` and an owner flag (**"⚠ currently <name>"**
+    if it's another engineer's, **"🆕 unscheduled"** otherwise). Tick some →
+    **↻ Re-optimise** folds them in (`optAddedIds`) and the real Google matrix
+    runs; **Apply reassigns** each added job to this engineer (`assignedEngineers`
+    on the PATCH).
+  - **Cross-engineer overview** (💡 Fill-ins button → `#fillBackdrop`): a
+    **tick-list of engineers** (auto-ticked when a home is set, disabled + "no home
+    set" otherwise), scanned together for the selected date. For each loose job
+    (unscheduled, or scheduled that date but NOT on a ticked engineer) it finds the
+    **best-fit ticked engineer** by cheapest insertion into their day-route
+    (`engRoutePoints`), skipping anyone on leave (`holFor`), and flags the current
+    owner. Each suggestion has **✓ Accept** (`acceptFillin` — PATCH
+    `assignedEngineers` + schedule onto the day if it had no time; removes just
+    that row, NO re-scan), **✕ Reject** (`rejectFillin` — dismiss + remember in
+    `fillRejected` for the session), and **👁 View**.
+  - **Job-card sub-modal** (`#jobCardBackdrop`, z-index 10001, `openJobCard`):
+    View on ANY suggestion (backfill or fill-ins) stacks a read-only job card OVER
+    the suggestion modal, rendered from the in-memory `jobs` array (no fetch). ‹
+    Back just hides it — **the suggestion list underneath is untouched, so nothing
+    re-runs**. This "peek then return without re-scanning" was an explicit
+    requirement. "Open full job ↗" links to job-view.html.
+  Because empty/near-empty days score a full home round-trip, the detour metric
+  naturally prefers engineers already passing by — i.e. "without going out of
+  their way". No worker change and no new endpoint — reuses /sla/route-optimize
+  (for the re-optimise) and PATCH /sla/jobs/{id} (for assignment).
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

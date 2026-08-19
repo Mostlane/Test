@@ -5756,6 +5756,12 @@ async function handle8(request, env, ctx, url, sess) {
       return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms };
     }), headers);
   }
+  if (subpath === "/route-optimize" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess))
+      return jsonResponse({ error: "Only SLA admins can optimise a route." }, headers, 403);
+    return jsonResponse(await optimiseEngineerRoute(env, tenantId, await readJson2(request)), headers);
+  }
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
     const date = searchParams.get("date") || todayStr();
@@ -6962,6 +6968,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
       scheduledEnd = new Date(s + 36e5).toISOString();
     }
   }
+  const durationMinutes = Number.isFinite(Number(body.durationMinutes)) ? Math.max(15, Math.round(Number(body.durationMinutes))) : existing?.durationMinutes ?? null;
   const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : !isProjJob;
   const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
   const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
@@ -7012,6 +7019,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
     scheduledAt,
     scheduledEnd,
+    durationMinutes,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
     release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0 } : void 0 : existing?.release,
@@ -7069,10 +7077,13 @@ async function patchJob(env, tenantId, id, patch) {
     }
   }
   if (patch.scheduledEnd !== void 0) job.scheduledEnd = patch.scheduledEnd;
-  if (patch.durationMinutes !== void 0 && job.scheduledAt) {
+  if (patch.durationMinutes !== void 0) {
     const mins = Math.max(15, Number(patch.durationMinutes) || 60);
-    const s = Date.parse(job.scheduledAt);
-    if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 6e4).toISOString();
+    job.durationMinutes = mins;
+    if (job.scheduledAt) {
+      const s = Date.parse(job.scheduledAt);
+      if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 6e4).toISOString();
+    }
   }
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
   if (patch.requiresRA !== void 0) job.requiresRA = !!patch.requiresRA;
@@ -7209,6 +7220,304 @@ async function isSlaAdmin(env, tenantId, sess) {
 }
 async function isFullAccess(env, tenantId, sess) {
   return (await userPerms(env, tenantId, sess)).has("FullAccess");
+}
+function haversineMi(a, b) {
+  const R = 3958.8, toR = (x) => x * Math.PI / 180;
+  const dLat = toR(b[0] - a[0]), dLng = toR(b[1] - a[1]);
+  const la1 = toR(a[0]), la2 = toR(b[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+async function geocodePcServer(pc) {
+  const clean = String(pc || "").toUpperCase().replace(/\s+/g, "").trim();
+  if (!clean) return null;
+  try {
+    const res = await fetch(
+      "https://api.postcodes.io/postcodes/" + encodeURIComponent(clean),
+      { cf: { cacheTtl: 2592e3, cacheEverything: true } }
+    );
+    if (!res.ok) return null;
+    const d = await res.json();
+    const r = d && d.result;
+    if (r && isFinite(r.latitude)) return [Number(r.latitude), Number(r.longitude)];
+  } catch {
+  }
+  return null;
+}
+async function engineerHome(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  let row = null;
+  try {
+    row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tenantId, username).first();
+  } catch {
+  }
+  let prof = {};
+  try {
+    prof = JSON.parse(row?.profile || "{}") || {};
+  } catch {
+  }
+  const lat = Number(prof.homeLat), lng = Number(prof.homeLng ?? prof.homeLon);
+  if (isFinite(lat) && isFinite(lng) && (lat || lng)) return { coord: [lat, lng], postcode: prof.homePostcode || "" };
+  const pc = String(prof.homePostcode || "").trim();
+  if (pc) {
+    const g = await geocodePcServer(pc);
+    if (g) return { coord: g, postcode: pc };
+  }
+  return null;
+}
+async function driveMatrix(env, pts) {
+  const n = pts.length;
+  const mins = Array.from({ length: n }, () => Array(n).fill(0));
+  const miles = Array.from({ length: n }, () => Array(n).fill(0));
+  const estPair = (i, j) => {
+    const mi = haversineMi(pts[i], pts[j]) * 1.25;
+    miles[i][j] = Math.round(mi * 10) / 10;
+    mins[i][j] = Math.max(1, Math.round(mi / 30 * 60));
+  };
+  const fallback = () => {
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) estPair(i, j);
+    return { mins, miles, source: "estimate" };
+  };
+  const key = env.GOOGLE_MAPS_KEY || "";
+  if (!key) return fallback();
+  try {
+    const latlng = pts.map((p) => p[0] + "," + p[1]);
+    const per = Math.max(1, Math.floor(100 / n));
+    let anyOk = false;
+    for (let o = 0; o < n; o += per) {
+      const originsIdx = [];
+      for (let k = o; k < Math.min(o + per, n); k++) originsIdx.push(k);
+      const url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(originsIdx.map((i) => latlng[i]).join("|")) + "&destinations=" + encodeURIComponent(latlng.join("|")) + "&mode=driving&units=imperial&key=" + encodeURIComponent(key);
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status !== "OK") {
+        for (const i of originsIdx) for (let j = 0; j < n; j++) if (i !== j) estPair(i, j);
+        continue;
+      }
+      (data.rows || []).forEach((row, ri) => {
+        const i = originsIdx[ri];
+        (row.elements || []).forEach((el, j) => {
+          if (i === j) return;
+          if (el && el.status === "OK") {
+            miles[i][j] = Math.round(el.distance.value / 1609.344 * 10) / 10;
+            mins[i][j] = Math.max(1, Math.round(el.duration.value / 60));
+            anyOk = true;
+          } else estPair(i, j);
+        });
+      });
+    }
+    return { mins, miles, source: anyOk ? "google" : "estimate" };
+  } catch {
+    return fallback();
+  }
+}
+function solveRoute(cost) {
+  const n = cost.length;
+  const jobIdx = [];
+  for (let i = 1; i < n; i++) jobIdx.push(i);
+  if (jobIdx.length <= 1) return jobIdx;
+  const unv = new Set(jobIdx);
+  const order = [];
+  let cur = 0;
+  while (unv.size) {
+    let best2 = null, bd = Infinity;
+    for (const j of unv) if (cost[cur][j] < bd) {
+      bd = cost[cur][j];
+      best2 = j;
+    }
+    order.push(best2);
+    unv.delete(best2);
+    cur = best2;
+  }
+  const tourCost = (seq) => {
+    let c = cost[0][seq[0]];
+    for (let i = 0; i < seq.length - 1; i++) c += cost[seq[i]][seq[i + 1]];
+    return c + cost[seq[seq.length - 1]][0];
+  };
+  let best = order.slice(), bestC = tourCost(best), improved = true, guard = 0;
+  while (improved && guard++ < 60) {
+    improved = false;
+    for (let i = 0; i < best.length - 1; i++) for (let k = i + 1; k < best.length; k++) {
+      const cand = best.slice(0, i).concat(best.slice(i, k + 1).reverse(), best.slice(k + 1));
+      const c = tourCost(cand);
+      if (c + 1e-9 < bestC) {
+        best = cand;
+        bestC = c;
+        improved = true;
+      }
+    }
+  }
+  return best;
+}
+async function anthropicRouteOrder(env, { jobs, matrixMins, dayStart, notes, baseSeq }) {
+  const key = env.ANTHROPIC_API_KEY;
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const N = jobs.length;
+  const lines = jobs.map((j, i) => `${i + 1}. ${j.ref}${j.site && j.site !== j.ref ? " (" + j.site + ")" : ""} \u2014 ${j.durationMin} min on site${j.priority ? ", " + j.priority : ""}`);
+  const hdr = "    " + Array.from({ length: N + 1 }, (_, k) => (k === 0 ? "H" : String(k)).padStart(4)).join("");
+  const rows = [];
+  for (let i = 0; i <= N; i++) rows.push((i === 0 ? "H" : String(i)).padStart(3) + " " + Array.from({ length: N + 1 }, (_, j) => String(matrixMins[i][j]).padStart(4)).join(""));
+  const schema = {
+    type: "object",
+    properties: {
+      order: { type: "array", items: { type: "integer" }, description: `Every job number (1..${N}), each exactly once, in visiting order.` },
+      reasoning: { type: "string", description: "One or two short sentences on the order chosen." },
+      notes: { type: "string", description: "Any instruction you could NOT honour, else empty." }
+    },
+    required: ["order"]
+  };
+  const system = "You are a routing assistant for a UK field-service engineer. Order the jobs to minimise total driving time for a round trip that starts and ends at the engineer's home (point H), UNLESS an office instruction requires otherwise. Strictly honour any fixed times, sequencing or priorities the office typed, even at the cost of extra driving. Return every job number exactly once.";
+  const userContent = `Day starts at ${dayStart} from home (H).
+
+Jobs:
+${lines.join("\n")}
+
+Driving time between points (minutes; H = home, columns and rows are point numbers):
+${hdr}
+${rows.join("\n")}
+
+Shortest-driving baseline order (job numbers): ${baseSeq.join(" \u2192 ")}
+
+` + (notes.trim() ? `Office instructions (these OVERRIDE pure efficiency):
+${notes.trim()}
+
+` : "") + `Return the visiting order as job numbers.`;
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: 1500, system, tools: [{ name: "set_route", description: "Return the route.", input_schema: schema }], tool_choice: { type: "tool", name: "set_route" }, messages: [{ role: "user", content: userContent }] })
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI to apply your notes \u2014 used shortest-driving order." };
+  }
+  if (!resp.ok) {
+    let detail = "";
+    try {
+      const j = await resp.json();
+      detail = j?.error?.message || "";
+    } catch {
+    }
+    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "The AI key was rejected \u2014 used shortest-driving order." };
+    if (resp.status === 404 && /model/i.test(detail)) return { ok: false, error: `The AI model "${model}" isn't available on this key \u2014 used shortest-driving order.` };
+    return { ok: false, error: "The AI service errored \u2014 used shortest-driving order." + (detail ? " (" + detail + ")" : "") };
+  }
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    return { ok: false, error: "AI gave an unreadable reply \u2014 used shortest-driving order." };
+  }
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "set_route") : null;
+  if (!block?.input?.order) return { ok: false, error: "AI didn't return an order \u2014 used shortest-driving order." };
+  return { ok: true, order: block.input.order, reasoning: block.input.reasoning || "", notes: block.input.notes || "" };
+}
+async function optimiseEngineerRoute(env, tenantId, body) {
+  const engineer = String(body.engineer || "").trim();
+  const date = String(body.date || "").slice(0, 10);
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunchMinutes = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 0));
+  const notes = String(body.notes || "").slice(0, 2e3);
+  const useAI = body.useAI !== false;
+  const inJobs = Array.isArray(body.jobs) ? body.jobs : [];
+  const warnings = [];
+  if (!engineer) return { ok: false, error: "No engineer given." };
+  const home = await engineerHome(env, tenantId, engineer);
+  if (!home) return { ok: false, needsHome: true, error: "No home location saved for this engineer. Add a home postcode in Users Admin so the round-trip route can be worked out." };
+  const jobs = [];
+  for (const j of inJobs) {
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    let coord = isFinite(lat) && isFinite(lng) && (lat || lng) ? [lat, lng] : null;
+    if (!coord && j.postcode) {
+      const g = await geocodePcServer(j.postcode);
+      if (g) coord = g;
+    }
+    if (!coord) {
+      warnings.push(`${j.ref || j.site || "A job"} has no map location \u2014 left where it is.`);
+      continue;
+    }
+    jobs.push({
+      id: String(j.id),
+      ref: String(j.ref || j.site || j.id),
+      site: String(j.site || ""),
+      priority: String(j.priority || ""),
+      durationMin: Math.max(15, Math.round(Number(j.durationMinutes)) || 60),
+      coord
+    });
+  }
+  if (jobs.length < 2) return { ok: false, error: "Need at least two locatable jobs on this day to optimise a route.", warnings };
+  const pts = [home.coord, ...jobs.map((j) => j.coord)];
+  const M3 = await driveMatrix(env, pts);
+  const baseSeq = solveRoute(M3.mins);
+  let order = baseSeq, aiUsed = false, aiReason = "";
+  if (useAI && env.ANTHROPIC_API_KEY) {
+    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M3.mins, dayStart, notes, baseSeq });
+    if (ai.ok) {
+      const seq = ai.order.map(Number).filter((nn) => nn >= 1 && nn <= jobs.length);
+      const uniq = [...new Set(seq)];
+      if (uniq.length === jobs.length) {
+        order = uniq;
+        aiUsed = true;
+        aiReason = ai.reasoning || "";
+        if (ai.notes) warnings.push(ai.notes);
+      } else warnings.push("The AI order was incomplete, so the shortest-driving order was used instead.");
+    } else if (ai.error) warnings.push(ai.error);
+  } else if (useAI && !env.ANTHROPIC_API_KEY) {
+    warnings.push("AI ordering is off (no ANTHROPIC_API_KEY) \u2014 ordered by shortest driving only; timed-job notes weren't applied.");
+  }
+  const [sh, sm] = dayStart.split(":").map(Number);
+  const lunchTargetOffset = Math.max(0, 13 * 60 - (sh * 60 + sm));
+  const legs = [];
+  let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0;
+  for (const p of order) {
+    const dMin = M3.mins[cur][p], dMi = M3.miles[cur][p];
+    driveMins += dMin;
+    driveMiles += dMi;
+    const arrival = t + dMin;
+    const j = jobs[p - 1];
+    legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, driveMins: dMin, driveMiles: Math.round(dMi * 10) / 10, arrivalOffset: arrival, durationMin: j.durationMin });
+    siteMins += j.durationMin;
+    t = arrival + j.durationMin;
+    cur = p;
+  }
+  const homeMin = M3.mins[cur][0], homeMi = M3.miles[cur][0];
+  driveMins += homeMin;
+  driveMiles += homeMi;
+  let lunch = null;
+  if (lunchMinutes > 0) {
+    let idx = legs.findIndex((l) => l.arrivalOffset >= lunchTargetOffset);
+    if (idx === -1) idx = legs.length;
+    const at = idx < legs.length ? legs[idx].arrivalOffset : t;
+    lunch = { offset: at, minutes: lunchMinutes, beforeJobId: idx < legs.length ? legs[idx].jobId : null };
+    for (let i = idx; i < legs.length; i++) legs[i].arrivalOffset += lunchMinutes;
+    t += lunchMinutes;
+  }
+  const endOffset = t + homeMin;
+  return {
+    ok: true,
+    engineer,
+    date,
+    dayStart,
+    aiUsed,
+    aiReason,
+    matrixSource: M3.source,
+    home: { postcode: home.postcode },
+    legs,
+    lunch,
+    summary: {
+      jobs: jobs.length,
+      driveMins: Math.round(driveMins),
+      driveMiles: Math.round(driveMiles * 10) / 10,
+      siteMins: Math.round(siteMins),
+      lunchMins: lunchMinutes,
+      dayLengthMins: Math.round(endOffset),
+      homeDriveMins: homeMin,
+      homeDriveMiles: Math.round(homeMi * 10) / 10,
+      source: M3.source
+    },
+    warnings
+  };
 }
 var _archiveReady = false;
 async function ensureArchive(env, tenantId) {
