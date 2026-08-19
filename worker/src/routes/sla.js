@@ -815,6 +815,16 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(roRes, headers);
   }
 
+  /* POST /sla/auto-schedule — auto-build a day: assign + order loose jobs across
+     one or many engineers (skill-preferred, capacity-limited). Preview only.
+     Deterministic (Distance Matrix / estimate) — no Claude, so no AI cost. */
+  if (subpath === "/auto-schedule" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "Only SLA admins can auto-schedule a day." }, headers, 403);
+    return jsonResponse(await autoScheduleDay(env, tenantId, await readJson(request)), headers);
+  }
+
   /* ===== Story Mode: daily shift (clock on / off) ===== */
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
@@ -2779,6 +2789,108 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     },
     warnings
   };
+}
+
+/* Auto-make-a-day: given a date, one-or-many engineers and a pool of loose jobs,
+   assign + order each job into an efficient day, preferring an engineer competent
+   in the job's work area (soft) and respecting a per-day capacity. Deterministic —
+   Google Distance Matrix (or haversine estimate) only, NO Claude — so it's cheap.
+   Returns a PREVIEW; the client PATCHes assignments/times on Apply. */
+async function autoScheduleDay(env, tenantId, body) {
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
+  const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 480));
+  const cap = Math.max(120, dayMinutes - lunch);            // working minutes/engineer (travel + on-site)
+  const warnings = [];
+  const skills = await getEngSkills(env, tenantId);
+  const normPrio = p => { const m = /(\d)/.exec(String(p || "")); return m ? Number(m[1]) : 5; };
+
+  const engs = [];
+  for (const e of (Array.isArray(body.engineers) ? body.engineers : [])) {
+    const u = String(e.username || "").trim(); if (!u) continue;
+    let coord = null;
+    const lat = Number(e.homeLat), lng = Number(e.homeLng ?? e.homeLon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord) { const h = await engineerHome(env, tenantId, u); if (h) coord = h.coord; }
+    if (!coord && e.homePostcode) { const g = await geocodePcServer(e.homePostcode); if (g) coord = g; }
+    if (!coord) { warnings.push(`${e.name || u} has no home location — skipped.`); continue; }
+    engs.push({ username: u, name: String(e.name || u), coord, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+  }
+  if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
+
+  const jobs = [];
+  for (const j of (Array.isArray(body.jobs) ? body.jobs : [])) {
+    let coord = null;
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord && j.postcode) { const g = await geocodePcServer(j.postcode); if (g) coord = g; }
+    if (!coord) { warnings.push(`${j.ref || j.site || "A job"} has no map location — left unscheduled.`); continue; }
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin: Math.max(15, Math.round(Number(j.durationMinutes)) || 60), workArea: String(j.workArea || ""), coord });
+  }
+  if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
+
+  // One matrix over all points: engineer homes first, then jobs. Cap Google use.
+  const pts = [...engs.map(e => e.coord), ...jobs.map(j => j.coord)];
+  const NE = engs.length;
+  let M;
+  if (pts.length <= 45) M = await driveMatrix(env, pts);
+  else {
+    const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
+    M = { mins, source: "estimate" };
+    warnings.push("Lots of jobs — used estimated driving times to keep it fast and cheap.");
+  }
+  const pE = i => i, pJ = k => NE + k;
+
+  // Skill-weighted greedy insertion with capacity. Urgent/long jobs placed first.
+  const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
+  const unassigned = [];
+  for (const k of order) {
+    const j = jobs[k];
+    let best = null;
+    engs.forEach((e, ei) => {
+      const route = [pE(ei), ...e.seq.map(x => pJ(x)), pE(ei)];
+      const p = pJ(k);
+      let bDelta = Infinity, bPos = 1;
+      for (let pos = 1; pos < route.length; pos++) {
+        const a = route[pos - 1], b = route[pos];
+        const delta = M.mins[a][p] + M.mins[p][b] - M.mins[a][b];
+        if (delta < bDelta) { bDelta = delta; bPos = pos; }
+      }
+      const newLoad = e.load + bDelta + j.durationMin;
+      if (newLoad > cap) return;                       // no room in this engineer's day
+      const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
+      const eff = stars > 0 ? bDelta - stars * 4 : bDelta;   // soft skill preference
+      if (best === null || eff < best.eff) best = { ei, pos: bPos, newLoad, eff };
+    });
+    if (!best) { unassigned.push({ id: j.id, ref: j.ref, reason: "no engineer had room in the day" }); continue; }
+    engs[best.ei].seq.splice(best.pos - 1, 0, k);
+    engs[best.ei].load = best.newLoad;
+  }
+
+  // Build each engineer's timeline (offsets from dayStart; lunch ~13:00).
+  const [sh, sm] = dayStart.split(":").map(Number);
+  const lunchTarget = Math.max(0, (13 * 60) - (sh * 60 + sm));
+  const plan = engs.map((e, ei) => {
+    // 2-opt tidy the order.
+    const sub = [pE(ei), ...e.seq.map(x => pJ(x))];
+    const subCost = sub.map(a => sub.map(b => M.mins[a][b]));
+    const solved = solveRoute(subCost);            // returns sub-indices 1..n in order
+    const orderedK = solved.map(si => e.seq[si - 1]);
+    const legs = []; let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
+    for (const k of orderedK) {
+      const p = pJ(k), dMin = M.mins[cur][p]; drive += dMin;
+      let arrival = t + dMin;
+      if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
+      const j = jobs[k];
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      site += j.durationMin; t = arrival + j.durationMin; cur = p;
+    }
+    const homeMin = orderedK.length ? M.mins[cur][pE(ei)] : 0; drive += homeMin;
+    return { username: e.username, name: e.name, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+  }).filter(p => p.legs.length);
+
+  return { ok: true, dayStart, matrixSource: M.source, plan, unassigned, warnings, placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length };
 }
 
 /* ===== Job archive (imported history) ===== */

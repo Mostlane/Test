@@ -256,6 +256,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
+        <button class="btn" id="openAutoBtn" title="Auto-build a day from unscheduled jobs, across the team">🤖 Auto day</button>
         <button class="btn" id="openMapBtn">🗺️ Map view</button>
         <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
       </div>
@@ -370,6 +371,7 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
       <span style="display:flex;gap:6px;flex:none;">
+        <button type="button" class="btn" id="engDayAuto" title="Auto-build this engineer's day from nearby unscheduled jobs they're competent for">🪄 Auto-build day</button>
         <button type="button" class="btn" id="engDayOptimise" title="Auto-order this engineer's day into the most efficient route">🧭 Optimise route</button>
         <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
         <button type="button" class="btn" id="engDayClose">✕</button>
@@ -439,6 +441,24 @@
     </div>
     <div id="fillStatus" style="font-size:13px;color:var(--muted);margin-bottom:6px;"></div>
     <div id="fillResult"></div>
+  </div>
+</div>
+
+<!-- AUTO-SCHEDULE PREVIEW -->
+<div class="modal-backdrop" id="autoBackdrop">
+  <div class="modal" style="max-width:720px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 style="margin:0;" id="autoTitle">🤖 Auto-build the day</h2>
+        <div id="autoSub" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button type="button" class="btn" id="autoClose" style="flex:none;">✕</button>
+    </div>
+    <div id="autoStatus" style="font-size:13px;color:var(--muted);margin:10px 0;">Building a plan…</div>
+    <div id="autoResult"></div>
+    <div id="autoFoot" style="display:none;margin-top:12px;text-align:right;">
+      <button type="button" class="btn btn-primary" id="autoApply">✓ Apply this plan</button>
+    </div>
   </div>
 </div>
 
@@ -1366,6 +1386,7 @@ async function applyOptimise(){
   if(!fail) setTimeout(() => { $("optBackdrop").style.display = "none"; }, 800);
 }
 document.getElementById("engDayOptimise").addEventListener("click", openRouteOptimise);
+document.getElementById("engDayAuto").addEventListener("click", () => { if(engDayCtx) runAutoSchedule([engDayCtx.username], engDayCtx.name, engDayCtx.date); });
 document.getElementById("optClose").addEventListener("click", () => { $("optBackdrop").style.display = "none"; });
 document.getElementById("optBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("optBackdrop")) $("optBackdrop").style.display = "none"; });
 document.getElementById("optRun").addEventListener("click", runOptimise);
@@ -1472,6 +1493,91 @@ $("fillClose").addEventListener("click", () => { $("fillBackdrop").style.display
 $("fillBackdrop").addEventListener("click", e => { if(e.target === $("fillBackdrop")) $("fillBackdrop").style.display = "none"; });
 $("fillThreshold").addEventListener("input", e => { fillThreshold = Number(e.target.value) || 20; $("fillThrVal").textContent = fillThreshold + " min"; });
 $("fillScan").addEventListener("click", runFillScan);
+
+/* ── Auto-make-a-day (whole team or one engineer) ────────────────────────── */
+let autoPlan = null, autoDate = null;
+function autoLoosePool(){
+  return jobs.filter(j => {
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return false;
+    if(j.scheduledAt) return false;   // only place UNSCHEDULED jobs — never move booked ones
+    return !!coordsFor(j);
+  });
+}
+function autoEngPayload(usernames, date){
+  return engineers.filter(e =>
+    (!usernames || usernames.includes(e.username)) &&
+    ((e.homeLat && e.homeLng) || e.homePostcode) &&
+    !holFor(e.username, date || selectedDate) &&
+    (usernames || e.staffType === "field")
+  ).map(e => ({ username:e.username, name:e.name, homeLat:e.homeLat, homeLng:e.homeLng, homePostcode:e.homePostcode }));
+}
+async function runAutoSchedule(usernames, titleWho, dateObj){
+  const date = dateObj || selectedDate;
+  const pool = autoLoosePool();
+  const engs = autoEngPayload(usernames, date);
+  autoDate = date;
+  $("autoSub").textContent = titleWho + " · " + date.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+  $("autoResult").innerHTML = ""; $("autoFoot").style.display = "none"; autoPlan = null;
+  $("autoBackdrop").style.display = "flex";
+  if(!engs.length){ $("autoStatus").textContent = "No engineers with a home postcode are available (or all on leave). Set home postcodes in Users Admin."; return; }
+  if(!pool.length){ $("autoStatus").textContent = "There are no unscheduled jobs with a location to place."; return; }
+  $("autoStatus").textContent = `Building a plan for ${engs.length} engineer${engs.length>1?"s":""} from ${pool.length} unscheduled job${pool.length>1?"s":""}…`;
+  const payload = {
+    date: formatDateInput(date), dayStart: "08:00", dayMinutes: 480, lunchMinutes: 30,
+    engineers: engs,
+    jobs: pool.map(j => { const c = coordsFor(j); return { id:j.id, ref:j.ref, site:j.site, priority:j.priority, durationMinutes:j.durationMinutes, workArea:j.workArea, lat:c?c[0]:undefined, lng:c?c[1]:undefined, postcode:j.postcode }; })
+  };
+  try{
+    const d = await (await authFetch("/sla/auto-schedule",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})).json();
+    if(!d.ok){ $("autoStatus").textContent = d.error || "Couldn't build a plan."; return; }
+    autoPlan = d; renderAutoPreview(d);
+  }catch(e){ $("autoStatus").textContent = "Couldn't reach the scheduler."; }
+}
+function autoOffToClock(off){ const base = 8*60 + Number(off||0); return String(Math.floor(base/60)%24).padStart(2,"0")+":"+String(base%60).padStart(2,"0"); }
+function renderAutoPreview(d){
+  const parts = [];
+  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs${d.matrixSource!=="google"?' <span style="color:var(--muted)">(estimated drive times)</span>':''}.</div>`);
+  d.plan.forEach(p => {
+    const s = p.summary;
+    parts.push(`<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;margin-bottom:8px;">
+      <div style="font-weight:700;">${escapeHtml(p.name)} <span style="font-weight:400;color:var(--muted);font-size:12px;">— ${s.jobs} jobs · ${Math.round(s.dayLengthMins/6)/10}h · ${s.driveMins} min drive</span></div>
+      ${p.legs.map(l => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0;align-items:baseline;">
+        <span style="width:44px;color:#0a7d33;font-weight:700;flex:none;">${autoOffToClock(l.arrivalOffset)}</span>
+        <span style="flex:1;">${escapeHtml(l.ref||l.site||"Job")}${l.priority?` · ${escapeHtml(l.priority)}`:""}${l.workArea?skillBadge(p.username,l.workArea):""}</span>
+        <span style="color:var(--muted);flex:none;">+${l.driveMins}m</span></div>`).join("")}
+    </div>`);
+  });
+  if(d.unassigned && d.unassigned.length){
+    parts.push(`<div style="font-size:12px;color:#b45309;margin-bottom:6px;">⚠ ${d.unassigned.length} couldn't be placed (day full or no location): ${d.unassigned.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${d.unassigned.length>6?"…":""}</div>`);
+  }
+  (d.warnings||[]).forEach(w => parts.push(`<div style="font-size:12px;color:var(--muted);">${escapeHtml(w)}</div>`));
+  $("autoStatus").textContent = "";
+  $("autoResult").innerHTML = parts.join("");
+  $("autoFoot").style.display = d.placed ? "" : "none";
+}
+async function applyAutoPlan(){
+  if(!autoPlan || !autoPlan.plan) return;
+  const btn = $("autoApply"); btn.disabled = true; btn.textContent = "Applying…";
+  const [Y,Mo,Da] = formatDateInput(autoDate || selectedDate).split("-").map(Number);
+  let done = 0, fail = 0;
+  for(const p of autoPlan.plan){
+    for(const l of p.legs){
+      const at = new Date(Y, Mo-1, Da, 0, 0, 0, 0); at.setMinutes(8*60 + Number(l.arrivalOffset||0));
+      try{
+        const res = await authFetch("/sla/jobs/"+encodeURIComponent(l.jobId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ assignedEngineers:[p.username], assignedTo:p.username, scheduledAt: at.toISOString(), durationMinutes: l.durationMin, changedBy: currentUser||"auto-schedule" }) });
+        if(res.ok) done++; else fail++;
+      }catch(e){ fail++; }
+    }
+  }
+  $("autoStatus").textContent = `✓ Scheduled ${done} job${done!==1?"s":""}${fail?`, ${fail} failed`:""}.`;
+  btn.textContent = "Done";
+  await loadJobs(); render();
+  setTimeout(()=>{ $("autoBackdrop").style.display="none"; btn.disabled=false; btn.textContent="✓ Apply this plan"; }, 1200);
+}
+$("openAutoBtn").addEventListener("click", ()=> runAutoSchedule(null, "Whole team"));
+$("autoClose").addEventListener("click", ()=> $("autoBackdrop").style.display="none");
+$("autoBackdrop").addEventListener("click", e => { if(e.target === $("autoBackdrop")) $("autoBackdrop").style.display="none"; });
+$("autoApply").addEventListener("click", applyAutoPlan);
 
 /* Job-card sub-modal — read-only, rendered from the in-memory job (no fetch, no
    re-scan). Stacks over whichever suggestion modal is open; ‹ Back just hides it. */
