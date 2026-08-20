@@ -5816,6 +5816,80 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ error: "Only SLA admins can auto-schedule a day." }, headers, 403);
     return jsonResponse(await autoScheduleDay(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/auto-schedule/record" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const b = await readJson2(request);
+    const jobIds = Array.isArray(b.jobIds) ? b.jobIds.map(String).slice(0, 500) : [];
+    if (!jobIds.length) return jsonResponse({ ok: false, error: "No jobs to record." }, headers, 400);
+    const rec = {
+      date: String(b.date || todayStr()),
+      jobIds,
+      engineers: Array.isArray(b.engineers) ? b.engineers.map(String).slice(0, 40) : [],
+      by: String(b.by || sess.user && sess.user.username || ""),
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    try {
+      await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:lastautoday:" + tenantId, JSON.stringify(rec)).run();
+    } catch {
+    }
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/auto-schedule/last" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try {
+      const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first();
+      if (row) rec = JSON.parse(row.value);
+    } catch {
+    }
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false }, headers);
+    return jsonResponse({ ok: true, date: rec.date, jobIds: rec.jobIds, engineers: rec.engineers || [], by: rec.by || "", at: rec.at || "" }, headers);
+  }
+  if (subpath === "/auto-schedule/undo" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try {
+      const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first();
+      if (row) rec = JSON.parse(row.value);
+    } catch {
+    }
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false, error: "Nothing to undo." }, headers, 400);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let reverted = 0, skipped = 0;
+    for (const id of rec.jobIds) {
+      let job = null;
+      try {
+        job = await getJob(env, tenantId, id);
+      } catch {
+      }
+      if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) {
+        skipped++;
+        continue;
+      }
+      job.scheduledAt = null;
+      job.scheduledEnd = null;
+      job.assignedTo = "";
+      job.assignedEngineers = [];
+      job.engStatus = void 0;
+      job.status = "Pending";
+      (job.statusHistory ||= []).push({ status: "Pending", at: now, by: "undo-auto-day" });
+      job.updatedAt = now;
+      try {
+        await saveJob(env, tenantId, job);
+        reverted++;
+      } catch {
+        skipped++;
+      }
+    }
+    try {
+      await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).run();
+    } catch {
+    }
+    return jsonResponse({ ok: true, reverted, skipped }, headers);
+  }
   if (subpath === "/duration-insights" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess))
