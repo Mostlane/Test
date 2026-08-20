@@ -21919,18 +21919,23 @@ function buildProgrammePdf(data, meta = {}) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
       }
+      const rightEdge = GRID_X + win.days * dayW;
       for (let i = 0; i < win.days; i++) {
         const d = addDays2(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
-        let label = dayW >= 15 ? true : d.getUTCDay() === 1;
-        if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
-        if (label) {
-          doc.text(x + 1, gridTop + 9, fmtDM(d), { size: 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
-          doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
-        }
+        const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1, major = isMon || first2;
+        let label = "", minor = false;
+        if (dayW >= 15) label = fmtDM(d);
+        else if (dayW >= 8) {
+          label = major ? fmtDM(d) : p2(d.getUTCDate());
+          minor = !major;
+        } else if (major) label = fmtDM(d);
+        if (label && x + 1 + textWidth(label, minor ? 5.4 : 5.8) > rightEdge) label = "";
+        if (label) doc.text(x + 1, gridTop + 9, label, { size: minor ? 5.4 : 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
+        if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
         if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
       }
       doc.line(M2, gridTop, M2 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });

@@ -260,19 +260,28 @@ export function buildProgrammePdf(data, meta = {}) {
       }
       // Day header: weekend/BH shading + a date label on every Monday (or
       // every day if the columns are wide enough).
+      const rightEdge = GRID_X + win.days * dayW;
       for (let i = 0; i < win.days; i++) {
         const d = addDays(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
-        let label = dayW >= 15 ? true : d.getUTCDay() === 1;    // Mondays (or all when roomy)
-        // A label on one of the last columns would spill past the frame.
-        if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
-        if (label) {
-          doc.text(x + 1, gridTop + 9, fmtDM(d), { size: 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
-          doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
-        }
+        // Date scale — show EVERY day so the daily grid never disappears: the full
+        // dd/mm when columns are roomy, otherwise just the day NUMBER on each day
+        // (which fits a narrow column) with dd/mm kept on Mondays + month-firsts for
+        // orientation. Only truly cramped (<8pt) columns drop to Mondays only.
+        const isMon = d.getUTCDay() === 1, first = d.getUTCDate() === 1, major = isMon || first;
+        let label = "", minor = false;
+        if (dayW >= 15) label = fmtDM(d);
+        else if (dayW >= 8) { label = major ? fmtDM(d) : p2(d.getUTCDate()); minor = !major; }
+        else if (major) label = fmtDM(d);
+        // Don't let a label spill past the right frame.
+        if (label && x + 1 + textWidth(label, minor ? 5.4 : 5.8) > rightEdge) label = "";
+        if (label) doc.text(x + 1, gridTop + 9, label, { size: minor ? 5.4 : 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
+        // Vertical gridline on the major columns (Mondays / month starts), plus
+        // every day when columns are wide — structure without clutter.
+        if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
         if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
       }
       doc.line(M, gridTop, M + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
