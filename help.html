@@ -303,6 +303,11 @@
           ["On each suggestion: <b>✓ Accept</b> to give it to that engineer, <b>✕ Reject</b> to dismiss it, or <b>👁</b> to view the job card. Viewing opens over the list and comes straight back — it never re-runs the scan or loses your place."],
           ["After accepting, open that engineer's day and <b>🧭 Optimise route</b> to slot it in at the right time. Jobs already booked onto a ticked engineer's day are left alone."],
         ]},
+        { icon: "🏢", title: "Batch nearby jobs when you allocate one", perms: ["SLAAdmin"], steps: [
+          ["When you <b>assign an operative</b> to a job in the edit dialog and save, a <b>Whilst you're here…</b> pop-up appears if there's anything worth batching."],
+          ["It lists other <b>open</b> jobs <b>at the same site</b>, plus any within a <b>radius you set</b> (default 5 miles) of that site — each showing how far away it is and who currently holds it."],
+          ["Tick the ones to send to the same operative and press <b>Assign</b>. Change the <b>miles</b> box to widen or tighten the radius (it remembers your choice). If nothing is same-site or in range, no pop-up shows."],
+        ]},
         { icon: "📁", title: "Site documents", perms: ["SLA", "SLAAdmin"], steps: [
           ["On a job, tap <b>📁 Site documents</b> (in the Site box) to see everything on file for that building. Office staff can also reach it from <b>Manage Sites → a site → Site documents</b>."],
           ["<b>Previous Jobs</b> — every job ever done at this site. Tap one to see a quick job sheet (engineer, dates, last note, who signed) and <b>Open full job</b> for the detail."],

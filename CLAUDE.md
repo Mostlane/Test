@@ -1681,6 +1681,20 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   naturally prefers engineers already passing by — i.e. "without going out of
   their way". No worker change and no new endpoint — reuses /sla/route-optimize
   (for the re-optimise) and PATCH /sla/jobs/{id} (for assignment).
+- **Allocation-time "whilst you're here" pop-up (sla-jobedit.js):** when a job is
+  newly allocated to an operative in the **shared editor** (`MLJobEdit`), a
+  self-contained pop-up (`#mlnjOverlay`, injected `#mlnj-style`) offers OTHER OPEN
+  jobs to batch onto the same person — **same site always** + **within a
+  straight-line radius** (default 5 mi, editable inline). Tick + **Assign** PATCHes
+  each to that engineer (landing an unscheduled one on the target's day). Data from
+  **GET /sla/jobs/nearby?jobId=&engineer=&radius=** (sla.js `nearbyForJob`): same
+  site via `siteKeyOf` (project-safe), nearby via `haversineMi` from the target's
+  coords (job lat/lon else `geocodePcServer`; others bulk-geocoded via
+  `geocodePcBulk`), OPEN statuses only, excludes jobs already the engineer's, top
+  12 by distance. Radius default persists in app_config `sla:nearbyRadius` via
+  **POST /sla/jobs/nearby-radius** (SLA admin). Trigger = a newly-added engineer on
+  save (`openEngineers` diff); no pop-up when nothing is same-site or in range.
+  `sla-jobedit.js?v=17`.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

@@ -5681,6 +5681,23 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ error: "Only SLA admins can optimise a route." }, headers, 403);
     return jsonResponse(await optimiseEngineerRoute(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/jobs/nearby" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const jobId = searchParams.get("jobId");
+    if (!jobId) return jsonResponse({ ok: false, error: "jobId required" }, headers, 400);
+    const def = await getNearbyRadius(env, tenantId);
+    const radius = Math.max(0.5, Math.min(50, Number(searchParams.get("radius")) || def));
+    return jsonResponse(await nearbyForJob(env, tenantId, jobId, searchParams.get("engineer") || "", radius), headers);
+  }
+  if (subpath === "/jobs/nearby-radius" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson2(request);
+    const n = Math.max(0.5, Math.min(50, Number(b.radius) || 5));
+    const db2 = tenantDB(env, tenantId);
+    await db2.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla:nearbyRadius', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, String(n)).run();
+    return jsonResponse({ ok: true, radius: n }, headers);
+  }
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
     const date = searchParams.get("date") || todayStr();
@@ -7086,6 +7103,91 @@ async function geocodePcServer(pc) {
   } catch {
   }
   return null;
+}
+var NEARBY_FINISHED = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
+var isOpenJobStatus = (s) => !NEARBY_FINISHED.has(String(s || ""));
+async function getNearbyRadius(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla:nearbyRadius'").bind(tenantId).first();
+    const n = Number(row && row.value);
+    return isFinite(n) && n > 0 ? n : 5;
+  } catch {
+    return 5;
+  }
+}
+async function geocodePcBulk(pcs) {
+  const clean = [...new Set(pcs.map((p) => String(p || "").toUpperCase().replace(/\s+/g, "").trim()).filter(Boolean))];
+  const out = /* @__PURE__ */ new Map();
+  for (let i = 0; i < clean.length; i += 100) {
+    const batch = clean.slice(i, i + 100);
+    try {
+      const res = await fetch("https://api.postcodes.io/postcodes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ postcodes: batch }), cf: { cacheTtl: 2592e3, cacheEverything: true } });
+      const d = await res.json();
+      (d.result || []).forEach((r) => {
+        const q = String(r.query || "").toUpperCase().replace(/\s+/g, "");
+        if (r.result && isFinite(r.result.latitude)) out.set(q, [Number(r.result.latitude), Number(r.result.longitude)]);
+      });
+    } catch {
+    }
+  }
+  return out;
+}
+function jobStoredCoord(j) {
+  const lat = Number(j.lat), lng = Number(j.lon);
+  return isFinite(lat) && isFinite(lng) && (lat || lng) ? [lat, lng] : null;
+}
+async function jobCoordServer(env, job) {
+  const c = jobStoredCoord(job);
+  if (c) return c;
+  const pc = String(job.postcode || "").trim();
+  if (pc) {
+    const g = await geocodePcServer(pc);
+    if (g) return g;
+  }
+  return null;
+}
+var nearbyLite = (j) => ({ id: j.id, ref: j.helpdeskRef || j.siteName || j.siteCode || j.id, site: j.siteName || j.siteCode || "", siteCode: j.siteCode || "", status: j.status || "", priority: j.priority || "", scheduledAt: j.scheduledAt || null, assignedEngineers: assignedList(j) });
+async function nearbyForJob(env, tenantId, jobId, engineer, radius) {
+  const target = await getJob(env, tenantId, jobId);
+  if (!target) return { ok: false, error: "job not found" };
+  const eng = normId(engineer || "");
+  const tKey = siteKeyOf(target.siteCode);
+  const all = (await listJobs(env, tenantId)).filter((j) => j.id !== jobId && isOpenJobStatus(j.status));
+  const notTheirs = (j) => !eng || !assignedList(j).some((a) => normId(a) === eng);
+  const sameSite = all.filter((j) => tKey && siteKeyOf(j.siteCode) === tKey && notTheirs(j)).map(nearbyLite);
+  const sameIds = new Set(sameSite.map((s) => s.id));
+  let nearby = [];
+  const tc = await jobCoordServer(env, target);
+  if (tc) {
+    const cand = all.filter((j) => !sameIds.has(j.id) && !(tKey && siteKeyOf(j.siteCode) === tKey) && notTheirs(j));
+    const map = /* @__PURE__ */ new Map();
+    const needPc = [];
+    for (const j of cand) {
+      const c = jobStoredCoord(j);
+      if (c) map.set(j.id, c);
+      else {
+        const pc = String(j.postcode || "").toUpperCase().replace(/\s+/g, "").trim();
+        if (pc) needPc.push([j.id, pc]);
+      }
+    }
+    if (needPc.length) {
+      const geo = await geocodePcBulk(needPc.map((x) => x[1]));
+      for (const [id, pc] of needPc) {
+        const cc = geo.get(pc);
+        if (cc) map.set(id, cc);
+      }
+    }
+    for (const j of cand) {
+      const c = map.get(j.id);
+      if (!c) continue;
+      const mi = haversineMi(tc, c);
+      if (mi <= radius) nearby.push({ ...nearbyLite(j), miles: Math.round(mi * 10) / 10 });
+    }
+    nearby.sort((a, b) => a.miles - b.miles);
+    nearby = nearby.slice(0, 12);
+  }
+  return { ok: true, radius, targetSite: target.siteName || target.siteCode || "", hasCoords: !!tc, sameSite, nearby };
 }
 async function engineerHome(env, tenantId, username) {
   const db = tenantDB(env, tenantId);
