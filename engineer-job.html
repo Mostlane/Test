@@ -603,34 +603,49 @@
       all:function(){ return store("readonly").then(function(s){ return new Promise(function(res){ var r=s.getAll(); r.onsuccess=function(){res(r.result||[]);}; r.onerror=function(){res([]);}; }); }); }
     };
   })();
-  var _pqFlushing=false, _pqTimer=null;
+  var _pqFlushing=false, _pqTimer=null, _pqStreak=0;
   async function loadPending(){
     try{ var all=await PQ.all(); pendingPhotos=(all||[]).filter(function(x){return x.jobId===jobId;}); }
     catch(e){ pendingPhotos=[]; }
   }
   function pendingCount(){ return pendingPhotos.length; }
   async function flushPhotoQueue(){
-    if(_pqFlushing) return; _pqFlushing=true;
+    if(_pqFlushing) return;
+    // Offline → don't try at all; the 'online' event will wake us. (A dropped
+    // upload can't succeed, and retrying blind is what caused an error storm.)
+    if(navigator.onLine===false){ if(pendingPhotos.length){ clearTimeout(_pqTimer); _pqTimer=setTimeout(flushPhotoQueue, 60000); } return; }
+    _pqFlushing=true;
+    var anyOk=false;
     try{
       var all=[]; try{ all=await PQ.all(); }catch(e){ all=[]; }
       var mine=all.filter(function(x){return x.jobId===jobId;});
       for(var i=0;i<mine.length;i++){
+        if(navigator.onLine===false) break;   // signal dropped mid-round — stop and back off
         var it=mine[i];
         try{
           var form=new FormData(); form.append("file", it.blob, it.filename||"photo.jpg");
           if(it.thumb) form.append("thumb", it.thumb, "thumb.jpg");
           var r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/files?filename="+encodeURIComponent(it.filename)+"&stage="+encodeURIComponent(it.stage),{method:"POST",body:form});
-          if(r && r.ok){ await PQ.del(it.id); }
+          if(r && r.ok){ await PQ.del(it.id); anyOk=true; }
           else { throw new Error("bad status "+(r&&r.status)); }   // leave queued, retry
-        }catch(e){ /* keep it in the queue; retry on the timer / online event */ }
+        }catch(e){ /* keep it queued; retry later with backoff */ }
       }
     } finally { _pqFlushing=false; }
     await loadPending();
     try{ await loadPhotos(); }catch(e){}
     drawPhotos(); refresh();
-    if(pendingPhotos.length){ clearTimeout(_pqTimer); _pqTimer=setTimeout(flushPhotoQueue, 15000); }
+    // Reschedule with EXPONENTIAL BACKOFF + jitter. A photo that keeps failing
+    // (weak signal truncating the upload) must NOT re-send every 15s — that
+    // turned one bad photo into a request storm. 15s → 30s → 1m → 2m → 4m → 5m
+    // cap; any success resets it so the rest go up promptly.
+    if(pendingPhotos.length){
+      var delay = Math.min(300000, 15000 * Math.pow(2, _pqStreak)) + Math.floor(Math.random()*5000);
+      _pqStreak = anyOk ? 0 : Math.min(_pqStreak + 1, 5);
+      clearTimeout(_pqTimer); _pqTimer=setTimeout(flushPhotoQueue, delay);
+    } else { _pqStreak=0; }
   }
-  window.addEventListener("online", flushPhotoQueue);
+  // Back online → one prompt, fresh attempt.
+  window.addEventListener("online", function(){ _pqStreak=0; clearTimeout(_pqTimer); flushPhotoQueue(); });
 
   async function uploadPhotos(e){
     var files=e.target.files; if(!files||!files.length){ raPicPending=false; return; }

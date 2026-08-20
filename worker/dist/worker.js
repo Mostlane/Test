@@ -6109,7 +6109,12 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (parts[2] === "files" && method === "POST") {
       const filename = searchParams.get("filename");
-      const form = await request.formData();
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+      }
       const file = form.get("file");
       if (!filename || !file) return jsonResponse({ error: "Missing file" }, headers, 400);
       const stageIn = searchParams.get("stage");
@@ -6585,7 +6590,12 @@ async function handle8(request, env, ctx, url, sess) {
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
-    const form = await request.formData();
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+    }
     const file = form.get("file");
     if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
     const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
@@ -6631,7 +6641,12 @@ async function handle8(request, env, ctx, url, sess) {
   }
   if (subpath === "/site/thumb" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-    const form = await request.formData();
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+    }
     const key = String(form.get("key") || "");
     const thumb = form.get("thumb");
     if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
