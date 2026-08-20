@@ -2170,7 +2170,9 @@ async function init(){
     $("trayToggle").textContent = collapsed ? "▸" : "▾";
   });
 
-  $("openMapBtn").addEventListener("click", openMap);
+  // Wrap so the click Event isn't passed as `scope` — openMap treats any truthy
+  // scope as an engineer-scoped view and would deref event.date (undefined).
+  $("openMapBtn").addEventListener("click", () => openMap());
   $("closeMapBtn").addEventListener("click", closeMap);
   document.querySelectorAll(".map-chip").forEach(chip => {
     chip.addEventListener("click", () => {
