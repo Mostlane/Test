@@ -1,0 +1,126 @@
+name: Monthly database backup
+
+# Automated monthly export of the three live D1 databases (mostlane, mostlane-po,
+# sitelog-db) to TWO private destinations:
+#   • a private R2 bucket   (secrets: R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY)
+#   • a private GitHub repo Mostlane/portal-backups  (secret: BACKUP_REPO_TOKEN)
+# Each destination is OPTIONAL — set up either or both. With neither, the export
+# still runs and the files are attached to the run (private only if this repo is
+# private; this repo is PUBLIC, so the workflow never keeps them here).
+#
+# It lives in THIS (active) repo so the monthly schedule never goes stale —
+# GitHub disables cron on repos with no recent activity. The exports themselves
+# never touch this public repo: they are fetched to the ephemeral runner and
+# pushed straight to the private destinations. Logs print only names + sizes.
+#
+# ── ONE-TIME SETUP (Cloudflare + GitHub dashboards) ─────────────────────────
+#   1. Cloudflare → My Profile → API Tokens → Create Token → give it
+#      "Account · D1 · Read".  Copy it.
+#   2. This repo → Settings → Secrets and variables → Actions → New secret:
+#         CLOUDFLARE_API_TOKEN   = that token
+#         CLOUDFLARE_ACCOUNT_ID  = your Cloudflare account id (R2 page shows it)
+#   3. (R2 copy) Cloudflare → R2 → create a private bucket named "mostlane-backups";
+#      R2 → Manage R2 API Tokens → create one → add secrets:
+#         R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+#   4. (GitHub copy) create a PRIVATE repo Mostlane/portal-backups, then a
+#      fine-grained PAT with Contents: Read+Write on it → add secret:
+#         BACKUP_REPO_TOKEN
+#   5. (optional phone ping on failure) add JOBS_INBOUND_TOKEN (same value as the
+#      worker's secret of that name).
+#   Run it once now with "Run workflow" to test.
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"      # 03:00 UTC on the 1st of every month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monthly-db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Export databases (D1 export API → gzipped .sql)
+        id: export
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set +e
+          node tools/db-backup/export-d1.mjs
+          code=$?
+          set -e
+          if [ "$code" = "2" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Backup isn't configured yet — add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID. Skipping."
+            exit 0
+          fi
+          [ "$code" != "0" ] && exit $code
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "YM=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to R2 (private bucket)
+        if: ${{ steps.export.outputs.configured == 'true' && secrets.R2_ACCESS_KEY_ID != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          YM: ${{ steps.export.outputs.YM }}
+        run: |
+          aws s3 cp out/ "s3://mostlane-backups/${YM}/" \
+            --recursive --exclude "*" --include "*.sql.gz" --include "manifest-*.json" \
+            --endpoint-url "https://${CF_ACCOUNT}.r2.cloudflarestorage.com"
+          echo "✓ Uploaded to R2 bucket mostlane-backups/${YM}/"
+
+      - name: Push to private repo Mostlane/portal-backups
+        if: ${{ steps.export.outputs.configured == 'true' && secrets.BACKUP_REPO_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+          YM: ${{ steps.export.outputs.YM }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/Mostlane/portal-backups.git" bkrepo
+          mkdir -p "bkrepo/dumps/${YM}"
+          cp out/*.sql.gz "bkrepo/dumps/${YM}/" 2>/dev/null || true
+          cp out/manifest-*.json "bkrepo/dumps/${YM}/" 2>/dev/null || true
+          cd bkrepo
+          # keep only the newest 12 monthly folders (older ones are pruned)
+          if [ -d dumps ]; then ls -d dumps/*/ 2>/dev/null | sort | head -n -12 | xargs -r rm -rf; fi
+          git config user.name "portal-backup-bot"
+          git config user.email "backup@users.noreply.github.com"
+          git add -A
+          git commit -m "Monthly DB backup ${YM}" || { echo "Nothing new to commit."; exit 0; }
+          git push
+          echo "✓ Pushed to Mostlane/portal-backups dumps/${YM}/"
+
+      - name: Run summary
+        if: ${{ always() && steps.export.outputs.configured == 'true' }}
+        run: |
+          {
+            echo "## Monthly database backup — ${{ steps.export.outputs.YM }}"
+            echo ""
+            if [ -f out/manifest-*.json ]; then cat out/manifest-*.json; fi
+            echo ""
+            echo "Destinations: R2 ${{ secrets.R2_ACCESS_KEY_ID != '' && '✓' || '—' }} · private repo ${{ secrets.BACKUP_REPO_TOKEN != '' && '✓' || '—' }}"
+          } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Phone ping on failure
+        if: ${{ failure() && secrets.JOBS_INBOUND_TOKEN != '' }}
+        env:
+          PING_TOKEN: ${{ secrets.JOBS_INBOUND_TOKEN }}
+        run: |
+          curl -s -X POST "https://mostlane-api.jamie-def.workers.dev/health/notify" \
+            -H "Authorization: Bearer ${PING_TOKEN}" -H "content-type: application/json" \
+            -d '{"title":"⚠ Monthly backup failed","body":"The automated database backup did not complete. Check the Actions run.","url":"/health.html"}' \
+            || true
