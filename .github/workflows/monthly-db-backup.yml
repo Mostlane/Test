@@ -71,7 +71,7 @@ jobs:
           echo "YM=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
 
       - name: Upload to R2 (private bucket)
-        if: ${{ steps.export.outputs.configured == 'true' && secrets.R2_ACCESS_KEY_ID != '' }}
+        if: steps.export.outputs.configured == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -79,17 +79,19 @@ jobs:
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           YM: ${{ steps.export.outputs.YM }}
         run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "No R2 secrets set — skipping the R2 copy."; exit 0; fi
           aws s3 cp out/ "s3://mostlane-backups/${YM}/" \
             --recursive --exclude "*" --include "*.sql.gz" --include "manifest-*.json" \
             --endpoint-url "https://${CF_ACCOUNT}.r2.cloudflarestorage.com"
           echo "✓ Uploaded to R2 bucket mostlane-backups/${YM}/"
 
       - name: Push to private repo Mostlane/portal-backups
-        if: ${{ steps.export.outputs.configured == 'true' && secrets.BACKUP_REPO_TOKEN != '' }}
+        if: steps.export.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
           YM: ${{ steps.export.outputs.YM }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then echo "No BACKUP_REPO_TOKEN set — skipping the GitHub copy."; exit 0; fi
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/Mostlane/portal-backups.git" bkrepo
           mkdir -p "bkrepo/dumps/${YM}"
           cp out/*.sql.gz "bkrepo/dumps/${YM}/" 2>/dev/null || true
@@ -110,16 +112,15 @@ jobs:
           {
             echo "## Monthly database backup — ${{ steps.export.outputs.YM }}"
             echo ""
-            if [ -f out/manifest-*.json ]; then cat out/manifest-*.json; fi
-            echo ""
-            echo "Destinations: R2 ${{ secrets.R2_ACCESS_KEY_ID != '' && '✓' || '—' }} · private repo ${{ secrets.BACKUP_REPO_TOKEN != '' && '✓' || '—' }}"
+            cat out/manifest-*.json 2>/dev/null || true
           } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Phone ping on failure
-        if: ${{ failure() && secrets.JOBS_INBOUND_TOKEN != '' }}
+        if: failure()
         env:
           PING_TOKEN: ${{ secrets.JOBS_INBOUND_TOKEN }}
         run: |
+          if [ -z "$PING_TOKEN" ]; then echo "No JOBS_INBOUND_TOKEN — skipping phone ping."; exit 0; fi
           curl -s -X POST "https://mostlane-api.jamie-def.workers.dev/health/notify" \
             -H "Authorization: Bearer ${PING_TOKEN}" -H "content-type: application/json" \
             -d '{"title":"⚠ Monthly backup failed","body":"The automated database backup did not complete. Check the Actions run.","url":"/health.html"}' \
