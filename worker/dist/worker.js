@@ -15266,26 +15266,32 @@ async function handle21(request, env, ctx, url, sess) {
     const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
     const drv = {};
     for (const r of cur || []) drv[dn(r.reg)] = r.username;
-    const miles = await latestMileage(env, tid);
-    const photos = await photoIndex(env, tid);
-    const covers = await coverMap(env, tid);
-    const vcCounts = await vanCheckPhotoCounts(env, tid);
-    let defResolved = {};
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
-      if (row && row.value) defResolved = JSON.parse(row.value) || {};
-    } catch {
-    }
-    const defects = await vanCheckDefects(env, tid, defResolved);
-    const lastVc = await lastVanCheckMap(env, tid);
-    let vcAck = {};
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first();
-      if (row && row.value) vcAck = JSON.parse(row.value) || {};
-    } catch {
-    }
     await ensureHandoverTable(env);
-    const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
+    const appCfg = async (key) => {
+      try {
+        const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+        return row && row.value ? JSON.parse(row.value) || {} : {};
+      } catch {
+        return {};
+      }
+    };
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes] = await Promise.all([
+      latestMileage(env, tid),
+      photoIndex(env, tid),
+      coverMap(env, tid),
+      vanCheckPhotoCounts(env, tid),
+      // van-check photos folded into the badge
+      lastVanCheckMap(env, tid),
+      // newest van-check date per reg (card bar)
+      mpgByVehicle(env, tid),
+      canMoney(env, tid, sess),
+      appCfg(DEFECTCLR_KEY(tid)),
+      // defects marked resolved by an admin
+      appCfg(VCACK_KEY(tid)),
+      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()
+    ]);
+    const defects = await vanCheckDefects(env, tid, defResolved);
+    const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
     for (const h of hoRows) {
       const k = dn(h.reg);
@@ -15294,21 +15300,20 @@ async function handle21(request, env, ctx, url, sess) {
         if (!cur2 || new Date(h.completed_at || 0) > new Date(cur2.at || 0)) lastHo[k] = { id: h.id, at: h.completed_at || "" };
       } else if (h.status === "pending") pendHo[k] = (pendHo[k] || 0) + 1;
     }
-    const mpg = await mpgByVehicle(env, tid);
-    const money2 = await canMoney(env, tid, sess);
     let fuelV = {}, odoV = {}, maint12 = {};
     if (money2) {
-      fuelV = await fuelByVehicle(env, tid);
-      odoV = await odoByVehicle(env, tid);
-      try {
-        await ensureMaintTable(env);
-        const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
-        const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
-        for (const m of mrows || []) {
-          const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
-          maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
-        }
-      } catch {
+      await ensureMaintTable(env);
+      const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+      const [fv, ov, mRes] = await Promise.all([
+        fuelByVehicle(env, tid),
+        odoByVehicle(env, tid),
+        env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all().catch(() => ({ results: [] }))
+      ]);
+      fuelV = fv;
+      odoV = ov;
+      for (const m of mRes.results || []) {
+        const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
+        maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
       }
     }
     const vehicles = await Promise.all((results || []).map(async (v) => {
