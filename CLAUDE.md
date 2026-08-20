@@ -1369,15 +1369,25 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   /vehicles and /fsm sub-app folders are separate and unmigrated.
 
 ## Chapplins customer (routes/chapplins.js + chapplins.html + chapplins-compliance.html — Aug 2026)
-A whole customer (Chapplins Lettings, `support@chapplins.co.uk`) built from their
-emailed **job-report PDFs**, imported via the **Microsoft 365 / Outlook connector**
-(the job emails are structured: Tenant ref/Name/Property/contacts/Job Number/Date/
-Description; extraction pass lived in the session scratchpad). Modelled as a full
-customer like Co-op/Fareham — NOT a silo:
-- **Sites**: normal `sites` register, **client=`chapplins`**, numbered **4001–4047**
-  (added to the sites.html category dropdown + `ucClient`). 47 sites (unit-level:
-  32A/32B/32C/Communal are distinct). Loaded direct to D1 (PII stays out of the
-  public repo — never commit customer data).
+A whole customer (Chapplins Lettings) built from their emailed **job-report PDFs**,
+imported via the **Microsoft 365 / Outlook connector** across THREE senders —
+`support@`, `ashley@` and `kerry@chapplins.co.uk` (the job emails are structured:
+Tenant ref/Name/Property/contacts/Job Number/Date/Description; resumable
+checkpointed extraction subagents + a three-way merge script lived in the session
+scratchpad — merge3-chapplins.mjs). Modelled as a full customer like Co-op/Fareham
+— NOT a silo. **Live totals (20 Aug 2026): 123 sites · 76 tenants (70 current) ·
+123 compliance stores · 578 archived jobs**, 0 orphans:
+- **Sites**: normal `sites` register, **client=`chapplins`**, numbered **4001–4127**
+  (added to the sites.html category dropdown + `ucClient`), currently 123 live
+  (unit-level: individual flats + communal areas are distinct sites). Loaded direct
+  to D1 (PII stays out of the public repo — never commit customer data). **Duplicate
+  communal records were merged** (20 Aug): the same communal area recorded 2–3× under
+  slightly different names was collapsed to one canonical site (jobs repointed, not
+  deleted) — Woodhouse 4127/4095→4094, Crawford 4074→4109, Andover 4073→4108;
+  individual flats were left untouched. **Any new communal-area sweep: merge only
+  duplicate COMMUNAL records, never fold flats into their block.** NB Jasmine Court
+  4088 and 4044 are TWO SEPARATE buildings (different postcodes PO21 5LT vs 5UR) —
+  confirmed by Jamie, do not merge.
 - **Tenants** (the genuinely new bit): table **`site_tenants`** (self-migrating;
   tenant_id INTEGER, keyed `id=<client>:<siteNumber>:<slug(ref|name)>`), generic
   per-site tenant with **current + previous history** (`is_current`, first/last_seen
@@ -1385,16 +1395,19 @@ customer like Co-op/Fareham — NOT a silo:
   FullAccess|Compliance|SLAAdmin): GET /chapplins/sites (directory + current tenant
   + job count + compliance due), GET /chapplins/site?number= (tenants current-first +
   jobs), POST /chapplins/tenant (upsert, makeCurrent unsets siblings), /tenant/current,
-  /tenant/delete. A real handover is captured at 4039 (BIS44→BISH01).
-- **Jobs**: the 73 job reports live in **`sla_jobs_archive`** (id `CHAP-<jobNumber>`,
-  `site_code`=numeric site number) so each site's **Previous Jobs** tab + the Job
-  Archive search surface them for free. Skeletons now; enrich later from Workever.
+  /tenant/delete. Real handovers captured (newest=current, older=previous) at e.g.
+  4039 (BIS44→BISH01), 4046 (NATH01→CHO202), 4070 (COO600→COOP8), 4077 (MANN12→MANN2),
+  4004 (POT140→OLEK01), 4021 (SKRU01→LAI01). 76 tenant rows total, 70 current.
+- **Jobs**: 578 job reports live in **`sla_jobs_archive`** (id `CHAP-<jobNumber>`;
+  within-sender reused job numbers get a `-2` suffix; `site_code`=numeric site
+  number) so each site's **Previous Jobs** tab + the Job Archive search surface them
+  for free. Skeletons now; enrich later from Workever.
 - **Compliance**: new **`chapplins` scheme** in compliance.js (SCHEME_DEFAULTS/
   SCHEME_LABELS/TYPE_LABELS/canonType) — six landlord cert types **fiveYear(EICR 5y),
   gas(1y), epc(10y), alarms(1y), fire(1y), legionella(2y)**. compliance_stores rows
-  (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
-  a framework to populate going forward). Page **chapplins-compliance.html** = a clone
-  of fareham.html on scheme=chapplins.
+  (scheme=chapplins, code=site_number; 123 rows, one per live site) created empty
+  (no certs in the emails yet — a framework to populate going forward). Page
+  **chapplins-compliance.html** = a clone of fareham.html on scheme=chapplins.
   **🔑 column + access modal (Aug 2026):** the key button is always a plain 🔑
   (the "🔑❓" not-set variant read as something being wrong with the site; the
   📍 pin keeps its ❓), and its modal shows **Access instructions only** — the
@@ -1418,7 +1431,8 @@ customer like Co-op/Fareham — NOT a silo:
   from the two sibling flats at the same address. 4074 (The Crawford Apartments,
   Percy Road, Exeter) still has none. The button is Chapplins-only for now:
   Fareham's 24 stores have no postcodes to look up (2 exceptions) and the Co-op
-  chart (eicr-portal.html) has no 📍 column at all.
+  chart (eicr-portal.html) has no 📍 column at all. (NB 4073 and 4074 referenced
+  above were later merged away as duplicate communal records — see the Sites bullet.)
 - **Nav**: 🏠 Chapplins tile on main.html (MAP `Chapplins:["Compliance","SLAAdmin"]`),
   sidebar entry in portal-config, a card on compliance.html → chapplins-compliance.html.
   Hub page **chapplins.html** = the directory (search, per-site current tenant +
