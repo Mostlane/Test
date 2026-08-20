@@ -1693,8 +1693,14 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   `geocodePcBulk`), OPEN statuses only, excludes jobs already the engineer's, top
   12 by distance. Radius default persists in app_config `sla:nearbyRadius` via
   **POST /sla/jobs/nearby-radius** (SLA admin). Trigger = a newly-added engineer on
-  save (`openEngineers` diff); no pop-up when nothing is same-site or in range.
-  `sla-jobedit.js?v=17`.
+  save (`openEngineers` diff) AND the scheduler drag —
+  `MLJobEdit.suggestNearby(job,eng,cb)` is called from `commitDrop` when a drop
+  hands a job to a NEW primary engineer (tray→lane or engineer→engineer; never a
+  plain time move). **Cross-engineer:** the scan includes OPEN jobs currently with
+  OTHER engineers (flagged "currently <name>") + unassigned ones — only the target
+  engineer's own are excluded. **Assigning keeps the pop-up open** with remaining
+  same-site/nearby rows so a second nearby job stays flagged. No pop-up when
+  nothing is same-site or in range. `sla-jobedit.js?v=18`.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

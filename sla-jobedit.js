@@ -781,7 +781,7 @@
     let ov = $("mlnjOverlay");
     if (!ov) { ov = document.createElement("div"); ov.id = "mlnjOverlay"; ov.className = "mlnj-overlay"; document.body.appendChild(ov); }
     const render = (d) => {
-      const site = esc(d.targetSite || job.siteName || job.siteCode || "this site");
+      const site = esc(d.targetSite || job.siteName || job.site || job.siteCode || "this site");
       ov.innerHTML = `<div class="mlnj-card">
         <div class="mlnj-head"><b>🧭 Whilst you're here</b><button type="button" class="mlnj-x" id="mlnjClose">✕</button></div>
         <div class="mlnj-sub"><b>${esc(engineer)}</b> is going to <b>${site}</b>. Also send them any of these?</div>
@@ -817,12 +817,23 @@
             if (res.ok) { ok++; const sv = await res.json().catch(() => null); if (sv && cb) { try { cb(sv); } catch { } } }
           } catch { }
         }
-        $("mlnjMsg").textContent = `✅ Assigned ${ok} to ${esc(engineer)}.`;
-        setTimeout(done, 800);
+        // Drop the ones just assigned, but KEEP the pop-up open so any remaining
+        // same-site / nearby job is still flagged (a second one isn't lost).
+        d.sameSite = (d.sameSite || []).filter(x => ids.indexOf(x.id) === -1);
+        d.nearby = (d.nearby || []).filter(x => ids.indexOf(x.id) === -1);
+        if (d.sameSite.length || d.nearby.length) {
+          render(d);
+          $("mlnjMsg").textContent = `✅ Assigned ${ok} to ${esc(engineer)}. Anything else?`;
+        } else {
+          $("mlnjMsg").textContent = `✅ Assigned ${ok} to ${esc(engineer)}.`;
+          setTimeout(done, 900);
+        }
       };
     };
     render(data);
   }
 
-  window.MLJobEdit = { open, wheelify };
+  // Exposed so the scheduler's drag-drop (tray→lane, engineer→engineer) can raise
+  // the same pop-up, not just the editor save.
+  window.MLJobEdit = { open, wheelify, suggestNearby: maybeShowNearby };
 })();

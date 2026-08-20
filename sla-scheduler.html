@@ -7,7 +7,7 @@
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=17"></script>
+  <script src="sla-jobedit.js?v=18"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -1017,6 +1017,7 @@ async function onPointerUp(e){
   const job = jobs.find(j => j.id === jobId);
   if(!job){ setStatus("Drop: job not found", true); return; }
   if(targetEngineer == null || targetMins == null){ render(); return; }
+  const prevPrimary = (job.assignedEngineers[0] || "").toLowerCase();   // before the drop reassigns
 
   const h = Math.floor(targetMins/60), m = targetMins%60;
   const startDate = withTime(selectedDate, h, m);
@@ -1059,6 +1060,18 @@ async function onPointerUp(e){
     const idx = jobs.findIndex(j => j.id === job.id);
     if(idx >= 0) jobs[idx] = normaliseJob(saved);
     render();
+    // A genuine (re)assignment — dropped from the tray, or handed to a different
+    // engineer — raises the same "whilst you're here" same-site/nearby pop-up as
+    // the editor (never on a plain time move to the same engineer).
+    const newPrimary = newEngineers[0] || "";
+    if(newPrimary && newPrimary.toLowerCase() !== prevPrimary && window.MLJobEdit && MLJobEdit.suggestNearby){
+      MLJobEdit.suggestNearby(saved, newPrimary, sv => {
+        const i = jobs.findIndex(j => j.id === sv.id);
+        const nj = normaliseJob(sv);
+        if(i >= 0) jobs[i] = nj; else jobs.push(nj);
+        render();
+      });
+    }
   }catch(err){
     setStatus("⚠️ Save failed — reloading. " + err.message, true);
     await loadJobs(); render();
