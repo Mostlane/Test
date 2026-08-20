@@ -2356,6 +2356,34 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   reminders, SiteLog reconcile) to `minute < 5`** so their cadence is unchanged.
   New scheduled jobs hang off the same handler.
 
+## Inbound email → job (Cloudflare Email Routing — replaces the Zapier zap)
+Jobs used to be captured by a Zapier zap watching **enquiries@mostlane.com** for
+Southern Co-op's **Concerto** "New Job Alert" emails (from `noreply@concerto.co.uk`)
+and POSTing them to `/sla/inbound`. That's now done in-portal by a Cloudflare
+**Email Worker**: `worker/src/index.js` exports an **`email(message, env, ctx)`**
+handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
+- **Parsing**: a dependency-free MIME walker (`extractText`) pulls the text body
+  (decodes quoted-printable/base64, strips HTML, DROPS attachments so the PDF work
+  order never reaches the AI). Extraction is **AI-first** — `aiExtract` calls the
+  Anthropic Messages API (`env.ANTHROPIC_API_KEY`, model `env.ANTHROPIC_MODEL`||
+  `claude-sonnet-5`, forced `extract_job` tool → {isJob, reference, priority,
+  siteCode, siteName, address, postcode, telephone, description, raisedAt}) so it
+  copes with ANY client's format and survives template tweaks. A deterministic
+  **`concertoRegex`** is the no-key / AI-error fallback. `isJob=false` (replies,
+  chases, quotes, POs, invoices, status updates, newsletters) is dropped.
+- **Creation**: reuses `/sla/inbound` **verbatim** via an in-process self-request
+  (`fetchSelf` = the worker's own `fetch`, Bearer `JOBS_INBOUND_TOKEN`) — so the
+  dedupe-by-reference, forgiving priority/date parsing and assignment push are all
+  identical to the old zap. `originator:"email"`. No change to sla.js.
+- The `email()` handler **never throws** (a thrown email handler bounces the mail).
+- **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
+  domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
+  mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
+  enquiries@: from `noreply@concerto.co.uk` (+ any other job senders) → **forward**
+  (not redirect — forward re-sends from mostlane.com so it passes SPF/DMARC at
+  Cloudflare) to `jobs@<domain>`. Dormant until (1)+(2) are done — the `email`
+  export just sits unused.
+
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system
    now runs INSIDE the portal (`mostlane-api`), not the standalone `mostlane-po`
