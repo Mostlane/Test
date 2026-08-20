@@ -1,0 +1,65 @@
+name: AI code review
+
+# Reviews recently-changed code with Claude and opens a GitHub issue when it
+# finds bugs or inefficiencies. Three ways it runs:
+#   • nightly (02:00 UTC) over everything changed in the last day
+#   • on every push to main, over that push's diff
+#   • on demand from the Actions tab (Run workflow) — pick "recent" or "full"
+#
+# SETUP (one-time): add the API key as a repo secret —
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name: ANTHROPIC_API_KEY   Value: (your Anthropic key — same one the worker uses)
+# Optional: a repo VARIABLE named ANTHROPIC_MODEL set to claude-sonnet-5 to cut cost.
+# Without the secret the job simply skips (it never fails the build).
+
+on:
+  schedule:
+    - cron: "0 2 * * *"      # nightly 02:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - "worker/src/**"
+      - "**/*.html"
+      - "**/*.js"
+      - "**/*.css"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "What to review"
+        type: choice
+        default: recent
+        options: [recent, full]
+
+permissions:
+  contents: read
+  issues: write
+
+# One review at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: ai-code-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history so diff/recent scopes work)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run AI code review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEW_SCOPE: ${{ github.event_name == 'push' && 'diff' || (github.event_name == 'workflow_dispatch' && inputs.scope || 'recent') }}
+          REVIEW_BEFORE: ${{ github.event.before }}
+          REVIEW_AFTER: ${{ github.sha }}
+          ALWAYS_ISSUE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: node tools/ai-code-review/review.mjs

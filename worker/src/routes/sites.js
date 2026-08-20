@@ -17,6 +17,7 @@
 import { json, error } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
+import * as sitelogApi from "./sitelog-api.js";
 
 const OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
 
@@ -61,6 +62,9 @@ export async function handle(request, env, ctx, url, sess) {
     try { name = JSON.parse(existing.data).siteName || siteNumber; } catch {}
     await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
       .bind(db.tenantId, client, siteNumber).run();
+    // Retire the SiteLog geofence (archive rather than hard-delete so any
+    // in-flight scan lands on a valid row before the reconcilers close them).
+    ctx?.waitUntil(removeSiteFromSiteLog(env, name, { archive: true }));
     // Human before→after note for the activity log.
     const res = json({ success: true, deleted: siteNumber }, {}, env, request);
     try { res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} — "${name}"`)); } catch {}
@@ -96,12 +100,14 @@ export async function handle(request, env, ctx, url, sess) {
     // fields. Look up by the old number first (a rename), else the current one.
     // While merging, build a human "before → after" note for the activity log.
     let auditNote = "";
+    let oldName = null;   // pre-save name — passed to SiteLog so a rename follows
     if (path === "/update-site") {
       const lookNum = String(oldNum || siteNumber).trim();
       const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
         .bind(db.tenantId, client, lookNum).first();
       if (row) {
         let cur = {}; try { cur = JSON.parse(row.data) || {}; } catch {}
+        oldName = String(cur.siteName || "").trim() || null;
         const merged = { ...cur };
         // Which fields changed (human-named), for the activity-log note.
         const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
@@ -123,7 +129,16 @@ export async function handle(request, env, ctx, url, sess) {
 
     await saveSite(env, tenantId, site);
     await ensureCustomer(env, tenantId, client);
-    await pushSiteToSiteLog(env, site);
+    // SiteLog: create-or-update-or-rename in one call. oldName (captured before
+    // saveSite) lets a rename find the existing geofence instead of orphaning it.
+    ctx?.waitUntil(syncSiteToSiteLog(env, site, oldName));
+    // Mirror name / postcode edits AND active/archived state to any linked
+    // compliance_stores rows so a Co-op / Fareham store's row on the compliance
+    // chart tracks the site (Active↔Closed toggle mirrors the portal).
+    ctx?.waitUntil(syncSiteToCompliance(env, tenantId, site).catch(() => {}));
+    // Flip the PO system's active flag in step — archived site stops appearing
+    // in the PO site picker; un-archived reappears.
+    ctx?.waitUntil(setPOSiteActive(env, site.siteName, site.active !== false));
     const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
     return json({ success: true, site }, { headers }, env, request);
   }
@@ -338,25 +353,88 @@ async function ensureCustomer(env, tenantId, id) {
   ).bind(db.tenantId, id, prettify(id)).run();
 }
 
-// Keep SiteLog's geofences in step: any portal site with coordinates is pushed
-// to SiteLog on save. bulk-add-sites skips names that already exist, so this
-// never duplicates or overwrites SiteLog-side edits. Fire-and-forget.
-async function pushSiteToSiteLog(env, site) {
+// Keep SiteLog's geofences in step with the portal on EVERY save: create if
+// missing, otherwise update coords / category / rename. `oldName` lets a rename
+// find the existing row so the geofence follows the portal record. Best-effort.
+// Uses the in-process handler when SITELOG_DB is bound, else the remote HTTP API.
+export async function syncSiteToSiteLog(env, site, oldName) {
   try {
-    if (!env.SITELOG_ADMIN_SECRET) return;
-    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "no-secret" };
     const name = String(site.siteName || "").trim();
-    if (!name) return;
-    await fetch("https://api.site-log.co.uk/bulk-add-sites", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
-      body: JSON.stringify({ sites: [{
-        siteName: name, lat, lng, radius: 500,
-        category: prettify(site.client || "") || "Projects"
-      }] })
-    });
-  } catch (e) { /* sync is best-effort; the portal save must never fail on it */ }
+    if (!name) return { ok: false, reason: "no-name" };
+    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    // Always send `archived` (0 or 1) so a site flipped Inactive→Active on the
+    // portal ALSO un-archives the geofence — otherwise archive is one-way.
+    const body = {
+      siteName: name,
+      lat: Number.isFinite(lat) ? lat : undefined,
+      lng: Number.isFinite(lng) ? lng : undefined,
+      category: prettify(site.client || "") || "Projects",
+      oldName: oldName && String(oldName).trim() !== name ? String(oldName).trim() : undefined,
+      archived: site.active === false ? 1 : 0,
+    };
+    return await slCall(env, "/upsert-site", body);
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Delete (or archive) the SiteLog geofence for this name, so scans stop landing
+// on a site the portal has retired. Best-effort — never blocks the portal save.
+export async function removeSiteFromSiteLog(env, siteName, { archive } = {}) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(siteName || "").trim()) return { ok: false };
+    return await slCall(env, "/delete-site", { siteName: String(siteName).trim(), archive: !!archive });
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function slCall(env, path, body) {
+  const base = (env.SITELOG_API || "https://api.site-log.co.uk");
+  const init = { method: "POST", headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET }, body: JSON.stringify(body) };
+  const req = new Request(base + path, init);
+  if (env.SITELOG_DB) { try { const r = await sitelogApi.handle(req, env); if (r) return await r.json().catch(() => ({ ok: r.ok })); } catch (e) {} }
+  const res = await fetch(base + path, init);
+  return await res.json().catch(() => ({ ok: res.ok }));
+}
+
+// Legacy wrapper kept so any lingering callers still fire the sync.
+async function pushSiteToSiteLog(env, site) { return syncSiteToSiteLog(env, site); }
+
+// Mirror portal-site edits (name / postcode / lat / lng / active-vs-archived)
+// into any linked `compliance_stores` rows so the compliance chart tracks the
+// canonical site. Archive/unarchive moves the store between the Open and
+// Closed views on the chart. Best-effort — never blocks the caller.
+export async function syncSiteToCompliance(env, tenantId, site) {
+  try {
+    const num = String(site.siteNumber || "").trim();
+    if (!num) return;
+    const rows = await env.DB.prepare(
+      "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
+    ).bind(tenantId, num).all();
+    const activeVal = site.active === false ? 0 : 1;
+    for (const r of rows.results || []) {
+      let meta = {}; try { meta = JSON.parse(r.meta || "{}") || {}; } catch {}
+      const lat = site.lat != null ? Number(site.lat) : null;
+      const lng = site.lon != null ? Number(site.lon) : (site.lng != null ? Number(site.lng) : null);
+      if (Number.isFinite(lat)) meta.lat = lat;
+      if (Number.isFinite(lng)) meta.lng = lng;
+      await env.DB.prepare(
+        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, active=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
+      ).bind(
+        site.siteName || null, site.postcode || null, JSON.stringify(meta),
+        activeVal, new Date().toISOString(), tenantId, r.scheme, r.code
+      ).run();
+    }
+  } catch {}
+}
+
+// Flip a PO-system site's active flag (0/1) to match the portal. Add-only
+// otherwise — never creates a PO row that wasn't already there.
+export async function setPOSiteActive(env, name, active) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    const val = active ? 1 : 0;
+    await env.PO_DB.prepare("UPDATE sites SET active = ? WHERE name = ?").bind(val, String(name).trim()).run();
+    return true;
+  } catch { return false; }
 }
 
 async function nextProjectNumber(env, tenantId) {

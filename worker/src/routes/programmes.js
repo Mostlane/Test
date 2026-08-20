@@ -327,10 +327,14 @@ export async function handle(request, env, ctx, url) {
     const suggestions = (await db.prepare(
       "SELECT id, rev, author, note, status, created_at, decided_by, decided_at, contractor FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
     ).bind(id, db.tenantId).all()).results || [];
+    // draftRev: the Rev the current draft EQUALS (unchanged since that issue),
+    // else null. Lets the builder label a just-issued export as its Rev, not DRAFT.
+    const latest = await latestRevision(db, id);
+    const draftRev = (latest && latest.data === p.data) ? latest.rev : null;
     return json({
       ok: true,
       prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, updatedBy: p.updated_by || "", data },
-      revisions, shares, suggestions,
+      revisions, shares, suggestions, draftRev,
       bankHolidays: await bankHolidayDates(db),
     });
   }
@@ -660,6 +664,13 @@ export async function handle(request, env, ctx, url) {
       revLbl = r.rev; issuedAt = r.issued_at;
     } else {
       try { data = JSON.parse(p.data); } catch {}
+      // No specific revision asked for → this is the working draft. But if it's
+      // UNCHANGED since the last issue (the revision was frozen from this exact
+      // draft), stamp it with that Rev instead of "DRAFT" — downloading a
+      // just-issued programme should read as its revision, not a draft. Only a
+      // draft with genuine unissued edits stays "DRAFT".
+      const latest = await latestRevision(db, p.id);
+      if (latest && latest.data === p.data) { revLbl = latest.rev; issuedAt = latest.issued_at; }
     }
     const bytes = buildProgrammePdf(data, {
       title: p.title || data.title, client: p.client, site: p.site, ref: data.ref,

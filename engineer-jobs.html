@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=11"></script>
+  <script src="/portal-config.js?v=17"></script>
   <meta charset="UTF-8">
   <title>Mostlane • My Jobs</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -59,8 +59,12 @@
     .day-banner.today{color:var(--accent)}
     .day-banner.today::after{content:"TODAY";font-size:10px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--accent);padding:2px 8px;border-radius:999px;align-self:center}
     .job-card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 0 rgba(16,32,58,.03);padding:15px 16px;margin-bottom:12px;overflow:hidden}
-    .job-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip,var(--line))}
+    .job-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--strip,var(--line))}
     .job-card.strip-ok{--strip:var(--ok)}.job-card.strip-warn{--strip:var(--amber)}.job-card.strip-bad{--strip:var(--urgent)}.job-card.strip-done{--strip:#b9c2d0}.job-card.strip-none{--strip:var(--line)}
+    /* Completed jobs recede so scheduled/active work stands out when scrolling. */
+    .job-card.is-done{background:color-mix(in srgb,var(--muted) 5%,var(--card))}
+    .job-card.is-done .job-site{opacity:.72}
+    .job-card.is-done .job-addr,.job-card.is-done .ref{opacity:.78}
     .job-card.job-flash{animation:mlJobFlash 1s ease-in-out 0s 4;scroll-margin-top:80px}
     @keyframes mlJobFlash{0%,100%{box-shadow:0 1px 0 rgba(16,32,58,.03)}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
     @media (prefers-reduced-motion:reduce){.job-card.job-flash{animation:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
@@ -82,6 +86,7 @@
     .act{min-height:50px;border-radius:13px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);text-decoration:none;touch-action:manipulation}
     .act.dir{flex:0 0 auto;padding:0 16px;font-size:20px;color:var(--muted)}
     .act.open{flex:1;background:var(--accent);border-color:var(--accent);color:#fff}
+    .act.open.is-done{background:var(--chip);border-color:var(--line);color:var(--muted);font-weight:650}
     .act.open:active{transform:translateY(1px)}
     .small{font-size:11px}.muted{color:var(--muted)}
     .modal-backdrop{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999}
@@ -91,7 +96,7 @@
     .modal-actions{display:flex;gap:8px;flex-wrap:wrap}
     .modal-actions .btn{flex:1 1 140px}
     #blockedBanner{border-radius:14px}
-    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:var(--card);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom));transform:translateZ(0);-webkit-transform:translateZ(0)}
+    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:var(--card);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
     .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
     .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
   </style>
@@ -170,9 +175,10 @@
   </div>
   <div id="dayMapSeg">
     <button type="button" class="mapseg on" data-r="day">Day</button>
-    <button type="button" class="mapseg" data-r="7">Next 7 days</button>
-    <button type="button" class="mapseg" data-r="30">Next 30 days</button>
+    <button type="button" class="mapseg" data-r="7">± 7d</button>
+    <button type="button" class="mapseg" data-r="30">± 30d</button>
     <button type="button" class="mapseg" data-r="year">Year</button>
+    <button type="button" class="mapseg" data-r="all">All</button>
   </div>
   <div id="dayMapFilterRow" style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
     <label for="dayMapStatus" style="font-size:12px;color:#6b7280;font-weight:600;">Show status:</label>
@@ -209,7 +215,12 @@ function dirUrl(job){
 /* Postcode → map pin (postcodes.io, cached on the device). */
 const GEO_KEY = "mlPostcodeGeo_v1";
 let geoCache = {};
-try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+let geoMiss = {};   // failed THIS page load only — deliberately never persisted
+try{
+  const raw = JSON.parse(localStorage.getItem(GEO_KEY)) || {};
+  // Successes only, and drop any nulls an older build left behind.
+  Object.keys(raw).forEach(k => { if(Array.isArray(raw[k])) geoCache[k] = raw[k]; });
+}catch{ geoCache = {}; }
 const PC_RE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
 function jobPostcode(job){
   let pc = String(job.postcode || "").replace(/\*+$/,"").trim();
@@ -220,7 +231,7 @@ function jobPostcode(job){
   return pc.toUpperCase().replace(/\s+/g," ");
 }
 async function geocodePostcodes(pcs){
-  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  const todo = [...new Set(pcs.filter(pc => pc && !Array.isArray(geoCache[pc]) && !geoMiss[pc]))];
   for(let i = 0; i < todo.length; i += 100){
     const batch = todo.slice(i, i + 100);
     try{
@@ -230,8 +241,12 @@ async function geocodePostcodes(pcs){
       });
       const data = await res.json();
       (data.result || []).forEach(r => {
-        geoCache[(r.query || "").toUpperCase()] =
-          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+        // Only cache SUCCESSES. Caching a miss as null meant a postcode that
+        // failed once — a bad batch, a rate-limit — never got looked up again
+        // on that device, and its pin stayed missing for good.
+        const q = (r.query || "").toUpperCase();
+        if (r.result && isFinite(r.result.latitude)) geoCache[q] = [r.result.latitude, r.result.longitude];
+        else geoMiss[q] = 1;
       });
     }catch(e){}
   }
@@ -312,10 +327,14 @@ function computeSlaCountdown(targetISO){
   };
 }
 
+// A finished job — complete/closed/invoiced. Used to grey out + recede the card.
+function isDoneStatus(status){
+  const s = (status || "").toLowerCase();
+  return s.includes("complete") || s.includes("closed") || s.includes("invoiced");
+}
 // Engineer status pill — plain status only, NO SLA overdue colouring.
 function statusClass(status){
-  const s = (status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")) return "status-pill status-complete";
+  if(isDoneStatus(status)) return "status-pill status-complete";
   return "status-pill status-open";
 }
 // Clean "Job name" = "{Job number} - {Site name}" ("26819 - Poole, Ringwood Road").
@@ -360,6 +379,8 @@ function jobCardInner(job, slaInfo, target){
   const addr = escH([...new Set([job.address, pc].map(x => String(x||"").trim()).filter(Boolean))]
     .filter(a => !String(siteRaw).includes(a)).join(" · "));
   const dir = dirUrl(job);
+  const done = isDoneStatus(job.status);
+  const statusTxt = escH(job.status || "Open");
   // Engineer view — deliberately NO SLA information (no countdown, target or
   // P-number). Just the site, address and the plain job status.
   return `
@@ -371,11 +392,11 @@ function jobCardInner(job, slaInfo, target){
       ${addr ? `<div class="job-addr">${addr}</div>` : ""}
       <div class="job-meta">
         ${isUrgentJob(job) ? `<span class="status-pill urgent-pill">Urgent</span>` : ""}
-        <span class="${statusClass(job.status)}">${escH(job.status || "Open")}</span>
+        <span class="${statusClass(job.status)}">${done ? "✓ " : ""}${statusTxt}</span>
       </div>
       <div class="job-actions">
         ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
-        <a class="act open" href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">Open job →</a>
+        <a class="act open${done ? " is-done" : ""}" href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">${done ? "View job →" : "Open job →"}</a>
       </div>`;
 }
 
@@ -441,7 +462,7 @@ function renderDay(dateStr, jobs, mode){
     const slaInfo = computeSlaCountdown(target);
 
     const card = document.createElement("div");
-    card.className = "job-card " + stripClass(job.status, isUrgentJob(job));
+    card.className = "job-card " + stripClass(job.status, isUrgentJob(job)) + (isDoneStatus(job.status) ? " is-done" : "");
     card.dataset.jobId = job.id;
     card.innerHTML = jobCardInner(job, slaInfo, target);
     group.appendChild(card);
@@ -812,19 +833,27 @@ function populateMapStatuses(){
 }
 
 let dayCursor = null;       // the single day shown in "Day" mode (scrollable)
-// Modes: day (one day, scroll ‹ ›) | 7 (next 7 days) | 30 (next 30 days) | year (whole year).
-// The N-day ranges look FORWARD from today so an engineer sees upcoming work to pick.
+// Modes: day (one day, scroll ‹ ›) | 7 | 30 | year | all (every job I hold,
+// including ones assigned to me with no date yet — those have no date to fall
+// inside any window, so "All" is the only view that can ever show them).
 function mapRange(mode){
   const now = new Date(); now.setHours(0,0,0,0);
-  if(mode === "7")    return [now, addDays(now, 6)];
-  if(mode === "30")   return [now, addDays(now, 29)];
+  // Windows span BOTH directions around today. They were briefly forward-only,
+  // which emptied the map: work here is booked a day or two ahead, so "next 7
+  // days" held 4 jobs where "last 7 days" held 50 — engineers reported their
+  // jobs had vanished. Either side of today keeps upcoming work for planning
+  // AND the recent jobs they actually look for.
+  if(mode === "7")    return [addDays(now, -7), addDays(now, 7)];
+  if(mode === "30")   return [addDays(now, -30), addDays(now, 30)];
   if(mode === "year") return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear(), 11, 31)];
+  if(mode === "all")  return [new Date(1970, 0, 1), new Date(2999, 11, 31)];
   const c = dayCursor || now;
   return [c, c];           // day
 }
 function mapLabel(mode){
-  if(mode === "7")    return "in the next 7 days";
-  if(mode === "30")   return "in the next 30 days";
+  if(mode === "all")  return "in total";
+  if(mode === "7")    return "within 7 days of today";
+  if(mode === "30")   return "within 30 days of today";
   if(mode === "year") return "this year";
   const c = dayCursor || new Date();
   return "on " + c.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" });
@@ -865,9 +894,16 @@ async function renderMapForRange(mode){
   if(!dayMap){ $("dayMapNote").textContent = "⚠️ Map couldn't load — check your connection and try again."; return; }
   const [from, to] = mapRange(mode);
   const fromISO = isoDate(from), toISO = isoDate(to);
+  let undatedHidden = 0;
   const list = (allMineJobs || []).filter(j => {
-    if(!j.scheduledAt) return false;
     if(mapStatusFilter !== "all" && (j.status || "") !== mapStatusFilter) return false;
+    // Assigned but not booked in yet: there is no date to compare, so a job like
+    // this can never fall inside a window — it only ever appears under "All".
+    if(!j.scheduledAt){
+      if(mode === "all") return true;
+      undatedHidden++;
+      return false;
+    }
     const d = isoDate(new Date(j.scheduledAt));   // local date, matches the range bounds
     return d >= fromISO && d <= toISO;
   });
@@ -884,26 +920,32 @@ async function renderMapForRange(mode){
       if(!pt){ noLoc++; return; }
       const [lat, lon] = pt;
       const colour = DAY_STATUS_COLOUR[job.status] || "#2563eb";
-      const m = L.circleMarker([lat, lon], { radius:9, color:"#fff", weight:2, fillColor:colour, fillOpacity:0.95 });
+      const undated = !job.scheduledAt;
+      const m = L.circleMarker([lat, lon], Object.assign(
+        { radius:9, color:"#fff", weight:2, fillColor:colour, fillOpacity:0.95 },
+        undated ? { color:"#111827", weight:2, dashArray:"3 3", fillOpacity:0.55 } : {}));
       m.bindPopup(`
         <div style="font-size:13px;min-width:180px;">
           <b style="color:#003b82;">${escH(job.helpdeskRef || job.id)}</b>
           <span style="display:inline-block;border-radius:999px;padding:1px 8px;color:#fff;font-size:11px;font-weight:600;background:${colour};margin-left:4px;">${escH(job.status||"")}</span><br>
           ${escH(job.description||"")}<br>
           <span style="color:#6b7280;">${escH(job.siteName||job.address||"")}</span><br>
-          ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}) + " " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}
+          ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}) + " " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : '<span style="color:#b45309;font-weight:600;">📌 Not booked in yet</span><br>'}
           <a href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html" style="color:#1d4ed8;font-weight:600;">Open job →</a>
           ${dirUrl(job) ? ` · <a href="${dirUrl(job)}" target="_blank" rel="noopener" style="color:#1d4ed8;">Directions</a>` : ""}
         </div>`);
       m.addTo(dayMapLayer);
       pts.push([lat, lon]);
     });
+    // Say out loud what ISN'T pinned, so a missing job is never a mystery.
+    const missing = (noLoc ? ` · ${noLoc} with no usable postcode` : "")
+      + (undatedHidden ? ` · ${undatedHidden} not booked in (tap All)` : "");
     if(pts.length){
       dayMap.fitBounds(pts, { padding:[36,36], maxZoom:13 });
-      $("dayMapNote").textContent = `${pts.length} job(s) ${label}` + (noLoc ? ` · ${noLoc} with no usable postcode` : "") + ". Tap a pin to open the job.";
+      $("dayMapNote").textContent = `${pts.length} job(s) ${label}` + missing + ". Tap a pin to open the job.";
     }else{
       dayMap.setView([51.27,-0.75], 9);
-      $("dayMapNote").textContent = list.length ? `Jobs ${label} have no usable postcodes.` : `No jobs scheduled ${label}.`;
+      $("dayMapNote").textContent = (list.length ? `Jobs ${label} have no usable postcodes.` : `No jobs ${label}.`) + missing;
     }
   }, 60);
 }
@@ -933,7 +975,7 @@ async function loadUnscheduled(){
       const target = job.targetAt || job.sla?.targetAt;
       const slaInfo = computeSlaCountdown(target);
       const card = document.createElement("div");
-      card.className = "job-card " + stripClass(job.status, isUrgentJob(job));
+      card.className = "job-card " + stripClass(job.status, isUrgentJob(job)) + (isDoneStatus(job.status) ? " is-done" : "");
       card.dataset.jobId = job.id;
       card.innerHTML = jobCardInner(job, slaInfo, target);
       items.appendChild(card);

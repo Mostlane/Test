@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Engineer skills — Mostlane</title>
+<script src="/portal-config.js?v=17"></script>
+<link rel="stylesheet" href="/portal.css?v=1">
+<script src="auth.js"></script>
+<style>
+  :root{ --navy:#003366; --line:#e2e8f0; --muted:#64748b; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;background:#eef2f6;color:#0f172a;}
+  header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;flex:1;min-width:150px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:14px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px;box-shadow:0 3px 12px rgba(0,30,80,.06);}
+  .card h2{margin:0 0 4px;font-size:16px;color:var(--navy);}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;}
+  .btn{border:1px solid var(--line);background:#f8fafc;color:#0f172a;border-radius:9px;padding:8px 12px;font:600 13px 'Segoe UI';cursor:pointer;}
+  .btn.primary{background:#003b82;color:#fff;border-color:#003b82;}
+  .btn.small{padding:5px 9px;font-size:12px;}
+  #saveState{font-weight:600;font-size:13px;color:#16a34a;margin-left:auto;}
+  /* areas editor */
+  .area-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap;}
+  .area-row input[type=text]{flex:1;min-width:140px;max-width:280px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;}
+  .area-row input[type=color]{width:34px;height:30px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;flex:none;}
+  /* skills grid */
+  .gridwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  table.skills{border-collapse:collapse;min-width:100%;font-size:13px;}
+  table.skills th,table.skills td{border-bottom:1px solid #eef2f7;padding:7px 8px;text-align:center;white-space:nowrap;}
+  table.skills th.eng,table.skills td.eng{position:sticky;left:0;background:#fff;text-align:left;font-weight:600;box-shadow:2px 0 0 #eef2f7;min-width:150px;z-index:1;}
+  table.skills thead th{background:#f4f7fb;color:#334155;font-weight:700;font-size:12px;position:sticky;top:0;z-index:2;}
+  table.skills thead th.eng{z-index:3;}
+  .stars{display:inline-flex;gap:1px;cursor:pointer;user-select:none;}
+  .stars .s{font-size:17px;line-height:1;color:#d7dee6;}
+  .stars .s.on{color:#f59e0b;}
+  .stars .s:hover{transform:scale(1.15);}
+  .clr{font-size:11px;color:#94a3b8;cursor:pointer;margin-left:4px;}
+  .empty{color:var(--muted);font-size:14px;padding:16px 4px;}
+  label.tgl{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;color:#334155;}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/sla-scheduler.html" title="Back">‹ Back</a>
+  <h1>🧭 Engineer skills</h1>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>🛠 Areas of work</h2>
+    <p class="sub">The list of work types you rate engineers on and tag jobs with. Edit the name/colour, remove one, or add your own. Changes save automatically.</p>
+    <div id="areaRows"></div>
+    <button type="button" class="btn small" id="addArea" style="margin-top:6px;">＋ Add area</button>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
+      <h2 style="margin:0;">⭐ Engineer competency</h2>
+      <span id="saveState"></span>
+    </div>
+    <p class="sub">Rate each engineer 1–5 stars for the areas they're competent in. Leave blank if they don't do that work. The scheduler uses this to prefer the right engineer for a job (a ⚠ shows if none is rated). Tap a star to set, tap it again or ✕ to clear. Saves automatically.</p>
+    <label class="tgl" style="margin-bottom:8px;"><input type="checkbox" id="showAll"> Show all staff (not just field engineers)</label>
+    <div class="gridwrap"><div id="grid"><div class="empty">Loading…</div></div></div>
+  </div>
+
+  <div class="card">
+    <h2>📊 AI usage this month</h2>
+    <p class="sub">The scheduler's AI features (route optimise, work-area suggestion) are cheap but metered. Set a soft daily limit — over it, those features fall back to the non-AI behaviour for the rest of the day (0 = no limit).</p>
+    <div id="aiUsage" style="font-size:14px;color:#334155;">Loading…</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+      <label style="font-size:13px;">Daily limit</label>
+      <input type="number" id="aiCap" min="0" step="50" style="width:100px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;">
+      <button type="button" class="btn small" id="aiCapSave">Save limit</button>
+      <span id="aiCapState" style="font-size:12px;color:#16a34a;"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const normId = s => String(s||"").toLowerCase().replace(/\s+/g,".").trim();
+function authFetch(path, opts={}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({ "Authorization":"Bearer "+t }, opts.headers||{});
+  if(opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"]="application/json";
+  return fetch(API+path, opts);
+}
+
+let AREAS = [], SKILLS = {}, USERS = [];
+
+// ── Areas editor (autosave) ────────────────────────────────────────────────
+let areaTimer=null;
+function queueAreaSave(){ clearTimeout(areaTimer); areaTimer=setTimeout(saveAreas, 700); }
+function renderAreas(){
+  const host=$("areaRows");
+  host.innerHTML = AREAS.map(a=>`
+    <div class="area-row" data-id="${esc(a.id)}">
+      <input type="color" class="a-col" value="${/^#[0-9a-f]{6}$/i.test(a.colour)?a.colour:"#64748b"}">
+      <input type="text" class="a-name" value="${esc(a.name)}" placeholder="Area name">
+      <button type="button" class="btn small a-del" title="Remove">✕</button>
+    </div>`).join("");
+  host.querySelectorAll(".area-row").forEach(row=>{
+    const id=row.getAttribute("data-id");
+    const a=AREAS.find(x=>x.id===id); if(!a) return;
+    row.querySelector(".a-name").addEventListener("input",e=>{ a.name=e.target.value; queueAreaSave(); });
+    row.querySelector(".a-col").addEventListener("input",e=>{ a.colour=e.target.value; queueAreaSave(); });
+    row.querySelector(".a-del").addEventListener("click",async ()=>{
+      const ok = window.MLUI ? await MLUI.confirm(`Remove "${a.name||"this area"}"? Engineers' ratings for it are cleared.`,{title:"Remove area",okLabel:"Remove",danger:true}) : confirm("Remove this area?");
+      if(!ok) return;
+      AREAS = AREAS.filter(x=>x!==a);
+      for(const u in SKILLS){ if(SKILLS[u]) delete SKILLS[u][id]; }
+      renderAreas(); renderGrid(); saveAreas(); saveSkills();
+    });
+  });
+}
+async function saveAreas(){
+  try{
+    const r = await (await authFetch("/sla/work-areas",{method:"POST",body:JSON.stringify({areas:AREAS})})).json();
+    if(r.ok){ AREAS = r.areas||AREAS; renderGridHeader(); }
+  }catch(e){}
+}
+$("addArea").addEventListener("click",()=>{
+  AREAS.push({ id:"", name:"", colour:"#64748b" });
+  renderAreas(); renderGrid();
+  const rows=$("areaRows").querySelectorAll(".a-name"); if(rows.length) rows[rows.length-1].focus();
+});
+
+// ── Skills grid (autosave) ─────────────────────────────────────────────────
+let skillTimer=null;
+function queueSkillSave(){ $("saveState").textContent="…"; clearTimeout(skillTimer); skillTimer=setTimeout(saveSkills, 600); }
+async function saveSkills(){
+  try{
+    const r = await (await authFetch("/sla/eng-skills",{method:"POST",body:JSON.stringify({skills:SKILLS})})).json();
+    if(r.ok){ SKILLS = r.skills||SKILLS; $("saveState").textContent="Saved ✓"; }
+    else $("saveState").textContent="⚠ not saved";
+  }catch(e){ $("saveState").textContent="⚠ offline"; }
+}
+function ratedUsers(){
+  const showAll = $("showAll").checked;
+  return USERS.filter(u=>{
+    const st = String(u.StaffType||u.staff_type||"").toLowerCase();
+    return showAll || st==="field";
+  });
+}
+function star(uk, areaId, n, cur){
+  return `<span class="s ${cur>=n?"on":""}" data-u="${esc(uk)}" data-a="${esc(areaId)}" data-n="${n}">★</span>`;
+}
+function renderGridHeader(){ /* header rebuilt inside renderGrid */ }
+function renderGrid(){
+  const host=$("grid");
+  const engs=ratedUsers();
+  if(!AREAS.length){ host.innerHTML='<div class="empty">Add an area of work above first.</div>'; return; }
+  if(!engs.length){ host.innerHTML='<div class="empty">No engineers found. Tick "Show all staff" or set staff type to Field in Users Admin.</div>'; return; }
+  let h='<table class="skills"><thead><tr><th class="eng">Engineer</th>';
+  AREAS.forEach(a=>{ h+=`<th title="${esc(a.name)}"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${esc(a.colour)};margin-right:4px;"></span>${esc(a.name)}</th>`; });
+  h+='</tr></thead><tbody>';
+  engs.forEach(u=>{
+    const name=((u.FirstName||u.first_name||"")+" "+(u.LastName||u.last_name||"")).trim()||u.Username||u.username;
+    const uk=normId(u.Username||u.username);
+    const row=SKILLS[uk]||{};
+    h+=`<tr><td class="eng">${esc(name)}</td>`;
+    AREAS.forEach(a=>{
+      const cur=Number(row[a.id]||0);
+      h+=`<td><span class="stars" data-u="${esc(uk)}" data-a="${esc(a.id)}">`
+        + [1,2,3,4,5].map(n=>star(uk,a.id,n,cur)).join("")
+        + `</span>${cur?`<span class="clr" data-u="${esc(uk)}" data-a="${esc(a.id)}">✕</span>`:""}</td>`;
+    });
+    h+='</tr>';
+  });
+  h+='</tbody></table>';
+  host.innerHTML=h;
+  host.querySelectorAll(".stars .s").forEach(s=>{
+    s.addEventListener("click",()=>{
+      const uk=s.getAttribute("data-u"), a=s.getAttribute("data-a"), n=Number(s.getAttribute("data-n"));
+      SKILLS[uk]=SKILLS[uk]||{};
+      SKILLS[uk][a] = (Number(SKILLS[uk][a]||0)===n) ? 0 : n;   // tap same star = clear
+      if(!SKILLS[uk][a]) delete SKILLS[uk][a];
+      renderGrid(); queueSkillSave();
+    });
+  });
+  host.querySelectorAll(".clr").forEach(c=>{
+    c.addEventListener("click",()=>{
+      const uk=c.getAttribute("data-u"), a=c.getAttribute("data-a");
+      if(SKILLS[uk]) delete SKILLS[uk][a];
+      renderGrid(); queueSkillSave();
+    });
+  });
+}
+$("showAll").addEventListener("change", renderGrid);
+
+// ── AI usage meter + cap ────────────────────────────────────────────────────
+async function loadAiUsage(){
+  try{
+    const d = await (await authFetch("/sla/ai-usage")).json();
+    if(!d.ok){ $("aiUsage").textContent = "Couldn't load usage."; return; }
+    const kinds = Object.entries(d.kinds||{}).map(([k,n])=>`${esc(k)}: ${n}`).join(" · ");
+    $("aiUsage").innerHTML = `This month: <b>${d.monthTotal}</b> AI call${d.monthTotal===1?"":"s"} · Today: <b>${d.today}</b>${d.cap?` of ${d.cap}`:""}` + (kinds?`<div class="sub" style="margin:4px 0 0;">${kinds}</div>`:"");
+    $("aiCap").value = d.cap || 0;
+  }catch(e){ $("aiUsage").textContent = "Couldn't load usage."; }
+}
+async function saveAiCap(){
+  const n = Math.max(0, parseInt($("aiCap").value,10)||0);
+  $("aiCapState").textContent = "…";
+  try{ await authFetch("/sla/ai-usage",{method:"POST",body:JSON.stringify({dailyCap:n})}); $("aiCapState").textContent = "Saved ✓"; loadAiUsage(); }
+  catch(e){ $("aiCapState").textContent = "⚠ not saved"; }
+}
+
+(async function(){
+  // SLA-admin gate.
+  try{
+    const me = await (await authFetch("/auth/me")).json();
+    const p = me.user||{};
+    if(!(p.FullAccess==="Yes" || p.SLAAdmin==="Yes")){ alert("This page needs SLA admin access."); location.href="main.html"; return; }
+  }catch(e){ location.href="main.html"; return; }
+  try{
+    const [sk, us] = await Promise.all([
+      (await authFetch("/sla/eng-skills")).json(),
+      (await authFetch("/users")).json()
+    ]);
+    AREAS = sk.areas||[]; SKILLS = sk.skills||{};
+    USERS = (us.Users||us.users||[]).filter(u=>(u.Username||u.username));
+    renderAreas(); renderGrid();
+  }catch(e){ $("grid").innerHTML='<div class="empty">Couldn\'t load skills.</div>'; }
+  $("aiCapSave").addEventListener("click", saveAiCap);
+  loadAiUsage();
+})();
+</script>
+</body>
+</html>

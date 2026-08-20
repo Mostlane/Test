@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=17"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Chapplins — Mostlane Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f4; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:920px; margin:16px auto 60px; padding:0 14px; }
+    .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+    .bar input[type=search]{ flex:1; min-width:180px; padding:10px 12px; border:1px solid #cfd8e3; border-radius:10px; font-size:15px; }
+    .sum { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+    .sum .kpi{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:8px 14px; box-shadow:0 2px 8px rgba(6,24,54,.05); }
+    .sum .kpi b{ display:block; font-size:20px; color:#003468; }
+    .sum .kpi span{ font-size:12px; color:#67788c; }
+    .lnk{ background:#fff; border:1px solid #cfd8e3; border-radius:10px; padding:9px 12px; text-decoration:none; color:#12304f; font-weight:600; font-size:14px; }
+    .lnk:hover{ background:#f4f8ff; }
+    .card{ background:#fff; border:1px solid #e3e9f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); margin-bottom:12px; overflow:hidden; }
+    .chead{ display:flex; align-items:flex-start; gap:12px; padding:14px 16px; cursor:pointer; }
+    .chead:hover{ background:#f7fafe; }
+    .num{ background:#eaf1fb; color:#1a4f8f; font-weight:700; border-radius:8px; padding:4px 8px; font-size:13px; flex:none; }
+    .cbody{ flex:1; min-width:0; }
+    .cname{ font-weight:700; font-size:16px; color:#132a45; }
+    .cpost{ color:#67788c; font-size:13px; }
+    .cur{ margin-top:6px; font-size:14px; }
+    .cur .who{ font-weight:600; }
+    .cur a{ color:#1a4f8f; text-decoration:none; }
+    .badge{ display:inline-block; background:#f0f3f7; border:1px solid #e0e6ee; border-radius:999px; padding:2px 9px; font-size:12px; color:#4a5b70; margin:2px 4px 0 0; }
+    .badge.warn{ background:#fff5e6; border-color:#f4d79a; color:#8a5a00; }
+    .badge.bad{ background:#fdeaea; border-color:#f2b8b8; color:#a11; }
+    .chev{ color:#9fb2c8; font-size:20px; flex:none; align-self:center; }
+    .detail{ display:none; border-top:1px solid #eef2f6; padding:12px 16px; background:#fbfdff; }
+    .detail.open{ display:block; }
+    .sec{ margin:8px 0; }
+    .sec h4{ margin:0 0 6px; font-size:12px; letter-spacing:.04em; text-transform:uppercase; color:#7488a0; }
+    .ten{ border:1px solid #e6ecf3; border-radius:10px; padding:9px 11px; margin-bottom:8px; background:#fff; }
+    .ten.curr{ border-color:#bcd4b8; background:#f4faf3; }
+    .ten .tn{ font-weight:600; }
+    .ten .tref{ color:#67788c; font-size:12px; }
+    .ten .tc{ font-size:13px; margin-top:3px; }
+    .ten .tc a{ color:#1a4f8f; text-decoration:none; margin-right:10px; }
+    .ten .td{ font-size:12px; color:#8494a6; margin-top:3px; }
+    .pill{ display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; }
+    .pill.c{ background:#2e7d32; color:#fff; } .pill.p{ background:#e7edf3; color:#5b6b7d; }
+    .row-actions{ margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; }
+    .btn{ border:1px solid #cfd8e3; background:#fff; border-radius:9px; padding:7px 11px; font-size:13px; font-weight:600; color:#12304f; cursor:pointer; text-decoration:none; }
+    .btn:hover{ background:#f2f7ff; } .btn.primary{ background:#1a4f8f; color:#fff; border-color:#1a4f8f; }
+    .btn.sm{ padding:4px 9px; font-size:12px; }
+    .jobs .j{ font-size:13px; padding:6px 0; border-bottom:1px dashed #e7edf3; }
+    .jobs .j:last-child{ border-bottom:0; }
+    .jobs .jr{ font-weight:600; color:#132a45; } .jobs .jd{ color:#67788c; }
+    .empty{ text-align:center; color:#7d8da0; padding:30px; }
+    .muted{ color:#7d8da0; }
+    /* modal */
+    .mask{ position:fixed; inset:0; background:rgba(10,22,40,.45); display:none; align-items:center; justify-content:center; z-index:60; padding:14px; }
+    .mask.on{ display:flex; }
+    .modal{ background:#fff; border-radius:14px; max-width:440px; width:100%; padding:18px; box-shadow:0 20px 60px rgba(6,24,54,.3); }
+    .modal h3{ margin:0 0 12px; font-size:17px; }
+    .modal label{ display:block; font-size:12px; color:#67788c; margin:8px 0 3px; }
+    .modal input, .modal textarea{ width:100%; padding:9px 11px; border:1px solid #cfd8e3; border-radius:9px; font-size:14px; }
+    .modal .mrow{ display:flex; gap:8px; margin-top:14px; justify-content:flex-end; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" data-role="home" href="main.html" title="Back to Menu" style="text-decoration:none;">‹ Back</a>
+    <h1>🏠 Chapplins</h1>
+  </header>
+  <div class="wrap">
+    <div class="sum" id="sum"></div>
+    <div class="bar">
+      <input type="search" id="q" placeholder="Search site, postcode, tenant name or ref…">
+      <a class="lnk" href="chapplins-compliance.html">✔️ Compliance</a>
+      <a class="lnk" href="sites.html">🗂️ Sites register</a>
+      <button class="lnk" id="geoBtn" style="display:none;cursor:pointer" onclick="geocodeAll()">📍 Look up map pins</button>
+      <span id="geoStat" class="muted" style="font-size:13px"></span>
+    </div>
+    <div id="list"><div class="empty muted">Loading…</div></div>
+  </div>
+
+  <!-- tenant edit modal -->
+  <div class="mask" id="mask">
+    <div class="modal">
+      <h3 id="mTitle">Tenant</h3>
+      <input type="hidden" id="mId"><input type="hidden" id="mSite">
+      <label>Name</label><input id="mName" placeholder="Tenant name(s)">
+      <label>Tenant reference</label><input id="mRef" placeholder="e.g. MYER01">
+      <label>Phone / mobile</label><input id="mPhone" placeholder="07…">
+      <label>Email</label><input id="mEmail" placeholder="name@example.com">
+      <label>Home telephone</label><input id="mHome" placeholder="(optional)">
+      <label>Notes</label><textarea id="mNotes" rows="2" placeholder="(optional)"></textarea>
+      <div class="mrow">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn primary" id="mSave" onclick="saveTenant()">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+function mlToken(){ try { return localStorage.getItem('mostlaneToken') || ''; } catch(e){ return ''; } }
+function authFetch(path, opts){
+  opts = opts || {};
+  const h = Object.assign({ 'Content-Type':'application/json' }, opts.headers || {});
+  const t = mlToken(); if (t) h['Authorization'] = 'Bearer ' + t;
+  return fetch((window.MOSTLANE_API || '') + path, Object.assign({}, opts, { headers:h }));
+}
+function perms(){ try { return JSON.parse(localStorage.getItem('mostlanePermissions')||'{}')||{}; } catch(e){ return {}; } }
+const P = perms();
+const CAN_MANAGE = P.FullAccess==='Yes' || P.Compliance==='Yes' || P.SLAAdmin==='Yes';
+
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TYPE_LABEL = { fiveYear:'EICR', gas:'Gas Safety', epc:'EPC', alarms:'Smoke/CO', fire:'Fire/EM Lighting', legionella:'Legionella' };
+function daysUntil(d){ if(!d) return null; const t=new Date(d); if(isNaN(t)) return null; return Math.ceil((t-new Date())/86400000); }
+
+let SITES = [];   // directory
+const OPEN = {};  // siteNumber -> loaded detail
+
+async function load(){
+  try {
+    const r = await authFetch('/chapplins/sites');
+    if (r.status===401){ location.href='login.html'; return; }
+    if (!r.ok) throw new Error('load failed');
+    const j = await r.json();
+    SITES = j.sites || [];
+    renderSummary();
+    render();
+  } catch(e){
+    document.getElementById('list').innerHTML = '<div class="empty">Couldn’t load Chapplins sites. Pull to refresh.</div>';
+  }
+}
+function renderSummary(){
+  const sites = SITES.length;
+  const tenants = SITES.reduce((a,s)=>a+(s.tenantCount||0),0);
+  const jobs = SITES.reduce((a,s)=>a+(s.jobCount||0),0);
+  document.getElementById('sum').innerHTML =
+    `<div class="kpi"><b>${sites}</b><span>Sites</span></div>`+
+    `<div class="kpi"><b>${tenants}</b><span>Tenants</span></div>`+
+    `<div class="kpi"><b>${jobs}</b><span>Jobs</span></div>`;
+}
+function dueBadges(due){
+  const keys = Object.keys(due||{});
+  if(!keys.length) return '';
+  return keys.map(k=>{
+    const du = daysUntil(due[k]); let cls='';
+    if(du!=null && du<0) cls='bad'; else if(du!=null && du<=30) cls='warn';
+    return `<span class="badge ${cls}">${esc(TYPE_LABEL[k]||k)}: ${esc(due[k])}</span>`;
+  }).join('');
+}
+function render(){
+  const q = (document.getElementById('q').value||'').toLowerCase().trim();
+  const rows = SITES.filter(s=>{
+    if(!q) return true;
+    const ct = s.currentTenant||{};
+    return [s.siteName,s.postcode,s.siteNumber,ct.name,ct.ref].some(v=>String(v||'').toLowerCase().includes(q));
+  });
+  if(!rows.length){ document.getElementById('list').innerHTML='<div class="empty muted">No matching sites.</div>'; return; }
+  document.getElementById('list').innerHTML = rows.map(cardHtml).join('');
+}
+function cardHtml(s){
+  const ct = s.currentTenant;
+  const cur = ct && (ct.name||ct.ref)
+    ? `<div class="cur"><span class="who">${esc(ct.name||ct.ref)}</span>${ct.ref?` <span class="cpost">[${esc(ct.ref)}]</span>`:''}`+
+      (ct.phone?` · <a href="tel:${esc(ct.phone.replace(/\s/g,''))}">${esc(ct.phone)}</a>`:'')+
+      (ct.email?` · <a href="mailto:${esc((ct.email||'').split(';')[0])}">✉︎</a>`:'')+`</div>`
+    : `<div class="cur muted">No current tenant (vacant / communal)</div>`;
+  const prev = s.tenantCount>1 ? `<span class="badge">${s.tenantCount-1} previous</span>` : '';
+  return `<div class="card" data-n="${esc(s.siteNumber)}">
+    <div class="chead" onclick="toggle('${esc(s.siteNumber)}')">
+      <span class="num">${esc(s.siteNumber)}</span>
+      <div class="cbody">
+        <div class="cname">${esc(s.siteName)}</div>
+        <div class="cpost">${esc(s.postcode||'')}</div>
+        ${cur}
+        <div>${s.jobCount?`<span class="badge">${s.jobCount} job${s.jobCount>1?'s':''}</span>`:''}${prev}${dueBadges(s.due)}</div>
+      </div>
+      <span class="chev">›</span>
+    </div>
+    <div class="detail" id="d-${esc(s.siteNumber)}"></div>
+  </div>`;
+}
+async function toggle(num){
+  const el = document.getElementById('d-'+num);
+  if(!el) return;
+  if(el.classList.contains('open')){ el.classList.remove('open'); return; }
+  await loadDetail(num, el);
+}
+async function loadDetail(num, el){
+  el = el || document.getElementById('d-'+num);
+  if(!el) return;
+  el.classList.add('open');
+  el.innerHTML = '<div class="muted">Loading…</div>';
+  try {
+    const r = await authFetch('/chapplins/site?number='+encodeURIComponent(num));
+    const j = await r.json();
+    OPEN[num] = j;
+    el.innerHTML = detailHtml(j);
+  } catch(e){ el.innerHTML = '<div class="muted">Couldn’t load.</div>'; }
+}
+function detailHtml(j){
+  const site = j.site||{}; const tenants=j.tenants||[]; const jobs=j.jobs||[];
+  const tHtml = tenants.length ? tenants.map(t=>{
+    const contact = [
+      t.phone?`<a href="tel:${esc(t.phone.replace(/\s/g,''))}">${esc(t.phone)}</a>`:'',
+      t.email?`<a href="mailto:${esc((t.email||'').split(';')[0])}">${esc((t.email||'').split(';')[0])}</a>`:'',
+      t.homeTel?`<span class="muted">${esc(t.homeTel)}</span>`:''
+    ].filter(Boolean).join(' ');
+    const dates = (t.firstSeen||t.lastSeen) ? `Seen ${esc(t.firstSeen||'?')} → ${esc(t.lastSeen||'?')}` : '';
+    const acts = CAN_MANAGE ? `<div class="row-actions">
+        ${t.current?'':`<button class="btn sm" onclick="makeCurrent('${esc(t.id)}','${esc(site.siteNumber)}')">Make current</button>`}
+        <button class="btn sm" onclick='editTenant(${JSON.stringify(t).replace(/'/g,"&#39;")})'>Edit</button>
+        <button class="btn sm" onclick="delTenant('${esc(t.id)}','${esc(site.siteNumber)}')">Delete</button>
+      </div>` : '';
+    return `<div class="ten ${t.current?'curr':''}">
+      <div><span class="pill ${t.current?'c':'p'}">${t.current?'CURRENT':'previous'}</span> <span class="tn">${esc(t.name||t.ref||'—')}</span> ${t.ref?`<span class="tref">[${esc(t.ref)}]</span>`:''}</div>
+      ${contact?`<div class="tc">${contact}</div>`:''}
+      ${dates?`<div class="td">${dates}</div>`:''}
+      ${acts}
+    </div>`;
+  }).join('') : '<div class="muted">No tenant on record.</div>';
+
+  const jHtml = jobs.length ? `<div class="jobs">`+jobs.map(job=>
+    `<div class="j"><span class="jr">${esc(job.ref||job.id)}</span>${job.priority?` · ${esc(job.priority)}`:''} <span class="jd">${esc((job.date||'').slice(0,10))}</span><br>${esc(job.description||'')}</div>`
+  ).join('')+`</div>` : '<div class="muted">No jobs on record yet.</div>';
+
+  const addBtn = CAN_MANAGE ? `<button class="btn sm primary" onclick="addTenant('${esc(site.siteNumber)}')">＋ Add tenant</button>` : '';
+  return `
+    <div class="sec"><h4>Tenants ${addBtn}</h4>${tHtml}</div>
+    <div class="sec"><h4>Jobs (${jobs.length})</h4>${jHtml}</div>
+    <div class="row-actions">
+      <a class="btn" href="site-folder.html?site=${esc(site.siteNumber)}">🗂️ Jobs, photos & documents</a>
+      <a class="btn" href="chapplins-compliance.html">✔️ Compliance</a>
+    </div>`;
+}
+
+/* ── tenant management ─────────────────────────────────────────────────── */
+function addTenant(site){ openModal({ siteNumber: site }, 'Add tenant'); }
+function editTenant(t){ openModal(t, 'Edit tenant'); }
+function openModal(t, title){
+  document.getElementById('mTitle').textContent = title;
+  document.getElementById('mId').value = t.id||'';
+  document.getElementById('mSite').value = t.siteNumber||'';
+  document.getElementById('mName').value = t.name||'';
+  document.getElementById('mRef').value = t.ref||'';
+  document.getElementById('mPhone').value = t.phone||'';
+  document.getElementById('mEmail').value = t.email||'';
+  document.getElementById('mHome').value = t.homeTel||'';
+  document.getElementById('mNotes').value = t.notes||'';
+  document.getElementById('mask').classList.add('on');
+}
+function closeModal(){ document.getElementById('mask').classList.remove('on'); }
+async function saveTenant(){
+  const body = {
+    id: document.getElementById('mId').value || undefined,
+    siteNumber: document.getElementById('mSite').value,
+    name: document.getElementById('mName').value.trim(),
+    ref: document.getElementById('mRef').value.trim(),
+    phone: document.getElementById('mPhone').value.trim(),
+    email: document.getElementById('mEmail').value.trim(),
+    homeTel: document.getElementById('mHome').value.trim(),
+    notes: document.getElementById('mNotes').value.trim(),
+    makeCurrent: true
+  };
+  if(!body.name && !body.ref){ alert('Enter a name or reference'); return; }
+  const btn=document.getElementById('mSave'); btn.disabled=true; btn.textContent='Saving…';
+  try {
+    const r = await authFetch('/chapplins/tenant', { method:'POST', body: JSON.stringify(body) });
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.error||'save failed'); }
+    closeModal(); await refreshSite(body.siteNumber);
+  } catch(e){ alert('Could not save: '+e.message); }
+  finally { btn.disabled=false; btn.textContent='Save'; }
+}
+async function makeCurrent(id, site){
+  try { await authFetch('/chapplins/tenant/current', { method:'POST', body: JSON.stringify({ id }) }); await refreshSite(site); } catch(e){ alert('Failed'); }
+}
+async function delTenant(id, site){
+  const ok = window.MLUI ? await MLUI.confirm('Remove this tenant record?',{danger:true}) : confirm('Remove this tenant record?');
+  if(!ok) return;
+  try { await authFetch('/chapplins/tenant/delete', { method:'POST', body: JSON.stringify({ id }) }); await refreshSite(site); } catch(e){ alert('Failed'); }
+}
+async function refreshSite(num){
+  // reload directory (counts/current may change) then re-open this site's detail
+  await load();
+  await loadDetail(num);
+}
+
+/* ── Look up map pins: geocode every site by postcode (postcodes.io, free) and
+   save via /update-site — which drops the site pin, mirrors the compliance 📍,
+   and pushes the SiteLog geofence. Postcode-level (units at one postcode share a
+   pin); building-level precision would use the Google Maps key server-side. */
+async function geocodeAll(){
+  if(!CAN_MANAGE) return;
+  const btn=document.getElementById('geoBtn'), stat=document.getElementById('geoStat');
+  const withPc = SITES.filter(s=>/[a-z]/i.test(s.postcode||'') && /\d/.test(s.postcode||''));
+  if(!withPc.length){ stat.textContent='No postcodes to look up.'; return; }
+  const ok = window.MLUI ? await MLUI.confirm(`Look up map pins for ${withPc.length} sites by postcode?`,{okLabel:'Look up'}) : confirm(`Look up map pins for ${withPc.length} sites?`);
+  if(!ok) return;
+  btn.disabled=true; stat.textContent='Looking up postcodes…';
+  // 1) bulk-geocode postcodes (chunks of 100)
+  const pcs=[...new Set(withPc.map(s=>String(s.postcode).trim().toUpperCase()))];
+  const coord={};
+  try{
+    for(let i=0;i<pcs.length;i+=100){
+      const r=await fetch('https://api.postcodes.io/postcodes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({postcodes:pcs.slice(i,i+100)})});
+      const j=await r.json();
+      for(const row of (j.result||[])){ const res=row.result; if(res&&res.latitude!=null) coord[String(row.query).toUpperCase()]={lat:res.latitude,lng:res.longitude}; }
+    }
+  }catch(e){ stat.textContent='Postcode lookup failed (network).'; btn.disabled=false; return; }
+  // 2) save each site's pin via /update-site
+  let done=0, saved=0, failed=0;
+  for(const s of withPc){
+    const c=coord[String(s.postcode).trim().toUpperCase()];
+    done++;
+    if(!c){ failed++; continue; }
+    try{
+      const r=await authFetch('/update-site?category=chapplins',{method:'POST',body:JSON.stringify({siteNumber:s.siteNumber, client:'chapplins', lat:c.lat, lon:c.lng, lng:c.lng})});
+      if(r.ok) saved++; else failed++;
+    }catch(e){ failed++; }
+    stat.textContent=`Saving pins… ${done}/${withPc.length}`;
+  }
+  stat.textContent=`✓ ${saved} pins set${failed?` · ${failed} without a match`:''}. SiteLog geofences updated.`;
+  btn.disabled=false;
+}
+if(CAN_MANAGE) document.getElementById('geoBtn').style.display='';
+
+document.getElementById('q').addEventListener('input', render);
+load();
+</script>
+</body>
+</html>

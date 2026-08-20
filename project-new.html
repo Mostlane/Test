@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>New Project</title>
-  <script src="/portal-config.js?v=11"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -130,6 +130,17 @@
         <label>Contract value (£, optional — you can add it later)</label>
         <input type="number" id="contractValue" placeholder="e.g. 48000" min="0" step="1">
       </div>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:14px 0;">
+      <h2 style="margin:0 0 4px;">👥 Who can see this project?</h2>
+      <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Admins (Full Access / Projects Admin) always see every project. You can change this later.</p>
+      <label class="tick" style="margin-bottom:6px;"><input type="radio" name="visMode" value="all" checked><span><b>Everyone with Projects access</b><div class="d">Anyone with the Projects permission can open it from their Projects page.</div></span></label>
+      <label class="tick" style="margin-bottom:6px;"><input type="radio" name="visMode" value="picked"><span><b>Only the people I pick</b><div class="d">Show it in their Projects area — hide it from everyone else.</div></span></label>
+      <div id="visPickBox" class="hide">
+        <input type="search" id="visSearch" placeholder="Filter people…" style="margin-bottom:6px;">
+        <div id="visPeople" style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;"><p class="muted" style="margin:6px;">Loading people…</p></div>
+      </div>
+
       <div class="navbtns">
         <button class="btn grey" id="back1" type="button">← Back</button>
         <button class="btn" id="to3" type="button">Next: SiteLog →</button>
@@ -307,6 +318,41 @@
     // ── Step 2: valuations reveal ─────────────────────────────────────────────
     g("req_valuations").addEventListener("change", e => g("valBox").classList.toggle("hide", !e.target.checked));
 
+    // ── Step 2: visibility picker ─────────────────────────────────────────────
+    let VIS_USERS = null; const VIS_PICK = new Set();
+    async function loadVisUsers() {
+      if (VIS_USERS) return VIS_USERS;
+      try { const d = await authFetch("/users").then(r => r.json()); VIS_USERS = (d.Users || d.users || []).filter(u => u.Username && String(u.Status || "Active") !== "Disabled"); }
+      catch { VIS_USERS = []; }
+      return VIS_USERS;
+    }
+    function renderVisPeople(filter) {
+      const box = g("visPeople"); if (!box || !VIS_USERS) return;
+      const q = (filter || "").toLowerCase().trim();
+      const rows = VIS_USERS.map(u => ({ u, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username }))
+        .filter(r => !q || r.name.toLowerCase().includes(q) || String(r.u.Username).toLowerCase().includes(q))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      if (!rows.length) { box.innerHTML = `<p class="muted" style="margin:6px;">No matches.</p>`; return; }
+      box.innerHTML = rows.map(r => {
+        const key = String(r.u.Username).toLowerCase();
+        const checked = VIS_PICK.has(key) ? "checked" : "";
+        return `<label style="display:flex;gap:8px;align-items:center;padding:5px 2px;border-top:1px solid #f0f3f7;font-size:14px;font-weight:500;margin:0;"><input type="checkbox" data-visu="${esc(r.u.Username)}" ${checked} style="width:19px;height:19px;"> ${esc(r.name)} <span class="muted" style="font-size:12px;">${esc(r.u.Username)}</span></label>`;
+      }).join("");
+    }
+    document.querySelectorAll("input[name=visMode]").forEach(r => {
+      r.onchange = async () => {
+        const picked = r.value === "picked" && r.checked;
+        g("visPickBox").classList.toggle("hide", !picked);
+        if (picked) { await loadVisUsers(); renderVisPeople(g("visSearch").value); }
+      };
+    });
+    g("visPeople").addEventListener("change", e => {
+      const c = e.target.closest("[data-visu]"); if (!c) return;
+      const key = String(c.dataset.visu).toLowerCase();
+      if (c.checked) VIS_PICK.add(key); else VIS_PICK.delete(key);
+    });
+    g("visSearch").addEventListener("input", e => renderVisPeople(e.target.value));
+
     // ── Step 3: companies ─────────────────────────────────────────────────────
     async function loadCompanySuggestions() {
       let names = [];
@@ -347,6 +393,7 @@
         },
         sitelog: { rules: g("slRules").value.trim(), visitorRules: g("slVisitor").value.trim(), companies: state.companies },
         contractValue: g("req_valuations").checked && g("contractValue").value ? Number(g("contractValue").value) : null,
+        visibleTo: (document.querySelector("input[name=visMode]:checked") || {}).value === "picked" ? Array.from(VIS_PICK) : [],
       };
     }
     function renderReview() {
@@ -360,7 +407,8 @@
         <div class="kv"><b>To build:</b> ${esc(reqList)}</div>
         ${d.contractValue ? `<div class="kv"><b>Contract value:</b> £${Number(d.contractValue).toLocaleString()}</div>` : ""}
         <div class="kv"><b>SiteLog message:</b> ${d.sitelog.rules ? esc(d.sitelog.rules).replace(/\n/g, "<br>") : "—"}</div>
-        <div class="kv"><b>Companies on site:</b> ${d.sitelog.companies.length ? d.sitelog.companies.map(esc).join(", ") : "—"}</div>`;
+        <div class="kv"><b>Companies on site:</b> ${d.sitelog.companies.length ? d.sitelog.companies.map(esc).join(", ") : "—"}</div>
+        <div class="kv"><b>Visible to:</b> ${d.visibleTo.length ? esc(d.visibleTo.join(", ")) + " <span class='muted'>(+ admins)</span>" : "everyone with Projects access"}</div>`;
     }
 
     g("createBtn").onclick = async () => {

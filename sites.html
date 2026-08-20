@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=11"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="utf-8"/>
   <title>Mostlane • Site Manager</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <style>
     :root{
@@ -221,6 +221,7 @@
           <option value="wenzels">Wenzels</option>
           <option value="projects">Projects</option>
           <option value="fbc">Fareham Borough Council</option>
+        <option value="chapplins">Chapplins</option>
 
         </select>
         <input id="searchInput" type="text" placeholder="Search name / number / postcode / phone"/>
@@ -294,6 +295,7 @@
         <option value="wenzels">Wenzels</option>
         <option value="projects">Projects</option>
         <option value="fbc">Fareham Borough Council</option>
+        <option value="chapplins">Chapplins</option>
 
       </select>
 
@@ -663,6 +665,7 @@ Fob – Main Gate
     if (v==="projects" || v==="project") return "Project";
     if (v==="retail") return "Retail";
     if (v === "fbc") return "Fareham BC";
+    if (v === "chapplins") return "Chapplins";
     return k || "";
   }
   function roundTrip(m){

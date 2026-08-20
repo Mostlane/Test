@@ -355,13 +355,7 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const key = String(b.key || "").trim();
     if (!key) return error("key required", 400, env, request);
-    const fin = await cfgGet(env, tid, "proj_fin", {});
-    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
-    if (b.value !== undefined) cur.value = Math.max(0, Number(b.value) || 0);
-    if (b.planned !== undefined) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
-    if (b.name !== undefined) cur.name = String(b.name || "").slice(0, 120);
-    fin[key] = cur;
-    await cfgSet(env, tid, "proj_fin", fin);
+    const cur = await writeProjFin(env, tid, key, { value: b.value, planned: b.planned, name: b.name });
     return json({ ok: true, fin: cur }, {}, env, request);
   }
   if (path === "/costing/fin/valuation" && method === "POST") {
@@ -402,6 +396,7 @@ export async function handle(request, env, ctx, url, sess) {
     const projFin = await cfgGet(env, tid, "proj_fin", {});   // per-site contract value + valuations
 
     const bySite = {};   // norm -> aggregate
+    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
       return bySite[key] || (bySite[key] = {
@@ -432,6 +427,26 @@ export async function handle(request, env, ctx, url, sess) {
     // cost across their actual visit dates (from /admin) for the labour line.
     const slRate = {};
 
+    // ── Seed every live/complete PROJECT so it appears here even at £0 ───────
+    // Without this a brand-new project (no labour, no PO) can't be found on the
+    // costing page for the admin to set its contract value / valuations.
+    // Archived projects are skipped so retired work doesn't clutter the list.
+    // Matching goes through resolveSite, so once real activity lands (labour /
+    // PO), it merges into this same row rather than creating a duplicate.
+    const seededProjects = {};   // sKey -> { id, number }
+    try {
+      const { results: projRows } = await env.DB.prepare(
+        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
+      ).bind(tid).all();
+      for (const p of projRows || []) {
+        const name = String(p.name || "").trim(); if (!name) continue;
+        const resolved = resolveSite(reg, name);
+        const s = siteFor(name, resolved);
+        const sKey = siteKeyOf(resolved, name);
+        seededProjects[sKey] = { id: p.id, number: p.number };
+      }
+    } catch {}
+
     // ── SiteLog labour (authoritative per site+person) ───────────────────────
     // Pull SiteLog's own job costing and fold it in FIRST, so we know which
     // (site, person) pairs SiteLog covers and can drop the matching SLA time
@@ -441,7 +456,6 @@ export async function handle(request, env, ctx, url, sess) {
     // SiteLog is unreachable, slSites is null and costing is SLA-only as before.
     const slSites = await fetchSitelogCosting(env, from, to);
     const slCovered = new Set();   // `${siteKey}::${normName(person)}` handled by SiteLog
-    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
     if (slSites) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
@@ -554,11 +568,54 @@ export async function handle(request, env, ctx, url, sess) {
       }
     }
 
+    // ── Manual costs entered on the project hub (labour shifts + materials)
+    // Folded per project's site key: labour into cost + per-engineer; materials
+    // into poTotal (grouped as a supplier "Manual entry"). Kept as separate
+    // manualLabour/manualMaterials totals for the P&L split on the hub.
+    try {
+      const projKeyById = {};   // projectId -> site key
+      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
+      const projIds = Object.keys(projKeyById);
+      if (projIds.length) {
+        for (const pid of projIds) {
+          const { results } = await env.DB.prepare(
+            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
+          ).bind(tid, pid).all();
+          const sKey = projKeyById[pid];
+          const s = bySite[sKey]; if (!s) continue;
+          for (const r of results || []) {
+            const amt = Number(r.amount) || 0;
+            if (r.kind === "labour") {
+              s.cost = Math.round((s.cost + amt) * 100) / 100;
+              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
+              addDay(s.labD, r.date, amt);
+              const who = canonEng(r.username || "(manual)");
+              const eng = engFor(s, who);
+              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
+              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+              if (mins) { s.onsiteMins += mins; eng.mins += mins; if (!eng.days) eng.days = new Set(); eng.days.add(r.date); }
+              addSrc(eng, "sla");
+            } else {
+              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
+              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
+              addDay(s.poD, r.date, amt);
+              const supName = (r.supplier || "").trim() || "Manual entry";
+              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+              sup.count++;
+              sup.total = Math.round((sup.total + amt) * 100) / 100;
+            }
+          }
+        }
+      }
+    } catch {}
+
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
         ...s,
         key,   // stable per-site id the front-end pins/hides/orders against
+        project: seededProjects[key] || null,   // { id, number } when this site IS a portal project
+        manualLabour: s.manualLabour || 0, manualMaterials: s.manualMaterials || 0,
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
@@ -738,12 +795,38 @@ async function buildDay(env, tid, user, date, reg) {
     });
   }
 
-  // SiteLog scans → visit intervals, clipped to time not already covered
+  // SiteLog scans → visit intervals, clipped to time not already covered.
+  // Primary source is the local `sitelog_scans` mirror (fed by the HMAC bridge
+  // from the old standalone SiteLog worker). When the mirror is empty for the
+  // day but SITELOG_DB is bound (in-process SiteLog), fall back to live
+  // visits from that DB — so exceptions/mismatch still work even if the
+  // bridge is dark, keeping /costing/summary £ figures and this day view in step.
   try {
     const { results } = await env.DB.prepare(
       "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at")
       .bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
-    const scans = (results || []).filter(s => londonDate(s.at) === date);
+    let scans = (results || []).filter(s => londonDate(s.at) === date);
+    if (!scans.length && env.SITELOG_DB) {
+      const from = new Date(dayStart).toISOString().slice(0, 10);
+      const to = new Date(dayEnd).toISOString().slice(0, 10);
+      try {
+        const visits = await fetchSitelogVisits(env, from, to);
+        const nameLike = jcNameLike;
+        // Turn visits (check_in_at/check_out_at) into scan-in/scan-out rows so
+        // the reconstruction below is unchanged.
+        for (const v of (visits || [])) {
+          const who = String(v.portal_username || "").trim() || nameLike(v);
+          if (String(who).toLowerCase() !== String(user).toLowerCase()) continue;
+          if (v.check_in_at && londonDate(v.check_in_at) === date) {
+            scans.push({ at: v.check_in_at, direction: "in", site: v.site_code || v.site_name || "" });
+          }
+          if (v.check_out_at && londonDate(v.check_out_at) === date) {
+            scans.push({ at: v.check_out_at, direction: "out", site: v.site_code || v.site_name || "" });
+          }
+        }
+        scans.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      } catch {}
+    }
     const open = {};   // site -> inAt
     const visits = [];
     for (const s of scans) {
@@ -1209,7 +1292,7 @@ async function jobPoRows(env, jobId) {
 
 /* ══ Rates (mirrors timesheets.js effectiveCfg, read-only subset) ═══════════ */
 
-async function ratesMap(env, tid) {
+export async function ratesMap(env, tid) {
   const out = {};
   let cfg = { byUser: {} };
   try {
@@ -1259,6 +1342,43 @@ async function ensure(env) {
       username TEXT NOT NULL, site TEXT NOT NULL, direction TEXT NOT NULL,
       at TEXT NOT NULL, source TEXT)`).run();
   } catch {}
+}
+
+// Single writer for `proj_fin` — used by both /costing/fin and projects-api.js
+// so contract-value edits on either page share one canonical helper. Pass
+// value:null (or 0) to clear the row entirely.
+export async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
+  if (!costingKey) return null;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  const cur = fin[costingKey] || { value: 0, planned: 0, valuations: [] };
+  if (value !== undefined) cur.value = value === null ? 0 : Math.max(0, Number(value) || 0);
+  if (planned !== undefined) cur.planned = Math.max(0, Math.round(Number(planned) || 0));
+  if (name !== undefined) cur.name = String(name || "").slice(0, 120);
+  if (!Array.isArray(cur.valuations)) cur.valuations = [];
+  // Empty out: no value + no valuations means the project's fin row is dead.
+  if ((!cur.value || cur.value === 0) && !cur.valuations.length && !cur.planned) {
+    delete fin[costingKey];
+  } else {
+    fin[costingKey] = cur;
+  }
+  await cfgSet(env, tid, "proj_fin", fin);
+  return fin[costingKey] || null;
+}
+// Rename a project's fin row when the project (and its normalised key) changes.
+export async function renameProjFinKey(env, tid, oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return false;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[oldKey]) return false;
+  fin[newKey] = fin[oldKey]; delete fin[oldKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
+export async function deleteProjFinKey(env, tid, costingKey) {
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[costingKey]) return false;
+  delete fin[costingKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
 }
 
 async function cfgGet(env, tid, name, fallback) {

@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Notification Centre — Mostlane</title>
-<script src="/portal-config.js?v=11"></script>
+<script src="/portal-config.js?v=17"></script>
 <script src="auth.js"></script>
 <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
@@ -53,6 +53,17 @@
       <button class="btn" id="pushTest" style="display:none;">Send test notification</button>
     </div>
     <p id="pushHint" class="sub" style="margin:10px 0 0;"></p>
+  </div>
+
+  <div class="card" id="pushStatusCard">
+    <h2>📱 Who has notifications on</h2>
+    <p class="sub">Every active user and whether they currently have push notifications enabled on at least one device. <b>On</b> = a device is registered; <b>Off</b> = none registered (they've never enabled it, turned it off, or reinstalled). Each of a user's devices is listed with its type (e.g. <i>iPhone · Safari</i>, from the browser it enabled on — the portal doesn't ask people to name a device) and when the server last successfully delivered a push to it.</p>
+    <p class="sub" id="psSummary" style="font-weight:600;color:#334155;">Loading…</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="btn small grey" id="psRefresh">↻ Refresh</button>
+      <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer;"><input type="checkbox" id="psOffOnly"> Show only <b>Off</b></label>
+    </div>
+    <div id="psList"><div class="empty">Loading…</div></div>
   </div>
 
   <div class="card" id="memoCard" style="display:none;">
@@ -474,6 +485,68 @@ function initMemos(user){
   mmLoad();
 }
 
+function psAgo(iso){
+  if(!iso) return "";
+  try{
+    const d = new Date(iso), now = Date.now(), s = Math.max(0, (now - d.getTime())/1000);
+    if(s < 90) return "just now";
+    const m = s/60; if(m < 90) return Math.round(m)+" min ago";
+    const h = m/60; if(h < 36) return Math.round(h)+" h ago";
+    const dd = h/24; if(dd < 14) return Math.round(dd)+" days ago";
+    return d.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"});
+  }catch{ return String(iso); }
+}
+async function loadPushStatus(){
+  const list = document.getElementById("psList");
+  const summ = document.getElementById("psSummary");
+  const offOnly = document.getElementById("psOffOnly").checked;
+  try{
+    const d = await (await authFetch("/push/status-all")).json();
+    if(!d.ok){ summ.textContent = d.error || "Couldn't load."; list.innerHTML = '<div class="empty">—</div>'; return; }
+    summ.innerHTML = "<b>"+d.on+"</b> of <b>"+d.total+"</b> users have notifications on · <b>"+d.off+"</b> off";
+    let users = d.users || [];
+    if(offOnly) users = users.filter(u => !u.on);
+    if(!users.length){ list.innerHTML = '<div class="empty">'+(offOnly?"Everyone has notifications on 🎉":"No users.")+'</div>'; return; }
+    list.innerHTML = users.map(u => {
+      const on = u.on;
+      const dot = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(on?"#0a7d33":"#cbd5e1")+';flex:none;"></span>';
+      const badge = on
+        ? '<span style="font-size:12px;font-weight:700;color:#0a7d33;">On</span>'
+        : '<span style="font-size:12px;font-weight:700;color:#94a3b8;">Off</span>';
+      const meta = on
+        ? (u.devices+" device"+(u.devices===1?"":"s")+(u.lastOk?" · last confirmed "+esc(psAgo(u.lastOk)):(u.lastReg?" · enabled "+esc(psAgo(u.lastReg)):"")))
+        : "No devices registered";
+      // Per-device breakdown (each subscription = one device the person enabled).
+      let devHtml = "";
+      if(on && (u.devicesList||[]).length){
+        devHtml = '<div style="margin:6px 0 0 20px;display:grid;gap:4px;">' + u.devicesList.map(dv => {
+          const when = dv.lastOk
+            ? "last confirmed "+esc(psAgo(dv.lastOk))
+            : (dv.lastReg ? "enabled "+esc(psAgo(dv.lastReg))+" · not yet confirmed" : "not yet confirmed");
+          return '<div style="display:flex;align-items:baseline;gap:6px;font-size:12px;color:#475569;">'
+            + '<span style="color:#0a7d33;flex:none;">•</span>'
+            + '<span style="font-weight:600;color:#334155;">'+esc(dv.device)+'</span>'
+            + '<span style="color:#94a3b8;">— '+when+'</span></div>';
+        }).join("") + '</div>';
+      }
+      return '<div style="padding:8px 4px;border-bottom:1px solid #eef2f6;">'
+        + '<div style="display:flex;align-items:center;gap:10px;">'
+        + dot
+        + '<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:14px;">'+esc(u.name)+'</div>'
+        + '<div class="sub" style="margin:0;font-size:12px;">'+meta+'</div></div>'
+        + badge + '</div>'
+        + devHtml + '</div>';
+    }).join("");
+  }catch(e){
+    summ.textContent = "Couldn't load push status.";
+    list.innerHTML = '<div class="empty">—</div>';
+  }
+}
+function initPushStatus(){
+  document.getElementById("psRefresh").addEventListener("click", loadPushStatus);
+  document.getElementById("psOffOnly").addEventListener("change", loadPushStatus);
+}
+
 (async function(){
   // Full-access only.
   let meUser = "";
@@ -484,7 +557,9 @@ function initMemos(user){
   }catch{ location.href="main.html"; return; }
   initMemos(meUser);
   initMuteForm();
+  initPushStatus();
   await initPush();
+  await loadPushStatus();
   await loadUsers();
   await load();
 })();

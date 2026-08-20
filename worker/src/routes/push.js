@@ -12,6 +12,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { sendPush } from "../lib/webpush.js";
+import { permissionsFor } from "../lib/auth.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -256,5 +257,94 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: r.sent > 0, ...r }, headers);
   }
 
+  // Admin: who has push turned on / off right now (device count + last successful send).
+  if (sub === "/status-all" && method === "GET") {
+    const perms = await permissionsFor(env, tid, me);
+    if (!perms || perms.FullAccess !== "Yes") return jr({ error: "Forbidden" }, headers, 403);
+    await ensureTable(env);
+
+    // Every subscription row (one per device), grouped per user (case-insensitive).
+    let rows = [];
+    try {
+      const r = await env.DB.prepare(
+        `SELECT lower(username) uk, ua, created_at, last_ok
+           FROM push_subscriptions
+          WHERE tenant_id = ?
+          ORDER BY created_at`
+      ).bind(tid).all();
+      rows = r.results || [];
+    } catch { rows = []; }
+    const byUser = {};
+    for (const s of rows) {
+      (byUser[s.uk] = byUser[s.uk] || []).push({
+        device: describeDevice(s.ua),
+        ua: s.ua || "",
+        lastOk: s.last_ok || null,
+        lastReg: s.created_at || null
+      });
+    }
+
+    // All active users.
+    let users = [];
+    try {
+      const r = await env.DB.prepare("SELECT first_name, last_name, username, status FROM users WHERE tenant_id = ? ORDER BY username").bind(tid).all();
+      users = (r.results || []).filter(u => isActiveStatus(u.status));
+    } catch { users = []; }
+
+    const list = users.map(u => {
+      const devs = byUser[String(u.username || "").toLowerCase()] || [];
+      // newest-confirmed device first within a user
+      devs.sort((a, b) => String(b.lastOk || "").localeCompare(String(a.lastOk || "")) || String(b.lastReg || "").localeCompare(String(a.lastReg || "")));
+      const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username;
+      const lastOk = devs.reduce((m, d) => (d.lastOk && (!m || d.lastOk > m)) ? d.lastOk : m, null);
+      const lastReg = devs.reduce((m, d) => (d.lastReg && (!m || d.lastReg > m)) ? d.lastReg : m, null);
+      return {
+        username: u.username,
+        name,
+        on: devs.length > 0,
+        devices: devs.length,
+        devicesList: devs,
+        lastOk,
+        lastReg
+      };
+    });
+    // Off first, then stale (never confirmed / old), then on — most-attention-needed at the top.
+    list.sort((a, b) => {
+      if (a.on !== b.on) return a.on ? 1 : -1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    const onCount = list.filter(u => u.on).length;
+    return jr({ ok: true, users: list, total: list.length, on: onCount, off: list.length - onCount }, headers);
+  }
+
   return jr({ error: "Not found: " + sub }, headers, 404);
+}
+
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+
+// Turn a raw browser user-agent into a friendly "iPhone · Safari" style label.
+function describeDevice(ua) {
+  const u = String(ua || "");
+  if (!u) return "Unknown device";
+  let os = "";
+  if (/iPhone/i.test(u)) os = "iPhone";
+  else if (/iPad/i.test(u)) os = "iPad";
+  else if (/Android/i.test(u)) os = "Android";
+  else if (/Windows/i.test(u)) os = "Windows PC";
+  else if (/Macintosh|Mac OS X/i.test(u)) os = "Mac";
+  else if (/CrOS/i.test(u)) os = "Chromebook";
+  else if (/Linux/i.test(u)) os = "Linux";
+  let br = "";
+  if (/EdgA?\//i.test(u)) br = "Edge";
+  else if (/OPR\/|Opera/i.test(u)) br = "Opera";
+  else if (/SamsungBrowser/i.test(u)) br = "Samsung Internet";
+  else if (/FxiOS|Firefox/i.test(u)) br = "Firefox";
+  else if (/CriOS/i.test(u)) br = "Chrome";
+  else if (/Chrome\//i.test(u)) br = "Chrome";
+  else if (/Version\/.*Safari/i.test(u) || /Safari/i.test(u)) br = "Safari";
+  const parts = [os, br].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Unknown device";
 }

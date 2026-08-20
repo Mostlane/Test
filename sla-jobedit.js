@@ -79,6 +79,34 @@
     } catch (e) { /* keep built-ins on failure */ }
     catsLoaded = true;
   }
+  // Areas of work for the work-area picker (loaded once). Hidden when none exist.
+  let WORK_AREAS = null;
+  async function loadWorkAreas() {
+    const sel = $("mljeWorkArea"); if (!sel) return;
+    if (WORK_AREAS) return;
+    try {
+      const d = await (await authFetch("/sla/work-areas?t=" + Date.now())).json();
+      WORK_AREAS = (d && d.areas) || [];
+    } catch (e) { WORK_AREAS = []; }
+    if (!WORK_AREAS.length) return;   // keep the field hidden
+    sel.innerHTML = '<option value="">— none —</option>' + WORK_AREAS.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
+    const wrap = $("mljeWorkAreaWrap"); if (wrap) wrap.style.display = "";
+  }
+  async function suggestWorkAreaEdit() {
+    const sel = $("mljeWorkArea"), hint = $("mljeWaHint"), btn = $("mljeWaSuggest");
+    if (!sel) return;
+    const desc = ($("mljeDesc").value || "").trim();
+    if (desc.length < 8) { if (hint) hint.textContent = "Type a description first, then Suggest."; return; }
+    if (hint) hint.textContent = "🤖 Suggesting…"; if (btn) btn.disabled = true;
+    try {
+      const r = await (await authFetch("/sla/infer-work-area", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description: desc }) })).json();
+      if (r && r.capped) { if (hint) hint.textContent = r.error || "Daily AI limit reached."; }
+      else if (r && r.ok && r.areaId) { sel.value = r.areaId; if (hint) hint.textContent = "🤖 Suggested: " + (r.name || r.areaId) + " — change it if wrong."; }
+      else if (r && r.ok) { if (hint) hint.textContent = "AI couldn't match an area — pick one if needed."; }
+      else { if (hint) hint.textContent = (r && r.error) || "Couldn't suggest — pick one manually."; }
+    } catch (e) { if (hint) hint.textContent = "Couldn't reach the AI."; }
+    if (btn) btn.disabled = false;
+  }
   // Rebuild the status dropdown; always include the job's own status so an
   // orphaned/custom value still shows selected instead of silently blank.
   function buildStatusOptions(current) {
@@ -140,6 +168,15 @@
 
       <label for="mljeDesc">Description</label>
       <textarea id="mljeDesc"></textarea>
+
+      <div id="mljeWorkAreaWrap" style="display:none;">
+        <label for="mljeWorkArea">Area of work</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="mljeWorkArea" style="flex:1;"><option value="">— none —</option></select>
+          <button type="button" id="mljeWaSuggest" class="mlje-btn" title="Let AI suggest the area from the description">🤖 Suggest</button>
+        </div>
+        <div class="mlje-hint" id="mljeWaHint">Matches the job to a competent engineer. AI can suggest one — change it if wrong.</div>
+      </div>
 
       <div class="mlje-2">
         <div id="mljePriorityWrap">
@@ -265,6 +302,7 @@
     back.addEventListener("click", e => { if (e.target === back) close(); });
     $("mljeSave").addEventListener("click", save);
     $("mljeDelete").addEventListener("click", del);
+    { const wb = $("mljeWaSuggest"); if (wb) wb.addEventListener("click", suggestWorkAreaEdit); }
     $("mljeSiteFilter").addEventListener("input", () => fillSitePicker($("mljeSiteFilter").value));
     $("mljeSitePick").addEventListener("change", onPickSite);
     $("mljeSaveSite").addEventListener("change", () => {
@@ -455,6 +493,7 @@
     $("mljeStatus").value = job.status || "Pending";
     loadCats().then(() => { buildStatusOptions(currentJob && currentJob.status); if (currentJob) $("mljeStatus").value = currentJob.status || "Pending"; });
     $("mljeRaised").value = toLocalInput(job.raisedAt);
+    loadWorkAreas().then(() => { const s = $("mljeWorkArea"); if (s) s.value = job.workArea || ""; });
     // On-site requirements — reflect the job's flags (project-aware default when unset).
     const isProjJob = /^p\d/i.test(String(job.siteCode || "")) || /project/i.test(String(job.storeType || job.client || ""));
     // Projects have no priority level — hide the field entirely for them.
@@ -658,6 +697,7 @@
       description: $("mljeDesc").value.trim() || undefined,
       priority: $("mljePriority").value,
       status: $("mljeStatus").value,
+      workArea: $("mljeWorkArea") ? ($("mljeWorkArea").value || "") : undefined,
       raisedAt: raisedLocal ? new Date(raisedLocal).toISOString() : undefined,
       siteCode: siteCode || undefined,
       siteName: siteName,

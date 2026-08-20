@@ -425,6 +425,70 @@
     window.alert = function (m) { toast(m); };
   })();
 
+  // ── Status-bar cap: the slim branded bar every native app has ───────────────
+  // The installed PWA is `apple-mobile-web-app-status-bar-style: black-translucent`
+  // (set on main.html, the start_url, so it governs the WHOLE app). That makes
+  // every page run full-bleed UNDER the iOS clock/battery. Rather than have each
+  // page pad its own header — which only ever covered the handful of pages that
+  // also set viewport-fit=cover, and left the rest with an untappable back button
+  // — this paints one opaque bar across the status-bar inset and pushes the page
+  // below it, portal-wide. Height is exactly the device's inset (0 on a phone
+  // with no notch, and in a normal browser tab), so it's only ever as slim as it
+  // needs to be. Content scrolling under it looks right because it's opaque.
+  (function statusCap() {
+    // Only the top document paints it — po.html embeds portal pages in an
+    // iframe, and a second cap inside the frame would double the gap.
+    try { if (window.self !== window.top) return; } catch (e) { return; }
+    if (document.getElementById("ml-statuscap-style")) return;
+    var st = document.createElement("style");
+    st.id = "ml-statuscap-style";
+    st.textContent =
+      // The offset goes on <html>, NOT <body>. Two earlier attempts on body both
+      // misfired: a CSS rule replaced whatever padding a page set for itself,
+      // and a JS one that added to it broke pages where BODY is the scroll
+      // container (main.html sets overflow-x:hidden, which makes overflow-y
+      // scrollable on body) — padding a scroll box left a strip of background
+      // at the end of the scroll range. Padding <html> instead shifts the whole
+      // page down, and because percentage heights resolve against the parent's
+      // CONTENT box, a `body{height:100%}` shrinks to fit exactly. Nothing
+      // overflows and no page's own padding is touched.
+      // min-height:100vh pins <html> to the FULL screen. With viewport-fit=cover
+      // iOS can resolve a page's own `html{height:100%}` against the SAFE-AREA
+      // box rather than the screen, which leaves the page ending short and a
+      // band of canvas below it — the bottom bar Jamie kept seeing on main.html
+      // (the one page that sets html,body{height:100%}). Chromium doesn't
+      // reproduce that, so this is belt-and-braces: where html is already
+      // full-height it changes nothing.
+      // `--ml-topbar` is extra room for anything else pinned across the top —
+      // currently the van-score banner. It's fixed, so without reserving space
+      // it simply covered the first row of the page (Jamie saw the Van Check /
+      // Holiday tiles sliced in half). Whatever sets it must clear it again.
+      "html{ box-sizing:border-box; min-height:100vh;"
+      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)); }"
+      // `vh` is measured against the FULL screen and ignores the padding above,
+      // so a page with `body{min-height:100vh}` (route.html and friends) ends up
+      // exactly one inset too tall — the blank strip again. Re-base it. Pages
+      // with no min-height simply gain a full-height body, which is harmless
+      // and makes short pages fill the screen rather than half-paint it.
+      + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px) - var(--ml-topbar, 0px)); }"
+      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px);"
+      + "  padding-right:env(safe-area-inset-right, 0px); } }"
+      + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
+      + "  background:#003468; z-index:2147483000; pointer-events:none; }"
+;
+    (document.head || document.documentElement).appendChild(st);
+
+    var cap = null;
+    function add() {
+      if (!document.body || document.getElementById("mlStatusCap")) return;
+      cap = document.createElement("div");
+      cap.id = "mlStatusCap";
+      document.body.appendChild(cap);
+    }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add);
+    else add();
+  })();
+
   // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
   // There are ~200 "Loading…" strings across ~80 pages, written every which way
   // (static HTML, innerHTML, textContent). Rather than edit them all, this
@@ -646,7 +710,10 @@
           if (document.getElementById("mlVaBar")) return;
           var bar = document.createElement("div");
           bar.id = "mlVaBar";
-          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);transform:translateZ(0);-webkit-transform:translateZ(0);";
+          // NB no translateZ(0)/transform here: a transform on a position:fixed
+          // element makes iOS Safari composite it in a layer that lags the scroll,
+          // so the bar drifts up and sticks mid-page. Plain fixed pins correctly.
+          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);";
           var who = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
           var lbl = document.createElement("span");
           lbl.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
@@ -785,9 +852,11 @@
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users", "DeviceAdmin"], hrefBy: [["Users", "users-admin.html"], ["DeviceAdmin", "device-admin.html"]], match: ["users-admin.html", "device-admin.html"] },
           { label: "Stats", href: "stats.html", icon: "chart", perms: ["__fullOnly"] },
+          { label: "Health", href: "health.html", icon: "chart", perms: ["__fullOnly"] },
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
+          { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["chapplins.html", "chapplins-compliance.html"] },
           { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["Compliance"], match: ["eicr-check.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
@@ -1516,11 +1585,13 @@
   })();
 
   // ── Notification bell (Facebook-style feed) ─────────────────────────────────
-  // ── Hard-refresh button (🔄, top-left) ─────────────────────────────────────
-  // One tap = the closest a page can get to Ctrl+Shift+R: wipe every service-
-  // worker cache, re-fetch the service worker itself, force the core scripts
-  // past the browser HTTP cache, then reload. The cure for "my phone is stuck
-  // on an old version" without asking anyone to find browser settings.
+  // ── Hard refresh: 🔄 button (desktop) + pull-down gesture (touch/PWA) ─────
+  // One action = the closest a page can get to Ctrl+Shift+R: wipe every
+  // service-worker cache, re-fetch the service worker itself, force the core
+  // scripts past the browser HTTP cache, then reload. The cure for "my phone
+  // is stuck on an old version" without asking anyone to find browser settings.
+  // On touch devices (mobile/PWA) the button is hidden and users pull DOWN at
+  // the top of the page instead; on desktop the button stays (no pull-down).
   (function hardRefresh() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
@@ -1530,7 +1601,39 @@
       if (SKIP.indexOf(page) !== -1) return;
       if (!localStorage.getItem(TOKEN_KEY)) return;
 
-      function build() {
+      var isTouch = false;
+      try { isTouch = window.matchMedia && window.matchMedia("(pointer:coarse)").matches; } catch (e) {}
+
+      // The refresh routine — shared by the button + the pull gesture.
+      var refreshing = false;
+      async function doHardRefresh() {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+          // 1. Wipe every Cache Storage cache (the service worker's copies).
+          if (window.caches && caches.keys) {
+            var keys = await caches.keys();
+            await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
+          }
+          // 2. Ask each service worker registration to fetch its newest sw.js.
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            var regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
+          }
+          // 3. Force the core shell past the browser HTTP cache so the reload
+          //    picks up fresh copies immediately (best-effort, failures ignored).
+          var core = ["/portal-config.js?v=17", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+            location.pathname + location.search];
+          await Promise.all(core.map(function (u) {
+            return fetch(u, { cache: "reload" }).catch(function () {});
+          }));
+        } catch (e) {}
+        location.reload();
+      }
+
+      // ── Desktop-only button ────────────────────────────────────────────────
+      function buildButton() {
+        if (isTouch) return;   // touch users get the pull-to-refresh gesture instead
         if (document.getElementById("mlRefresh")) return;
         var btn = document.createElement("button");
         btn.id = "mlRefresh";
@@ -1544,39 +1647,177 @@
           "width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.92);" +
           "box-shadow:0 3px 12px rgba(0,20,60,.28);cursor:pointer;font-size:16px;line-height:34px;padding:0;opacity:.9;";
         btn.textContent = "🔄";
-        var busy = false;
-        btn.onclick = async function () {
-          if (busy) return;
-          busy = true;
+        btn.onclick = function () {
           btn.style.transition = "transform .8s ease";
           btn.style.transform = "rotate(720deg)";
           btn.disabled = true;
-          try {
-            // 1. Wipe every Cache Storage cache (the service worker's copies).
-            if (window.caches && caches.keys) {
-              var keys = await caches.keys();
-              await Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
-            }
-            // 2. Ask each service worker registration to fetch its newest sw.js.
-            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-              var regs = await navigator.serviceWorker.getRegistrations();
-              await Promise.all(regs.map(function (r) { return r.update().catch(function () {}); }));
-            }
-            // 3. Force the core shell past the browser HTTP cache so the reload
-            //    picks up fresh copies immediately (best-effort, failures ignored).
-            var core = ["/portal-config.js?v=11", "/portal.css?v=1", "/auth.js", "/device-auth.js",
-              location.pathname + location.search];
-            await Promise.all(core.map(function (u) {
-              return fetch(u, { cache: "reload" }).catch(function () {});
-            }));
-          } catch (e) {}
-          location.reload();
+          doHardRefresh();
         };
         (document.body || document.documentElement).appendChild(btn);
       }
-      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", build);
-      else build();
+
+      // ── Touch-only pull-to-refresh ────────────────────────────────────────
+      // Pull DOWN at the very top of the page ~80px, release, and the same
+      // hard refresh fires. A blue banner slides down from the top with a hint
+      // ("↓ Pull to refresh" → "↻ Release to refresh"), matching modern app
+      // conventions. Uses 60% resistance for a native feel.
+      function wirePull() {
+        if (!isTouch) return;
+        // Suppress the browser's native overscroll (would trigger its own,
+        // soft reload on Chromium and fight our gesture).
+        try { document.documentElement.style.overscrollBehaviorY = "contain"; } catch (e) {}
+
+        var THRESH = 80, banner = null, startY = 0, startX = 0, dragging = false, engaged = false;
+        function atTop() {
+          var se = document.scrollingElement || document.documentElement;
+          return (se && se.scrollTop <= 0);
+        }
+        function ensureBanner() {
+          if (banner) return banner;
+          banner = document.createElement("div");
+          banner.id = "mlP2R";
+          banner.style.cssText = "position:fixed;top:0;left:0;right:0;height:0;overflow:hidden;" +
+            "background:linear-gradient(180deg,#003366,#004080);color:#fff;font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;" +
+            "display:flex;align-items:flex-end;justify-content:center;padding-bottom:10px;" +
+            "z-index:100000;box-shadow:0 3px 12px rgba(0,20,60,.28);will-change:height;transition:none;";
+          document.body.appendChild(banner);
+          return banner;
+        }
+        function killBanner() { if (banner) { banner.remove(); banner = null; } }
+
+        document.addEventListener("touchstart", function (e) {
+          if (e.touches.length !== 1 || !atTop()) return;
+          startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+          dragging = true; engaged = false;
+        }, { passive: true });
+
+        document.addEventListener("touchmove", function (e) {
+          if (!dragging) return;
+          var t = e.touches[0], dy = t.clientY - startY, dx = Math.abs(t.clientX - startX);
+          // Ignore upward or sideways drags — user is scrolling / swiping, not pulling.
+          if (dy <= 0 || dx > Math.abs(dy) || !atTop()) { killBanner(); engaged = false; return; }
+          var el = ensureBanner();
+          var h = Math.min(dy * 0.6, THRESH + 30);
+          el.style.height = h + "px";
+          el.textContent = h >= THRESH ? "↻  Release to refresh" : "↓  Pull to refresh";
+          engaged = h >= THRESH;
+        }, { passive: true });
+
+        function finish() {
+          if (!dragging) return;
+          dragging = false;
+          if (engaged) {
+            if (banner) { banner.style.height = "50px"; banner.textContent = "↻  Refreshing…"; }
+            doHardRefresh();
+          } else if (banner) {
+            banner.style.transition = "height .2s ease"; banner.style.height = "0";
+            setTimeout(killBanner, 220);
+          }
+        }
+        document.addEventListener("touchend", finish, { passive: true });
+        document.addEventListener("touchcancel", function () { dragging = false; killBanner(); }, { passive: true });
+      }
+
+      function start() { buildButton(); wirePull(); }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+      else start();
     } catch (e) { console.error("[hard-refresh]", e); }
+  })();
+
+  // ── New van driving-score banner (top of every page for the engineer) ────
+  // A dark navy "🚐 Your new van driving score is ready — tap to view" bar that
+  // sits above the page header until dismissed or opened. Was hardcoded into
+  // route.html only — moved here so it appears on every logged-in portal page.
+  //
+  // Two fixes over the original:
+  //   • The seen marker is now keyed PER-USER (`mlVanScoreSeen:<username>`)
+  //     instead of a shared device key. Without this, View As'ing a user
+  //     inherited whoever's marker was on that phone last — so Jamie viewing
+  //     as Connor saw no banner because Jamie had dismissed his own score.
+  //   • Tapping the WHOLE banner (not only the ✕) now also POSTs to /prefs
+  //     so the seen state syncs cross-device, matching the ✕ behaviour.
+  (function vanScoreBanner() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      // Skip auth flows, gate pages, and the target page itself.
+      var SKIP = ["login.html", "onboard.html", "confirmation.html",
+        "forgot-password.html", "reset-password.html", "change-password.html",
+        "hash.html", "memo-sign.html", "hs-sign.html", "programme-view.html",
+        "my-van-scores.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      if (!localStorage.getItem(TOKEN_KEY)) return;
+
+      // Per-user key so View As doesn't inherit the impersonator's marker.
+      // Empty username → falls back to the shared key (legacy behaviour).
+      function whoNow() {
+        try { return (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").trim(); }
+        catch (e) { return ""; }
+      }
+      function seenKey() {
+        var u = whoNow();
+        return u ? ("mlVanScoreSeen:" + u) : "mlVanScoreSeen";
+      }
+
+      function fetchAndShow() {
+        var t = localStorage.getItem(TOKEN_KEY) || "";
+        if (!t) return;
+        fetch(window.MOSTLANE_API + "/fleet/scores/unseen", {
+          headers: { "Authorization": "Bearer " + t }, cache: "no-store"
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (!d || !d.ok || !d.latest) return;
+          var key = seenKey(), seen = "";
+          try { seen = localStorage.getItem(key) || ""; } catch (e) {}
+          if (seen && seen >= d.latest) return;
+          if (document.getElementById("mlVanScoreNote")) return;
+
+          // Post the seen date to BOTH storages — the ✕ AND the whole-banner
+          // click now do the same thing, so the marker survives on this device
+          // AND on the user's other devices (via /prefs).
+          function markSeen() {
+            try { localStorage.setItem(key, d.latest); } catch (e) {}
+            try { fetch(window.MOSTLANE_API + "/prefs", { method: "POST",
+              headers: { "Authorization": "Bearer " + t, "Content-Type": "application/json" },
+              body: JSON.stringify({ vanScoreSeen: d.latest }) }); } catch (e) {}
+          }
+
+          var a = document.createElement("a");
+          a.id = "mlVanScoreNote";
+          a.href = "/my-van-scores.html";
+          // Sits BELOW the statusCap (which paints the notch inset). Padding
+          // needs no safe-area allowance because statusCap owns that region.
+          a.style.cssText = "position:fixed;top:env(safe-area-inset-top, 0px);left:0;right:0;z-index:99500;" +
+            "background:#003468;color:#fff;text-decoration:none;padding:10px 14px;" +
+            "font:650 13px -apple-system,system-ui,'Segoe UI',Roboto,Arial,sans-serif;" +
+            "display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22);";
+          a.innerHTML = '<span style="flex:1">🚐 Your new van driving score is ready — tap to view</span>' +
+            '<span id="mlVanScoreX" style="opacity:.85;font-size:16px;padding:0 6px">✕</span>';
+          a.addEventListener("click", function () { markSeen(); });
+          document.body.appendChild(a);
+          // Reserve the space it occupies, or it just covers the top of the
+          // page. Measured rather than assumed — the text wraps to two lines on
+          // a narrow screen. Re-measured on resize/rotate.
+          function reserve() {
+            var h = Math.round(a.getBoundingClientRect().height);
+            document.documentElement.style.setProperty("--ml-topbar", h + "px");
+          }
+          function release() {
+            document.documentElement.style.removeProperty("--ml-topbar");
+            removeEventListener("resize", reserve);
+          }
+          reserve();
+          addEventListener("resize", reserve);
+          var x = document.getElementById("mlVanScoreX");
+          if (x) x.addEventListener("click", function (ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            markSeen();
+            release();
+            a.remove();
+          });
+        }).catch(function () {});
+      }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fetchAndShow);
+      else fetchAndShow();
+    } catch (e) { console.error("[van-score]", e); }
   })();
 
   // A small bell, top-right on every portal page, that anyone can open at any

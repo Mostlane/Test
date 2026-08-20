@@ -1,0 +1,37 @@
+name: Alignment check
+
+# Deterministic (no AI, no cost) centralisation + endpoint alignment linter. Checks
+# every portal page against the worker's real route table: are all pages pointed at
+# the ONE central API, on the same portal-config version, and calling endpoints that
+# actually exist? Opens an issue listing any drift. Report-only — never edits.
+
+on:
+  # MANUAL ONLY — run from the Actions tab when you want a drift report.
+  # The nightly cron + push-to-main triggers were removed (Aug 2026): every push
+  # that touched an HTML page opened a brand-new GitHub issue, which spammed the
+  # owner's inbox. Findings are mostly retired/dead pages + benign legacy-bridge
+  # notices, so an on-demand check is enough. When it does run it now UPDATES one
+  # tracking issue instead of opening a fresh one each time (see check.mjs).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: alignment-check
+  cancel-in-progress: true
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run alignment check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALWAYS_ISSUE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: node tools/alignment-check/check.mjs

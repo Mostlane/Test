@@ -1372,7 +1372,88 @@ async function handle4(request, env, ctx, url, sess) {
     if (!r.sent && !r.failed && !r.gone) return jr({ ok: false, error: "No devices registered on this account yet \u2014 enable notifications first." }, headers, 400);
     return jr({ ok: r.sent > 0, ...r }, headers);
   }
+  if (sub === "/status-all" && method === "GET") {
+    const perms = await permissionsFor(env, tid, me);
+    if (!perms || perms.FullAccess !== "Yes") return jr({ error: "Forbidden" }, headers, 403);
+    await ensureTable(env);
+    let rows = [];
+    try {
+      const r = await env.DB.prepare(
+        `SELECT lower(username) uk, ua, created_at, last_ok
+           FROM push_subscriptions
+          WHERE tenant_id = ?
+          ORDER BY created_at`
+      ).bind(tid).all();
+      rows = r.results || [];
+    } catch {
+      rows = [];
+    }
+    const byUser = {};
+    for (const s of rows) {
+      (byUser[s.uk] = byUser[s.uk] || []).push({
+        device: describeDevice(s.ua),
+        ua: s.ua || "",
+        lastOk: s.last_ok || null,
+        lastReg: s.created_at || null
+      });
+    }
+    let users = [];
+    try {
+      const r = await env.DB.prepare("SELECT first_name, last_name, username, status FROM users WHERE tenant_id = ? ORDER BY username").bind(tid).all();
+      users = (r.results || []).filter((u) => isActiveStatus2(u.status));
+    } catch {
+      users = [];
+    }
+    const list = users.map((u) => {
+      const devs = byUser[String(u.username || "").toLowerCase()] || [];
+      devs.sort((a, b) => String(b.lastOk || "").localeCompare(String(a.lastOk || "")) || String(b.lastReg || "").localeCompare(String(a.lastReg || "")));
+      const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username;
+      const lastOk = devs.reduce((m, d) => d.lastOk && (!m || d.lastOk > m) ? d.lastOk : m, null);
+      const lastReg = devs.reduce((m, d) => d.lastReg && (!m || d.lastReg > m) ? d.lastReg : m, null);
+      return {
+        username: u.username,
+        name,
+        on: devs.length > 0,
+        devices: devs.length,
+        devicesList: devs,
+        lastOk,
+        lastReg
+      };
+    });
+    list.sort((a, b) => {
+      if (a.on !== b.on) return a.on ? 1 : -1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    const onCount = list.filter((u) => u.on).length;
+    return jr({ ok: true, users: list, total: list.length, on: onCount, off: list.length - onCount }, headers);
+  }
   return jr({ error: "Not found: " + sub }, headers, 404);
+}
+function isActiveStatus2(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+function describeDevice(ua) {
+  const u = String(ua || "");
+  if (!u) return "Unknown device";
+  let os = "";
+  if (/iPhone/i.test(u)) os = "iPhone";
+  else if (/iPad/i.test(u)) os = "iPad";
+  else if (/Android/i.test(u)) os = "Android";
+  else if (/Windows/i.test(u)) os = "Windows PC";
+  else if (/Macintosh|Mac OS X/i.test(u)) os = "Mac";
+  else if (/CrOS/i.test(u)) os = "Chromebook";
+  else if (/Linux/i.test(u)) os = "Linux";
+  let br = "";
+  if (/EdgA?\//i.test(u)) br = "Edge";
+  else if (/OPR\/|Opera/i.test(u)) br = "Opera";
+  else if (/SamsungBrowser/i.test(u)) br = "Samsung Internet";
+  else if (/FxiOS|Firefox/i.test(u)) br = "Firefox";
+  else if (/CriOS/i.test(u)) br = "Chrome";
+  else if (/Chrome\//i.test(u)) br = "Chrome";
+  else if (/Version\/.*Safari/i.test(u) || /Safari/i.test(u)) br = "Safari";
+  const parts = [os, br].filter(Boolean);
+  return parts.length ? parts.join(" \xB7 ") : "Unknown device";
 }
 
 // src/routes/holidays.js
@@ -1420,7 +1501,7 @@ async function handle5(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
-  const json3 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const json4 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
   const text = (msg, status = 200) => new Response(msg, { status, headers });
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -1437,7 +1518,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (!user) return text("Unauthorised", 401);
   const year = getYear(url);
   const isAdmin = ["Admin", "Director"].includes(role);
-  async function cfgGet3(key) {
+  async function cfgGet2(key) {
     const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
     return row ? JSON.parse(row.value) : null;
   }
@@ -1447,16 +1528,16 @@ async function handle5(request, env, ctx, url, sess) {
     ).bind(db.tenantId, key, JSON.stringify(val)).run();
   }
   async function getYearConfig() {
-    return await cfgGet3(`holiday:config:${year}`) || { defaultAllowance: 28 };
+    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
   }
   async function getDefaultAllowance() {
     return Number((await getYearConfig()).defaultAllowance ?? 28);
   }
   async function getBankHolidays() {
-    return await cfgGet3(`holiday:bankholidays:${year}`) || [];
+    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
   }
   async function getShutdownDays() {
-    return await cfgGet3(`holiday:shutdown:${year}`) || [];
+    return await cfgGet2(`holiday:shutdown:${year}`) || [];
   }
   async function getUserAllowance(username) {
     const row = await db.prepare(
@@ -1608,7 +1689,7 @@ async function handle5(request, env, ctx, url, sess) {
       tag: "holiday-admin:" + id,
       actionable: true
     }, user));
-    return json3({ success: true, id });
+    return json4({ success: true, id });
   }
   if (path === "/holiday/cancel" && method === "POST") {
     const { id } = await request.json();
@@ -1629,7 +1710,7 @@ async function handle5(request, env, ctx, url, sess) {
       url: "/holiday-admin.html",
       tag: "holiday-admin"
     }, user));
-    return json3({ success: true, wasApproved });
+    return json4({ success: true, wasApproved });
   }
   if (path === "/holiday/delete-own" && method === "POST") {
     const { id } = await request.json();
@@ -1642,7 +1723,7 @@ async function handle5(request, env, ctx, url, sess) {
     }
     await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
     await logAction(id, "Deleted by engineer", user);
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/cancel-approved" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1655,7 +1736,7 @@ async function handle5(request, env, ctx, url, sess) {
       "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
     ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
     await logAction(id, "Approval cancelled by admin", user);
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/my" && method === "GET") {
     await ensureSystemDaysForUser(user);
@@ -1667,7 +1748,7 @@ async function handle5(request, env, ctx, url, sess) {
       const db2 = b.date || b.start || "9999-12-31";
       return da.localeCompare(db2);
     });
-    return json3(results);
+    return json4(results);
   }
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
@@ -1675,7 +1756,7 @@ async function handle5(request, env, ctx, url, sess) {
     const [all, sys, cfg] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear(), getYearConfig()]);
     const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const u = computeUsage(all, sys, user, allowance, today);
-    return json3({
+    return json4({
       allowance,
       used: u.usedToDate,
       // headline = used TO DATE
@@ -1688,7 +1769,7 @@ async function handle5(request, env, ctx, url, sess) {
   }
   if (path === "/holiday/all" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
-    return json3(await listHolidayRequestsForYear());
+    return json4(await listHolidayRequestsForYear());
   }
   if (path === "/holiday/calendar" && method === "GET") {
     if (!sess) return text("Not authenticated", 401);
@@ -1698,7 +1779,7 @@ async function handle5(request, env, ctx, url, sess) {
     const from = iso(q.get("from")) || today;
     const to = iso(q.get("to")) || from;
     const days = await approvedLeaveInRange(env, tenantId, from, to);
-    return json3({ ok: true, from, to, days });
+    return json4({ ok: true, from, to, days });
   }
   if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1723,13 +1804,13 @@ async function handle5(request, env, ctx, url, sess) {
       title: `Holiday ${status.toLowerCase()}`,
       body: `${record.username}'s holiday ${record.start_date} \u2192 ${record.end_date} \u2014 ${status === "Approved" ? "\u2705 approved" : "\u274C rejected"} by ${user}.`
     }));
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/config" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const cfg = await getYearConfig();
     const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
-    return json3({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
+    return json4({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
   }
   if (path === "/holiday/set-year-config" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1741,7 +1822,7 @@ async function handle5(request, env, ctx, url, sess) {
       defaultAllowance,
       accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
     });
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/set-allowance" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1752,7 +1833,7 @@ async function handle5(request, env, ctx, url, sess) {
     await db.prepare(
       "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
     ).bind(db.tenantId, year, username, allowance).run();
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/set-bankholidays" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1764,7 +1845,7 @@ async function handle5(request, env, ctx, url, sess) {
     const removed = oldDays.filter((b) => !newDates.has(b.date)).map((b) => b.date);
     if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
     await cfgPut(`holiday:bankholidays:${year}`, days);
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/set-shutdown" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1776,7 +1857,7 @@ async function handle5(request, env, ctx, url, sess) {
     const removed = oldDays.filter((s) => !newDates.has(s.date)).map((s) => s.date);
     if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
     await cfgPut(`holiday:shutdown:${year}`, days);
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/toggle-worked" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1792,7 +1873,7 @@ async function handle5(request, env, ctx, url, sess) {
       "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
     ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, kind, year, date, username).run();
     await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
-    return json3({ success: true });
+    return json4({ success: true });
   }
   if (path === "/holiday/admin-summary" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1823,7 +1904,7 @@ async function handle5(request, env, ctx, url, sess) {
         shutdown: c.shutdown
       });
     }
-    return json3({ year, engineers: list });
+    return json4({ year, engineers: list });
   }
   if (path === "/holiday/calendar" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1882,7 +1963,7 @@ async function handle5(request, env, ctx, url, sess) {
       }
       engineers.push({ username: u, name: u.replace(".", " "), cells });
     }
-    return json3({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
+    return json4({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
   }
   if (path === "/holiday/uk-bank-holidays" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1891,7 +1972,7 @@ async function handle5(request, env, ctx, url, sess) {
       if (!resp.ok) return text("GOV.UK unavailable", 502);
       const data = await resp.json();
       const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
-      return json3({ year, events });
+      return json4({ year, events });
     } catch (e) {
       return text("GOV.UK unavailable", 502);
     }
@@ -1899,7 +1980,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (path === "/holiday/debug-users" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const activeUsers2 = await getActiveUsers();
-    return json3({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
+    return json4({ activeUsersCount: activeUsers2.length, activeUsers: activeUsers2.slice(0, 10) });
   }
   return text("Not Found", 404);
 }
@@ -2032,7 +2113,7 @@ async function handle6(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
-  const json3 = (data, code = 200) => new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   if (method === "POST" && pathname === "/upload-asset-image") {
@@ -2040,7 +2121,7 @@ async function handle6(request, env, ctx, url, sess) {
       const form = await request.formData();
       const file = form.get("file");
       const assetId = form.get("assetId");
-      if (!file || !assetId) return json3({ ok: false, error: "Missing file or assetId" }, 400);
+      if (!file || !assetId) return json4({ ok: false, error: "Missing file or assetId" }, 400);
       const ext = file.name?.split(".").pop() || "jpg";
       const list = await env.ASSET_BUCKET.list({ prefix: `${assetId}/` });
       const nextNum = (list.objects || []).filter((o) => !o.key.endsWith(".thumb")).length + 1;
@@ -2056,14 +2137,14 @@ async function handle6(request, env, ctx, url, sess) {
       }
       await purgeAssetCache(url, filename);
       const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
-      return json3({ ok: true, url: publicUrl, key: filename });
+      return json4({ ok: true, url: publicUrl, key: filename });
     } catch (err) {
-      return json3({ ok: false, error: err.message }, 500);
+      return json4({ ok: false, error: err.message }, 500);
     }
   }
   if (method === "GET" && pathname === "/asset-image") {
     const key = searchParams.get("key");
-    if (!key) return json3({ error: "Missing key" }, 400);
+    if (!key) return json4({ error: "Missing key" }, 400);
     const cache = caches.default;
     const hit = await cache.match(request);
     if (hit) return hit;
@@ -2079,7 +2160,7 @@ async function handle6(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset-thumb") {
     try {
       const key = searchParams.get("key");
-      if (!key) return json3({ error: "Missing key" }, 400);
+      if (!key) return json4({ error: "Missing key" }, 400);
       const cache = caches.default;
       const hit = await cache.match(request);
       if (hit) return hit;
@@ -2100,7 +2181,7 @@ async function handle6(request, env, ctx, url, sess) {
       ctx?.waitUntil(cache.put(request, resp.clone()));
       return resp;
     } catch (err) {
-      return json3({ error: "Thumbnail generation failed", details: err.message }, 500);
+      return json4({ error: "Thumbnail generation failed", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/upload-asset-thumb") {
@@ -2109,38 +2190,38 @@ async function handle6(request, env, ctx, url, sess) {
       const key = form.get("key");
       const thumb = form.get("thumb");
       if (!key || !thumb || typeof thumb.arrayBuffer !== "function") {
-        return json3({ ok: false, error: "Missing key or thumb" }, 400);
+        return json4({ ok: false, error: "Missing key or thumb" }, 400);
       }
       const head = await env.ASSET_BUCKET.head(key);
-      if (!head) return json3({ ok: false, error: "Unknown image key" }, 404);
+      if (!head) return json4({ ok: false, error: "Unknown image key" }, 404);
       await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
         httpMetadata: { contentType: "image/jpeg" }
       });
       await purgeAssetCache(url, key);
-      return json3({ ok: true });
+      return json4({ ok: true });
     } catch (err) {
-      return json3({ ok: false, error: err.message }, 500);
+      return json4({ ok: false, error: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/delete-asset-image") {
     try {
       const body = await request.json();
       const { assetId, key, url: imageUrl } = body;
-      if (!assetId || !key && !imageUrl) return json3({ ok: false, error: "Missing assetId or url/key" }, 400);
+      if (!assetId || !key && !imageUrl) return json4({ ok: false, error: "Missing assetId or url/key" }, 400);
       let r2Key = key;
       if (!r2Key && imageUrl) r2Key = decodeURIComponent((imageUrl.split("key=")[1] || "").split("&")[0]);
-      if (!r2Key) return json3({ ok: false, error: "Invalid image URL or key" }, 400);
+      if (!r2Key) return json4({ ok: false, error: "Invalid image URL or key" }, 400);
       await env.ASSET_BUCKET.delete(r2Key);
       await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
       await purgeAssetCache(url, r2Key);
       const asset = await getAsset(env, tenantId, assetId);
-      if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
+      if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
       const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
       asset.images = (asset.images || []).filter((u) => u !== fullUrl);
       await putAsset(env, tenantId, asset);
-      return json3({ ok: true, message: "Image deleted", removedKey: r2Key });
+      return json4({ ok: true, message: "Image deleted", removedKey: r2Key });
     } catch (err) {
-      return json3({ ok: false, error: "Failed to delete image", details: err.message }, 500);
+      return json4({ ok: false, error: "Failed to delete image", details: err.message }, 500);
     }
   }
   if (method === "GET" && pathname === "/assets") {
@@ -2149,25 +2230,25 @@ async function handle6(request, env, ctx, url, sess) {
       const stmt = user ? db.prepare("SELECT data FROM assets WHERE tenant_id = ? AND assigned_to = ?").bind(db.tenantId, user) : db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId);
       const { results } = await stmt.all();
       const assets = (results || []).map((r) => JSON.parse(r.data));
-      return json3({ assets });
+      return json4({ assets });
     } catch (err) {
-      return json3({ error: "Failed to fetch assets", details: err.message }, 500);
+      return json4({ error: "Failed to fetch assets", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/asset/add") {
     try {
       const body = await request.json();
-      if (!body.id) return json3({ error: "Missing ID" }, 400);
+      if (!body.id) return json4({ error: "Missing ID" }, 400);
       await putAsset(env, tenantId, body);
-      return json3({ ok: true, message: `Asset ${body.id} added.` });
+      return json4({ ok: true, message: `Asset ${body.id} added.` });
     } catch (err) {
-      return json3({ error: "Failed to add asset", details: err.message }, 500);
+      return json4({ error: "Failed to add asset", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/asset/update") {
     try {
       const body = await request.json();
-      if (!body.id) return json3({ error: "Missing ID" }, 400);
+      if (!body.id) return json4({ error: "Missing ID" }, 400);
       const existing = await getAsset(env, tenantId, body.id);
       const updated = { ...existing, ...body };
       if (existing && String(existing.assignedTo || "") !== String(body.assignedTo || "") && updated.confirm) {
@@ -2184,15 +2265,15 @@ async function handle6(request, env, ctx, url, sess) {
         };
         await putTransfer(env, tenantId, log);
       }
-      return json3({ ok: true, message: `Asset ${body.id} updated.` });
+      return json4({ ok: true, message: `Asset ${body.id} updated.` });
     } catch (err) {
-      return json3({ error: "Failed to update asset", details: err.message }, 500);
+      return json4({ error: "Failed to update asset", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/transfer") {
     try {
       const log = await request.json();
-      if (!log.assetID) return json3({ error: "Missing assetID" }, 400);
+      if (!log.assetID) return json4({ error: "Missing assetID" }, 400);
       const asset = await getAsset(env, tenantId, log.assetID);
       if (asset) {
         asset.assignedTo = log.to;
@@ -2201,38 +2282,38 @@ async function handle6(request, env, ctx, url, sess) {
         await putAsset(env, tenantId, asset);
       }
       await putTransfer(env, tenantId, log);
-      return json3({ ok: true, message: `Transfer logged for ${log.assetID}` });
+      return json4({ ok: true, message: `Transfer logged for ${log.assetID}` });
     } catch (err) {
-      return json3({ error: "Failed to log transfer", details: err.message }, 500);
+      return json4({ error: "Failed to log transfer", details: err.message }, 500);
     }
   }
   if (method === "GET" && pathname === "/transfer-log") {
     const assetID = searchParams.get("assetID");
-    if (!assetID) return json3({ error: "Missing assetID" }, 400);
+    if (!assetID) return json4({ error: "Missing assetID" }, 400);
     try {
       const { results } = await db.prepare(
         "SELECT data FROM asset_transfers WHERE tenant_id = ? AND asset_id = ? ORDER BY id ASC"
       ).bind(db.tenantId, assetID).all();
-      return json3((results || []).map((r) => JSON.parse(r.data)));
+      return json4((results || []).map((r) => JSON.parse(r.data)));
     } catch (err) {
-      return json3({ error: "Failed to load logs", details: err.message }, 500);
+      return json4({ error: "Failed to load logs", details: err.message }, 500);
     }
   }
   if (method === "DELETE" && pathname === "/asset/delete") {
     try {
       const id = searchParams.get("id");
-      if (!id) return json3({ error: "Missing ID" }, 400);
+      if (!id) return json4({ error: "Missing ID" }, 400);
       await db.prepare("DELETE FROM assets WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).run();
-      return json3({ ok: true, message: `Asset ${id} deleted.` });
+      return json4({ ok: true, message: `Asset ${id} deleted.` });
     } catch (err) {
-      return json3({ error: "Failed to delete asset", details: err.message }, 500);
+      return json4({ error: "Failed to delete asset", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/asset/r2-relink") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
     let cursor, objects = [];
     try {
       do {
@@ -2241,7 +2322,7 @@ async function handle6(request, env, ctx, url, sess) {
         cursor = l.truncated ? l.cursor : null;
       } while (cursor);
     } catch (e) {
-      return json3({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
+      return json4({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
     }
     const byAsset = {};
     for (const o of objects) {
@@ -2265,7 +2346,7 @@ async function handle6(request, env, ctx, url, sess) {
       await putAsset(env, tenantId, asset);
       updated++;
     }
-    return json3({
+    return json4({
       ok: true,
       bucketObjects: objects.length,
       assetsInBucket: Object.keys(byAsset).length,
@@ -2275,11 +2356,11 @@ async function handle6(request, env, ctx, url, sess) {
   }
   if (method === "GET" && pathname === "/asset/condition-photos") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
     const assetID = searchParams.get("assetID");
-    if (!assetID) return json3({ ok: false, error: "Missing assetID" }, 400);
+    if (!assetID) return json4({ ok: false, error: "Missing assetID" }, 400);
     const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
     const keyOf = (u) => {
       try {
@@ -2321,13 +2402,13 @@ async function handle6(request, env, ctx, url, sess) {
         photos.push({ url: toUrl(k), takenAt: utcify(r.requested_at), by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
     }
     photos.sort((a, b) => String(b.takenAt || "").localeCompare(String(a.takenAt || "")));
-    return json3({ ok: true, assetID, photos });
+    return json4({ ok: true, assetID, photos });
   }
   if (method === "POST" && pathname === "/asset/r2-unlink") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
     const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let cleared = 0;
     for (const row of results || []) {
@@ -2342,24 +2423,24 @@ async function handle6(request, env, ctx, url, sess) {
       await putAsset(env, tenantId, asset);
       cleared++;
     }
-    return json3({ ok: true, cleared });
+    return json4({ ok: true, cleared });
   }
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const rules = await getRules(env, tenantId);
     const { results } = await db.prepare(
       "SELECT asset_id FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
     ).bind(db.tenantId, sess2.user.username).all();
     const count = (results || []).filter((r) => !isSuppressed(rules, "asset-transfer", sess2.user.username, String(r.asset_id))).length;
-    return json3({ ok: true, count });
+    return json4({ ok: true, count });
   }
   const CONFIRM_KEY = `asset_confirm_round:${tenantId}`;
   if (method === "POST" && pathname === "/asset/confirm/request") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
     const body = await request.json().catch(() => ({}));
     const exclude = new Set((Array.isArray(body.exclude) ? body.exclude : []).map((u) => String(u || "").trim().toLowerCase()).filter(Boolean));
     const round = (/* @__PURE__ */ new Date()).toISOString();
@@ -2393,20 +2474,20 @@ async function handle6(request, env, ctx, url, sess) {
     await env.DB.prepare(
       "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
     ).bind(tenantId, CONFIRM_KEY, JSON.stringify({ round, startedAt: round, by: sess2.user.username, total: count, excluded: [...exclude] })).run();
-    return json3({ ok: true, count, round });
+    return json4({ ok: true, count, round });
   }
   if (method === "POST" && pathname === "/asset/confirm/respond") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    if (!b.id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!b.id) return json4({ ok: false, error: "Missing id" }, 400);
     const asset = await getAsset(env, tenantId, b.id);
-    if (!asset) return json3({ ok: false, error: "Unknown item" }, 404);
+    if (!asset) return json4({ ok: false, error: "Unknown item" }, 404);
     const me = sess2.user.username;
     const perms = await permissionsFor(env, tenantId, me);
     const isAdmin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
     if (String(asset.assignedTo || "").toLowerCase() !== me.toLowerCase() && !isAdmin)
-      return json3({ ok: false, error: "Not your item" }, 403);
+      return json4({ ok: false, error: "Not your item" }, 403);
     asset.confirm = Object.assign({ round: null }, asset.confirm, {
       status: b.held === false ? "flagged" : "confirmed",
       at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -2414,11 +2495,11 @@ async function handle6(request, env, ctx, url, sess) {
       by: me
     });
     await putAsset(env, tenantId, asset);
-    return json3({ ok: true, status: asset.confirm.status });
+    return json4({ ok: true, status: asset.confirm.status });
   }
   if (method === "GET" && pathname === "/asset/confirm/pending-count") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const rules = await getRules(env, tenantId);
     const { results } = await db.prepare(
       "SELECT data FROM assets WHERE tenant_id = ? AND lower(assigned_to)=lower(?)"
@@ -2431,13 +2512,13 @@ async function handle6(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    return json3({ ok: true, count: n });
+    return json4({ ok: true, count: n });
   }
   if (method === "GET" && pathname === "/asset/confirm/status") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
     let roundInfo = null;
     try {
       const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CONFIRM_KEY).first();
@@ -2464,11 +2545,11 @@ async function handle6(request, env, ctx, url, sess) {
         note: a.confirm.note || ""
       });
     }
-    return json3({ ok: true, round: roundInfo, items });
+    return json4({ ok: true, round: roundInfo, items });
   }
   if (method === "GET" && pathname === "/asset/transfers/pending") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess2.user.username;
     const { results } = await db.prepare(
       "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
@@ -2498,7 +2579,7 @@ async function handle6(request, env, ctx, url, sess) {
       });
     }
     const rules = await getRules(env, tenantId);
-    return json3({
+    return json4({
       ok: true,
       // Suppressed transfers stop showing (and stop counting) for the recipient.
       incoming: shaped.filter((s) => s.direction === "incoming" && !isSuppressed(rules, "asset-transfer", me, String(s.assetId))),
@@ -2507,23 +2588,23 @@ async function handle6(request, env, ctx, url, sess) {
   }
   if (method === "POST" && pathname === "/asset/transfer-request") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    if (!b.assetId || !b.to) return json3({ ok: false, error: "assetId and to required" }, 400);
+    if (!b.assetId || !b.to) return json4({ ok: false, error: "assetId and to required" }, 400);
     const asset = await getAsset(env, tenantId, b.assetId);
-    if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
+    if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
     const me = sess2.user.username;
     const holder = String(asset.assignedTo || "");
     if (holder.toLowerCase() !== me.toLowerCase()) {
       const perms = await permissionsFor(env, tenantId, me);
-      if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Only the current holder can transfer this item" }, 403);
+      if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Only the current holder can transfer this item" }, 403);
     }
     if (String(b.to).toLowerCase() === holder.toLowerCase())
-      return json3({ ok: false, error: "That person already holds this item" }, 400);
+      return json4({ ok: false, error: "That person already holds this item" }, 400);
     const dup = await db.prepare(
       "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
     ).bind(db.tenantId, b.assetId).first();
-    if (dup) return json3({ ok: false, error: "This item already has a transfer pending" }, 409);
+    if (dup) return json4({ ok: false, error: "This item already has a transfer pending" }, 409);
     const res = await db.prepare(
       "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at, tenant_id) VALUES (?,?,?,?,?,?)"
     ).bind(b.assetId, holder || me, b.to, b.note || null, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId).run();
@@ -2539,20 +2620,20 @@ async function handle6(request, env, ctx, url, sess) {
       tag: "asset-transfer:" + reqId,
       actionable: true
     }));
-    return json3({ ok: true, id: reqId });
+    return json4({ ok: true, id: reqId });
   }
   if (method === "POST" && pathname === "/asset/transfer-accept") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    if (!b.id || !b.signature) return json3({ ok: false, error: "id and signature required" }, 400);
+    if (!b.id || !b.signature) return json4({ ok: false, error: "id and signature required" }, 400);
     const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json3({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
+    if (!req) return json4({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
     const me = sess2.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
-      return json3({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+      return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
     const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.signature);
-    if (!m) return json3({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
+    if (!m) return json4({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
     const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
     const sigKey = `signatures/transfer-${req.id}-${crypto.randomUUID()}.${m[1] === "jpeg" ? "jpg" : "png"}`;
     await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
@@ -2604,17 +2685,17 @@ async function handle6(request, env, ctx, url, sess) {
       body: `You accepted ${asset?.name || req.asset_id}.`
     }));
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
-    return json3({ ok: true, note });
+    return json4({ ok: true, note });
   }
   if (method === "POST" && pathname === "/asset/transfer-reject") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json3({ ok: false, error: "Transfer not found" }, 404);
+    if (!req) return json4({ ok: false, error: "Transfer not found" }, 404);
     const me = sess2.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
-      return json3({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+      return json4({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, req.id).run();
     await putTransfer(env, tenantId, {
@@ -2630,35 +2711,35 @@ async function handle6(request, env, ctx, url, sess) {
       title: "Equipment declined",
       body: `You declined the transfer${req.from_user ? " from " + req.from_user : ""}.`
     }));
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/transfer-cancel") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json3({ ok: false, error: "Transfer not found" }, 404);
+    if (!req) return json4({ ok: false, error: "Transfer not found" }, 404);
     const me = sess2.user.username;
     if (String(req.from_user || "").toLowerCase() !== me.toLowerCase()) {
       const perms = await permissionsFor(env, tenantId, me);
-      if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
+      if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
     }
     await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, req.id).run();
     ctx?.waitUntil(resolveNotificationsByTag(env, tenantId, "asset-transfer:" + req.id, {
       title: "Transfer withdrawn",
       body: `${req.from_user || "The sender"} withdrew this equipment transfer.`
     }));
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (method === "GET" && pathname === "/asset/transfer-note") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const id = searchParams.get("id");
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     const { results } = await db.prepare(
       "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
     ).bind(db.tenantId, Number(id)).all();
-    if (!results || !results.length) return json3({ ok: false, error: "Note not found" }, 404);
+    if (!results || !results.length) return json4({ ok: false, error: "Note not found" }, 404);
     const note = JSON.parse(results[0].data);
     const me = sess2.user.username, meL = me.toLowerCase();
     const perms = await permissionsFor(env, tenantId, me);
@@ -2671,15 +2752,15 @@ async function handle6(request, env, ctx, url, sess) {
         isCurrentTo = !!(a && String(a.assignedTo || "").toLowerCase() === meL);
       }
       if (!isFrom && !isCurrentTo)
-        return json3({ ok: false, error: "This document isn't linked to you" }, 403);
+        return json4({ ok: false, error: "This document isn't linked to you" }, 403);
     }
     if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
     note.requestedAt = utcify(note.requestedAt);
-    return json3({ ok: true, note });
+    return json4({ ok: true, note });
   }
   if (method === "GET" && pathname === "/asset/my-documents") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess2.user.username, meL = me.toLowerCase();
     const { results } = await db.prepare(
       "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE' AND (lower(json_extract(data,'$.to'))=? OR lower(json_extract(data,'$.from'))=?) ORDER BY at DESC"
@@ -2703,33 +2784,33 @@ async function handle6(request, env, ctx, url, sess) {
         releases.push(n);
       }
     }
-    return json3({ ok: true, acceptance, releases });
+    return json4({ ok: true, acceptance, releases });
   }
   const isRealHolder = (h) => {
     const v = String(h || "").trim();
     return v && v.toLowerCase() !== "shared";
   };
   if (method === "POST" && pathname === "/asset/request") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const b = await request.json().catch(() => ({}));
-    if (!b.assetId) return json3({ ok: false, error: "assetId required" }, 400);
+    if (!b.assetId) return json4({ ok: false, error: "assetId required" }, 400);
     const asset = await getAsset(env, tenantId, b.assetId);
-    if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
+    if (!asset) return json4({ ok: false, error: "Asset not found" }, 404);
     const holder = String(asset.assignedTo || "").trim();
     if (holder.toLowerCase() === me.toLowerCase())
-      return json3({ ok: false, error: "You already have this item" }, 400);
+      return json4({ ok: false, error: "You already have this item" }, 400);
     const dup = await db.prepare(
       "SELECT id FROM asset_requests WHERE tenant_id=? AND asset_id=? AND requested_by=? AND status='pending'"
     ).bind(db.tenantId, b.assetId, me).first();
-    if (dup) return json3({ ok: false, error: "You've already requested this \u2014 it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
+    if (dup) return json4({ ok: false, error: "You've already requested this \u2014 it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
     await db.prepare(
       "INSERT INTO asset_requests (tenant_id, asset_id, requested_by, holder, message, requested_at) VALUES (?,?,?,?,?,?)"
     ).bind(db.tenantId, b.assetId, me, isRealHolder(holder) ? holder : "", String(b.message || "").trim(), (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json3({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
+    return json4({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
   }
   if (method === "GET" && pathname === "/asset/requests") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
@@ -2766,10 +2847,10 @@ async function handle6(request, env, ctx, url, sess) {
       out.all = [];
       for (const r of allR || []) out.all.push(await shape(r));
     }
-    return json3(out);
+    return json4(out);
   }
   if (method === "GET" && pathname === "/asset/requests/attention") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
@@ -2780,28 +2861,28 @@ async function handle6(request, env, ctx, url, sess) {
     const { results: dec } = await db.prepare(
       "SELECT id, asset_id, status FROM asset_requests WHERE tenant_id=? AND requested_by=? AND status IN ('accepted','rejected') AND seen=0"
     ).bind(db.tenantId, me).all();
-    return json3({ ok: true, toAction: toAction.length, decided: (dec || []).length });
+    return json4({ ok: true, toAction: toAction.length, decided: (dec || []).length });
   }
   if (method === "POST" && pathname === "/asset/request/accept") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const b = await request.json().catch(() => ({}));
     const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json3({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
+    if (!r) return json4({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
     if (!(r.holder === me || !r.holder && admin || admin))
-      return json3({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+      return json4({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
     const asset = await getAsset(env, tenantId, r.asset_id);
-    if (!asset) return json3({ ok: false, error: "Asset no longer exists" }, 404);
+    if (!asset) return json4({ ok: false, error: "Asset no longer exists" }, 404);
     if (String(asset.assignedTo || "").toLowerCase() === r.requested_by.toLowerCase()) {
       await db.prepare("UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
-      return json3({ ok: true, note: "They already hold it \u2014 request closed." });
+      return json4({ ok: true, note: "They already hold it \u2014 request closed." });
     }
     const dupT = await db.prepare(
       "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
     ).bind(db.tenantId, r.asset_id).first();
-    if (dupT) return json3({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
+    if (dupT) return json4({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const holderNow = String(asset.assignedTo || "").trim();
     const res = await db.prepare(
@@ -2817,41 +2898,41 @@ async function handle6(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=?, transfer_request_id=? WHERE tenant_id=? AND id=?"
     ).bind(now, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
-    return json3({ ok: true, transferStarted: true });
+    return json4({ ok: true, transferStarted: true });
   }
   if (method === "POST" && pathname === "/asset/request/reject") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const b = await request.json().catch(() => ({}));
     const reason = String(b.reason || "").trim();
-    if (!reason) return json3({ ok: false, error: "Add a short message explaining why." }, 400);
+    if (!reason) return json4({ ok: false, error: "Add a short message explaining why." }, 400);
     const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json3({ ok: false, error: "Request not found" }, 404);
+    if (!r) return json4({ ok: false, error: "Request not found" }, 404);
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
     if (!(r.holder === me || !r.holder && admin || admin))
-      return json3({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+      return json4({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
     await db.prepare(
       "UPDATE asset_requests SET status='rejected', reject_reason=?, decided_at=?, decided_by=? WHERE tenant_id=? AND id=?"
     ).bind(reason.slice(0, 300), (/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/request/cancel") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json3({ ok: false, error: "Request not found" }, 404);
-    if (r.requested_by !== sess.user.username) return json3({ ok: false, error: "Only the requester can cancel" }, 403);
+    if (!r) return json4({ ok: false, error: "Request not found" }, 404);
+    if (r.requested_by !== sess.user.username) return json4({ ok: false, error: "Only the requester can cancel" }, 403);
     await db.prepare("UPDATE asset_requests SET status='cancelled', decided_at=?, decided_by=?, seen=1 WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), sess.user.username, db.tenantId, r.id).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/request/ack") {
-    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     await db.prepare("UPDATE asset_requests SET seen=1 WHERE tenant_id=? AND id=? AND requested_by=?").bind(db.tenantId, Number(b.id), sess.user.username).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
-  return json3({ error: "Not found" }, 404);
+  return json4({ error: "Not found" }, 404);
 }
 function utcify(s) {
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(s || "")) ? s.replace(" ", "T") + "Z" : s;
@@ -5039,6 +5120,48 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
     }
   }
+  if (subpath === "/work-areas") {
+    if (method === "GET") return jsonResponse({ areas: await getWorkAreas(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      const list = Array.isArray(body?.areas) ? body.areas : [];
+      return jsonResponse({ ok: true, areas: await setWorkAreas(env, tenantId, list) }, headers);
+    }
+  }
+  if (subpath === "/eng-skills") {
+    if (method === "GET") return jsonResponse({ skills: await getEngSkills(env, tenantId), areas: await getWorkAreas(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      return jsonResponse({ ok: true, skills: await setEngSkills(env, tenantId, body?.skills || {}) }, headers);
+    }
+  }
+  if (subpath === "/infer-work-area" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const b = await readJson2(request);
+    const cap = await aiCapCheck(env, tenantId);
+    if (cap.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
+    const r = await inferWorkArea(env, tenantId, b.description || "");
+    if (r.ok && (r.areaId || r.name)) ctx?.waitUntil(bumpAiUsage(env, tenantId, "infer-work-area"));
+    return jsonResponse(r, headers);
+  }
+  if (subpath === "/ai-usage") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (method === "GET") return jsonResponse(await getAiUsage(env, tenantId), headers);
+    if (method === "POST") {
+      const b = await readJson2(request);
+      if (b.dailyCap !== void 0) {
+        const n = Math.max(0, parseInt(b.dailyCap, 10) || 0);
+        const db2 = tenantDB(env, tenantId);
+        await db2.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,'ai_daily_cap',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, String(n)).run();
+      }
+      return jsonResponse(await getAiUsage(env, tenantId), headers);
+    }
+  }
   if (subpath.startsWith("/firestop")) {
     const r2Bytes = async (key) => {
       try {
@@ -5679,7 +5802,118 @@ async function handle8(request, env, ctx, url, sess) {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess))
       return jsonResponse({ error: "Only SLA admins can optimise a route." }, headers, 403);
-    return jsonResponse(await optimiseEngineerRoute(env, tenantId, await readJson2(request)), headers);
+    const roBody = await readJson2(request);
+    const roCap = await aiCapCheck(env, tenantId);
+    if (roCap.capped) roBody.useAI = false;
+    const roRes = await optimiseEngineerRoute(env, tenantId, roBody);
+    if (roRes.aiUsed) ctx?.waitUntil(bumpAiUsage(env, tenantId, "route-optimize"));
+    if (roCap.capped) (roRes.warnings = roRes.warnings || []).push(`Daily AI limit reached (${roCap.cap}) \u2014 used shortest-driving order without the AI pass.`);
+    return jsonResponse(roRes, headers);
+  }
+  if (subpath === "/auto-schedule" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess))
+      return jsonResponse({ error: "Only SLA admins can auto-schedule a day." }, headers, 403);
+    return jsonResponse(await autoScheduleDay(env, tenantId, await readJson2(request)), headers);
+  }
+  if (subpath === "/auto-schedule/record" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const b = await readJson2(request);
+    const jobIds = Array.isArray(b.jobIds) ? b.jobIds.map(String).slice(0, 500) : [];
+    if (!jobIds.length) return jsonResponse({ ok: false, error: "No jobs to record." }, headers, 400);
+    const rec = {
+      date: String(b.date || todayStr()),
+      jobIds,
+      engineers: Array.isArray(b.engineers) ? b.engineers.map(String).slice(0, 40) : [],
+      by: String(b.by || sess.user && sess.user.username || ""),
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    try {
+      await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:lastautoday:" + tenantId, JSON.stringify(rec)).run();
+    } catch {
+    }
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/auto-schedule/last" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try {
+      const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first();
+      if (row) rec = JSON.parse(row.value);
+    } catch {
+    }
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false }, headers);
+    return jsonResponse({ ok: true, date: rec.date, jobIds: rec.jobIds, engineers: rec.engineers || [], by: rec.by || "", at: rec.at || "" }, headers);
+  }
+  if (subpath === "/auto-schedule/undo" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try {
+      const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first();
+      if (row) rec = JSON.parse(row.value);
+    } catch {
+    }
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false, error: "Nothing to undo." }, headers, 400);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let reverted = 0, skipped = 0;
+    for (const id of rec.jobIds) {
+      let job = null;
+      try {
+        job = await getJob(env, tenantId, id);
+      } catch {
+      }
+      if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) {
+        skipped++;
+        continue;
+      }
+      job.scheduledAt = null;
+      job.scheduledEnd = null;
+      job.assignedTo = "";
+      job.assignedEngineers = [];
+      job.engStatus = void 0;
+      job.status = "Pending";
+      (job.statusHistory ||= []).push({ status: "Pending", at: now, by: "undo-auto-day" });
+      job.updatedAt = now;
+      try {
+        await saveJob(env, tenantId, job);
+        reverted++;
+      } catch {
+        skipped++;
+      }
+    }
+    try {
+      await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).run();
+    } catch {
+    }
+    return jsonResponse({ ok: true, reverted, skipped }, headers);
+  }
+  if (subpath === "/duration-insights" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess))
+      return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const dur = await estimateJobDurations(env, tenantId);
+    const ai = await loadAiDurCache(env, tenantId);
+    const recent = (dur.recent || []).map((r) => ({ ...r, ai: ai[r.id] ?? null }));
+    return jsonResponse({
+      ok: true,
+      model: { typical: dur.typical, byPriority: dur.byPriority, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
+      overruns: dur.overruns,
+      recent,
+      aiCount: Object.keys(ai).length
+    }, headers);
+  }
+  if (subpath === "/duration-clear-ai" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess))
+      return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    try {
+      await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:aidur:" + tenantId).run();
+    } catch {
+    }
+    return jsonResponse({ ok: true }, headers);
   }
   if (subpath === "/jobs/nearby" && method === "GET") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -5892,7 +6126,12 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (parts[2] === "files" && method === "POST") {
       const filename = searchParams.get("filename");
-      const form = await request.formData();
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+      }
       const file = form.get("file");
       if (!filename || !file) return jsonResponse({ error: "Missing file" }, headers, 400);
       const stageIn = searchParams.get("stage");
@@ -5902,6 +6141,13 @@ async function handle8(request, env, ctx, url, sess) {
         httpMetadata: { contentType: file.type },
         customMetadata: stage ? { stage } : void 0
       });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try {
+          await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+        } catch {
+        }
+      }
       return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
     }
     if (parts[2] === "files" && method === "GET") {
@@ -5912,14 +6158,21 @@ async function handle8(request, env, ctx, url, sess) {
         overrides = j && j.photoStages || {};
       } catch {
       }
-      return jsonResponse({ files: listed.objects.map((o) => {
+      const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
+      const thumbSet = new Set((listed.objects || []).filter((o) => o.key.endsWith(".thumb")).map((o) => o.key));
+      const files = [];
+      for (const o of objs) {
         const name = o.key.split("/").pop();
-        return {
+        files.push({
           name,
+          key: o.key,
           publicURL: r2Url(env, o.key),
+          thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
+          hasThumb: thumbSet.has(o.key + ".thumb"),
           stage: overrides[name] || o.customMetadata && o.customMetadata.stage || ""
-        };
-      }) }, headers);
+        });
+      }
+      return jsonResponse({ files }, headers);
     }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -6289,6 +6542,64 @@ async function handle8(request, env, ctx, url, sess) {
         size: o.size
       })))).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     }
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        const proj = await env.DB.prepare(
+          "SELECT id FROM projects WHERE tenant_id=? AND (number=? OR site_number=?) LIMIT 1"
+        ).bind(tenantId, raw, raw).first();
+        if (proj) {
+          const { results: pfs } = await env.DB.prepare(
+            "SELECT id, r2_key, title, name, uploaded_at, uploaded_by FROM project_files WHERE tenant_id=? AND project_id=? AND (hidden=0 OR hidden IS NULL) ORDER BY uploaded_at DESC"
+          ).bind(tenantId, proj.id).all();
+          if ((pfs || []).length) {
+            const AREA = "Project Documents";
+            if (!areas.includes(AREA)) areas.unshift(AREA);
+            docs[AREA] = await Promise.all(pfs.map(async (f) => ({
+              url: await signedFileUrl(env, url.origin, "/project/doc", f.r2_key, 86400),
+              key: f.r2_key,
+              name: f.title || f.name || f.r2_key.split("/").pop(),
+              at: f.uploaded_at,
+              by: f.uploaded_by,
+              size: 0,
+              projectDoc: true
+              // marker: engineers/office see it but can't delete via /site/doc-delete
+            })));
+          }
+        }
+      }
+    } catch {
+    }
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        const { results: files } = await env.DB.prepare(
+          `SELECT f.id, f.scheme, f.code, f.type, f.year, f.filename, f.label, f.r2_key, f.uploaded_at, f.uploaded_by
+             FROM compliance_files f
+             LEFT JOIN compliance_stores s
+                    ON s.tenant_id = f.tenant_id AND s.scheme = f.scheme AND s.code = f.code
+            WHERE f.tenant_id = ?
+              AND (s.site_number = ? OR f.code = ?)
+            ORDER BY f.uploaded_at DESC`
+        ).bind(tenantId, raw, raw).all();
+        if ((files || []).length) {
+          const AREA = "Compliance Certificates";
+          if (!areas.includes(AREA)) areas.unshift(AREA);
+          const TYPE_LBL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly", emYearly: "EM Yearly", pv: "PV", ev: "EV", forecourt: "EV", pump: "Pump", other: "Other" };
+          docs[AREA] = await Promise.all(files.map(async (f) => ({
+            url: await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 86400),
+            key: f.r2_key,
+            name: (f.label || f.filename || f.r2_key.split("/").pop()) + " \xB7 " + (TYPE_LBL[f.type] || f.type || "compliance"),
+            at: f.uploaded_at,
+            by: f.uploaded_by,
+            size: 0,
+            complianceDoc: true
+            // marker: managed on the compliance chart
+          })));
+        }
+      }
+    } catch {
+    }
     return jsonResponse({ areas, docs }, headers);
   }
   if (subpath === "/site/docs" && method === "POST") {
@@ -6296,7 +6607,12 @@ async function handle8(request, env, ctx, url, sess) {
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
-    const form = await request.formData();
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+    }
     const file = form.get("file");
     if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
     const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
@@ -6342,7 +6658,12 @@ async function handle8(request, env, ctx, url, sess) {
   }
   if (subpath === "/site/thumb" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-    const form = await request.formData();
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+    }
     const key = String(form.get("key") || "");
     const thumb = form.get("thumb");
     if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
@@ -6878,9 +7199,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
+    // Portal-project link: set when this job was raised from a project hub, so
+    // the project can list its jobs + roll up per-engineer visits. Preserved.
+    projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
     scheduledAt,
     scheduledEnd,
     durationMinutes,
+    // Area of work (id from app_config sla_work_areas) — used to match jobs to
+    // engineers competent in that area when suggesting/auto-scheduling. Preserved.
+    workArea: body.workArea !== void 0 ? String(body.workArea || "") || null : existing?.workArea ?? null,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
     release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0 } : void 0 : existing?.release,
@@ -6953,6 +7280,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
+  if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
+  if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -7210,6 +7539,27 @@ async function engineerHome(env, tenantId, username) {
   }
   return null;
 }
+async function osrmTable(pts) {
+  if (!pts || pts.length < 2 || pts.length > 100) return null;
+  const coords = pts.map((p) => `${p[1]},${p[0]}`).join(";");
+  try {
+    const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`, { signal: AbortSignal.timeout(7e3) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.code !== "Ok" || !Array.isArray(data.durations)) return null;
+    const mins = data.durations.map((row) => row.map((s) => s == null ? 0 : Math.max(1, Math.round(s / 60))));
+    return { mins, source: "osrm" };
+  } catch {
+    return null;
+  }
+}
+async function roadMatrix(pts) {
+  const osrm = await osrmTable(pts);
+  if (osrm) return osrm;
+  const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) mins[i][j] = Math.max(1, Math.round(haversineMi(pts[i], pts[j]) * 1.25 / 30 * 60));
+  return { mins, source: "estimate" };
+}
 async function driveMatrix(env, pts) {
   const n = pts.length;
   const mins = Array.from({ length: n }, () => Array(n).fill(0));
@@ -7463,6 +7813,442 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     },
     warnings
   };
+}
+async function autoScheduleDay(env, tenantId, body) {
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
+  const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 540));
+  const cap = Math.max(120, dayMinutes - lunch);
+  const warnings = [];
+  const skills = await getEngSkills(env, tenantId);
+  const dur = await estimateJobDurations(env, tenantId);
+  const normPrio = (p) => {
+    const m = /(\d)/.exec(String(p || ""));
+    return m ? Number(m[1]) : 5;
+  };
+  const estimateFor = (p) => {
+    const m = /(\d)/.exec(String(p || ""));
+    const key = m ? "Priority " + m[1] : "";
+    return dur.byPriority && dur.byPriority[key] || dur.typical;
+  };
+  const outward = (pc) => {
+    const s = String(pc || "").trim().toUpperCase();
+    const m = s.match(/^[A-Z]{1,2}\d[A-Z\d]?/);
+    return m ? m[0] : "";
+  };
+  const hmm = (m) => {
+    m = Math.round(m || 0);
+    const h = Math.floor(m / 60), mm = m % 60;
+    return h ? h + "h" + (mm ? " " + mm + "m" : "") : mm + "m";
+  };
+  const engs = [];
+  for (const e of Array.isArray(body.engineers) ? body.engineers : []) {
+    const u = String(e.username || "").trim();
+    if (!u) continue;
+    let coord = null;
+    const lat = Number(e.homeLat), lng = Number(e.homeLng ?? e.homeLon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord) {
+      const h = await engineerHome(env, tenantId, u);
+      if (h) coord = h.coord;
+    }
+    if (!coord && e.homePostcode) {
+      const g = await geocodePcServer(e.homePostcode);
+      if (g) coord = g;
+    }
+    if (!coord) {
+      warnings.push(`${e.name || u} has no home location \u2014 skipped.`);
+      continue;
+    }
+    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+  }
+  if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
+  const jobs = [];
+  for (const j of Array.isArray(body.jobs) ? body.jobs : []) {
+    let coord = null;
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord && j.postcode) {
+      const g = await geocodePcServer(j.postcode);
+      if (g) coord = g;
+    }
+    if (!coord) {
+      warnings.push(`${j.ref || j.site || "A job"} has no map location \u2014 left unscheduled.`);
+      continue;
+    }
+    const explicit = Number(j.durationMinutes);
+    const hasExplicit = Number.isFinite(explicit) && explicit > 0;
+    const durationMin = hasExplicit ? Math.max(15, Math.round(explicit)) : Math.max(15, Math.round(estimateFor(j.priority)));
+    const ow = outward(j.postcode);
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), area: ow || String(j.site || "").split(/[,\s]/)[0] || "", iow: /^PO(3\d|4[01])$/.test(ow), coord });
+  }
+  if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
+  let aiUsed = 0, aiSource = "history";
+  const needIds = jobs.filter((j) => j.estimated).map((j) => j.id);
+  if (needIds.length && env.ANTHROPIC_API_KEY) {
+    const cache = await loadAiDurCache(env, tenantId);
+    const missing = needIds.filter((id) => !(id in cache));
+    if (missing.length) {
+      const got = await aiEstimateDurations(env, await jobMetaForIds(env, tenantId, missing));
+      if (Object.keys(got).length) {
+        Object.assign(cache, got);
+        await saveAiDurCache(env, tenantId, cache);
+      }
+    }
+    for (const j of jobs) if (j.estimated && cache[j.id] != null) {
+      j.durationMin = Math.max(15, Math.min(480, Math.round(cache[j.id])));
+      j.aiEstimated = true;
+      aiUsed++;
+    }
+    if (aiUsed) aiSource = "ai";
+  } else if (needIds.length && !env.ANTHROPIC_API_KEY) {
+    warnings.push("AI duration estimates are off (no ANTHROPIC_API_KEY) \u2014 used the learned typical instead.");
+  }
+  const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
+  const NE = engs.length;
+  let M3;
+  if (pts.length <= 90) M3 = await roadMatrix(pts);
+  else {
+    const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
+    M3 = { mins, source: "estimate" };
+  }
+  const pE = (i) => i, pJ = (k) => NE + k;
+  const FERRY = 90, REMOTE = 75;
+  const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M3.mins[i][k2] += FERRY;
+  const insertCost = (ei, k) => {
+    const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
+    let bDelta = Infinity, bPos = 1;
+    for (let pos = 1; pos < route.length; pos++) {
+      const a = route[pos - 1], b = route[pos];
+      const delta = M3.mins[a][p] + M3.mins[p][b] - M3.mins[a][b];
+      if (delta < bDelta) {
+        bDelta = delta;
+        bPos = pos;
+      }
+    }
+    return { pos: bPos, delta: bDelta };
+  };
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M3.mins[pE(ei)][pJ(k)]));
+  const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
+  const unassigned = [], handled = /* @__PURE__ */ new Set();
+  const remoteByArea = {};
+  for (const k of order) if (nearestHome(k) > REMOTE) (remoteByArea[jobs[k].area || "_" + k] ||= []).push(k);
+  const remoteAreas = Object.keys(remoteByArea).sort((a, b) => Math.min(...remoteByArea[b].map(nearestHome)) - Math.min(...remoteByArea[a].map(nearestHome)));
+  for (const area of remoteAreas) {
+    const ks = remoteByArea[area];
+    let bestE = -1, bestCost = Infinity;
+    engs.forEach((_, ei) => {
+      const c = Math.min(...ks.map((k) => M3.mins[pE(ei)][pJ(k)]));
+      if (c < bestCost) {
+        bestCost = c;
+        bestE = ei;
+      }
+    });
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M3.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
+    const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
+    if (!justified) {
+      for (const k of ks) {
+        handled.add(k);
+        unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `held for a planned trip \u2014 ${area} is ~${hmm(oneWay === Infinity ? 0 : oneWay)} each way and today isn't worth a dedicated run (${ks.length} job${ks.length > 1 ? "s" : ""}, ${hmm(areaSite2)} on site)` });
+      }
+      continue;
+    }
+    const e = engs[bestE];
+    for (const k of ks) {
+      handled.add(k);
+      const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
+      if (newLoad <= cap) {
+        e.seq.splice(ins.pos - 1, 0, k);
+        e.load = newLoad;
+      } else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full \u2014 this one won't fit today` });
+    }
+  }
+  for (const k of order) {
+    if (handled.has(k)) continue;
+    const j = jobs[k];
+    let best = null;
+    engs.forEach((e, ei) => {
+      const ins = insertCost(ei, k);
+      const newLoad = e.load + ins.delta + j.durationMin;
+      if (newLoad > cap) return;
+      const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
+      const sameArea = j.area && e.seq.some((x) => jobs[x].area === j.area);
+      let eff = ins.delta;
+      if (stars > 0) eff -= stars * 4;
+      if (sameArea) eff -= 25;
+      if (best === null || eff < best.eff) best = { ei, pos: ins.pos, newLoad, eff };
+    });
+    if (!best) {
+      unassigned.push({ id: j.id, ref: j.ref, reason: "no engineer had room in the day" });
+      continue;
+    }
+    engs[best.ei].seq.splice(best.pos - 1, 0, k);
+    engs[best.ei].load = best.newLoad;
+  }
+  const [sh, sm] = dayStart.split(":").map(Number);
+  const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
+  const plan = engs.map((e, ei) => {
+    const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
+    const subCost = sub.map((a) => sub.map((b) => M3.mins[a][b]));
+    const solved = solveRoute(subCost);
+    const orderedK = solved.map((si) => e.seq[si - 1]);
+    const legs = [];
+    let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
+    for (const k of orderedK) {
+      const p = pJ(k), dMin = M3.mins[cur][p];
+      drive += dMin;
+      let arrival = t + dMin;
+      if (!lunchDone && arrival >= lunchTarget) {
+        arrival += lunch;
+        t += lunch;
+        lunchDone = true;
+      }
+      const j = jobs[k];
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, area: j.area, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      site += j.durationMin;
+      t = arrival + j.durationMin;
+      cur = p;
+    }
+    const homeMin = orderedK.length ? M3.mins[cur][pE(ei)] : 0;
+    drive += homeMin;
+    return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+  }).filter((p) => p.legs.length);
+  let matrixSource = M3.source;
+  if (M3.source !== "osrm" && plan.length) {
+    const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
+    const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
+    let allReal = true;
+    for (const p of plan) {
+      const home = engCoord.get(p.username);
+      const pts2 = [home, ...p.legs.map((l) => coordById.get(l.jobId))];
+      if (!home || pts2.some((c) => !c) || pts2.length < 2) {
+        allReal = false;
+        continue;
+      }
+      const dm = await roadMatrix(pts2);
+      if (dm.source !== "osrm") {
+        allReal = false;
+        continue;
+      }
+      let t = 0, drive = 0, site = 0, lunchDone = lunch === 0, cur = 0;
+      p.legs.forEach((l, idx) => {
+        const to = idx + 1, dMin = dm.mins[cur][to];
+        drive += dMin;
+        let arrival = t + dMin;
+        if (!lunchDone && arrival >= lunchTarget) {
+          arrival += lunch;
+          t += lunch;
+          lunchDone = true;
+        }
+        l.driveMins = dMin;
+        l.arrivalOffset = arrival;
+        site += l.durationMin;
+        t = arrival + l.durationMin;
+        cur = to;
+      });
+      const homeMin = dm.mins[cur][0];
+      drive += homeMin;
+      p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
+    }
+    matrixSource = allReal ? "osrm" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (the free routing service didn't answer for every one \u2014 try again in a moment).");
+  }
+  const areaCounts = (legs) => {
+    const m = {};
+    for (const l of legs) {
+      const a = l.area || "";
+      if (a) m[a] = (m[a] || 0) + 1;
+    }
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  };
+  for (const p of plan) {
+    const ac = areaCounts(p.legs);
+    const skillN = p.legs.filter((l) => l.stars > 0).length;
+    const bits = [];
+    if (ac.length) bits.push("clustered around " + ac.slice(0, 2).map(([a, n]) => `${a} (${n} job${n > 1 ? "s" : ""})`).join(" and ") + (ac.length > 2 ? `, plus ${ac.length - 2} other area${ac.length - 2 > 1 ? "s" : ""}` : ""));
+    if (skillN) bits.push(`${skillN} match ${p.name.split(" ")[0]}'s rated skills`);
+    bits.push(`fills ${hmm(p.summary.dayLengthMins)} door-to-door with ${hmm(p.summary.driveMins)} driving`);
+    if (p.hq) bits.push("routed from HQ (no home postcode set)");
+    p.why = bits.join(" \xB7 ") + ".";
+  }
+  const areaMap = {}, areaSite = {};
+  for (const p of plan) for (const l of p.legs) {
+    const a = l.area;
+    if (!a) continue;
+    areaMap[a] ||= {};
+    areaMap[a][p.name] = (areaMap[a][p.name] || 0) + 1;
+    areaSite[a] = (areaSite[a] || 0) + l.durationMin;
+  }
+  const overlaps = [];
+  for (const [area, byName] of Object.entries(areaMap)) {
+    const es = Object.entries(byName);
+    if (es.length < 2) continue;
+    const totalJobs = es.reduce((s, [, n]) => s + n, 0);
+    const reason = (areaSite[area] || 0) > cap * 0.7 ? `${totalJobs} jobs there \u2014 more than one engineer can fit in a ${hmm(cap)} working day, so it's shared to keep everyone finishing on time` : `both were already passing ${area} on efficient routes \u2014 drag a job across if you'd rather one engineer owned the whole area`;
+    overlaps.push({ area, engineers: es.map(([name, count]) => ({ name, count })), reason });
+  }
+  overlaps.sort((a, b) => b.engineers.reduce((s, e) => s + e.count, 0) - a.engineers.reduce((s, e) => s + e.count, 0));
+  return {
+    ok: true,
+    dayStart,
+    matrixSource,
+    plan,
+    unassigned,
+    warnings,
+    overlaps,
+    placed: plan.reduce((a, p) => a + p.legs.length, 0),
+    total: jobs.length,
+    durModel: { typical: dur.typical, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
+    estimatedCount: jobs.filter((j) => j.estimated).length,
+    aiUsed,
+    aiSource,
+    overruns: dur.overruns
+  };
+}
+var _durCache = null;
+var _durCacheAt = 0;
+async function estimateJobDurations(env, tid) {
+  if (_durCache && Date.now() - _durCacheAt < 5 * 6e4) return _durCache;
+  const db = tenantDB(env, tid);
+  let rows = [];
+  try {
+    rows = (await db.prepare("SELECT id, helpdesk_ref, priority, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  const norm = (p) => {
+    const m = /(\d)/.exec(String(p || ""));
+    return m ? "Priority " + m[1] : "";
+  };
+  const actuals = [], actualByPrio = {}, setVals = [], setByPrio = {}, overruns = [], recent = [];
+  const MIN = 5;
+  for (const r of rows) {
+    let d;
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+      continue;
+    }
+    const prio = norm(r.priority || d.priority);
+    const explicit = Number(d.durationMinutes);
+    let actual = null, ip = null;
+    for (const e of Array.isArray(d.statusHistory) ? d.statusHistory : []) {
+      const st = String(e.status || "");
+      if (st === "In Progress") ip = Date.parse(e.at);
+      else if (st === "Complete" && ip) {
+        const mins = Math.round((Date.parse(e.at) - ip) / 6e4);
+        if (mins >= 5 && mins <= 600) actual = mins;
+        ip = null;
+      }
+    }
+    if (Number.isFinite(explicit) && explicit > 0 && explicit <= 600) {
+      setVals.push(explicit);
+      if (prio) (setByPrio[prio] ||= []).push(explicit);
+    }
+    if (actual != null) {
+      actuals.push(actual);
+      if (prio) (actualByPrio[prio] ||= []).push(actual);
+      recent.push({ id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || r.id, priority: prio, allocated: Number.isFinite(explicit) && explicit > 0 ? Math.round(explicit) : null, actual });
+    }
+    if (Number.isFinite(explicit) && explicit > 0 && actual != null && actual > Math.max(explicit * 1.5, explicit + 30))
+      overruns.push({ ref: r.helpdesk_ref || d.helpdeskRef || r.id, allocated: Math.round(explicit), actual });
+  }
+  const median = (a) => {
+    if (!a.length) return null;
+    const s = [...a].sort((x, y) => x - y);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+  };
+  const clamp = (v) => v == null ? null : Math.max(30, Math.min(240, v));
+  const typical = clamp(actuals.length >= MIN ? median(actuals) : median(actuals.concat(setVals))) ?? 90;
+  const byPriority = {};
+  const prios = /* @__PURE__ */ new Set([...Object.keys(actualByPrio), ...Object.keys(setByPrio)]);
+  for (const p of prios) {
+    const a = actualByPrio[p] || [], s = setByPrio[p] || [];
+    const v = clamp(a.length >= MIN ? median(a) : a.concat(s).length >= MIN ? median(a.concat(s)) : null);
+    if (v != null) byPriority[p] = v;
+  }
+  overruns.sort((a, b) => b.actual - b.allocated - (a.actual - a.allocated));
+  _durCache = { typical, byPriority, sampleCount: actuals.length + setVals.length, actualCount: actuals.length, overruns: overruns.slice(0, 10), recent: recent.slice(-80).reverse() };
+  _durCacheAt = Date.now();
+  return _durCache;
+}
+async function loadAiDurCache(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:aidur:" + tid).first();
+    return row ? JSON.parse(row.value) : {};
+  } catch {
+    return {};
+  }
+}
+async function saveAiDurCache(env, tid, cache) {
+  try {
+    let obj = cache;
+    const keys = Object.keys(cache);
+    if (keys.length > 3e3) {
+      obj = {};
+      for (const k of keys.slice(-3e3)) obj[k] = cache[k];
+    }
+    await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:aidur:" + tid, JSON.stringify(obj)).run();
+  } catch {
+  }
+}
+async function aiEstimateDurations(env, metas) {
+  if (!env.ANTHROPIC_API_KEY || !metas.length) return {};
+  const schema = {
+    type: "object",
+    properties: {
+      estimates: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            minutes: { type: "integer", description: "On-site working minutes (exclude travel), 15\u2013480." }
+          },
+          required: ["id", "minutes"]
+        }
+      }
+    },
+    required: ["estimates"]
+  };
+  const system = "You estimate how long a UK building-maintenance / facilities job takes ON SITE \u2014 the hands-on working time for one engineer, EXCLUDING travel \u2014 so an office can schedule the day. Use the description, trade and priority. Typical reactive repairs run 30\u201390 min; diagnostics/multi-part or install works run longer. Give a whole number of minutes (15\u2013480) for every job id; for a vague description give a sensible middle estimate. Do not omit any job.";
+  const chunks = [];
+  for (let i = 0; i < metas.length && i < 200; i += 40) chunks.push(metas.slice(i, i + 40));
+  const out = {};
+  const results = await Promise.all(chunks.map((chunk) => {
+    const list = chunk.map((m) => `- id:${m.id} | ${m.priority || "?"} | ${m.workArea || ""} | ${m.site || ""} | ${String(m.description || m.ref || "").replace(/\s+/g, " ").slice(0, 220)}`).join("\n");
+    return anthropicTool(env, { system, user: `Estimate on-site minutes for each job (return every id):
+${list}`, toolName: "set_durations", schema, maxTokens: 1600 }).catch(() => ({ ok: false }));
+  }));
+  for (const r of results) if (r.ok) for (const e of r.input.estimates || []) {
+    const m = Math.round(Number(e.minutes));
+    if (e.id && Number.isFinite(m)) out[String(e.id)] = Math.max(15, Math.min(480, m));
+  }
+  return out;
+}
+async function jobMetaForIds(env, tid, ids) {
+  if (!ids.length) return [];
+  const db = tenantDB(env, tid);
+  const chunkIds = ids.slice(0, 200);
+  const ph = chunkIds.map(() => "?").join(",");
+  let rows = [];
+  try {
+    rows = (await db.prepare(`SELECT id, helpdesk_ref, priority, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunkIds).all()).results || [];
+  } catch {
+    rows = [];
+  }
+  return rows.map((r) => {
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+    }
+    return { id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || "", description: d.description || "", priority: r.priority || d.priority || "", site: d.site && (d.site.name || d.site) || "", workArea: d.workArea || "" };
+  });
 }
 var _archiveReady = false;
 async function ensureArchive(env, tenantId) {
@@ -7811,6 +8597,217 @@ async function setCategories(env, tenantId, list) {
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
 }
+var areaSlug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "area-" + crypto.randomUUID().slice(0, 6);
+var DEFAULT_WORK_AREAS = [
+  "Electrical",
+  "Plumbing",
+  "Fabric / Building",
+  "Firestopping",
+  "Fire alarms",
+  "Heating / HVAC",
+  "Joinery / Carpentry",
+  "Decorating",
+  "General maintenance"
+].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
+async function getWorkAreas(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_work_areas'").bind(tenantId).first();
+  let a;
+  try {
+    a = row ? JSON.parse(row.value) : null;
+  } catch {
+    a = null;
+  }
+  if (!Array.isArray(a)) return DEFAULT_WORK_AREAS.slice();
+  const seen = /* @__PURE__ */ new Set(), out = [];
+  for (const x of a) {
+    const name = String(x && x.name || "").trim();
+    if (!name) continue;
+    let id = String(x && x.id || "").trim() || areaSlug(name);
+    if (seen.has(id)) id = areaSlug(name) + "-" + out.length;
+    seen.add(id);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String(x && x.colour || "")) ? x.colour : "#64748b";
+    out.push({ id, name, colour });
+  }
+  return out;
+}
+async function setWorkAreas(env, tenantId, list) {
+  const seen = /* @__PURE__ */ new Set(), clean = [];
+  for (const x of Array.isArray(list) ? list : []) {
+    const name = String(x && x.name || "").trim();
+    if (!name) continue;
+    let id = String(x && x.id || "").trim() || areaSlug(name);
+    if (seen.has(id)) id = areaSlug(name) + "-" + clean.length;
+    seen.add(id);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String(x && x.colour || "")) ? x.colour : "#64748b";
+    clean.push({ id, name: name.slice(0, 60), colour });
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_work_areas', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
+}
+async function getEngSkills(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_eng_skills'").bind(tenantId).first();
+  let s;
+  try {
+    s = row ? JSON.parse(row.value) : null;
+  } catch {
+    s = null;
+  }
+  return s && typeof s === "object" ? s : {};
+}
+async function setEngSkills(env, tenantId, skills) {
+  const clean = {};
+  for (const [user, areas] of Object.entries(skills || {})) {
+    if (!user || typeof areas !== "object") continue;
+    const u = normId(user);
+    const row = {};
+    for (const [areaId, stars] of Object.entries(areas)) {
+      const n = Math.round(Number(stars) || 0);
+      if (n >= 1 && n <= 5) row[String(areaId)] = n;
+    }
+    if (Object.keys(row).length) clean[u] = row;
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_eng_skills', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
+}
+var AI_CAP_DEFAULT = 400;
+async function bumpAiUsage(env, tenantId, kind) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const k = "ai_usage:" + mon;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, k).first();
+    let u;
+    try {
+      u = row ? JSON.parse(row.value) : null;
+    } catch {
+      u = null;
+    }
+    if (!u || typeof u !== "object") u = { total: 0, days: {}, kinds: {} };
+    u.total = (u.total || 0) + 1;
+    u.days = u.days || {};
+    u.days[day] = (u.days[day] || 0) + 1;
+    u.kinds = u.kinds || {};
+    u.kinds[kind || "other"] = (u.kinds[kind || "other"] || 0) + 1;
+    await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, k, JSON.stringify(u)).run();
+    return u.days[day];
+  } catch {
+    return 0;
+  }
+}
+async function aiCapLimit(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='ai_daily_cap'").bind(tenantId).first();
+    const n = row ? parseInt(row.value, 10) : NaN;
+    return Number.isFinite(n) && n >= 0 ? n : AI_CAP_DEFAULT;
+  } catch {
+    return AI_CAP_DEFAULT;
+  }
+}
+async function aiUsageToday(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+    let u;
+    try {
+      u = row ? JSON.parse(row.value) : null;
+    } catch {
+      u = null;
+    }
+    return u && u.days && u.days[day] || 0;
+  } catch {
+    return 0;
+  }
+}
+async function aiCapCheck(env, tenantId) {
+  const cap = await aiCapLimit(env, tenantId);
+  if (!cap) return { capped: false, cap: 0 };
+  const today = await aiUsageToday(env, tenantId);
+  return { capped: today >= cap, cap, today };
+}
+async function getAiUsage(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const mon = (/* @__PURE__ */ new Date()).toISOString().slice(0, 7), day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+  let u;
+  try {
+    u = row ? JSON.parse(row.value) : null;
+  } catch {
+    u = null;
+  }
+  u = u && typeof u === "object" ? u : { total: 0, days: {}, kinds: {} };
+  return { ok: true, month: mon, monthTotal: u.total || 0, today: u.days && u.days[day] || 0, cap: await aiCapLimit(env, tenantId), kinds: u.kinds || {} };
+}
+async function anthropicTool(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured on the server (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 800, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] })
+    });
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+  if (!resp.ok) {
+    let d = "";
+    try {
+      const j = await resp.json();
+      d = j?.error?.message || "";
+    } catch {
+    }
+    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "The AI key was rejected." };
+    if (resp.status === 404 && /model/i.test(d)) return { ok: false, error: `The AI model "${model}" isn't available on this key.` };
+    return { ok: false, error: "The AI service errored." + (d ? " (" + d + ")" : "") };
+  }
+  let payload;
+  try {
+    payload = await resp.json();
+  } catch {
+    return { ok: false, error: "AI gave an unreadable reply." };
+  }
+  const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+  return { ok: true, input: block.input };
+}
+async function inferWorkArea(env, tenantId, description) {
+  const areas = await getWorkAreas(env, tenantId);
+  if (!areas.length) return { ok: false, error: "No areas of work are configured yet." };
+  const list = areas.map((a) => `${a.id}: ${a.name}`).join("\n");
+  const schema = {
+    type: "object",
+    properties: {
+      areaId: { type: "string", description: "The id of the single best-matching area, or empty string if none fit." },
+      confidence: { type: "string", enum: ["high", "medium", "low"] }
+    },
+    required: ["areaId"]
+  };
+  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
+  const user = `Areas (id: name):
+${list}
+
+Job description:
+"""${String(description || "").slice(0, 1500)}"""
+
+Which single area id best fits this work?`;
+  const r = await anthropicTool(env, { system, user, toolName: "set_area", schema, maxTokens: 120 });
+  if (!r.ok) return r;
+  const id = String(r.input.areaId || "").trim();
+  const match = areas.find((a) => a.id === id);
+  return { ok: true, areaId: match ? match.id : "", name: match ? match.name : "", confidence: r.input.confidence || "" };
+}
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
@@ -7985,716 +8982,6 @@ async function saveFsMaterials(env, tenantId, mats) {
   const db = tenantDB(env, tenantId);
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
-}
-
-// src/routes/sites.js
-var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
-async function handle9(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const method = request.method;
-  const q = url.searchParams;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (path === "/get-sites" && method === "GET") {
-    const cat = (q.get("category") || "all").toLowerCase();
-    let rows;
-    if (cat === "all") {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
-    } else {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
-    }
-    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
-  }
-  if (path === "/delete-site" && method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, tenantId, sess.user.username);
-    if (perms.FullAccess !== "Yes")
-      return error("Deleting a site needs Full Access", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const client = ((q.get("category") || b.client || "") + "").toLowerCase().trim();
-    const siteNumber = String(b.siteNumber || "").trim();
-    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
-    const existing = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
-    if (!existing) return error("Site not found", 404, env, request);
-    let name = siteNumber;
-    try {
-      name = JSON.parse(existing.data).siteName || siteNumber;
-    } catch {
-    }
-    await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).run();
-    const res = json({ success: true, deleted: siteNumber }, {}, env, request);
-    try {
-      res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} \u2014 "${name}"`));
-    } catch {
-    }
-    return res;
-  }
-  if ((path === "/add-site" || path === "/update-site") && method === "POST") {
-    let site = await request.json().catch(() => ({}));
-    const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
-    if (!client) return error("client (category) required", 400, env, request);
-    site.client = client;
-    if (path === "/add-site" && client === "projects") {
-      if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
-      if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
-    }
-    const siteNumber = String(site.siteNumber || "").trim();
-    if (!siteNumber) return error("siteNumber required", 400, env, request);
-    site.siteNumber = siteNumber;
-    const oldNum = q.get("oldSiteNumber");
-    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
-      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
-    }
-    let auditNote = "";
-    if (path === "/update-site") {
-      const lookNum = String(oldNum || siteNumber).trim();
-      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
-      if (row) {
-        let cur = {};
-        try {
-          cur = JSON.parse(row.data) || {};
-        } catch {
-        }
-        const merged = { ...cur };
-        const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
-        const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").replace(/ · /g, " ").trim();
-        const chg = [];
-        for (const [k, v] of Object.entries(site)) {
-          if (v !== void 0 && v !== null && v !== "") {
-            if (NOTE_FIELDS[k] && clean(cur[k]) !== clean(v)) chg.push(`${NOTE_FIELDS[k]} "${clean(cur[k]) || "\u2014"}" \u2192 "${clean(v)}"`);
-            merged[k] = v;
-          }
-        }
-        if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" \u2192 "${clean(siteNumber)}"`);
-        merged.siteNumber = siteNumber;
-        merged.client = client;
-        site = merged;
-        const label = clean(merged.name) || siteNumber;
-        auditNote = (chg.length ? `${label} \u2014 ${chg.join(", ")}` : label).slice(0, 380);
-      }
-    }
-    await saveSite(env, tenantId, site);
-    await ensureCustomer(env, tenantId, client);
-    await pushSiteToSiteLog(env, site);
-    const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
-    return json({ success: true, site }, { headers }, env, request);
-  }
-  if (path === "/next-project-job-number" && method === "GET") {
-    return json({ next: await nextProjectNumber(env, tenantId) }, {}, env, request);
-  }
-  if (path === "/upload-image" && method === "POST") {
-    const form = await request.formData().catch(() => null);
-    const file = form && form.get("file");
-    const siteNumber = form && String(form.get("siteNumber") || "").trim();
-    const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
-    if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName4 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName4}`;
-    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
-    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
-    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
-  }
-  if (path === "/customers" && method === "GET") {
-    const { results } = await db.prepare(`
-      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.tenant_id = ? AND s.client = c.id) AS site_count
-      FROM customers c WHERE c.tenant_id = ? ORDER BY c.name COLLATE NOCASE
-    `).bind(db.tenantId, db.tenantId).all();
-    return json({ customers: results || [] }, {}, env, request);
-  }
-  if (path === "/customers" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const id = slug(b.id || b.name);
-    if (!id) return error("name required", 400, env, request);
-    await db.prepare(`
-      INSERT INTO customers (tenant_id, id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
-        phone=excluded.phone, invoice_email=excluded.invoice_email,
-        billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
-    `).bind(
-      db.tenantId,
-      id,
-      b.name || id,
-      b.contactName || null,
-      b.email || null,
-      b.phone || null,
-      b.invoiceEmail || null,
-      b.billingAddress || null,
-      b.notes || null
-    ).run();
-    return json({ ok: true, id }, {}, env, request);
-  }
-  if (path === "/customers/delete" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    if (!b.id) return error("id required", 400, env, request);
-    const n = await db.prepare("SELECT COUNT(*) AS n FROM sites WHERE tenant_id=? AND client=?").bind(db.tenantId, b.id).first();
-    if (n && n.n > 0) return error(`Customer has ${n.n} site(s) \u2014 move or delete them first.`, 400, env, request);
-    await db.prepare("DELETE FROM customers WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/sites/street-images" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const key = b.key || env.GOOGLE_MAPS_KEY;
-    if (!key) return error("Google Maps API key required", 400, env, request);
-    const overwrite = !!b.overwrite;
-    const since = b.since || "";
-    const brands = b.brands || {};
-    const limit = Math.min(Number(b.limit) || 8, 10);
-    const size = b.size || "640x400";
-    const { results } = await db.prepare("SELECT data FROM sites WHERE tenant_id=?").bind(db.tenantId).all();
-    const all = (results || []).map((r) => JSON.parse(r.data));
-    const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
-    const ownImage = (s) => !s.imageURL || /\/streetview\.jpg(\?|$)/.test(s.imageURL);
-    const todo = all.filter((s) => (overwrite || !s._noImagery) && // an overwrite run retries previously-failed sites
-    (overwrite ? ownImage(s) && (!s._svAt || s._svAt < since) : !s.imageURL) && locOf(s));
-    const batch = todo.slice(0, limit);
-    let updated = 0;
-    const failed = [];
-    let sampleError = "";
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    for (const site of batch) {
-      let loc = locOf(site);
-      let buf = null;
-      try {
-        const q2 = [
-          brands[site.client] || "",
-          site.siteName || "",
-          (site.postcode || "").replace(/\*+$/, "")
-        ].filter(Boolean).join(" ");
-        const fp = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q2)}&inputtype=textquery&fields=photos,geometry&key=${key}`);
-        const fpj = await fp.json();
-        const cand = fpj.candidates && fpj.candidates[0];
-        if (cand) {
-          if (cand.geometry && cand.geometry.location) loc = `${cand.geometry.location.lat},${cand.geometry.location.lng}`;
-          const ref = cand.photos && cand.photos[0] && cand.photos[0].photo_reference;
-          if (ref) {
-            const ph = await fetch(`https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${encodeURIComponent(ref)}&key=${key}`);
-            if (ph.ok && (ph.headers.get("content-type") || "").startsWith("image/")) buf = await ph.arrayBuffer();
-          }
-        }
-      } catch (e) {
-        if (!sampleError) sampleError = "Places: " + e.message;
-      }
-      if (!buf) try {
-        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
-        const res = await fetch(svUrl);
-        if (res.ok) buf = await res.arrayBuffer();
-        else if (!sampleError) sampleError = `StreetView ${res.status}: ${(await res.text()).slice(0, 160)}`;
-      } catch (e) {
-        if (!sampleError) sampleError = "StreetView: " + e.message;
-      }
-      if (!buf) {
-        try {
-          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
-          const res = await fetch(smUrl);
-          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
-          else if (!sampleError) sampleError = `StaticMap ${res.status}: ${(await res.text()).slice(0, 160)}`;
-        } catch (e) {
-          if (!sampleError) sampleError = "StaticMap: " + e.message;
-        }
-      }
-      if (buf) {
-        const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
-        await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
-        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
-        site._svAt = now;
-        delete site._noImagery;
-        await saveSite(env, tenantId, site);
-        updated++;
-      } else {
-        site._noImagery = true;
-        site._svAt = now;
-        await saveSite(env, tenantId, site);
-        failed.push(String(site.siteNumber));
-      }
-    }
-    return json({
-      ok: true,
-      updated,
-      failed,
-      sampleError,
-      remaining: Math.max(0, todo.length - batch.length)
-    }, {}, env, request);
-  }
-  if (path === "/import-sites" && method === "POST") {
-    const body = await request.json().catch(() => ({}));
-    const imagesOnly = !!body.imagesOnly;
-    let list = Array.isArray(body.sites) ? body.sites : [];
-    if (!list.length) {
-      try {
-        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
-        list = await res.json();
-        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
-      } catch (e) {
-        return error("Could not read the old sites worker: " + e.message, 502, env, request);
-      }
-    }
-    let imported = 0;
-    const clients = /* @__PURE__ */ new Set();
-    for (const site of list) {
-      const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
-      const siteNumber = String(site.siteNumber || "").trim();
-      if (!siteNumber) continue;
-      if (imagesOnly) {
-        if (!site.imageURL) continue;
-        const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
-        if (!row) continue;
-        const cur = JSON.parse(row.data);
-        cur.imageURL = site.imageURL;
-        await saveSite(env, tenantId, cur);
-        imported++;
-        continue;
-      }
-      site.client = client;
-      await saveSite(env, tenantId, site);
-      clients.add(client);
-      imported++;
-    }
-    for (const c of clients) await ensureCustomer(env, tenantId, c);
-    return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
-  }
-  return error("Unknown sites route", 404, env, request);
-}
-async function saveSite(env, tenantId, site) {
-  const db = tenantDB(env, tenantId);
-  await db.prepare(`
-    INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, job_number, data, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,datetime('now'))
-    ON CONFLICT(client, site_number) DO UPDATE SET
-      site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
-      job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
-  `).bind(
-    db.tenantId,
-    site.client,
-    String(site.siteNumber).trim(),
-    site.siteName || null,
-    site.postcode || null,
-    site.active === false ? 0 : 1,
-    site.jobNumber || null,
-    JSON.stringify(site)
-  ).run();
-}
-async function ensureCustomer(env, tenantId, id) {
-  if (!id) return;
-  const db = tenantDB(env, tenantId);
-  await db.prepare(
-    "INSERT INTO customers (tenant_id, id, name) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING"
-  ).bind(db.tenantId, id, prettify(id)).run();
-}
-async function pushSiteToSiteLog(env, site) {
-  try {
-    if (!env.SITELOG_ADMIN_SECRET) return;
-    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    const name = String(site.siteName || "").trim();
-    if (!name) return;
-    await fetch("https://api.site-log.co.uk/bulk-add-sites", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
-      body: JSON.stringify({ sites: [{
-        siteName: name,
-        lat,
-        lng,
-        radius: 500,
-        category: prettify(site.client || "") || "Projects"
-      }] })
-    });
-  } catch (e) {
-  }
-}
-async function nextProjectNumber(env, tenantId) {
-  const db = tenantDB(env, tenantId);
-  const { results } = await db.prepare(
-    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
-  ).bind(db.tenantId).all();
-  let max = 0;
-  for (const r of results || []) {
-    const m = String(r.job_number).match(/(\d+)\s*$/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return "P" + String(max + 1).padStart(4, "0");
-}
-function slug(s) {
-  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-function prettify(id) {
-  return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// src/routes/portal.js
-var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
-function vanWeek() {
-  const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
-  return d.toISOString().slice(0, 10);
-}
-var SETTINGS_KEY = "portal:settings";
-async function requireFullAccess(env, request) {
-  const sess = await requireSession(env, request);
-  if (!sess) return { err: error("Not authenticated", 401, env, request) };
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
-  return { sess };
-}
-async function handle10(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const method = request.method;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (path === "/settings" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, SETTINGS_KEY).first();
-    let settings = {};
-    try {
-      settings = row ? JSON.parse(row.value) : {};
-    } catch {
-    }
-    return json({ ok: true, settings }, {}, env, request);
-  }
-  if (path === "/settings" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    await db.prepare(`
-      INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value
-    `).bind(db.tenantId, SETTINGS_KEY, JSON.stringify(b || {})).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/menu-config" && method === "GET") {
-    const s = await requireSession(env, request);
-    if (!s) return error("Not authenticated", 401, env, request);
-    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "menu:hidden").first();
-    let hidden = [];
-    try {
-      hidden = row ? JSON.parse(row.value) : [];
-    } catch {
-    }
-    if (!Array.isArray(hidden)) hidden = [];
-    return json({ ok: true, hidden }, {}, env, request);
-  }
-  if (path === "/menu-config" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const hidden = Array.isArray(b.hidden) ? b.hidden.map(String).slice(0, 200) : [];
-    await db.prepare(
-      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-    ).bind(db.tenantId, "menu:hidden", JSON.stringify(hidden)).run();
-    return json({ ok: true, hidden }, {}, env, request);
-  }
-  if (path === "/oncall/current" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const cur = async (role) => await db.prepare(
-      "SELECT name, set_by, set_at FROM oncall_log WHERE tenant_id=? AND role=? ORDER BY id DESC LIMIT 1"
-    ).bind(db.tenantId, role).first();
-    return json({ ok: true, engineer: await cur("engineer"), manager: await cur("manager") }, {}, env, request);
-  }
-  if (path === "/oncall/set" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    const by = sess2.user.username;
-    const stmts = [];
-    if (b.engineer) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'engineer', ?, ?)").bind(db.tenantId, String(b.engineer), by));
-    if (b.manager) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'manager', ?, ?)").bind(db.tenantId, String(b.manager), by));
-    if (!stmts.length) return error("Nothing to set \u2014 send engineer and/or manager", 400, env, request);
-    await db.batch(stmts);
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/oncall/history" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const { results } = await db.prepare(
-      "SELECT role, name, set_by, set_at FROM oncall_log WHERE tenant_id=? ORDER BY id DESC LIMIT 200"
-    ).bind(db.tenantId).all();
-    return json({ ok: true, history: results || [] }, {}, env, request);
-  }
-  if (path === "/daily-logs" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    if (!b.engineer || !b.date) return error("engineer and date required", 400, env, request);
-    await db.prepare(`
-      INSERT INTO daily_logs (tenant_id, engineer, date, site, standard_hours, overtime_hours, travel_time, mileage, notes, submitted_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-    `).bind(
-      db.tenantId,
-      b.engineer,
-      b.date,
-      b.site || null,
-      num(b.standardHours),
-      num(b.overtimeHours),
-      num(b.travelTime),
-      num(b.mileage),
-      b.notes || null,
-      sess2.user.username
-    ).run();
-    return json({ ok: true }, { status: 201 }, env, request);
-  }
-  if (path === "/daily-logs" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const q = url.searchParams;
-    const conds = ["tenant_id = ?"], binds = [db.tenantId];
-    if (q.get("engineer")) {
-      conds.push("engineer = ?");
-      binds.push(q.get("engineer"));
-    }
-    if (q.get("from")) {
-      conds.push("date >= ?");
-      binds.push(q.get("from"));
-    }
-    if (q.get("to")) {
-      conds.push("date <= ?");
-      binds.push(q.get("to"));
-    }
-    let sql = "SELECT * FROM daily_logs";
-    sql += " WHERE " + conds.join(" AND ");
-    sql += " ORDER BY date DESC, id DESC LIMIT 500";
-    const { results } = await db.prepare(sql).bind(...binds).all();
-    return json({ ok: true, logs: results || [] }, {}, env, request);
-  }
-  if (path === "/prefs" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
-    let profile = {};
-    try {
-      profile = row?.profile ? JSON.parse(row.profile) : {};
-    } catch {
-    }
-    return json({ ok: true, prefs: profile.prefs || {} }, {}, env, request);
-  }
-  if (path === "/prefs" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => null);
-    if (!b || typeof b !== "object" || Array.isArray(b)) return error("Send an object of keys to merge", 400, env, request);
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
-    let profile = {};
-    try {
-      profile = row?.profile ? JSON.parse(row.profile) : {};
-    } catch {
-    }
-    const prefs = profile.prefs || {};
-    for (const k of Object.keys(b)) {
-      if (b[k] === null) delete prefs[k];
-      else prefs[k] = b[k];
-    }
-    if (JSON.stringify(prefs).length > 8e3) return error("Preferences too large", 400, env, request);
-    profile.prefs = prefs;
-    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(profile), db.tenantId, sess2.user.username).run();
-    return json({ ok: true, prefs }, {}, env, request);
-  }
-  if (path === "/audit/pageview" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    const page = String(b.page || "").slice(0, 80);
-    if (!/^[\w.-]+\.html$/.test(page)) return error("Bad page", 400, env, request);
-    await db.prepare(
-      "INSERT INTO audit_log (tenant_id, username, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
-    ).bind(db.tenantId, sess2.user.username, "VIEW", "/" + page, "", 200, (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/audit/log" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const q = url.searchParams;
-    const days = Math.min(365, Math.max(1, Number(q.get("days")) || 7));
-    const since = new Date(Date.now() - days * 864e5).toISOString();
-    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
-    if (q.get("user")) {
-      conds.push("username = ?");
-      binds.push(q.get("user"));
-    }
-    if (q.get("type") === "view") conds.push("method = 'VIEW'");
-    if (q.get("type") === "action") conds.push("method != 'VIEW'");
-    try {
-      await db.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run();
-    } catch {
-    }
-    const { results } = await db.prepare(
-      "SELECT username, method, path, detail, status, at, ref FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
-    ).bind(...binds).all();
-    return json({ ok: true, log: results || [] }, {}, env, request);
-  }
-  if (path === "/notify/log" && method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const b = await request.json().catch(() => ({}));
-    const action = String(b.action || "");
-    if (["shown", "snoozed", "dismissed", "opened"].indexOf(action) === -1)
-      return error("Bad action", 400, env, request);
-    const surface = String(b.surface || "").slice(0, 20);
-    const items = JSON.stringify(Array.isArray(b.items) ? b.items : []).slice(0, 4e3);
-    await db.prepare(
-      "INSERT INTO notify_log (tenant_id, username, action, surface, items, at) VALUES (?,?,?,?,?,?)"
-    ).bind(db.tenantId, sess2.user.username, action, surface, items, (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/notify/log" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const q = url.searchParams;
-    const days = Math.min(90, Math.max(1, Number(q.get("days")) || 14));
-    const since = new Date(Date.now() - days * 864e5).toISOString();
-    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
-    if (q.get("user")) {
-      conds.push("username = ?");
-      binds.push(q.get("user"));
-    }
-    const { results } = await db.prepare(
-      "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
-    ).bind(...binds).all();
-    return json({ ok: true, log: results || [] }, {}, env, request);
-  }
-  if (path === "/notify/feed/count" && method === "GET") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    await ensureFeedTable(env);
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
-    ).bind(db.tenantId, sess.user.username).first();
-    return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
-  }
-  if (path === "/notify/feed" && method === "GET") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    await ensureFeedTable(env);
-    const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
-    const { results } = await db.prepare(
-      "SELECT id, title, body, url, tag, created_at, read_at, actionable, resolved_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
-    ).bind(db.tenantId, sess.user.username, limit).all();
-    const items = (results || []).map((r) => ({
-      id: r.id,
-      title: r.title || "",
-      body: r.body || "",
-      url: r.url || "",
-      tag: r.tag || "",
-      at: r.created_at,
-      read: !!r.read_at,
-      // actionable-but-unresolved stays "outstanding" (bold, counts) until dealt with.
-      actionable: !!r.actionable,
-      resolved: !!r.resolved_at
-    }));
-    const cRow = await db.prepare(
-      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
-    ).bind(db.tenantId, sess.user.username).first();
-    return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
-  }
-  if (path === "/notify/feed/read" && method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    await ensureFeedTable(env);
-    const b = await request.json().catch(() => ({}));
-    const at = (/* @__PURE__ */ new Date()).toISOString();
-    if (b.seen) {
-      await db.prepare("UPDATE user_notifications SET seen_at=? WHERE tenant_id=? AND username=? AND seen_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
-    } else if (b.all) {
-      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND username=? AND (read_at IS NULL OR seen_at IS NULL)").bind(at, at, db.tenantId, sess.user.username).run();
-    } else if (b.id != null) {
-      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE id=? AND tenant_id=? AND username=?").bind(at, at, Number(b.id), db.tenantId, sess.user.username).run();
-    } else {
-      return error("Send seen:true, id, or all:true", 400, env, request);
-    }
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/notify/suppress" && method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    return json({ ok: true, rules: await getRules(env, tenantId) }, {}, env, request);
-  }
-  if (path === "/notify/suppress" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const type = String(b.type || "");
-    if (SUPPRESS_TYPES.indexOf(type) === -1) return error("Bad type", 400, env, request);
-    const rule = {
-      id: "s" + Date.now(),
-      type,
-      user: b.user ? String(b.user) : null,
-      key: b.key != null && b.key !== "" ? String(b.key) : null,
-      label: String(b.label || "").slice(0, 140),
-      by: gate.sess.user.username,
-      at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    const rules = (await getRules(env, tenantId)).filter((r) => !(r.type === rule.type && (r.user || null) === (rule.user || null) && (r.key || null) === (rule.key || null)));
-    rules.push(rule);
-    await saveRules(env, tenantId, rules);
-    return json({ ok: true, rules }, {}, env, request);
-  }
-  if (path === "/notify/suppress/remove" && method === "POST") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const id = String(b.id || "");
-    const rules = (await getRules(env, tenantId)).filter((r) => r.id !== id);
-    await saveRules(env, tenantId, rules);
-    return json({ ok: true, rules }, {}, env, request);
-  }
-  if (path === "/notify/overview" && method === "GET") {
-    const gate = await requireFullAccess(env, request);
-    if (gate.err) return gate.err;
-    const assetMap = {};
-    const confirmations = [];
-    try {
-      const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id=?").bind(db.tenantId).all();
-      for (const r of results || []) {
-        let a;
-        try {
-          a = JSON.parse(r.data);
-        } catch {
-          continue;
-        }
-        assetMap[a.id] = a.name || a.assetName || a.id;
-        const holder = String(a.assignedTo || "").trim();
-        if (a.confirm && a.confirm.status === "pending" && holder && holder.toLowerCase() !== "shared")
-          confirmations.push({ user: holder, key: String(a.id), name: assetMap[a.id] });
-      }
-    } catch {
-    }
-    const transfers = [];
-    try {
-      const { results } = await db.prepare(
-        "SELECT id, asset_id, to_user, requested_at FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
-      ).bind(db.tenantId).all();
-      for (const t of results || [])
-        transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || "Asset " + t.asset_id, at: t.requested_at });
-    } catch {
-    }
-    const week = vanWeek();
-    const vehicleChecks = [];
-    const skippedVanChecks = [];
-    try {
-      const { results: drivers } = await db.prepare(
-        "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
-      ).bind(db.tenantId).all();
-      const { results: doneRows } = await db.prepare(
-        "SELECT username, items FROM vehicle_checks WHERE tenant_id=? AND week=?"
-      ).bind(db.tenantId, week).all();
-      const doneSet = new Set((doneRows || []).map((r) => r.username));
-      for (const u of drivers || [])
-        if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check \u2014 week of " + week });
-      for (const r of doneRows || []) {
-        try {
-          const it = r.items ? JSON.parse(r.items) : {};
-          if (it.skipped) skippedVanChecks.push({ user: r.username, week, by: it.skippedBy || "" });
-        } catch {
-        }
-      }
-    } catch {
-    }
-    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, skippedVanChecks, week }, {}, env, request);
-  }
-  return error("Unknown portal route", 404, env, request);
-}
-function num(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
 }
 
 // src/routes/sitelog-api.js
@@ -9224,18 +9511,18 @@ async function getArrivalRulesFor(env, site, type) {
   if (!rules.length) rules = await getArrivalDefaultRules(env, type);
   return rules;
 }
-async function handle11(request, env, ctx) {
+async function handle9(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsFor(request) });
   }
-  function json3(data, status = 200, extraHeaders) {
+  function json4(data, status = 200, extraHeaders) {
     const base = corsFor(request);
     const headers = extraHeaders ? { ...base, ...extraHeaders } : base;
     return Response.json(data, { status, headers });
   }
   if (url.pathname === "/served-by" && request.method === "GET") {
-    return json3({
+    return json4({
       worker: "mostlane-api",
       sitelog: true,
       dbBound: !!env.SITELOG_DB,
@@ -9273,13 +9560,13 @@ async function handle11(request, env, ctx) {
   }
   function requireAdmin2() {
     if (!isAdminAuthorised()) {
-      return json3({ ok: false, error: "Unauthorised" }, 401);
+      return json4({ ok: false, error: "Unauthorised" }, 401);
     }
     return null;
   }
   if (url.pathname === "/admin-auth" && request.method === "POST") {
     const secret = env.SITELOG_ADMIN_SECRET || "";
-    if (!secret) return json3({ ok: false, error: "Admin secret not configured" }, 500);
+    if (!secret) return json4({ ok: false, error: "Admin secret not configured" }, 500);
     const headerSecret = request.headers.get("x-admin-secret") ?? "";
     let bodySecret = "";
     try {
@@ -9289,18 +9576,18 @@ async function handle11(request, env, ctx) {
       bodySecret = "";
     }
     const valid = constantTimeEqual(headerSecret, secret) || constantTimeEqual(bodySecret, secret);
-    if (!valid) return json3({ ok: false, error: "Invalid password" }, 401);
-    return json3({ ok: true });
+    if (!valid) return json4({ ok: false, error: "Invalid password" }, 401);
+    return json4({ ok: true });
   }
   if (url.pathname === "/portal-link" && request.method === "POST") {
     const body = await readBody(request);
     const token = (body.token ?? body.pt ?? "").toString();
     const deviceToken = (body.deviceToken ?? body.device_token ?? readDidCookie(request) ?? "").toString().trim();
-    if (!token || !deviceToken) return json3({ ok: false, error: "token and deviceToken required" }, 400);
+    if (!token || !deviceToken) return json4({ ok: false, error: "token and deviceToken required" }, 400);
     const payload = await verifyPortalToken(env, token);
-    if (!payload) return json3({ ok: false, error: "invalid or expired token" }, 401);
+    if (!payload) return json4({ ok: false, error: "invalid or expired token" }, 401);
     const portalUser = String(payload.u || "").trim();
-    if (!portalUser) return json3({ ok: false, error: "no portal user in token" }, 400);
+    if (!portalUser) return json4({ ok: false, error: "no portal user in token" }, 400);
     const first = String(payload.f || "").trim().slice(0, 80);
     const last = String(payload.l || "").trim().slice(0, 80);
     const company = String(payload.c || "Mostlane").trim().slice(0, 120) || "Mostlane";
@@ -9337,10 +9624,10 @@ async function handle11(request, env, ctx) {
           "INSERT INTO devices (device_token, person_id) VALUES (?, ?)"
         ).bind(deviceToken, personId).run();
       }
-      return json3({ ok: true, personId, portalUsername: portalUser }, 200, didSetCookie(deviceToken));
+      return json4({ ok: true, personId, portalUsername: portalUser }, 200, didSetCookie(deviceToken));
     } catch (err) {
       console.error("portal-link failed:", err);
-      return json3({ ok: false, error: "link failed" }, 500);
+      return json4({ ok: false, error: "link failed" }, 500);
     }
   }
   if ((url.pathname === "/register" || url.pathname === "/signup" || url.pathname === "/add-person") && request.method === "POST") {
@@ -9352,8 +9639,8 @@ async function handle11(request, env, ctx) {
     const purpose = (body.purpose ?? "").toString().trim().slice(0, 60) || null;
     const ptRaw = String(body.personType ?? body.type ?? "").toLowerCase();
     const personType = ptRaw === "visitor" ? "visitor" : ptRaw === "contractor" ? "contractor" : null;
-    if (!deviceToken || deviceToken.length > 128) return json3({ ok: false, error: "Missing deviceToken" }, 400);
-    if (!firstName && !lastName) return json3({ ok: false, error: "Missing name" }, 400);
+    if (!deviceToken || deviceToken.length > 128) return json4({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!firstName && !lastName) return json4({ ok: false, error: "Missing name" }, 400);
     try {
       await ensureOfflineSchema(env);
       const existing = await env.SITELOG_DB.prepare(`
@@ -9370,7 +9657,7 @@ async function handle11(request, env, ctx) {
                 person_type = COALESCE(?, person_type)
             WHERE id = ?
           `).bind(firstName, lastName, company, purpose, personType, existing.person_id).run();
-        return json3({
+        return json4({
           ok: true,
           status: "already_registered",
           personId: existing.person_id
@@ -9385,10 +9672,10 @@ async function handle11(request, env, ctx) {
           INSERT INTO devices (device_token, person_id)
           VALUES (?, ?)
         `).bind(deviceToken, personId).run();
-      return json3({ ok: true, status: "registered", personId }, 200, didSetCookie(deviceToken));
+      return json4({ ok: true, status: "registered", personId }, 200, didSetCookie(deviceToken));
     } catch (err) {
       console.error("register failed:", err);
-      return json3({
+      return json4({
         ok: false,
         error: "Registration failed"
       }, 500);
@@ -9398,15 +9685,15 @@ async function handle11(request, env, ctx) {
     const body = await readBody(request);
     const { deviceToken, firstName, lastName, company } = body;
     if (!deviceToken || !firstName || !lastName || !company) {
-      return json3({ ok: false, error: "Missing required fields" }, 400);
+      return json4({ ok: false, error: "Missing required fields" }, 400);
     }
     if (String(deviceToken).length > 128) {
-      return json3({ ok: false, error: "Invalid deviceToken" }, 400);
+      return json4({ ok: false, error: "Invalid deviceToken" }, 400);
     }
     const existing = await env.SITELOG_DB.prepare(
       "SELECT id FROM device_transfers WHERE new_device_token = ? AND status = 'pending'"
     ).bind(deviceToken).first();
-    if (existing) return json3({ ok: true, already_pending: true });
+    if (existing) return json4({ ok: true, already_pending: true });
     const tempPersonId = crypto.randomUUID();
     const transferId = crypto.randomUUID();
     const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
@@ -9432,7 +9719,7 @@ async function handle11(request, env, ctx) {
       tempPersonId,
       now
     ).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/pending-transfers" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -9440,7 +9727,7 @@ async function handle11(request, env, ctx) {
     const transfers = await env.SITELOG_DB.prepare(
       "SELECT dt.*, (SELECT COUNT(*) FROM visits v WHERE v.person_id = dt.temp_person_id) as visit_count FROM device_transfers dt WHERE dt.status = 'pending' ORDER BY dt.requested_at DESC"
     ).all();
-    return json3({ ok: true, transfers: transfers.results || [] });
+    return json4({ ok: true, transfers: transfers.results || [] });
   }
   if (url.pathname === "/all-engineers-for-transfer" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -9448,20 +9735,20 @@ async function handle11(request, env, ctx) {
     const engineers = await env.SITELOG_DB.prepare(
       "SELECT id, first_name, last_name, company FROM people WHERE (is_transfer_pending = 0 OR is_transfer_pending IS NULL) AND (archived = 0 OR archived IS NULL) ORDER BY last_name, first_name"
     ).all();
-    return json3({ ok: true, engineers: engineers.results || [] });
+    return json4({ ok: true, engineers: engineers.results || [] });
   }
   if (url.pathname === "/approve-transfer" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { transferId, targetPersonId } = await readBody(request);
     if (!transferId || !targetPersonId) {
-      return json3({ ok: false, error: "Missing transferId or targetPersonId" }, 400);
+      return json4({ ok: false, error: "Missing transferId or targetPersonId" }, 400);
     }
     const transfer = await env.SITELOG_DB.prepare(
       "SELECT * FROM device_transfers WHERE id = ? AND status = 'pending'"
     ).bind(transferId).first();
     if (!transfer) {
-      return json3({ ok: false, error: "Transfer not found or already resolved" }, 404);
+      return json4({ ok: false, error: "Transfer not found or already resolved" }, 404);
     }
     const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     await env.SITELOG_DB.prepare("UPDATE visits SET person_id = ? WHERE person_id = ?").bind(targetPersonId, transfer.temp_person_id).run();
@@ -9471,31 +9758,31 @@ async function handle11(request, env, ctx) {
     await env.SITELOG_DB.prepare(
       "UPDATE device_transfers SET status = 'approved', target_person_id = ?, resolved_at = ? WHERE id = ?"
     ).bind(targetPersonId, now, transferId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/reject-transfer" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { transferId } = await readBody(request);
-    if (!transferId) return json3({ ok: false, error: "Missing transferId" }, 400);
+    if (!transferId) return json4({ ok: false, error: "Missing transferId" }, 400);
     const transfer = await env.SITELOG_DB.prepare(
       "SELECT * FROM device_transfers WHERE id = ? AND status = 'pending'"
     ).bind(transferId).first();
-    if (!transfer) return json3({ ok: false, error: "Transfer not found" }, 404);
+    if (!transfer) return json4({ ok: false, error: "Transfer not found" }, 404);
     const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     await env.SITELOG_DB.prepare("DELETE FROM devices WHERE device_token = ?").bind(transfer.new_device_token).run();
     await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(transfer.temp_person_id).run();
     await env.SITELOG_DB.prepare(
       "UPDATE device_transfers SET status = 'rejected', resolved_at = ? WHERE id = ?"
     ).bind(now, transferId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/sites" && request.method === "GET") {
     await ensureOfflineSchema(env);
     const rows = await env.SITELOG_DB.prepare(
       "SELECT * FROM sites ORDER BY site_name ASC"
     ).all();
-    return json3({ sites: rows.results || [] });
+    return json4({ sites: rows.results || [] });
   }
   if (url.pathname === "/update-site" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9503,8 +9790,8 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const { id, siteName, radius, siteRules, siteRulesVisitor, category } = body;
-    if (!id) return json3({ error: "Missing id" }, 400);
-    if (!siteName) return json3({ error: "Missing siteName" }, 400);
+    if (!id) return json4({ error: "Missing id" }, 400);
+    if (!siteName) return json4({ error: "Missing siteName" }, 400);
     const sets = ["site_name = ?", "radius_m = ?", "site_rules = ?"];
     const binds = [siteName, Number(radius ?? 500), siteRules ?? null];
     if (category !== void 0) {
@@ -9519,7 +9806,7 @@ async function handle11(request, env, ctx) {
     await env.SITELOG_DB.prepare(
       `UPDATE sites SET ${sets.join(", ")} WHERE id = ?`
     ).bind(...binds).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/arrival-config" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -9533,7 +9820,7 @@ async function handle11(request, env, ctx) {
                 SUM(CASE WHEN site_rules_visitor IS NOT NULL AND TRIM(site_rules_visitor)!='' THEN 1 ELSE 0 END) AS withOwnVisitor
          FROM sites WHERE COALESCE(archived,0)=0`
     ).first();
-    return json3({
+    return json4({
       ok: true,
       contractor,
       visitor,
@@ -9557,7 +9844,7 @@ async function handle11(request, env, ctx) {
     const hasContractor = body.contractor !== void 0 || body.rules !== void 0 || body.text !== void 0;
     if (hasContractor) await save("contractor", body.contractor ?? body.rules ?? body.text ?? "");
     if (body.visitor !== void 0) await save("visitor", body.visitor);
-    return json3({
+    return json4({
       ok: true,
       contractor: await getArrivalDefaultRules(env, "contractor"),
       visitor: await getArrivalDefaultRules(env, "visitor")
@@ -9579,22 +9866,22 @@ async function handle11(request, env, ctx) {
     };
     if (which === "contractor" || which === "both") await applyOne("site_rules", "contractor");
     if (which === "visitor" || which === "both") await applyOne("site_rules_visitor", "visitor");
-    return json3({ ok: true, updated, onlyBlank, which });
+    return json4({ ok: true, updated, onlyBlank, which });
   }
   if (url.pathname === "/toggle-site" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { id } = await readBody(request);
-    if (!id) return json3({ error: "Missing id" }, 400);
+    if (!id) return json4({ error: "Missing id" }, 400);
     const site = await env.SITELOG_DB.prepare(
       "SELECT archived FROM sites WHERE id = ?"
     ).bind(id).first();
-    if (!site) return json3({ error: "Site not found" }, 404);
+    if (!site) return json4({ error: "Site not found" }, 404);
     const newState = site.archived ? 0 : 1;
     await env.SITELOG_DB.prepare(
       "UPDATE sites SET archived = ? WHERE id = ?"
     ).bind(newState, id).run();
-    return json3({ ok: true, archived: newState });
+    return json4({ ok: true, archived: newState });
   }
   if (url.pathname === "/engineers" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -9617,7 +9904,7 @@ async function handle11(request, env, ctx) {
         FROM people
         ORDER BY first_name ASC, last_name ASC
       `).all();
-    return json3({ engineers: rows.results || [] });
+    return json4({ engineers: rows.results || [] });
   }
   if (url.pathname === "/add-engineer" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9631,13 +9918,13 @@ async function handle11(request, env, ctx) {
     const rateIn = body.hourlyRate ?? body.hourly_rate;
     const hourlyRate = rateIn === "" || rateIn == null || Number.isNaN(Number(rateIn)) ? null : Number(rateIn);
     const isMain = body.isMain ?? body.is_main ? 1 : 0;
-    if (!firstName && !lastName) return json3({ ok: false, error: "Enter a name" }, 400);
+    if (!firstName && !lastName) return json4({ ok: false, error: "Enter a name" }, 400);
     const id = crypto.randomUUID();
     await env.SITELOG_DB.prepare(`
         INSERT INTO people (id, first_name, last_name, company, purpose, archived, hourly_rate, is_main)
         VALUES (?, ?, ?, ?, ?, 0, ?, ?)
       `).bind(id, firstName, lastName, company, purpose, hourlyRate, isMain).run();
-    return json3({ ok: true, id });
+    return json4({ ok: true, id });
   }
   if (url.pathname === "/update-engineer" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9645,7 +9932,7 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const id = body?.id;
-    if (!id) return json3({ error: "Missing id" }, 400);
+    if (!id) return json4({ error: "Missing id" }, 400);
     const firstName = body.firstName ?? body.first_name ?? null;
     const lastName = body.lastName ?? body.last_name ?? null;
     const company = body.company ?? null;
@@ -9734,33 +10021,33 @@ async function handle11(request, env, ctx) {
       sets.push("portal_username = ?");
       binds.push(pu || null);
     }
-    if (!sets.length) return json3({ ok: true, note: "No fields to update" });
+    if (!sets.length) return json4({ ok: true, note: "No fields to update" });
     binds.push(id);
     await env.SITELOG_DB.prepare(
       `UPDATE people SET ${sets.join(", ")} WHERE id = ?`
     ).bind(...binds).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/toggle-engineer" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { id } = await readBody(request);
-    if (!id) return json3({ error: "Missing id" }, 400);
+    if (!id) return json4({ error: "Missing id" }, 400);
     const person = await env.SITELOG_DB.prepare(
       "SELECT COALESCE(archived,0) as archived FROM people WHERE id = ?"
     ).bind(id).first();
-    if (!person) return json3({ error: "Engineer not found" }, 404);
+    if (!person) return json4({ error: "Engineer not found" }, 404);
     const newState = person.archived ? 0 : 1;
     await env.SITELOG_DB.prepare(
       "UPDATE people SET archived = ? WHERE id = ?"
     ).bind(newState, id).run();
-    return json3({ ok: true, archived: newState });
+    return json4({ ok: true, archived: newState });
   }
   if (url.pathname === "/delete-engineer" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { id } = await readBody(request);
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     const visitCount = await env.SITELOG_DB.prepare(
       "SELECT COUNT(*) as cnt FROM visits WHERE person_id = ?"
     ).bind(id).first();
@@ -9771,11 +10058,11 @@ async function handle11(request, env, ctx) {
       await env.SITELOG_DB.prepare(
         "DELETE FROM devices WHERE person_id = ?"
       ).bind(id).run();
-      return json3({ ok: true, message: "Archived and device links removed." });
+      return json4({ ok: true, message: "Archived and device links removed." });
     }
     await env.SITELOG_DB.prepare("DELETE FROM devices WHERE person_id = ?").bind(id).run();
     await env.SITELOG_DB.prepare("DELETE FROM people WHERE id = ?").bind(id).run();
-    return json3({ ok: true, message: "Engineer deleted." });
+    return json4({ ok: true, message: "Engineer deleted." });
   }
   if (url.pathname === "/merge-people" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9784,10 +10071,10 @@ async function handle11(request, env, ctx) {
     const body = await readBody(request);
     const primaryId = body?.primaryId;
     const mergeIds = Array.isArray(body?.mergeIds) ? [...new Set(body.mergeIds.filter((x) => x && x !== primaryId))] : [];
-    if (!primaryId) return json3({ ok: false, error: "Missing primaryId" }, 400);
-    if (!mergeIds.length) return json3({ ok: false, error: "No people to merge" }, 400);
+    if (!primaryId) return json4({ ok: false, error: "Missing primaryId" }, 400);
+    if (!mergeIds.length) return json4({ ok: false, error: "No people to merge" }, 400);
     const primary = await env.SITELOG_DB.prepare("SELECT id FROM people WHERE id = ?").bind(primaryId).first();
-    if (!primary) return json3({ ok: false, error: "Primary person not found" }, 404);
+    if (!primary) return json4({ ok: false, error: "Primary person not found" }, 404);
     const placeholders = mergeIds.map(() => "?").join(",");
     const moved = await env.SITELOG_DB.prepare(
       `UPDATE visits SET person_id = ? WHERE person_id IN (${placeholders})`
@@ -9805,17 +10092,17 @@ async function handle11(request, env, ctx) {
       `DELETE FROM people WHERE id IN (${placeholders})`
     ).bind(...mergeIds).run();
     const visitsMoved = moved && moved.meta && moved.meta.changes || 0;
-    return json3({ ok: true, merged: mergeIds.length, visitsMoved });
+    return json4({ ok: true, merged: mergeIds.length, visitsMoved });
   }
   if (url.pathname === "/reset-device" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { personId } = await readBody(request);
-    if (!personId) return json3({ ok: false, error: "Missing personId" }, 400);
+    if (!personId) return json4({ ok: false, error: "Missing personId" }, 400);
     const result = await env.SITELOG_DB.prepare(
       "DELETE FROM devices WHERE person_id = ?"
     ).bind(personId).run();
-    return json3({ ok: true, removedDevices: result.meta.changes });
+    return json4({ ok: true, removedDevices: result.meta.changes });
   }
   if (url.pathname === "/add-site" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9823,10 +10110,10 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const { siteName, lat, lng, radius, category } = await readBody(request);
     if (!siteName || lat == null || lng == null) {
-      return json3({ error: "Missing siteName/lat/lng" }, 400);
+      return json4({ error: "Missing siteName/lat/lng" }, 400);
     }
     if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
-      return json3({ error: "lat/lng must be numbers" }, 400);
+      return json4({ error: "lat/lng must be numbers" }, 400);
     }
     await env.SITELOG_DB.prepare(
       "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived, category) VALUES (?, ?, ?, ?, ?, 0, ?)"
@@ -9838,7 +10125,94 @@ async function handle11(request, env, ctx) {
       Number(radius ?? 500),
       String(category || "").trim() || "Projects"
     ).run();
-    return json3({ ok: true, siteName });
+    return json4({ ok: true, siteName });
+  }
+  if (url.pathname === "/upsert-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const name = String(body.siteName || "").trim();
+    if (!name) return json4({ error: "Missing siteName" }, 400);
+    const lat = body.lat !== void 0 ? Number(body.lat) : null;
+    const lng = body.lng !== void 0 ? Number(body.lng ?? body.lon) : null;
+    const cat = String(body.category || "").trim() || null;
+    const radius = body.radius !== void 0 ? Number(body.radius) : null;
+    const oldName = String(body.oldName || "").trim();
+    const lookupName = oldName || name;
+    const existing = await env.SITELOG_DB.prepare(
+      "SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1"
+    ).bind(lookupName).first();
+    if (existing) {
+      const sets = ["site_name = ?"];
+      const binds = [name];
+      if (lat !== null && isFiniteNumber(lat)) {
+        sets.push("lat = ?");
+        binds.push(lat);
+      }
+      if (lng !== null && isFiniteNumber(lng)) {
+        sets.push("lng = ?");
+        binds.push(lng);
+      }
+      if (radius !== null && isFiniteNumber(radius)) {
+        sets.push("radius_m = ?");
+        binds.push(radius);
+      }
+      if (cat) {
+        sets.push("category = ?");
+        binds.push(cat);
+      }
+      if (body.siteRules !== void 0) {
+        sets.push("site_rules = ?");
+        binds.push(body.siteRules || null);
+      }
+      if (body.siteRulesVisitor !== void 0) {
+        sets.push("site_rules_visitor = ?");
+        binds.push(body.siteRulesVisitor || null);
+      }
+      if (body.archived !== void 0) {
+        sets.push("archived = ?");
+        binds.push(body.archived ? 1 : 0);
+      }
+      binds.push(existing.id);
+      await env.SITELOG_DB.prepare(`UPDATE sites SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
+      return json4({ ok: true, id: existing.id, updated: true, renamed: !!(oldName && oldName.toLowerCase() !== name.toLowerCase()) });
+    }
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      return json4({ ok: false, reason: "no-coords" });
+    }
+    const id = crypto.randomUUID();
+    await env.SITELOG_DB.prepare(
+      "INSERT INTO sites (id, site_name, lat, lng, radius_m, archived, category, site_rules, site_rules_visitor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      id,
+      name,
+      lat,
+      lng,
+      isFiniteNumber(radius) ? radius : 500,
+      body.archived ? 1 : 0,
+      cat || "Projects",
+      body.siteRules || null,
+      body.siteRulesVisitor || null
+    ).run();
+    return json4({ ok: true, id, created: true });
+  }
+  if (url.pathname === "/delete-site" && request.method === "POST") {
+    const guard = requireAdmin2();
+    if (guard) return guard;
+    await ensureOfflineSchema(env);
+    const body = await readBody(request);
+    const name = String(body.siteName || "").trim();
+    const id = String(body.id || "").trim();
+    if (!name && !id) return json4({ error: "Missing siteName or id" }, 400);
+    const row = id ? await env.SITELOG_DB.prepare("SELECT id FROM sites WHERE id = ?").bind(id).first() : await env.SITELOG_DB.prepare("SELECT id FROM sites WHERE LOWER(TRIM(site_name)) = LOWER(TRIM(?)) LIMIT 1").bind(name).first();
+    if (!row) return json4({ ok: true, missing: true });
+    if (body.archive) {
+      await env.SITELOG_DB.prepare("UPDATE sites SET archived = 1 WHERE id = ?").bind(row.id).run();
+      return json4({ ok: true, id: row.id, archived: true });
+    }
+    await env.SITELOG_DB.prepare("DELETE FROM sites WHERE id = ?").bind(row.id).run();
+    return json4({ ok: true, id: row.id, deleted: true });
   }
   if (url.pathname === "/bulk-add-sites" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9846,7 +10220,7 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const incoming = Array.isArray(body.sites) ? body.sites : [];
-    if (!incoming.length) return json3({ ok: false, error: "No sites provided" }, 400);
+    if (!incoming.length) return json4({ ok: false, error: "No sites provided" }, 400);
     const existing = await env.SITELOG_DB.prepare("SELECT site_name FROM sites").all();
     const have = new Set((existing.results || []).map((r) => String(r.site_name || "").trim().toLowerCase()));
     const stmts = [];
@@ -9874,22 +10248,22 @@ async function handle11(request, env, ctx) {
       ));
     }
     if (stmts.length) await env.SITELOG_DB.batch(stmts);
-    return json3({ ok: true, added: stmts.length, skipped });
+    return json4({ ok: true, added: stmts.length, skipped });
   }
   if (url.pathname === "/manual-checkout" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { visitId, manualTime } = await readBody(request);
-    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    if (!visitId) return json4({ ok: false, error: "Missing visitId" }, 400);
     if (manualTime !== void 0 && manualTime !== "" && !isValidDateTimeString(manualTime)) {
-      return json3({ ok: false, error: "Invalid manualTime format" }, 400);
+      return json4({ ok: false, error: "Invalid manualTime format" }, 400);
     }
     if (manualTime) {
       const vrow = await env.SITELOG_DB.prepare(
         "SELECT check_in_at FROM visits WHERE id = ?"
       ).bind(visitId).first();
       if (vrow && vrow.check_in_at && new Date(manualTime) <= new Date(vrow.check_in_at)) {
-        return json3({ ok: false, error: "Sign-out time must be after sign-in time" }, 400);
+        return json4({ ok: false, error: "Sign-out time must be after sign-in time" }, 400);
       }
     }
     let checkoutTimeSQL = "CURRENT_TIMESTAMP";
@@ -9901,9 +10275,9 @@ async function handle11(request, env, ctx) {
     const sql = `UPDATE visits SET check_out_at = ${checkoutTimeSQL}, auto_checkout = 0 WHERE id = ? AND check_out_at IS NULL`;
     const result = await env.SITELOG_DB.prepare(sql).bind(...bindValues).run();
     if (result.meta.changes === 0) {
-      return json3({ ok: false, error: "Visit not found or already checked out" }, 400);
+      return json4({ ok: false, error: "Visit not found or already checked out" }, 400);
     }
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/add-visit" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -9911,47 +10285,47 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const { personId, site, checkInAt, checkOutAt } = await readBody(request);
     if (!personId || !site || !checkInAt) {
-      return json3({ ok: false, error: "Missing person, site or start time" }, 400);
+      return json4({ ok: false, error: "Missing person, site or start time" }, 400);
     }
     const siteName = String(site).trim().slice(0, 120);
-    if (!siteName) return json3({ ok: false, error: "Missing site" }, 400);
-    if (!isValidDateTimeString(checkInAt)) return json3({ ok: false, error: "Invalid start time" }, 400);
-    if (checkOutAt && !isValidDateTimeString(checkOutAt)) return json3({ ok: false, error: "Invalid end time" }, 400);
+    if (!siteName) return json4({ ok: false, error: "Missing site" }, 400);
+    if (!isValidDateTimeString(checkInAt)) return json4({ ok: false, error: "Invalid start time" }, 400);
+    if (checkOutAt && !isValidDateTimeString(checkOutAt)) return json4({ ok: false, error: "Invalid end time" }, 400);
     if (checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
-      return json3({ ok: false, error: "End time must be after start time" }, 400);
+      return json4({ ok: false, error: "End time must be after start time" }, 400);
     }
     const person = await env.SITELOG_DB.prepare("SELECT id FROM people WHERE id = ?").bind(personId).first();
-    if (!person) return json3({ ok: false, error: "Person not found" }, 404);
+    if (!person) return json4({ ok: false, error: "Person not found" }, 404);
     const id = crypto.randomUUID();
     await env.SITELOG_DB.prepare(`
         INSERT INTO visits
           (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, manual_entry, check_in_at, check_out_at)
         VALUES (?, ?, ?, NULL, NULL, NULL, 1, 0, 1, 1, 1, ?, ?)
       `).bind(id, personId, siteName, checkInAt, checkOutAt ?? null).run();
-    return json3({ ok: true, visitId: id });
+    return json4({ ok: true, visitId: id });
   }
   if (url.pathname === "/update-visit-times" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { visitId, checkInAt, checkOutAt } = await readBody(request);
-    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    if (!visitId) return json4({ ok: false, error: "Missing visitId" }, 400);
     if (!checkInAt || !isValidDateTimeString(checkInAt)) {
-      return json3({ ok: false, error: "Invalid checkInAt" }, 400);
+      return json4({ ok: false, error: "Invalid checkInAt" }, 400);
     }
     if (checkOutAt && !isValidDateTimeString(checkOutAt)) {
-      return json3({ ok: false, error: "Invalid checkOutAt" }, 400);
+      return json4({ ok: false, error: "Invalid checkOutAt" }, 400);
     }
     if (checkOutAt && new Date(checkOutAt) <= new Date(checkInAt)) {
-      return json3({ ok: false, error: "check_out_at must be after check_in_at" }, 400);
+      return json4({ ok: false, error: "check_out_at must be after check_in_at" }, 400);
     }
     await env.SITELOG_DB.prepare(
       "UPDATE visits SET check_in_at = ?, check_out_at = ? WHERE id = ?"
     ).bind(checkInAt, checkOutAt ?? null, visitId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/confirm-checkout" && request.method === "POST") {
     const { visitId } = await readBody(request);
-    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    if (!visitId) return json4({ ok: false, error: "Missing visitId" }, 400);
     const result = await env.SITELOG_DB.prepare(`
         UPDATE visits
         SET check_out_at = MAX(check_in_at, COALESCE(check_out_at, CURRENT_TIMESTAMP)),
@@ -9960,7 +10334,7 @@ async function handle11(request, env, ctx) {
         WHERE id = ?
       `).bind(visitId).run();
     if (result.meta.changes === 0) {
-      return json3({ ok: false, error: "Visit not found" }, 400);
+      return json4({ ok: false, error: "Visit not found" }, 400);
     }
     let travelOut = null;
     try {
@@ -9983,12 +10357,12 @@ async function handle11(request, env, ctx) {
       }
     } catch (e) {
     }
-    return json3({ ok: true, status: "checked_out", travel: travelOut });
+    return json4({ ok: true, status: "checked_out", travel: travelOut });
   }
   if (url.pathname === "/confirm-checkin" && request.method === "POST") {
     const { deviceToken, lat, lng, accuracy, site, visitId } = await readBody(request);
-    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
-    if (!site) return json3({ ok: false, error: "Missing site" }, 400);
+    if (!deviceToken) return json4({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!site) return json4({ ok: false, error: "Missing site" }, 400);
     const siteCheck = await env.SITELOG_DB.prepare(`
         SELECT id, lat, lng
         FROM sites
@@ -9996,18 +10370,18 @@ async function handle11(request, env, ctx) {
         LIMIT 1
       `).bind(site).first();
     if (!siteCheck) {
-      return json3({ ok: false, error: "Site not found or archived" }, 404);
+      return json4({ ok: false, error: "Site not found or archived" }, 404);
     }
     if (lat != null && lat !== "" && !isFiniteNumber(lat)) {
-      return json3({ ok: false, error: "Invalid lat" }, 400);
+      return json4({ ok: false, error: "Invalid lat" }, 400);
     }
     if (lng != null && lng !== "" && !isFiniteNumber(lng)) {
-      return json3({ ok: false, error: "Invalid lng" }, 400);
+      return json4({ ok: false, error: "Invalid lng" }, 400);
     }
     const device = await env.SITELOG_DB.prepare(
       "SELECT person_id FROM devices WHERE device_token = ?"
     ).bind(deviceToken).first();
-    if (!device) return json3({ ok: false, error: "Device not registered" }, 404);
+    if (!device) return json4({ ok: false, error: "Device not registered" }, 404);
     const person = await env.SITELOG_DB.prepare(
       "SELECT first_name, company FROM people WHERE id = ?"
     ).bind(device.person_id).first();
@@ -10028,7 +10402,7 @@ async function handle11(request, env, ctx) {
     if (!targetId) {
       const pending = await pendingCompulsoryDocs(env, device.person_id, site);
       if (pending.length) {
-        return json3({ ok: false, status: "must_acknowledge", site, documents: pending }, 409);
+        return json4({ ok: false, status: "must_acknowledge", site, documents: pending }, 409);
       }
     }
     let travelIn = null;
@@ -10048,7 +10422,7 @@ async function handle11(request, env, ctx) {
         }
       } catch (e) {
       }
-      return json3({
+      return json4({
         ok: true,
         status: "checked_in",
         site,
@@ -10129,7 +10503,7 @@ async function handle11(request, env, ctx) {
       }
     } catch (e) {
     }
-    return json3({
+    return json4({
       ok: true,
       status: "checked_in",
       site,
@@ -10145,14 +10519,14 @@ async function handle11(request, env, ctx) {
     const deviceToken = (body.deviceToken || readDidCookie(request) || "").toString().trim();
     const siteName = (body.siteName || "").toString().trim().slice(0, 120);
     const lat = body.lat, lng = body.lng, accuracy = body.accuracy;
-    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
-    if (!siteName) return json3({ ok: false, error: "Please enter a site name" }, 400);
-    if (lat != null && lat !== "" && !isFiniteNumber(lat)) return json3({ ok: false, error: "Invalid lat" }, 400);
-    if (lng != null && lng !== "" && !isFiniteNumber(lng)) return json3({ ok: false, error: "Invalid lng" }, 400);
+    if (!deviceToken) return json4({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!siteName) return json4({ ok: false, error: "Please enter a site name" }, 400);
+    if (lat != null && lat !== "" && !isFiniteNumber(lat)) return json4({ ok: false, error: "Invalid lat" }, 400);
+    if (lng != null && lng !== "" && !isFiniteNumber(lng)) return json4({ ok: false, error: "Invalid lng" }, 400);
     const device = await env.SITELOG_DB.prepare(
       "SELECT person_id FROM devices WHERE device_token = ?"
     ).bind(deviceToken).first();
-    if (!device) return json3({ ok: false, error: "Device not registered" }, 404);
+    if (!device) return json4({ ok: false, error: "Device not registered" }, 404);
     const person = await env.SITELOG_DB.prepare(
       "SELECT first_name, company FROM people WHERE id = ?"
     ).bind(device.person_id).first();
@@ -10169,7 +10543,7 @@ async function handle11(request, env, ctx) {
       isFiniteNumber(accuracy) ? Number(accuracy) : null,
       siteName
     ).run();
-    return json3({
+    return json4({
       ok: true,
       status: "checked_in",
       site: siteName,
@@ -10183,16 +10557,16 @@ async function handle11(request, env, ctx) {
     if (guard) return guard;
     await ensureOfflineSchema(env);
     const { visitId, mode, siteName, radius, existingSiteName } = await readBody(request);
-    if (!visitId) return json3({ ok: false, error: "Missing visitId" }, 400);
+    if (!visitId) return json4({ ok: false, error: "Missing visitId" }, 400);
     const visit = await env.SITELOG_DB.prepare(
       "SELECT id, lat, lng FROM visits WHERE id = ?"
     ).bind(visitId).first();
-    if (!visit) return json3({ ok: false, error: "Visit not found" }, 404);
+    if (!visit) return json4({ ok: false, error: "Visit not found" }, 404);
     if (mode === "create") {
       const name = (siteName || "").toString().trim().slice(0, 120);
-      if (!name) return json3({ ok: false, error: "Missing site name" }, 400);
+      if (!name) return json4({ ok: false, error: "Missing site name" }, 400);
       if (!isFiniteNumber(visit.lat) || !isFiniteNumber(visit.lng)) {
-        return json3({ ok: false, error: "This visit has no captured location, so a site can't be created from it. Link to an existing site instead." }, 400);
+        return json4({ ok: false, error: "This visit has no captured location, so a site can't be created from it. Link to an existing site instead." }, 400);
       }
       const existing = await env.SITELOG_DB.prepare(
         "SELECT id FROM sites WHERE site_name = ?"
@@ -10205,31 +10579,31 @@ async function handle11(request, env, ctx) {
       await env.SITELOG_DB.prepare(
         "UPDATE visits SET site_code = ?, unmatched_site = 0 WHERE id = ?"
       ).bind(name, visitId).run();
-      return json3({ ok: true, site: name, created: !existing });
+      return json4({ ok: true, site: name, created: !existing });
     }
     if (mode === "link") {
       const name = (existingSiteName || "").toString().trim();
-      if (!name) return json3({ ok: false, error: "Missing site to link to" }, 400);
+      if (!name) return json4({ ok: false, error: "Missing site to link to" }, 400);
       const site = await env.SITELOG_DB.prepare(
         "SELECT id FROM sites WHERE site_name = ?"
       ).bind(name).first();
-      if (!site) return json3({ ok: false, error: "Site not found" }, 404);
+      if (!site) return json4({ ok: false, error: "Site not found" }, 404);
       await env.SITELOG_DB.prepare(
         "UPDATE visits SET site_code = ?, unmatched_site = 0 WHERE id = ?"
       ).bind(name, visitId).run();
-      return json3({ ok: true, site: name });
+      return json4({ ok: true, site: name });
     }
-    return json3({ ok: false, error: "Invalid mode" }, 400);
+    return json4({ ok: false, error: "Invalid mode" }, 400);
   }
   if (url.pathname === "/delete-visit" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { visitId } = await readBody(request);
-    if (!visitId) return json3({ error: "Missing visitId" }, 400);
+    if (!visitId) return json4({ error: "Missing visitId" }, 400);
     await env.SITELOG_DB.prepare(
       "DELETE FROM visits WHERE id = ?"
     ).bind(visitId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/sync-event" && request.method === "POST") {
     await ensureOfflineSchema(env);
@@ -10237,7 +10611,7 @@ async function handle11(request, env, ctx) {
     const deviceToken = (body.deviceToken || readDidCookie(request) || "").toString().trim();
     const intent = body.intent === "out" ? "out" : "in";
     const accuracy = isFiniteNumber(body.accuracy) ? Number(body.accuracy) : null;
-    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!deviceToken) return json4({ ok: false, error: "Missing deviceToken" }, 400);
     await touchDevice(env, deviceToken);
     const nowMs = Date.now();
     const clientNowMs = typeof body.clientNow === "string" ? Date.parse(body.clientNow) : NaN;
@@ -10275,7 +10649,7 @@ async function handle11(request, env, ctx) {
       await env.SITELOG_DB.prepare(
         "INSERT INTO pending_events (id, device_token, lat, lng, accuracy, site_code, intent, occurred_at, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
       ).bind(crypto.randomUUID(), deviceToken, latVal, lngVal, accuracy, siteCode2, intent, occurredSql).run();
-      return json3({ ok: true, status: "logged_pending", reason });
+      return json4({ ok: true, status: "logged_pending", reason });
     };
     if (!device) return await logPending(matchedSite ? matchedSite.site_name : null, "unknown_device");
     if (!matchedSite) return await logPending(null, "no_site_match");
@@ -10289,13 +10663,13 @@ async function handle11(request, env, ctx) {
       await env.SITELOG_DB.prepare(
         "UPDATE visits SET check_out_at = ?, auto_checkout = 0, sign_out_confirmed = 1, offline_synced = 1 WHERE id = ? AND check_out_at IS NULL"
       ).bind(outSql, openVisit.id).run();
-      return json3({ ok: true, status: "checked_out", site: siteCode, offline: true });
+      return json4({ ok: true, status: "checked_out", site: siteCode, offline: true });
     }
-    if (openVisit) return json3({ ok: true, status: "already_in", site: siteCode, offline: true });
+    if (openVisit) return json4({ ok: true, status: "already_in", site: siteCode, offline: true });
     const dupIn = await env.SITELOG_DB.prepare(
       "SELECT id FROM visits WHERE person_id = ? AND site_code = ? AND check_in_at = ? LIMIT 1"
     ).bind(device.person_id, siteCode, occurredSql).first();
-    if (dupIn) return json3({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
+    if (dupIn) return json4({ ok: true, status: "duplicate_ignored", site: siteCode, offline: true });
     let offTravel = null, offTransferFrom = null;
     const openOther = await env.SITELOG_DB.prepare(
       "SELECT id, site_code, check_in_at, lat, lng FROM visits WHERE person_id = ? AND check_out_at IS NULL AND site_code != ? AND check_in_at < ? ORDER BY check_in_at DESC LIMIT 1"
@@ -10330,7 +10704,7 @@ async function handle11(request, env, ctx) {
     await env.SITELOG_DB.prepare(
       "INSERT INTO visits (id, person_id, site_code, lat, lng, accuracy, hs_ack, auto_checkout, sign_in_confirmed, sign_out_confirmed, offline_synced, check_in_at, travel_in_miles, travel_in_mins) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 0, 1, ?, ?, ?)"
     ).bind(crypto.randomUUID(), device.person_id, siteCode, latVal, lngVal, accuracy, occurredSql, offTravel ? offTravel.miles : null, offTravel ? offTravel.mins : null).run();
-    return json3({ ok: true, status: "checked_in", site: siteCode, offline: true, transferFrom: offTransferFrom });
+    return json4({ ok: true, status: "checked_in", site: siteCode, offline: true, transferFrom: offTransferFrom });
   }
   if (url.pathname === "/pending-events" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -10339,21 +10713,21 @@ async function handle11(request, env, ctx) {
     const rows = await env.SITELOG_DB.prepare(
       "SELECT id, device_token, lat, lng, accuracy, site_code, intent, occurred_at, synced_at FROM pending_events WHERE COALESCE(resolved,0) = 0 ORDER BY occurred_at DESC LIMIT 200"
     ).all();
-    return json3({ ok: true, events: rows.results || [] });
+    return json4({ ok: true, events: rows.results || [] });
   }
   if (url.pathname === "/scan" && request.method === "POST") {
     const body = await readBody(request);
     const lat = body.lat, lng = body.lng, accuracy = body.accuracy;
     const deviceToken = body.deviceToken || readDidCookie(request);
-    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!deviceToken) return json4({ ok: false, error: "Missing deviceToken" }, 400);
     if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
-      return json3({ ok: false, error: "Missing or invalid lat/lng" }, 400);
+      return json4({ ok: false, error: "Missing or invalid lat/lng" }, 400);
     }
     await touchDevice(env, deviceToken);
     const latNum = Number(lat);
     const lngNum = Number(lng);
     if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
-      return json3({ ok: false, error: "lat/lng out of range" }, 400);
+      return json4({ ok: false, error: "lat/lng out of range" }, 400);
     }
     const siteRows = await env.SITELOG_DB.prepare(
       "SELECT * FROM sites WHERE COALESCE(archived,0) = 0"
@@ -10379,7 +10753,7 @@ async function handle11(request, env, ctx) {
           const perNoSite = await env.SITELOG_DB.prepare(
             "SELECT first_name, company FROM people WHERE id = ?"
           ).bind(devNoSite.person_id).first();
-          return json3({
+          return json4({
             status: "confirm_sign_out",
             visitId: openAny.id,
             site: openAny.site_code,
@@ -10398,9 +10772,9 @@ async function handle11(request, env, ctx) {
         }
       }
       if (!nearestSite) {
-        return json3({ status: "unknown_site", reason: "No active sites configured" });
+        return json4({ status: "unknown_site", reason: "No active sites configured" });
       }
-      return json3({
+      return json4({
         status: "unknown_site",
         nearestSite: nearestSite.site_name,
         distance_m: Math.round(nearestDist)
@@ -10413,7 +10787,7 @@ async function handle11(request, env, ctx) {
       "SELECT * FROM devices WHERE device_token = ?"
     ).bind(deviceToken).first();
     if (!device) {
-      return json3({
+      return json4({
         status: "first_visit",
         site: siteCode,
         askType: true,
@@ -10427,7 +10801,7 @@ async function handle11(request, env, ctx) {
       "SELECT COALESCE(archived,0) as archived FROM people WHERE id = ?"
     ).bind(device.person_id).first();
     if (isArchived && isArchived.archived) {
-      return json3({ status: "blocked", reason: "engineer_archived" });
+      return json4({ status: "blocked", reason: "engineer_archived" });
     }
     const person = await env.SITELOG_DB.prepare(
       "SELECT first_name, company, person_type, portal_username FROM people WHERE id = ?"
@@ -10456,7 +10830,7 @@ async function handle11(request, env, ctx) {
         WHERE person_id = ? AND site_code = ? AND check_out_at IS NULL
       `).bind(device.person_id, siteCode).first();
     if (openVisit) {
-      return json3({
+      return json4({
         status: "confirm_sign_out",
         visitId: openVisit.id,
         site: siteCode,
@@ -10465,7 +10839,7 @@ async function handle11(request, env, ctx) {
       });
     }
     const mustAck = await pendingCompulsoryDocs(env, device.person_id, siteCode);
-    return json3({
+    return json4({
       status: "confirm_check_in",
       site: siteCode,
       firstName: person?.first_name || null,
@@ -10479,36 +10853,36 @@ async function handle11(request, env, ctx) {
     const rows = await env.SITELOG_DB.prepare(
       "SELECT id, name FROM companies ORDER BY name ASC"
     ).all();
-    return json3({ companies: rows.results || [] });
+    return json4({ companies: rows.results || [] });
   }
   if (url.pathname === "/add-company" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { name } = await readBody(request);
     if (!name || !name.trim()) {
-      return json3({ ok: false, error: "Missing company name" }, 400);
+      return json4({ ok: false, error: "Missing company name" }, 400);
     }
     await env.SITELOG_DB.prepare(
       "INSERT INTO companies (id, name) VALUES (?, ?)"
     ).bind(crypto.randomUUID(), name.trim()).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/delete-company" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const { id } = await readBody(request);
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     await env.SITELOG_DB.prepare(
       "DELETE FROM site_company_map WHERE company_id = ?"
     ).bind(id).run();
     await env.SITELOG_DB.prepare(
       "DELETE FROM companies WHERE id = ?"
     ).bind(id).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/companies-for-site" && request.method === "GET") {
     const siteName = url.searchParams.get("site");
-    if (!siteName) return json3({ error: "Missing site parameter" }, 400);
+    if (!siteName) return json4({ error: "Missing site parameter" }, 400);
     const rows = await env.SITELOG_DB.prepare(`
         SELECT c.id, c.name
         FROM sites s
@@ -10517,14 +10891,14 @@ async function handle11(request, env, ctx) {
         WHERE s.site_name = ?
         ORDER BY c.name ASC
       `).bind(siteName).all();
-    return json3({ companies: rows.results || [] });
+    return json4({ companies: rows.results || [] });
   }
   if (url.pathname === "/update-site-companies" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const mappings = await readBody(request);
     if (!mappings || typeof mappings !== "object") {
-      return json3({ ok: false, error: "Invalid payload" }, 400);
+      return json4({ ok: false, error: "Invalid payload" }, 400);
     }
     try {
       const statements = [];
@@ -10541,10 +10915,10 @@ async function handle11(request, env, ctx) {
         }
       }
       if (statements.length) await env.SITELOG_DB.batch(statements);
-      return json3({ ok: true });
+      return json4({ ok: true });
     } catch (err) {
       console.error("update-site-companies failed:", err);
-      return json3({
+      return json4({
         ok: false,
         error: "Database update failed"
       }, 500);
@@ -10552,7 +10926,7 @@ async function handle11(request, env, ctx) {
   }
   if (url.pathname === "/site-occupants" && request.method === "GET") {
     const siteName = url.searchParams.get("site");
-    if (!siteName) return json3({ error: "Missing site parameter" }, 400);
+    if (!siteName) return json4({ error: "Missing site parameter" }, 400);
     const rows = await env.SITELOG_DB.prepare(`
         SELECT p.first_name, p.last_name, p.company, p.purpose, v.check_in_at
         FROM visits v
@@ -10560,16 +10934,16 @@ async function handle11(request, env, ctx) {
         WHERE v.site_code = ? AND v.check_out_at IS NULL AND COALESCE(p.archived,0) = 0
         ORDER BY v.check_in_at ASC
       `).bind(siteName).all();
-    return json3({ occupants: rows.results || [] });
+    return json4({ occupants: rows.results || [] });
   }
   if (url.pathname === "/my-visits" && request.method === "GET") {
     const deviceToken = url.searchParams.get("deviceToken");
     const limit = Math.min(Number(url.searchParams.get("limit") || 60), 200);
-    if (!deviceToken) return json3({ error: "Missing deviceToken" }, 400);
+    if (!deviceToken) return json4({ error: "Missing deviceToken" }, 400);
     const device = await env.SITELOG_DB.prepare(
       "SELECT person_id FROM devices WHERE device_token = ?"
     ).bind(deviceToken).first();
-    if (!device) return json3({ visits: [] });
+    if (!device) return json4({ visits: [] });
     const rows = await env.SITELOG_DB.prepare(`
         SELECT id, site_code, check_in_at, check_out_at,
                COALESCE(sign_in_confirmed,0) as sign_in_confirmed,
@@ -10580,11 +10954,11 @@ async function handle11(request, env, ctx) {
         ORDER BY check_in_at DESC
         LIMIT ?
       `).bind(device.person_id, limit).all();
-    return json3({ visits: rows.results || [] });
+    return json4({ visits: rows.results || [] });
   }
   if (url.pathname === "/me" && request.method === "GET") {
     const deviceToken = url.searchParams.get("deviceToken");
-    if (!deviceToken) return json3({ ok: false, error: "Missing deviceToken" }, 400);
+    if (!deviceToken) return json4({ ok: false, error: "Missing deviceToken" }, 400);
     const row = await env.SITELOG_DB.prepare(`
         SELECT p.id AS person_id, p.first_name, p.last_name, p.company, p.purpose,
                COALESCE(p.archived,0) AS archived,
@@ -10594,8 +10968,8 @@ async function handle11(request, env, ctx) {
         WHERE d.device_token = ?
         LIMIT 1
       `).bind(deviceToken).first();
-    if (!row) return json3({ ok: true, registered: false });
-    return json3({
+    if (!row) return json4({ ok: true, registered: false });
+    return json4({
       ok: true,
       registered: true,
       personId: row.person_id,
@@ -10611,16 +10985,16 @@ async function handle11(request, env, ctx) {
     const orig = parseLatLng(url.searchParams.get("orig") || "");
     const dest = parseLatLng(url.searchParams.get("dest") || "");
     if (!orig || !dest) {
-      return json3({
+      return json4({
         ok: false,
         error: "Invalid orig/dest. Expected 'lat,lng' with valid ranges."
       }, 400);
     }
     const result = await getTravelData(env, orig.lat, orig.lng, dest.lat, dest.lng);
     if (!result) {
-      return json3({ ok: false, error: "Travel data unavailable" }, 502);
+      return json4({ ok: false, error: "Travel data unavailable" }, 502);
     }
-    return json3({
+    return json4({
       ok: true,
       duration_text: result.duration_text,
       distance_text: result.distance_text,
@@ -10630,11 +11004,11 @@ async function handle11(request, env, ctx) {
   }
   if (url.pathname === "/geocode" && request.method === "GET") {
     const address = (url.searchParams.get("address") || "").trim();
-    if (!address) return json3({ ok: false, error: "Missing address" }, 400);
-    if (address.length > 200) return json3({ ok: false, error: "Address too long" }, 400);
+    if (!address) return json4({ ok: false, error: "Missing address" }, 400);
+    if (address.length > 200) return json4({ ok: false, error: "Address too long" }, 400);
     const result = await getGeocode(env, address);
-    if (!result) return json3({ ok: false, error: "Geocode failed" }, 502);
-    return json3({
+    if (!result) return json4({ ok: false, error: "Geocode failed" }, 502);
+    return json4({
       ok: true,
       lat: result.lat,
       lng: result.lng,
@@ -10642,7 +11016,7 @@ async function handle11(request, env, ctx) {
     });
   }
   if (url.pathname === "/log-failed-scan" && request.method === "POST") {
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/admin" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -10651,10 +11025,10 @@ async function handle11(request, env, ctx) {
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
     if (from && !isValidDateKey(from)) {
-      return json3({ error: "Invalid 'from' date (expected YYYY-MM-DD)" }, 400);
+      return json4({ error: "Invalid 'from' date (expected YYYY-MM-DD)" }, 400);
     }
     if (to && !isValidDateKey(to)) {
-      return json3({ error: "Invalid 'to' date (expected YYYY-MM-DD)" }, 400);
+      return json4({ error: "Invalid 'to' date (expected YYYY-MM-DD)" }, 400);
     }
     let sql = `
         SELECT v.id AS visit_id, v.person_id, v.site_code, v.check_in_at, v.check_out_at,
@@ -10702,7 +11076,7 @@ async function handle11(request, env, ctx) {
     sql += " ORDER BY v.check_in_at DESC LIMIT 500";
     const stmt = env.SITELOG_DB.prepare(sql);
     const rows = params.length ? await stmt.bind(...params).all() : await stmt.all();
-    return json3({ visits: rows.results || [] });
+    return json4({ visits: rows.results || [] });
   }
   if (url.pathname === "/job-costing" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -10710,8 +11084,8 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
-    if (from && !isValidDateKey(from)) return json3({ ok: false, error: "Invalid 'from' date (expected YYYY-MM-DD)" }, 400);
-    if (to && !isValidDateKey(to)) return json3({ ok: false, error: "Invalid 'to' date (expected YYYY-MM-DD)" }, 400);
+    if (from && !isValidDateKey(from)) return json4({ ok: false, error: "Invalid 'from' date (expected YYYY-MM-DD)" }, 400);
+    if (to && !isValidDateKey(to)) return json4({ ok: false, error: "Invalid 'to' date (expected YYYY-MM-DD)" }, 400);
     const engRows = (await env.SITELOG_DB.prepare(`
         SELECT id, first_name, last_name, company,
                COALESCE(hourly_rate, NULL) as hourly_rate,
@@ -10827,7 +11201,7 @@ async function handle11(request, env, ctx) {
         people
       };
     }).sort((a, b) => b.total - a.total);
-    return json3({ ok: true, from: from || null, to: to || null, sites: out });
+    return json4({ ok: true, from: from || null, to: to || null, sites: out });
   }
   if (url.pathname === "/on-site" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -10845,7 +11219,7 @@ async function handle11(request, env, ctx) {
       name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
       company: r.company || ""
     }));
-    return json3({ people });
+    return json4({ people });
   }
   if (url.pathname === "/documents/create" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -10903,14 +11277,14 @@ async function handle11(request, env, ctx) {
         a.signature ? now : null
       ).run();
     }
-    return json3({ ok: true, id: docId });
+    return json4({ ok: true, id: docId });
   }
   if (url.pathname === "/documents/closeout" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const body = await readBody(request);
     const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
-    if (!body.docId) return json3({ ok: false, error: "Missing docId" }, 400);
+    if (!body.docId) return json4({ ok: false, error: "Missing docId" }, 400);
     await env.SITELOG_DB.prepare(`
         UPDATE documents
         SET status = 'closed',
@@ -10928,7 +11302,7 @@ async function handle11(request, env, ctx) {
       now,
       body.docId
     ).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/site-people" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -10949,15 +11323,15 @@ async function handle11(request, env, ctx) {
       company: r.company || "",
       on_now: Number(r.on_now || 0) === 1
     })).filter((p) => p.name);
-    return json3({ people });
+    return json4({ people });
   }
   if (url.pathname === "/my-documents" && request.method === "GET") {
     await ensureOfflineSchema(env);
     const deviceToken = url.searchParams.get("deviceToken") || "";
     const site = url.searchParams.get("site") || "";
-    if (!deviceToken) return json3({ documents: [] });
+    if (!deviceToken) return json4({ documents: [] });
     const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
-    if (!dev || !dev.person_id) return json3({ documents: [] });
+    if (!dev || !dev.person_id) return json4({ documents: [] });
     const wheres = ["d.id IN (SELECT document_id FROM document_attendees WHERE person_id = ? UNION SELECT document_id FROM document_links WHERE person_id = ?)"];
     const binds = [dev.person_id, dev.person_id];
     if (site) {
@@ -10970,7 +11344,7 @@ async function handle11(request, env, ctx) {
         WHERE ${wheres.join(" AND ")}
         ORDER BY d.issued_at DESC LIMIT 100
       `).bind(...binds).all();
-    return json3({ documents: rows.results || [] });
+    return json4({ documents: rows.results || [] });
   }
   if (url.pathname === "/documents" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -11017,18 +11391,18 @@ async function handle11(request, env, ctx) {
     if (wheres.length) q += " WHERE " + wheres.join(" AND ");
     q += " GROUP BY d.id ORDER BY d.issued_at DESC LIMIT 200";
     const rows = await env.SITELOG_DB.prepare(q).bind(...binds).all();
-    return json3({ documents: rows.results || [] });
+    return json4({ documents: rows.results || [] });
   }
   if (url.pathname === "/documents/delete" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     const body = await readBody(request);
     const id = body.id || body.docId;
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     await env.SITELOG_DB.prepare("DELETE FROM document_attendees WHERE document_id = ?").bind(id).run();
     await env.SITELOG_DB.prepare("DELETE FROM document_links WHERE document_id = ?").bind(id).run();
     await env.SITELOG_DB.prepare("DELETE FROM documents WHERE id = ?").bind(id).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/documents/link" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -11036,7 +11410,7 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const docId = body.docId, personId = body.personId;
-    if (!docId || !personId) return json3({ ok: false, error: "Missing docId or personId" }, 400);
+    if (!docId || !personId) return json4({ ok: false, error: "Missing docId or personId" }, 400);
     const existing = await env.SITELOG_DB.prepare(
       "SELECT id FROM document_links WHERE document_id = ? AND person_id = ?"
     ).bind(docId, personId).first();
@@ -11049,18 +11423,18 @@ async function handle11(request, env, ctx) {
         "INSERT INTO document_links (id, document_id, person_id, person_name, linked_at) VALUES (?,?,?,?,?)"
       ).bind(crypto.randomUUID(), docId, personId, body.personName || "", now).run();
     }
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/documents/unlink" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     await ensureOfflineSchema(env);
     const body = await readBody(request);
-    if (!body.docId || !body.personId) return json3({ ok: false, error: "Missing docId or personId" }, 400);
+    if (!body.docId || !body.personId) return json4({ ok: false, error: "Missing docId or personId" }, 400);
     await env.SITELOG_DB.prepare(
       "DELETE FROM document_links WHERE document_id = ? AND person_id = ?"
     ).bind(body.docId, body.personId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/documents/single" && request.method === "GET") {
     const id = url.searchParams.get("id") || "";
@@ -11074,12 +11448,12 @@ async function handle11(request, env, ctx) {
         ).bind(id, dev.person_id, id, dev.person_id).first();
         allowed = !!onDoc;
       }
-      if (!allowed) return json3({ error: "Unauthorised" }, 401);
+      if (!allowed) return json4({ error: "Unauthorised" }, 401);
     }
     const doc = await env.SITELOG_DB.prepare(
       "SELECT * FROM documents WHERE id = ?"
     ).bind(id).first();
-    if (!doc) return json3({ error: "Not found" }, 404);
+    if (!doc) return json4({ error: "Not found" }, 404);
     try {
       doc.form_data = JSON.parse(doc.form_data || "{}");
     } catch {
@@ -11099,7 +11473,7 @@ async function handle11(request, env, ctx) {
     } catch (e) {
     }
     doc.linked = linked;
-    return json3({ document: doc });
+    return json4({ document: doc });
   }
   if (url.pathname === "/field-memory/save" && request.method === "POST") {
     const body = await readBody(request);
@@ -11107,7 +11481,7 @@ async function handle11(request, env, ctx) {
     const value = (body.value || "").trim();
     const site = (body.site || "").trim();
     if (!key || !value) {
-      return json3({ ok: false, error: "key and value required" }, 400);
+      return json4({ ok: false, error: "key and value required" }, 400);
     }
     const now = (/* @__PURE__ */ new Date()).toISOString().replace("T", " ").slice(0, 19);
     const existing = await env.SITELOG_DB.prepare(`
@@ -11136,7 +11510,7 @@ async function handle11(request, env, ctx) {
         now
       ).run();
     }
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/field-memory/suggest" && request.method === "GET") {
     const key = url.searchParams.get("key") || "";
@@ -11156,14 +11530,14 @@ async function handle11(request, env, ctx) {
       seen.add(r.value);
       return true;
     }).map((r) => ({ value: r.value }));
-    return json3({ suggestions });
+    return json4({ suggestions });
   }
   if (url.pathname === "/site-documents/upload" && request.method === "POST") {
     const guard = requireAdmin2();
     if (guard) return guard;
     await ensureOfflineSchema(env);
     if (!env.DOCS_BUCKET) {
-      return json3({ ok: false, error: "File storage is not configured. Add an R2 bucket binding named DOCS_BUCKET to the worker." }, 500);
+      return json4({ ok: false, error: "File storage is not configured. Add an R2 bucket binding named DOCS_BUCKET to the worker." }, 500);
     }
     const form = await request.formData();
     const file = form.get("file");
@@ -11172,8 +11546,8 @@ async function handle11(request, env, ctx) {
     const title = (form.get("title") || "").toString().trim();
     const requireAck = form.get("requireAck") && form.get("requireAck") !== "0" ? 1 : 0;
     const uploadedBy = (form.get("uploadedBy") || "Admin").toString();
-    if (!site) return json3({ ok: false, error: "Missing site" }, 400);
-    if (!file || typeof file === "string") return json3({ ok: false, error: "Missing file" }, 400);
+    if (!site) return json4({ ok: false, error: "Missing site" }, 400);
+    if (!file || typeof file === "string") return json4({ ok: false, error: "Missing file" }, 400);
     const id = crypto.randomUUID();
     const fileName = (file.name || "document").toString();
     const contentType = file.type || "application/octet-stream";
@@ -11183,7 +11557,7 @@ async function handle11(request, env, ctx) {
     await env.SITELOG_DB.prepare(
       "INSERT INTO site_documents (id, site_name, category, title, file_name, content_type, size_bytes, r2_key, require_ack, uploaded_by, uploaded_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
     ).bind(id, site, category, title || fileName, fileName, contentType, buf.byteLength, key, requireAck, uploadedBy, toSqlUtc(Date.now())).run();
-    return json3({ ok: true, id });
+    return json4({ ok: true, id });
   }
   if (url.pathname === "/site-documents/list" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -11205,7 +11579,7 @@ async function handle11(request, env, ctx) {
         WHERE ${wheres.join(" AND ")}
         ORDER BY sd.category ASC, sd.uploaded_at DESC
       `).bind(...binds).all();
-    return json3({ ok: true, documents: rows.results || [] });
+    return json4({ ok: true, documents: rows.results || [] });
   }
   if (url.pathname === "/site-documents/summary" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -11218,7 +11592,7 @@ async function handle11(request, env, ctx) {
         WHERE COALESCE(sd.archived,0) = 0
         GROUP BY sd.site_name
       `).all();
-    return json3({ ok: true, sites: rows.results || [] });
+    return json4({ ok: true, sites: rows.results || [] });
   }
   if (url.pathname === "/site-documents/update" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -11226,7 +11600,7 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const id = body.id;
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     const sets = [], binds = [];
     if (body.title != null) {
       sets.push("title = ?");
@@ -11240,10 +11614,10 @@ async function handle11(request, env, ctx) {
       sets.push("require_ack = ?");
       binds.push(body.requireAck && body.requireAck !== "0" ? 1 : 0);
     }
-    if (!sets.length) return json3({ ok: true });
+    if (!sets.length) return json4({ ok: true });
     binds.push(id);
     await env.SITELOG_DB.prepare(`UPDATE site_documents SET ${sets.join(", ")} WHERE id = ?`).bind(...binds).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/site-documents/delete" && request.method === "POST") {
     const guard = requireAdmin2();
@@ -11251,7 +11625,7 @@ async function handle11(request, env, ctx) {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const id = body.id;
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     const row = await env.SITELOG_DB.prepare("SELECT r2_key FROM site_documents WHERE id = ?").bind(id).first();
     if (row && row.r2_key && env.DOCS_BUCKET) {
       try {
@@ -11261,7 +11635,7 @@ async function handle11(request, env, ctx) {
     }
     await env.SITELOG_DB.prepare("DELETE FROM site_document_acks WHERE document_id = ?").bind(id).run();
     await env.SITELOG_DB.prepare("DELETE FROM site_documents WHERE id = ?").bind(id).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/site-documents/acks" && request.method === "GET") {
     const guard = requireAdmin2();
@@ -11271,16 +11645,16 @@ async function handle11(request, env, ctx) {
     const rows = await env.SITELOG_DB.prepare(
       "SELECT person_name, company, acked_at FROM site_document_acks WHERE document_id = ? ORDER BY acked_at DESC"
     ).bind(id).all();
-    return json3({ ok: true, acks: rows.results || [] });
+    return json4({ ok: true, acks: rows.results || [] });
   }
   if (url.pathname === "/site-documents/my" && request.method === "GET") {
     await ensureOfflineSchema(env);
     const deviceToken = url.searchParams.get("deviceToken") || "";
     const site = url.searchParams.get("site") || "";
-    if (!deviceToken || !site) return json3({ documents: [] });
+    if (!deviceToken || !site) return json4({ documents: [] });
     const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
-    if (!dev || !dev.person_id) return json3({ documents: [] });
-    if (!await canViewSiteDocs(env, dev.person_id, site)) return json3({ documents: [] });
+    if (!dev || !dev.person_id) return json4({ documents: [] });
+    if (!await canViewSiteDocs(env, dev.person_id, site)) return json4({ documents: [] });
     const rows = await env.SITELOG_DB.prepare(`
         SELECT sd.id, sd.category, sd.title, sd.file_name, sd.content_type, sd.size_bytes,
                sd.require_ack, sd.uploaded_at,
@@ -11290,20 +11664,20 @@ async function handle11(request, env, ctx) {
         WHERE sd.site_name = ? AND COALESCE(sd.archived,0) = 0
         ORDER BY sd.category ASC, sd.uploaded_at DESC
       `).bind(dev.person_id, site).all();
-    return json3({ documents: rows.results || [] });
+    return json4({ documents: rows.results || [] });
   }
   if (url.pathname === "/site-documents/ack" && request.method === "POST") {
     await ensureOfflineSchema(env);
     const body = await readBody(request);
     const deviceToken = (body.deviceToken || "").toString();
     const id = (body.id || "").toString();
-    if (!deviceToken || !id) return json3({ ok: false, error: "Missing fields" }, 400);
+    if (!deviceToken || !id) return json4({ ok: false, error: "Missing fields" }, 400);
     const dev = await env.SITELOG_DB.prepare("SELECT person_id FROM devices WHERE device_token = ?").bind(deviceToken).first();
-    if (!dev || !dev.person_id) return json3({ ok: false, error: "Unknown device" }, 401);
+    if (!dev || !dev.person_id) return json4({ ok: false, error: "Unknown device" }, 401);
     const doc = await env.SITELOG_DB.prepare("SELECT site_name, require_ack FROM site_documents WHERE id = ?").bind(id).first();
-    if (!doc) return json3({ ok: false, error: "Document not found" }, 404);
+    if (!doc) return json4({ ok: false, error: "Document not found" }, 404);
     const ackPermitted = Number(doc.require_ack) === 1 || await canViewSiteDocs(env, dev.person_id, doc.site_name);
-    if (!ackPermitted) return json3({ ok: false, error: "Not permitted" }, 403);
+    if (!ackPermitted) return json4({ ok: false, error: "Not permitted" }, 403);
     const person = await env.SITELOG_DB.prepare("SELECT first_name, last_name, company FROM people WHERE id = ?").bind(dev.person_id).first();
     const name = person ? `${person.first_name || ""} ${person.last_name || ""}`.trim() : "";
     const existing = await env.SITELOG_DB.prepare(
@@ -11314,7 +11688,7 @@ async function handle11(request, env, ctx) {
         "INSERT INTO site_document_acks (id, document_id, person_id, person_name, company, acked_at) VALUES (?, ?, ?, ?, ?, ?)"
       ).bind(crypto.randomUUID(), id, dev.person_id, name, person ? person.company || "" : "", toSqlUtc(Date.now())).run();
     }
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (url.pathname === "/site-documents/file" && request.method === "GET") {
     await ensureOfflineSchema(env);
@@ -11363,6 +11737,786 @@ async function sweepAutoClose(env) {
   }
 }
 
+// src/routes/sites.js
+var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
+async function handle10(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (path === "/get-sites" && method === "GET") {
+    const cat = (q.get("category") || "all").toLowerCase();
+    let rows;
+    if (cat === "all") {
+      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
+    } else {
+      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
+    }
+    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
+  }
+  if (path === "/delete-site" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes")
+      return error("Deleting a site needs Full Access", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || b.client || "") + "").toLowerCase().trim();
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    const existing = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
+    if (!existing) return error("Site not found", 404, env, request);
+    let name = siteNumber;
+    try {
+      name = JSON.parse(existing.data).siteName || siteNumber;
+    } catch {
+    }
+    await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).run();
+    ctx?.waitUntil(removeSiteFromSiteLog(env, name, { archive: true }));
+    const res = json({ success: true, deleted: siteNumber }, {}, env, request);
+    try {
+      res.headers.set("X-Audit-Note", encodeURIComponent(`Deleted site ${siteNumber} \u2014 "${name}"`));
+    } catch {
+    }
+    return res;
+  }
+  if ((path === "/add-site" || path === "/update-site") && method === "POST") {
+    let site = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
+    if (!client) return error("client (category) required", 400, env, request);
+    site.client = client;
+    if (path === "/add-site" && client === "projects") {
+      if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
+      if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
+    }
+    const siteNumber = String(site.siteNumber || "").trim();
+    if (!siteNumber) return error("siteNumber required", 400, env, request);
+    site.siteNumber = siteNumber;
+    const oldNum = q.get("oldSiteNumber");
+    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
+      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
+    }
+    let auditNote = "";
+    let oldName = null;
+    if (path === "/update-site") {
+      const lookNum = String(oldNum || siteNumber).trim();
+      const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, lookNum).first();
+      if (row) {
+        let cur = {};
+        try {
+          cur = JSON.parse(row.data) || {};
+        } catch {
+        }
+        oldName = String(cur.siteName || "").trim() || null;
+        const merged = { ...cur };
+        const NOTE_FIELDS = { name: "name", siteName: "name", postcode: "postcode", address: "address", phone: "phone", contactName: "contact", contact: "contact" };
+        const clean = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").replace(/ · /g, " ").trim();
+        const chg = [];
+        for (const [k, v] of Object.entries(site)) {
+          if (v !== void 0 && v !== null && v !== "") {
+            if (NOTE_FIELDS[k] && clean(cur[k]) !== clean(v)) chg.push(`${NOTE_FIELDS[k]} "${clean(cur[k]) || "\u2014"}" \u2192 "${clean(v)}"`);
+            merged[k] = v;
+          }
+        }
+        if (oldNum && oldNum !== siteNumber) chg.unshift(`number "${clean(oldNum)}" \u2192 "${clean(siteNumber)}"`);
+        merged.siteNumber = siteNumber;
+        merged.client = client;
+        site = merged;
+        const label = clean(merged.name) || siteNumber;
+        auditNote = (chg.length ? `${label} \u2014 ${chg.join(", ")}` : label).slice(0, 380);
+      }
+    }
+    await saveSite(env, tenantId, site);
+    await ensureCustomer(env, tenantId, client);
+    ctx?.waitUntil(syncSiteToSiteLog(env, site, oldName));
+    ctx?.waitUntil(syncSiteToCompliance(env, tenantId, site).catch(() => {
+    }));
+    ctx?.waitUntil(setPOSiteActive(env, site.siteName, site.active !== false));
+    const headers = auditNote ? { "X-Audit-Note": encodeURIComponent(auditNote) } : {};
+    return json({ success: true, site }, { headers }, env, request);
+  }
+  if (path === "/next-project-job-number" && method === "GET") {
+    return json({ next: await nextProjectNumber(env, tenantId) }, {}, env, request);
+  }
+  if (path === "/upload-image" && method === "POST") {
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const siteNumber = form && String(form.get("siteNumber") || "").trim();
+    const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
+    if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
+    const safeName4 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName4}`;
+    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
+    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
+  }
+  if (path === "/customers" && method === "GET") {
+    const { results } = await db.prepare(`
+      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.tenant_id = ? AND s.client = c.id) AS site_count
+      FROM customers c WHERE c.tenant_id = ? ORDER BY c.name COLLATE NOCASE
+    `).bind(db.tenantId, db.tenantId).all();
+    return json({ customers: results || [] }, {}, env, request);
+  }
+  if (path === "/customers" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = slug(b.id || b.name);
+    if (!id) return error("name required", 400, env, request);
+    await db.prepare(`
+      INSERT INTO customers (tenant_id, id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
+        phone=excluded.phone, invoice_email=excluded.invoice_email,
+        billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
+    `).bind(
+      db.tenantId,
+      id,
+      b.name || id,
+      b.contactName || null,
+      b.email || null,
+      b.phone || null,
+      b.invoiceEmail || null,
+      b.billingAddress || null,
+      b.notes || null
+    ).run();
+    return json({ ok: true, id }, {}, env, request);
+  }
+  if (path === "/customers/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("id required", 400, env, request);
+    const n = await db.prepare("SELECT COUNT(*) AS n FROM sites WHERE tenant_id=? AND client=?").bind(db.tenantId, b.id).first();
+    if (n && n.n > 0) return error(`Customer has ${n.n} site(s) \u2014 move or delete them first.`, 400, env, request);
+    await db.prepare("DELETE FROM customers WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/sites/street-images" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const key = b.key || env.GOOGLE_MAPS_KEY;
+    if (!key) return error("Google Maps API key required", 400, env, request);
+    const overwrite = !!b.overwrite;
+    const since = b.since || "";
+    const brands = b.brands || {};
+    const limit = Math.min(Number(b.limit) || 8, 10);
+    const size = b.size || "640x400";
+    const { results } = await db.prepare("SELECT data FROM sites WHERE tenant_id=?").bind(db.tenantId).all();
+    const all = (results || []).map((r) => JSON.parse(r.data));
+    const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
+    const ownImage = (s) => !s.imageURL || /\/streetview\.jpg(\?|$)/.test(s.imageURL);
+    const todo = all.filter((s) => (overwrite || !s._noImagery) && // an overwrite run retries previously-failed sites
+    (overwrite ? ownImage(s) && (!s._svAt || s._svAt < since) : !s.imageURL) && locOf(s));
+    const batch = todo.slice(0, limit);
+    let updated = 0;
+    const failed = [];
+    let sampleError = "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    for (const site of batch) {
+      let loc = locOf(site);
+      let buf = null;
+      try {
+        const q2 = [
+          brands[site.client] || "",
+          site.siteName || "",
+          (site.postcode || "").replace(/\*+$/, "")
+        ].filter(Boolean).join(" ");
+        const fp = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q2)}&inputtype=textquery&fields=photos,geometry&key=${key}`);
+        const fpj = await fp.json();
+        const cand = fpj.candidates && fpj.candidates[0];
+        if (cand) {
+          if (cand.geometry && cand.geometry.location) loc = `${cand.geometry.location.lat},${cand.geometry.location.lng}`;
+          const ref = cand.photos && cand.photos[0] && cand.photos[0].photo_reference;
+          if (ref) {
+            const ph = await fetch(`https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${encodeURIComponent(ref)}&key=${key}`);
+            if (ph.ok && (ph.headers.get("content-type") || "").startsWith("image/")) buf = await ph.arrayBuffer();
+          }
+        }
+      } catch (e) {
+        if (!sampleError) sampleError = "Places: " + e.message;
+      }
+      if (!buf) try {
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
+        const res = await fetch(svUrl);
+        if (res.ok) buf = await res.arrayBuffer();
+        else if (!sampleError) sampleError = `StreetView ${res.status}: ${(await res.text()).slice(0, 160)}`;
+      } catch (e) {
+        if (!sampleError) sampleError = "StreetView: " + e.message;
+      }
+      if (!buf) {
+        try {
+          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
+          const res = await fetch(smUrl);
+          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
+          else if (!sampleError) sampleError = `StaticMap ${res.status}: ${(await res.text()).slice(0, 160)}`;
+        } catch (e) {
+          if (!sampleError) sampleError = "StaticMap: " + e.message;
+        }
+      }
+      if (buf) {
+        const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
+        await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
+        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
+        site._svAt = now;
+        delete site._noImagery;
+        await saveSite(env, tenantId, site);
+        updated++;
+      } else {
+        site._noImagery = true;
+        site._svAt = now;
+        await saveSite(env, tenantId, site);
+        failed.push(String(site.siteNumber));
+      }
+    }
+    return json({
+      ok: true,
+      updated,
+      failed,
+      sampleError,
+      remaining: Math.max(0, todo.length - batch.length)
+    }, {}, env, request);
+  }
+  if (path === "/import-sites" && method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const imagesOnly = !!body.imagesOnly;
+    let list = Array.isArray(body.sites) ? body.sites : [];
+    if (!list.length) {
+      try {
+        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
+        list = await res.json();
+        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
+      } catch (e) {
+        return error("Could not read the old sites worker: " + e.message, 502, env, request);
+      }
+    }
+    let imported = 0;
+    const clients = /* @__PURE__ */ new Set();
+    for (const site of list) {
+      const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
+      const siteNumber = String(site.siteNumber || "").trim();
+      if (!siteNumber) continue;
+      if (imagesOnly) {
+        if (!site.imageURL) continue;
+        const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
+        if (!row) continue;
+        const cur = JSON.parse(row.data);
+        cur.imageURL = site.imageURL;
+        await saveSite(env, tenantId, cur);
+        imported++;
+        continue;
+      }
+      site.client = client;
+      await saveSite(env, tenantId, site);
+      clients.add(client);
+      imported++;
+    }
+    for (const c of clients) await ensureCustomer(env, tenantId, c);
+    return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
+  }
+  return error("Unknown sites route", 404, env, request);
+}
+async function saveSite(env, tenantId, site) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`
+    INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, job_number, data, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+    ON CONFLICT(client, site_number) DO UPDATE SET
+      site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
+      job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
+  `).bind(
+    db.tenantId,
+    site.client,
+    String(site.siteNumber).trim(),
+    site.siteName || null,
+    site.postcode || null,
+    site.active === false ? 0 : 1,
+    site.jobNumber || null,
+    JSON.stringify(site)
+  ).run();
+}
+async function ensureCustomer(env, tenantId, id) {
+  if (!id) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO customers (tenant_id, id, name) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING"
+  ).bind(db.tenantId, id, prettify(id)).run();
+}
+async function syncSiteToSiteLog(env, site, oldName) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "no-secret" };
+    const name = String(site.siteName || "").trim();
+    if (!name) return { ok: false, reason: "no-name" };
+    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    const body = {
+      siteName: name,
+      lat: Number.isFinite(lat) ? lat : void 0,
+      lng: Number.isFinite(lng) ? lng : void 0,
+      category: prettify(site.client || "") || "Projects",
+      oldName: oldName && String(oldName).trim() !== name ? String(oldName).trim() : void 0,
+      archived: site.active === false ? 1 : 0
+    };
+    return await slCall(env, "/upsert-site", body);
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function removeSiteFromSiteLog(env, siteName, { archive } = {}) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(siteName || "").trim()) return { ok: false };
+    return await slCall(env, "/delete-site", { siteName: String(siteName).trim(), archive: !!archive });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function slCall(env, path, body) {
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const init = { method: "POST", headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET }, body: JSON.stringify(body) };
+  const req = new Request(base + path, init);
+  if (env.SITELOG_DB) {
+    try {
+      const r = await handle9(req, env);
+      if (r) return await r.json().catch(() => ({ ok: r.ok }));
+    } catch (e) {
+    }
+  }
+  const res = await fetch(base + path, init);
+  return await res.json().catch(() => ({ ok: res.ok }));
+}
+async function syncSiteToCompliance(env, tenantId, site) {
+  try {
+    const num2 = String(site.siteNumber || "").trim();
+    if (!num2) return;
+    const rows = await env.DB.prepare(
+      "SELECT scheme, code, meta FROM compliance_stores WHERE tenant_id=? AND site_number=?"
+    ).bind(tenantId, num2).all();
+    const activeVal = site.active === false ? 0 : 1;
+    for (const r of rows.results || []) {
+      let meta = {};
+      try {
+        meta = JSON.parse(r.meta || "{}") || {};
+      } catch {
+      }
+      const lat = site.lat != null ? Number(site.lat) : null;
+      const lng = site.lon != null ? Number(site.lon) : site.lng != null ? Number(site.lng) : null;
+      if (Number.isFinite(lat)) meta.lat = lat;
+      if (Number.isFinite(lng)) meta.lng = lng;
+      await env.DB.prepare(
+        "UPDATE compliance_stores SET name=COALESCE(?, name), postcode=COALESCE(?, postcode), meta=?, active=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?"
+      ).bind(
+        site.siteName || null,
+        site.postcode || null,
+        JSON.stringify(meta),
+        activeVal,
+        (/* @__PURE__ */ new Date()).toISOString(),
+        tenantId,
+        r.scheme,
+        r.code
+      ).run();
+    }
+  } catch {
+  }
+}
+async function setPOSiteActive(env, name, active) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    const val = active ? 1 : 0;
+    await env.PO_DB.prepare("UPDATE sites SET active = ? WHERE name = ?").bind(val, String(name).trim()).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function nextProjectNumber(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
+  ).bind(db.tenantId).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = String(r.job_number).match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "P" + String(max + 1).padStart(4, "0");
+}
+function slug(s) {
+  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function prettify(id) {
+  return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// src/routes/portal.js
+var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
+function vanWeek() {
+  const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+  return d.toISOString().slice(0, 10);
+}
+var SETTINGS_KEY = "portal:settings";
+async function requireFullAccess(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle11(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (path === "/settings" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, SETTINGS_KEY).first();
+    let settings = {};
+    try {
+      settings = row ? JSON.parse(row.value) : {};
+    } catch {
+    }
+    return json({ ok: true, settings }, {}, env, request);
+  }
+  if (path === "/settings" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    await db.prepare(`
+      INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    `).bind(db.tenantId, SETTINGS_KEY, JSON.stringify(b || {})).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/menu-config" && method === "GET") {
+    const s = await requireSession(env, request);
+    if (!s) return error("Not authenticated", 401, env, request);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "menu:hidden").first();
+    let hidden = [];
+    try {
+      hidden = row ? JSON.parse(row.value) : [];
+    } catch {
+    }
+    if (!Array.isArray(hidden)) hidden = [];
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+  if (path === "/menu-config" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const hidden = Array.isArray(b.hidden) ? b.hidden.map(String).slice(0, 200) : [];
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(db.tenantId, "menu:hidden", JSON.stringify(hidden)).run();
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+  if (path === "/oncall/current" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const cur = async (role) => await db.prepare(
+      "SELECT name, set_by, set_at FROM oncall_log WHERE tenant_id=? AND role=? ORDER BY id DESC LIMIT 1"
+    ).bind(db.tenantId, role).first();
+    return json({ ok: true, engineer: await cur("engineer"), manager: await cur("manager") }, {}, env, request);
+  }
+  if (path === "/oncall/set" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const by = sess2.user.username;
+    const stmts = [];
+    if (b.engineer) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'engineer', ?, ?)").bind(db.tenantId, String(b.engineer), by));
+    if (b.manager) stmts.push(db.prepare("INSERT INTO oncall_log (tenant_id, role, name, set_by) VALUES (?, 'manager', ?, ?)").bind(db.tenantId, String(b.manager), by));
+    if (!stmts.length) return error("Nothing to set \u2014 send engineer and/or manager", 400, env, request);
+    await db.batch(stmts);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/oncall/history" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const { results } = await db.prepare(
+      "SELECT role, name, set_by, set_at FROM oncall_log WHERE tenant_id=? ORDER BY id DESC LIMIT 200"
+    ).bind(db.tenantId).all();
+    return json({ ok: true, history: results || [] }, {}, env, request);
+  }
+  if (path === "/daily-logs" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!b.engineer || !b.date) return error("engineer and date required", 400, env, request);
+    await db.prepare(`
+      INSERT INTO daily_logs (tenant_id, engineer, date, site, standard_hours, overtime_hours, travel_time, mileage, notes, submitted_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).bind(
+      db.tenantId,
+      b.engineer,
+      b.date,
+      b.site || null,
+      num(b.standardHours),
+      num(b.overtimeHours),
+      num(b.travelTime),
+      num(b.mileage),
+      b.notes || null,
+      sess2.user.username
+    ).run();
+    return json({ ok: true }, { status: 201 }, env, request);
+  }
+  if (path === "/daily-logs" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const conds = ["tenant_id = ?"], binds = [db.tenantId];
+    if (q.get("engineer")) {
+      conds.push("engineer = ?");
+      binds.push(q.get("engineer"));
+    }
+    if (q.get("from")) {
+      conds.push("date >= ?");
+      binds.push(q.get("from"));
+    }
+    if (q.get("to")) {
+      conds.push("date <= ?");
+      binds.push(q.get("to"));
+    }
+    let sql = "SELECT * FROM daily_logs";
+    sql += " WHERE " + conds.join(" AND ");
+    sql += " ORDER BY date DESC, id DESC LIMIT 500";
+    const { results } = await db.prepare(sql).bind(...binds).all();
+    return json({ ok: true, logs: results || [] }, {}, env, request);
+  }
+  if (path === "/prefs" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, prefs: profile.prefs || {} }, {}, env, request);
+  }
+  if (path === "/prefs" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) return error("Send an object of keys to merge", 400, env, request);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, sess2.user.username).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    const prefs = profile.prefs || {};
+    for (const k of Object.keys(b)) {
+      if (b[k] === null) delete prefs[k];
+      else prefs[k] = b[k];
+    }
+    if (JSON.stringify(prefs).length > 8e3) return error("Preferences too large", 400, env, request);
+    profile.prefs = prefs;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(profile), db.tenantId, sess2.user.username).run();
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/audit/pageview" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const page = String(b.page || "").slice(0, 80);
+    if (!/^[\w.-]+\.html$/.test(page)) return error("Bad page", 400, env, request);
+    await db.prepare(
+      "INSERT INTO audit_log (tenant_id, username, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
+    ).bind(db.tenantId, sess2.user.username, "VIEW", "/" + page, "", 200, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/audit/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(365, Math.max(1, Number(q.get("days")) || 7));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
+    if (q.get("user")) {
+      conds.push("username = ?");
+      binds.push(q.get("user"));
+    }
+    if (q.get("type") === "view") conds.push("method = 'VIEW'");
+    if (q.get("type") === "action") conds.push("method != 'VIEW'");
+    try {
+      await db.prepare("ALTER TABLE audit_log ADD COLUMN ref TEXT").run();
+    } catch {
+    }
+    const { results } = await db.prepare(
+      "SELECT username, method, path, detail, status, at, ref FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+  if (path === "/notify/log" && method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const action = String(b.action || "");
+    if (["shown", "snoozed", "dismissed", "opened"].indexOf(action) === -1)
+      return error("Bad action", 400, env, request);
+    const surface = String(b.surface || "").slice(0, 20);
+    const items = JSON.stringify(Array.isArray(b.items) ? b.items : []).slice(0, 4e3);
+    await db.prepare(
+      "INSERT INTO notify_log (tenant_id, username, action, surface, items, at) VALUES (?,?,?,?,?,?)"
+    ).bind(db.tenantId, sess2.user.username, action, surface, items, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/notify/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(90, Math.max(1, Number(q.get("days")) || 14));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const conds = ["tenant_id = ?", "at >= ?"], binds = [db.tenantId, since];
+    if (q.get("user")) {
+      conds.push("username = ?");
+      binds.push(q.get("user"));
+    }
+    const { results } = await db.prepare(
+      "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+  if (path === "/notify/feed/count" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const row = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, unread: row && row.n || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed" && method === "GET") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const limit = Math.min(120, Math.max(1, Number(url.searchParams.get("limit")) || 40));
+    const { results } = await db.prepare(
+      "SELECT id, title, body, url, tag, created_at, read_at, actionable, resolved_at FROM user_notifications WHERE tenant_id=? AND username=? ORDER BY id DESC LIMIT ?"
+    ).bind(db.tenantId, sess.user.username, limit).all();
+    const items = (results || []).map((r) => ({
+      id: r.id,
+      title: r.title || "",
+      body: r.body || "",
+      url: r.url || "",
+      tag: r.tag || "",
+      at: r.created_at,
+      read: !!r.read_at,
+      // actionable-but-unresolved stays "outstanding" (bold, counts) until dealt with.
+      actionable: !!r.actionable,
+      resolved: !!r.resolved_at
+    }));
+    const cRow = await db.prepare(
+      "SELECT COUNT(*) AS n FROM user_notifications WHERE tenant_id=? AND username=? AND resolved_at IS NULL AND (actionable=1 OR seen_at IS NULL)"
+    ).bind(db.tenantId, sess.user.username).first();
+    return json({ ok: true, items, unread: cRow && cRow.n || 0 }, {}, env, request);
+  }
+  if (path === "/notify/feed/read" && method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    await ensureFeedTable(env);
+    const b = await request.json().catch(() => ({}));
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    if (b.seen) {
+      await db.prepare("UPDATE user_notifications SET seen_at=? WHERE tenant_id=? AND username=? AND seen_at IS NULL").bind(at, db.tenantId, sess.user.username).run();
+    } else if (b.all) {
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE tenant_id=? AND username=? AND (read_at IS NULL OR seen_at IS NULL)").bind(at, at, db.tenantId, sess.user.username).run();
+    } else if (b.id != null) {
+      await db.prepare("UPDATE user_notifications SET read_at=COALESCE(read_at,?), seen_at=COALESCE(seen_at,?) WHERE id=? AND tenant_id=? AND username=?").bind(at, at, Number(b.id), db.tenantId, sess.user.username).run();
+    } else {
+      return error("Send seen:true, id, or all:true", 400, env, request);
+    }
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    return json({ ok: true, rules: await getRules(env, tenantId) }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const type = String(b.type || "");
+    if (SUPPRESS_TYPES.indexOf(type) === -1) return error("Bad type", 400, env, request);
+    const rule = {
+      id: "s" + Date.now(),
+      type,
+      user: b.user ? String(b.user) : null,
+      key: b.key != null && b.key !== "" ? String(b.key) : null,
+      label: String(b.label || "").slice(0, 140),
+      by: gate.sess.user.username,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const rules = (await getRules(env, tenantId)).filter((r) => !(r.type === rule.type && (r.user || null) === (rule.user || null) && (r.key || null) === (rule.key || null)));
+    rules.push(rule);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/suppress/remove" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rules = (await getRules(env, tenantId)).filter((r) => r.id !== id);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/overview" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const assetMap = {};
+    const confirmations = [];
+    try {
+      const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const r of results || []) {
+        let a;
+        try {
+          a = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        assetMap[a.id] = a.name || a.assetName || a.id;
+        const holder = String(a.assignedTo || "").trim();
+        if (a.confirm && a.confirm.status === "pending" && holder && holder.toLowerCase() !== "shared")
+          confirmations.push({ user: holder, key: String(a.id), name: assetMap[a.id] });
+      }
+    } catch {
+    }
+    const transfers = [];
+    try {
+      const { results } = await db.prepare(
+        "SELECT id, asset_id, to_user, requested_at FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+      ).bind(db.tenantId).all();
+      for (const t of results || [])
+        transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || "Asset " + t.asset_id, at: t.requested_at });
+    } catch {
+    }
+    const week = vanWeek();
+    const vehicleChecks = [];
+    const skippedVanChecks = [];
+    try {
+      const { results: drivers } = await db.prepare(
+        "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
+      ).bind(db.tenantId).all();
+      const { results: doneRows } = await db.prepare(
+        "SELECT username, items FROM vehicle_checks WHERE tenant_id=? AND week=?"
+      ).bind(db.tenantId, week).all();
+      const doneSet = new Set((doneRows || []).map((r) => r.username));
+      for (const u of drivers || [])
+        if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check \u2014 week of " + week });
+      for (const r of doneRows || []) {
+        try {
+          const it = r.items ? JSON.parse(r.items) : {};
+          if (it.skipped) skippedVanChecks.push({ user: r.username, week, by: it.skippedBy || "" });
+        } catch {
+        }
+      }
+    } catch {
+    }
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, skippedVanChecks, week }, {}, env, request);
+  }
+  return error("Unknown portal route", 404, env, request);
+}
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 // src/routes/sitelog.js
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
@@ -11407,7 +12561,7 @@ async function handle12(request, env, ctx, url, sess) {
   let res;
   try {
     if (env.SITELOG_DB) {
-      res = await handle11(new Request(target, init), env, ctx);
+      res = await handle9(new Request(target, init), env, ctx);
     } else {
       res = await fetch(target, init);
     }
@@ -12015,10 +13169,10 @@ async function handle14(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
-  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   if (method === "GET" && pathname === "/keys") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json4({ ok: false, error: "Not authenticated" }, 401);
     const { results } = await db.prepare("SELECT data FROM portal_keys WHERE tenant_id = ?").bind(db.tenantId).all();
     const keys = [];
     for (const r of results || []) {
@@ -12028,26 +13182,26 @@ async function handle14(request, env, ctx, url, sess) {
       }
     }
     keys.sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)));
-    return json3({ ok: true, keys });
+    return json4({ ok: true, keys });
   }
   if (method === "GET" && pathname === "/key/log") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json4({ ok: false, error: gate.error }, gate.code);
     const keyID = searchParams.get("keyID");
-    if (!keyID) return json3({ ok: false, error: "Missing keyID" }, 400);
+    if (!keyID) return json4({ ok: false, error: "Missing keyID" }, 400);
     const { results } = await db.prepare(
       "SELECT action, holder, by_user, note, at FROM key_log WHERE key_id=? AND tenant_id=? ORDER BY id DESC LIMIT 50"
     ).bind(keyID, db.tenantId).all();
-    return json3({ ok: true, log: results || [] });
+    return json4({ ok: true, log: results || [] });
   }
   if (method === "POST" && (pathname === "/key/add" || pathname === "/key/update")) {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json4({ ok: false, error: gate.error }, gate.code);
     const b = await request.json().catch(() => ({}));
-    if (!String(b.label || "").trim()) return json3({ ok: false, error: "A key needs a label" }, 400);
+    if (!String(b.label || "").trim()) return json4({ ok: false, error: "A key needs a label" }, 400);
     if (pathname === "/key/add") {
       const id = String(b.id || "").trim() || "K-" + Math.random().toString(36).slice(2, 8).toUpperCase();
-      if (await getKey(env, tenantId, id)) return json3({ ok: false, error: "Key ID already exists" }, 400);
+      if (await getKey(env, tenantId, id)) return json4({ ok: false, error: "Key ID already exists" }, 400);
       const key2 = {
         id,
         label: String(b.label).trim(),
@@ -12061,53 +13215,53 @@ async function handle14(request, env, ctx, url, sess) {
         createdAt: (/* @__PURE__ */ new Date()).toISOString()
       };
       await putKey(env, tenantId, key2);
-      return json3({ ok: true, key: key2 });
+      return json4({ ok: true, key: key2 });
     }
     const key = await getKey(env, tenantId, String(b.id || ""));
-    if (!key) return json3({ ok: false, error: "Key not found" }, 404);
+    if (!key) return json4({ ok: false, error: "Key not found" }, 404);
     key.label = String(b.label).trim();
     key.type = ["site", "van", "other"].includes(b.type) ? b.type : key.type;
     key.ref = String(b.ref ?? key.ref ?? "").trim();
     key.notes = String(b.notes ?? key.notes ?? "").trim();
     await putKey(env, tenantId, key);
-    return json3({ ok: true, key });
+    return json4({ ok: true, key });
   }
   if (method === "POST" && pathname === "/key/sign-out") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json4({ ok: false, error: gate.error }, gate.code);
     const b = await request.json().catch(() => ({}));
     const key = await getKey(env, tenantId, String(b.id || ""));
-    if (!key) return json3({ ok: false, error: "Key not found" }, 404);
+    if (!key) return json4({ ok: false, error: "Key not found" }, 404);
     const to = String(b.to || "").trim();
-    if (!to) return json3({ ok: false, error: "Choose who the key is signed to" }, 400);
+    if (!to) return json4({ ok: false, error: "Choose who the key is signed to" }, 400);
     key.holder = to;
     key.outSince = (/* @__PURE__ */ new Date()).toISOString();
     await putKey(env, tenantId, key);
     await logMove(env, tenantId, key.id, "out", to, gate.sess.user.username, b.note);
-    return json3({ ok: true, key });
+    return json4({ ok: true, key });
   }
   if (method === "POST" && pathname === "/key/sign-in") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json4({ ok: false, error: gate.error }, gate.code);
     const b = await request.json().catch(() => ({}));
     const key = await getKey(env, tenantId, String(b.id || ""));
-    if (!key) return json3({ ok: false, error: "Key not found" }, 404);
+    if (!key) return json4({ ok: false, error: "Key not found" }, 404);
     const wasWith = key.holder || "";
     key.holder = "";
     key.outSince = null;
     await putKey(env, tenantId, key);
     await logMove(env, tenantId, key.id, "in", wasWith, gate.sess.user.username, b.note);
-    return json3({ ok: true, key });
+    return json4({ ok: true, key });
   }
   if (method === "DELETE" && pathname === "/key/delete") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json4({ ok: false, error: gate.error }, gate.code);
     const id = searchParams.get("id");
-    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json4({ ok: false, error: "Missing id" }, 400);
     await db.prepare("DELETE FROM portal_keys WHERE id=? AND tenant_id=?").bind(id, db.tenantId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
-  return json3({ ok: false, error: "Not found: " + pathname }, 404);
+  return json4({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
 // src/routes/theme.js
@@ -12131,9 +13285,9 @@ async function handle15(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
-  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   if (!sess) sess = await requireSession(env, request);
-  if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
   const me = sess.user.username;
@@ -12145,11 +13299,11 @@ async function handle15(request, env, ctx, url, sess) {
       profile = row?.profile ? JSON.parse(row.profile) : {};
     } catch {
     }
-    return json3({ ok: true, theme: filterTheme(profile.theme || {}, can), can });
+    return json4({ ok: true, theme: filterTheme(profile.theme || {}, can), can });
   }
   if (method === "POST" && pathname === "/theme") {
     const can = await caps(env, tenantId, me);
-    if (!can.colour && !can.background) return json3({ ok: false, error: "Personalisation isn't enabled for your account" }, 403);
+    if (!can.colour && !can.background) return json4({ ok: false, error: "Personalisation isn't enabled for your account" }, 403);
     const b = await request.json().catch(() => ({}));
     const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tenantId, me).first();
     let profile = {};
@@ -12159,7 +13313,7 @@ async function handle15(request, env, ctx, url, sess) {
     }
     const t = profile.theme || {};
     if (b.accent !== void 0 && can.colour) {
-      if (!ACCENTS.includes(b.accent)) return json3({ ok: false, error: "Unknown colour theme" }, 400);
+      if (!ACCENTS.includes(b.accent)) return json4({ ok: false, error: "Unknown colour theme" }, 400);
       t.accent = b.accent;
     }
     if (b.bg !== void 0 && can.background) {
@@ -12167,30 +13321,30 @@ async function handle15(request, env, ctx, url, sess) {
       if (bg.type === "emboss" || !bg.type) delete t.bg;
       else if (bg.type === "colour" && BG_COLOURS.includes(bg.value)) t.bg = { type: "colour", value: bg.value };
       else if (bg.type === "image" && typeof bg.value === "string" && bg.value.startsWith(`theme/${me}/`)) t.bg = { type: "image", value: bg.value };
-      else return json3({ ok: false, error: "Unknown background choice" }, 400);
+      else return json4({ ok: false, error: "Unknown background choice" }, 400);
     }
     profile.theme = t;
     await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(profile), tenantId, me).run();
-    return json3({ ok: true, theme: filterTheme(t, can), can });
+    return json4({ ok: true, theme: filterTheme(t, can), can });
   }
   if (method === "POST" && pathname === "/theme/background") {
     const can = await caps(env, tenantId, me);
-    if (!can.background) return json3({ ok: false, error: "Background changes aren't enabled for your account" }, 403);
+    if (!can.background) return json4({ ok: false, error: "Background changes aren't enabled for your account" }, 403);
     const form = await request.formData().catch(() => null);
     const file = form && form.get("file");
-    if (!file || typeof file === "string") return json3({ ok: false, error: "Missing file" }, 400);
-    if (!/^image\//.test(file.type || "")) return json3({ ok: false, error: "That isn't an image" }, 400);
+    if (!file || typeof file === "string") return json4({ ok: false, error: "Missing file" }, 400);
+    if (!/^image\//.test(file.type || "")) return json4({ ok: false, error: "That isn't an image" }, 400);
     const bytes = await file.arrayBuffer();
-    if (bytes.byteLength > 4 * 1024 * 1024) return json3({ ok: false, error: "Image too large \u2014 try again (it should be under 4 MB)" }, 400);
+    if (bytes.byteLength > 4 * 1024 * 1024) return json4({ ok: false, error: "Image too large \u2014 try again (it should be under 4 MB)" }, 400);
     const prefix2 = `theme/${me}/`;
     const old = await env.ASSET_BUCKET.list({ prefix: prefix2 });
     for (const o of old.objects || []) await env.ASSET_BUCKET.delete(o.key);
     const ext = file.type === "image/png" ? "png" : "jpg";
     const key = `${prefix2}bg-${Date.now()}.${ext}`;
     await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: file.type || "image/jpeg" } });
-    return json3({ ok: true, key, url: `${url.origin}/asset-image?key=${encodeURIComponent(key)}` });
+    return json4({ ok: true, key, url: `${url.origin}/asset-image?key=${encodeURIComponent(key)}` });
   }
-  return json3({ ok: false, error: "Not found: " + pathname }, 404);
+  return json4({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
 // src/routes/hs.js
@@ -14496,26 +15650,32 @@ async function handle21(request, env, ctx, url, sess) {
     const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
     const drv = {};
     for (const r of cur || []) drv[dn(r.reg)] = r.username;
-    const miles = await latestMileage(env, tid);
-    const photos = await photoIndex(env, tid);
-    const covers = await coverMap(env, tid);
-    const vcCounts = await vanCheckPhotoCounts(env, tid);
-    let defResolved = {};
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
-      if (row && row.value) defResolved = JSON.parse(row.value) || {};
-    } catch {
-    }
-    const defects = await vanCheckDefects(env, tid, defResolved);
-    const lastVc = await lastVanCheckMap(env, tid);
-    let vcAck = {};
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first();
-      if (row && row.value) vcAck = JSON.parse(row.value) || {};
-    } catch {
-    }
     await ensureHandoverTable(env);
-    const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
+    const appCfg = async (key) => {
+      try {
+        const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+        return row && row.value ? JSON.parse(row.value) || {} : {};
+      } catch {
+        return {};
+      }
+    };
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes] = await Promise.all([
+      latestMileage(env, tid),
+      photoIndex(env, tid),
+      coverMap(env, tid),
+      vanCheckPhotoCounts(env, tid),
+      // van-check photos folded into the badge
+      lastVanCheckMap(env, tid),
+      // newest van-check date per reg (card bar)
+      mpgByVehicle(env, tid),
+      canMoney(env, tid, sess),
+      appCfg(DEFECTCLR_KEY(tid)),
+      // defects marked resolved by an admin
+      appCfg(VCACK_KEY(tid)),
+      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()
+    ]);
+    const defects = await vanCheckDefects(env, tid, defResolved);
+    const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
     for (const h of hoRows) {
       const k = dn(h.reg);
@@ -14524,21 +15684,20 @@ async function handle21(request, env, ctx, url, sess) {
         if (!cur2 || new Date(h.completed_at || 0) > new Date(cur2.at || 0)) lastHo[k] = { id: h.id, at: h.completed_at || "" };
       } else if (h.status === "pending") pendHo[k] = (pendHo[k] || 0) + 1;
     }
-    const mpg = await mpgByVehicle(env, tid);
-    const money2 = await canMoney(env, tid, sess);
     let fuelV = {}, odoV = {}, maint12 = {};
     if (money2) {
-      fuelV = await fuelByVehicle(env, tid);
-      odoV = await odoByVehicle(env, tid);
-      try {
-        await ensureMaintTable(env);
-        const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
-        const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
-        for (const m of mrows || []) {
-          const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
-          maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
-        }
-      } catch {
+      await ensureMaintTable(env);
+      const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+      const [fv, ov, mRes] = await Promise.all([
+        fuelByVehicle(env, tid),
+        odoByVehicle(env, tid),
+        env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all().catch(() => ({ results: [] }))
+      ]);
+      fuelV = fv;
+      odoV = ov;
+      for (const m of mRes.results || []) {
+        const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
+        maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
       }
     }
     const vehicles = await Promise.all((results || []).map(async (v) => {
@@ -15363,13 +16522,13 @@ async function handle21(request, env, ctx, url, sess) {
   if (sub === "/handover/template" && method === "POST") {
     if (!await canMoney(env, tid, sess)) return jr3({ error: "Only a Full-Access admin can change the handover template." }, headers, 403);
     const b = await readJson4(request);
-    const slug3 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    const slug4 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
     const mkList = (arr, kind, failVal) => {
       const out = [], seen = /* @__PURE__ */ new Set();
       for (const it of Array.isArray(arr) ? arr : []) {
         const label = String(it && it.label || "").trim().slice(0, 120);
         if (!label) continue;
-        let id = slug3(it && it.id) || slug3(label) || "item" + (out.length + 1);
+        let id = slug4(it && it.id) || slug4(label) || "item" + (out.length + 1);
         while (seen.has(id)) id = id + "_" + (out.length + 1);
         seen.add(id);
         if (kind === "photo") {
@@ -16864,7 +18023,7 @@ async function sitelogAdminFetch(env, pathQuery, ms) {
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
   if (env.SITELOG_DB) {
     try {
-      const res = await handle11(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      const res = await handle9(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
       if (res && res.ok) return res;
     } catch (e) {
     }
@@ -16924,7 +18083,7 @@ async function handle24(request, env, ctx, url, sess) {
         num2
       ).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog2(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
       return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/add") {
@@ -16949,7 +18108,7 @@ async function handle24(request, env, ctx, url, sess) {
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
       let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog2(env, name, ll.lat, ll.lng, client);
+      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
       return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
@@ -17171,13 +18330,7 @@ async function handle24(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const key = String(b.key || "").trim();
     if (!key) return error("key required", 400, env, request);
-    const fin = await cfgGet(env, tid, "proj_fin", {});
-    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
-    if (b.value !== void 0) cur.value = Math.max(0, Number(b.value) || 0);
-    if (b.planned !== void 0) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
-    if (b.name !== void 0) cur.name = String(b.name || "").slice(0, 120);
-    fin[key] = cur;
-    await cfgSet(env, tid, "proj_fin", fin);
+    const cur = await writeProjFin(env, tid, key, { value: b.value, planned: b.planned, name: b.name });
     return json({ ok: true, fin: cur }, {}, env, request);
   }
   if (path === "/costing/fin/valuation" && method === "POST") {
@@ -17217,6 +18370,7 @@ async function handle24(request, env, ctx, url, sess) {
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
     const projFin = await cfgGet(env, tid, "proj_fin", {});
     const bySite = {};
+    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     const siteFor = (name, resolved) => {
       const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
       return bySite[key] || (bySite[key] = {
@@ -17252,9 +18406,23 @@ async function handle24(request, env, ctx, url, sess) {
       map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
     };
     const slRate = {};
+    const seededProjects = {};
+    try {
+      const { results: projRows } = await env.DB.prepare(
+        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
+      ).bind(tid).all();
+      for (const p of projRows || []) {
+        const name = String(p.name || "").trim();
+        if (!name) continue;
+        const resolved = resolveSite(reg, name);
+        const s = siteFor(name, resolved);
+        const sKey = siteKeyOf2(resolved, name);
+        seededProjects[sKey] = { id: p.id, number: p.number };
+      }
+    } catch {
+    }
     const slSites = await fetchSitelogCosting(env, from, to);
     const slCovered = /* @__PURE__ */ new Set();
-    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
     if (slSites) {
       for (const slSite of slSites) {
         const resolved = resolveSiteCode(reg, slSite.siteCode);
@@ -17358,12 +18526,59 @@ async function handle24(request, env, ctx, url, sess) {
         if (hrs > 0) addDay(site.labD, londonDate3(v.check_in_at), hrs * (rt.cost / rt.hrs));
       }
     }
+    try {
+      const projKeyById = {};
+      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
+      const projIds = Object.keys(projKeyById);
+      if (projIds.length) {
+        for (const pid of projIds) {
+          const { results } = await env.DB.prepare(
+            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
+          ).bind(tid, pid).all();
+          const sKey = projKeyById[pid];
+          const s = bySite[sKey];
+          if (!s) continue;
+          for (const r of results || []) {
+            const amt = Number(r.amount) || 0;
+            if (r.kind === "labour") {
+              s.cost = Math.round((s.cost + amt) * 100) / 100;
+              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
+              addDay(s.labD, r.date, amt);
+              const who = canonEng(r.username || "(manual)");
+              const eng = engFor(s, who);
+              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
+              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+              if (mins) {
+                s.onsiteMins += mins;
+                eng.mins += mins;
+                if (!eng.days) eng.days = /* @__PURE__ */ new Set();
+                eng.days.add(r.date);
+              }
+              addSrc(eng, "sla");
+            } else {
+              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
+              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
+              addDay(s.poD, r.date, amt);
+              const supName = (r.supplier || "").trim() || "Manual entry";
+              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+              sup.count++;
+              sup.total = Math.round((sup.total + amt) * 100) / 100;
+            }
+          }
+        }
+      }
+    } catch {
+    }
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
         ...s,
         key,
         // stable per-site id the front-end pins/hides/orders against
+        project: seededProjects[key] || null,
+        // { id, number } when this site IS a portal project
+        manualLabour: s.manualLabour || 0,
+        manualMaterials: s.manualMaterials || 0,
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost,
         poTotal,
@@ -17591,7 +18806,27 @@ async function buildDay(env, tid, user, date, reg) {
     const { results } = await env.DB.prepare(
       "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at"
     ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
-    const scans = (results || []).filter((s) => londonDate3(s.at) === date);
+    let scans = (results || []).filter((s) => londonDate3(s.at) === date);
+    if (!scans.length && env.SITELOG_DB) {
+      const from = new Date(dayStart).toISOString().slice(0, 10);
+      const to = new Date(dayEnd).toISOString().slice(0, 10);
+      try {
+        const visits2 = await fetchSitelogVisits(env, from, to);
+        const nameLike = jcNameLike;
+        for (const v of visits2 || []) {
+          const who = String(v.portal_username || "").trim() || nameLike(v);
+          if (String(who).toLowerCase() !== String(user).toLowerCase()) continue;
+          if (v.check_in_at && londonDate3(v.check_in_at) === date) {
+            scans.push({ at: v.check_in_at, direction: "in", site: v.site_code || v.site_name || "" });
+          }
+          if (v.check_out_at && londonDate3(v.check_out_at) === date) {
+            scans.push({ at: v.check_out_at, direction: "out", site: v.site_code || v.site_name || "" });
+          }
+        }
+        scans.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      } catch {
+      }
+    }
     const open = {};
     const visits = [];
     for (const s of scans) {
@@ -17778,7 +19013,7 @@ function parseLatLngPair(latIn, lngIn) {
   if (lat === 0 && lng === 0) return null;
   return { lat, lng };
 }
-async function pushSiteToSiteLog2(env, name, lat, lng, client) {
+async function pushSiteToSiteLog(env, name, lat, lng, client) {
   try {
     if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
     const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
@@ -17791,7 +19026,7 @@ async function pushSiteToSiteLog2(env, name, lat, lng, client) {
     let res;
     if (env.SITELOG_DB) {
       try {
-        res = await handle11(new Request(target, init), env);
+        res = await handle9(new Request(target, init), env);
       } catch (e) {
         res = null;
       }
@@ -18184,6 +19419,38 @@ async function ensure4(env) {
   } catch {
   }
 }
+async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
+  if (!costingKey) return null;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  const cur = fin[costingKey] || { value: 0, planned: 0, valuations: [] };
+  if (value !== void 0) cur.value = value === null ? 0 : Math.max(0, Number(value) || 0);
+  if (planned !== void 0) cur.planned = Math.max(0, Math.round(Number(planned) || 0));
+  if (name !== void 0) cur.name = String(name || "").slice(0, 120);
+  if (!Array.isArray(cur.valuations)) cur.valuations = [];
+  if ((!cur.value || cur.value === 0) && !cur.valuations.length && !cur.planned) {
+    delete fin[costingKey];
+  } else {
+    fin[costingKey] = cur;
+  }
+  await cfgSet(env, tid, "proj_fin", fin);
+  return fin[costingKey] || null;
+}
+async function renameProjFinKey(env, tid, oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return false;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[oldKey]) return false;
+  fin[newKey] = fin[oldKey];
+  delete fin[oldKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
+async function deleteProjFinKey(env, tid, costingKey) {
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[costingKey]) return false;
+  delete fin[costingKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
 async function cfgGet(env, tid, name, fallback) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
@@ -18390,6 +19657,33 @@ var SCHEME_DEFAULTS = {
     emYearly: { years: 1, amberDays: 90, redDays: 30 },
     pat: { years: 1, amberDays: 90, redDays: 30 },
     pv: { years: 1, amberDays: 90, redDays: 30 }
+  },
+  // Projects scheme — one row per portal project (auto-created on
+  // /project/create). Every project appears here so a lost approval /
+  // certificate has one canonical home. Types kept short + editable per project:
+  //   elec = Electrical Certificate (EICR / EIC / Minor Works)
+  //   gas  = Gas Safety Certificate
+  //   bldg = Building Control (approval / completion)
+  // "other" (drawings + everything else) is always available on every scheme.
+  projects: {
+    elec: { years: 5, amberDays: 90, redDays: 30 },
+    gas: { years: 1, amberDays: 90, redDays: 30 },
+    bldg: { years: 10, amberDays: 90, redDays: 30 }
+  },
+  // Chapplins (residential lettings): statutory landlord certificates.
+  chapplins: {
+    fiveYear: { years: 5, amberDays: 90, redDays: 30 },
+    // EICR (electrical), 5-yearly
+    gas: { years: 1, amberDays: 60, redDays: 21 },
+    // Gas Safety (CP12), annual
+    epc: { years: 10, amberDays: 180, redDays: 60 },
+    // EPC, 10-yearly
+    alarms: { years: 1, amberDays: 60, redDays: 21 },
+    // Smoke/CO alarms
+    fire: { years: 1, amberDays: 90, redDays: 30 },
+    // Fire / emergency lighting (communal)
+    legionella: { years: 2, amberDays: 90, redDays: 30 }
+    // Legionella risk assessment
   }
 };
 var DEFAULT_TYPE_SETTINGS = SCHEME_DEFAULTS.coop;
@@ -18484,7 +19778,7 @@ async function coopSiteNumber(env, tid, code) {
   }
   return code;
 }
-var SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council" };
+var SCHEME_LABELS = { coop: "Southern Co-op", fareham: "Fareham Borough Council", chapplins: "Chapplins" };
 var schemeLabel = (s) => SCHEME_LABELS[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 var TYPE_LABELS = {
   fiveYear: "5 Year",
@@ -18497,6 +19791,15 @@ var TYPE_LABELS = {
   forecourt: "EV/Forecourt",
   pump: "Pump",
   asbestos: "Asbestos Register",
+  // Projects scheme
+  elec: "Electrical Certificate",
+  bldg: "Building Control",
+  // Chapplins lettings types
+  gas: "Gas Safety",
+  epc: "EPC",
+  alarms: "Smoke/CO Alarms",
+  fire: "Fire / Emergency Lighting",
+  legionella: "Legionella",
   other: "Other"
 };
 function typeOptionsFor(scheme) {
@@ -18505,7 +19808,7 @@ function typeOptionsFor(scheme) {
   if (!keys.includes("other")) keys.push("other");
   return keys.map((k) => ({ key: k, label: TYPE_LABELS[k] || k }));
 }
-var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "other"];
+var KNOWN_TYPES = ["fiveYear", "pat", "em", "emMonthly", "emYearly", "pv", "ev", "pump", "asbestos", "elec", "gas", "bldg", "epc", "alarms", "fire", "legionella", "other"];
 function canonType(t) {
   const s = String(t || "").toLowerCase();
   const exact = KNOWN_TYPES.find((k2) => k2.toLowerCase() === s);
@@ -18513,13 +19816,21 @@ function canonType(t) {
   if (/em\s*month|month.*\bem\b|emmonthly/.test(s)) return "emMonthly";
   if (/em\s*year|year.*\bem\b|emyearly/.test(s)) return "emYearly";
   if (/asbestos/.test(s)) return "asbestos";
+  if (/legionella|\blra\b/.test(s)) return "legionella";
+  if (/\bepc\b|energy\s*perf/.test(s)) return "epc";
+  if (/\bgas\b|cp12|gsc|landlord.*gas|gas.*safety/.test(s)) return "gas";
+  if (/smoke|\bco\b|carbon\s*monox|alarm/.test(s)) return "alarms";
   if (/5\s*year|five\s*year|eicr/.test(s)) return "fiveYear";
+  if (/\bfire\b|\bfra\b/.test(s)) return "fire";
   if (/\bpat\b/.test(s)) return "pat";
   if (/emergency|\bem\b|em\s*light/.test(s)) return "em";
   if (/forecourt|\bpfs\b|petrol|fuel/.test(s)) return "ev";
   if (/\bpv\b|solar|photovolt/.test(s)) return "pv";
   if (/\bev\b|charge|ev\s*maint/.test(s)) return "ev";
   if (/pump|sump/.test(s)) return "pump";
+  if (/build.*control|\bbldg\b|building/.test(s)) return "bldg";
+  if (/gas\s*safe|gas/.test(s)) return "gas";
+  if (/electr|\belec\b|eic\b|minor\s*works/.test(s)) return "elec";
   const k = s.replace(/[^a-z0-9]+/g, "");
   return k ? k.slice(0, 20) : "other";
 }
@@ -18747,6 +20058,23 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true }, headers);
   }
   if (sub === "/stores" && method === "GET") {
+    if (scheme === "projects") {
+      try {
+        const { results: projRows } = await env.DB.prepare(
+          "SELECT id, number, name, status FROM projects WHERE tenant_id=? AND status IN ('live','complete')"
+        ).bind(tid).all();
+        for (const p of projRows || []) {
+          const code = String(p.number || "").trim();
+          if (!code) continue;
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO compliance_stores
+              (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+              VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+          ).bind(tid, code, p.name || null, code, (/* @__PURE__ */ new Date()).toISOString()).run();
+        }
+      } catch {
+      }
+    }
     if (scheme !== "coop") {
       try {
         await env.DB.prepare(
@@ -18932,6 +20260,24 @@ async function handle25(request, env, ctx, url, sess) {
        VALUES (?,?,?,?,?,?,?,1,?,?)
        ON CONFLICT(tenant_id, scheme, code) DO UPDATE SET category=excluded.category, name=excluded.name, postcode=excluded.postcode, due=excluded.due, site_number=COALESCE(excluded.site_number, compliance_stores.site_number), updated_at=excluded.updated_at`
     ).bind(tid, scheme, code, category, name, postcode, JSON.stringify(due), siteNo, at).run();
+    if (siteNo && (b.name != null || b.postcode != null)) {
+      try {
+        const s = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+        if (s) {
+          let d = {};
+          try {
+            d = JSON.parse(s.data || "{}");
+          } catch {
+          }
+          if (b.name != null) d.siteName = String(name || d.siteName || "").slice(0, 200);
+          if (b.postcode != null) d.postcode = String(postcode || "").slice(0, 20);
+          await env.DB.prepare(
+            "UPDATE sites SET site_name=?, postcode=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?"
+          ).bind(d.siteName || null, d.postcode || null, JSON.stringify(d), tid, s.client, siteNo).run();
+        }
+      } catch {
+      }
+    }
     return jr6({ ok: true, code, due, siteNumber: siteNo }, headers);
   }
   if (sub === "/store-meta" && method === "POST") {
@@ -18960,6 +20306,30 @@ async function handle25(request, env, ctx, url, sess) {
     if ("keys" in b) meta.keys = String(b.keys || "").slice(0, 2e3) || null;
     if (row) await env.DB.prepare("UPDATE compliance_stores SET meta=?, updated_at=? WHERE tenant_id=? AND scheme=? AND code=?").bind(JSON.stringify(meta), at, tid, scheme, code).run();
     else await env.DB.prepare("INSERT INTO compliance_stores (tenant_id, scheme, code, meta, active, site_number, updated_at) VALUES (?,?,?,?,1,?,?)").bind(tid, scheme, code, JSON.stringify(meta), scheme === "coop" ? await coopSiteNumber(env, tid, code) : null, at).run();
+    if ("lat" in b || "lng" in b) {
+      try {
+        const linkRow = await env.DB.prepare("SELECT site_number FROM compliance_stores WHERE tenant_id=? AND scheme=? AND code=?").bind(tid, scheme, code).first();
+        const siteNo = linkRow && linkRow.site_number;
+        if (siteNo) {
+          const s = await env.DB.prepare("SELECT client, site_name, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, siteNo).first();
+          if (s) {
+            let d = {};
+            try {
+              d = JSON.parse(s.data || "{}");
+            } catch {
+            }
+            if ("lat" in b) d.lat = meta.lat;
+            if ("lng" in b) {
+              d.lng = meta.lng;
+              d.lon = meta.lng;
+            }
+            await env.DB.prepare("UPDATE sites SET data=?, updated_at=datetime('now') WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(d), tid, s.client, siteNo).run();
+            ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: s.site_name, lat: d.lat, lon: d.lon, client: s.client }));
+          }
+        }
+      } catch {
+      }
+    }
     return jr6({ ok: true, code, meta }, headers);
   }
   if (sub === "/store-delete" && method === "POST") {
@@ -19147,6 +20517,229 @@ async function handle25(request, env, ctx, url, sess) {
   return jr6({ error: "Not found: " + sub }, headers, 404);
 }
 
+// src/routes/chapplins.js
+var CLIENT = "chapplins";
+var SCHEME = "chapplins";
+var _ready = false;
+async function ensureTables2(env, tenantId) {
+  if (_ready) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS site_tenants (
+    tenant_id   INTEGER NOT NULL DEFAULT 1,
+    id          TEXT PRIMARY KEY,        -- stable: <client>:<siteNumber>:<ref|slug(name)>
+    client      TEXT,                    -- portal client id (chapplins)
+    site_number TEXT NOT NULL,           -- the portal site this tenant occupies
+    ref         TEXT,                    -- the customer's own tenant reference (e.g. MYER01)
+    name        TEXT,
+    phone       TEXT,
+    email       TEXT,
+    home_tel    TEXT,
+    notes       TEXT,
+    first_seen  TEXT,                    -- earliest job date we saw this tenant
+    last_seen   TEXT,                    -- latest job date (drives current)
+    is_current  INTEGER DEFAULT 0,       -- 1 = current occupant of the site
+    data        TEXT,                    -- JSON room for extra fields
+    updated_at  TEXT
+  )`).run();
+  try {
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_site_tenants_site ON site_tenants(tenant_id, client, site_number)").run();
+  } catch {
+  }
+  _ready = true;
+}
+var slug3 = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+var nowISO = () => (/* @__PURE__ */ new Date()).toISOString();
+function tenantId2(client, siteNumber, ref, name) {
+  return `${client}:${siteNumber}:${slug3(ref || name || "t")}`;
+}
+async function canManage(env, tid, sess) {
+  if (!sess) return false;
+  try {
+    const p = await permissionsFor(env, tid, sess.user.username);
+    return p.FullAccess === "Yes" || p.Compliance === "Yes" || p.SLAAdmin === "Yes";
+  } catch {
+    return false;
+  }
+}
+function tenantOut(r) {
+  return {
+    id: r.id,
+    siteNumber: r.site_number,
+    ref: r.ref || "",
+    name: r.name || "",
+    phone: r.phone || "",
+    email: r.email || "",
+    homeTel: r.home_tel || "",
+    notes: r.notes || "",
+    firstSeen: r.first_seen || "",
+    lastSeen: r.last_seen || "",
+    current: r.is_current ? 1 : 0
+  };
+}
+async function handle26(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tenantId = sess.tenantId;
+  const db = tenantDB(env, tenantId);
+  await ensureTables2(env, tenantId);
+  if (path === "/chapplins/sites" && method === "GET") {
+    const { results: siteRows } = await db.prepare(
+      "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_name COLLATE NOCASE"
+    ).bind(tenantId, CLIENT).all();
+    const { results: tenRows } = await db.prepare(
+      "SELECT * FROM site_tenants WHERE tenant_id=? AND client=?"
+    ).bind(tenantId, CLIENT).all();
+    const tenBySite = {};
+    for (const r of tenRows || []) (tenBySite[r.site_number] = tenBySite[r.site_number] || []).push(r);
+    const jobCount = {};
+    try {
+      const { results: jc } = await db.prepare(
+        "SELECT site_code, COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND site_code IS NOT NULL GROUP BY site_code"
+      ).bind(tenantId).all();
+      for (const r of jc || []) jobCount[String(r.site_code)] = r.n;
+    } catch {
+    }
+    const dueByCode = {};
+    try {
+      const { results: cs } = await db.prepare(
+        "SELECT code, due FROM compliance_stores WHERE tenant_id=? AND scheme=?"
+      ).bind(tenantId, SCHEME).all();
+      for (const r of cs || []) {
+        try {
+          dueByCode[String(r.code)] = JSON.parse(r.due || "{}") || {};
+        } catch {
+        }
+      }
+    } catch {
+    }
+    const sites = (siteRows || []).map((s) => {
+      const num2 = String(s.site_number);
+      const tens = (tenBySite[num2] || []).slice().sort((a, b) => (b.last_seen || "").localeCompare(a.last_seen || ""));
+      const cur = tens.find((t) => t.is_current) || tens[0] || null;
+      return {
+        siteNumber: num2,
+        siteName: s.site_name || "",
+        postcode: s.postcode || "",
+        active: s.active == null ? 1 : s.active,
+        jobCount: jobCount[String(Number(num2))] || jobCount[num2] || 0,
+        tenantCount: tens.length,
+        currentTenant: cur ? { ref: cur.ref || "", name: cur.name || "", phone: cur.phone || "", email: cur.email || "" } : null,
+        due: dueByCode[num2] || {}
+      };
+    });
+    return json({ ok: true, sites, count: sites.length }, {}, env, request);
+  }
+  if (path === "/chapplins/site" && method === "GET") {
+    const num2 = String(q.get("number") || "").trim();
+    if (!num2) return error("number required", 400, env, request);
+    const s = await db.prepare(
+      "SELECT site_number, site_name, postcode, active, data FROM sites WHERE tenant_id=? AND client=? AND site_number=?"
+    ).bind(tenantId, CLIENT, num2).first();
+    if (!s) return error("Site not found", 404, env, request);
+    let data = {};
+    try {
+      data = JSON.parse(s.data || "{}") || {};
+    } catch {
+    }
+    const { results: tenRows } = await db.prepare(
+      "SELECT * FROM site_tenants WHERE tenant_id=? AND client=? AND site_number=? ORDER BY is_current DESC, last_seen DESC"
+    ).bind(tenantId, CLIENT, num2).all();
+    const tenants = (tenRows || []).map(tenantOut);
+    let jobs = [];
+    try {
+      const code = String(Number(num2));
+      const { results: jr7 } = await db.prepare(
+        "SELECT id, ref, status, created_at, completed_at, data FROM sla_jobs_archive WHERE tenant_id=? AND site_code=? ORDER BY COALESCE(completed_at,created_at) DESC LIMIT 500"
+      ).bind(tenantId, code).all();
+      jobs = (jr7 || []).map((r) => {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}") || {};
+        } catch {
+        }
+        return {
+          id: r.id,
+          ref: r.ref || r.id,
+          status: r.status || "Archived",
+          priority: d.priority || "",
+          date: r.created_at || r.completed_at || null,
+          description: d.description || d.jobName || "",
+          tenantRef: d.tenantRef || "",
+          tenantName: d.tenantName || ""
+        };
+      });
+    } catch {
+    }
+    return json({
+      ok: true,
+      site: { siteNumber: String(s.site_number), siteName: s.site_name || "", postcode: s.postcode || "", active: s.active == null ? 1 : s.active, data },
+      tenants,
+      jobs
+    }, {}, env, request);
+  }
+  if (path === "/chapplins/tenant" && method === "POST") {
+    if (!await canManage(env, tenantId, sess)) return error("Not permitted", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!siteNumber) return error("siteNumber required", 400, env, request);
+    if (!String(b.name || "").trim() && !String(b.ref || "").trim()) return error("name or ref required", 400, env, request);
+    const id = String(b.id || "").trim() || tenantId2(CLIENT, siteNumber, b.ref, b.name);
+    const makeCurrent = b.makeCurrent === void 0 ? true : !!b.makeCurrent;
+    if (makeCurrent) {
+      await db.prepare("UPDATE site_tenants SET is_current=0, updated_at=? WHERE tenant_id=? AND client=? AND site_number=?").bind(nowISO(), tenantId, CLIENT, siteNumber).run();
+    }
+    await db.prepare(`INSERT INTO site_tenants
+        (tenant_id, id, client, site_number, ref, name, phone, email, home_tel, notes, first_seen, last_seen, is_current, data, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET
+        site_number=excluded.site_number, ref=excluded.ref, name=excluded.name,
+        phone=excluded.phone, email=excluded.email, home_tel=excluded.home_tel,
+        notes=excluded.notes, first_seen=COALESCE(excluded.first_seen, site_tenants.first_seen),
+        last_seen=COALESCE(excluded.last_seen, site_tenants.last_seen),
+        is_current=excluded.is_current, updated_at=excluded.updated_at`).bind(
+      tenantId,
+      id,
+      CLIENT,
+      siteNumber,
+      b.ref || null,
+      b.name || null,
+      b.phone || null,
+      b.email || null,
+      b.homeTel || null,
+      b.notes || null,
+      b.firstSeen || null,
+      b.lastSeen || null,
+      makeCurrent ? 1 : 0,
+      JSON.stringify(b.data || {}),
+      nowISO()
+    ).run();
+    const row = await db.prepare("SELECT * FROM site_tenants WHERE tenant_id=? AND id=?").bind(tenantId, id).first();
+    return json({ ok: true, tenant: row ? tenantOut(row) : null }, {}, env, request);
+  }
+  if (path === "/chapplins/tenant/current" && method === "POST") {
+    if (!await canManage(env, tenantId, sess)) return error("Not permitted", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "").trim();
+    if (!id) return error("id required", 400, env, request);
+    const row = await db.prepare("SELECT site_number FROM site_tenants WHERE tenant_id=? AND id=?").bind(tenantId, id).first();
+    if (!row) return error("Tenant not found", 404, env, request);
+    await db.prepare("UPDATE site_tenants SET is_current=0, updated_at=? WHERE tenant_id=? AND client=? AND site_number=?").bind(nowISO(), tenantId, CLIENT, row.site_number).run();
+    await db.prepare("UPDATE site_tenants SET is_current=1, updated_at=? WHERE tenant_id=? AND id=?").bind(nowISO(), tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/chapplins/tenant/delete" && method === "POST") {
+    if (!await canManage(env, tenantId, sess)) return error("Not permitted", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "").trim();
+    if (!id) return error("id required", 400, env, request);
+    await db.prepare("DELETE FROM site_tenants WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown chapplins route", 404, env, request);
+}
+
 // src/routes/po.js
 function staffTypeOf2(u) {
   try {
@@ -19189,7 +20782,7 @@ async function getVehicles(env) {
     return [];
   }
 }
-async function handle26(request, env, ctx, url, sess) {
+async function handle27(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
@@ -19768,18 +21361,18 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle27(request, env, ctx, url, sess) {
+async function handle28(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
-  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   if (path === "/cctv/snapshot" && method === "GET") {
     return snapshot(request, env, url, cors);
   }
   if (!sess) sess = await requireSession(env, request);
-  if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
+  if (perms.FullAccess !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
   const db = tenantDB(env, sess.tenantId);
   if (path === "/cctv/sites" && method === "GET") {
     const sites = await loadSites(db);
@@ -19794,17 +21387,17 @@ async function handle27(request, env, ctx, url, sess) {
       }
       out.push(v);
     }
-    return json3({ ok: true, sites: out, allowedPorts: [...ALLOWED_PORTS] });
+    return json4({ ok: true, sites: out, allowedPorts: [...ALLOWED_PORTS] });
   }
   if (path === "/cctv/site" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const name = String(b.name || "").trim();
     const host = String(b.host || "").trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
     const port = parseInt(b.port, 10) || (b.https ? 443 : 80);
-    if (!name) return json3({ ok: false, error: "Give the site a name" }, 400);
-    if (!host) return json3({ ok: false, error: "Enter the DVR host / DDNS address" }, 400);
+    if (!name) return json4({ ok: false, error: "Give the site a name" }, 400);
+    if (!host) return json4({ ok: false, error: "Enter the DVR host / DDNS address" }, 400);
     if (!ALLOWED_PORTS.has(port)) {
-      return json3({ ok: false, error: `Port ${port} can't be reached by the proxy. Forward the DVR to one of: ${[...ALLOWED_PORTS].join(", ")} (8080 is easiest).` }, 400);
+      return json4({ ok: false, error: `Port ${port} can't be reached by the proxy. Forward the DVR to one of: ${[...ALLOWED_PORTS].join(", ")} (8080 is easiest).` }, 400);
     }
     const vendor = b.vendor === "dahua" ? "dahua" : "hik";
     const sites = await loadSites(db);
@@ -19841,28 +21434,28 @@ async function handle27(request, env, ctx, url, sess) {
       site.cameras = [];
     }
     await saveSites(db, sites);
-    return json3({ ok: true, id: site.id, isNew, site: publicSite(site) });
+    return json4({ ok: true, id: site.id, isNew, site: publicSite(site) });
   }
   if (path === "/cctv/site/delete" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     let sites = await loadSites(db);
     const before = sites.length;
     sites = sites.filter((s) => s.id !== b.id);
-    if (sites.length === before) return json3({ ok: false, error: "Site not found" }, 404);
+    if (sites.length === before) return json4({ ok: false, error: "Site not found" }, 404);
     await saveSites(db, sites);
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (path === "/cctv/test" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const sites = await loadSites(db);
     const site = sites.find((s) => s.id === b.id);
-    if (!site) return json3({ ok: false, error: "Save the site first, then test" }, 404);
+    if (!site) return json4({ ok: false, error: "Save the site first, then test" }, 404);
     const cam = (site.cameras || [])[0];
-    if (!cam) return json3({ ok: false, error: "This site has no cameras" }, 400);
+    if (!cam) return json4({ ok: false, error: "This site has no cameras" }, 400);
     const r = await fetchSnapshot(site, cam.ch);
-    return json3({ ok: r.ok, status: r.status, bytes: r.bytes || 0, error: r.error || null, contentType: r.contentType || null, debug: r.debug || null, ch: cam.ch });
+    return json4({ ok: r.ok, status: r.status, bytes: r.bytes || 0, error: r.error || null, contentType: r.contentType || null, debug: r.debug || null, ch: cam.ch });
   }
-  return json3({ ok: false, error: "Not found: " + path }, 404);
+  return json4({ ok: false, error: "Not found: " + path }, 404);
 }
 async function snapshot(request, env, url, cors) {
   const params = url.searchParams;
@@ -20145,7 +21738,7 @@ var TASK_AREAS = [
 var AREA_BY_KEY = {};
 for (const a of TASK_AREAS) AREA_BY_KEY[a.key] = a;
 var RECURRENCE = ["daily", "weekly", "monthly", "quarterly", "yearly", "once"];
-async function ensureTables2(env) {
+async function ensureTables3(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_tasks (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, detail TEXT, assignees TEXT,
     recurrence TEXT, due_time TEXT, due_dow INTEGER, due_dom INTEGER, due_month INTEGER, due_date TEXT,
@@ -20282,13 +21875,13 @@ function shapeTask(t) {
     createdBy: t.created_by || ""
   };
 }
-async function handle28(request, env, ctx, url, sess) {
+async function handle29(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
-  await ensureTables2(env);
+  await ensureTables3(env);
   const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
@@ -20485,6 +22078,9 @@ var PW = 842;
 var PH = 595;
 var M2 = 26;
 var ROW_H = 14.5;
+var LINE_H = 10;
+var ROW_PAD = 4.5;
+var MAX_NAME_LINES = 5;
 var HDR_H = 22;
 var COLS = [
   // left columns; "Works" width is dynamic
@@ -20546,6 +22142,37 @@ function fitText(str, w, size) {
   while (s.length > 1 && textWidth(s + "...", size) > w) s = s.slice(0, -1);
   return s + "...";
 }
+function wrapLines(str, w, size, maxLines) {
+  const words = String(str || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (let word of words) {
+    while (textWidth(word, size) > w && word.length > 1) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      let k = word.length;
+      while (k > 1 && textWidth(word.slice(0, k), size) > w) k--;
+      lines.push(word.slice(0, k));
+      word = word.slice(k);
+    }
+    const test = line ? line + " " + word : word;
+    if (textWidth(test, size) <= w) line = test;
+    else {
+      if (line) lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  if (!lines.length) lines.push("");
+  if (maxLines && lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    kept[maxLines - 1] = fitText(lines.slice(maxLines - 1).join(" "), w, size);
+    return kept;
+  }
+  return lines;
+}
 function buildProgrammePdf(data, meta = {}) {
   data = data || {};
   applyWorksWidth(data.worksW);
@@ -20559,6 +22186,10 @@ function buildProgrammePdf(data, meta = {}) {
     _end: endOf(t, hs),
     _c: byC[t.contractor] || null
   }));
+  for (const t of tasks) {
+    t._lines = wrapLines(t.name || "", COLS[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._h = Math.max(ROW_H, t._lines.length * LINE_H + ROW_PAD);
+  }
   const starts = tasks.map((t) => t._start).filter(Boolean).sort((a, b) => a - b);
   const anchor = starts.length ? starts[Math.floor(starts.length / 2)] : /* @__PURE__ */ new Date();
   const near = (t) => t._start && Math.abs(t._start - anchor) / DAY <= 550;
@@ -20582,7 +22213,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const rowsPerPage = Math.max(8, Math.floor((PH - M2 - headerBlockH - HDR_H - footerH - M2) / ROW_H));
+  const bodyH = PH - M2 - headerBlockH - HDR_H - footerH - M2;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -20593,17 +22224,24 @@ function buildProgrammePdf(data, meta = {}) {
   for (const win of windows) {
     const winTasks = tasks.filter((t) => inWindow(t, win));
     if (!winTasks.length) continue;
-    const nPages = Math.max(1, Math.ceil(winTasks.length / rowsPerPage));
-    const per = Math.ceil(winTasks.length / nPages);
-    for (let i = 0; i < winTasks.length; i += per) {
-      pages.push({ win, rows: winTasks.slice(i, i + per) });
+    let cur = [], curH = 0;
+    for (const t of winTasks) {
+      if (cur.length && curH + t._h > bodyH) {
+        pages.push({ win, rows: cur });
+        cur = [];
+        curH = 0;
+      }
+      cur.push(t);
+      curH += t._h;
     }
+    if (cur.length) pages.push({ win, rows: cur });
   }
-  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, rowsPerPage) });
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H))) });
   const doc = new PdfDoc(PW, PH);
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
+  let lastGridBot = M2 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
@@ -20657,33 +22295,40 @@ function buildProgrammePdf(data, meta = {}) {
       }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M2 + headerBlockH;
-      const gridTop = y, gridBot = gridTop + HDR_H + rows.length * ROW_H;
+      const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
+      const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
       doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
       let cx = M2;
       for (const col of COLS) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
       }
+      const rightEdge = GRID_X + win.days * dayW;
       for (let i = 0; i < win.days; i++) {
         const d = addDays2(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
-        if (we) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.937, 0.949, 0.963] });
-        if (bh) doc.rect(x, gridTop, dayW, HDR_H + rows.length * ROW_H, { fill: [0.992, 0.953, 0.898] });
-        let label = dayW >= 15 ? true : d.getUTCDay() === 1;
-        if (label && x + 1 + textWidth(fmtDM(d), 5.8) > GRID_X + win.days * dayW) label = false;
-        if (label) {
-          doc.text(x + 1, gridTop + 9, fmtDM(d), { size: 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
-          doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
-        }
+        if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
+        if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
+        const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1, major = isMon || first2;
+        let label = "", minor = false;
+        if (dayW >= 15) label = fmtDM(d);
+        else if (dayW >= 8) {
+          label = major ? fmtDM(d) : p2(d.getUTCDate());
+          minor = !major;
+        } else if (major) label = fmtDM(d);
+        if (label && x + 1 + textWidth(label, minor ? 5.4 : 5.8) > rightEdge) label = "";
+        if (label) doc.text(x + 1, gridTop + 9, label, { size: minor ? 5.4 : 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
+        if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
         if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
       }
       doc.line(M2, gridTop, M2 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
       doc.line(M2, gridTop + HDR_H, M2 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
-      rows.forEach((t, ri) => {
-        const ry = gridTop + HDR_H + ri * ROW_H;
+      let ry = gridTop + HDR_H;
+      rows.forEach((t) => {
+        const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        doc.text(M2 + 3, ry + 10.5, fitText(t.name, COLS[0].w - 8, 8.5), { size: 8.5 });
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M2 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
           doc.rect(M2 + COLS[0].w + 2, ry + 3.5, 7, 7, { fill: col });
           doc.text(M2 + COLS[0].w + 12, ry + 10.5, fitText(t._c.name, COLS[1].w - 16, 8), { size: 8 });
@@ -20691,7 +22336,7 @@ function buildProgrammePdf(data, meta = {}) {
         if (t._start) doc.text(M2 + COLS[0].w + COLS[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
         if (t._end) doc.text(M2 + COLS[0].w + COLS[1].w + COLS[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
         doc.text(M2 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M2, ry + ROW_H, M2 + LEFT_W + win.days * dayW, ry + ROW_H, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        doc.line(M2, ry + rh, M2 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
@@ -20700,24 +22345,27 @@ function buildProgrammePdf(data, meta = {}) {
             if (off >= 0 && off < win.days) marked.push(off);
           }
           if (t.milestone && marked.length) {
-            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + ROW_H / 2;
+            const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + rh / 2;
             doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
           } else {
+            const bh = ROW_H - 5;
+            const barTop = ry + (rh - bh) / 2;
             let i = 0;
             while (i < marked.length) {
               let j = i;
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
-              const bh = ROW_H - 5;
               const bw = (j - i + 1) * dayW - 1;
               const r = Math.max(1, Math.min(2.5, bh / 2, bw / 2));
-              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, ry + 2.5, bw, bh, r, { fill: col });
+              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, barTop, bw, bh, r, { fill: col });
               i = j + 1;
             }
           }
         }
+        ry += rh;
       });
-      doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H + rows.length * ROW_H, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
+      lastGridBot = gridBot;
       const fy = PH - M2 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
       doc.text(M2, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
@@ -20725,27 +22373,65 @@ function buildProgrammePdf(data, meta = {}) {
     }
   }
   const notes = String(data.notes || meta.notes || "").trim();
-  if (notes) {
-    doc.newPage(PW, PH);
-    doc.text(M2, M2 + 14, "Notes", { size: 12, bold: true });
-    const words = notes.split(/\s+/);
-    let line = "", ny = M2 + 32;
-    for (const w of words) {
-      if (textWidth(line + " " + w, 10) > PW - 2 * M2) {
-        doc.text(M2, ny, line, { size: 10 });
-        ny += 14;
-        line = w;
-      } else line = line ? line + " " + w : w;
+  const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
+  if (notes || items.length) {
+    const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
+    const PAD = 10, LH = 12, contentW = PW - 2 * M2 - 2 * PAD;
+    const notesLines = notes ? wrapLines(notes, contentW, 10, 0) : [];
+    const plainW = plain.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    const discW = disc.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    let adv = 16;
+    if (notesLines.length) adv += notesLines.length * LH + 4;
+    for (const w of plainW) adv += w.length * LH;
+    if (disc.length) {
+      adv += 6 + 16;
+      for (const w of discW) adv += w.length * LH;
     }
-    if (line) doc.text(M2, ny, line, { size: 10 });
-    doc.text(M2, PH - M2 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    const boxH = 2 * PAD + adv;
+    let boxTop, ownPage = false;
+    if (lastGridBot + 14 + boxH <= PH - M2) {
+      boxTop = lastGridBot + 14;
+    } else {
+      doc.newPage(PW, PH);
+      boxTop = M2 + 14;
+      ownPage = true;
+    }
+    doc.roundRect(M2, boxTop, PW - 2 * M2, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M2 + PAD;
+    let ny = boxTop + PAD + 10;
+    const para = (lines, x) => {
+      for (const ln of lines) {
+        doc.text(x, ny, ln, { size: 10 });
+        ny += LH;
+      }
+    };
+    doc.text(x0, ny, "Notes", { size: 12, bold: true, color: [0, 0.22, 0.41] });
+    ny += 16;
+    if (notesLines.length) {
+      para(notesLines, x0);
+      ny += 4;
+    }
+    for (const w of plainW) {
+      doc.text(x0, ny, "\u2022", { size: 10 });
+      para(w, x0 + 12);
+    }
+    if (disc.length) {
+      ny += 6;
+      doc.text(x0, ny, "To discuss", { size: 11, bold: true, color: [0.57, 0.38, 0.04] });
+      ny += 16;
+      for (const w of discW) {
+        doc.text(x0, ny, "\u2022", { size: 10 });
+        para(w, x0 + 12);
+      }
+    }
+    if (ownPage) doc.text(M2, PH - M2 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }
 
 // src/routes/programmes.js
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables3(env) {
+async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -20895,24 +22581,24 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle29(request, env, ctx, url) {
+async function handle30(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
-  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables3(env);
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  await ensureTables4(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
-    if (g.error) return json3({ ok: false, error: g.error }, g.code);
+    if (g.error) return json4({ ok: false, error: g.error }, g.code);
     const share = g.share;
     if (share.access_code && !codeOk(share, b.code)) {
-      return json3({ ok: false, needCode: true, error: b.code ? "That access code isn't right." : "" }, b.code ? 403 : 401);
+      return json4({ ok: false, needCode: true, error: b.code ? "That access code isn't right." : "" }, b.code ? 403 : 401);
     }
     const rev = await latestRevision(db, share.prog_id);
-    if (!rev) return json3({ ok: false, error: "This programme hasn't been issued yet." }, 404);
+    if (!rev) return json4({ ok: false, error: "This programme hasn't been issued yet." }, 404);
     const prog = await db.prepare("SELECT title, client, site FROM job_programmes WHERE id=? AND tenant_id=?").bind(share.prog_id, db.tenantId).first();
     ctx?.waitUntil(db.prepare(
       "UPDATE programme_shares SET opens=opens+1, last_opened_at=? WHERE token=? AND tenant_id=?"
@@ -20925,7 +22611,7 @@ async function handle29(request, env, ctx, url) {
     if (share.contractor && Array.isArray(data.tasks)) {
       data = { ...data, tasks: data.tasks.filter((t) => t && t.contractor === share.contractor) };
     }
-    return json3({
+    return json4({
       ok: true,
       title: prog?.title || data.title || "Programme of works",
       client: prog?.client || "",
@@ -20942,12 +22628,12 @@ async function handle29(request, env, ctx, url) {
   if (method === "POST" && pathname === "/prog/shared/suggest") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
-    if (g.error) return json3({ ok: false, error: g.error }, g.code);
+    if (g.error) return json4({ ok: false, error: g.error }, g.code);
     const share = g.share;
-    if (!codeOk(share, b.code)) return json3({ ok: false, error: "That access code isn't right." }, 403);
-    if (!share.allow_suggest) return json3({ ok: false, error: "Suggestions are switched off for this link." }, 403);
+    if (!codeOk(share, b.code)) return json4({ ok: false, error: "That access code isn't right." }, 403);
+    if (!share.allow_suggest) return json4({ ok: false, error: "Suggestions are switched off for this link." }, 403);
     const c = cleanData(b.data);
-    if (c.error) return json3({ ok: false, error: c.error }, 400);
+    if (c.error) return json4({ ok: false, error: c.error }, 400);
     let revLbl = "";
     const claimed = String(b.rev || "").slice(0, 6);
     if (claimed) {
@@ -20983,16 +22669,16 @@ async function handle29(request, env, ctx, url) {
       }).catch(() => {
       }));
     }
-    return json3({ ok: true, id });
+    return json4({ ok: true, id });
   }
   if (method === "POST" && pathname === "/prog/shared/export") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
-    if (g.error) return json3({ ok: false, error: g.error }, g.code);
+    if (g.error) return json4({ ok: false, error: g.error }, g.code);
     const share = g.share;
-    if (share.access_code && !codeOk(share, b.code)) return json3({ ok: false, error: "That access code isn't right." }, 403);
+    if (share.access_code && !codeOk(share, b.code)) return json4({ ok: false, error: "That access code isn't right." }, 403);
     const rev = await latestRevision(db, share.prog_id);
-    if (!rev) return json3({ ok: false, error: "This programme hasn't been issued yet." }, 404);
+    if (!rev) return json4({ ok: false, error: "This programme hasn't been issued yet." }, 404);
     const prog = await db.prepare("SELECT title, client, site FROM job_programmes WHERE id=? AND tenant_id=?").bind(share.prog_id, db.tenantId).first();
     let data = {};
     try {
@@ -21014,7 +22700,7 @@ async function handle29(request, env, ctx, url) {
     return pdfResponse(cors, bytes, `${prog?.title || "Programme"} - Rev ${rev.rev}.pdf`);
   }
   const gate = await progAdmin(env, request);
-  if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+  if (gate.error) return json4({ ok: false, error: gate.error }, gate.code);
   const me = gate.sess.user.username;
   if (method === "GET" && pathname === "/prog/list") {
     const { results } = await db.prepare(
@@ -21036,7 +22722,7 @@ async function handle29(request, env, ctx, url) {
     for (const r of sugg) sBy[r.prog_id] = r.n;
     const shBy = {};
     for (const r of shares) shBy[r.prog_id] = r.n;
-    return json3({
+    return json4({
       ok: true,
       programmes: progs.map((p) => ({
         ...p,
@@ -21049,7 +22735,7 @@ async function handle29(request, env, ctx, url) {
   if (method === "GET" && pathname === "/prog/one") {
     const id = searchParams.get("id") || "";
     const p = await db.prepare("SELECT * FROM job_programmes WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
-    if (!p) return json3({ ok: false, error: "Programme not found" }, 404);
+    if (!p) return json4({ ok: false, error: "Programme not found" }, 404);
     let data = {};
     try {
       data = JSON.parse(p.data);
@@ -21064,19 +22750,22 @@ async function handle29(request, env, ctx, url) {
     const suggestions = (await db.prepare(
       "SELECT id, rev, author, note, status, created_at, decided_by, decided_at, contractor FROM programme_suggestions WHERE prog_id=? AND tenant_id=? ORDER BY created_at DESC LIMIT 100"
     ).bind(id, db.tenantId).all()).results || [];
-    return json3({
+    const latest = await latestRevision(db, id);
+    const draftRev = latest && latest.data === p.data ? latest.rev : null;
+    return json4({
       ok: true,
       prog: { id: p.id, title: p.title, client: p.client, site: p.site, createdBy: p.created_by, createdAt: p.created_at, updatedAt: p.updated_at, updatedBy: p.updated_by || "", data },
       revisions,
       shares,
       suggestions,
+      draftRev,
       bankHolidays: await bankHolidayDates(db)
     });
   }
   if (method === "POST" && pathname === "/prog/save") {
     const b = await request.json().catch(() => ({}));
     const c = cleanData(b.data);
-    if (c.error) return json3({ ok: false, error: c.error }, 400);
+    if (c.error) return json4({ ok: false, error: c.error }, 400);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const title = String(b.title ?? c.obj.title ?? "").slice(0, 200) || "Untitled programme";
     const client = String(b.client ?? c.obj.client ?? "").slice(0, 200);
@@ -21084,9 +22773,9 @@ async function handle29(request, env, ctx, url) {
     let id = String(b.id || "").trim();
     if (id) {
       const row = await db.prepare("SELECT id, updated_at, updated_by FROM job_programmes WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
-      if (!row) return json3({ ok: false, error: "Programme not found" }, 404);
+      if (!row) return json4({ ok: false, error: "Programme not found" }, 404);
       if (b.baseVersion !== void 0 && String(b.baseVersion) !== String(row.updated_at || "")) {
-        return json3({ ok: false, conflict: true, error: "This programme was changed on another device.", updatedAt: row.updated_at, updatedBy: row.updated_by || "" }, 409);
+        return json4({ ok: false, conflict: true, error: "This programme was changed on another device.", updatedAt: row.updated_at, updatedBy: row.updated_by || "" }, 409);
       }
       await db.prepare(
         "UPDATE job_programmes SET title=?, client=?, site=?, data=?, updated_at=?, updated_by=? WHERE id=? AND tenant_id=?"
@@ -21096,12 +22785,12 @@ async function handle29(request, env, ctx, url) {
       await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
         VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, title, client, site, c.json, me, now, now, me).run();
     }
-    return json3({ ok: true, id, updatedAt: now });
+    return json4({ ok: true, id, updatedAt: now });
   }
   if (method === "POST" && pathname === "/prog/ai-draft") {
     const key = env.ANTHROPIC_API_KEY;
     if (!key) {
-      return json3({ ok: false, error: "AI drafting isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
+      return json4({ ok: false, error: "AI drafting isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
     }
     const b = await request.json().catch(() => ({}));
     const notes = String(b.notes || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 4e3);
@@ -21109,8 +22798,8 @@ async function handle29(request, env, ctx, url) {
     let pdfB64 = String(b.pdfBase64 || "").replace(/\s+/g, "");
     if (pdfB64 && !/^[A-Za-z0-9+/=]+$/.test(pdfB64)) pdfB64 = "";
     const MAX_PDF_B64 = 9 * 1024 * 1024;
-    if (pdfB64.length > MAX_PDF_B64) return json3({ ok: false, error: "That PDF is too big to read directly (over ~6 MB). Try a smaller file, or paste the text in." }, 400);
-    if (text.length < 40 && notes.length < 40 && !pdfB64) return json3({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
+    if (pdfB64.length > MAX_PDF_B64) return json4({ ok: false, error: "That PDF is too big to read directly (over ~6 MB). Try a smaller file, or paste the text in." }, 400);
+    if (text.length < 40 && notes.length < 40 && !pdfB64) return json4({ ok: false, error: "There wasn't enough to work from. Upload a document, or describe the works in the notes box." }, 400);
     const MAX_TEXT = 12e4;
     if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
     const hintTitle = String(b.title || "").slice(0, 200);
@@ -21178,7 +22867,7 @@ async function handle29(request, env, ctx, url) {
         })
       });
     } catch (e) {
-      return json3({ ok: false, error: "Couldn't reach the AI service. Try again in a moment." }, 502);
+      return json4({ ok: false, error: "Couldn't reach the AI service. Try again in a moment." }, 502);
     }
     if (!apiResp.ok) {
       let detail = "";
@@ -21188,26 +22877,26 @@ async function handle29(request, env, ctx, url) {
       } catch {
       }
       if (apiResp.status === 401 || apiResp.status === 403) {
-        return json3({ ok: false, error: "The AI key was rejected. Check the ANTHROPIC_API_KEY secret on the worker." }, 400);
+        return json4({ ok: false, error: "The AI key was rejected. Check the ANTHROPIC_API_KEY secret on the worker." }, 400);
       }
       if (apiResp.status === 404 && /model/i.test(detail)) {
-        return json3({ ok: false, error: `The AI model "${model}" isn't available on this key. Set ANTHROPIC_MODEL on the worker to one you can use.` }, 400);
+        return json4({ ok: false, error: `The AI model "${model}" isn't available on this key. Set ANTHROPIC_MODEL on the worker to one you can use.` }, 400);
       }
-      return json3({ ok: false, error: "The AI service returned an error" + (detail ? ": " + detail : ".") }, 502);
+      return json4({ ok: false, error: "The AI service returned an error" + (detail ? ": " + detail : ".") }, 502);
     }
     let payload;
     try {
       payload = await apiResp.json();
     } catch {
-      return json3({ ok: false, error: "The AI service returned an unreadable response." }, 502);
+      return json4({ ok: false, error: "The AI service returned an unreadable response." }, 502);
     }
     if (payload.stop_reason === "refusal") {
-      return json3({ ok: false, error: "The AI declined to draft from that document. Try a clearer specification." }, 400);
+      return json4({ ok: false, error: "The AI declined to draft from that document. Try a clearer specification." }, 400);
     }
     const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "build_programme") : null;
     const out = block?.input;
     if (!out || !Array.isArray(out.tasks) || !out.tasks.length) {
-      return json3({ ok: false, error: "The AI couldn't find any work activities in that document." }, 422);
+      return json4({ ok: false, error: "The AI couldn't find any work activities in that document." }, 422);
     }
     const PALETTE = ["#00B0F0", "#92D050", "#FFC000", "#852C98", "#7F7F7F", "#e0344b", "#0369a1", "#b45309"];
     const uid = () => "c" + Math.random().toString(36).slice(2, 8);
@@ -21262,7 +22951,7 @@ async function handle29(request, env, ctx, url) {
       const days = Math.max(1, Math.min(365, Number(t?.days) || 1));
       tasks.push({ id: uid(), name, contractor: con ? con.id : "", start, days, wknd: false, progress: 0, milestone: !!t?.milestone });
     }
-    if (!tasks.length) return json3({ ok: false, error: "The AI couldn't turn that document into tasks." }, 422);
+    if (!tasks.length) return json4({ ok: false, error: "The AI couldn't turn that document into tasks." }, 422);
     if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
     const data = {
       title: hintTitle || String(out.title || "").slice(0, 200) || "Programme of works",
@@ -21277,18 +22966,18 @@ async function handle29(request, env, ctx, url) {
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare(`INSERT INTO job_programmes (id, tenant_id, title, client, site, data, created_by, created_at, updated_at, updated_by)
       VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, db.tenantId, data.title, data.client, data.site, JSON.stringify(data), me, now, now, me).run();
-    return json3({ ok: true, id, taskCount: tasks.length, contractors: contractors.length });
+    return json4({ ok: true, id, taskCount: tasks.length, contractors: contractors.length });
   }
   if (method === "POST" && pathname === "/prog/ai-edit") {
-    if (!env.ANTHROPIC_API_KEY) return json3({ ok: false, error: "AI editing isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
+    if (!env.ANTHROPIC_API_KEY) return json4({ ok: false, error: "AI editing isn't switched on yet. Add the ANTHROPIC_API_KEY secret to the mostlane-api worker in the Cloudflare dashboard, then hit Deploy." }, 400);
     const b = await request.json().catch(() => ({}));
     const instruction = String(b.instruction || "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 2e3);
-    if (instruction.length < 2) return json3({ ok: false, error: `Type what you'd like changed (e.g. "compress into two weeks").` }, 400);
+    if (instruction.length < 2) return json4({ ok: false, error: `Type what you'd like changed (e.g. "compress into two weeks").` }, 400);
     const cur = cleanData(b.data);
-    if (cur.error) return json3({ ok: false, error: cur.error }, 400);
+    if (cur.error) return json4({ ok: false, error: cur.error }, 400);
     const src = cur.obj;
     const srcTasks = Array.isArray(src.tasks) ? src.tasks : [];
-    if (!srcTasks.length) return json3({ ok: false, error: "There are no tasks to edit yet." }, 400);
+    if (!srcTasks.length) return json4({ ok: false, error: "There are no tasks to edit yet." }, 400);
     const conById = {}, colourByName = {};
     for (const c of src.contractors || []) {
       if (c && c.id) {
@@ -21327,9 +23016,9 @@ async function handle29(request, env, ctx, url) {
     const sys = "You edit an existing UK construction programme of works (a Gantt schedule) according to the user's instruction. Return the COMPLETE revised programme - every task, not just the ones you changed. Preserve tasks, dates, durations and contractors the instruction doesn't touch. Dates are calendar dates in YYYY-MM-DD; durations are in WORKING DAYS (weekends aren't worked unless a task's wknd flag is true). Keep tasks in a sensible sequence so dependent work follows on and things don't overlap unrealistically. When asked to compress or expand the programme to a target length, rescale the start dates and, only if needed, the durations to fit while keeping the order.";
     const userContent = "CURRENT PROGRAMME (JSON):\n" + JSON.stringify(compact) + "\n\nINSTRUCTION:\n" + instruction;
     const r = await anthropicStructured(env, { system: sys, userContent, schema, toolName: "revise_programme" });
-    if (!r.ok) return json3({ ok: false, error: r.error }, r.code || 502);
+    if (!r.ok) return json4({ ok: false, error: r.error }, r.code || 502);
     const out = r.input;
-    if (!Array.isArray(out.tasks) || !out.tasks.length) return json3({ ok: false, error: "The AI returned no tasks." }, 422);
+    if (!Array.isArray(out.tasks) || !out.tasks.length) return json4({ ok: false, error: "The AI returned no tasks." }, 422);
     const PALETTE = ["#00B0F0", "#92D050", "#FFC000", "#852C98", "#7F7F7F", "#e0344b", "#0369a1", "#b45309"];
     const uid = () => "c" + Math.random().toString(36).slice(2, 8);
     const conByName = /* @__PURE__ */ new Map(), contractors = [];
@@ -21355,10 +23044,10 @@ async function handle29(request, env, ctx, url) {
       const days = Math.max(1, Math.min(365, Number(t?.days) || 1));
       tasks.push({ id: uid(), name, contractor: con ? con.id : "", start, days, wknd: !!t?.wknd, progress: 0, milestone: !!t?.milestone });
     }
-    if (!tasks.length) return json3({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
+    if (!tasks.length) return json4({ ok: false, error: "The AI couldn't produce a valid revised programme." }, 422);
     if (!contractors.length) contractors.push({ id: uid(), name: "Mostlane", colour: PALETTE[0] });
     const data = { ...src, title: String(out.title || src.title || "").slice(0, 200) || "Programme of works", contractors, tasks };
-    return json3({ ok: true, data, taskCount: tasks.length });
+    return json4({ ok: true, data, taskCount: tasks.length });
   }
   if (method === "POST" && pathname === "/prog/delete") {
     const b = await request.json().catch(() => ({}));
@@ -21367,26 +23056,26 @@ async function handle29(request, env, ctx, url) {
     await db.prepare("DELETE FROM programme_revisions WHERE prog_id=? AND tenant_id=?").bind(id, db.tenantId).run();
     await db.prepare("DELETE FROM programme_shares WHERE prog_id=? AND tenant_id=?").bind(id, db.tenantId).run();
     await db.prepare("DELETE FROM programme_suggestions WHERE prog_id=? AND tenant_id=?").bind(id, db.tenantId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (method === "POST" && pathname === "/prog/issue") {
     const b = await request.json().catch(() => ({}));
     const p = await db.prepare("SELECT * FROM job_programmes WHERE id=? AND tenant_id=?").bind(String(b.id || ""), db.tenantId).first();
-    if (!p) return json3({ ok: false, error: "Programme not found" }, 404);
+    if (!p) return json4({ ok: false, error: "Programme not found" }, 404);
     const n = await db.prepare("SELECT COUNT(*) n FROM programme_revisions WHERE prog_id=? AND tenant_id=?").bind(p.id, db.tenantId).first();
     const rev = revLabel(Number(n?.n || 0));
     await db.prepare(`INSERT INTO programme_revisions (id, tenant_id, prog_id, rev, data, note, issued_by, issued_at)
       VALUES (?,?,?,?,?,?,?,?)`).bind(newId2("REV"), db.tenantId, p.id, rev, p.data, String(b.note || "").slice(0, 500), me, (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json3({ ok: true, rev });
+    return json4({ ok: true, rev });
   }
   if (method === "POST" && pathname === "/prog/export") {
     const b = await request.json().catch(() => ({}));
     const p = await db.prepare("SELECT * FROM job_programmes WHERE id=? AND tenant_id=?").bind(String(b.id || ""), db.tenantId).first();
-    if (!p) return json3({ ok: false, error: "Programme not found" }, 404);
+    if (!p) return json4({ ok: false, error: "Programme not found" }, 404);
     let data = {}, revLbl = "", issuedAt = "";
     if (b.revId) {
       const r = await db.prepare("SELECT * FROM programme_revisions WHERE id=? AND prog_id=? AND tenant_id=?").bind(String(b.revId), p.id, db.tenantId).first();
-      if (!r) return json3({ ok: false, error: "Revision not found" }, 404);
+      if (!r) return json4({ ok: false, error: "Revision not found" }, 404);
       try {
         data = JSON.parse(r.data);
       } catch {
@@ -21397,6 +23086,11 @@ async function handle29(request, env, ctx, url) {
       try {
         data = JSON.parse(p.data);
       } catch {
+      }
+      const latest = await latestRevision(db, p.id);
+      if (latest && latest.data === p.data) {
+        revLbl = latest.rev;
+        issuedAt = latest.issued_at;
       }
     }
     const bytes = buildProgrammePdf(data, {
@@ -21411,18 +23105,18 @@ async function handle29(request, env, ctx, url) {
   }
   if (method === "GET" && pathname === "/prog/revision") {
     const r = await db.prepare("SELECT * FROM programme_revisions WHERE id=? AND tenant_id=?").bind(searchParams.get("id") || "", db.tenantId).first();
-    if (!r) return json3({ ok: false, error: "Revision not found" }, 404);
+    if (!r) return json4({ ok: false, error: "Revision not found" }, 404);
     let data = {};
     try {
       data = JSON.parse(r.data);
     } catch {
     }
-    return json3({ ok: true, rev: r.rev, note: r.note, issuedBy: r.issued_by, issuedAt: r.issued_at, data });
+    return json4({ ok: true, rev: r.rev, note: r.note, issuedBy: r.issued_by, issuedAt: r.issued_at, data });
   }
   if (method === "POST" && pathname === "/prog/share") {
     const b = await request.json().catch(() => ({}));
     const p = await db.prepare("SELECT id FROM job_programmes WHERE id=? AND tenant_id=?").bind(String(b.progId || ""), db.tenantId).first();
-    if (!p) return json3({ ok: false, error: "Programme not found" }, 404);
+    if (!p) return json4({ ok: false, error: "Programme not found" }, 404);
     const token = randToken();
     const days = Number(b.expiresDays);
     const expires = days > 0 ? new Date(Date.now() + days * 864e5).toISOString() : null;
@@ -21441,34 +23135,33 @@ async function handle29(request, env, ctx, url) {
       (/* @__PURE__ */ new Date()).toISOString(),
       String(b.contractor || "").slice(0, 40)
     ).run();
-    return json3({ ok: true, token });
+    return json4({ ok: true, token });
   }
   if (method === "POST" && pathname === "/prog/share/revoke") {
     const b = await request.json().catch(() => ({}));
     await db.prepare("UPDATE programme_shares SET revoked=1 WHERE token=? AND tenant_id=?").bind(String(b.token || ""), db.tenantId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
   if (method === "GET" && pathname === "/prog/suggestion") {
     const s = await db.prepare("SELECT * FROM programme_suggestions WHERE id=? AND tenant_id=?").bind(searchParams.get("id") || "", db.tenantId).first();
-    if (!s) return json3({ ok: false, error: "Suggestion not found" }, 404);
+    if (!s) return json4({ ok: false, error: "Suggestion not found" }, 404);
     let data = {};
     try {
       data = JSON.parse(s.data);
     } catch {
     }
-    return json3({ ok: true, id: s.id, progId: s.prog_id, rev: s.rev, author: s.author, note: s.note, status: s.status, createdAt: s.created_at, contractor: s.contractor || "", data });
+    return json4({ ok: true, id: s.id, progId: s.prog_id, rev: s.rev, author: s.author, note: s.note, status: s.status, createdAt: s.created_at, contractor: s.contractor || "", data });
   }
   if (method === "POST" && pathname === "/prog/suggestion/decide") {
     const b = await request.json().catch(() => ({}));
     const status = b.status === "incorporated" ? "incorporated" : b.status === "dismissed" ? "dismissed" : "open";
     await db.prepare("UPDATE programme_suggestions SET status=?, decided_by=?, decided_at=? WHERE id=? AND tenant_id=?").bind(status, me, (/* @__PURE__ */ new Date()).toISOString(), String(b.id || ""), db.tenantId).run();
-    return json3({ ok: true });
+    return json4({ ok: true });
   }
-  return json3({ ok: false, error: "Not found: " + pathname }, 404);
+  return json4({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
 // src/routes/projects-api.js
-var PROJ_FIN_KEY = (tid) => `proj_fin:${tid}`;
 var DOC_TYPES = [
   { key: "programme", label: "Programme of works" },
   { key: "rams", label: "Risk Assessment (RAMS)" },
@@ -21485,7 +23178,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables4(env) {
+async function ensureTables5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -21494,28 +23187,55 @@ async function ensureTables4(env) {
     id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, title TEXT, section TEXT,
     r2_key TEXT, name TEXT, type TEXT, hidden INTEGER DEFAULT 0,
     downloadable INTEGER DEFAULT 1, uploaded_by TEXT, uploaded_at TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS project_costs (
+    id TEXT PRIMARY KEY, tenant_id TEXT, project_id TEXT, kind TEXT,
+    date TEXT, username TEXT, hours REAL, rate REAL,
+    supplier TEXT, description TEXT, amount REAL,
+    created_by TEXT, created_at TEXT)`).run();
 }
-async function cfgGet2(db, key) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+async function setProjFinValue(env, tid, costingKey, value, name) {
+  return writeProjFin(env, tid, costingKey, { value, name, planned: 1 });
+}
+async function pushSiteToPO(env, name) {
   try {
-    return row && row.value ? JSON.parse(row.value) : null;
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare(
+      "INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1"
+    ).bind(String(name).trim()).run();
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
-async function cfgSet2(db, key, obj) {
-  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
+async function renameSiteInPO(env, oldName, newName) {
+  try {
+    if (!env.PO_DB) return false;
+    const a = String(oldName || "").trim(), b = String(newName || "").trim();
+    if (!a || !b || a === b) return false;
+    const clash = await env.PO_DB.prepare("SELECT id FROM sites WHERE name = ?").bind(b).first();
+    if (clash) {
+      await env.PO_DB.prepare("DELETE FROM sites WHERE name = ?").bind(a).run();
+      await env.PO_DB.prepare("UPDATE sites SET active = 1 WHERE name = ?").bind(b).run();
+    } else {
+      await env.PO_DB.prepare("UPDATE sites SET name = ? WHERE name = ?").bind(b, a).run();
+    }
+    try {
+      await env.PO_DB.prepare("UPDATE po_log SET site = ? WHERE site = ?").bind(b, a).run();
+    } catch {
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
-async function setProjFinValue(db, costingKey, value, name) {
-  if (!costingKey) return;
-  const all = await cfgGet2(db, PROJ_FIN_KEY(db.tenantId)) || {};
-  const cur = all[costingKey] || { value: 0, planned: 1, valuations: [] };
-  cur.value = Number(value) || 0;
-  cur.name = name || cur.name;
-  if (!Array.isArray(cur.valuations)) cur.valuations = [];
-  if (!cur.planned) cur.planned = 1;
-  all[costingKey] = cur;
-  await cfgSet2(db, PROJ_FIN_KEY(db.tenantId), all);
+async function removeSiteFromPO(env, name) {
+  try {
+    if (!env.PO_DB || !String(name || "").trim()) return false;
+    await env.PO_DB.prepare("UPDATE sites SET active = 0 WHERE name = ?").bind(String(name).trim()).run();
+    return true;
+  } catch {
+    return false;
+  }
 }
 async function applySiteLogRules(env, siteName, rules, visitorRules) {
   try {
@@ -21526,7 +23246,7 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
       const req = new Request(base + path, init);
       if (env.SITELOG_DB) {
         try {
-          const r = await handle11(req, env);
+          const r = await handle9(req, env);
           if (r && r.ok) return r;
         } catch {
         }
@@ -21592,10 +23312,32 @@ function projectView(row, data, fileCount) {
     contractValue: data.contractValue ?? null,
     links: data.links || {},
     costingKey: data.links && data.links.costingKey || normName2(row.name),
+    visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
     todo: computeTodo(row, data, fileCount)
   };
 }
-async function handle30(request, env, ctx, url, sess) {
+function canSeeProject(data, me, canManage2) {
+  if (canManage2) return true;
+  const list = Array.isArray(data && data.visibleTo) ? data.visibleTo : [];
+  if (!list.length) return true;
+  const u = String(me || "").toLowerCase();
+  return list.some((v) => String(v || "").toLowerCase() === u);
+}
+function sanitiseVisible(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [], seen = /* @__PURE__ */ new Set();
+  for (const x of v) {
+    const s = String(x || "").trim();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+async function handle31(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -21617,9 +23359,9 @@ async function handle30(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const perms = await permissionsFor(env, tenantId, me);
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
-  const canManage = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
+  const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables4(env);
+  await ensureTables5(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -21640,17 +23382,20 @@ async function handle30(request, env, ctx, url, sess) {
     const counts = {};
     const { results: fc } = await db.prepare("SELECT project_id, COUNT(*) AS n FROM project_files WHERE tenant_id=? GROUP BY project_id").bind(db.tenantId).all();
     for (const r of fc || []) counts[r.project_id] = Number(r.n) || 0;
-    let items = (results || []).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
+    let items = (results || []).filter((row) => canSeeProject(parse2(row), me, canManage2)).map((row) => projectView(row, parse2(row), counts[row.id] || 0));
     if (status) items = items.filter((p) => (p.status || "live") === status);
     return json({ ok: true, projects: items }, {}, env, request);
   }
   if (path === "/project/get" && method === "GET") {
     const row = await getRow(url.searchParams.get("id") || "");
     if (!row) return error("Project not found", 404, env, request);
-    return json({ ok: true, project: projectView(row, parse2(row), await fileCountFor(row.id)), canManage }, {}, env, request);
+    const data = parse2(row);
+    if (!canSeeProject(data, me, canManage2)) return error("Project not found", 404, env, request);
+    if (canManage2) ctx?.waitUntil(pushSiteToPO(env, row.name));
+    return json({ ok: true, project: projectView(row, data, await fileCountFor(row.id)), canManage: canManage2 }, {}, env, request);
   }
   if (path === "/project/create" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const name = String(b.name || "").trim();
     const number = String(b.number || "").trim();
@@ -21675,6 +23420,7 @@ async function handle30(request, env, ctx, url, sess) {
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
       links: { programmeId: "", ramsIds: [], cppRef: "", costingKey },
+      visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {}
     };
     await db.prepare(`INSERT INTO projects (id, tenant_id, number, name, site_client, site_number, status, data, created_by, created_at, updated_at)
@@ -21691,19 +23437,29 @@ async function handle30(request, env, ctx, url, sess) {
       now,
       now
     ).run();
-    if (required.valuations && contractValue) await setProjFinValue(db, costingKey, contractValue, name);
+    if (required.valuations && contractValue) await setProjFinValue(env, tenantId, costingKey, contractValue, name);
     if (data.sitelog.rules || data.sitelog.visitorRules) {
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
+    }
+    ctx?.waitUntil(pushSiteToPO(env, name));
+    try {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO compliance_stores
+          (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
+          VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
+      ).bind(tenantId, number, name, number, now).run();
+    } catch {
     }
     const row = await getRow(id);
     return json({ ok: true, id, project: projectView(row, parse2(row), 0) }, {}, env, request);
   }
   if (path === "/project/update" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
     const data = parse2(row);
+    const oldName = row.name;
     let name = row.name, status = row.status;
     if (typeof b.name === "string" && b.name.trim()) name = b.name.trim().slice(0, 200);
     if (typeof b.status === "string" && ["live", "complete", "archived"].includes(b.status)) status = b.status;
@@ -21718,17 +23474,68 @@ async function handle30(request, env, ctx, url, sess) {
       if (Array.isArray(b.sitelog.companies)) data.sitelog.companies = b.sitelog.companies.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 60);
       ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
     }
+    const oldKey = data.links && data.links.costingKey || normName2(oldName);
+    const newKey = normName2(name);
     if (b.contractValue !== void 0) {
       data.contractValue = b.contractValue === null || b.contractValue === "" ? null : Number(b.contractValue);
-      const key = data.links && data.links.costingKey || normName2(name);
-      if (data.contractValue) await setProjFinValue(db, key, data.contractValue, name);
+      const key = newKey || oldKey;
+      await setProjFinValue(env, tenantId, key, data.contractValue, name);
+      data.links = data.links || {};
+      data.links.costingKey = key;
+    }
+    if (Array.isArray(b.visibleTo)) data.visibleTo = sanitiseVisible(b.visibleTo);
+    const renamed = name && oldName && name !== oldName;
+    if (renamed) {
+      await renameProjFinKey(env, tenantId, oldKey, newKey);
+      data.links = data.links || {};
+      data.links.costingKey = newKey;
+      try {
+        await env.DB.prepare("UPDATE sites SET site_name=?, data=json_patch(data, ?) WHERE tenant_id=? AND client='projects' AND site_number=?").bind(name, JSON.stringify({ siteName: name }), tenantId, row.number).run();
+      } catch {
+        try {
+          const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+          if (s) {
+            let d = {};
+            try {
+              d = JSON.parse(s.data || "{}");
+            } catch {
+            }
+            d.siteName = name;
+            await env.DB.prepare("UPDATE sites SET site_name=?, data=? WHERE tenant_id=? AND client='projects' AND site_number=?").bind(name, JSON.stringify(d), tenantId, row.number).run();
+          }
+        } catch {
+        }
+      }
+      ctx?.waitUntil(renameSiteInPO(env, oldName, name));
+      const lat = data.lat != null ? Number(data.lat) : null, lon = data.lon != null ? Number(data.lon) : null;
+      ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat, lon, client: "projects" }, oldName));
+      if (data.sitelog && (data.sitelog.rules || data.sitelog.visitorRules)) {
+        ctx?.waitUntil(applySiteLogRules(env, name, data.sitelog.rules, data.sitelog.visitorRules));
+      }
     }
     await db.prepare("UPDATE projects SET name=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(name, status, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, row.id).run();
+    if (status !== row.status) {
+      const nowActive = status !== "archived";
+      try {
+        const s = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).first();
+        let sd = {};
+        try {
+          sd = JSON.parse(s?.data || "{}");
+        } catch {
+        }
+        sd.active = nowActive;
+        await env.DB.prepare("UPDATE sites SET active=?, data=?, updated_at=datetime('now') WHERE tenant_id=? AND client='projects' AND site_number=?").bind(nowActive ? 1 : 0, JSON.stringify(sd), tenantId, row.number).run();
+        ctx?.waitUntil(syncSiteToSiteLog(env, { siteName: name, lat: sd.lat, lon: sd.lon ?? sd.lng, client: "projects", active: nowActive }));
+        ctx?.waitUntil(syncSiteToCompliance(env, tenantId, { siteNumber: row.number, siteName: name, postcode: sd.postcode, lat: sd.lat, lon: sd.lon ?? sd.lng, active: nowActive }));
+        ctx?.waitUntil(setPOSiteActive(env, name, nowActive));
+      } catch {
+      }
+    }
     const fresh = await getRow(row.id);
     return json({ ok: true, project: projectView(fresh, parse2(fresh), await fileCountFor(row.id)) }, {}, env, request);
   }
   if (path === "/project/link" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -21747,7 +23554,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, links: data.links }, {}, env, request);
   }
   if (path === "/project/todo" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
@@ -21770,7 +23577,7 @@ async function handle30(request, env, ctx, url, sess) {
     const origin = url.origin;
     const files = [];
     for (const f of results || []) {
-      if (!canManage && f.hidden) continue;
+      if (!canManage2 && f.hidden) continue;
       files.push({
         id: f.id,
         title: f.title || f.name,
@@ -21784,10 +23591,10 @@ async function handle30(request, env, ctx, url, sess) {
         url: await signedFileUrl(env, origin, "/project/doc", f.r2_key, 86400)
       });
     }
-    return json({ ok: true, files, canManage }, {}, env, request);
+    return json({ ok: true, files, canManage: canManage2 }, {}, env, request);
   }
   if (path === "/project/doc" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const form = await request.formData().catch(() => null);
     const file = form && form.get("file");
     const pid = form && String(form.get("id") || "");
@@ -21815,7 +23622,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, id }, {}, env, request);
   }
   if (path === "/project/doc-update" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const f = await db.prepare("SELECT * FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, String(b.fileId || "")).first();
     if (!f) return error("File not found", 404, env, request);
@@ -21826,7 +23633,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/project/doc-delete" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const f = await db.prepare("SELECT * FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, String(b.fileId || "")).first();
     if (!f) return error("File not found", 404, env, request);
@@ -21837,11 +23644,263 @@ async function handle30(request, env, ctx, url, sess) {
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
     return json({ ok: true }, {}, env, request);
   }
-  if (path === "/project/delete" && method === "POST") {
-    if (!canManage) return error("Forbidden", 403, env, request);
+  if (path === "/project/create-job" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {
+    }
+    let siteData = {};
+    try {
+      if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
+    } catch {
+    }
+    const scheduledAt = b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0;
+    const durationMinutes = b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : void 0;
+    const payload = {
+      description,
+      projectId: row.id,
+      siteCode: row.number,
+      siteName: row.name,
+      storeType: "projects",
+      address: siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ") || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: siteRow && siteRow.postcode || data.postcode || "",
+      lat: data.lat != null ? data.lat : siteData.lat != null ? siteData.lat : void 0,
+      lon: data.lon != null ? data.lon : siteData.lng != null ? siteData.lng : siteData.lon != null ? siteData.lon : void 0,
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : void 0,
+      assignedEngineers: engineers,
+      scheduledAt,
+      durationMinutes,
+      // Projects default all four gates OFF (RA/sig/photo/note) — matches the
+      // add-job.html Projects rule. Explicit values from the form still win.
+      requiresRA: b.requiresRA === true,
+      requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true,
+      requiresNote: b.requiresNote === true,
+      changedBy: me
+    };
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+    }));
+    return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+  if (path === "/project/visits" && method === "GET") {
+    const row = await getRow(url.searchParams.get("id") || "");
+    if (!row) return error("Project not found", 404, env, request);
+    const dataP = parse2(row);
+    if (!canSeeProject(dataP, me, canManage2)) return error("Project not found", 404, env, request);
+    const wantName = String(row.name || "").toLowerCase();
+    const wantNum = String(row.number || "").toLowerCase();
+    const all = await listJobs(env, tenantId);
+    const projectJobs = all.filter((j) => {
+      if (String(j.projectId || "") === row.id) return true;
+      const sc = String(j.siteCode || "").toLowerCase(), sn = String(j.siteName || "").toLowerCase();
+      return wantNum && (sc === wantNum || sn === wantNum) || wantName && sn === wantName;
+    });
+    const jobIds = projectJobs.map((j) => String(j.id));
+    const segs = [];
+    for (const jid of jobIds) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT id, username, job_id, job_ref, started_at, ended_at, kind FROM job_time_segments WHERE tenant_id=? AND job_id=? ORDER BY started_at"
+        ).bind(tenantId, jid).all();
+        for (const s of results || []) segs.push(s);
+      } catch {
+      }
+    }
+    let manualLab = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, username, date, hours, amount, description FROM project_costs WHERE tenant_id=? AND project_id=? AND kind='labour' ORDER BY date"
+      ).bind(tenantId, row.id).all();
+      manualLab = results || [];
+    } catch {
+    }
+    if (!jobIds.length && !manualLab.length) return json({ ok: true, canManage: canManage2, jobs: [], visits: [], perUser: [] }, {}, env, request);
+    const dayOf = (iso) => String(iso || "").slice(0, 10);
+    const minsOf = (a, b) => {
+      const s = Date.parse(a || ""), e = Date.parse(b || "");
+      if (!Number.isFinite(s)) return 0;
+      const end = Number.isFinite(e) ? e : Date.now();
+      return Math.max(0, Math.round((end - s) / 6e4));
+    };
+    const visitMap = /* @__PURE__ */ new Map();
+    for (const s of segs) {
+      const user = s.username || "";
+      const date = dayOf(s.started_at);
+      const key = user + "|" + date + "|" + s.job_id;
+      let v = visitMap.get(key);
+      if (!v) {
+        v = { date, user, jobId: s.job_id, jobRef: s.job_ref || "", onsiteMins: 0, travelMins: 0, live: false, manual: false, cost: 0, note: "" };
+        visitMap.set(key, v);
+      }
+      const m = minsOf(s.started_at, s.ended_at);
+      if ((s.kind || "onsite") === "travel") v.travelMins += m;
+      else v.onsiteMins += m;
+      if (!s.ended_at) v.live = true;
+    }
+    for (const r of manualLab) {
+      const user = r.username || "";
+      const date = String(r.date || "").slice(0, 10);
+      const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+      visitMap.set("m|" + r.id, {
+        date,
+        user,
+        jobId: "",
+        jobRef: "Manual shift",
+        onsiteMins: mins,
+        travelMins: 0,
+        live: false,
+        manual: true,
+        cost: Number(r.amount) || 0,
+        note: r.description || ""
+      });
+    }
+    const meLower = String(me).toLowerCase();
+    const normId2 = (u) => String(u || "").toLowerCase().replace(/\s+/g, ".").trim();
+    let visits = Array.from(visitMap.values()).sort((a, b) => (b.date + b.user).localeCompare(a.date + a.user));
+    if (!canManage2) {
+      const meNorm = normId2(me);
+      visits = visits.filter((v) => v.user.toLowerCase() === meLower || normId2(v.user) === meNorm).map((v) => {
+        const { cost, rate, amount, ...rest } = v;
+        return rest;
+      });
+    }
+    const perUser = [];
+    if (canManage2) {
+      const byU = /* @__PURE__ */ new Map();
+      for (const v of Array.from(visitMap.values())) {
+        let r = byU.get(v.user);
+        if (!r) {
+          r = { user: v.user, visits: 0, days: /* @__PURE__ */ new Set(), onsiteMins: 0, travelMins: 0 };
+          byU.set(v.user, r);
+        }
+        r.visits++;
+        r.days.add(v.date);
+        r.onsiteMins += v.onsiteMins;
+        r.travelMins += v.travelMins;
+      }
+      for (const r of byU.values()) perUser.push({ user: r.user, visits: r.visits, days: r.days.size, onsiteMins: r.onsiteMins, travelMins: r.travelMins });
+      perUser.sort((a, b) => b.onsiteMins + b.travelMins - (a.onsiteMins + a.travelMins));
+    }
+    const jobs = projectJobs.map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      description: j.description || "",
+      status: j.status || "Pending",
+      scheduledAt: j.scheduledAt || null,
+      engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [],
+      firestopping: !!j.firestopping,
+      investigateOnly: !!j.investigateOnly
+    })).sort((a, b) => String(b.scheduledAt || "").localeCompare(String(a.scheduledAt || "")));
+    return json({ ok: true, canManage: canManage2, jobs, visits, perUser }, {}, env, request);
+  }
+  if (path === "/project/costs" && method === "GET") {
+    if (!canManage2) return json({ ok: true, costs: [], canManage: false }, {}, env, request);
+    const pid = url.searchParams.get("id") || "";
+    if (!await getRow(pid)) return error("Project not found", 404, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM project_costs WHERE tenant_id=? AND project_id=? ORDER BY date DESC, created_at DESC"
+    ).bind(tenantId, pid).all();
+    const rows = (results || []).map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      date: r.date,
+      username: r.username || "",
+      hours: r.hours != null ? Number(r.hours) : null,
+      rate: r.rate != null ? Number(r.rate) : null,
+      supplier: r.supplier || "",
+      description: r.description || "",
+      amount: Number(r.amount) || 0,
+      createdBy: r.created_by,
+      createdAt: r.created_at
+    }));
+    return json({ ok: true, costs: rows, canManage: canManage2 }, {}, env, request);
+  }
+  if (path === "/project/cost" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const kind = b.kind === "material" ? "material" : "labour";
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const description = String(b.description || "").slice(0, 400);
+    let username = "", hours = null, rate = null, amount = 0, supplier = "";
+    if (kind === "labour") {
+      username = String(b.username || "").trim();
+      if (!username) return error("Engineer required", 400, env, request);
+      hours = Number(b.hours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 24) return error("Hours must be between 0 and 24", 400, env, request);
+      const explicit = Number(b.rate);
+      if (Number.isFinite(explicit) && explicit > 0) rate = explicit;
+      else {
+        const rates = await ratesMap(env, tenantId);
+        const r = rates[username];
+        rate = r && r.rateType === "hour" ? r.rate : null;
+      }
+      amount = rate ? Math.round(hours * rate * 100) / 100 : 0;
+    } else {
+      supplier = String(b.supplier || "").trim().slice(0, 120);
+      const amt = Number(b.amount);
+      if (!Number.isFinite(amt) || amt <= 0) return error("Amount required", 400, env, request);
+      amount = Math.round(amt * 100) / 100;
+      if (!description) return error("Description required", 400, env, request);
+    }
+    const id = newId3("PC");
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare(`INSERT INTO project_costs
+      (id, tenant_id, project_id, kind, date, username, hours, rate, supplier, description, amount, created_by, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      id,
+      tenantId,
+      row.id,
+      kind,
+      date,
+      username,
+      hours,
+      rate,
+      supplier,
+      description,
+      amount,
+      me,
+      now
+    ).run();
+    return json({ ok: true, id, amount }, {}, env, request);
+  }
+  if (path === "/project/cost-delete" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.costId || "");
+    if (!id) return error("costId required", 400, env, request);
+    await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/project/push-po" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const ok = await pushSiteToPO(env, row.name);
+    return json({ ok, poBound: !!env.PO_DB }, {}, env, request);
+  }
+  if (path === "/project/delete" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const key = data.links && data.links.costingKey || normName2(row.name);
     const { results } = await db.prepare("SELECT r2_key FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).all();
     for (const f of results || []) {
       try {
@@ -21850,10 +23909,439 @@ async function handle30(request, env, ctx, url, sess) {
       }
     }
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, row.id).run();
+    try {
+      await env.DB.prepare("DELETE FROM project_costs WHERE tenant_id=? AND project_id=?").bind(tenantId, row.id).run();
+    } catch {
+    }
+    try {
+      await env.DB.prepare("DELETE FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?").bind(tenantId, row.number).run();
+    } catch {
+    }
+    try {
+      await deleteProjFinKey(env, tenantId, key);
+    } catch {
+    }
+    try {
+      const jobs = await listJobs(env, tenantId);
+      for (const j of jobs) {
+        if (j.projectId === row.id) {
+          try {
+            j.projectId = null;
+            await env.DB.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(j), tenantId, j.id).run();
+          } catch {
+          }
+        }
+      }
+    } catch {
+    }
+    try {
+      const { results: cf } = await env.DB.prepare(
+        "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?"
+      ).bind(tenantId, row.number).all();
+      for (const f of cf || []) {
+        try {
+          await env.JOB_FILES.delete(f.r2_key);
+        } catch {
+        }
+      }
+      await env.DB.prepare("DELETE FROM compliance_files WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+      await env.DB.prepare("DELETE FROM compliance_stores WHERE tenant_id=? AND scheme='projects' AND code=?").bind(tenantId, row.number).run();
+    } catch {
+    }
+    ctx?.waitUntil(removeSiteFromPO(env, row.name));
+    ctx?.waitUntil(removeSiteFromSiteLog(env, row.name, { archive: true }));
     await db.prepare("DELETE FROM projects WHERE tenant_id=? AND id=?").bind(db.tenantId, row.id).run();
-    return json({ ok: true }, {}, env, request);
+    return json({ ok: true, cascaded: { po: true, sitelog: true, projFin: true, pxxxSite: true } }, {}, env, request);
   }
   return error("Unknown projects route", 404, env, request);
+}
+
+// src/routes/health.js
+function json3(data, status, env, request) {
+  return new Response(JSON.stringify(data), {
+    status: status || 200,
+    headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
+  });
+}
+var SLOW_MS = 2500;
+var PROBE_SLOW_MS = 1500;
+var RETAIN_DAYS = 30;
+var TABLE_READY = false;
+async function ensureTable2(env) {
+  if (TABLE_READY) return;
+  try {
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS health_events (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         tenant_id INTEGER,
+         kind TEXT,            -- 'error' | 'slow' | 'probe'
+         endpoint TEXT,
+         message TEXT,
+         status INTEGER,
+         ms INTEGER,
+         at TEXT
+       )`
+    ).run();
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_health_at ON health_events (tenant_id, at)").run();
+    TABLE_READY = true;
+  } catch (e) {
+    console.error("health ensureTable:", e && e.message);
+  }
+}
+async function recordEvent(env, tenantId, { kind, endpoint, message, status, ms }) {
+  try {
+    await ensureTable2(env);
+    const res = await env.DB.prepare(
+      "INSERT INTO health_events (tenant_id, kind, endpoint, message, status, ms, at) VALUES (?,?,?,?,?,?,?)"
+    ).bind(
+      tenantId || 1,
+      kind || "error",
+      String(endpoint || "").slice(0, 200),
+      String(message || "").slice(0, 500),
+      status || 0,
+      ms || 0,
+      (/* @__PURE__ */ new Date()).toISOString()
+    ).run();
+    const rowId = res.meta ? res.meta.last_row_id : 0;
+    if (rowId && rowId % 200 === 0) {
+      const cutoff = new Date(Date.now() - RETAIN_DAYS * 864e5).toISOString();
+      await env.DB.prepare("DELETE FROM health_events WHERE at < ?").bind(cutoff).run();
+    }
+  } catch (e) {
+  }
+}
+function probeList(env) {
+  const probes = [
+    ["d1", "Main database (D1)", async () => {
+      const r = await env.DB.prepare("SELECT 1 AS ok").first();
+      if (!r || r.ok !== 1) throw new Error("SELECT 1 returned nothing");
+      return "reachable";
+    }],
+    ["d1_core", "Core tables readable", async () => {
+      const out = [];
+      for (const t of ["users", "sla_jobs", "sites", "vehicles", "app_config"]) {
+        const row = await env.DB.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = 1`).first();
+        out.push(`${t} ${row && row.n || 0}`);
+      }
+      return out.join(" \xB7 ");
+    }],
+    ["r2_jobfiles", "Job files bucket (R2)", async () => {
+      if (!env.JOB_FILES) return "not bound (skipped)";
+      await env.JOB_FILES.list({ limit: 1 });
+      return "reachable";
+    }],
+    ["r2_assets", "Asset images bucket (R2)", async () => {
+      if (!env.ASSET_BUCKET) return "not bound (skipped)";
+      await env.ASSET_BUCKET.list({ limit: 1 });
+      return "reachable";
+    }]
+  ];
+  if (env.PO_DB) probes.push(["po_db", "Purchase-order database", async () => {
+    await env.PO_DB.prepare("SELECT 1 AS ok").first();
+    return "reachable";
+  }]);
+  if (env.SITELOG_DB) probes.push(["sitelog_db", "SiteLog database", async () => {
+    await env.SITELOG_DB.prepare("SELECT 1 AS ok").first();
+    return "reachable";
+  }]);
+  return probes;
+}
+async function runHealthChecks(env, tenantId) {
+  const tid = tenantId || 1;
+  await ensureTable2(env);
+  const checks = [];
+  for (const [name, desc, fn] of probeList(env)) {
+    const t0 = Date.now();
+    try {
+      const detail = await fn();
+      const ms = Date.now() - t0;
+      checks.push({ name, desc, ok: true, ms, slow: ms > PROBE_SLOW_MS, detail: String(detail || "") });
+    } catch (e) {
+      const ms = Date.now() - t0;
+      checks.push({ name, desc, ok: false, ms, slow: false, detail: String(e && e.message || e).slice(0, 300) });
+    }
+  }
+  const failed = checks.filter((c) => !c.ok);
+  const snapshot2 = {
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    ok: failed.length === 0,
+    checks,
+    failed: failed.length,
+    slowest: checks.slice().sort((a, b) => b.ms - a.ms)[0] || null
+  };
+  try {
+    await env.DB.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(tid, "health:lastrun:" + tid, JSON.stringify(snapshot2)).run();
+  } catch (e) {
+    console.error("health snapshot save:", e && e.message);
+  }
+  for (const c of failed) {
+    await recordEvent(env, tid, { kind: "probe", endpoint: c.name, message: c.desc + ": " + c.detail, status: 0, ms: c.ms });
+  }
+  await maybeAlert(env, tid, snapshot2);
+  return snapshot2;
+}
+var INTEGRITY_CHECKS = [
+  // ── Fleet ──────────────────────────────────────────────────────────────────
+  {
+    id: "assign_user",
+    area: "Fleet",
+    label: "Van assignments point at a real user",
+    sql: "SELECT COUNT(*) n FROM vehicle_assignments va WHERE va.tenant_id=? AND va.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=va.tenant_id AND lower(u.username)=lower(va.username))"
+  },
+  {
+    id: "assign_veh",
+    area: "Fleet",
+    label: "Open van assignments point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM vehicle_assignments va WHERE va.tenant_id=? AND va.end_date IS NULL AND va.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=va.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(va.reg,' ','')))"
+  },
+  {
+    id: "maint_veh",
+    area: "Fleet",
+    label: "Maintenance records point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM vehicle_maintenance m WHERE m.tenant_id=? AND m.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=m.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(m.reg,' ','')))"
+  },
+  {
+    id: "odo_veh",
+    area: "Fleet",
+    label: "Odometer readings point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM odometer_readings o WHERE o.tenant_id=? AND o.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=o.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(o.reg,' ','')))"
+  },
+  {
+    id: "fuel_veh",
+    area: "Fleet",
+    label: "Reg-tagged fuel entries point at a real vehicle",
+    sql: "SELECT COUNT(*) n FROM fuel_entries f WHERE f.tenant_id=? AND f.reg IS NOT NULL AND f.reg<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=f.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(f.reg,' ','')))"
+  },
+  {
+    id: "user_veh",
+    area: "Fleet",
+    label: "Each user's assigned van is a real vehicle",
+    sql: "SELECT COUNT(*) n FROM users u WHERE u.tenant_id=? AND u.vehicle_assigned IS NOT NULL AND u.vehicle_assigned<>'' AND NOT EXISTS(SELECT 1 FROM vehicles v WHERE v.tenant_id=u.tenant_id AND upper(replace(v.reg,' ',''))=upper(replace(u.vehicle_assigned,' ','')))"
+  },
+  // ── SLA / jobs ───────────────────────────────────────────────────────────────
+  {
+    id: "seg_job",
+    area: "SLA",
+    label: "Time segments point at a real job",
+    sql: "SELECT COUNT(*) n FROM job_time_segments s WHERE s.tenant_id=? AND s.job_id<>'' AND NOT EXISTS(SELECT 1 FROM sla_jobs j WHERE j.tenant_id=s.tenant_id AND j.id=s.job_id)"
+  },
+  {
+    id: "seg_user",
+    area: "SLA",
+    label: "Time segments point at a real user",
+    sql: "SELECT COUNT(*) n FROM job_time_segments s WHERE s.tenant_id=? AND s.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=s.tenant_id AND lower(u.username)=lower(s.username))"
+  },
+  {
+    id: "job_status",
+    area: "SLA",
+    label: "Every job has a status",
+    sql: "SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id=? AND (status IS NULL OR status='')"
+  },
+  {
+    id: "job_site",
+    area: "SLA",
+    label: "Jobs with a store number match a real site",
+    sql: "SELECT COUNT(*) n FROM sla_jobs j WHERE j.tenant_id=? AND j.site_code GLOB '[0-9]*' AND NOT j.site_code GLOB '*[^0-9]*' AND NOT EXISTS(SELECT 1 FROM sites s WHERE s.tenant_id=j.tenant_id AND CAST(s.site_number AS INTEGER)=CAST(j.site_code AS INTEGER))"
+  },
+  {
+    id: "seg_open",
+    area: "SLA",
+    label: "No time segment left open for days (runaway clock)",
+    sql: "SELECT COUNT(*) n FROM job_time_segments WHERE tenant_id=? AND ended_at IS NULL AND started_at < datetime('now','-2 day')"
+  },
+  // ── People ───────────────────────────────────────────────────────────────────
+  {
+    id: "push_user",
+    area: "People",
+    label: "Push subscriptions point at a real user",
+    sql: "SELECT COUNT(*) n FROM push_subscriptions p WHERE p.tenant_id=? AND p.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=p.tenant_id AND lower(u.username)=lower(p.username))"
+  },
+  {
+    id: "device_user",
+    area: "People",
+    label: "Registered devices point at a real user",
+    sql: "SELECT COUNT(*) n FROM devices d WHERE d.tenant_id=? AND d.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=d.tenant_id AND lower(u.username)=lower(d.username))"
+  },
+  {
+    id: "ts_user",
+    area: "People",
+    label: "Engineer timesheets point at a real user",
+    sql: "SELECT COUNT(*) n FROM eng_timesheets t WHERE t.tenant_id=? AND t.username<>'' AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=t.tenant_id AND lower(u.username)=lower(t.username))"
+  },
+  {
+    id: "active_login",
+    area: "People",
+    label: "Active users can actually log in (have a password)",
+    sql: "SELECT COUNT(*) n FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active') AND (password_hash IS NULL OR password_hash='')"
+  },
+  // ── Holidays ─────────────────────────────────────────────────────────────────
+  {
+    id: "hol_user",
+    area: "Holidays",
+    label: "Current/future holiday bookings point at a real user",
+    // Only CURRENT/FUTURE bookings — a past booking for a departed employee is
+    // just history (kept on purpose), not a broken link, so it shouldn't flag.
+    sql: "SELECT COUNT(*) n FROM holidays h WHERE h.tenant_id=? AND h.username<>'' AND h.end_date >= date('now') AND NOT EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=h.tenant_id AND lower(u.username)=lower(h.username))"
+  },
+  {
+    id: "hol_range",
+    area: "Holidays",
+    label: "No holiday ends before it starts",
+    sql: "SELECT COUNT(*) n FROM holidays WHERE tenant_id=? AND end_date < start_date"
+  },
+  // ── Compliance ───────────────────────────────────────────────────────────────
+  {
+    id: "comp_site",
+    area: "Compliance",
+    label: "Linked compliance stores resolve to a real site",
+    sql: "SELECT COUNT(*) n FROM compliance_stores c WHERE c.tenant_id=? AND c.site_number IS NOT NULL AND c.site_number<>'' AND NOT EXISTS(SELECT 1 FROM sites s WHERE s.tenant_id=c.tenant_id AND s.site_number=c.site_number)"
+  },
+  {
+    id: "comp_coop_link",
+    area: "Compliance",
+    label: "Every Co-op store is linked to its portal site",
+    sql: "SELECT COUNT(*) n FROM compliance_stores WHERE tenant_id=? AND scheme='coop' AND (site_number IS NULL OR site_number='')"
+  }
+];
+async function runIntegrityChecks(env, tenantId) {
+  const tid = tenantId || 1;
+  const checks = [];
+  for (const c of INTEGRITY_CHECKS) {
+    try {
+      const row = await env.DB.prepare(c.sql).bind(tid).first();
+      const n = row && row.n || 0;
+      checks.push({ id: c.id, area: c.area, label: c.label, n, ok: n === 0 });
+    } catch (e) {
+      checks.push({ id: c.id, area: c.area, label: c.label, n: 0, ok: null, error: String(e && e.message || e).slice(0, 140) });
+    }
+  }
+  const failed = checks.filter((c) => c.ok === false);
+  const na = checks.filter((c) => c.ok === null);
+  const snapshot2 = { at: (/* @__PURE__ */ new Date()).toISOString(), total: checks.length, passed: checks.filter((c) => c.ok === true).length, failed: failed.length, na: na.length, checks };
+  try {
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "health:integrity:" + tid, JSON.stringify(snapshot2)).run();
+  } catch (e) {
+    console.error("integrity snapshot save:", e && e.message);
+  }
+  return snapshot2;
+}
+async function maybeAlert(env, tid, snapshot2) {
+  try {
+    const since = new Date(Date.now() - 15 * 6e4).toISOString();
+    const spike = await env.DB.prepare(
+      "SELECT COUNT(*) n FROM health_events WHERE tenant_id=? AND kind='error' AND at>=?"
+    ).bind(tid, since).first();
+    const errCount = spike && spike.n || 0;
+    const ERR_SPIKE = 8;
+    const problems = [];
+    if (!snapshot2.ok) problems.push(...snapshot2.checks.filter((c) => !c.ok).map((c) => c.name));
+    if (errCount >= ERR_SPIKE) problems.push("errspike");
+    if (!problems.length) return;
+    const sig = problems.sort().join(",");
+    const key = "health:alerted:" + tid;
+    let last = null;
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      last = row && JSON.parse(row.value);
+    } catch {
+    }
+    if (last && last.sig === sig && Date.now() - (last.at || 0) < 36e5) return;
+    await env.DB.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(tid, key, JSON.stringify({ sig, at: Date.now() })).run();
+    const bits = [];
+    if (!snapshot2.ok) bits.push(snapshot2.checks.filter((c) => !c.ok).map((c) => c.desc).join(", ") + " failing");
+    if (errCount >= ERR_SPIKE) bits.push(errCount + " server errors in 15 min");
+    const owner = env.OWNER_USERNAME || "Jamie Line";
+    await sendToUser(env, tid, owner, {
+      title: "\u26A0\uFE0F Portal health",
+      body: bits.join(" \xB7 ") || "A health check failed.",
+      url: "/health.html",
+      tag: "health-alert"
+    });
+  } catch (e) {
+    console.error("health alert:", e && e.message);
+  }
+}
+async function handle32(request, env, ctx, url, sess) {
+  if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
+    const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
+    const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    let diff = tok.length === secret.length ? 0 : 1;
+    for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+    if (diff !== 0) return json3({ ok: false, error: "bad token" }, 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const owner = env.OWNER_USERNAME || "Jamie Line";
+    await sendToUser(env, 1, owner, {
+      title: String(b.title || "Portal").slice(0, 80),
+      body: String(b.body || "").slice(0, 200),
+      url: String(b.url || "/health.html").slice(0, 200),
+      tag: "autofix"
+    });
+    return json3({ ok: true }, 200, env, request);
+  }
+  if (!sess) return json3({ error: "Not authenticated" }, 401, env, request);
+  const db = tenantDB(env, sess.tenantId);
+  const permRows = await db.prepare(
+    "SELECT permission FROM user_permissions WHERE tenant_id = ? AND username = ? AND value = 1"
+  ).bind(db.tenantId, sess.user.username).all();
+  const perms = new Set((permRows.results || []).map((r) => r.permission));
+  if (!perms.has("FullAccess")) return json3({ error: "Full access only" }, 403, env, request);
+  const tid = sess.tenantId;
+  await ensureTable2(env);
+  const method = request.method.toUpperCase();
+  if (url.pathname === "/health/run" && method === "POST") {
+    const [snap, integrity] = await Promise.all([runHealthChecks(env, tid), runIntegrityChecks(env, tid)]);
+    return json3({ ok: true, snapshot: snap, integrity }, 200, env, request);
+  }
+  if (url.pathname === "/health/events" && method === "GET") {
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+    const { results } = await env.DB.prepare(
+      "SELECT id, kind, endpoint, message, status, ms, at FROM health_events WHERE tenant_id=? ORDER BY id DESC LIMIT ?"
+    ).bind(tid, limit).all();
+    return json3({ ok: true, events: results || [] }, 200, env, request);
+  }
+  if (url.pathname === "/health/status" && method === "GET") {
+    const now = Date.now();
+    const iso24 = new Date(now - 24 * 36e5).toISOString();
+    const iso7 = new Date(now - 7 * 864e5).toISOString();
+    let lastRun = null, integrity = null;
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "health:lastrun:" + tid).first();
+      if (row) lastRun = JSON.parse(row.value);
+    } catch {
+    }
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "health:integrity:" + tid).first();
+      if (row) integrity = JSON.parse(row.value);
+    } catch {
+    }
+    const first = (sql, ...b) => env.DB.prepare(sql).bind(...b).first();
+    const all = (sql, ...b) => env.DB.prepare(sql).bind(...b).all().then((r) => r.results || []);
+    const [err24, err7, slow24, topErr, topSlow, recent] = await Promise.all([
+      first("SELECT COUNT(*) n FROM health_events WHERE tenant_id=? AND kind='error' AND at>=?", tid, iso24),
+      first("SELECT COUNT(*) n FROM health_events WHERE tenant_id=? AND kind='error' AND at>=?", tid, iso7),
+      first("SELECT COUNT(*) n FROM health_events WHERE tenant_id=? AND kind='slow' AND at>=?", tid, iso24),
+      all("SELECT endpoint, COUNT(*) n, MAX(at) last FROM health_events WHERE tenant_id=? AND kind='error' AND at>=? GROUP BY endpoint ORDER BY n DESC LIMIT 8", tid, iso7),
+      all("SELECT endpoint, COUNT(*) n, MAX(ms) worst, ROUND(AVG(ms)) avg FROM health_events WHERE tenant_id=? AND kind='slow' AND at>=? GROUP BY endpoint ORDER BY worst DESC LIMIT 8", tid, iso7),
+      all("SELECT id, kind, endpoint, message, status, ms, at FROM health_events WHERE tenant_id=? ORDER BY id DESC LIMIT 40", tid)
+    ]);
+    return json3({
+      ok: true,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      lastRun,
+      integrity,
+      slowMs: SLOW_MS,
+      totals: { errors24h: err24 && err24.n || 0, errors7d: err7 && err7.n || 0, slow24h: slow24 && slow24.n || 0 },
+      topErrors: topErr,
+      topSlow,
+      recent
+    }, 200, env, request);
+  }
+  return json3({ error: "Not found" }, 404, env, request);
 }
 
 // src/index.js
@@ -21891,15 +24379,15 @@ var ROUTES = [
   // company memos (draft/send/sign)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
-  ["*", "/get-sites", handle9],
-  ["*", "/add-site", handle9],
-  ["*", "/update-site", handle9],
-  ["*", "/delete-site", handle9],
-  ["*", "/next-project-job-number", handle9],
-  ["*", "/upload-image", handle9],
-  ["*", "/customers", handle9],
-  ["*", "/import-sites", handle9],
-  ["*", "/sites", handle9],
+  ["*", "/get-sites", handle10],
+  ["*", "/add-site", handle10],
+  ["*", "/update-site", handle10],
+  ["*", "/delete-site", handle10],
+  ["*", "/next-project-job-number", handle10],
+  ["*", "/upload-image", handle10],
+  ["*", "/customers", handle10],
+  ["*", "/import-sites", handle10],
+  ["*", "/sites", handle10],
   // /sites/street-images (bulk imagery)
   ["*", "/sites/register", handle24],
   // master site register (longest prefix wins over /sites)
@@ -21911,16 +24399,18 @@ var ROUTES = [
   // needs-a-human-eye list
   ["*", "/compliance", handle25],
   // Southern Co-op compliance certs (R2 + D1)
-  ["*", "/settings", handle10],
-  ["*", "/oncall", handle10],
-  ["*", "/daily-logs", handle10],
-  ["*", "/notify", handle10],
+  ["*", "/chapplins", handle26],
+  // Chapplins customer: site tenants (current/previous) + directory
+  ["*", "/settings", handle11],
+  ["*", "/oncall", handle11],
+  ["*", "/daily-logs", handle11],
+  ["*", "/notify", handle11],
   // notification audit log
-  ["*", "/prefs", handle10],
+  ["*", "/prefs", handle11],
   // per-user cross-device markers
-  ["*", "/menu-config", handle10],
+  ["*", "/menu-config", handle11],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle10],
+  ["*", "/audit", handle11],
   // activity log (page views + viewer)
   ["*", "/sitelog", handle12],
   ["*", "/sitelog-launch", handle12],
@@ -21934,18 +24424,20 @@ var ROUTES = [
   // H&S documents hub (inductions, permits, RAMS, incidents)
   ["*", "/vancheck", handle17],
   // weekly van checks (form, grid, deadline badges)
-  ["*", "/po", handle26],
+  ["*", "/po", handle27],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle27],
+  ["*", "/cctv", handle28],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle28],
+  ["*", "/tasks", handle29],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/prog", handle29],
+  ["*", "/prog", handle30],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle30],
+  ["*", "/projects", handle31],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle30]
+  ["*", "/project", handle31],
   // Projects: create/get/update/link/todo/docs
+  ["*", "/health/", handle32]
+  // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -21953,7 +24445,7 @@ var worker = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.hostname === "api.site-log.co.uk" || url.hostname === "api2.site-log.co.uk") {
-      return handle11(request, env, ctx);
+      return handle9(request, env, ctx);
     }
     if (request.method === "OPTIONS") return preflight(env, request);
     if (url.pathname === "/" || url.pathname === "/health") {
@@ -21990,14 +24482,34 @@ var worker = {
     const match = ROUTES.filter(([, prefix2]) => url.pathname === prefix2 || url.pathname.startsWith(prefix2 + "/") || url.pathname.startsWith(prefix2)).sort((a, b) => b[1].length - a[1].length)[0];
     if (!match) return error("Not found: " + url.pathname, 404, env, request);
     const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
+    const reqT0 = Date.now();
     try {
       const resp = await match[2](request, env, ctx, url, sess);
       const auditNote = resp && resp.headers && resp.headers.get("X-Audit-Note") || "";
       auditAction(env, ctx, sess, request, url, resp.status, auditClone, auditNote);
+      const dur = Date.now() - reqT0;
+      if (dur > SLOW_MS && !url.pathname.startsWith("/health/")) {
+        ctx.waitUntil(recordEvent(env, sess ? sess.tenantId : 1, {
+          kind: "slow",
+          endpoint: request.method + " " + url.pathname,
+          message: "slow response",
+          status: resp.status,
+          ms: dur
+        }).catch(() => {
+        }));
+      }
       return resp;
     } catch (err) {
       console.error("Handler error:", err);
       auditAction(env, ctx, sess, request, url, 500, auditClone, "");
+      ctx.waitUntil(recordEvent(env, sess ? sess.tenantId : 1, {
+        kind: "error",
+        endpoint: request.method + " " + url.pathname,
+        message: String(err && err.message || err),
+        status: 500,
+        ms: Date.now() - reqT0
+      }).catch(() => {
+      }));
       return error("Server error: " + err.message, 500, env, request);
     }
   },
@@ -22009,10 +24521,12 @@ var worker = {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
+    ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
+      ctx.waitUntil(runIntegrityChecks(env, 1).catch((e) => console.error("scheduled integrity sweep:", e)));
       ctx.waitUntil(remindDailyApprovals(env).catch((e) => console.error("scheduled daily approvals:", e)));
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
@@ -22175,6 +24689,8 @@ var PUBLIC_ROUTES = [
   ["POST", "/auth/reset-password"],
   // Public self-registration form (login page → "Sign up").
   ["POST", "/onboard"],
+  // Owner phone-ping for the AI auto-fixer — token-gated in-handler (JOBS_INBOUND_TOKEN).
+  ["POST", "/health/notify"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"],

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=11"></script>
+  <script src="/portal-config.js?v=17"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Scheduler</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=19"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -183,6 +183,9 @@
     .opt-bf-meta{font-size:11.5px;color:var(--muted);}
     .opt-owner{color:#b45309;font-weight:700;margin-left:4px;}
     .opt-new{color:#2563eb;font-weight:700;margin-left:4px;}
+    .opt-skill{font-size:11px;font-weight:700;white-space:nowrap;}
+    .opt-skill.ok{color:#0a7d33;}
+    .opt-skill.warn{color:#b45309;}
     .opt-bf-cost{flex:0 0 auto;text-align:right;font-size:12px;font-weight:800;color:#16a34a;line-height:1.25;}
     .opt-bf-cost small{font-weight:500;color:var(--muted);}
     .opt-bf-foot{margin-top:8px;}
@@ -253,7 +256,11 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
+        <button class="btn" id="openAutoBtn" title="Auto-build a day from unscheduled jobs, across the team">🤖 Auto day</button>
+        <button class="btn" id="undoAutoBtn" style="display:none;background:#fef2f2;border-color:#fecaca;color:#b91c1c;" title="Revert the jobs booked in by the last auto-day">↩ Undo last auto-day</button>
         <button class="btn" id="openMapBtn">🗺️ Map view</button>
+        <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
+        <a class="btn" href="job-durations.html" title="See how job length estimates are learned + which jobs ran over">⏱ Durations</a>
       </div>
     </header>
 
@@ -366,6 +373,7 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <h2 id="engDayTitle" style="margin:0;">Engineer's day</h2>
       <span style="display:flex;gap:6px;flex:none;">
+        <button type="button" class="btn" id="engDayAuto" title="Auto-build this engineer's day from nearby unscheduled jobs they're competent for">🪄 Auto-build day</button>
         <button type="button" class="btn" id="engDayOptimise" title="Auto-order this engineer's day into the most efficient route">🧭 Optimise route</button>
         <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
         <button type="button" class="btn" id="engDayClose">✕</button>
@@ -435,6 +443,28 @@
     </div>
     <div id="fillStatus" style="font-size:13px;color:var(--muted);margin-bottom:6px;"></div>
     <div id="fillResult"></div>
+  </div>
+</div>
+
+<!-- AUTO-SCHEDULE PREVIEW -->
+<div class="modal-backdrop" id="autoBackdrop">
+  <div class="modal" style="max-width:720px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 style="margin:0;" id="autoTitle">🤖 Auto-build the day</h2>
+        <div id="autoSub" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+      </div>
+      <button type="button" class="btn" id="autoClose" style="flex:none;">✕</button>
+    </div>
+    <div id="autoStatus" style="font-size:13px;color:var(--muted);margin:10px 0;">Building a plan…</div>
+    <div id="autoResult"></div>
+    <div id="autoFoot" style="display:none;margin-top:12px;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="autoAll" onclick="toggleAutoAll(this.checked)" style="width:16px;height:16px;">
+        <span>Select all · <b id="autoPickCount">nothing</b> ticked. This is a draft — nothing is booked until you press below.</span>
+      </label>
+      <button type="button" class="btn btn-primary" id="autoApply" disabled>✓ Book in ticked days</button>
+    </div>
   </div>
 </div>
 
@@ -565,6 +595,34 @@ async function loadEngineers(){
   if(!engineers.length) throw new Error("No active engineers");
 }
 
+/* Engineer skills (soft weighting for suggestions). Loaded once; suggestions
+   prefer an engineer competent in the job's work area and flag ⚠ when not rated. */
+let ENG_SKILLS = {}, WORK_AREAS = [], AREA_NAME = {};
+async function loadSkills(){
+  try{
+    const d = await (await authFetch("/sla/eng-skills")).json();
+    ENG_SKILLS = d.skills || {}; WORK_AREAS = d.areas || [];
+    AREA_NAME = {}; WORK_AREAS.forEach(a => AREA_NAME[a.id] = a.name);
+  }catch(e){ ENG_SKILLS = {}; WORK_AREAS = []; AREA_NAME = {}; }
+}
+const skNorm = s => String(s||"").toLowerCase().replace(/\s+/g,".").trim();
+// Stars (1-5) an engineer holds in a job's work area; 0 = not rated; -1 = job has
+// no work area (skill is N/A, so no flag).
+function engStars(username, areaId){
+  if(!areaId || !WORK_AREAS.length) return -1;
+  return Number((ENG_SKILLS[skNorm(username)] || {})[areaId] || 0);
+}
+// Soft weighting: each star shaves ~4 "effective" minutes off a detour, so a
+// competent engineer is preferred but a much-closer un-rated one can still win.
+function skillAdjust(mins, stars){ return stars > 0 ? mins - stars * 4 : mins; }
+function skillBadge(username, areaId){
+  if(areaId === undefined) areaId = "";
+  if(!areaId || !WORK_AREAS.length) return "";
+  const st = engStars(username, areaId), nm = escapeHtml(AREA_NAME[areaId] || areaId);
+  if(st >= 1) return ` <span class="opt-skill ok" title="${nm} — rated ${st}/5">${"★".repeat(st)} ${nm}</span>`;
+  return ` <span class="opt-skill warn" title="Not rated for ${nm}">⚠ not rated: ${nm}</span>`;
+}
+
 /* Jobs come straight from the server — no local overrides, no invented
    assignments, no fake 8am times. What you see is what everyone sees. */
 function normaliseJob(j){
@@ -586,6 +644,7 @@ function normaliseJob(j){
     address: [j.address, j.postcode].filter(Boolean).join(", "),
     priority: j.priority || "",
     status: j.status || "Pending",
+    workArea: j.workArea || "",
     lat: j.lat, lon: j.lon,
     scheduledAt: j.scheduledAt || null,
     durationMinutes,
@@ -1220,7 +1279,7 @@ async function runOptimise(){
 function renderOptimise(data){
   const s = data.summary, dayStart = data.dayStart;
   const endClock = optWallClock(optCtx.date, dayStart, s.dayLengthMins);
-  const srcLabel = data.matrixSource === "google" ? "live driving times" : "estimated distances (no Maps key)";
+  const srcLabel = data.matrixSource && data.matrixSource !== "estimate" ? "live driving times" : "estimated distances";
   $("optStatus").innerHTML = (data.aiUsed ? "🤖 AI-ordered · " : "📐 Shortest-driving · ") + srcLabel;
   $("optSummary").innerHTML =
     `<div class="opt-sum">
@@ -1283,9 +1342,11 @@ function renderBackfill(data){
     if(ins.index === 1) slot = "first call";
     else if(ins.index === dayPts.length - 1) slot = "last call";
     else { const bj = jobs.find(x => x.id === orderIds[ins.index - 2]); slot = "after " + (bj ? (bj.ref || bj.site || "a job") : "a job"); }
-    cand.push({ job: j, detourMi: Math.round(ins.detourMi * 10) / 10, detourMin: mins, slot });
+    cand.push({ job: j, detourMi: Math.round(ins.detourMi * 10) / 10, detourMin: mins, slot, stars: engStars(optCtx.username, j.workArea) });
   });
-  cand.sort((a, b) => a.detourMin - b.detourMin);
+  // Soft skill preference: a competent engineer's job floats up, but a much-closer
+  // un-rated one can still win.
+  cand.sort((a, b) => skillAdjust(a.detourMin, a.stars) - skillAdjust(b.detourMin, b.stars) || a.detourMin - b.detourMin);
   const top = cand.slice(0, 12);
   let html = `<div class="opt-bf-head"><b>➕ Jobs you could work in</b>
     <label class="opt-thr">within <input type="range" id="optThreshold" min="5" max="45" step="5" value="${optThreshold}"><span id="optThrVal">${optThreshold} min</span> extra</label></div>`;
@@ -1298,7 +1359,7 @@ function renderBackfill(data){
     return `<div class="opt-bf-row" data-id="${escapeAttr(j.id)}">
       <label class="opt-bf-lbl"><input type="checkbox" class="opt-bf-cb" data-id="${escapeAttr(j.id)}" ${optAddedIds.has(j.id) ? "checked" : ""}>
         <span class="opt-bf-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
-          <span class="opt-bf-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
+          <span class="opt-bf-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}${skillBadge(optCtx.username, j.workArea)}</span></span>
         <span class="opt-bf-cost">≈ +${c.detourMin}m<br><small>+${c.detourMi} mi · ${escapeHtml(c.slot)}</small></span></label>
       <button type="button" class="btn tiny opt-bf-view" data-id="${escapeAttr(j.id)}" title="View the job card">👁</button>
     </div>`;
@@ -1353,6 +1414,7 @@ function optimiseEngineerDay(username, name, date){
   runOptimise();
 }
 window.mlOptimiseEngineerDay = optimiseEngineerDay;
+document.getElementById("engDayAuto").addEventListener("click", () => { if(engDayCtx) runAutoSchedule([engDayCtx.username], engDayCtx.name, engDayCtx.date); });
 document.getElementById("optClose").addEventListener("click", () => { $("optBackdrop").style.display = "none"; });
 document.getElementById("optBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("optBackdrop")) $("optBackdrop").style.display = "none"; });
 document.getElementById("optRun").addEventListener("click", runOptimise);
@@ -1399,12 +1461,14 @@ async function runFillScan(){
       if(owners.includes(u.toLowerCase())) return;
       const ins = cheapestInsertion(routes[u], c);
       const mins = miToMin(ins.detourMi);
-      if(best === null || mins < best.mins) best = { u, mins, mi: Math.round(ins.detourMi * 10) / 10 };
+      const stars = engStars(u, j.workArea);
+      const eff = skillAdjust(mins, stars);   // soft skill weighting
+      if(best === null || eff < best.eff) best = { u, mins, eff, stars, mi: Math.round(ins.detourMi * 10) / 10 };
     });
     if(!best || best.mins > fillThreshold) return;
     cand.push({ job: j, best });
   });
-  cand.sort((a, b) => a.best.mins - b.best.mins);
+  cand.sort((a, b) => a.best.eff - b.best.eff || a.best.mins - b.best.mins);
   if(!cand.length){ $("fillStatus").textContent = `No loose jobs fit within ${fillThreshold} min of the ticked engineers' days.`; $("fillResult").innerHTML = ""; $("fillScan").disabled = false; return; }
   $("fillResult").innerHTML = cand.map(c => {
     const j = c.job;
@@ -1412,7 +1476,7 @@ async function runFillScan(){
     return `<div class="fill-row" data-id="${escapeAttr(j.id)}">
       <span class="fill-main"><b>${escapeHtml(j.ref || j.site || "Job")}</b>
         <span class="fill-meta">${escapeHtml(j.site || "")}${j.priority ? " · " + escapeHtml(j.priority) : ""} · ${j.durationMinutes || 60} min ${owner}</span></span>
-      <span class="fill-best">→ <b>${escapeHtml(engName(c.best.u))}</b><br><small>≈ +${c.best.mins}m · +${c.best.mi} mi</small></span>
+      <span class="fill-best">→ <b>${escapeHtml(engName(c.best.u))}</b><br><small>≈ +${c.best.mins}m · +${c.best.mi} mi</small>${skillBadge(c.best.u, j.workArea)}</span>
       <span class="fill-acts">
         <button type="button" class="btn tiny fill-view" data-id="${escapeAttr(j.id)}" title="View the job card">👁</button>
         <button type="button" class="btn tiny fill-reject" data-id="${escapeAttr(j.id)}" title="Reject this suggestion">✕</button>
@@ -1457,6 +1521,224 @@ $("fillClose").addEventListener("click", () => { $("fillBackdrop").style.display
 $("fillBackdrop").addEventListener("click", e => { if(e.target === $("fillBackdrop")) $("fillBackdrop").style.display = "none"; });
 $("fillThreshold").addEventListener("input", e => { fillThreshold = Number(e.target.value) || 20; $("fillThrVal").textContent = fillThreshold + " min"; });
 $("fillScan").addEventListener("click", runFillScan);
+
+/* ── Auto-make-a-day (whole team or one engineer) ────────────────────────── */
+let autoPlan = null, autoDate = null;
+function autoLoosePool(){
+  return jobs.filter(j => {
+    if(isDoneStatus(j.status) || ["Closed Jobs","Invoiced"].includes(j.status)) return false;
+    if(j.scheduledAt) return false;   // only place UNSCHEDULED jobs — never move booked ones
+    return !!coordsFor(j);
+  });
+}
+// Depot / HQ — the provisional start point for any engineer who hasn't got a home
+// postcode saved yet, so the whole team can be planned without waiting on data
+// entry. (Same HQ the mileage + projects tools default to.)
+const HQ_POSTCODE = "PO15 5RQ";
+function autoEngPayload(usernames, date){
+  return engineers.filter(e =>
+    (!usernames || usernames.includes(e.username)) &&
+    !holFor(e.username, date || selectedDate) &&
+    (usernames || e.staffType === "field")
+  ).map(e => {
+    const hasHome = (e.homeLat && e.homeLng) || !!e.homePostcode;
+    return { username:e.username, name:e.name,
+      homeLat: hasHome ? e.homeLat : undefined,
+      homeLng: hasHome ? e.homeLng : undefined,
+      homePostcode: hasHome ? e.homePostcode : HQ_POSTCODE,
+      _hq: !hasHome };
+  });
+}
+let autoFromHQ = 0;
+async function runAutoSchedule(usernames, titleWho, dateObj){
+  const date = dateObj || selectedDate;
+  autoDate = date;
+  $("autoSub").textContent = titleWho + " · " + date.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+  $("autoResult").innerHTML = ""; $("autoFoot").style.display = "none"; autoPlan = null;
+  $("autoBackdrop").style.display = "flex";
+  // Geocode EVERY job's postcode first — otherwise the pool is limited to jobs
+  // already looked up for the visible board (typically only a handful), and the
+  // rest are silently dropped before the server (which could geocode them) sees
+  // them. This is what made it place ~3 jobs when 100+ were waiting.
+  $("autoStatus").textContent = "Locating jobs…";
+  await ensureAllJobGeocodes();
+  const pool = autoLoosePool();
+  const engs = autoEngPayload(usernames, date);
+  // Engineers with no home postcode are still included, routed provisionally from
+  // HQ — count them so the plan can say so (better than silently dropping them).
+  autoFromHQ = engs.filter(e => e._hq).length;
+  if(!engs.length){ $("autoStatus").textContent = "No engineers are available (all on leave, or none are field staff)."; return; }
+  if(!pool.length){ $("autoStatus").textContent = "There are no unscheduled jobs with a location to place."; return; }
+  const homeNote = autoFromHQ ? ` · ${autoFromHQ} routed from HQ (no home set)` : "";
+  $("autoStatus").textContent = `Building a plan for ${engs.length} engineer${engs.length>1?"s":""} from ${pool.length} unscheduled job${pool.length>1?"s":""}…${homeNote}`;
+  const payload = {
+    date: formatDateInput(date), dayStart: "08:00", dayMinutes: 540, lunchMinutes: 30,
+    engineers: engs,
+    jobs: pool.map(j => { const c = coordsFor(j); return { id:j.id, ref:j.ref, site:j.site, priority:j.priority, durationMinutes:j.durationMinutes, workArea:j.workArea, lat:c?c[0]:undefined, lng:c?c[1]:undefined, postcode:j.postcode }; })
+  };
+  try{
+    const d = await (await authFetch("/sla/auto-schedule",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})).json();
+    if(!d.ok){ $("autoStatus").textContent = d.error || "Couldn't build a plan."; return; }
+    autoPlan = d; renderAutoPreview(d);
+  }catch(e){ $("autoStatus").textContent = "Couldn't reach the scheduler."; }
+}
+function autoOffToClock(off){ const base = 8*60 + Number(off||0); return String(Math.floor(base/60)%24).padStart(2,"0")+":"+String(base%60).padStart(2,"0"); }
+function renderAutoPreview(d){
+  const parts = [];
+  const totDrive = (d.plan||[]).reduce((a,p)=>a+(p.summary.driveMins||0),0);
+  const totSite = (d.plan||[]).reduce((a,p)=>a+(p.summary.siteMins||0),0);
+  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs across <b>${(d.plan||[]).length}</b> engineer${(d.plan||[]).length===1?"":"s"} · ${optFmtMins(totSite)} on site · ${optFmtMins(totDrive)} driving ${d.matrixSource!=="estimate"?'<span style="color:#0a7d33;">· live drive times ✓</span>':'<span style="color:var(--muted)">(est. drive times)</span>'}.</div>`);
+  if(d.durModel){
+    const dm = d.durModel;
+    const how = d.aiUsed ? `${d.aiUsed} estimated by AI` : (d.estimatedCount ? `${d.estimatedCount} used the learned typical` : "");
+    parts.push(`<div style="font-size:12px;color:var(--muted);margin-bottom:8px;">⏱ Learned typical ${optFmtMins(dm.typical)} from ${dm.actualCount} completed job${dm.actualCount===1?"":"s"}${how?` · ${how}`:""}${d.estimatedCount?` (tap a job to set its real length)`:""}.</div>`);
+    if(d.overruns && d.overruns.length){
+      const eg = d.overruns.slice(0,3).map(o=>`${escapeHtml(o.ref)} ${optFmtMins(o.allocated)}→${optFmtMins(o.actual)}`).join(", ");
+      parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">📈 ${d.overruns.length} recent job${d.overruns.length===1?"":"s"} ran well over the time allowed — e.g. ${eg}. Estimates learn from these automatically.</div>`);
+    }
+  }
+  if(autoFromHQ){
+    parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:8px;">ℹ ${autoFromHQ} engineer${autoFromHQ>1?"s were":" was"} routed from HQ (${HQ_POSTCODE}) — no home postcode saved. Set each engineer's home in Users Admin for accurate start/finish times.</div>`);
+  }
+  // Why some areas have two engineers — the clustering explainer.
+  if(d.overlaps && d.overlaps.length){
+    parts.push(`<details style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;background:#f8fafc;">
+      <summary style="cursor:pointer;padding:8px 10px;font-weight:600;font-size:13px;">🗺️ Why some areas have two engineers (${d.overlaps.length})</summary>
+      <div style="padding:0 10px 8px;">${d.overlaps.map(o => `<div style="font-size:12.5px;padding:4px 0;border-top:1px solid #eef2f7;">
+        <b>${escapeHtml(o.area)}</b> — ${o.engineers.map(e=>`${escapeHtml(e.name.split(" ")[0])} (${e.count})`).join(", ")}<br>
+        <span style="color:var(--muted);">${escapeHtml(o.reason)}.</span></div>`).join("")}</div>
+    </details>`);
+  }
+  // One collapsible section per engineer — totals in the header, expand for detail.
+  d.plan.forEach((p, i) => {
+    const s = p.summary;
+    parts.push(`<details ${i===0?"open":""} style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">
+      <summary style="cursor:pointer;padding:9px 11px;list-style:none;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" class="autoPick" data-user="${escapeAttr(p.username)}" onclick="event.stopPropagation();syncAutoAll()" title="Tick to book this engineer's day into the scheduler" style="width:18px;height:18px;flex:none;">
+        <span style="font-weight:700;">${escapeHtml(p.name)}</span>
+        <span style="margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;">${s.jobs} jobs · ${optFmtMins(s.dayLengthMins)} · 🚗 ${optFmtMins(s.driveMins)}</span>
+      </summary>
+      <div style="padding:0 11px 9px;">
+        ${p.why?`<div style="font-size:12px;color:#334155;background:#f1f5f9;border-radius:8px;padding:6px 9px;margin:2px 0 8px;">💡 ${escapeHtml(p.why)}</div>`:""}
+        ${p.legs.map(l => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0;align-items:baseline;">
+          <span style="width:44px;color:#0a7d33;font-weight:700;flex:none;">${autoOffToClock(l.arrivalOffset)}</span>
+          <span style="flex:1;">${escapeHtml(l.ref||l.site||"Job")}${l.area?` <span style="color:#94a3b8;">${escapeHtml(l.area)}</span>`:""}${l.priority?` · ${escapeHtml(l.priority)}`:""}${l.workArea?skillBadge(p.username,l.workArea):""} <span style="color:var(--muted);">· ${optFmtMins(l.durationMin)} on site${l.aiEstimated?" (AI)":(l.estimated?" (est)":"")}</span></span>
+          <span style="color:var(--muted);flex:none;">+${optFmtMins(l.driveMins)}</span></div>`).join("")}
+      </div>
+    </details>`);
+  });
+  if(d.unassigned && d.unassigned.length){
+    const held = d.unassigned.filter(u => /planned trip/.test(u.reason||""));
+    const other = d.unassigned.filter(u => !/planned trip/.test(u.reason||""));
+    if(held.length){
+      const urgent = held.filter(u => /1/.test(u.priority||"")).length;
+      parts.push(`<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 9px;margin-bottom:6px;">🧭 <b>${held.length} held for a planned trip</b> — too far to be efficient today${urgent?` · <b style="color:#b91c1c;">⚠ ${urgent} Priority 1</b>`:""}: ${held.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${held.length>6?"…":""}. <span style="color:var(--muted);">Do these on a deliberate trip — schedule one manually if it's urgent.</span></div>`);
+    }
+    if(other.length){
+      parts.push(`<div style="font-size:12px;color:#b45309;margin-bottom:6px;">⚠ ${other.length} couldn't be placed (day full or no location): ${other.slice(0,6).map(u=>escapeHtml(u.ref)).join(", ")}${other.length>6?"…":""}</div>`);
+    }
+  }
+  (d.warnings||[]).forEach(w => parts.push(`<div style="font-size:12px;color:var(--muted);">${escapeHtml(w)}</div>`));
+  $("autoStatus").textContent = "";
+  $("autoResult").innerHTML = parts.join("");
+  $("autoFoot").style.display = d.placed ? "flex" : "none";
+  syncAutoAll();
+}
+// Tick/untick reconciliation for the per-engineer day checkboxes. Days default
+// UNticked (a draft) — the office deliberately picks whose day to book in, so a
+// single-engineer run can never book everyone. Keeps the footer count, the
+// "Select all" master box and the apply button's enabled state in step.
+function syncAutoAll(){
+  const boxes = [...document.querySelectorAll(".autoPick")];
+  const ticked = boxes.filter(b => b.checked);
+  const all = $("autoAll"), btn = $("autoApply"), lbl = $("autoPickCount");
+  if(all){ all.checked = boxes.length>0 && ticked.length===boxes.length; all.indeterminate = ticked.length>0 && ticked.length<boxes.length; }
+  if(lbl) lbl.textContent = ticked.length ? `${ticked.length} of ${boxes.length}` : "nothing";
+  if(btn){ btn.disabled = ticked.length===0; btn.textContent = ticked.length ? `✓ Book in ${ticked.length} day${ticked.length!==1?"s":""}` : "✓ Book in ticked days"; }
+}
+function toggleAutoAll(on){ document.querySelectorAll(".autoPick").forEach(b => b.checked = on); syncAutoAll(); }
+async function applyAutoPlan(){
+  if(!autoPlan || !autoPlan.plan) return;
+  // Apply only the engineers' days that are ticked (each section has a checkbox).
+  const picked = new Set([...document.querySelectorAll(".autoPick:checked")].map(c => c.getAttribute("data-user")));
+  const plans = autoPlan.plan.filter(p => picked.has(p.username));
+  if(!plans.length){ $("autoStatus").textContent = "Tick at least one engineer's day to add it to the scheduler."; return; }
+  // "Are you sure" — this is where the draft becomes real bookings. Name exactly
+  // who is being booked and how many jobs, so a mis-tick is caught here.
+  const totJobs = plans.reduce((a,p)=>a+p.legs.length,0);
+  const who = plans.map(p=>p.name).join(", ");
+  const dateStr = (autoDate||selectedDate).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  const msg = `Book in ${totJobs} job${totJobs!==1?"s":""} for ${plans.length} engineer${plans.length!==1?"s":""} on ${dateStr}?\n\n${who}\n\nThis writes the jobs straight into the scheduler.`;
+  const ok = window.MLUI ? await MLUI.confirm(msg,{title:"Book in this day?",okLabel:"Yes, book them in",danger:false}) : confirm(msg);
+  if(!ok) return;
+  const btn = $("autoApply"); btn.disabled = true; btn.textContent = "Adding…";
+  const [Y,Mo,Da] = formatDateInput(autoDate || selectedDate).split("-").map(Number);
+  let done = 0, fail = 0;
+  const appliedIds = [];   // remember what we booked so it can be undone in one tap
+  for(const p of plans){
+    for(const l of p.legs){
+      const at = new Date(Y, Mo-1, Da, 0, 0, 0, 0); at.setMinutes(8*60 + Number(l.arrivalOffset||0));
+      try{
+        const res = await authFetch("/sla/jobs/"+encodeURIComponent(l.jobId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ assignedEngineers:[p.username], assignedTo:p.username, scheduledAt: at.toISOString(), durationMinutes: l.durationMin, changedBy: currentUser||"auto-schedule" }) });
+        if(res.ok){ done++; appliedIds.push(l.jobId); } else fail++;
+      }catch(e){ fail++; }
+    }
+    // Once applied, drop that engineer's day from the preview + untick it.
+    autoPlan.plan = autoPlan.plan.filter(x => x.username !== p.username);
+  }
+  // Record this batch server-side so "↩ Undo last auto-day" can revert exactly
+  // these jobs (only the ones still untouched since — see /sla/auto-schedule/undo).
+  if(appliedIds.length){
+    try{ await authFetch("/sla/auto-schedule/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ date: formatDateInput(autoDate||selectedDate), jobIds: appliedIds, engineers: plans.map(p=>p.name), by: currentUser||"" })}); }catch(e){}
+    refreshUndoBtn();
+  }
+  $("autoStatus").textContent = `✓ Added ${done} job${done!==1?"s":""} for ${plans.length} engineer${plans.length!==1?"s":""} to the scheduler${fail?`, ${fail} failed`:""}.`;
+  await loadJobs(); render();
+  if(autoPlan.plan.length){ renderAutoPreview(autoPlan); btn.disabled=false; }
+  else { btn.textContent = "Done"; setTimeout(()=>{ $("autoBackdrop").style.display="none"; btn.disabled=false; syncAutoAll(); }, 1200); }
+}
+$("openAutoBtn").addEventListener("click", ()=> runAutoSchedule(null, "Whole team"));
+$("autoClose").addEventListener("click", ()=> $("autoBackdrop").style.display="none");
+$("autoBackdrop").addEventListener("click", e => { if(e.target === $("autoBackdrop")) $("autoBackdrop").style.display="none"; });
+$("autoApply").addEventListener("click", applyAutoPlan);
+
+/* ── Undo last auto-day ─────────────────────────────────────────────────────
+   The last apply batch is stashed server-side (app_config sla:lastautoday).
+   Undo clears scheduled_at + assignment for ONLY the jobs still exactly as the
+   auto-day left them (an engineer who's since started/moved a job is skipped),
+   so it can never clobber real work done after the booking. */
+let lastUndoInfo = null;
+async function refreshUndoBtn(){
+  const btn = $("undoAutoBtn"); if(!btn) return;
+  try{
+    const d = await (await authFetch("/sla/auto-schedule/last")).json();
+    if(d && d.ok && d.jobIds && d.jobIds.length){
+      lastUndoInfo = d;
+      btn.style.display = "";
+      btn.title = `Revert ${d.jobIds.length} job${d.jobIds.length!==1?"s":""} booked by the last auto-day${d.engineers&&d.engineers.length?` (${d.engineers.join(", ")})`:""}`;
+    } else { lastUndoInfo = null; btn.style.display = "none"; }
+  }catch(e){ btn.style.display = "none"; }
+}
+async function undoLastAutoDay(){
+  if(!lastUndoInfo) return;
+  const n = lastUndoInfo.jobIds.length;
+  const who = (lastUndoInfo.engineers||[]).join(", ");
+  const msg = `Undo the last auto-day?\n\nThis un-schedules the ${n} job${n!==1?"s":""} it booked${who?` for ${who}`:""}. Any of those jobs an engineer has since started or moved is left alone.`;
+  const ok = window.MLUI ? await MLUI.confirm(msg,{title:"Undo last auto-day?",okLabel:"Yes, undo it",danger:true}) : confirm(msg);
+  if(!ok) return;
+  const btn = $("undoAutoBtn"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "Undoing…";
+  try{
+    const d = await (await authFetch("/sla/auto-schedule/undo",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json();
+    if(d && d.ok){
+      await loadJobs(); render();
+      alert(`↩ Un-scheduled ${d.reverted} job${d.reverted!==1?"s":""}${d.skipped?`, ${d.skipped} left alone (already started or moved)`:""}.`);
+    } else { alert((d&&d.error)||"Couldn't undo."); }
+  }catch(e){ alert("Couldn't reach the scheduler."); }
+  btn.disabled = false; btn.textContent = orig;
+  refreshUndoBtn();
+}
+$("undoAutoBtn").addEventListener("click", undoLastAutoDay);
+refreshUndoBtn();
 
 /* Job-card sub-modal — read-only, rendered from the in-memory job (no fetch, no
    re-scan). Stacks over whichever suggestion modal is open; ‹ Back just hides it. */
@@ -1587,7 +1869,13 @@ const mapFilter = new Set(MAP_STATUSES);
 let siteMeta = null;                 // "0123" -> { pc, lat, lon }
 const GEO_KEY = "mlPostcodeGeo_v1";
 let geoCache = {};
-try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+let geoMiss = {};   // postcodes that failed THIS page load — never persisted
+try{
+  const raw = JSON.parse(localStorage.getItem(GEO_KEY)) || {};
+  // Successes only. A miss cached as null (older builds) meant a postcode that
+  // failed once was never retried on that device, and its pin stayed missing.
+  Object.keys(raw).forEach(k => { if(Array.isArray(raw[k])) geoCache[k] = raw[k]; });
+}catch{ geoCache = {}; }
 
 async function loadSiteMeta(){
   if(siteMeta) return;
@@ -1629,7 +1917,7 @@ function postcodeFor(job){
 let geoFetchError = false;
 async function geocodePostcodes(pcs){
   geoFetchError = false;
-  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  const todo = [...new Set(pcs.filter(pc => pc && !Array.isArray(geoCache[pc]) && !geoMiss[pc]))];
   for(let i = 0; i < todo.length; i += 100){
     const batch = todo.slice(i, i + 100);
     try{
@@ -1640,8 +1928,9 @@ async function geocodePostcodes(pcs){
       });
       const data = await res.json();
       (data.result || []).forEach(r => {
-        geoCache[(r.query || "").toUpperCase()] =
-          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+        const q = (r.query || "").toUpperCase();
+        if(r.result && isFinite(r.result.latitude)) geoCache[q] = [r.result.latitude, r.result.longitude];
+        else geoMiss[q] = 1;
       });
     }catch(e){ geoFetchError = true; }
   }
@@ -1796,7 +2085,7 @@ function plotJobs(){
       const pc = postcodeFor(job);
       problems.push(`${job.ref || job.id}: ` + (
         !pc ? "no postcode on the job, its site, or its address"
-            : (geoCache[pc] === null ? `postcode "${pc}" not recognised`
+            : (geoMiss[pc] ? `postcode "${pc}" not recognised`
                                      : `postcode "${pc}" not looked up yet${geoFetchError ? " (postcode lookup unreachable)" : ""}`)
       ));
       return;
@@ -1894,6 +2183,7 @@ async function init(){
 
   try{
     await loadEngineers();
+    loadSkills();   // fire-and-forget; suggestions weight by it once loaded
     const sel = $("engineerFilter");
     engineers.forEach(e => {
       const opt = document.createElement("option");

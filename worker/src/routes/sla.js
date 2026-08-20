@@ -55,6 +55,61 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  /* Areas of work — a managed list (app_config sla_work_areas) used to match a
+     job's `workArea` to engineers competent in it. GET any session; POST SLA admin. */
+  if (subpath === "/work-areas") {
+    if (method === "GET") return jsonResponse({ areas: await getWorkAreas(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson(request);
+      const list = Array.isArray(body?.areas) ? body.areas : [];
+      return jsonResponse({ ok: true, areas: await setWorkAreas(env, tenantId, list) }, headers);
+    }
+  }
+
+  /* Engineer skills matrix — {username:{areaId:stars 1-5}} in app_config
+     sla_eng_skills. GET any session (the scheduler weights suggestions with it);
+     POST SLA admin (the rock-sheet page). */
+  if (subpath === "/eng-skills") {
+    if (method === "GET") return jsonResponse({ skills: await getEngSkills(env, tenantId), areas: await getWorkAreas(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson(request);
+      return jsonResponse({ ok: true, skills: await setEngSkills(env, tenantId, body?.skills || {}) }, headers);
+    }
+  }
+
+  /* AI: suggest a job's area of work from its description (office confirms).
+     Cheap (~0.1p) but capped + metered. Any logged-in session may call it
+     (add-job / the editor are already permission-gated pages). */
+  if (subpath === "/infer-work-area" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const b = await readJson(request);
+    const cap = await aiCapCheck(env, tenantId);
+    if (cap.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
+    const r = await inferWorkArea(env, tenantId, b.description || "");
+    if (r.ok && (r.areaId || r.name)) ctx?.waitUntil(bumpAiUsage(env, tenantId, "infer-work-area"));
+    return jsonResponse(r, headers);
+  }
+
+  /* AI usage meter + soft daily cap (SLA admin). */
+  if (subpath === "/ai-usage") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (method === "GET") return jsonResponse(await getAiUsage(env, tenantId), headers);
+    if (method === "POST") {
+      const b = await readJson(request);
+      if (b.dailyCap !== undefined) {
+        const n = Math.max(0, parseInt(b.dailyCap, 10) || 0);
+        const db = tenantDB(env, tenantId);
+        await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,'ai_daily_cap',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, String(n)).run();
+      }
+      return jsonResponse(await getAiUsage(env, tenantId), headers);
+    }
+  }
+
   /* ═══════════════ Firestopping (RIA form) ═══════════════
      A firestopping job produces a "Record of Installation Activities" PDF from
      the engineer's per-seal photos + a signed declaration, bundled with the
@@ -749,7 +804,114 @@ export async function handle(request, env, ctx, url, sess) {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!(await isSlaAdmin(env, tenantId, sess)))
       return jsonResponse({ error: "Only SLA admins can optimise a route." }, headers, 403);
-    return jsonResponse(await optimiseEngineerRoute(env, tenantId, await readJson(request)), headers);
+    const roBody = await readJson(request);
+    // Soft daily cap applies to the AI re-order; over the cap we still return the
+    // shortest-driving (Google/estimate) order, just without the AI pass.
+    const roCap = await aiCapCheck(env, tenantId);
+    if (roCap.capped) roBody.useAI = false;
+    const roRes = await optimiseEngineerRoute(env, tenantId, roBody);
+    if (roRes.aiUsed) ctx?.waitUntil(bumpAiUsage(env, tenantId, "route-optimize"));
+    if (roCap.capped) (roRes.warnings = roRes.warnings || []).push(`Daily AI limit reached (${roCap.cap}) — used shortest-driving order without the AI pass.`);
+    return jsonResponse(roRes, headers);
+  }
+
+  /* POST /sla/auto-schedule — auto-build a day: assign + order loose jobs across
+     one or many engineers (skill-preferred, capacity-limited). Preview only.
+     Deterministic (Distance Matrix / estimate) — no Claude, so no AI cost. */
+  if (subpath === "/auto-schedule" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "Only SLA admins can auto-schedule a day." }, headers, 403);
+    return jsonResponse(await autoScheduleDay(env, tenantId, await readJson(request)), headers);
+  }
+
+  /* POST /sla/auto-schedule/record — stash the batch of jobs the office just
+     booked in from an auto-day, so it can be reverted in one tap. SLA admin. */
+  if (subpath === "/auto-schedule/record" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const b = await readJson(request);
+    const jobIds = Array.isArray(b.jobIds) ? b.jobIds.map(String).slice(0, 500) : [];
+    if (!jobIds.length) return jsonResponse({ ok: false, error: "No jobs to record." }, headers, 400);
+    const rec = {
+      date: String(b.date || todayStr()),
+      jobIds,
+      engineers: Array.isArray(b.engineers) ? b.engineers.map(String).slice(0, 40) : [],
+      by: String(b.by || (sess.user && sess.user.username) || ""),
+      at: new Date().toISOString(),
+    };
+    try { await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:lastautoday:" + tenantId, JSON.stringify(rec)).run(); } catch {}
+    return jsonResponse({ ok: true }, headers);
+  }
+
+  /* GET /sla/auto-schedule/last — the last recorded auto-day batch (for the
+     scheduler's "↩ Undo last auto-day" button). SLA admin. */
+  if (subpath === "/auto-schedule/last" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try { const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first(); if (row) rec = JSON.parse(row.value); } catch {}
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false }, headers);
+    return jsonResponse({ ok: true, date: rec.date, jobIds: rec.jobIds, engineers: rec.engineers || [], by: rec.by || "", at: rec.at || "" }, headers);
+  }
+
+  /* POST /sla/auto-schedule/undo — revert the last auto-day: un-schedule +
+     un-assign ONLY the jobs still exactly as the auto-day left them (status
+     "Scheduled" and still on that date). A job an engineer has since started,
+     or the office has moved/reassigned, is left untouched. SLA admin. */
+  if (subpath === "/auto-schedule/undo" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try { const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first(); if (row) rec = JSON.parse(row.value); } catch {}
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false, error: "Nothing to undo." }, headers, 400);
+    const now = new Date().toISOString();
+    let reverted = 0, skipped = 0;
+    for (const id of rec.jobIds) {
+      let job = null;
+      try { job = await getJob(env, tenantId, id); } catch {}
+      // Skip anything that's gone, moved off the recorded date, or that an
+      // engineer has already started (status past "Scheduled").
+      if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) { skipped++; continue; }
+      job.scheduledAt = null;
+      job.scheduledEnd = null;
+      job.assignedTo = "";
+      job.assignedEngineers = [];
+      job.engStatus = undefined;
+      job.status = "Pending";
+      (job.statusHistory ||= []).push({ status: "Pending", at: now, by: "undo-auto-day" });
+      job.updatedAt = now;
+      try { await saveJob(env, tenantId, job); reverted++; } catch { skipped++; }
+    }
+    // Consume the record so a second Undo doesn't re-fire on already-reverted jobs.
+    try { await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).run(); } catch {}
+    return jsonResponse({ ok: true, reverted, skipped }, headers);
+  }
+
+  /* GET /sla/duration-insights — the learned duration model + overruns + a
+     review sample (allocated vs actual vs AI estimate). SLA admin. */
+  if (subpath === "/duration-insights" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const dur = await estimateJobDurations(env, tenantId);
+    const ai = await loadAiDurCache(env, tenantId);
+    const recent = (dur.recent || []).map(r => ({ ...r, ai: ai[r.id] ?? null }));
+    return jsonResponse({
+      ok: true,
+      model: { typical: dur.typical, byPriority: dur.byPriority, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
+      overruns: dur.overruns, recent, aiCount: Object.keys(ai).length,
+    }, headers);
+  }
+
+  /* POST /sla/duration-clear-ai — forget the cached AI estimates so they're
+     recomputed on the next auto-day (e.g. after editing descriptions). SLA admin. */
+  if (subpath === "/duration-clear-ai" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess)))
+      return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    try { await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:aidur:" + tenantId).run(); } catch {}
+    return jsonResponse({ ok: true }, headers);
   }
 
   /* GET /sla/jobs/nearby?jobId=&engineer=&radius= — same-site + within-radius OPEN
@@ -979,7 +1141,13 @@ export async function handle(request, env, ctx, url, sess) {
     // POST /sla/jobs/{id}/files?filename=  -> upload photo to R2
     if (parts[2] === "files" && method === "POST") {
       const filename = searchParams.get("filename");
-      const form = await request.formData();
+      // A truncated multipart body (an upload cut off on weak signal) makes
+      // request.formData() throw "No initial boundary string". That's a BAD
+      // REQUEST from a dropped connection, not a server fault — return 400 so it
+      // isn't logged as a 500 error/alert; the client keeps the photo and retries.
+      let form;
+      try { form = await request.formData(); }
+      catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
       const file = form.get("file");
       if (!filename || !file) return jsonResponse({ error: "Missing file" }, headers, 400);
       // Before / During / After label the engineer picks with the photo slider.
@@ -992,6 +1160,12 @@ export async function handle(request, env, ctx, url, sess) {
         httpMetadata: { contentType: file.type },
         customMetadata: stage ? { stage } : undefined
       });
+      // A client-shrunk thumbnail rides along → stored as <key>.thumb so the photo
+      // grid loads a tiny image instead of the full-res one.
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
+      }
       return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
     }
 
@@ -1002,11 +1176,24 @@ export async function handle(request, env, ctx, url, sess) {
       // upload) so a photo can be re-stamped without rewriting the R2 object.
       let overrides = {};
       try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; } catch {}
-      return jsonResponse({ files: listed.objects.map(o => {
+      // A small <key>.thumb rides alongside each photo (client-generated on upload,
+      // or backfilled). The grid loads the thumb, not the full-res original, so it
+      // stays fast even with many photos. Filter out the .thumb objects themselves.
+      const objs = (listed.objects || []).filter(o => !o.key.endsWith(".thumb"));
+      const thumbSet = new Set((listed.objects || []).filter(o => o.key.endsWith(".thumb")).map(o => o.key));
+      const files = [];
+      for (const o of objs) {
         const name = o.key.split("/").pop();
-        return { name, publicURL: r2Url(env, o.key),
-          stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || "" };
-      }) }, headers);
+        files.push({
+          name,
+          key: o.key,
+          publicURL: r2Url(env, o.key),
+          thumb: await signedFileUrl(env, url.origin, "/sla/site/thumb", o.key),
+          hasThumb: thumbSet.has(o.key + ".thumb"),
+          stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || ""
+        });
+      }
+      return jsonResponse({ files }, headers);
     }
 
     // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
@@ -1405,6 +1592,69 @@ export async function handle(request, env, ctx, url, sess) {
         size: o.size
       })))).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     }
+    // If this site IS a portal project's site (siteCode matches its Pxxxx
+    // number), inject the project's own documents as a "Project Documents"
+    // area — engineers on the job and Sites both surface them here without a
+    // separate lookup. Non-hidden files only.
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        const proj = await env.DB.prepare(
+          "SELECT id FROM projects WHERE tenant_id=? AND (number=? OR site_number=?) LIMIT 1"
+        ).bind(tenantId, raw, raw).first();
+        if (proj) {
+          const { results: pfs } = await env.DB.prepare(
+            "SELECT id, r2_key, title, name, uploaded_at, uploaded_by FROM project_files WHERE tenant_id=? AND project_id=? AND (hidden=0 OR hidden IS NULL) ORDER BY uploaded_at DESC"
+          ).bind(tenantId, proj.id).all();
+          if ((pfs || []).length) {
+            const AREA = "Project Documents";
+            if (!areas.includes(AREA)) areas.unshift(AREA);
+            docs[AREA] = await Promise.all(pfs.map(async f => ({
+              url: await signedFileUrl(env, url.origin, "/project/doc", f.r2_key, 86400),
+              key: f.r2_key,
+              name: f.title || f.name || f.r2_key.split("/").pop(),
+              at: f.uploaded_at, by: f.uploaded_by, size: 0,
+              projectDoc: true,   // marker: engineers/office see it but can't delete via /site/doc-delete
+            })));
+          }
+        }
+      }
+    } catch {}
+    // Compliance certificates — the same files eicr-portal / fareham chart
+    // shows. Surface them here as a "Compliance Certificates" area so an
+    // engineer opening Site Documents finds a store's EICR / PAT / EM etc.
+    // without leaving the page. Non-destructive read; delete/upload still
+    // owned by the compliance chart. Matches by site_number → compliance_stores
+    // via siteKeyOf-of-the-request (portal site number OR compliance code).
+    try {
+      const raw = String(searchParams.get("siteCode") || "").trim();
+      if (raw) {
+        // Two match paths: (a) the compliance store links directly to this site's
+        // number, (b) the compliance code IS the request code (Co-op stores).
+        const { results: files } = await env.DB.prepare(
+          `SELECT f.id, f.scheme, f.code, f.type, f.year, f.filename, f.label, f.r2_key, f.uploaded_at, f.uploaded_by
+             FROM compliance_files f
+             LEFT JOIN compliance_stores s
+                    ON s.tenant_id = f.tenant_id AND s.scheme = f.scheme AND s.code = f.code
+            WHERE f.tenant_id = ?
+              AND (s.site_number = ? OR f.code = ?)
+            ORDER BY f.uploaded_at DESC`
+        ).bind(tenantId, raw, raw).all();
+        if ((files || []).length) {
+          const AREA = "Compliance Certificates";
+          if (!areas.includes(AREA)) areas.unshift(AREA);
+          const TYPE_LBL = { fiveYear: "5 Year", pat: "PAT", em: "Emergency Lighting", emMonthly: "EM Monthly", emYearly: "EM Yearly", pv: "PV", ev: "EV", forecourt: "EV", pump: "Pump", other: "Other" };
+          docs[AREA] = await Promise.all(files.map(async f => ({
+            url: await signedFileUrl(env, url.origin, "/compliance/file", f.r2_key, 86400),
+            key: f.r2_key,
+            name: (f.label || f.filename || f.r2_key.split("/").pop())
+              + " · " + (TYPE_LBL[f.type] || f.type || "compliance"),
+            at: f.uploaded_at, by: f.uploaded_by, size: 0,
+            complianceDoc: true,   // marker: managed on the compliance chart
+          })));
+        }
+      }
+    } catch {}
     return jsonResponse({ areas, docs }, headers);
   }
 
@@ -1416,7 +1666,9 @@ export async function handle(request, env, ctx, url, sess) {
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
-    const form = await request.formData();
+    let form;
+    try { form = await request.formData(); }
+    catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
     const file = form.get("file");
     if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
     const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
@@ -1463,7 +1715,9 @@ export async function handle(request, env, ctx, url, sess) {
   // Store a thumbnail for an EXISTING photo (backfill) — client generates it.
   if (subpath === "/site/thumb" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-    const form = await request.formData();
+    let form;
+    try { form = await request.formData(); }
+    catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
     const key = String(form.get("key") || "");
     const thumb = form.get("thumb");
     if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
@@ -1881,7 +2135,7 @@ async function pushJobToEngineers(env, tid, job, engineerIds) {
 }
 // First-time announcement: if the job is visible + has engineers + hasn't been
 // announced, push ALL its engineers and mark it notified (persisting the flag).
-async function reconcileRelease(env, tid, job, allJobs) {
+export async function reconcileRelease(env, tid, job, allJobs) {
   if (!job || job.releaseNotified) return false;
   const engs = assignedList(job);
   if (!engs.length) return false;
@@ -1962,7 +2216,7 @@ async function getShift(env, tenantId, username, date) {
   return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
 }
 
-async function listJobs(env, tenantId) {
+export async function listJobs(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
   return (results || []).map(r => JSON.parse(r.data));
@@ -2014,7 +2268,7 @@ async function saveJob(env, tenantId, job) {
 
 /* ================= CREATE / PATCH ================= */
 
-async function createOrUpdateJobFromPayload(env, tenantId, body) {
+export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const cfg = await getConfig(env, tenantId);
   const id = body.id || body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
@@ -2111,9 +2365,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
+    // Portal-project link: set when this job was raised from a project hub, so
+    // the project can list its jobs + roll up per-engineer visits. Preserved.
+    projectId: body.projectId !== undefined ? (String(body.projectId || "") || null) : (existing?.projectId || null),
     scheduledAt,
     scheduledEnd,
     durationMinutes,
+    // Area of work (id from app_config sla_work_areas) — used to match jobs to
+    // engineers competent in that area when suggesting/auto-scheduling. Preserved.
+    workArea: body.workArea !== undefined ? (String(body.workArea || "") || null) : (existing?.workArea ?? null),
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
     release: (body.release !== undefined
@@ -2199,6 +2459,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
+  if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
+  if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
@@ -2522,6 +2784,30 @@ async function engineerHome(env, tenantId, username) {
   return null;
 }
 // Full driving-time + distance matrix over an array of [lat,lng] points. Google
+// FREE real road-time matrix via OSRM (OpenStreetMap routing — no API key, no
+// cost). One request returns an N×N duration matrix. Public server allows ~100
+// coordinates per request; returns null on any problem so callers fall back.
+async function osrmTable(pts) {
+  if (!pts || pts.length < 2 || pts.length > 100) return null;
+  const coords = pts.map(p => `${p[1]},${p[0]}`).join(";");   // OSRM wants lng,lat
+  try {
+    const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`, { signal: AbortSignal.timeout(7000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.code !== "Ok" || !Array.isArray(data.durations)) return null;
+    const mins = data.durations.map(row => row.map(s => (s == null ? 0 : Math.max(1, Math.round(s / 60)))));
+    return { mins, source: "osrm" };
+  } catch { return null; }
+}
+// Free real times (OSRM) when they fit one request, else a haversine estimate.
+async function roadMatrix(pts) {
+  const osrm = await osrmTable(pts);
+  if (osrm) return osrm;
+  const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) mins[i][j] = Math.max(1, Math.round(haversineMi(pts[i], pts[j]) * 1.25 / 30 * 60));
+  return { mins, source: "estimate" };
+}
+
 // Distance Matrix (chunked to the 100-element-per-request cap); on any failure /
 // no key, a haversine × 1.25 road-factor estimate at ~30 mph.
 async function driveMatrix(env, pts) {
@@ -2706,6 +2992,366 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     },
     warnings
   };
+}
+
+/* Auto-make-a-day: given a date, one-or-many engineers and a pool of loose jobs,
+   assign + order each job into an efficient day, preferring an engineer competent
+   in the job's work area (soft) and respecting a per-day capacity. Deterministic —
+   Google Distance Matrix (or haversine estimate) only, NO Claude — so it's cheap.
+   Returns a PREVIEW; the client PATCHes assignments/times on Apply. */
+async function autoScheduleDay(env, tenantId, body) {
+  const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
+  const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
+  // Door-to-door day target ~9h (8-10h band). cap = travel + on-site minutes.
+  const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 540));
+  const cap = Math.max(120, dayMinutes - lunch);            // working minutes/engineer (travel + on-site)
+  const warnings = [];
+  const skills = await getEngSkills(env, tenantId);
+  const dur = await estimateJobDurations(env, tenantId);    // learned typical job length
+  const normPrio = p => { const m = /(\d)/.exec(String(p || "")); return m ? Number(m[1]) : 5; };
+  const estimateFor = p => { const m = /(\d)/.exec(String(p || "")); const key = m ? "Priority " + m[1] : ""; return (dur.byPriority && dur.byPriority[key]) || dur.typical; };
+  // Postcode district (e.g. "GU15") — the unit we cluster/explain by; falls back
+  // to the first word of the site name.
+  const outward = pc => { const s = String(pc || "").trim().toUpperCase(); const m = s.match(/^[A-Z]{1,2}\d[A-Z\d]?/); return m ? m[0] : ""; };
+  const hmm = m => { m = Math.round(m || 0); const h = Math.floor(m / 60), mm = m % 60; return h ? (h + "h" + (mm ? " " + mm + "m" : "")) : (mm + "m"); };
+
+  const engs = [];
+  for (const e of (Array.isArray(body.engineers) ? body.engineers : [])) {
+    const u = String(e.username || "").trim(); if (!u) continue;
+    let coord = null;
+    const lat = Number(e.homeLat), lng = Number(e.homeLng ?? e.homeLon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord) { const h = await engineerHome(env, tenantId, u); if (h) coord = h.coord; }
+    if (!coord && e.homePostcode) { const g = await geocodePcServer(e.homePostcode); if (g) coord = g; }
+    if (!coord) { warnings.push(`${e.name || u} has no home location — skipped.`); continue; }
+    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+  }
+  if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
+
+  const jobs = [];
+  for (const j of (Array.isArray(body.jobs) ? body.jobs : [])) {
+    let coord = null;
+    const lat = Number(j.lat), lng = Number(j.lng ?? j.lon);
+    if (isFinite(lat) && isFinite(lng) && (lat || lng)) coord = [lat, lng];
+    if (!coord && j.postcode) { const g = await geocodePcServer(j.postcode); if (g) coord = g; }
+    if (!coord) { warnings.push(`${j.ref || j.site || "A job"} has no map location — left unscheduled.`); continue; }
+    // Use the job's own set length if it has one, otherwise the LEARNED estimate.
+    const explicit = Number(j.durationMinutes);
+    const hasExplicit = Number.isFinite(explicit) && explicit > 0;
+    const durationMin = hasExplicit ? Math.max(15, Math.round(explicit)) : Math.max(15, Math.round(estimateFor(j.priority)));
+    const ow = outward(j.postcode);
+    jobs.push({ id: String(j.id), ref: String(j.ref || j.site || j.id), site: String(j.site || ""), priority: String(j.priority || ""), durationMin, estimated: !hasExplicit, workArea: String(j.workArea || ""), area: ow || String(j.site || "").split(/[,\s]/)[0] || "", iow: /^PO(3\d|4[01])$/.test(ow), coord });
+  }
+  if (!jobs.length) return { ok: false, error: "No locatable unscheduled jobs to place.", warnings };
+
+  // AI estimates are the PRIMARY length for a job with no set duration: read its
+  // description and estimate the on-site time (cached per job, so it's a one-off
+  // cost). Falls back to the learned historical typical already set above.
+  let aiUsed = 0, aiSource = "history";
+  const needIds = jobs.filter(j => j.estimated).map(j => j.id);
+  if (needIds.length && env.ANTHROPIC_API_KEY) {
+    const cache = await loadAiDurCache(env, tenantId);
+    const missing = needIds.filter(id => !(id in cache));
+    if (missing.length) {
+      const got = await aiEstimateDurations(env, await jobMetaForIds(env, tenantId, missing));
+      if (Object.keys(got).length) { Object.assign(cache, got); await saveAiDurCache(env, tenantId, cache); }
+    }
+    for (const j of jobs) if (j.estimated && cache[j.id] != null) { j.durationMin = Math.max(15, Math.min(480, Math.round(cache[j.id]))); j.aiEstimated = true; aiUsed++; }
+    if (aiUsed) aiSource = "ai";
+  } else if (needIds.length && !env.ANTHROPIC_API_KEY) {
+    warnings.push("AI duration estimates are off (no ANTHROPIC_API_KEY) — used the learned typical instead.");
+  }
+
+  // One matrix over all points: engineer homes first, then jobs. Cap Google use.
+  const pts = [...engs.map(e => e.coord), ...jobs.map(j => j.coord)];
+  const NE = engs.length;
+  // Free real road times (OSRM) when the whole set fits one request; otherwise a
+  // fast haversine estimate just to DECIDE the assignment — each engineer's final
+  // route is then re-timed with real OSRM below (a day is only a few stops).
+  let M;
+  if (pts.length <= 90) M = await roadMatrix(pts);
+  else {
+    const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
+    M = { mins, source: "estimate" };
+  }
+  const pE = i => i, pJ = k => NE + k;
+
+  // Ferry crossing: straight-line/road drive can't see the Solent, so add a fixed
+  // penalty each way between an Isle-of-Wight job and anywhere on the mainland.
+  // A Shanklin round-trip is a real ~1h30 each way (drive to terminal + ferry).
+  const FERRY = 90, REMOTE = 75;
+  const isIow = [...engs.map(() => false), ...jobs.map(j => !!j.iow)];
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M.mins[i][k2] += FERRY;
+
+  // Cheapest place to slot job k into engineer ei's current route.
+  const insertCost = (ei, k) => {
+    const route = [pE(ei), ...engs[ei].seq.map(x => pJ(x)), pE(ei)], p = pJ(k);
+    let bDelta = Infinity, bPos = 1;
+    for (let pos = 1; pos < route.length; pos++) { const a = route[pos - 1], b = route[pos]; const delta = M.mins[a][p] + M.mins[p][b] - M.mins[a][b]; if (delta < bDelta) { bDelta = delta; bPos = pos; } }
+    return { pos: bPos, delta: bDelta };
+  };
+  const nearestHome = k => Math.min(...engs.map((_, ei) => M.mins[pE(ei)][pJ(k)]));
+
+  const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
+  const unassigned = [], handled = new Set();
+
+  // PHASE 1 — REMOTE clusters (Bristol, Isle of Wight…). A far area is a
+  // dedicated one-engineer run: assign ALL of its jobs to the single cheapest
+  // engineer, and DEFER any that don't fit rather than sending a second engineer
+  // on the same long haul for one store. This is the "never two engineers to
+  // Bristol" rule.
+  const remoteByArea = {};
+  for (const k of order) if (nearestHome(k) > REMOTE) (remoteByArea[jobs[k].area || ("_" + k)] ||= []).push(k);
+  const remoteAreas = Object.keys(remoteByArea).sort((a, b) => Math.min(...remoteByArea[b].map(nearestHome)) - Math.min(...remoteByArea[a].map(nearestHome)));
+  for (const area of remoteAreas) {
+    const ks = remoteByArea[area];
+    let bestE = -1, bestCost = Infinity;
+    engs.forEach((_, ei) => { const c = Math.min(...ks.map(k => M.mins[pE(ei)][pJ(k)])); if (c < bestCost) { bestCost = c; bestE = ei; } });
+    const oneWay = bestE >= 0 ? Math.min(...ks.map(k => M.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const areaSite = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
+    // EFFICIENCY-FIRST: only do a dedicated run when there's at least as much
+    // on-site work as the round-trip driving. Otherwise the whole area is HELD for
+    // a planned trip — never drag an engineer across the county for a quick job.
+    const justified = bestE >= 0 && areaSite >= oneWay * 2;
+    if (!justified) {
+      for (const k of ks) { handled.add(k); unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `held for a planned trip — ${area} is ~${hmm(oneWay === Infinity ? 0 : oneWay)} each way and today isn't worth a dedicated run (${ks.length} job${ks.length > 1 ? "s" : ""}, ${hmm(areaSite)} on site)` }); }
+      continue;
+    }
+    const e = engs[bestE];
+    for (const k of ks) {
+      handled.add(k);
+      const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
+      if (newLoad <= cap) { e.seq.splice(ins.pos - 1, 0, k); e.load = newLoad; }
+      else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full — this one won't fit today` });
+    }
+  }
+
+  // PHASE 2 — the rest: skill-weighted greedy insertion with capacity + a strong
+  // pull to keep a postcode area with one engineer.
+  for (const k of order) {
+    if (handled.has(k)) continue;
+    const j = jobs[k];
+    let best = null;
+    engs.forEach((e, ei) => {
+      const ins = insertCost(ei, k);
+      const newLoad = e.load + ins.delta + j.durationMin;
+      if (newLoad > cap) return;                       // no room in this engineer's day
+      const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
+      const sameArea = j.area && e.seq.some(x => jobs[x].area === j.area);
+      let eff = ins.delta;
+      if (stars > 0) eff -= stars * 4;                 // soft skill preference
+      if (sameArea) eff -= 25;                         // area-cohesion pull
+      if (best === null || eff < best.eff) best = { ei, pos: ins.pos, newLoad, eff };
+    });
+    if (!best) { unassigned.push({ id: j.id, ref: j.ref, reason: "no engineer had room in the day" }); continue; }
+    engs[best.ei].seq.splice(best.pos - 1, 0, k);
+    engs[best.ei].load = best.newLoad;
+  }
+
+  // Build each engineer's timeline (offsets from dayStart; lunch ~13:00).
+  const [sh, sm] = dayStart.split(":").map(Number);
+  const lunchTarget = Math.max(0, (13 * 60) - (sh * 60 + sm));
+  const plan = engs.map((e, ei) => {
+    // 2-opt tidy the order.
+    const sub = [pE(ei), ...e.seq.map(x => pJ(x))];
+    const subCost = sub.map(a => sub.map(b => M.mins[a][b]));
+    const solved = solveRoute(subCost);            // returns sub-indices 1..n in order
+    const orderedK = solved.map(si => e.seq[si - 1]);
+    const legs = []; let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
+    for (const k of orderedK) {
+      const p = pJ(k), dMin = M.mins[cur][p]; drive += dMin;
+      let arrival = t + dMin;
+      if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
+      const j = jobs[k];
+      legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, area: j.area, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
+      site += j.durationMin; t = arrival + j.durationMin; cur = p;
+    }
+    const homeMin = orderedK.length ? M.mins[cur][pE(ei)] : 0; drive += homeMin;
+    return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+  }).filter(p => p.legs.length);
+
+  // REAL driving times for the SHOWN routes, FREE via OSRM. The assignment above
+  // may have used a fast estimate (a full matrix over every job is too big for one
+  // request), but each engineer's actual day is only a few stops — so re-time just
+  // those legs with OSRM. No API key, no cost, and every time on screen is real.
+  let matrixSource = M.source;
+  if (M.source !== "osrm" && plan.length) {
+    const coordById = new Map(jobs.map(j => [j.id, j.coord]));
+    const engCoord = new Map(engs.map(e => [e.username, e.coord]));
+    let allReal = true;
+    for (const p of plan) {
+      const home = engCoord.get(p.username);
+      const pts2 = [home, ...p.legs.map(l => coordById.get(l.jobId))];
+      if (!home || pts2.some(c => !c) || pts2.length < 2) { allReal = false; continue; }
+      const dm = await roadMatrix(pts2);             // small: home + this day's stops
+      if (dm.source !== "osrm") { allReal = false; continue; }
+      let t = 0, drive = 0, site = 0, lunchDone = lunch === 0, cur = 0;
+      p.legs.forEach((l, idx) => {
+        const to = idx + 1, dMin = dm.mins[cur][to]; drive += dMin;
+        let arrival = t + dMin;
+        if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
+        l.driveMins = dMin; l.arrivalOffset = arrival;
+        site += l.durationMin; t = arrival + l.durationMin; cur = to;
+      });
+      const homeMin = dm.mins[cur][0]; drive += homeMin;
+      p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
+    }
+    matrixSource = allReal ? "osrm" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (the free routing service didn't answer for every one — try again in a moment).");
+  }
+
+  // Plain-English "why these jobs" per engineer + a shared-area explainer.
+  const areaCounts = legs => { const m = {}; for (const l of legs) { const a = l.area || ""; if (a) m[a] = (m[a] || 0) + 1; } return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+  for (const p of plan) {
+    const ac = areaCounts(p.legs);
+    const skillN = p.legs.filter(l => l.stars > 0).length;
+    const bits = [];
+    if (ac.length) bits.push("clustered around " + ac.slice(0, 2).map(([a, n]) => `${a} (${n} job${n > 1 ? "s" : ""})`).join(" and ") + (ac.length > 2 ? `, plus ${ac.length - 2} other area${ac.length - 2 > 1 ? "s" : ""}` : ""));
+    if (skillN) bits.push(`${skillN} match ${p.name.split(" ")[0]}'s rated skills`);
+    bits.push(`fills ${hmm(p.summary.dayLengthMins)} door-to-door with ${hmm(p.summary.driveMins)} driving`);
+    if (p.hq) bits.push("routed from HQ (no home postcode set)");
+    p.why = bits.join(" · ") + ".";
+  }
+  // Where two+ engineers share a postcode area, say why (usually: too big for one day).
+  const areaMap = {}, areaSite = {};
+  for (const p of plan) for (const l of p.legs) { const a = l.area; if (!a) continue; (areaMap[a] ||= {}); areaMap[a][p.name] = (areaMap[a][p.name] || 0) + 1; areaSite[a] = (areaSite[a] || 0) + l.durationMin; }
+  const overlaps = [];
+  for (const [area, byName] of Object.entries(areaMap)) {
+    const es = Object.entries(byName); if (es.length < 2) continue;
+    const totalJobs = es.reduce((s, [, n]) => s + n, 0);
+    const reason = (areaSite[area] || 0) > cap * 0.7
+      ? `${totalJobs} jobs there — more than one engineer can fit in a ${hmm(cap)} working day, so it's shared to keep everyone finishing on time`
+      : `both were already passing ${area} on efficient routes — drag a job across if you'd rather one engineer owned the whole area`;
+    overlaps.push({ area, engineers: es.map(([name, count]) => ({ name, count })), reason });
+  }
+  overlaps.sort((a, b) => b.engineers.reduce((s, e) => s + e.count, 0) - a.engineers.reduce((s, e) => s + e.count, 0));
+
+  return {
+    ok: true, dayStart, matrixSource, plan, unassigned, warnings, overlaps,
+    placed: plan.reduce((a, p) => a + p.legs.length, 0), total: jobs.length,
+    durModel: { typical: dur.typical, sampleCount: dur.sampleCount, actualCount: dur.actualCount },
+    estimatedCount: jobs.filter(j => j.estimated).length,
+    aiUsed, aiSource,
+    overruns: dur.overruns,
+  };
+}
+
+// ── Learned on-site job-duration model ───────────────────────────────────────
+// Estimates how long a job takes so the day-planner can allocate realistically,
+// and flags jobs that ran well over — which in turn sharpen the estimate.
+// Signals (combined): a job's explicitly-set durationMinutes (a human estimate)
+// AND the MEASURED actual = "In Progress" → "Complete" from its statusHistory.
+// Refines per priority once a bucket has ≥5 samples; else a global median.
+// Bounded 30–240 min; default 90 when there's no history yet. Cached per isolate.
+let _durCache = null, _durCacheAt = 0;
+async function estimateJobDurations(env, tid) {
+  if (_durCache && (Date.now() - _durCacheAt) < 5 * 60000) return _durCache;
+  const db = tenantDB(env, tid);
+  let rows = [];
+  try { rows = (await db.prepare("SELECT id, helpdesk_ref, priority, data FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || []; }
+  catch { rows = []; }
+  const norm = p => { const m = /(\d)/.exec(String(p || "")); return m ? "Priority " + m[1] : ""; };
+  // Measured actuals are the ground truth; explicit set-durations are a weaker
+  // secondary signal (often a uniform placeholder), so prefer actuals and only
+  // fall back to set-durations when there's too little real history.
+  const actuals = [], actualByPrio = {}, setVals = [], setByPrio = {}, overruns = [], recent = [];
+  const MIN = 5;
+  for (const r of rows) {
+    let d; try { d = JSON.parse(r.data || "{}"); } catch { continue; }
+    const prio = norm(r.priority || d.priority);
+    const explicit = Number(d.durationMinutes);
+    // Measured actual: last "In Progress" → the following "Complete".
+    let actual = null, ip = null;
+    for (const e of (Array.isArray(d.statusHistory) ? d.statusHistory : [])) {
+      const st = String(e.status || "");
+      if (st === "In Progress") ip = Date.parse(e.at);
+      else if (st === "Complete" && ip) { const mins = Math.round((Date.parse(e.at) - ip) / 60000); if (mins >= 5 && mins <= 600) actual = mins; ip = null; }
+    }
+    if (Number.isFinite(explicit) && explicit > 0 && explicit <= 600) { setVals.push(explicit); if (prio) (setByPrio[prio] ||= []).push(explicit); }
+    if (actual != null) {
+      actuals.push(actual); if (prio) (actualByPrio[prio] ||= []).push(actual);
+      recent.push({ id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || r.id, priority: prio, allocated: (Number.isFinite(explicit) && explicit > 0) ? Math.round(explicit) : null, actual });
+    }
+    if (Number.isFinite(explicit) && explicit > 0 && actual != null && actual > Math.max(explicit * 1.5, explicit + 30))
+      overruns.push({ ref: r.helpdesk_ref || d.helpdeskRef || r.id, allocated: Math.round(explicit), actual });
+  }
+  const median = a => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); };
+  const clamp = v => v == null ? null : Math.max(30, Math.min(240, v));
+  // Prefer measured actuals; fall back to actuals+set-durations; else a default.
+  const typical = clamp(actuals.length >= MIN ? median(actuals) : median(actuals.concat(setVals))) ?? 90;
+  const byPriority = {};
+  const prios = new Set([...Object.keys(actualByPrio), ...Object.keys(setByPrio)]);
+  for (const p of prios) {
+    const a = actualByPrio[p] || [], s = setByPrio[p] || [];
+    const v = clamp(a.length >= MIN ? median(a) : (a.concat(s).length >= MIN ? median(a.concat(s)) : null));
+    if (v != null) byPriority[p] = v;
+  }
+  overruns.sort((a, b) => (b.actual - b.allocated) - (a.actual - a.allocated));
+  _durCache = { typical, byPriority, sampleCount: actuals.length + setVals.length, actualCount: actuals.length, overruns: overruns.slice(0, 10), recent: recent.slice(-80).reverse() };
+  _durCacheAt = Date.now();
+  return _durCache;
+}
+
+// ── AI on-site duration estimates (primary; history is the fallback) ─────────
+// Claude reads each job's description/trade/priority and estimates its ON-SITE
+// working time. Batched (one call per ~40 jobs) so it's cheap, and PERSISTED per
+// job in app_config `sla:aidur:<tid>` so a job is only ever estimated once (until
+// re-estimated). Fails soft — no key / API error → returns nothing and the caller
+// falls back to the learned historical typical.
+async function loadAiDurCache(env, tid) {
+  try { const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:aidur:" + tid).first(); return row ? JSON.parse(row.value) : {}; }
+  catch { return {}; }
+}
+async function saveAiDurCache(env, tid, cache) {
+  try {
+    // Keep it bounded — newest 3000 ids.
+    let obj = cache; const keys = Object.keys(cache);
+    if (keys.length > 3000) { obj = {}; for (const k of keys.slice(-3000)) obj[k] = cache[k]; }
+    await tenantDB(env, tid).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:aidur:" + tid, JSON.stringify(obj)).run();
+  } catch { /* cache is best-effort */ }
+}
+// metas: [{id, ref, description, priority, site, workArea}] → {id: minutes}
+async function aiEstimateDurations(env, metas) {
+  if (!env.ANTHROPIC_API_KEY || !metas.length) return {};
+  const schema = {
+    type: "object",
+    properties: {
+      estimates: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            minutes: { type: "integer", description: "On-site working minutes (exclude travel), 15–480." },
+          },
+          required: ["id", "minutes"],
+        },
+      },
+    },
+    required: ["estimates"],
+  };
+  const system = "You estimate how long a UK building-maintenance / facilities job takes ON SITE — the hands-on working time for one engineer, EXCLUDING travel — so an office can schedule the day. Use the description, trade and priority. Typical reactive repairs run 30–90 min; diagnostics/multi-part or install works run longer. Give a whole number of minutes (15–480) for every job id; for a vague description give a sensible middle estimate. Do not omit any job.";
+  const chunks = [];
+  for (let i = 0; i < metas.length && i < 200; i += 40) chunks.push(metas.slice(i, i + 40));
+  const out = {};
+  const results = await Promise.all(chunks.map(chunk => {
+    const list = chunk.map(m => `- id:${m.id} | ${m.priority || "?"} | ${m.workArea || ""} | ${m.site || ""} | ${String(m.description || m.ref || "").replace(/\s+/g, " ").slice(0, 220)}`).join("\n");
+    return anthropicTool(env, { system, user: `Estimate on-site minutes for each job (return every id):\n${list}`, toolName: "set_durations", schema, maxTokens: 1600 }).catch(() => ({ ok: false }));
+  }));
+  for (const r of results) if (r.ok) for (const e of (r.input.estimates || [])) { const m = Math.round(Number(e.minutes)); if (e.id && Number.isFinite(m)) out[String(e.id)] = Math.max(15, Math.min(480, m)); }
+  return out;
+}
+// Look up description/priority/site for a set of job ids (for the AI prompt).
+async function jobMetaForIds(env, tid, ids) {
+  if (!ids.length) return [];
+  const db = tenantDB(env, tid);
+  const chunkIds = ids.slice(0, 200);
+  const ph = chunkIds.map(() => "?").join(",");
+  let rows = [];
+  try { rows = (await db.prepare(`SELECT id, helpdesk_ref, priority, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunkIds).all()).results || []; }
+  catch { rows = []; }
+  return rows.map(r => { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} return { id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || "", description: d.description || "", priority: r.priority || d.priority || "", site: (d.site && (d.site.name || d.site)) || "", workArea: d.workArea || "" }; });
 }
 
 /* ===== Job archive (imported history) ===== */
@@ -3059,6 +3705,174 @@ async function setCategories(env, tenantId, list) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_categories', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(clean)).run();
   return clean;
+}
+
+/* ================= Areas of work + engineer skills =================
+   sla_work_areas = [{id,name,colour}] ; sla_eng_skills = {normUsername:{areaId:1-5}}
+   Used to match a job's workArea to engineers competent in it (scheduler). */
+const areaSlug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || ("area-" + crypto.randomUUID().slice(0, 6));
+const DEFAULT_WORK_AREAS = [
+  "Electrical", "Plumbing", "Fabric / Building", "Firestopping", "Fire alarms",
+  "Heating / HVAC", "Joinery / Carpentry", "Decorating", "General maintenance",
+].map(name => ({ id: areaSlug(name), name, colour: "#64748b" }));
+
+async function getWorkAreas(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_work_areas'").bind(tenantId).first();
+  let a; try { a = row ? JSON.parse(row.value) : null; } catch { a = null; }
+  if (!Array.isArray(a)) return DEFAULT_WORK_AREAS.slice();
+  const seen = new Set(), out = [];
+  for (const x of a) {
+    const name = String((x && x.name) || "").trim(); if (!name) continue;
+    let id = String((x && x.id) || "").trim() || areaSlug(name);
+    if (seen.has(id)) id = areaSlug(name) + "-" + out.length;
+    seen.add(id);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String((x && x.colour) || "")) ? x.colour : "#64748b";
+    out.push({ id, name, colour });
+  }
+  return out;
+}
+async function setWorkAreas(env, tenantId, list) {
+  const seen = new Set(), clean = [];
+  for (const x of (Array.isArray(list) ? list : [])) {
+    const name = String((x && x.name) || "").trim(); if (!name) continue;
+    let id = String((x && x.id) || "").trim() || areaSlug(name);
+    if (seen.has(id)) id = areaSlug(name) + "-" + clean.length;
+    seen.add(id);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String((x && x.colour) || "")) ? x.colour : "#64748b";
+    clean.push({ id, name: name.slice(0, 60), colour });
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_work_areas', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
+}
+
+async function getEngSkills(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_eng_skills'").bind(tenantId).first();
+  let s; try { s = row ? JSON.parse(row.value) : null; } catch { s = null; }
+  return (s && typeof s === "object") ? s : {};
+}
+async function setEngSkills(env, tenantId, skills) {
+  const clean = {};
+  for (const [user, areas] of Object.entries(skills || {})) {
+    if (!user || typeof areas !== "object") continue;
+    const u = normId(user);
+    const row = {};
+    for (const [areaId, stars] of Object.entries(areas)) {
+      const n = Math.round(Number(stars) || 0);
+      if (n >= 1 && n <= 5) row[String(areaId)] = n;   // 0 / invalid = not competent, dropped
+    }
+    if (Object.keys(row).length) clean[u] = row;
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_eng_skills', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
+}
+
+/* ================= AI usage meter + soft daily cap =================
+   Every paid AI call (route optimise, work-area inference, auto-schedule,
+   programme draft/edit) bumps a per-month counter so the office can see spend
+   and a soft DAILY cap protects against runaway cost. Stored in app_config
+   ai_usage:<yyyy-mm> = {total, days:{d:n}, kinds:{k:n}}; cap in ai_daily_cap. */
+const AI_CAP_DEFAULT = 400;
+export async function bumpAiUsage(env, tenantId, kind) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = new Date().toISOString().slice(0, 7), day = new Date().toISOString().slice(0, 10);
+    const k = "ai_usage:" + mon;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, k).first();
+    let u; try { u = row ? JSON.parse(row.value) : null; } catch { u = null; }
+    if (!u || typeof u !== "object") u = { total: 0, days: {}, kinds: {} };
+    u.total = (u.total || 0) + 1;
+    u.days = u.days || {}; u.days[day] = (u.days[day] || 0) + 1;
+    u.kinds = u.kinds || {}; u.kinds[kind || "other"] = (u.kinds[kind || "other"] || 0) + 1;
+    await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, k, JSON.stringify(u)).run();
+    return u.days[day];
+  } catch { return 0; }
+}
+async function aiCapLimit(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='ai_daily_cap'").bind(tenantId).first();
+    const n = row ? parseInt(row.value, 10) : NaN;
+    return Number.isFinite(n) && n >= 0 ? n : AI_CAP_DEFAULT;
+  } catch { return AI_CAP_DEFAULT; }
+}
+async function aiUsageToday(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const mon = new Date().toISOString().slice(0, 7), day = new Date().toISOString().slice(0, 10);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+    let u; try { u = row ? JSON.parse(row.value) : null; } catch { u = null; }
+    return (u && u.days && u.days[day]) || 0;
+  } catch { return 0; }
+}
+// Returns {capped:true,...} when today's calls would exceed the soft cap (cap 0 = off).
+async function aiCapCheck(env, tenantId) {
+  const cap = await aiCapLimit(env, tenantId);
+  if (!cap) return { capped: false, cap: 0 };
+  const today = await aiUsageToday(env, tenantId);
+  return { capped: today >= cap, cap, today };
+}
+async function getAiUsage(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const mon = new Date().toISOString().slice(0, 7), day = new Date().toISOString().slice(0, 10);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "ai_usage:" + mon).first();
+  let u; try { u = row ? JSON.parse(row.value) : null; } catch { u = null; }
+  u = (u && typeof u === "object") ? u : { total: 0, days: {}, kinds: {} };
+  return { ok: true, month: mon, monthTotal: u.total || 0, today: (u.days && u.days[day]) || 0, cap: await aiCapLimit(env, tenantId), kinds: u.kinds || {} };
+}
+
+/* Generic forced-tool Anthropic call → {ok, input} (the validated tool args). */
+async function anthropicTool(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured on the server (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 800, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] }),
+    });
+  } catch { return { ok: false, error: "Couldn't reach the AI service." }; }
+  if (!resp.ok) {
+    let d = ""; try { const j = await resp.json(); d = j?.error?.message || ""; } catch {}
+    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "The AI key was rejected." };
+    if (resp.status === 404 && /model/i.test(d)) return { ok: false, error: `The AI model "${model}" isn't available on this key.` };
+    return { ok: false, error: "The AI service errored." + (d ? " (" + d + ")" : "") };
+  }
+  let payload; try { payload = await resp.json(); } catch { return { ok: false, error: "AI gave an unreadable reply." }; }
+  const block = Array.isArray(payload.content) ? payload.content.find(c => c.type === "tool_use" && c.name === toolName) : null;
+  if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+  return { ok: true, input: block.input };
+}
+
+/* Classify a job description into ONE work area id (or empty). */
+async function inferWorkArea(env, tenantId, description) {
+  const areas = await getWorkAreas(env, tenantId);
+  if (!areas.length) return { ok: false, error: "No areas of work are configured yet." };
+  const list = areas.map(a => `${a.id}: ${a.name}`).join("\n");
+  const schema = {
+    type: "object",
+    properties: {
+      areaId: { type: "string", description: "The id of the single best-matching area, or empty string if none fit." },
+      confidence: { type: "string", enum: ["high", "medium", "low"] },
+    },
+    required: ["areaId"],
+  };
+  const system = "You classify a UK building-maintenance / facilities job into exactly ONE area of work from the provided list. Reply with only the matching area id. If nothing clearly fits, return an empty areaId.";
+  const user = `Areas (id: name):\n${list}\n\nJob description:\n"""${String(description || "").slice(0, 1500)}"""\n\nWhich single area id best fits this work?`;
+  const r = await anthropicTool(env, { system, user, toolName: "set_area", schema, maxTokens: 120 });
+  if (!r.ok) return r;
+  const id = String(r.input.areaId || "").trim();
+  const match = areas.find(a => a.id === id);
+  return { ok: true, areaId: match ? match.id : "", name: match ? match.name : "", confidence: r.input.confidence || "" };
 }
 
 /* ================= FILES (R2) + PDF ================= */

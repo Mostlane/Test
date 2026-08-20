@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=11"></script>
+  <script src="/portal-config.js?v=17"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Add Job</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
   <script src="auth.js"></script>
   <style>
     :root{
@@ -215,6 +215,16 @@
         <textarea id="description" name="description" required
           placeholder="What’s the job? What needs doing, any access notes…"></textarea>
         <div class="hint">This is the main text the engineer sees on the job.</div>
+      </div>
+
+      <!-- Area of work (AI suggests, office confirms) -->
+      <div class="field-group" id="workAreaGroup" style="display:none;">
+        <label for="workArea">Area of work</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="workArea" style="flex:1;min-width:160px;"><option value="">— none —</option></select>
+          <button type="button" id="waSuggest" class="btn" style="white-space:nowrap;">🤖 Suggest</button>
+        </div>
+        <div class="hint" id="waHint">Used to match the job to an engineer competent in this work. The AI suggests one from the description — change it if it's wrong.</div>
       </div>
 
       <!-- Allocate: when + who -->
@@ -578,6 +588,7 @@ async function handleSubmit(evt){
     assignedTo: $("assignedTo").value.trim() || undefined,
     scheduledAt: toIsoOrNull($("scheduledAt").value),
     durationMinutes: Number($("expectedDuration").value) || 60,
+    workArea: ($("workArea") && $("workArea").value) || undefined,
     requiresRA: $("firestopping").checked ? false : $("reqRA").checked,
     requiresSignature: $("firestopping").checked ? false : $("reqSig").checked,
     requiresPhoto: $("firestopping").checked ? false : $("reqPhoto").checked,
@@ -652,6 +663,49 @@ async function init(){
 
   // Load portal users into AssignedTo dropdown
   populateUsersDropdown();
+
+  // Areas of work + AI suggestion
+  initWorkArea();
+}
+
+// ── Area of work: load the managed list; AI suggests one from the description
+// (office confirms). Only shows when areas exist. ───────────────────────────
+var WA_LOADED = false, WA_LAST = "", waSuggesting = false;
+async function initWorkArea(){
+  try{
+    var d = await fetchJSON(API_BASE + "/work-areas");
+    var areas = (d && d.areas) || [];
+    if(!areas.length) return;   // no areas configured → hide the field entirely
+    var sel = $("workArea");
+    areas.forEach(function(a){ var o=document.createElement("option"); o.value=a.id; o.textContent=a.name; sel.appendChild(o); });
+    $("workAreaGroup").style.display = "";
+    WA_LOADED = true;
+    $("waSuggest").addEventListener("click", function(){ suggestWorkArea(true); });
+    // Auto-suggest once when the description is filled and no area picked yet.
+    $("description").addEventListener("blur", function(){ suggestWorkArea(false); });
+  }catch(e){}
+}
+async function suggestWorkArea(force){
+  if(!WA_LOADED || waSuggesting) return;
+  var desc = ($("description").value || "").trim();
+  if(desc.length < 8) return;
+  if(!force){
+    if($("workArea").value) return;         // office already chose — don't override
+    if(desc === WA_LAST) return;            // already suggested for this text
+  }
+  WA_LAST = desc; waSuggesting = true;
+  var hint = $("waHint"), btn = $("waSuggest");
+  var prev = hint.textContent; hint.textContent = "🤖 Suggesting an area…"; btn.disabled = true;
+  try{
+    var r = await fetch(API_BASE + "/infer-work-area", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ description: desc }) }).then(function(x){ return x.json(); });
+    if(r && r.capped){ hint.textContent = r.error || "Daily AI limit reached — pick an area manually."; }
+    else if(r && r.ok && r.areaId){
+      if(force || !$("workArea").value){ $("workArea").value = r.areaId; }
+      hint.textContent = "🤖 Suggested: " + (r.name || r.areaId) + " — change it if that's not right.";
+    } else if(r && r.ok){ hint.textContent = "AI couldn't match an area — pick one if it needs a trade."; }
+    else { hint.textContent = (r && r.error) || "Couldn't suggest an area — pick one manually."; }
+  }catch(e){ hint.textContent = "Couldn't reach the AI — pick an area manually."; }
+  waSuggesting = false; btn.disabled = false;
 }
 
 document.addEventListener("DOMContentLoaded", init);

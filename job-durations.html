@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=17"></script>
+  <meta charset="UTF-8">
+  <title>Mostlane • Job durations</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --ink:#0f172a; --muted:#64748b; --border:#e2e8f0; --panel:#fff; --bg:#eef1f5; --bad:#dc2626; --warn:#d97706; --ok:#16a34a; }
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+    .shell{max-width:900px;margin:16px auto 48px;padding:0 14px;}
+    header.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+    header.top h1{margin:0;font-size:21px;color:var(--ml-blue);display:flex;align-items:center;gap:8px;}
+    .sub{font-size:12px;color:var(--muted);}
+    .btn{border:1px solid var(--border);border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;background:#fff;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
+    .btn:hover{background:#f8fafc;}
+    .grid{display:grid;gap:12px;}
+    .kpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}
+    .kpi{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:0 2px 10px rgba(6,24,54,.05);}
+    .kpi .v{font-size:26px;font-weight:700;color:var(--ml-blue);font-variant-numeric:tabular-nums;}
+    .kpi .l{font-size:12px;color:var(--muted);margin-top:3px;}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 2px 10px rgba(6,24,54,.05);margin-top:12px;}
+    .card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}
+    table.mini{width:100%;border-collapse:collapse;font-size:13px;}
+    table.mini th,table.mini td{padding:6px 5px;border-bottom:1px solid #f1f5f9;text-align:left;}
+    table.mini th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+    table.mini td.r,table.mini th.r{text-align:right;font-variant-numeric:tabular-nums;}
+    .chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:600;background:#eff6ff;color:var(--ml-blue);}
+    .over{color:var(--bad);font-weight:700;}
+    .under{color:var(--ok);}
+    .muted{color:var(--muted);}
+    .empty{color:var(--muted);font-size:13px;padding:8px 2px;}
+    #err{display:none;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;border-radius:12px;padding:14px;}
+    .prio{display:flex;flex-wrap:wrap;gap:8px;}
+    .prio .p{background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:13px;}
+    .prio .p b{color:var(--ml-blue);}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div>
+      <h1>⏱ Job durations</h1>
+      <div class="sub" id="genAt">Loading…</div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" id="recompute" title="Forget cached AI estimates so they recompute">↻ Recompute AI</button>
+      <a class="ml-back" href="sla-scheduler.html" title="Back">‹ Back</a>
+    </div>
+  </header>
+
+  <div id="err"></div>
+  <div id="body" style="display:none;">
+    <div class="grid kpis" id="kpis"></div>
+    <div class="card" id="prioCard" style="display:none;"><h2>Typical by priority (from real jobs)</h2><div class="prio" id="prio"></div></div>
+    <div class="card"><h2>Ran well over the time allowed</h2><div id="overruns"></div></div>
+    <div class="card"><h2>Recent completed jobs — allowed vs actual vs AI</h2><div id="recent"></div></div>
+  </div>
+  <div id="loading" class="muted" style="padding:30px 4px;">Working it out…</div>
+</div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts = {}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
+  return fetch(API + path, opts);
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function hm(m){ m = Math.round(m||0); const h=Math.floor(m/60), mm=m%60; return h ? (h+"h"+(mm?" "+mm+"m":"")) : (mm+"m"); }
+
+async function load(){
+  $("err").style.display = "none";
+  try{
+    const res = await authFetch("/sla/duration-insights?t=" + Date.now());
+    if(res.status === 403) throw new Error("This page is for SLA admins.");
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    render(await res.json());
+  }catch(e){
+    $("loading").style.display="none"; $("body").style.display="none";
+    $("err").style.display="block"; $("err").textContent = "⚠️ " + e.message;
+  }
+}
+
+function render(d){
+  $("loading").style.display="none"; $("body").style.display="block";
+  $("genAt").textContent = "The planner uses these to allocate each job's time.";
+  const m = d.model || {};
+
+  $("kpis").innerHTML = [
+    `<div class="kpi"><div class="v">${hm(m.typical)}</div><div class="l">Typical job length</div></div>`,
+    `<div class="kpi"><div class="v">${m.actualCount||0}</div><div class="l">Jobs timed (In&nbsp;Progress→Complete)</div></div>`,
+    `<div class="kpi"><div class="v">${d.aiCount||0}</div><div class="l">AI estimates cached</div></div>`,
+    `<div class="kpi"><div class="v">${(d.overruns||[]).length}</div><div class="l">Recent overruns</div></div>`,
+  ].join("");
+
+  const bp = m.byPriority || {};
+  const bpk = Object.keys(bp).sort();
+  if(bpk.length){ $("prioCard").style.display=""; $("prio").innerHTML = bpk.map(k => `<div class="p">${esc(k)}: <b>${hm(bp[k])}</b></div>`).join(""); }
+
+  $("overruns").innerHTML = (d.overruns&&d.overruns.length)
+    ? `<table class="mini"><thead><tr><th>Job</th><th class="r">Allowed</th><th class="r">Actual</th><th class="r">Over by</th></tr></thead><tbody>${
+        d.overruns.map(o => `<tr><td>${esc(o.ref)}</td><td class="r">${hm(o.allocated)}</td><td class="r over">${hm(o.actual)}</td><td class="r over">+${hm(o.actual-o.allocated)}</td></tr>`).join("")
+      }</tbody></table><div class="muted" style="margin-top:6px;font-size:12px;">These feed the learning — the typical shifts toward reality as more jobs are timed.</div>`
+    : `<div class="empty">✓ Nothing has run well over its allowed time.</div>`;
+
+  $("recent").innerHTML = (d.recent&&d.recent.length)
+    ? `<table class="mini"><thead><tr><th>Job</th><th>Priority</th><th class="r">Allowed</th><th class="r">Actual</th><th class="r">AI est.</th></tr></thead><tbody>${
+        d.recent.map(r => {
+          const diff = r.allocated!=null ? r.actual - r.allocated : null;
+          const cls = diff==null ? "" : (diff>0 ? "over" : "under");
+          return `<tr><td>${esc(r.ref)}</td><td>${esc(r.priority||"—")}</td>`
+            + `<td class="r ${cls}">${r.allocated!=null?hm(r.allocated):"—"}</td>`
+            + `<td class="r">${hm(r.actual)}</td>`
+            + `<td class="r muted">${r.ai!=null?hm(r.ai):"—"}</td></tr>`;
+        }).join("")
+      }</tbody></table>`
+    : `<div class="empty">No completed jobs have both an In&nbsp;Progress and a Complete time yet. Estimates sharpen as engineers tap those on the job.</div>`;
+}
+
+$("recompute").addEventListener("click", async () => {
+  const b = $("recompute"); const old = b.textContent; b.textContent = "Clearing…"; b.disabled = true;
+  try{ await authFetch("/sla/duration-clear-ai", { method:"POST" }); }catch{}
+  b.textContent = "Cleared ✓"; setTimeout(()=>{ b.textContent = old; b.disabled = false; load(); }, 900);
+});
+
+load();
+</script>
+</body>
+</html>

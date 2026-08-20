@@ -831,3 +831,19 @@ CREATE TABLE IF NOT EXISTS project_files (
   hidden INTEGER DEFAULT 0, downloadable INTEGER DEFAULT 1,
   uploaded_by TEXT, uploaded_at TEXT
 );
+
+-- Portal health watchdog (routes/health.js). Runtime self-monitoring: every 500
+-- a real user hits ('error'), every slow response ('slow'), and any failed
+-- synthetic cron probe ('probe'). Self-migrating; pruned to ~30 days. The latest
+-- probe snapshot itself lives in app_config key 'health:lastrun:<tid>'.
+CREATE TABLE IF NOT EXISTS health_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER,
+  kind TEXT,                            -- 'error' | 'slow' | 'probe'
+  endpoint TEXT,
+  message TEXT,
+  status INTEGER,
+  ms INTEGER,
+  at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_health_at ON health_events (tenant_id, at);

@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Offline — Mostlane</title>
 <link rel="icon" type="image/x-icon" href="favicon.ico">
 <style>
   html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#0b1930;color:#e5ecff;}
+  body{padding-top:env(safe-area-inset-top, 0px);}   /* clear the iOS clock */
   .box{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:14px;}
   img{width:96px;height:96px;border-radius:20px;box-shadow:0 8px 24px rgba(0,0,0,.4);}
   h1{font-size:20px;margin:6px 0 0;}

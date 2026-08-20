@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=11"></script>
+  <script src="/portal-config.js?v=17"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -21,7 +21,7 @@
     @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
     *{box-sizing:border-box}
     html,body{margin:0}
-    body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top)) 16px calc(60px + env(safe-area-inset-bottom))}
+    body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:14px 16px calc(60px + env(safe-area-inset-bottom))}
     a{color:var(--accent)}
     .backline{font-size:15px;color:var(--muted);margin:0 0 2px -6px;cursor:pointer;background:0;border:0;padding:8px 10px;font:inherit;display:inline-flex;align-items:center;gap:4px;min-height:40px;-webkit-tap-highlight-color:transparent}
     h1.big{font-size:23px;margin:6px 0 4px;letter-spacing:-.02em}
@@ -39,7 +39,16 @@
     .tool{flex:1 1 auto;min-width:30%;border:1px solid var(--line);background:var(--card);border-radius:11px;padding:10px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;color:var(--ink);text-decoration:none}
     .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .ph{aspect-ratio:1.35;border-radius:12px;position:relative;display:flex;align-items:flex-end;padding:9px;color:#fff;font-size:12px;overflow:hidden;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.5);background-size:cover;background-position:center;background-color:#334155}
+    .ph>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
+    .ph>.tag{position:relative;z-index:2}
+    /* Shimmer lives on the tile BACKGROUND (behind the img), so a loaded photo
+       covers it. Never overlay the image or it stays hidden behind the skeleton. */
+    .ph.pend{background:linear-gradient(100deg,#dfe4ec 30%,#eef1f6 50%,#dfe4ec 70%);background-size:200% 100%;animation:phsk 1.1s linear infinite}
+    @keyframes phsk{to{background-position:-200% 0}}
     .ph .tag{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;letter-spacing:.05em;background:rgba(9,20,38,.82);color:#fff;padding:4px 8px;border-radius:7px}
+    .ph .uptag{position:absolute;top:6px;right:6px;z-index:3;font-size:13px;background:rgba(9,20,38,.72);border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;text-shadow:none;animation:uppulse 1.2s ease-in-out infinite}
+    .ph.up{outline:2px solid var(--amber,#f59e0b);outline-offset:-2px}
+    @keyframes uppulse{0%,100%{opacity:.55}50%{opacity:1}}
     .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
     .seg{display:flex;background:var(--chip);border-radius:11px;padding:4px;gap:4px;margin-top:12px}
     .seg button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:650;font-size:13px;padding:8px 0;border-radius:8px;cursor:pointer}
@@ -193,8 +202,56 @@
 
   var job=null, photos=[], cats=[], chosen="Travelling", stage="During";
   var raDone=false, reported=false, signed=false, sigName="", raPicPending=false;
+  var pendingPhotos=[];   // photos captured but not yet uploaded (durable queue)
 
   function jfetch(path, opts){ return fetch(SLA_API+path, opts||{}); }
+  // Shrink an image File to a max dimension → JPEG Blob (small thumbnail so the
+  // grid never decodes full-res camera photos).
+  function shrinkImage(file, maxDim, quality){
+    return new Promise(function(resolve){
+      if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
+      var img=new Image(), u=URL.createObjectURL(file);
+      img.onload=function(){
+        URL.revokeObjectURL(u);
+        var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+        w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+        var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+        cv.getContext("2d").drawImage(img,0,0,w,h);
+        cv.toBlob(function(b){ resolve(b); },"image/jpeg",quality||0.7);
+      };
+      img.onerror=function(){ URL.revokeObjectURL(u); resolve(null); };
+      img.src=u;
+    });
+  }
+  // Self-healing for older photos with no stored thumbnail: fetch the full image
+  // (a couple at a time, off the grid), shrink it, store the thumb, swap it in.
+  // New uploads already carry a thumb, so this normally has nothing to do.
+  var _backfilling=false;
+  async function backfillThumbs(){
+    if(_backfilling) return;
+    var todo=(photos||[]).filter(function(p){ return p.hasThumb===false && p.key; });
+    if(!todo.length) return;
+    _backfilling=true;
+    var idx=0;
+    async function worker(){
+      while(idx<todo.length){
+        var p=todo[idx++];
+        try{
+          var blob=await fetch(p.publicURL).then(function(r){ return r.ok?r.blob():null; });
+          if(blob){
+            var thumb=await shrinkImage(new File([blob],"p.jpg",{type:blob.type||"image/jpeg"}),400,0.7);
+            if(thumb){
+              var form=new FormData(); form.append("key",p.key); form.append("thumb",thumb,"thumb.jpg");
+              var r=await jfetch("/site/thumb",{method:"POST",body:form}).then(function(r){ return r.json(); }).catch(function(){ return null; });
+              if(r&&r.ok){ p.hasThumb=true; }
+            }
+          }
+        }catch(e){}
+      }
+    }
+    try{ await Promise.all([worker(),worker()]); }catch(e){}
+    _backfilling=false;
+  }
   // Permission helpers (read the cached session).
   function myPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||{}; }catch(e){ return {}; } }
   function isFullAccess(){ return myPerms().FullAccess==="Yes"; }               // "all access" only
@@ -299,15 +356,36 @@
     var host=$("photos"); if(!host) return;   // firestopping jobs use per-seal photos in the RIA panel
     var html="";
     photos.forEach(function(p,i){
-      var bg=p.publicURL?'background-image:url('+esc(p.publicURL)+')':'';
+      // Load the small THUMBNAIL in the grid, not the full-res photo (native
+      // lazy-load so off-screen tiles don't fetch). Full-res only opens on tap.
+      var src=p.thumb||p.publicURL||"";
+      var pend=(p.hasThumb===false)?" pend":"";
+      var img=src?'<img loading="lazy" decoding="async" alt="" src="'+esc(src)+'">':'';
       var tag=p.stage?'<span class="tag">'+esc(p.stage.toUpperCase())+'</span>':'';
-      html+='<div class="ph" data-i="'+i+'" style="'+bg+'">'+tag+'</div>';
+      html+='<div class="ph'+pend+'" data-i="'+i+'">'+img+tag+'</div>';
+    });
+    // Photos captured but still uploading — shown from the on-device Blob so the
+    // engineer can SEE it's saved (not lost) while it syncs in the background.
+    (pendingPhotos||[]).forEach(function(pp){
+      var u=""; try{ u=URL.createObjectURL(pp.thumb||pp.blob); }catch(e){}
+      var im=u?'<img decoding="async" alt="" src="'+esc(u)+'">':'';
+      html+='<div class="ph pend up" title="Uploading…">'+im+'<span class="tag">'+esc(String(pp.stage||"").toUpperCase())+'</span><span class="uptag">⏳</span></div>';
     });
     html+='<div class="ph add" id="addPhoto">'+(raDone?'📷<span>Add '+stage+' photo</span>':'🔒<span>RA required</span>')+'</div>';
     host.innerHTML=html;
-    $("phcount").textContent=photos.length+(photos.length===1?" photo":" photos");
+    var np=pendingPhotos.length;
+    $("phcount").textContent=(photos.length+np)+(photos.length+np===1?" photo":" photos")+(np?" · "+np+" uploading":"");
     $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; $("fileInput").click(); };
     [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
+    [].forEach.call(host.querySelectorAll(".ph[data-i] img"),function(im){
+      // Reveal (stop the skeleton) as soon as the photo has loaded.
+      function done(){ im.parentNode.classList.remove("pend"); }
+      if(im.complete && im.naturalWidth>0){ done(); }
+      im.addEventListener("load",done);
+      // If a thumbnail ever fails, fall back to the full image once so nothing is blank.
+      im.addEventListener("error",function(){ var p=photos[+im.parentNode.dataset.i]; if(p&&p.publicURL&&im.src!==p.publicURL){ im.src=p.publicURL; } });
+    });
+    backfillThumbs();
   }
   function drawStatus(){
     // Projects have a slim status set — just Travelling · In Progress · Complete
@@ -405,7 +483,8 @@
     if(!fs){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
       $("fileInput").addEventListener("change",uploadPhotos);
-      $("note").addEventListener("input",refresh);
+      restoreNoteDraft();   // bring back a note typed before an app kill / bounce
+      $("note").addEventListener("input",function(){ saveNoteDraft(); refresh(); });
       $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
       $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
       var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
@@ -502,21 +581,107 @@
     }
     $("blockModal").classList.add("show");
   }
+  /* ── Durable photo upload queue (IndexedDB) ──────────────────────────────
+     A captured photo is written to the DEVICE (IndexedDB, which stores the Blob
+     directly) BEFORE any network attempt, shown in the grid straight away, and
+     uploaded in the background — retried on a timer and when signal returns —
+     until it lands. So a photo taken on weak signal, or before the app is
+     killed / the "finish previous job" bounce, is never lost. Mirrors the
+     signature's local-first pattern. Falls back to a direct upload only if
+     IndexedDB is unavailable (private mode). */
+  var PQ = (function(){
+    var DBP=null;
+    function db(){ if(DBP) return DBP; DBP=new Promise(function(res,rej){
+      try{ var q=indexedDB.open("mlPhotoQ",1);
+        q.onupgradeneeded=function(){ var d=q.result; if(!d.objectStoreNames.contains("q")) d.createObjectStore("q",{keyPath:"id"}); };
+        q.onsuccess=function(){ res(q.result); }; q.onerror=function(){ rej(q.error); };
+      }catch(e){ rej(e); } }); return DBP; }
+    function store(mode){ return db().then(function(d){ return d.transaction("q",mode).objectStore("q"); }); }
+    return {
+      add:function(rec){ return store("readwrite").then(function(s){ return new Promise(function(res,rej){ var r=s.put(rec); r.onsuccess=function(){res();}; r.onerror=function(){rej(r.error);}; }); }); },
+      del:function(id){ return store("readwrite").then(function(s){ return new Promise(function(res){ var r=s.delete(id); r.onsuccess=function(){res();}; r.onerror=function(){res();}; }); }); },
+      all:function(){ return store("readonly").then(function(s){ return new Promise(function(res){ var r=s.getAll(); r.onsuccess=function(){res(r.result||[]);}; r.onerror=function(){res([]);}; }); }); }
+    };
+  })();
+  var _pqFlushing=false, _pqTimer=null, _pqStreak=0;
+  async function loadPending(){
+    try{ var all=await PQ.all(); pendingPhotos=(all||[]).filter(function(x){return x.jobId===jobId;}); }
+    catch(e){ pendingPhotos=[]; }
+  }
+  function pendingCount(){ return pendingPhotos.length; }
+  async function flushPhotoQueue(){
+    if(_pqFlushing) return;
+    // Offline → don't try at all; the 'online' event will wake us. (A dropped
+    // upload can't succeed, and retrying blind is what caused an error storm.)
+    if(navigator.onLine===false){ if(pendingPhotos.length){ clearTimeout(_pqTimer); _pqTimer=setTimeout(flushPhotoQueue, 60000); } return; }
+    _pqFlushing=true;
+    var anyOk=false;
+    try{
+      var all=[]; try{ all=await PQ.all(); }catch(e){ all=[]; }
+      var mine=all.filter(function(x){return x.jobId===jobId;});
+      for(var i=0;i<mine.length;i++){
+        if(navigator.onLine===false) break;   // signal dropped mid-round — stop and back off
+        var it=mine[i];
+        try{
+          var form=new FormData(); form.append("file", it.blob, it.filename||"photo.jpg");
+          if(it.thumb) form.append("thumb", it.thumb, "thumb.jpg");
+          var r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/files?filename="+encodeURIComponent(it.filename)+"&stage="+encodeURIComponent(it.stage),{method:"POST",body:form});
+          if(r && r.ok){ await PQ.del(it.id); anyOk=true; }
+          else { throw new Error("bad status "+(r&&r.status)); }   // leave queued, retry
+        }catch(e){ /* keep it queued; retry later with backoff */ }
+      }
+    } finally { _pqFlushing=false; }
+    await loadPending();
+    try{ await loadPhotos(); }catch(e){}
+    drawPhotos(); refresh();
+    // Reschedule with EXPONENTIAL BACKOFF + jitter. A photo that keeps failing
+    // (weak signal truncating the upload) must NOT re-send every 15s — that
+    // turned one bad photo into a request storm. 15s → 30s → 1m → 2m → 4m → 5m
+    // cap; any success resets it so the rest go up promptly.
+    if(pendingPhotos.length){
+      var delay = Math.min(300000, 15000 * Math.pow(2, _pqStreak)) + Math.floor(Math.random()*5000);
+      _pqStreak = anyOk ? 0 : Math.min(_pqStreak + 1, 5);
+      clearTimeout(_pqTimer); _pqTimer=setTimeout(flushPhotoQueue, delay);
+    } else { _pqStreak=0; }
+  }
+  // Back online → one prompt, fresh attempt.
+  window.addEventListener("online", function(){ _pqStreak=0; clearTimeout(_pqTimer); flushPhotoQueue(); });
+
   async function uploadPhotos(e){
     var files=e.target.files; if(!files||!files.length){ raPicPending=false; return; }
     var wasRA = raPicPending;
     var useStage = raPicPending ? "Before" : stage;
+    var added=0;
     for(var i=0;i<files.length;i++){
       var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
-      var form=new FormData(); form.append("file",f);
-      try{ await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?filename="+encodeURIComponent(fn)+"&stage="+encodeURIComponent(useStage),{method:"POST",body:form}); }
-      catch(err){ toast("Photo upload failed — will retry when online"); }
+      // Generate a small thumbnail so the grid loads instantly (full-res only opens on tap).
+      var th=null; try{ th=await shrinkImage(f,400,0.7); }catch(e){}
+      // Save to the device FIRST — never lost, even with no signal.
+      var rec={ id:opId(), jobId:jobId, filename:fn, stage:useStage, blob:f, thumb:th, at:Date.now() };
+      try{ await PQ.add(rec); added++; }
+      catch(err){
+        // IndexedDB unavailable — fall back to a straight upload so it's not dropped.
+        try{
+          var form=new FormData(); form.append("file",f); if(th) form.append("thumb",th,"thumb.jpg");
+          var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?filename="+encodeURIComponent(fn)+"&stage="+encodeURIComponent(useStage),{method:"POST",body:form});
+          if(r&&r.ok) added++; else throw new Error();
+        }catch(e2){ toast("⚠ Couldn't save that photo — check the phone's storage"); }
+      }
     }
     raPicPending=false; e.target.value="";
-    await loadPhotos(); drawPhotos(); refresh();
-    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo added"); }
-    else toast("Photo added — tagged "+useStage);
+    await loadPending(); drawPhotos(); refresh();
+    // The RA "work-area photo" is satisfied the instant it's captured (durable),
+    // not only once it uploads.
+    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo saved"); }
+    else if(added){ toast(pendingCount()? ("Photo saved ("+useStage+") — uploading…") : ("Photo added — tagged "+useStage)); }
+    flushPhotoQueue();   // kick the uploader (non-blocking)
   }
+  // ── Completion-note draft: saved to the device as it's typed, restored on
+  //    load, cleared once the note is committed — so a typed note is never lost.
+  function noteKey(){ return "mlNote:"+jobId; }
+  function saveNoteDraft(){ try{ var v=$("note")?$("note").value:""; if(v&&v.trim()) localStorage.setItem(noteKey(), v); else localStorage.removeItem(noteKey()); }catch(e){} }
+  function restoreNoteDraft(){ try{ var el=$("note"); if(!el) return; var d=localStorage.getItem(noteKey()); if(d && !el.value){ el.value=d; } }catch(e){} }
+  function clearNoteDraft(){ try{ localStorage.removeItem(noteKey()); }catch(e){} }
   var finishing=false;
   async function doFinish(){
     if(finishing) return;
@@ -524,9 +689,9 @@
     finishing=true;
     var slide=$("slide"); slide.classList.add("go");
     try{
-      if(chosen==="Complete"){ $("slidetxt").textContent="Completing…"; await patchJob({status:"Complete",note:$("note").value.trim()}); $("slidetxt").textContent="Completed ✓"; toast("Job completed"); }
+      if(chosen==="Complete"){ $("slidetxt").textContent="Completing…"; await patchJob({status:"Complete",note:$("note").value.trim()}); clearNoteDraft(); $("slidetxt").textContent="Completed ✓"; toast("Job completed"); }
       else if(chosen==="On Hold"){ $("slidetxt").textContent="Sending…"; await patchJob({status:"On Hold",hold:{reason:ntrim("holdReason"),needs:ntrim("holdNeeds")}}); $("slidetxt").textContent="Sent for approval ✓"; toast("Sent to the office for approval"); }
-      else if(chosen==="Quote"){ $("slidetxt").textContent="Submitting…"; await patchJob({status:"Quote",note:$("note").value.trim(),quote:collectQuote()}); $("slidetxt").textContent="Quote submitted ✓"; toast("Quote submitted"); }
+      else if(chosen==="Quote"){ $("slidetxt").textContent="Submitting…"; await patchJob({status:"Quote",note:$("note").value.trim(),quote:collectQuote()}); clearNoteDraft(); $("slidetxt").textContent="Quote submitted ✓"; toast("Quote submitted"); }
       setTimeout(function(){ location.href=backTo; },1200);
     }catch(err){ finishing=false; slide.classList.remove("go","locked"); $("slidetxt").textContent=ENDLABEL[chosen]||"Slide to finish"; if(!err.blocked) toast("⚠ "+err.message); }
   }
@@ -588,7 +753,7 @@
   // reflect that the RA work-area photo was captured (fires after its upload completes)
   window.addEventListener("ml-rapic", function(){ raPicTaken=true; $("raPic").classList.add("done"); $("raPic").classList.remove("err"); $("raPicTxt").textContent="Work-area photo added"; });
   function openRA(){
-    raPicTaken=(photos.some(function(p){return p.stage==="Before";}));
+    raPicTaken=(photos.some(function(p){return p.stage==="Before";}) || (pendingPhotos||[]).some(function(p){return p.stage==="Before";}));
     if(raPicTaken){ $("raPic").classList.add("done"); $("raPicTxt").textContent="Work-area photo added"; } else { $("raPic").classList.remove("done","err"); $("raPicTxt").textContent="Photo of the work area"; }
     hazRows().forEach(function(r){r.classList.remove("err");delete r.dataset.ans;[].forEach.call(r.querySelectorAll(".hb"),function(b){b.classList.remove("on");});});
     decls().forEach(function(d){d.classList.remove("on","shake");});
@@ -675,7 +840,9 @@
     if(!jobId){ $("loading").textContent="No job specified."; return; }
     try{
       await loadAll();
+      await loadPending();   // any photos queued from a previous visit (offline / killed)
       $("loading").style.display="none"; $("app").style.display="block"; render();
+      if(pendingPhotos.length) flushPhotoQueue();   // resume uploading them
     }catch(err){ $("loading").innerHTML="Couldn't load this job.<br><small>"+esc(err.message)+"</small>"; }
   })();
 })();
