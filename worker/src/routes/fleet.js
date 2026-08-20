@@ -541,43 +541,48 @@ export async function handle(request, env, ctx, url, sess) {
     const cur = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
     const dn = s => String(s || "").replace(/\s+/g, "").toUpperCase();
     const drv = {}; for (const r of cur || []) drv[dn(r.reg)] = r.username;
-    const miles = await latestMileage(env, tid);
-    const photos = await photoIndex(env, tid);
-    const covers = await coverMap(env, tid);
-    const vcCounts = await vanCheckPhotoCounts(env, tid);   // van-check photos folded into the badge
-    // Outstanding van-check defects (until an admin marks the van resolved).
-    let defResolved = {};
-    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) defResolved = JSON.parse(row.value) || {}; } catch {}
-    const defects = await vanCheckDefects(env, tid, defResolved);
-    const lastVc = await lastVanCheckMap(env, tid);   // newest van-check date per reg (card bar)
-    let vcAck = {};
-    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VCACK_KEY(tid)).first(); if (row && row.value) vcAck = JSON.parse(row.value) || {}; } catch {}
-    // Handover state per reg: latest completed (for the card's direct link) +
-    // whether one is still pending (a badge / "awaiting handover" hint).
     await ensureHandoverTable(env);
-    const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
+    const appCfg = async key => { try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); return row && row.value ? (JSON.parse(row.value) || {}) : {}; } catch { return {}; } };
+    // Gather everything the cards need CONCURRENTLY — these lookups are
+    // independent, so running them in parallel turns ~10 stacked round trips into
+    // one, which is the main win for this page's speed.
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, hoRes] = await Promise.all([
+      latestMileage(env, tid),
+      photoIndex(env, tid),
+      coverMap(env, tid),
+      vanCheckPhotoCounts(env, tid),     // van-check photos folded into the badge
+      lastVanCheckMap(env, tid),         // newest van-check date per reg (card bar)
+      mpgByVehicle(env, tid),
+      canMoney(env, tid, sess),
+      appCfg(DEFECTCLR_KEY(tid)),        // defects marked resolved by an admin
+      appCfg(VCACK_KEY(tid)),
+      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
+    ]);
+    const defects = await vanCheckDefects(env, tid, defResolved);
+    // Handover state per reg: latest completed (card's direct link) + whether one
+    // is still pending (a badge / "awaiting handover" hint).
+    const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
     for (const h of hoRows) {
       const k = dn(h.reg);
       if (h.status === "done") { const cur = lastHo[k]; if (!cur || new Date(h.completed_at || 0) > new Date(cur.at || 0)) lastHo[k] = { id: h.id, at: h.completed_at || "" }; }
       else if (h.status === "pending") pendHo[k] = (pendHo[k] || 0) + 1;
     }
-    // MPG (all users) + money views (Full Access only): fuel/odo spans, finance,
-    // last-12-months maintenance, running cost.
-    const mpg = await mpgByVehicle(env, tid);
-    const money = await canMoney(env, tid, sess);
+    // Money views (Full Access only): fuel/odo spans + last-12-months maintenance.
     let fuelV = {}, odoV = {}, maint12 = {};
     if (money) {
-      fuelV = await fuelByVehicle(env, tid); odoV = await odoByVehicle(env, tid);
-      try {
-        await ensureMaintTable(env);
-        const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
-        const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
-        for (const m of mrows || []) {
-          const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
-          maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
-        }
-      } catch {}
+      await ensureMaintTable(env);
+      const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const [fv, ov, mRes] = await Promise.all([
+        fuelByVehicle(env, tid),
+        odoByVehicle(env, tid),
+        env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all().catch(() => ({ results: [] })),
+      ]);
+      fuelV = fv; odoV = ov;
+      for (const m of (mRes.results || [])) {
+        const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
+        maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
+      }
     }
     const vehicles = await Promise.all((results || []).map(async v => {
       const cm = miles[dn(v.reg)] || null;
