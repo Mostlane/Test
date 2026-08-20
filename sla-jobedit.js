@@ -778,6 +778,7 @@
   }
   function showNearby(job, engineer, data, cb) {
     njStyle();
+    let assignedAny = false;
     let ov = $("mlnjOverlay");
     if (!ov) { ov = document.createElement("div"); ov.id = "mlnjOverlay"; ov.className = "mlnj-overlay"; document.body.appendChild(ov); }
     const render = (d) => {
@@ -791,7 +792,16 @@
         <div class="mlnj-foot"><button type="button" class="mlnj-btn primary" id="mlnjAssign">Assign ticked to ${esc(engineer)}</button><button type="button" class="mlnj-btn" id="mlnjSkip">Skip</button></div>
         <div class="mlnj-msg" id="mlnjMsg"></div>
       </div>`;
-      const done = () => ov.remove();
+      const done = () => {
+        ov.remove();
+        // On the scheduler, sequence the newly-added stops: open the optimiser
+        // preview for this engineer's day (office reviews, then Applies). On the
+        // board there's no optimiser here — the jobs are simply added to the day.
+        if (assignedAny && window.mlOptimiseEngineerDay) {
+          const dt = job.scheduledAt ? new Date(job.scheduledAt) : new Date();
+          try { window.mlOptimiseEngineerDay(engineer, engineer, dt); } catch (e) { }
+        }
+      };
       $("mlnjClose").onclick = done; $("mlnjSkip").onclick = done;
       $("mlnjRad").onchange = async (e) => {
         const n = Math.max(1, Math.min(50, Number(e.target.value) || 5));
@@ -817,6 +827,7 @@
             if (res.ok) { ok++; const sv = await res.json().catch(() => null); if (sv && cb) { try { cb(sv); } catch { } } }
           } catch { }
         }
+        if (ok) assignedAny = true;   // closing will open the optimiser to sequence them
         // Drop the ones just assigned, but KEEP the pop-up open so any remaining
         // same-site / nearby job is still flagged (a second one isn't lost).
         d.sameSite = (d.sameSite || []).filter(x => ids.indexOf(x.id) === -1);

@@ -1699,8 +1699,13 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   plain time move). **Cross-engineer:** the scan includes OPEN jobs currently with
   OTHER engineers (flagged "currently <name>") + unassigned ones — only the target
   engineer's own are excluded. **Assigning keeps the pop-up open** with remaining
-  same-site/nearby rows so a second nearby job stays flagged. No pop-up when
-  nothing is same-site or in range. `sla-jobedit.js?v=18`.
+  same-site/nearby rows so a second nearby job stays flagged. **After accepting,
+  closing the pop-up calls `window.mlOptimiseEngineerDay(username,name,date)` when
+  present (the scheduler exposes it) → opens the route optimiser for that
+  engineer's day and auto-runs the preview, so the newly-added stops get sequenced
+  (office reviews → Apply). On sla-main (no optimiser on the page) the jobs are
+  just added to the day.** No pop-up when nothing is same-site or in range.
+  `sla-jobedit.js?v=19`.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
