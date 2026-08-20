@@ -1120,7 +1120,13 @@ export async function handle(request, env, ctx, url, sess) {
     // POST /sla/jobs/{id}/files?filename=  -> upload photo to R2
     if (parts[2] === "files" && method === "POST") {
       const filename = searchParams.get("filename");
-      const form = await request.formData();
+      // A truncated multipart body (an upload cut off on weak signal) makes
+      // request.formData() throw "No initial boundary string". That's a BAD
+      // REQUEST from a dropped connection, not a server fault — return 400 so it
+      // isn't logged as a 500 error/alert; the client keeps the photo and retries.
+      let form;
+      try { form = await request.formData(); }
+      catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
       const file = form.get("file");
       if (!filename || !file) return jsonResponse({ error: "Missing file" }, headers, 400);
       // Before / During / After label the engineer picks with the photo slider.
@@ -1639,7 +1645,9 @@ export async function handle(request, env, ctx, url, sess) {
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
-    const form = await request.formData();
+    let form;
+    try { form = await request.formData(); }
+    catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
     const file = form.get("file");
     if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
     const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
@@ -1686,7 +1694,9 @@ export async function handle(request, env, ctx, url, sess) {
   // Store a thumbnail for an EXISTING photo (backfill) — client generates it.
   if (subpath === "/site/thumb" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-    const form = await request.formData();
+    let form;
+    try { form = await request.formData(); }
+    catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
     const key = String(form.get("key") || "");
     const thumb = form.get("thumb");
     if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
