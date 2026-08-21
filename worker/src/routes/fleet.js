@@ -1333,7 +1333,7 @@ export async function handle(request, env, ctx, url, sess) {
       else if (m) title = `${m} You came ${rankLabel(rank, total)} in the fleet`;
       const rankBit = rank && total ? ` ${m ? m + " " : ""}${rankLabel(rank, total)}.` : "";
       const nudge = score < SCORE_MIN
-        ? " Below 70 — let's focus on smoother driving this week."
+        ? " This is not an acceptable driving standard and must be improved."
         : (rank === 1 ? " Great work — keep it up!" : "");
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
         title,

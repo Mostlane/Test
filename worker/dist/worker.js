@@ -16554,7 +16554,7 @@ async function handle21(request, env, ctx, url, sess) {
       else if (rank === total && total > 1) title = "\u{1F690} Bottom of the fleet this week";
       else if (m) title = `${m} You came ${rankLabel(rank, total)} in the fleet`;
       const rankBit = rank && total ? ` ${m ? m + " " : ""}${rankLabel(rank, total)}.` : "";
-      const nudge = score < SCORE_MIN ? " Below 70 \u2014 let's focus on smoother driving this week." : rank === 1 ? " Great work \u2014 keep it up!" : "";
+      const nudge = score < SCORE_MIN ? " This is not an acceptable driving standard and must be improved." : rank === 1 ? " Great work \u2014 keep it up!" : "";
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
         title,
         body: `Your driving score for ${rangeLabel} is ${score}/100.${rankBit}${nudge} Tap to see your history.`,

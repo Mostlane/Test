@@ -77,11 +77,17 @@
       const rankLine = latest.rank && latest.total
         ? `<div style="font-weight:700;font-size:14.5px;color:${lm?'#0a8a35':(below?'#d11f2a':'#334155')};margin-top:4px">${lm?lm+" ":""}${rankLabel(latest.rank, latest.total)} in the fleet${isLast?" · last place":""}</div>`
         : "";
-      const warn = (below || isLast)
+      // Firm message when the score is below 70; a neutral "last place" note
+      // for anyone who happens to be at the bottom with a passing score.
+      const warn = below
         ? `<div style="margin-top:12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.45">
-             <b>${below ? "Below 70 — this needs some care." : "Last place this week."}</b><br>
-             Let's focus on smoother acceleration, keeping to the limits and gentler braking this coming week. A steady week usually moves the score up fast.
-           </div>` : "";
+             <b>Below 70 — this is not an acceptable driving standard and must be improved.</b>
+           </div>`
+        : (isLast
+            ? `<div style="margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.45">
+                 <b>Bottom of the fleet this week.</b> Let's aim higher next week.
+               </div>`
+            : "");
       const cheer = latest.rank === 1
         ? `<div style="margin-top:12px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:10px 12px;font-size:13.5px">
              <b>🏆 Top of the fleet — nice work!</b> Keep it up.
