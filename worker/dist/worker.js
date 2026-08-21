@@ -16548,16 +16548,16 @@ async function handle21(request, env, ctx, url, sess) {
            rank=excluded.rank, total=excluded.total`
       ).bind(tid, username, weekStart, weekEnd, reg, score, by, at, rank, total).run();
       sent++;
-      let title = "\u{1F690} Your van driving score";
       let m = medal(rank);
-      if (rank === 1) title = "\u{1F3C6} You topped the fleet!";
-      else if (rank === total && total > 1) title = "\u{1F690} Bottom of the fleet this week";
-      else if (m) title = `${m} You came ${rankLabel(rank, total)} in the fleet`;
-      const rankBit = rank && total ? ` ${m ? m + " " : ""}${rankLabel(rank, total)}.` : "";
+      let title;
+      if (!rank || !total) title = "\u{1F690} Your van driving score";
+      else if (rank === 1) title = "\u{1F3C6} You topped the fleet!";
+      else if (rank === total && total > 1) title = `\u{1F690} ${rankLabel(rank, total)} in the fleet \u2014 last place`;
+      else title = `${m ? m + " " : "\u{1F690} "}${rankLabel(rank, total)} in the fleet`;
       const nudge = score < SCORE_MIN ? " This is not an acceptable driving standard and must be improved." : rank === 1 ? " Great work \u2014 keep it up!" : "";
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
         title,
-        body: `Your driving score for ${rangeLabel} is ${score}/100.${rankBit}${nudge} Tap to see your history.`,
+        body: `Your driving score for ${rangeLabel} is ${score}/100.${nudge} Tap to see your history.`,
         url: "/my-van-scores.html",
         tag: "van-score"
       }).catch(() => {

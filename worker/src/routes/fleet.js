@@ -1324,20 +1324,23 @@ export async function handle(request, env, ctx, url, sess) {
            rank=excluded.rank, total=excluded.total`
       ).bind(tid, username, weekStart, weekEnd, reg, score, by, at, rank, total).run();
       sent++;
-      // Push body: medal for top 3, position for the rest, and a nudge for
-      // anyone under the threshold or in last place.
-      let title = "🚐 Your van driving score";
+      // Push body: put the place in the TITLE for EVERY ranked driver — 1st,
+      // 4th, 7th etc all see where they came at a glance. Medal for the top
+      // three. Unranked (light-week vans) get the plain default title.
       let m = medal(rank);
-      if (rank === 1) title = "🏆 You topped the fleet!";
-      else if (rank === total && total > 1) title = "🚐 Bottom of the fleet this week";
-      else if (m) title = `${m} You came ${rankLabel(rank, total)} in the fleet`;
-      const rankBit = rank && total ? ` ${m ? m + " " : ""}${rankLabel(rank, total)}.` : "";
+      let title;
+      if (!rank || !total) title = "🚐 Your van driving score";
+      else if (rank === 1) title = "🏆 You topped the fleet!";
+      else if (rank === total && total > 1) title = `🚐 ${rankLabel(rank, total)} in the fleet — last place`;
+      else title = `${m ? m + " " : "🚐 "}${rankLabel(rank, total)} in the fleet`;
+      // Body: score + a nudge. The rank is already in the title so no need to
+      // repeat it in the body — keeps the notification short.
       const nudge = score < SCORE_MIN
         ? " This is not an acceptable driving standard and must be improved."
         : (rank === 1 ? " Great work — keep it up!" : "");
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
         title,
-        body: `Your driving score for ${rangeLabel} is ${score}/100.${rankBit}${nudge} Tap to see your history.`,
+        body: `Your driving score for ${rangeLabel} is ${score}/100.${nudge} Tap to see your history.`,
         url: "/my-van-scores.html", tag: "van-score"
       }).catch(() => {}));
     }
