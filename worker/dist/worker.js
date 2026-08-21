@@ -1397,6 +1397,16 @@ async function handle4(request, env, ctx, url, sess) {
         lastReg: s.created_at || null
       });
     }
+    const byDev = {};
+    try {
+      const d = await env.DB.prepare(
+        "SELECT lower(username) uk, label, registered_at FROM devices WHERE tenant_id = ? ORDER BY registered_at"
+      ).bind(tid).all();
+      for (const row of d.results || []) {
+        (byDev[row.uk] = byDev[row.uk] || []).push({ label: row.label || "device", registeredAt: row.registered_at || null });
+      }
+    } catch {
+    }
     let users = [];
     try {
       const r = await env.DB.prepare("SELECT first_name, last_name, username, status FROM users WHERE tenant_id = ? ORDER BY username").bind(tid).all();
@@ -1410,12 +1420,16 @@ async function handle4(request, env, ctx, url, sess) {
       const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username;
       const lastOk = devs.reduce((m, d) => d.lastOk && (!m || d.lastOk > m) ? d.lastOk : m, null);
       const lastReg = devs.reduce((m, d) => d.lastReg && (!m || d.lastReg > m) ? d.lastReg : m, null);
+      const regDevs = byDev[String(u.username || "").toLowerCase()] || [];
       return {
         username: u.username,
         name,
         on: devs.length > 0,
         devices: devs.length,
         devicesList: devs,
+        // Device-lock devices — present even when push notifications are off.
+        registeredDevices: regDevs.length,
+        registeredList: regDevs,
         lastOk,
         lastReg
       };
