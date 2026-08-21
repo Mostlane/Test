@@ -42,6 +42,21 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
   }
 
+  // POST /sla/speed-check — read the body, discard it, return 200 with the
+  // received byte count. Used by engineer-job.html's "high-quality upload"
+  // toggle: the client POSTs a ~500KB blob and times it. If it takes >4s
+  // the toggle snaps back off, so a full-res photo isn't queued on a phone
+  // that can't push it. Cheap: reads the stream and drops each chunk.
+  if (subpath === "/speed-check" && method === "POST") {
+    let bytes = 0;
+    try {
+      const reader = request.body && request.body.getReader ? request.body.getReader() : null;
+      if (reader) { for (;;) { const { done, value } = await reader.read(); if (done) break; bytes += value ? value.length : 0; } }
+      else { const ab = await request.arrayBuffer(); bytes = ab.byteLength; }
+    } catch { /* truncated body → still returns the bytes we managed to read */ }
+    return jsonResponse({ ok: true, bytes }, headers);
+  }
+
   /* GET /sla/categories — custom job categories (any session, so every page can
      merge them into its status list). POST — replace the whole list (SLA admin). */
   if (subpath === "/categories") {

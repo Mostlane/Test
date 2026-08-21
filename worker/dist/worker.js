@@ -5110,6 +5110,24 @@ async function handle8(request, env, ctx, url, sess) {
     if (method === "GET") return jsonResponse(await getConfig(env, tenantId), headers);
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/speed-check" && method === "POST") {
+    let bytes = 0;
+    try {
+      const reader = request.body && request.body.getReader ? request.body.getReader() : null;
+      if (reader) {
+        for (; ; ) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value ? value.length : 0;
+        }
+      } else {
+        const ab = await request.arrayBuffer();
+        bytes = ab.byteLength;
+      }
+    } catch {
+    }
+    return jsonResponse({ ok: true, bytes }, headers);
+  }
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
