@@ -623,7 +623,20 @@
         if(navigator.onLine===false) break;   // signal dropped mid-round — stop and back off
         var it=mine[i];
         try{
-          var form=new FormData(); form.append("file", it.blob, it.filename||"photo.jpg");
+          // Legacy queued blob still full-res (>1.5 MB) → shrink now so weak
+          // signal can actually get it through. Overwrites the queue record so
+          // the smaller blob sticks even if the upload still fails this round.
+          var upBlob = it.blob;
+          if(upBlob && upBlob.size > 1500000){
+            try{
+              var shrunk = await shrinkImage(upBlob, 1600, 0.85);
+              if(shrunk && shrunk.size && shrunk.size < upBlob.size){
+                upBlob = shrunk; it.blob = shrunk;
+                try{ await PQ.add(it); }catch(_){}
+              }
+            }catch(_){}
+          }
+          var form=new FormData(); form.append("file", upBlob, it.filename||"photo.jpg");
           if(it.thumb) form.append("thumb", it.thumb, "thumb.jpg");
           var r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/files?filename="+encodeURIComponent(it.filename)+"&stage="+encodeURIComponent(it.stage),{method:"POST",body:form});
           if(r && r.ok){ await PQ.del(it.id); anyOk=true; }
@@ -654,15 +667,21 @@
     var added=0;
     for(var i=0;i<files.length;i++){
       var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
-      // Generate a small thumbnail so the grid loads instantly (full-res only opens on tap).
+      // Shrink the MAIN upload too. A raw iPhone JPEG is 3–5 MB; on weak signal
+      // the multipart body gets truncated (server returns "Upload was incomplete"),
+      // then the queue retries forever. A 1600px re-encoded JPEG is ~300–600 KB —
+      // small enough to make it through a wobbly bar and still crisp on-site.
+      // Falls back to the raw file if the browser can't shrink (very old Safari).
+      var big=null; try{ big=await shrinkImage(f,1600,0.85); }catch(e){}
+      var mainBlob = big || f;
       var th=null; try{ th=await shrinkImage(f,400,0.7); }catch(e){}
       // Save to the device FIRST — never lost, even with no signal.
-      var rec={ id:opId(), jobId:jobId, filename:fn, stage:useStage, blob:f, thumb:th, at:Date.now() };
+      var rec={ id:opId(), jobId:jobId, filename:fn, stage:useStage, blob:mainBlob, thumb:th, at:Date.now() };
       try{ await PQ.add(rec); added++; }
       catch(err){
         // IndexedDB unavailable — fall back to a straight upload so it's not dropped.
         try{
-          var form=new FormData(); form.append("file",f); if(th) form.append("thumb",th,"thumb.jpg");
+          var form=new FormData(); form.append("file",mainBlob); if(th) form.append("thumb",th,"thumb.jpg");
           var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?filename="+encodeURIComponent(fn)+"&stage="+encodeURIComponent(useStage),{method:"POST",body:form});
           if(r&&r.ok) added++; else throw new Error();
         }catch(e2){ toast("⚠ Couldn't save that photo — check the phone's storage"); }
