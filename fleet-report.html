@@ -477,19 +477,40 @@ function scoreRecipients(){
     if(seen.has(v.driverUser)) continue; seen.add(v.driverUser);
     out.push({username:v.driverUser, name:v.driver||v.driverUser, reg:v.reg, score:sc});
   }
+  // Rank across EVERY vehicle in the fleet that has a real score (including
+  // vehicles whose driver isn't a portal user — the ranking is about the
+  // vehicle's driving, not just who we can send to). Ties share a rank
+  // ("standard competition ranking": 1,2,2,4).
+  const allScores = (R.vehicles||[])
+    .map(v => R.scores ? R.scores[v.reg] : null)
+    .filter(s => s != null && isFinite(s))
+    .sort((a,b) => b - a);
+  const total = allScores.length;
+  for (const r of out) {
+    const idx = allScores.indexOf(r.score);
+    r.rank = idx >= 0 ? idx + 1 : null;
+    r.total = total;
+  }
   return out;
 }
 function scoreColour(s){ return s>=85?'#0a8a35':s>=70?'#b45309':'#d11f2a'; }
+function medal(rank){ return rank===1?'🏆':rank===2?'🥈':rank===3?'🥉':''; }
+function rankLabel(rank,tot){ if(!rank||!tot) return ''; const s=rank%100; const suf=(s>=11&&s<=13)?'th':['th','st','nd','rd','th','th','th','th','th','th'][rank%10]; return rank+suf+' of '+tot; }
 function openSendScores(){
   closeSendScores();
   const R=window.__reportData; const recs=scoreRecipients(); window.__scoreRecs=recs;
   const range=R?fmtRange(R.minD,R.maxD):'';
-  const rows=recs.length?recs.map((r,i)=>`
+  const rows=recs.length?recs.map((r,i)=>{
+    const m = medal(r.rank);
+    const isLast = r.rank && r.total && r.rank === r.total && r.total > 1;
+    const meta = r.rank ? `<span style="color:${m?'#0a8a35':(r.score<70?'#d11f2a':'#64748b')};font-weight:${m?700:600};font-size:12px">${m?m+' ':''}${rankLabel(r.rank,r.total)}${isLast?' · last':''}${r.score<70?' · under 70':''}</span>` : '';
+    return `
     <label style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-top:1px solid #eef;cursor:pointer">
       <input type="checkbox" class="ss-ck" data-i="${i}" checked style="width:18px;height:18px;flex:none">
-      <span style="flex:1;min-width:0"><b>${esc(r.name)}</b><br><span style="color:#64748b;font-size:12px">${esc(r.reg)}</span></span>
+      <span style="flex:1;min-width:0"><b>${esc(r.name)}</b><br><span style="color:#64748b;font-size:12px">${esc(r.reg)}</span>${meta?' · '+meta:''}</span>
       <span style="font-weight:800;font-size:17px;color:${scoreColour(r.score)}">${r.score}</span>
-    </label>`).join(''):'<p style="color:#64748b;font-size:14px">No engineer scores to send — a report needs an <b>assigned driver</b> and a driver-score PDF.</p>';
+    </label>`;
+  }).join(''):'<p style="color:#64748b;font-size:14px">No engineer scores to send — a report needs an <b>assigned driver</b> and a driver-score PDF.</p>';
   const host=document.createElement('div'); host.id='sendScoresModal';
   host.style.cssText='position:fixed;inset:0;background:rgba(8,18,34,.55);z-index:3000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px;font-family:inherit';
   host.innerHTML=`<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:18px;margin-top:4vh;color:#0f172a">
@@ -516,7 +537,7 @@ async function sendScores(btn){
   if(!picks.length){ if(msg)msg.textContent='Tick at least one engineer.'; return; }
   if(btn)btn.disabled=true; if(msg)msg.textContent='Sending…';
   try{
-    const body={ weekStart:R.minD, weekEnd:R.maxD, scores:picks.map(p=>({username:p.username,reg:p.reg,score:p.score})) };
+    const body={ weekStart:R.minD, weekEnd:R.maxD, scores:picks.map(p=>({username:p.username,reg:p.reg,score:p.score,rank:p.rank,total:p.total})) };
     const r=await authFetch('/fleet/scores/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
     if(r&&r.ok){ if(msg)msg.textContent='✓ Sent to '+r.sent+' engineer'+(r.sent===1?'':'s'); setTimeout(closeSendScores,1200); }
     else { if(btn)btn.disabled=false; if(msg)msg.textContent='Send failed'+(r&&r.error?' — '+r.error:''); }

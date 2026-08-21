@@ -143,6 +143,10 @@ async function ensureScoresTable(env) {
     PRIMARY KEY (tenant_id, username, week_start)
   )`).run();
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_dscores_user ON driver_scores(tenant_id,username,week_start)").run(); } catch {}
+  // Rank + fleet size at send time (1 = top). Snapshotted so the number in the
+  // engineer's history reflects where they were IN THAT WEEK.
+  try { await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN rank INTEGER").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN total INTEGER").run(); } catch {}
 }
 async function ensureHandoverTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_handovers (
@@ -399,9 +403,12 @@ export async function handle(request, env, ctx, url, sess) {
       return jr({ ok: true, count: (row && row.n) || 0, latest: (row && row.latest) || "" }, headers);
     }
     const { results } = await env.DB.prepare(
-      "SELECT week_start, week_end, reg, score, sent_at FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
+      "SELECT week_start, week_end, reg, score, sent_at, rank, total FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
     ).bind(tid, me).all();
-    const scores = (results || []).map(r => ({ weekStart: r.week_start, weekEnd: r.week_end || "", reg: r.reg || "", score: r.score, sentAt: r.sent_at || "" }));
+    const scores = (results || []).map(r => ({
+      weekStart: r.week_start, weekEnd: r.week_end || "", reg: r.reg || "", score: r.score, sentAt: r.sent_at || "",
+      rank: r.rank || null, total: r.total || null,
+    }));
     return jr({ ok: true, scores }, headers);
   }
 
@@ -1293,21 +1300,44 @@ export async function handle(request, env, ctx, url, sess) {
     const by = (sess && sess.user && sess.user.username) || "";
     const rangeLabel = weekEnd && weekEnd !== weekStart ? `${weekStart} → ${weekEnd}` : weekStart;
     let sent = 0;
+    // Rank medal / bottom-of-fleet warning threshold. < 70 = needs work.
+    const SCORE_MIN = 70;
+    const medal = r => r === 1 ? "🏆" : r === 2 ? "🥈" : r === 3 ? "🥉" : "";
+    const rankLabel = (r, tot) => {
+      if (!r || !tot) return "";
+      const suf = (n) => { const s = n % 100; return (s >= 11 && s <= 13) ? "th" : ["th","st","nd","rd","th","th","th","th","th","th"][n % 10]; };
+      return `${r}${suf(r)} of ${tot}`;
+    };
     for (const s of list) {
       const username = String(s.username || "").trim();
       const score = s.score == null ? null : Math.max(0, Math.min(100, Math.round(Number(s.score))));
       if (!username || score == null || !isFinite(score)) continue;
       const reg = String(s.reg || "").trim();
+      const rank = s.rank != null && isFinite(Number(s.rank)) ? Math.max(1, Math.round(Number(s.rank))) : null;
+      const total = s.total != null && isFinite(Number(s.total)) ? Math.max(1, Math.round(Number(s.total))) : null;
       await env.DB.prepare(
-        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at)
-         VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at, rank, total)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id, username, week_start) DO UPDATE SET
-           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score, sent_by=excluded.sent_by, sent_at=excluded.sent_at`
-      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at).run();
+           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score,
+           sent_by=excluded.sent_by, sent_at=excluded.sent_at,
+           rank=excluded.rank, total=excluded.total`
+      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at, rank, total).run();
       sent++;
+      // Push body: medal for top 3, position for the rest, and a nudge for
+      // anyone under the threshold or in last place.
+      let title = "🚐 Your van driving score";
+      let m = medal(rank);
+      if (rank === 1) title = "🏆 You topped the fleet!";
+      else if (rank === total && total > 1) title = "🚐 Bottom of the fleet this week";
+      else if (m) title = `${m} You came ${rankLabel(rank, total)} in the fleet`;
+      const rankBit = rank && total ? ` ${m ? m + " " : ""}${rankLabel(rank, total)}.` : "";
+      const nudge = score < SCORE_MIN
+        ? " Below 70 — let's focus on smoother driving this week."
+        : (rank === 1 ? " Great work — keep it up!" : "");
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
-        title: "🚐 Your van driving score",
-        body: `Your driving score for ${rangeLabel} is ${score}/100. Tap to see your history.`,
+        title,
+        body: `Your driving score for ${rangeLabel} is ${score}/100.${rankBit}${nudge} Tap to see your history.`,
         url: "/my-van-scores.html", tag: "van-score"
       }).catch(() => {}));
     }
