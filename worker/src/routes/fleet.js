@@ -1676,7 +1676,8 @@ export async function handle(request, env, ctx, url, sess) {
     try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
     const b = await readJson(request);
     const rows = Array.isArray(b.rows) ? b.rows : [];
-    if (!rows.length) return jr({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty" }, headers);
+    const dryRun = !!b.dryRun;
+    if (!rows.length) return jr({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty", dryRun, preview: [] }, headers);
     // Ask SiteLog what it knows for the covered days so we don't double-cost a
     // (user, site, date) that SiteLog has authoritatively captured.
     const dates = new Set(rows.map(r => String(r.date || "").slice(0, 10)).filter(Boolean));
@@ -1698,16 +1699,38 @@ export async function handle(request, env, ctx, url, sess) {
         }
       } catch {}
     }
+    // Look up each user's hourly rate so the preview can show £ before we
+    // write. Real writes don't need it (costing computes £ on read); the
+    // preview does so the office sees "3h × £20 = £60" per driver-site-day.
+    const rates = {};
+    try {
+      const cfg = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("engts:cfg:" + tid).first();
+      const parsed = cfg && cfg.value ? JSON.parse(cfg.value) : { byUser: {} };
+      const byUser = parsed.byUser || {};
+      const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of results || []) {
+        let profile = {}; try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+        const mine = byUser[u.username] || {};
+        const rate = Number(mine.rate) || Number(profile.hourlyRate) || null;
+        if (rate) rates[u.username] = rate;
+      }
+    } catch {}
     // Wipe our previous tracker inserts for (user, date) — idempotent replace.
-    for (const d of dates) {
-      for (const u of users) {
-        try {
-          await env.DB.prepare(
-            "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
-          ).bind(tid, u, "tracker:%", d).run();
-        } catch {}
+    // Skipped in dryRun so a preview never touches the DB.
+    if (!dryRun) {
+      for (const d of dates) {
+        for (const u of users) {
+          try {
+            await env.DB.prepare(
+              "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
+            ).bind(tid, u, "tracker:%", d).run();
+          } catch {}
+        }
       }
     }
+    // Aggregate the rows for a compact preview: one entry per (user, site, day)
+    // with total on-site minutes + travel minutes + a matching £ figure.
+    const bucket = new Map();   // key -> { username, siteName, siteKey, postcode, date, onsiteMins, travelMins }
     let wrote = 0, skippedSL = 0;
     let seq = 0;
     for (const r of rows) {
@@ -1717,12 +1740,23 @@ export async function handle(request, env, ctx, url, sess) {
       const kind = r.kind === "travel" ? "travel" : "onsite";
       const siteName = String(r.siteName || "").trim();
       const siteKey = normSite(r.siteCode || siteName);
+      const mins = Math.max(0, Math.round((Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 60000));
+      if (!mins) continue;
       // SiteLog dedupe — skip on-site tracker time when SiteLog already covers
       // this (user, site, day). Travel is never in SiteLog, so travel always goes in.
+      let skipped = false;
       if (kind === "onsite" && siteKey) {
         const key = username.toLowerCase() + "::" + siteKey + "::" + date;
-        if (slCover.has(key)) { skippedSL++; continue; }
+        if (slCover.has(key)) { skippedSL++; skipped = true; }
       }
+      // Preview aggregate (unconditional — we want to show what SiteLog is
+      // covering too so it's visible, not silent).
+      const bKey = username + "|" + siteKey + "|" + date;
+      let b = bucket.get(bKey);
+      if (!b) { b = { username, siteName, siteKey, postcode: String(r.postcode || ""), date, onsiteMins: 0, travelMins: 0, skippedOnsiteMins: 0 }; bucket.set(bKey, b); }
+      if (kind === "onsite") { if (skipped) b.skippedOnsiteMins += mins; else b.onsiteMins += mins; }
+      else b.travelMins += mins;
+      if (skipped || dryRun) continue;
       seq++;
       const jobId = "tracker:" + username + ":" + date + ":" + (siteKey || "unknown") + ":" + kind + ":" + seq;
       try {
@@ -1732,7 +1766,18 @@ export async function handle(request, env, ctx, url, sess) {
         wrote++;
       } catch {}
     }
-    return jr({ ok: true, wrote, skippedSitelog: skippedSL }, headers);
+    // Preview array with £ figures attached (uses each user's rate).
+    const preview = Array.from(bucket.values()).map(b => {
+      const rate = rates[b.username] || 0;
+      const hoursCosted = (b.onsiteMins + b.travelMins) / 60;   // skipped on-site is NOT costed
+      const cost = Math.round(hoursCosted * rate * 100) / 100;
+      return {
+        username: b.username, siteName: b.siteName, siteKey: b.siteKey, postcode: b.postcode, date: b.date,
+        onsiteMins: b.onsiteMins, travelMins: b.travelMins, skippedOnsiteMins: b.skippedOnsiteMins,
+        rate, cost,
+      };
+    }).sort((a, b) => (a.username + a.date + a.siteName).localeCompare(b.username + b.date + b.siteName));
+    return jr({ ok: true, wrote, skippedSitelog: skippedSL, dryRun, preview }, headers);
   }
 
   return jr({ error: "Not found: " + sub }, headers, 404);

@@ -18465,7 +18465,8 @@ async function handle22(request, env, ctx, url, sess) {
     }
     const b = await readJson4(request);
     const rows = Array.isArray(b.rows) ? b.rows : [];
-    if (!rows.length) return jr3({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty" }, headers);
+    const dryRun = !!b.dryRun;
+    if (!rows.length) return jr3({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty", dryRun, preview: [] }, headers);
     const dates = new Set(rows.map((r) => String(r.date || "").slice(0, 10)).filter(Boolean));
     const users = new Set(rows.map((r) => String(r.username || "").trim().toLowerCase()).filter(Boolean));
     const slCover = /* @__PURE__ */ new Set();
@@ -18485,16 +18486,37 @@ async function handle22(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    for (const d of dates) {
-      for (const u of users) {
+    const rates = {};
+    try {
+      const cfg = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("engts:cfg:" + tid).first();
+      const parsed = cfg && cfg.value ? JSON.parse(cfg.value) : { byUser: {} };
+      const byUser = parsed.byUser || {};
+      const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of results || []) {
+        let profile = {};
         try {
-          await env.DB.prepare(
-            "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
-          ).bind(tid, u, "tracker:%", d).run();
+          profile = u.profile ? JSON.parse(u.profile) : {};
         } catch {
+        }
+        const mine = byUser[u.username] || {};
+        const rate = Number(mine.rate) || Number(profile.hourlyRate) || null;
+        if (rate) rates[u.username] = rate;
+      }
+    } catch {
+    }
+    if (!dryRun) {
+      for (const d of dates) {
+        for (const u of users) {
+          try {
+            await env.DB.prepare(
+              "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
+            ).bind(tid, u, "tracker:%", d).run();
+          } catch {
+          }
         }
       }
     }
+    const bucket = /* @__PURE__ */ new Map();
     let wrote = 0, skippedSL = 0;
     let seq = 0;
     for (const r of rows) {
@@ -18504,13 +18526,27 @@ async function handle22(request, env, ctx, url, sess) {
       const kind = r.kind === "travel" ? "travel" : "onsite";
       const siteName = String(r.siteName || "").trim();
       const siteKey = normSite(r.siteCode || siteName);
+      const mins = Math.max(0, Math.round((Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 6e4));
+      if (!mins) continue;
+      let skipped = false;
       if (kind === "onsite" && siteKey) {
         const key = username.toLowerCase() + "::" + siteKey + "::" + date;
         if (slCover.has(key)) {
           skippedSL++;
-          continue;
+          skipped = true;
         }
       }
+      const bKey = username + "|" + siteKey + "|" + date;
+      let b2 = bucket.get(bKey);
+      if (!b2) {
+        b2 = { username, siteName, siteKey, postcode: String(r.postcode || ""), date, onsiteMins: 0, travelMins: 0, skippedOnsiteMins: 0 };
+        bucket.set(bKey, b2);
+      }
+      if (kind === "onsite") {
+        if (skipped) b2.skippedOnsiteMins += mins;
+        else b2.onsiteMins += mins;
+      } else b2.travelMins += mins;
+      if (skipped || dryRun) continue;
       seq++;
       const jobId = "tracker:" + username + ":" + date + ":" + (siteKey || "unknown") + ":" + kind + ":" + seq;
       try {
@@ -18521,7 +18557,24 @@ async function handle22(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    return jr3({ ok: true, wrote, skippedSitelog: skippedSL }, headers);
+    const preview = Array.from(bucket.values()).map((b2) => {
+      const rate = rates[b2.username] || 0;
+      const hoursCosted = (b2.onsiteMins + b2.travelMins) / 60;
+      const cost = Math.round(hoursCosted * rate * 100) / 100;
+      return {
+        username: b2.username,
+        siteName: b2.siteName,
+        siteKey: b2.siteKey,
+        postcode: b2.postcode,
+        date: b2.date,
+        onsiteMins: b2.onsiteMins,
+        travelMins: b2.travelMins,
+        skippedOnsiteMins: b2.skippedOnsiteMins,
+        rate,
+        cost
+      };
+    }).sort((a, b2) => (a.username + a.date + a.siteName).localeCompare(b2.username + b2.date + b2.siteName));
+    return jr3({ ok: true, wrote, skippedSitelog: skippedSL, dryRun, preview }, headers);
   }
   return jr3({ error: "Not found: " + sub }, headers, 404);
 }

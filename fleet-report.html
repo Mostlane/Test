@@ -704,18 +704,79 @@ function buildTrackerRows(R){
   }
   return out;
 }
-async function autoTrackerReconcile(R){
+async function autoTrackerReconcile(R, dryRun){
   if(!R) return { ok:false, wrote:0 };
   try{
     await loadTrackerSites();
     const rows = buildTrackerRows(R);
-    if(!rows.length) return { ok:true, wrote:0 };
+    if(!rows.length) return { ok:true, wrote:0, preview:[], rowCount:0 };
     const r = await authFetch("/fleet/tracker-reconcile", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ rows })
+      body: JSON.stringify({ rows, dryRun: !!dryRun })
     }).then(r=>r.json());
+    if(r) r.rowCount = rows.length;
     return r || { ok:false };
   }catch(e){ return { ok:false, error:e.message }; }
+}
+// Render the tracker preview as a table under the report — shown before we
+// apply, with an "Apply to job costing" button. Every driver x site x day
+// gets one row: on-site minutes + travel minutes + £ at the driver's rate.
+// Skipped rows (SiteLog already covers) show muted so nothing is silent.
+function renderTrackerPreview(p, host){
+  const hmm = m => { m=Math.max(0,Math.round(m||0)); const h=Math.floor(m/60), r=m%60; return (h?h+"h ":"")+(r||!h?r+"m":""); };
+  const money = n => "£"+(Math.round((n||0)*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const totCost = (p||[]).reduce((a,x)=>a+(x.cost||0),0);
+  const totOn = (p||[]).reduce((a,x)=>a+(x.onsiteMins||0),0);
+  const totTr = (p||[]).reduce((a,x)=>a+(x.travelMins||0),0);
+  host.innerHTML = `
+    <div style="margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <b style="font-size:15px">🚐 Tracker → job costing — preview</b>
+        <span style="font-size:12.5px;color:#334155">${(p||[]).length} entries · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
+      </div>
+      <div style="max-height:38vh;overflow:auto;border:1px solid #cdddf5;border-radius:8px;background:#fff">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead style="background:#f1f5f9;position:sticky;top:0">
+            <tr><th style="text-align:left;padding:6px 8px">Driver</th><th style="text-align:left;padding:6px 8px">Date</th><th style="text-align:left;padding:6px 8px">Site</th><th style="padding:6px 8px">On-site</th><th style="padding:6px 8px">Travel</th><th style="padding:6px 8px">Rate</th><th style="padding:6px 8px">Cost</th></tr>
+          </thead>
+          <tbody>
+          ${(p||[]).map(x => {
+            const dedup = x.skippedOnsiteMins>0 ? `<div style="color:#94a3b8;font-size:11px">− ${hmm(x.skippedOnsiteMins)} covered by SiteLog</div>` : "";
+            return `<tr style="border-top:1px solid #eef">
+              <td style="padding:6px 8px">${esc(x.username)}</td>
+              <td style="padding:6px 8px">${esc(x.date)}</td>
+              <td style="padding:6px 8px">${esc(x.siteName||"(unmatched)")}${dedup}</td>
+              <td style="padding:6px 8px;text-align:right">${hmm(x.onsiteMins)}</td>
+              <td style="padding:6px 8px;text-align:right">${hmm(x.travelMins)}</td>
+              <td style="padding:6px 8px;text-align:right">${x.rate?("£"+x.rate):"—"}</td>
+              <td style="padding:6px 8px;text-align:right;font-weight:700">${money(x.cost)}</td>
+            </tr>`;
+          }).join("")}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
+        <button id="applyTrackerBtn" style="background:#0a7d33;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font:inherit">✓ Apply to job costing</button>
+        <button id="reRunTrackerBtn" style="background:#e2e8f0;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit">🔄 Re-check</button>
+        <span id="trackerApplyMsg" style="font-size:13px;color:#334155"></span>
+      </div>
+    </div>`;
+  host.querySelector("#applyTrackerBtn").onclick = async (e) => {
+    e.target.disabled=true;
+    host.querySelector("#trackerApplyMsg").textContent = "Applying…";
+    const R = window.__reportData;
+    const r = await autoTrackerReconcile(R, false);
+    host.querySelector("#trackerApplyMsg").innerHTML = r && r.ok
+      ? "✓ Written to job costing — " + (r.wrote||0) + " segment"+((r.wrote||0)===1?"":"s")+((r.skippedSitelog||0)>0?" · "+r.skippedSitelog+" skipped (SiteLog covered)":"")+"."
+      : "❌ Apply failed — " + ((r&&r.error)||"see console");
+  };
+  host.querySelector("#reRunTrackerBtn").onclick = async (e) => {
+    e.target.disabled=true;
+    host.querySelector("#trackerApplyMsg").textContent = "Re-checking…";
+    const R = window.__reportData;
+    const r = await autoTrackerReconcile(R, true);
+    if(r && r.ok) renderTrackerPreview(r.preview||[], host);
+  };
 }
 
 /* ═══ Confirm & save timesheets modal ══════════════════════════════════════
@@ -1073,22 +1134,27 @@ async function generate(){
     $("genPane").style.display="none";
     window.scrollTo(0,0);
     saveReport({auto:true});   // every generated report saves to the portal automatically
-    // Auto-fold the van tracker's on-site + travel time into job costing.
-    // Fires alongside the save so /costing/summary reflects it straight away
-    // for every site card + project P&L. No job need be allocated — the
-    // driver's time is attributed to the SITE they visited. Deduped against
-    // SiteLog on the server so a scanned visit isn't counted twice.
+    // Auto-run a DRY RUN of the tracker→job-costing reconciler and show a
+    // preview panel at the top of the report. Nothing is written yet. The
+    // panel has an "Apply to job costing" button so the office can eyeball
+    // the matched sites, hours + £ before it commits. This addresses the
+    // "let me see what would happen first" ask — full audit before any DB write.
     (async () => {
       try {
         const R = window.__reportData;
-        const r = await autoTrackerReconcile(R);
-        const badge = document.createElement("div");
-        badge.style.cssText = "margin:10px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px";
-        badge.innerHTML = r && r.ok
-          ? ("🚐 <b>Tracker time auto-costed:</b> " + (r.wrote||0) + " segment"+((r.wrote||0)===1?"":"s")+" written"+((r.skippedSitelog||0)>0?" · "+r.skippedSitelog+" skipped (SiteLog already covers)":"")+".")
-          : ("🚐 <span style=\"color:#78350f\">Tracker auto-cost skipped — "+((r&&r.error)||"see console")+"</span>");
+        const r = await autoTrackerReconcile(R, true);   // dryRun
         const host = document.getElementById("report") || document.body;
-        host.insertBefore(badge, host.firstChild);
+        const wrap = document.createElement("div");
+        host.insertBefore(wrap, host.firstChild);
+        if (!r || !r.ok) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost preview skipped — '+((r&&r.error)||"unknown")+'</div>';
+          return;
+        }
+        if (!(r.preview||[]).length) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: no matched sites this week — nothing to write.</div>';
+          return;
+        }
+        renderTrackerPreview(r.preview, wrap);
       } catch (e) {}
     })();
     if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
