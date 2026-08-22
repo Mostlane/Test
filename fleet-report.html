@@ -603,7 +603,7 @@ window.downloadReport=downloadReport;
    card AND every project P&L — no job need be allocated. Runs on every
    report generation. Idempotent: a re-run replaces its own prior writes.
    ══════════════════════════════════════════════════════════════════════ */
-let TRACKER_SITES=null, TRACKER_ALIASES=null;
+let TRACKER_SITES=null, TRACKER_ALIASES=null, TRACKER_ALL=[];
 async function loadTrackerSites(){
   if(TRACKER_SITES) return TRACKER_SITES;
   const out={ byPostcode:{}, byNum:{}, byName:[], byAddr:[] };
@@ -613,6 +613,8 @@ async function loadTrackerSites(){
       const name = String(s.siteName||"").trim();
       const num  = String(s.siteNumber||"").trim();
       const pc   = String(s.postcode||"").replace(/\*+$/,"").trim().toUpperCase();
+      const client = String(s.client||"").trim();
+      const address = [s.address1, s.street, s.town, s.county, s.address].filter(Boolean).join(", ");
       if(pc) (out.byPostcode[pc.replace(/\s+/g,"")] = out.byPostcode[pc.replace(/\s+/g,"")] || []).push({name,num,postcode:pc});
       if(num) out.byNum[num.toLowerCase()] = {name,num,postcode:pc};
       if(name) out.byName.push({lc:name.toLowerCase(),name,num,postcode:pc});
@@ -625,6 +627,12 @@ async function loadTrackerSites(){
         const t=String(raw).toLowerCase().trim();
         if(t && t.length>=5) out.byAddr.push({lc:t,name,num,postcode:pc});
       }
+      // Full list for the pin typeahead — every site once, with search text.
+      if(num || name) TRACKER_ALL.push({
+        name, num, postcode: pc, client, address,
+        searchLC: (name+" "+num+" "+pc+" "+address+" "+client).toLowerCase(),
+        isProject: /^p\d/i.test(num) || client === "projects",
+      });
     }
     // Longest first so "5 woodlands close" beats "close".
     out.byName.sort((a,b)=>b.lc.length-a.lc.length);
@@ -772,14 +780,44 @@ function renderTrackerPreview(p, host, unmatched){
   const totCost = (p||[]).reduce((a,x)=>a+(x.cost||0),0);
   const totOn = (p||[]).reduce((a,x)=>a+(x.onsiteMins||0),0);
   const totTr = (p||[]).reduce((a,x)=>a+(x.travelMins||0),0);
-  // Build a full <option> list of every portal site for the pin dropdown.
-  const optHtml = (() => {
-    const opts = ['<option value="">— pin to site… —</option>'];
-    const seen = new Set();
-    const push = (num, name) => { if(!num||seen.has(num)) return; seen.add(num); opts.push('<option value="'+esc(num)+'">'+esc(name)+' · '+esc(num)+'</option>'); };
-    (TRACKER_SITES?.byName||[]).forEach(s => push(s.num, s.name));
-    return opts.join('');
-  })();
+  // Rank sites by how likely they match a specific tracker "to" text — near
+  // ones surface first, projects always show, alphabetical fallback. Words
+  // in common with the text (≥4 chars) score highest. Postcode area
+  // (e.g. "SO31") in the text scores a bit lower.
+  function suggestFor(txt, limit){
+    if(!TRACKER_ALL.length) return [];
+    const t = String(txt||"").toLowerCase();
+    const words = (t.match(/[a-z0-9]{4,}/g) || []).filter((w,i,a)=>a.indexOf(w)===i);
+    const pcArea = (String(txt||"").toUpperCase().match(/\b[A-Z]{1,2}\d{1,2}\b/)||[])[0]||"";
+    const scored = TRACKER_ALL.map(s => {
+      let score = 0;
+      const sLC = s.searchLC;
+      for(const w of words){ if(sLC.indexOf(w)>=0) score += 3; }
+      if(pcArea && s.postcode && s.postcode.replace(/\s+/g,"").startsWith(pcArea)) score += 2;
+      if(s.isProject) score += 1;   // surface projects slightly (Steve-case)
+      return { s, score };
+    });
+    scored.sort((a,b) => b.score - a.score || a.s.name.localeCompare(b.s.name));
+    return scored.slice(0, limit||15).map(x=>x.s);
+  }
+  // Renders one pin control: a search box + a live suggestions dropdown.
+  // Default suggestions = suggestFor(trip text). Typing filters ALL sites.
+  function pinControlHtml(uText){
+    const initial = suggestFor(uText, 12);
+    const initHtml = initial.map((s,i)=>pinItemHtml(s,i===0)).join('');
+    return `<div class="pin-wrap" style="position:relative">
+      <input type="search" class="pin-search" data-pin-text="${esc(uText)}" placeholder="🔍 Search sites…" style="width:100%;padding:5px 8px;border:1px solid #fed7aa;border-radius:6px;font:inherit">
+      <div class="pin-list" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #fed7aa;border-top:none;border-radius:0 0 8px 8px;max-height:220px;overflow:auto;z-index:20;display:none;box-shadow:0 6px 14px rgba(0,0,0,.08)">${initHtml}</div>
+    </div>`;
+  }
+  function pinItemHtml(s){
+    const tag = s.isProject ? '<span style="background:#e0e7ff;color:#3730a3;font-size:10.5px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:4px">PROJECT</span>' : '';
+    const meta = [s.num, s.postcode].filter(Boolean).join(" · ");
+    return `<div class="pin-item" data-num="${esc(s.num)}" data-label="${esc(s.name+' · '+s.num)}" style="padding:6px 10px;cursor:pointer;border-top:1px solid #fdf1e1;font-size:13px">
+      <div><b>${esc(s.name||"(no name)")}</b>${tag}</div>
+      <div style="color:#94a3b8;font-size:11.5px">${esc(meta)}${s.address?" · "+esc(s.address.slice(0,60)):""}</div>
+    </div>`;
+  }
   host.innerHTML = `
     <div style="margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
@@ -825,7 +863,7 @@ function renderTrackerPreview(p, host, unmatched){
                   <td style="padding:6px 8px;color:#9a3412"><b>${esc(u.text)}</b><div style="color:#94a3b8;font-size:11px">${u.occurrences||0} stop${u.occurrences===1?'':'s'}</div></td>
                   <td style="padding:6px 8px;text-align:right;color:#9a3412;font-weight:700">${hmm(u.totalMins)}</td>
                   <td style="padding:6px 8px;color:#334155">${esc(drivers)}</td>
-                  <td style="padding:6px 8px"><select data-pin-text="${esc(u.text)}" style="padding:5px 6px;border:1px solid #fed7aa;border-radius:6px;font:inherit;max-width:220px">${optHtml}</select></td>
+                  <td style="padding:6px 8px;overflow:visible">${pinControlHtml(u.text)}</td>
                 </tr>`;
               }).join('')}
               </tbody>
@@ -838,39 +876,52 @@ function renderTrackerPreview(p, host, unmatched){
         <span id="trackerApplyMsg" style="font-size:13px;color:#334155"></span>
       </div>
     </div>`;
-  // Wire the pin dropdowns → save an alias via /sites/register/merge, then
-  // auto-re-check so the newly-pinned rows move to the matched table.
-  host.querySelectorAll("select[data-pin-text]").forEach(sel => {
-    sel.onchange = async () => {
-      const text = sel.getAttribute("data-pin-text");
-      const num = sel.value;
-      if(!text || !num) return;
-      sel.disabled = true;
+  // Wire the pin search boxes: focus opens, typing refilters, click on a
+  // suggestion pins that text → site and re-checks. Clicking outside closes.
+  host.querySelectorAll(".pin-wrap").forEach(wrap => {
+    const input = wrap.querySelector(".pin-search");
+    const list = wrap.querySelector(".pin-list");
+    const text = input.getAttribute("data-pin-text") || "";
+    const showList = () => { list.style.display = "block"; };
+    const hideList = () => { list.style.display = "none"; };
+    input.addEventListener("focus", showList);
+    input.addEventListener("input", () => {
+      const q = (input.value || "").toLowerCase().trim();
+      // Empty search → the trip-text relevance list; typing → full-site filter.
+      const src = q ? TRACKER_ALL.filter(s => s.searchLC.indexOf(q) >= 0) : suggestFor(text, 12);
+      // Cap to 40 when searching so long lists stay usable.
+      list.innerHTML = src.slice(0, q ? 40 : 12).map(s => pinItemHtml(s)).join("") ||
+        '<div style="padding:8px 10px;color:#94a3b8;font-size:12.5px">No sites match.</div>';
+      showList();
+    });
+    document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) hideList(); });
+    list.addEventListener("click", async (e) => {
+      const it = e.target.closest(".pin-item"); if(!it) return;
+      const num = it.getAttribute("data-num"); const label = it.getAttribute("data-label");
+      if(!num) return;
+      hideList();
+      input.value = label;
+      input.disabled = true;
       const msg = host.querySelector("#trackerApplyMsg");
-      if(msg) msg.textContent = "Pinning “"+text+"” to site "+num+"…";
+      if(msg) msg.textContent = "Pinning “"+text+"” to "+label+"…";
       try {
-        // /sites/register/merge accepts { alias, client, siteNumber }. Try any
-        // client — the server matches by number regardless (aliases are
-        // globally keyed by normName(alias)).
-        // We need a client — use the site's own client from TRACKER_SITES.
-        const site = (TRACKER_SITES.byName||[]).find(s=>String(s.num)===String(num));
-        const client = "projects";   // fallback — merge lookup uses siteNumber, client hint only
+        const site = TRACKER_ALL.find(s => String(s.num) === String(num));
+        const client = (site && site.client) || "projects";
         await authFetch("/sites/register/merge", {
           method:"POST", headers:{"Content-Type":"application/json"},
           body: JSON.stringify({ alias: text, client, siteNumber: num })
         });
-        // Update our local alias cache so the same-tab re-check picks it up.
+        // Update the local alias cache so this-tab re-check picks it up.
         if(TRACKER_ALIASES) TRACKER_ALIASES[trkNorm(text)] = { client, siteNumber: num };
         if(msg) msg.textContent = "✓ Pinned — re-checking…";
-        // Auto re-run.
         const R = window.__reportData;
         const r = await autoTrackerReconcile(R, true);
         if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[]);
-      } catch(e){
-        sel.disabled = false;
-        if(msg) msg.textContent = "Pin failed — "+e.message;
+      } catch(err){
+        input.disabled = false;
+        if(msg) msg.textContent = "Pin failed — "+err.message;
       }
-    };
+    });
   });
   host.querySelector("#applyTrackerBtn").onclick = async (e) => {
     e.target.disabled=true;
