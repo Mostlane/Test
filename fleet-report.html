@@ -618,14 +618,15 @@ async function loadTrackerSites(){
       if(pc) (out.byPostcode[pc.replace(/\s+/g,"")] = out.byPostcode[pc.replace(/\s+/g,"")] || []).push({name,num,postcode:pc});
       if(num) out.byNum[num.toLowerCase()] = {name,num,postcode:pc};
       if(name) out.byName.push({lc:name.toLowerCase(),name,num,postcode:pc});
-      // Match by address-line words: many tracker "to" strings are place names
-      // (e.g. "5 Woodlands Close, Sarisbury Green") — a site's saved address1 /
-      // town / street will contain those exact strings. This catches project
-      // sites the name-only match misses.
-      const bits = [s.address1, s.street, s.town, s.county, s.address].filter(Boolean);
+      // Match by address-line words. STRICT: only specific street lines —
+      // NOT town/county/full-address — because "Titchfield" or "Whiteley"
+      // would false-match every Co-op / Chapplins site in the same town and
+      // silently overwrite the correct project. Min 12 chars so short
+      // generic streets ("High St", "The Street") don't over-match either.
+      const bits = [s.address1, s.street].filter(Boolean);
       for(const raw of bits){
         const t=String(raw).toLowerCase().trim();
-        if(t && t.length>=5) out.byAddr.push({lc:t,name,num,postcode:pc});
+        if(t && t.length>=12) out.byAddr.push({lc:t,name,num,postcode:pc,isProject:/^p\d/i.test(String(num))||String(s.client||"").toLowerCase()==="projects"});
       }
       // Full list for the pin typeahead — every site once, with search text.
       if(num || name) TRACKER_ALL.push({
@@ -658,8 +659,12 @@ function trackerMatchSite(txt){
   const raw = String(txt).trim(); if(!raw) return null;
   const up = raw.toUpperCase();
   const lc = raw.toLowerCase();
-  // 1. Remembered pin — the office previously said "this text = this site".
-  //    Alias key = normName(text), value = { client, siteNumber }.
+  const isProj = s => /^p\d/i.test(String(s.num||""));
+  // Prefer a project site when several candidates share the same signal —
+  // engineers are typically on projects for weeks so a project hit is more
+  // likely correct than a retail/private site sharing the same town/postcode.
+  const preferProject = arr => arr.length ? (arr.find(isProj) || arr[0]) : null;
+  // 1. Remembered pin — the office (or AI) previously said "this text = this site".
   if(TRACKER_ALIASES){
     const nk = trkNorm(raw);
     const tgt = TRACKER_ALIASES[nk];
@@ -668,15 +673,17 @@ function trackerMatchSite(txt){
       if(hit) return hit;
     }
   }
-  // 2. Full UK postcode inside the text — most reliable.
+  // 2. Full UK postcode — the only signal strong enough to auto-attribute.
+  //    Project sites at the same postcode win over other sites.
   const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
   if(pcm){
     const key = pcm[0].replace(/\s+/g,"");
     const hits = TRACKER_SITES.byPostcode[key];
-    if(hits && hits.length) return hits[0];
+    if(hits && hits.length) return preferProject(hits);
   }
-  // 3. Site number token — 4-digit or Pxxxx.
-  const numM = raw.match(/\bP?\d{3,5}\b/i);
+  // 3. Site number token — Pxxxx or a bare 4-digit that appears as its own
+  //    word. This is a strong signal.
+  const numM = raw.match(/\bP\d{3,5}\b|\b\d{4}\b/i);
   if(numM){
     const k = numM[0].toLowerCase();
     if(TRACKER_SITES.byNum[k]) return TRACKER_SITES.byNum[k];
@@ -685,16 +692,23 @@ function trackerMatchSite(txt){
     const padded = ("0000"+k).slice(-4);
     if(TRACKER_SITES.byNum[padded]) return TRACKER_SITES.byNum[padded];
   }
-  // 4. Substring site-name match — longest first.
+  // 4. Site NAME substring — only accept when the site name is ≥ 10 chars
+  //    (short generic names like "Bristol" would over-match otherwise).
+  //    Collect all hits and prefer a project when several match.
+  const nameHits = [];
   for(const s of TRACKER_SITES.byName){
-    if(s.lc && s.lc.length>=6 && lc.indexOf(s.lc)>=0) return s;
+    if(s.lc && s.lc.length>=10 && lc.indexOf(s.lc)>=0) nameHits.push(s);
   }
-  // 5. Substring address-line match (address1 / street / town from the site's
-  //    saved data). Catches project sites whose name doesn't appear in the
-  //    tracker text but whose street or village does.
+  if(nameHits.length) return preferProject(nameHits);
+  // 5. STRICT address-line match — only specific streets (address1 / street),
+  //    min 12 chars — NEVER town or county. Collect all candidates and prefer
+  //    a project when several match. This is the fix for Steve's project
+  //    losing out to a Co-op / Chapplins in the same town.
+  const addrHits = [];
   for(const s of TRACKER_SITES.byAddr){
-    if(s.lc && s.lc.length>=5 && lc.indexOf(s.lc)>=0) return s;
+    if(s.lc && s.lc.length>=12 && lc.indexOf(s.lc)>=0) addrHits.push(s);
   }
+  if(addrHits.length) return preferProject(addrHits);
   return null;
 }
 // Home strings for a vehicle (crude match — same pattern classifyDay uses).
@@ -878,10 +892,11 @@ function renderTrackerPreview(p, host, unmatched, opts){
           <tbody>
           ${((p||[]).length?p:[]).map(x => {
             const dedup = x.skippedOnsiteMins>0 ? `<div style="color:#94a3b8;font-size:11px">− ${hmm(x.skippedOnsiteMins)} covered by SiteLog</div>` : "";
+            const wrongBtn = `<button title="Wrong site? Click to reject this attribution and unlearn any pin for future reports." data-wrong-site="${esc(x.siteCode||'')}" data-wrong-user="${esc(x.username)}" data-wrong-date="${esc(x.date)}" style="background:none;border:none;color:#b91c1c;cursor:pointer;padding:0 4px;font-size:11.5px" >✕ wrong</button>`;
             return `<tr style="border-top:1px solid #eef">
               <td style="padding:6px 8px">${esc(x.username)}</td>
               <td style="padding:6px 8px">${esc(x.date)}</td>
-              <td style="padding:6px 8px">${esc(x.siteName||"(unmatched)")}${dedup}</td>
+              <td style="padding:6px 8px">${esc(x.siteName||"(unmatched)")}${dedup} ${wrongBtn}</td>
               <td style="padding:6px 8px;text-align:right">${hmm(x.onsiteMins)}</td>
               <td style="padding:6px 8px;text-align:right">${hmm(x.travelMins)}</td>
               <td style="padding:6px 8px;text-align:right">${x.rate?("£"+x.rate):"—"}</td>
@@ -969,6 +984,31 @@ function renderTrackerPreview(p, host, unmatched, opts){
         if(msg) msg.textContent = "Pin failed — "+err.message;
       }
     });
+  });
+  // "✕ wrong" — the row was pinned to a site the office says is incorrect.
+  // Prompt for the trip text (defaults to the site name they see) and
+  // un-pin the alias for it so future reports won't repeat the mistake.
+  host.querySelectorAll("[data-wrong-site]").forEach(btn => {
+    btn.onclick = async () => {
+      const label = btn.closest("tr")?.children[2]?.innerText || "";
+      const guess = String(label).replace(/− .*|✕.*|from project|from compliance chart/gi, "").trim();
+      const text = prompt("Which tracker 'to' text mapped here wrongly?\n\n(Type the exact text as it appears in the trip table, or leave blank to just record the site as wrong.)", guess);
+      if(text === null) return;
+      const t = String(text||"").trim(); if(!t){ alert("Cancelled — nothing changed."); return; }
+      try{
+        await authFetch("/sites/register/unmerge", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ alias: t })
+        });
+        // Wipe local alias cache so this-tab re-check picks up the un-pin.
+        if(TRACKER_ALIASES) delete TRACKER_ALIASES[trkNorm(t)];
+        const msg = host.querySelector("#trackerApplyMsg");
+        if(msg) msg.textContent = "✓ Un-pinned “"+t+"” — re-checking…";
+        const R = window.__reportData;
+        const r = await autoTrackerReconcile(R, true);
+        if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[], {});
+      }catch(e){ alert("Un-pin failed — "+e.message); }
+    };
   });
   host.querySelector("#applyTrackerBtn").onclick = async (e) => {
     e.target.disabled=true;

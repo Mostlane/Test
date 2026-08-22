@@ -18499,7 +18499,7 @@ async function handle22(request, env, ctx, url, sess) {
             properties: {
               text: { type: "string", description: "The tracker 'to' text exactly as given." },
               siteNumber: { type: "string", description: "The site number you're pinning it to." },
-              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.75 will be applied." },
+              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.9 will be applied. Prefer to omit rather than guess." },
               reason: { type: "string" }
             },
             required: ["text", "siteNumber", "confidence"]
@@ -18513,7 +18513,7 @@ async function handle22(request, env, ctx, url, sess) {
             properties: {
               vanKey: { type: "string", description: "The van|date key exactly as given." },
               username: { type: "string", description: "The driver's portal username." },
-              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.75 will be applied." },
+              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.9 will be applied. Prefer to omit rather than guess." },
               reason: { type: "string" }
             },
             required: ["vanKey", "username", "confidence"]
@@ -18522,7 +18522,20 @@ async function handle22(request, env, ctx, url, sess) {
       },
       required: ["siteAliases", "poolDrivers"]
     };
-    const system = "You are helping match van tracker text to a UK field-service company's portal. Rules: (1) Only return matches you're >=75% confident about. (2) For siteAliases: prefer a match on postcode > site name > address street/town. Project sites (isProject:true) are often the right answer for repeat stops at unfamiliar text. (3) For poolDrivers: match the trip origin/destination to a driver's home postcode area (e.g. text 'Whiteley, PO15 7LJ' matches homePostcode 'PO15 7LJ' or the same PO15 area). Never guess; empty output is fine when unsure.";
+    const system = [
+      "You are helping match van tracker text to a UK field-service company's portal.",
+      "ACCURACY OVER RECALL \u2014 a wrong pin is much worse than no pin. When several sites plausibly fit, DO NOT GUESS: omit.",
+      "Only return an entry with confidence >= 0.9. Below that, LEAVE IT OUT.",
+      "Rules for siteAliases:",
+      " (a) An EXACT full-postcode match in the trip text against a site's postcode is the ONLY signal strong enough to auto-attribute alone (confidence 0.95+).",
+      " (b) Address-line match (specific STREET NAME 12+ chars) with a project site is strong (0.9). With a NON-PROJECT site sharing the same town it's weak \u2014 skip.",
+      " (c) A TOWN name alone (e.g. 'Whiteley', 'Titchfield', 'Sarisbury Green', 'Verwood') is NEVER enough \u2014 many sites share a town. Never pin on town alone.",
+      " (d) Prefer PROJECT sites (isProject prefix P) over other clients when the tracker text is close to project territory \u2014 engineers spend weeks on a project, so a project match is usually correct.",
+      " (e) NEVER pick a Southern Co-op, Chapplins, ELS, Cobra, Wenzel's site unless the tracker text unambiguously names it (site number OR full site name).",
+      "Rules for poolDrivers:",
+      " Match the trip origin/destination to a driver's home postcode area (e.g. 'Whiteley, PO15 7LJ' matches homePostcode PO15 7LJ or the same PO15 area). Only if a single driver's home is a clear match.",
+      "When unsure \u2014 output empty."
+    ].join(" ");
     const compactSites = sites.slice(0, 400).map((s) => (s.isProject ? "P" : "S") + " " + s.num + " | " + s.name + (s.postcode ? " | " + s.postcode : "") + (s.address ? " | " + s.address : ""));
     const compactDrivers = drivers.slice(0, 120).map((d) => d.username + " | " + d.name + (d.homePostcode ? " | " + d.homePostcode : ""));
     const compactUnmatched = unmatched.map((u) => "TEXT: " + (u.text || "") + "  (" + (u.occurrences || 0) + " stops, " + (u.totalMins || 0) + " min total)");
@@ -18569,7 +18582,7 @@ async function handle22(request, env, ctx, url, sess) {
       const norm = (s) => String(s || "").toLowerCase().replace(/['’`]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
       for (const a of out.siteAliases) {
         if (!a || !a.text || !a.siteNumber) continue;
-        if (Number(a.confidence) < 0.75) continue;
+        if (Number(a.confidence) < 0.9) continue;
         if (!validNums.has(String(a.siteNumber))) continue;
         const site = sites.find((s) => String(s.num) === String(a.siteNumber));
         cur[norm(a.text)] = { client: site && site.client || "", siteNumber: String(a.siteNumber), label: String(a.text).slice(0, 200), aiConfidence: a.confidence, aiReason: a.reason || "" };
@@ -18583,15 +18596,15 @@ async function handle22(request, env, ctx, url, sess) {
       const cur = await cfgReadWrap(env, tid, "fleet:poolalloc", {});
       for (const p of out.poolDrivers) {
         if (!p || !p.vanKey || !p.username) continue;
-        if (Number(p.confidence) < 0.75) continue;
+        if (Number(p.confidence) < 0.9) continue;
         if (!validUsers.has(String(p.username))) continue;
         cur[p.vanKey] = p.username;
         appliedPool++;
       }
       await cfgWriteWrap(env, tid, "fleet:poolalloc", cur);
     }
-    const okTexts = new Set((out.siteAliases || []).filter((a) => Number(a.confidence) >= 0.75).map((a) => a.text));
-    const okPool = new Set((out.poolDrivers || []).filter((p) => Number(p.confidence) >= 0.75).map((p) => p.vanKey));
+    const okTexts = new Set((out.siteAliases || []).filter((a) => Number(a.confidence) >= 0.9).map((a) => a.text));
+    const okPool = new Set((out.poolDrivers || []).filter((p) => Number(p.confidence) >= 0.9).map((p) => p.vanKey));
     return jr3({
       ok: true,
       applied: { aliases: appliedAliases, poolDrivers: appliedPool },
