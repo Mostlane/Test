@@ -460,7 +460,13 @@ async function saveReport(opts){
     form.append("weekEnd", window.__lastReport.weekEnd);
     const r=await authFetch("/fleet/report",{method:"POST",body:form}).then(r=>r.json());
     if(msg)msg.textContent = r.ok ? (auto?"✓ Saved automatically":"✓ Saved to portal") : ("Save failed — "+(r.error||""));
-    if(r&&r.ok) loadPastReports();   // refresh the saved list (under its month banner)
+    if(r&&r.ok){
+      // Remember the R2 key + saved-at so the timesheet builder can stamp
+      // every day it writes with "these times came from THIS report",
+      // giving a clean audit trail for later disputes.
+      if(window.__lastReport){ window.__lastReport.reportKey=r.key||""; window.__lastReport.savedAt=new Date().toISOString(); }
+      loadPastReports();   // refresh the saved list (under its month banner)
+    }
   }catch(e){ if($("saveMsg"))$("saveMsg").textContent="Save failed"; }
 }
 window.saveReport=saveReport;
@@ -772,17 +778,40 @@ async function saveTimesheetsFromModal(btn){
   const rows=window.__tsRows||[]; const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
   if(!rows.length){ if(msg) msg.textContent="Nothing to save."; return; }
   if(btn) btn.disabled=true; if(msg) msg.textContent="Saving…";
+  // Audit trail — every day written from this modal carries the R2 key of
+  // the report it came from + the ORIGINAL tracker start/end (before any
+  // human edit) + who confirmed it and when. If someone later disputes a
+  // start/finish, the timesheet row links back to the exact report + shows
+  // "picked 07:30 from a van that moved 07:15 → 17:30, confirmed by Jamie".
+  const L=window.__lastReport||{};
+  const reportKey = L.reportKey || "";
+  const reportTitle = L.title || "";
+  const pickedBy = (localStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUser") || "").trim();
+  const pickedAt = new Date().toISOString();
+  // Look up ORIGINAL tracker times keyed by (user|date) from what we built
+  // in buildTimesheetRows — this is what the van actually did before an edit.
+  const orig = {};
+  for(const r0 of ((window.__tsRows||[]).concat(window.__tsUnalloc||[]))){
+    if(!r0.driverUser) continue;
+    orig[r0.driverUser+"|"+r0.date] = { startMin:r0.startMin, endMin:r0.endMin };
+  }
   // Group by (week × username).
   const byWeek={};
   for(const r of rows){
     if(!r.driverUser) continue;
     const wk=mondayOf(r.date);
     (byWeek[wk]=byWeek[wk]||{})[r.driverUser]=(byWeek[wk][r.driverUser]||{});
+    const o = orig[r.driverUser+"|"+r.date] || { startMin:r.startMin, endMin:r.endMin };
     byWeek[wk][r.driverUser][r.date] = {
       startMin:r.startMin, endMin:r.endMin,
       morningCommute:r.morning, homeCommute:r.home,
       leavingHome:true, arrivingHome:true,
       lunchOverride: (r.lunchOverride!=null && isFinite(Number(r.lunchOverride))) ? Math.max(0,Math.round(Number(r.lunchOverride))) : null,
+      // Audit fields — untouched by van-timesheet.html's own edits, which
+      // write their own editStart/editEnd on top when the office corrects.
+      sourceReportKey: reportKey, sourceReportTitle: reportTitle,
+      trackerStartMin: o.startMin, trackerEndMin: o.endMin,
+      pickedBy, pickedAt, van: r.reg,
     };
   }
   try{
