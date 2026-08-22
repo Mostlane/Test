@@ -596,6 +596,128 @@ function downloadReport(){
 }
 window.downloadReport=downloadReport;
 
+/* ═══ Auto tracker → job costing ═══════════════════════════════════════════
+   Turn each van's trips into per-site visit + travel segments and post them
+   to /fleet/tracker-reconcile. That writes job_time_segments rows tagged
+   src=tracker so /costing/summary automatically folds them into every site
+   card AND every project P&L — no job need be allocated. Runs on every
+   report generation. Idempotent: a re-run replaces its own prior writes.
+   ══════════════════════════════════════════════════════════════════════ */
+let TRACKER_SITES=null;   // {postcode: [siteName], byNum: {num: name}, byName:[{lc,name,postcode}]}
+async function loadTrackerSites(){
+  if(TRACKER_SITES) return TRACKER_SITES;
+  const out={ byPostcode:{}, byNum:{}, byName:[] };
+  try{
+    const sites = await authFetch("/get-sites?category=all").then(r=>r.json());
+    for(const s of (sites||[])){
+      const name = String(s.siteName||"").trim();
+      const num  = String(s.siteNumber||"").trim();
+      const pc   = String(s.postcode||"").replace(/\*+$/,"").trim().toUpperCase();
+      if(pc) (out.byPostcode[pc.replace(/\s+/g,"")] = out.byPostcode[pc.replace(/\s+/g,"")] || []).push({name,num,postcode:pc});
+      if(num) out.byNum[num.toLowerCase()] = {name,num,postcode:pc};
+      if(name) out.byName.push({lc:name.toLowerCase(),name,num,postcode:pc});
+    }
+    // Sort byName by longest first so "Lake Road Surgery Verwood" is checked
+    // before "Lake Road" (crude but effective).
+    out.byName.sort((a,b)=>b.lc.length-a.lc.length);
+  }catch(e){}
+  TRACKER_SITES=out; return out;
+}
+// Match a free-text location (a trip's `to` string) to a portal site. Postcode
+// wins (a valid full postcode is unambiguous), then a full name substring,
+// then a site number. Returns { name, num, postcode } or null.
+function trackerMatchSite(txt){
+  if(!txt || !TRACKER_SITES) return null;
+  const raw = String(txt).trim(); if(!raw) return null;
+  const up = raw.toUpperCase();
+  // Full UK postcode inside the text.
+  const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+  if(pcm){
+    const key = pcm[0].replace(/\s+/g,"");
+    const hits = TRACKER_SITES.byPostcode[key];
+    if(hits && hits.length) return hits[0];
+  }
+  // Site number token — 4-digit or Pxxxx.
+  const numM = raw.match(/\bP?\d{3,5}\b/i);
+  if(numM){
+    const k = numM[0].toLowerCase();
+    if(TRACKER_SITES.byNum[k]) return TRACKER_SITES.byNum[k];
+    // Also try zero-stripped ("0649" → "649") and vice versa.
+    const stripped = k.replace(/^p?0+/,"").toLowerCase();
+    if(TRACKER_SITES.byNum[stripped]) return TRACKER_SITES.byNum[stripped];
+    const padded = ("0000"+k).slice(-4);
+    if(TRACKER_SITES.byNum[padded]) return TRACKER_SITES.byNum[padded];
+  }
+  // Substring name match — longest first so a specific match wins.
+  const lc = raw.toLowerCase();
+  for(const s of TRACKER_SITES.byName){
+    if(s.lc && s.lc.length>=6 && lc.indexOf(s.lc)>=0) return s;
+  }
+  return null;
+}
+// Home strings for a vehicle (crude match — same pattern classifyDay uses).
+function isHomeText(txt, homes){
+  if(!txt) return false;
+  const l=String(txt).toLowerCase();
+  return (homes||[]).some(h=>l.includes(h)) || l.includes("yard") || l.includes("office");
+}
+// Turn a report's parsed vehicles into tracker segments — one on-site row
+// per visit + one travel row per drive TO that site (excluding home commute).
+function buildTrackerRows(R){
+  if(!R || !R.vehicles) return [];
+  const out=[];
+  for(const v of R.vehicles){
+    const dr = v.driverUser || "";      // only cost time for a real portal user
+    if(!dr) continue;
+    for(const d of (v.days||[])){
+      const trips = d.trips||[]; if(!trips.length) continue;
+      // Iterate trip-by-trip, when a trip's `to` matches a site AND the driver
+      // stops there → open a visit that closes on the NEXT trip's start.
+      for(let i=0;i<trips.length;i++){
+        const t=trips[i];
+        // Home = never a costable site.
+        if(isHomeText(t.to, v.home)) continue;
+        const site = trackerMatchSite(t.to);
+        if(!site) continue;
+        // The visit: from t.end until the next trip's start (or day end).
+        const visitStart = t.end || null;
+        const nextTrip = trips[i+1];
+        const visitEnd = nextTrip ? nextTrip.start : t.end;   // no next trip -> zero (van never moved again)
+        if(visitStart && visitEnd && visitEnd !== visitStart){
+          out.push({
+            username: dr, date: d.date, kind: "onsite",
+            siteName: site.name, siteCode: site.num, postcode: site.postcode,
+            startedAt: d.date+"T"+visitStart+":00", endedAt: d.date+"T"+visitEnd+":00",
+          });
+        }
+        // The travel to it: t.start → t.end, whether the driver came from home
+        // or from another site (both count as work travel now).
+        if(t.start && t.end && (t.drive||0) > 0){
+          out.push({
+            username: dr, date: d.date, kind: "travel",
+            siteName: site.name, siteCode: site.num, postcode: site.postcode,
+            startedAt: d.date+"T"+t.start+":00", endedAt: d.date+"T"+t.end+":00",
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+async function autoTrackerReconcile(R){
+  if(!R) return { ok:false, wrote:0 };
+  try{
+    await loadTrackerSites();
+    const rows = buildTrackerRows(R);
+    if(!rows.length) return { ok:true, wrote:0 };
+    const r = await authFetch("/fleet/tracker-reconcile", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ rows })
+    }).then(r=>r.json());
+    return r || { ok:false };
+  }catch(e){ return { ok:false, error:e.message }; }
+}
+
 /* ═══ Confirm & save timesheets modal ══════════════════════════════════════
    One place to review every driver-day in the week: assigned drivers show
    with their van, pool/unassigned days show at the top with a driver picker.
@@ -951,6 +1073,24 @@ async function generate(){
     $("genPane").style.display="none";
     window.scrollTo(0,0);
     saveReport({auto:true});   // every generated report saves to the portal automatically
+    // Auto-fold the van tracker's on-site + travel time into job costing.
+    // Fires alongside the save so /costing/summary reflects it straight away
+    // for every site card + project P&L. No job need be allocated — the
+    // driver's time is attributed to the SITE they visited. Deduped against
+    // SiteLog on the server so a scanned visit isn't counted twice.
+    (async () => {
+      try {
+        const R = window.__reportData;
+        const r = await autoTrackerReconcile(R);
+        const badge = document.createElement("div");
+        badge.style.cssText = "margin:10px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px";
+        badge.innerHTML = r && r.ok
+          ? ("🚐 <b>Tracker time auto-costed:</b> " + (r.wrote||0) + " segment"+((r.wrote||0)===1?"":"s")+" written"+((r.skippedSitelog||0)>0?" · "+r.skippedSitelog+" skipped (SiteLog already covers)":"")+".")
+          : ("🚐 <span style=\"color:#78350f\">Tracker auto-cost skipped — "+((r&&r.error)||"see console")+"</span>");
+        const host = document.getElementById("report") || document.body;
+        host.insertBefore(badge, host.firstChild);
+      } catch (e) {}
+    })();
     if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
     // Any pool / unassigned van days with real journeys? Nudge the admin to
     // allocate a driver + confirm start/finish/lunch straight into a

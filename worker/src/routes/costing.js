@@ -920,7 +920,7 @@ async function reconcileRange(env, tid, from, to, reg) {
 
 /* ══ Register loading + resolution ══════════════════════════════════════════ */
 
-async function loadRegister(env, tid) {
+export async function loadRegister(env, tid) {
   const list = [];
   const byNorm = {};
   try {
@@ -957,7 +957,7 @@ async function loadRegister(env, tid) {
   return { list, byNorm, byCode, aliases, ignored };
 }
 
-function resolveSite(reg, name) {
+export function resolveSite(reg, name) {
   const k = normName(name);
   return (k && reg.byNorm[k]) || null;
 }

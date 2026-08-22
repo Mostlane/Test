@@ -18,6 +18,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
 import { evalAlerts, answerWord } from "./vancheck.js";
+import { loadRegister, resolveSite } from "./costing.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -1651,7 +1652,98 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  // ── Auto-cost the van tracker's on-site + travel time ─────────────────────
+  // POST /fleet/tracker-reconcile  — write tracker-derived time to
+  // job_time_segments so job-costing folds it in like SLA taps and SiteLog
+  // scans. Doesn't need a job to be allocated — the driver was there, time
+  // gets attributed to the SITE. Deduped against SiteLog for the same
+  // (user, site, day); SiteLog is authoritative when both exist.
+  //
+  // Body: { rows: [{ username, date, siteName?, siteCode?, postcode?,
+  //   startedAt, endedAt, kind: "onsite"|"travel" }] }
+  //   (rows are pre-built client-side from the fleet report — one per
+  //   matched site visit + one for the drive to it.)
+  //
+  // Every write carries a stable synthetic job_id `tracker:<username>:
+  // <date>:<site>:<kind>:<seq>` so re-runs of the same report REPLACE
+  // rather than duplicate.
+  if (sub === "/tracker-reconcile" && method === "POST") {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT)`).run();
+    try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
+    try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+    const b = await readJson(request);
+    const rows = Array.isArray(b.rows) ? b.rows : [];
+    if (!rows.length) return jr({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty" }, headers);
+    // Ask SiteLog what it knows for the covered days so we don't double-cost a
+    // (user, site, date) that SiteLog has authoritatively captured.
+    const dates = new Set(rows.map(r => String(r.date || "").slice(0, 10)).filter(Boolean));
+    const users = new Set(rows.map(r => String(r.username || "").trim().toLowerCase()).filter(Boolean));
+    const slCover = new Set();   // "user::siteKey::date"
+    if (env.SITELOG_DB && dates.size) {
+      try {
+        const from = [...dates].sort()[0], to = [...dates].sort().reverse()[0];
+        // fetchSitelogVisits is on costing.js but not exported — inline the query.
+        const { results } = await env.SITELOG_DB.prepare(
+          "SELECT portal_username, site_code, site_name, check_in_at, check_out_at FROM visits WHERE date(check_in_at) BETWEEN date(?) AND date(?)"
+        ).bind(from, to).all().catch(() => ({ results: [] }));
+        for (const v of results || []) {
+          const u = String(v.portal_username || "").trim().toLowerCase();
+          if (!users.has(u)) continue;
+          const d = String(v.check_in_at || "").slice(0, 10);
+          const key = u + "::" + normSite(v.site_code || v.site_name || "") + "::" + d;
+          slCover.add(key);
+        }
+      } catch {}
+    }
+    // Wipe our previous tracker inserts for (user, date) — idempotent replace.
+    for (const d of dates) {
+      for (const u of users) {
+        try {
+          await env.DB.prepare(
+            "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
+          ).bind(tid, u, "tracker:%", d).run();
+        } catch {}
+      }
+    }
+    let wrote = 0, skippedSL = 0;
+    let seq = 0;
+    for (const r of rows) {
+      const username = String(r.username || "").trim();
+      const date = String(r.date || "").slice(0, 10);
+      if (!username || !date || !r.startedAt || !r.endedAt) continue;
+      const kind = r.kind === "travel" ? "travel" : "onsite";
+      const siteName = String(r.siteName || "").trim();
+      const siteKey = normSite(r.siteCode || siteName);
+      // SiteLog dedupe — skip on-site tracker time when SiteLog already covers
+      // this (user, site, day). Travel is never in SiteLog, so travel always goes in.
+      if (kind === "onsite" && siteKey) {
+        const key = username.toLowerCase() + "::" + siteKey + "::" + date;
+        if (slCover.has(key)) { skippedSL++; continue; }
+      }
+      seq++;
+      const jobId = "tracker:" + username + ":" + date + ":" + (siteKey || "unknown") + ":" + kind + ":" + seq;
+      try {
+        await env.DB.prepare(
+          "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind) VALUES (?,?,?,?,?,?,?,?,?)"
+        ).bind(tid, username, jobId, "van tracker", siteName, String(r.postcode || "").toUpperCase(), r.startedAt, r.endedAt, kind).run();
+        wrote++;
+      } catch {}
+    }
+    return jr({ ok: true, wrote, skippedSitelog: skippedSL }, headers);
+  }
+
   return jr({ error: "Not found: " + sub }, headers, 404);
+}
+
+// Compact site key for the SiteLog dedupe (numeric store code if the value is
+// pure digits, else uppercased alphanumerics — mirrors sla.siteKeyOf).
+function normSite(s) {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 async function ensureVehTable(env) {
