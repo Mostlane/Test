@@ -1652,6 +1652,88 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  // ── Geocode tracker "to" texts → nearest portal site ─────────────────────
+  // POST /fleet/tracker-geocode { texts: [] } → [{text, lat, lon, siteNumber,
+  //   siteName, distanceM}]. Uses Google Geocoding (env.GOOGLE_MAPS_KEY) so
+  //   free-text place names ("5 Woodlands Close, Sarisbury Green") resolve,
+  //   not just full postcodes. Nearest portal site with saved lat/lng within
+  //   800 m wins; projects win ties inside 150 m.
+  if (sub === "/tracker-geocode" && method === "POST") {
+    const b = await readJson(request);
+    const texts = Array.isArray(b.texts) ? b.texts.slice(0, 80) : [];
+    if (!texts.length) return jr({ ok: true, results: [] }, headers);
+    const key = env.GOOGLE_MAPS_KEY || "";
+    // Sites with coords — indexed once for the lookup.
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      for (const r of results || []) {
+        let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+        const lat = Number(d.lat), lon = Number(d.lon ?? d.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        sites.push({ num: r.site_number, name: r.site_name, postcode: r.postcode || "", lat, lon,
+          isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || "")) });
+      }
+    } catch {}
+    const R = 6371000, toR = d => d * Math.PI / 180;
+    const dist = (a, bb) => { const dLat = toR(bb.lat - a.lat), dLon = toR(bb.lon - a.lon);
+      const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat)) * Math.cos(toR(bb.lat)) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.asin(Math.sqrt(s)); };
+    const nearest = (lat, lon) => {
+      let best = null, bestD = 801;
+      for (const s of sites) { const d = dist({lat,lon}, s); if (d < bestD) { best = s; bestD = d; } }
+      // Project bias inside 150 m — if a project sits within 150 m of the
+      // best hit and the best isn't a project, project wins.
+      if (best && !best.isProject) {
+        for (const s of sites) {
+          if (!s.isProject) continue;
+          const d = dist({lat,lon}, s);
+          if (d <= bestD + 150) { best = s; bestD = d; break; }
+        }
+      }
+      return best ? { num: best.num, name: best.name, distanceM: Math.round(bestD) } : null;
+    };
+    const out = [];
+    for (const t of texts) {
+      const text = String(t || "").trim();
+      if (!text) { out.push({ text: t, lat: null, lon: null, siteNumber: null }); continue; }
+      let lat = null, lon = null, source = "";
+      // 1) Google Geocoding — handles free text (address, street, town).
+      if (key) {
+        try {
+          const gr = await fetch("https://maps.googleapis.com/maps/api/geocode/json?address=" + encodeURIComponent(text + ", UK") + "&region=uk&key=" + encodeURIComponent(key));
+          const gj = await gr.json();
+          const first = gj && Array.isArray(gj.results) && gj.results[0];
+          if (first && first.geometry && first.geometry.location) {
+            lat = Number(first.geometry.location.lat);
+            lon = Number(first.geometry.location.lng);
+            source = "google";
+          }
+        } catch {}
+      }
+      // 2) postcodes.io fallback — postcode-only, free.
+      if (!Number.isFinite(lat)) {
+        const pc = String(text).toUpperCase().match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+        if (pc) {
+          try {
+            const pr = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc[0]));
+            const pj = pr.ok ? await pr.json() : null;
+            if (pj && pj.result) { lat = Number(pj.result.latitude); lon = Number(pj.result.longitude); source = "postcodes.io"; }
+          } catch {}
+        }
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        out.push({ text: t, lat: null, lon: null, siteNumber: null, source: "" });
+        continue;
+      }
+      const near = nearest(lat, lon);
+      out.push({ text: t, lat, lon, source, siteNumber: near ? near.num : null, siteName: near ? near.name : null, distanceM: near ? near.distanceM : null });
+    }
+    return jr({ ok: true, results: out }, headers);
+  }
+
   // ── AI resolver for unmatched tracker stops + pool-van drivers ────────────
   // Fed the trip texts the deterministic matcher missed + any pool-van days
   // with no allocated driver, plus the sites catalogue + drivers directory

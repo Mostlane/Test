@@ -18450,6 +18450,108 @@ async function handle22(request, env, ctx, url, sess) {
       return jr3({ ok: true }, headers);
     }
   }
+  if (sub === "/tracker-geocode" && method === "POST") {
+    const b = await readJson4(request);
+    const texts = Array.isArray(b.texts) ? b.texts.slice(0, 80) : [];
+    if (!texts.length) return jr3({ ok: true, results: [] }, headers);
+    const key = env.GOOGLE_MAPS_KEY || "";
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      for (const r of results || []) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const lat = Number(d.lat), lon = Number(d.lon ?? d.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        sites.push({
+          num: r.site_number,
+          name: r.site_name,
+          postcode: r.postcode || "",
+          lat,
+          lon,
+          isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || ""))
+        });
+      }
+    } catch {
+    }
+    const R = 6371e3, toR = (d) => d * Math.PI / 180;
+    const dist = (a, bb) => {
+      const dLat = toR(bb.lat - a.lat), dLon = toR(bb.lon - a.lon);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(bb.lat)) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.asin(Math.sqrt(s));
+    };
+    const nearest = (lat, lon) => {
+      let best = null, bestD = 801;
+      for (const s of sites) {
+        const d = dist({ lat, lon }, s);
+        if (d < bestD) {
+          best = s;
+          bestD = d;
+        }
+      }
+      if (best && !best.isProject) {
+        for (const s of sites) {
+          if (!s.isProject) continue;
+          const d = dist({ lat, lon }, s);
+          if (d <= bestD + 150) {
+            best = s;
+            bestD = d;
+            break;
+          }
+        }
+      }
+      return best ? { num: best.num, name: best.name, distanceM: Math.round(bestD) } : null;
+    };
+    const out = [];
+    for (const t of texts) {
+      const text = String(t || "").trim();
+      if (!text) {
+        out.push({ text: t, lat: null, lon: null, siteNumber: null });
+        continue;
+      }
+      let lat = null, lon = null, source = "";
+      if (key) {
+        try {
+          const gr = await fetch("https://maps.googleapis.com/maps/api/geocode/json?address=" + encodeURIComponent(text + ", UK") + "&region=uk&key=" + encodeURIComponent(key));
+          const gj = await gr.json();
+          const first = gj && Array.isArray(gj.results) && gj.results[0];
+          if (first && first.geometry && first.geometry.location) {
+            lat = Number(first.geometry.location.lat);
+            lon = Number(first.geometry.location.lng);
+            source = "google";
+          }
+        } catch {
+        }
+      }
+      if (!Number.isFinite(lat)) {
+        const pc = String(text).toUpperCase().match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+        if (pc) {
+          try {
+            const pr = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc[0]));
+            const pj = pr.ok ? await pr.json() : null;
+            if (pj && pj.result) {
+              lat = Number(pj.result.latitude);
+              lon = Number(pj.result.longitude);
+              source = "postcodes.io";
+            }
+          } catch {
+          }
+        }
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        out.push({ text: t, lat: null, lon: null, siteNumber: null, source: "" });
+        continue;
+      }
+      const near = nearest(lat, lon);
+      out.push({ text: t, lat, lon, source, siteNumber: near ? near.num : null, siteName: near ? near.name : null, distanceM: near ? near.distanceM : null });
+    }
+    return jr3({ ok: true, results: out }, headers);
+  }
   if (sub === "/tracker-ai-resolve" && method === "POST") {
     const b = await readJson4(request);
     const unmatched = Array.isArray(b.unmatched) ? b.unmatched.slice(0, 40) : [];

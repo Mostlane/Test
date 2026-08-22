@@ -715,27 +715,45 @@ async function trkMatchByCoords(txt){
 let TRK_TEXT_TO_SITE = {};
 async function precomputeCoordMatches(R){
   if(!R || !R.vehicles) return;
-  // Every unique trip "to" text that contains a UK postcode.
+  // Every unique trip "to" text worth geocoding. We send them ALL to the
+  // server (which uses Google Geocoding + falls back to postcodes.io) so
+  // free-text place names — not just postcodes — resolve to a coord and get
+  // matched to the nearest portal site.
   const wants = new Set();
   for(const v of R.vehicles){
     for(const d of (v.days||[])){
       for(const t of (d.trips||[])){
-        const s = String(t.to||"");
-        if(!s) continue;
-        if(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(s)) wants.add(s);
+        const s = String(t.to||"").trim();
+        if(s && s.length>=4 && !(s in TRK_TEXT_TO_SITE)) wants.add(s);
       }
     }
   }
-  // Resolve each in parallel — postcodes.io is fast and free; results cache
-  // in sessionStorage so a re-run doesn't hit the API again.
   const list = [...wants];
-  await Promise.all(list.map(async txt => {
-    if(txt in TRK_TEXT_TO_SITE) return;
-    try {
-      const site = await trkMatchByCoords(txt);
-      TRK_TEXT_TO_SITE[txt] = site || null;
-    } catch(e){ TRK_TEXT_TO_SITE[txt] = null; }
-  }));
+  if(!list.length) return;
+  // Chunk to keep the server request small — Google is billed per request
+  // so batches of ~30 keep costs low without a huge single call.
+  for(let i=0;i<list.length;i+=30){
+    const batch = list.slice(i, i+30);
+    try{
+      const r = await authFetch("/fleet/tracker-geocode", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ texts: batch })
+      }).then(r=>r.json());
+      if(r && r.ok && Array.isArray(r.results)){
+        for(const row of r.results){
+          if(!row) continue;
+          if(row.siteNumber){
+            // Look up the full site record so trackerMatchSite can return the
+            // {name, num, postcode} shape it expects.
+            const site = (TRACKER_ALL||[]).find(s => String(s.num)===String(row.siteNumber));
+            TRK_TEXT_TO_SITE[row.text] = site || { name: row.siteName, num: row.siteNumber, postcode: "" };
+          } else {
+            TRK_TEXT_TO_SITE[row.text] = null;
+          }
+        }
+      }
+    }catch(e){}
+  }
 }
 function trackerMatchSite(txt){
   if(!txt || !TRACKER_SITES) return null;
