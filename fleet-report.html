@@ -603,10 +603,10 @@ window.downloadReport=downloadReport;
    card AND every project P&L — no job need be allocated. Runs on every
    report generation. Idempotent: a re-run replaces its own prior writes.
    ══════════════════════════════════════════════════════════════════════ */
-let TRACKER_SITES=null;   // {postcode: [siteName], byNum: {num: name}, byName:[{lc,name,postcode}]}
+let TRACKER_SITES=null, TRACKER_ALIASES=null;
 async function loadTrackerSites(){
   if(TRACKER_SITES) return TRACKER_SITES;
-  const out={ byPostcode:{}, byNum:{}, byName:[] };
+  const out={ byPostcode:{}, byNum:{}, byName:[], byAddr:[] };
   try{
     const sites = await authFetch("/get-sites?category=all").then(r=>r.json());
     for(const s of (sites||[])){
@@ -616,13 +616,32 @@ async function loadTrackerSites(){
       if(pc) (out.byPostcode[pc.replace(/\s+/g,"")] = out.byPostcode[pc.replace(/\s+/g,"")] || []).push({name,num,postcode:pc});
       if(num) out.byNum[num.toLowerCase()] = {name,num,postcode:pc};
       if(name) out.byName.push({lc:name.toLowerCase(),name,num,postcode:pc});
+      // Match by address-line words: many tracker "to" strings are place names
+      // (e.g. "5 Woodlands Close, Sarisbury Green") — a site's saved address1 /
+      // town / street will contain those exact strings. This catches project
+      // sites the name-only match misses.
+      const bits = [s.address1, s.street, s.town, s.county, s.address].filter(Boolean);
+      for(const raw of bits){
+        const t=String(raw).toLowerCase().trim();
+        if(t && t.length>=5) out.byAddr.push({lc:t,name,num,postcode:pc});
+      }
     }
-    // Sort byName by longest first so "Lake Road Surgery Verwood" is checked
-    // before "Lake Road" (crude but effective).
+    // Longest first so "5 woodlands close" beats "close".
     out.byName.sort((a,b)=>b.lc.length-a.lc.length);
+    out.byAddr.sort((a,b)=>b.lc.length-a.lc.length);
   }catch(e){}
-  TRACKER_SITES=out; return out;
+  TRACKER_SITES=out;
+  // Load remembered pins (aliases) so a previously-assigned trip text always
+  // maps to the same site next time — one-click "this text = this site" learn.
+  try{
+    const d = await authFetch("/sites/register").then(r=>r.json());
+    TRACKER_ALIASES = (d && d.aliases) || {};
+  }catch(e){ TRACKER_ALIASES = {}; }
+  return out;
 }
+// Same normalisation costing.js uses on aliases, so a pin saved via
+// /sites/register/merge is picked up here without a server round trip.
+function trkNorm(s){ return String(s||"").toLowerCase().replace(/['’`]/g,"").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim(); }
 // Match a free-text location (a trip's `to` string) to a portal site. Postcode
 // wins (a valid full postcode is unambiguous), then a full name substring,
 // then a site number. Returns { name, num, postcode } or null.
@@ -630,28 +649,43 @@ function trackerMatchSite(txt){
   if(!txt || !TRACKER_SITES) return null;
   const raw = String(txt).trim(); if(!raw) return null;
   const up = raw.toUpperCase();
-  // Full UK postcode inside the text.
+  const lc = raw.toLowerCase();
+  // 1. Remembered pin — the office previously said "this text = this site".
+  //    Alias key = normName(text), value = { client, siteNumber }.
+  if(TRACKER_ALIASES){
+    const nk = trkNorm(raw);
+    const tgt = TRACKER_ALIASES[nk];
+    if(tgt && tgt.siteNumber){
+      const hit = TRACKER_SITES.byNum[String(tgt.siteNumber).toLowerCase()];
+      if(hit) return hit;
+    }
+  }
+  // 2. Full UK postcode inside the text — most reliable.
   const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
   if(pcm){
     const key = pcm[0].replace(/\s+/g,"");
     const hits = TRACKER_SITES.byPostcode[key];
     if(hits && hits.length) return hits[0];
   }
-  // Site number token — 4-digit or Pxxxx.
+  // 3. Site number token — 4-digit or Pxxxx.
   const numM = raw.match(/\bP?\d{3,5}\b/i);
   if(numM){
     const k = numM[0].toLowerCase();
     if(TRACKER_SITES.byNum[k]) return TRACKER_SITES.byNum[k];
-    // Also try zero-stripped ("0649" → "649") and vice versa.
     const stripped = k.replace(/^p?0+/,"").toLowerCase();
     if(TRACKER_SITES.byNum[stripped]) return TRACKER_SITES.byNum[stripped];
     const padded = ("0000"+k).slice(-4);
     if(TRACKER_SITES.byNum[padded]) return TRACKER_SITES.byNum[padded];
   }
-  // Substring name match — longest first so a specific match wins.
-  const lc = raw.toLowerCase();
+  // 4. Substring site-name match — longest first.
   for(const s of TRACKER_SITES.byName){
     if(s.lc && s.lc.length>=6 && lc.indexOf(s.lc)>=0) return s;
+  }
+  // 5. Substring address-line match (address1 / street / town from the site's
+  //    saved data). Catches project sites whose name doesn't appear in the
+  //    tracker text but whose street or village does.
+  for(const s of TRACKER_SITES.byAddr){
+    if(s.lc && s.lc.length>=5 && lc.indexOf(s.lc)>=0) return s;
   }
   return null;
 }
@@ -664,25 +698,36 @@ function isHomeText(txt, homes){
 // Turn a report's parsed vehicles into tracker segments — one on-site row
 // per visit + one travel row per drive TO that site (excluding home commute).
 function buildTrackerRows(R){
-  if(!R || !R.vehicles) return [];
-  const out=[];
+  if(!R || !R.vehicles) return { rows:[], unmatched:[] };
+  const out=[], unmatched={};   // unmatched: `to_text` -> { text, drivers:Set, totalMins }
   for(const v of R.vehicles){
     const dr = v.driverUser || "";      // only cost time for a real portal user
     if(!dr) continue;
     for(const d of (v.days||[])){
       const trips = d.trips||[]; if(!trips.length) continue;
-      // Iterate trip-by-trip, when a trip's `to` matches a site AND the driver
-      // stops there → open a visit that closes on the NEXT trip's start.
       for(let i=0;i<trips.length;i++){
         const t=trips[i];
-        // Home = never a costable site.
-        if(isHomeText(t.to, v.home)) continue;
+        if(isHomeText(t.to, v.home)) continue;   // home = never a costable site
         const site = trackerMatchSite(t.to);
-        if(!site) continue;
-        // The visit: from t.end until the next trip's start (or day end).
+        if(!site){
+          // Aggregate unmatched stops. Only count the on-site duration
+          // (t.end → next trip.start) so tiny drive-throughs don't clutter
+          // the list. Trips where the van never stopped again are skipped.
+          const nextTrip = trips[i+1];
+          const startMin = toMin(t.end);
+          const endMin = nextTrip ? toMin(nextTrip.start) : null;
+          if(startMin==null || endMin==null || endMin<=startMin) continue;
+          const stayMin = endMin - startMin;
+          if(stayMin < 20) continue;   // ignore fleeting drop-offs (min 20 min)
+          const key = String(t.to||"").trim(); if(!key) continue;
+          const u = unmatched[key] || (unmatched[key] = { text:key, drivers:{}, totalMins:0, occurrences:0 });
+          u.totalMins += stayMin; u.occurrences++;
+          u.drivers[dr] = (u.drivers[dr]||0) + stayMin;
+          continue;
+        }
         const visitStart = t.end || null;
         const nextTrip = trips[i+1];
-        const visitEnd = nextTrip ? nextTrip.start : t.end;   // no next trip -> zero (van never moved again)
+        const visitEnd = nextTrip ? nextTrip.start : t.end;
         if(visitStart && visitEnd && visitEnd !== visitStart){
           out.push({
             username: dr, date: d.date, kind: "onsite",
@@ -690,8 +735,6 @@ function buildTrackerRows(R){
             startedAt: d.date+"T"+visitStart+":00", endedAt: d.date+"T"+visitEnd+":00",
           });
         }
-        // The travel to it: t.start → t.end, whether the driver came from home
-        // or from another site (both count as work travel now).
         if(t.start && t.end && (t.drive||0) > 0){
           out.push({
             username: dr, date: d.date, kind: "travel",
@@ -702,19 +745,20 @@ function buildTrackerRows(R){
       }
     }
   }
-  return out;
+  const unmatchedArr = Object.values(unmatched).sort((a,b)=>b.totalMins-a.totalMins).slice(0,30);
+  return { rows: out, unmatched: unmatchedArr };
 }
 async function autoTrackerReconcile(R, dryRun){
   if(!R) return { ok:false, wrote:0 };
   try{
     await loadTrackerSites();
-    const rows = buildTrackerRows(R);
-    if(!rows.length) return { ok:true, wrote:0, preview:[], rowCount:0 };
+    const { rows, unmatched } = buildTrackerRows(R);
+    if(!rows.length && !unmatched.length) return { ok:true, wrote:0, preview:[], unmatched:[], rowCount:0 };
     const r = await authFetch("/fleet/tracker-reconcile", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ rows, dryRun: !!dryRun })
     }).then(r=>r.json());
-    if(r) r.rowCount = rows.length;
+    if(r){ r.rowCount = rows.length; r.unmatched = unmatched; }
     return r || { ok:false };
   }catch(e){ return { ok:false, error:e.message }; }
 }
@@ -722,17 +766,25 @@ async function autoTrackerReconcile(R, dryRun){
 // apply, with an "Apply to job costing" button. Every driver x site x day
 // gets one row: on-site minutes + travel minutes + £ at the driver's rate.
 // Skipped rows (SiteLog already covers) show muted so nothing is silent.
-function renderTrackerPreview(p, host){
+function renderTrackerPreview(p, host, unmatched){
   const hmm = m => { m=Math.max(0,Math.round(m||0)); const h=Math.floor(m/60), r=m%60; return (h?h+"h ":"")+(r||!h?r+"m":""); };
   const money = n => "£"+(Math.round((n||0)*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
   const totCost = (p||[]).reduce((a,x)=>a+(x.cost||0),0);
   const totOn = (p||[]).reduce((a,x)=>a+(x.onsiteMins||0),0);
   const totTr = (p||[]).reduce((a,x)=>a+(x.travelMins||0),0);
+  // Build a full <option> list of every portal site for the pin dropdown.
+  const optHtml = (() => {
+    const opts = ['<option value="">— pin to site… —</option>'];
+    const seen = new Set();
+    const push = (num, name) => { if(!num||seen.has(num)) return; seen.add(num); opts.push('<option value="'+esc(num)+'">'+esc(name)+' · '+esc(num)+'</option>'); };
+    (TRACKER_SITES?.byName||[]).forEach(s => push(s.num, s.name));
+    return opts.join('');
+  })();
   host.innerHTML = `
     <div style="margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
         <b style="font-size:15px">🚐 Tracker → job costing — preview</b>
-        <span style="font-size:12.5px;color:#334155">${(p||[]).length} entries · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
+        <span style="font-size:12.5px;color:#334155">${(p||[]).length} matched · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
       </div>
       <div style="max-height:38vh;overflow:auto;border:1px solid #cdddf5;border-radius:8px;background:#fff">
         <table style="width:100%;border-collapse:collapse;font-size:12.5px">
@@ -740,7 +792,7 @@ function renderTrackerPreview(p, host){
             <tr><th style="text-align:left;padding:6px 8px">Driver</th><th style="text-align:left;padding:6px 8px">Date</th><th style="text-align:left;padding:6px 8px">Site</th><th style="padding:6px 8px">On-site</th><th style="padding:6px 8px">Travel</th><th style="padding:6px 8px">Rate</th><th style="padding:6px 8px">Cost</th></tr>
           </thead>
           <tbody>
-          ${(p||[]).map(x => {
+          ${((p||[]).length?p:[]).map(x => {
             const dedup = x.skippedOnsiteMins>0 ? `<div style="color:#94a3b8;font-size:11px">− ${hmm(x.skippedOnsiteMins)} covered by SiteLog</div>` : "";
             return `<tr style="border-top:1px solid #eef">
               <td style="padding:6px 8px">${esc(x.username)}</td>
@@ -751,16 +803,75 @@ function renderTrackerPreview(p, host){
               <td style="padding:6px 8px;text-align:right">${x.rate?("£"+x.rate):"—"}</td>
               <td style="padding:6px 8px;text-align:right;font-weight:700">${money(x.cost)}</td>
             </tr>`;
-          }).join("")}
+          }).join("") || '<tr><td colspan="7" style="padding:14px;color:#64748b;text-align:center">No matched stops yet — see unmatched below.</td></tr>'}
           </tbody>
         </table>
       </div>
+      ${((unmatched||[]).length ? `
+        <div style="margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+            <b style="color:#9a3412;font-size:14px">🧭 ${unmatched.length} unmatched trip location${unmatched.length===1?'':'s'} — the tracker text didn't line up with a portal site</b>
+            <span style="color:#78350f;font-size:12px">Pin one to a site → the reconciler learns it for future reports.</span>
+          </div>
+          <div style="max-height:30vh;overflow:auto;border:1px solid #fed7aa;border-radius:8px;background:#fff">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead style="background:#fff7ed;position:sticky;top:0">
+                <tr><th style="text-align:left;padding:6px 8px">Tracker "to" text</th><th style="padding:6px 8px">Time spent</th><th style="text-align:left;padding:6px 8px">Drivers</th><th style="text-align:left;padding:6px 8px;min-width:220px">Pin to site</th></tr>
+              </thead>
+              <tbody>
+              ${unmatched.map((u,i)=>{
+                const drivers = Object.keys(u.drivers||{}).join(", ");
+                return `<tr style="border-top:1px solid #fed7aa">
+                  <td style="padding:6px 8px;color:#9a3412"><b>${esc(u.text)}</b><div style="color:#94a3b8;font-size:11px">${u.occurrences||0} stop${u.occurrences===1?'':'s'}</div></td>
+                  <td style="padding:6px 8px;text-align:right;color:#9a3412;font-weight:700">${hmm(u.totalMins)}</td>
+                  <td style="padding:6px 8px;color:#334155">${esc(drivers)}</td>
+                  <td style="padding:6px 8px"><select data-pin-text="${esc(u.text)}" style="padding:5px 6px;border:1px solid #fed7aa;border-radius:6px;font:inherit;max-width:220px">${optHtml}</select></td>
+                </tr>`;
+              }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>` : '')}
       <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
         <button id="applyTrackerBtn" style="background:#0a7d33;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font:inherit">✓ Apply to job costing</button>
         <button id="reRunTrackerBtn" style="background:#e2e8f0;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit">🔄 Re-check</button>
         <span id="trackerApplyMsg" style="font-size:13px;color:#334155"></span>
       </div>
     </div>`;
+  // Wire the pin dropdowns → save an alias via /sites/register/merge, then
+  // auto-re-check so the newly-pinned rows move to the matched table.
+  host.querySelectorAll("select[data-pin-text]").forEach(sel => {
+    sel.onchange = async () => {
+      const text = sel.getAttribute("data-pin-text");
+      const num = sel.value;
+      if(!text || !num) return;
+      sel.disabled = true;
+      const msg = host.querySelector("#trackerApplyMsg");
+      if(msg) msg.textContent = "Pinning “"+text+"” to site "+num+"…";
+      try {
+        // /sites/register/merge accepts { alias, client, siteNumber }. Try any
+        // client — the server matches by number regardless (aliases are
+        // globally keyed by normName(alias)).
+        // We need a client — use the site's own client from TRACKER_SITES.
+        const site = (TRACKER_SITES.byName||[]).find(s=>String(s.num)===String(num));
+        const client = "projects";   // fallback — merge lookup uses siteNumber, client hint only
+        await authFetch("/sites/register/merge", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ alias: text, client, siteNumber: num })
+        });
+        // Update our local alias cache so the same-tab re-check picks it up.
+        if(TRACKER_ALIASES) TRACKER_ALIASES[trkNorm(text)] = { client, siteNumber: num };
+        if(msg) msg.textContent = "✓ Pinned — re-checking…";
+        // Auto re-run.
+        const R = window.__reportData;
+        const r = await autoTrackerReconcile(R, true);
+        if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[]);
+      } catch(e){
+        sel.disabled = false;
+        if(msg) msg.textContent = "Pin failed — "+e.message;
+      }
+    };
+  });
   host.querySelector("#applyTrackerBtn").onclick = async (e) => {
     e.target.disabled=true;
     host.querySelector("#trackerApplyMsg").textContent = "Applying…";
@@ -775,7 +886,7 @@ function renderTrackerPreview(p, host){
     host.querySelector("#trackerApplyMsg").textContent = "Re-checking…";
     const R = window.__reportData;
     const r = await autoTrackerReconcile(R, true);
-    if(r && r.ok) renderTrackerPreview(r.preview||[], host);
+    if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[]);
   };
 }
 
@@ -1150,11 +1261,11 @@ async function generate(){
           wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost preview skipped — '+((r&&r.error)||"unknown")+'</div>';
           return;
         }
-        if (!(r.preview||[]).length) {
-          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: no matched sites this week — nothing to write.</div>';
+        if (!(r.preview||[]).length && !(r.unmatched||[]).length) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: no matched or unmatched stops this week — nothing to write.</div>';
           return;
         }
-        renderTrackerPreview(r.preview, wrap);
+        renderTrackerPreview(r.preview||[], wrap, r.unmatched||[]);
       } catch (e) {}
     })();
     if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
