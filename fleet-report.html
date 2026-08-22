@@ -709,45 +709,60 @@ function renderTsBody(){
   const users=Object.keys(byU);
   if(!users.length){ host.innerHTML='<p style="color:#64748b;padding:10px 8px;font-size:13px">No assigned driver-days yet. Pick drivers for any pool days above.</p>'; return; }
   const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+  const dfltCaps = { morning: Number(cfg.defaults.morningCap)||30, home: Number(cfg.defaults.homeCap)||30 };
   host.innerHTML = users.map(u=>{
     const bu = cfg.byUser[u]||{};
-    const dflt = (bu.lunch!=null && isFinite(Number(bu.lunch))) ? Number(bu.lunch) : (Number(cfg.defaults.lunch)||30);
+    const dfltL = (bu.lunch!=null && isFinite(Number(bu.lunch))) ? Number(bu.lunch) : (Number(cfg.defaults.lunch)||30);
+    const dfltM = (bu.morningCap!=null && isFinite(Number(bu.morningCap))) ? Number(bu.morningCap) : dfltCaps.morning;
+    const dfltH = (bu.homeCap!=null && isFinite(Number(bu.homeCap))) ? Number(bu.homeCap) : dfltCaps.home;
     const drows = byU[u];
     return `<div style="border-top:2px solid #cbd5e1;margin-top:4px;padding:6px 4px">
       <div style="display:flex;align-items:center;gap:8px;padding:4px 2px;flex-wrap:wrap">
         <b style="font-size:14.5px;color:#0f172a">${esc(driverName(u)||u)}</b>
         <span style="color:#64748b;font-size:12px">${drows.length} day${drows.length===1?'':'s'}</span>
-        <span style="margin-left:auto;font-size:12.5px;color:#334155">Default lunch: <input type="number" min="0" max="120" step="5" value="${dflt}" data-default-lunch="${esc(u)}" style="width:56px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> min</span>
+        <span style="margin-left:auto;font-size:12.5px;color:#334155;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span title="Max deducted for morning commute (their actual drive is used if shorter)">Morning cap <input type="number" min="0" max="120" step="5" value="${dfltM}" data-driver-cap="morningCap|${esc(u)}" style="width:52px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> m</span>
+          <span title="Max deducted for home commute (their actual drive is used if shorter)">Home cap <input type="number" min="0" max="120" step="5" value="${dfltH}" data-driver-cap="homeCap|${esc(u)}" style="width:52px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> m</span>
+          <span>Default lunch <input type="number" min="0" max="120" step="5" value="${dfltL}" data-default-lunch="${esc(u)}" style="width:52px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> m</span>
+        </span>
       </div>
-      <div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 90px 40px;gap:6px;padding:4px 2px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;font-weight:700">
-        <span>Day</span><span>Van</span><span>Start</span><span>Finish</span><span>Lunch (m)</span><span>Paid</span><span></span>
+      <div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 190px 40px;gap:6px;padding:4px 2px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;font-weight:700">
+        <span>Day</span><span>Van</span><span>Start</span><span>Finish</span><span>Lunch (m)</span><span>Paid — deductions</span><span></span>
       </div>
-      ${drows.map((r,i)=>tsDayRow(u,r,i,dflt)).join('')}
+      ${drows.map((r,i)=>tsDayRow(u,r,i,dfltL,dfltM,dfltH)).join('')}
     </div>`;
   }).join('');
   host.querySelectorAll("[data-default-lunch]").forEach(el=>{
     el.addEventListener("input",()=>{
       const u=el.getAttribute("data-default-lunch"); const v=Math.max(0,Math.round(Number(el.value)||0));
       const cfg=window.__tsCfg; cfg.byUser[u]=cfg.byUser[u]||{}; cfg.byUser[u].lunch=v;
-      // Refresh rows below so paid figures update.
+      renderTsBody();
+    });
+  });
+  host.querySelectorAll("[data-driver-cap]").forEach(el=>{
+    el.addEventListener("input",()=>{
+      const [field,u]=String(el.getAttribute("data-driver-cap")).split("|");
+      const v=Math.max(0,Math.round(Number(el.value)||0));
+      const cfg=window.__tsCfg; cfg.byUser[u]=cfg.byUser[u]||{}; cfg.byUser[u][field]=v;
       renderTsBody();
     });
   });
   host.querySelectorAll("[data-tsf]").forEach(el=>{ el.addEventListener("input",()=>tsRowChanged(el)); });
 }
-function tsDayRow(u,r,i,dfltLunch){
-  const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+function tsDayRow(u,r,i,dfltLunch,dfltMcap,dfltHcap){
   const lunch = r.lunchOverride!=null ? Number(r.lunchOverride) : dfltLunch;
-  const caps={morningCap:cfg.defaults.morningCap||30,homeCap:cfg.defaults.homeCap||30};
+  const caps = { morningCap: dfltMcap!=null?dfltMcap:30, homeCap: dfltHcap!=null?dfltHcap:30 };
   const h = tsHoursCalc(r.startMin,r.endMin,r.morning,r.home,lunch,caps);
   const rowKey = u+"|"+r.date;
-  return `<div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 90px 40px;gap:6px;padding:5px 2px;align-items:center;border-top:1px solid #eef" data-tsrow="${esc(rowKey)}">
+  const paidHtml = `<b style="color:${h.paid>0?'#0a7d33':'#64748b'}">${hmSpan(h.paid)}</b>` +
+    `<span style="color:#94a3b8;font-size:11.5px;margin-left:6px" title="Deductions applied — morning / home / lunch">− ${h.morning}m am · ${h.home}m pm · ${h.lunch}m lunch</span>`;
+  return `<div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 190px 40px;gap:6px;padding:5px 2px;align-items:center;border-top:1px solid #eef" data-tsrow="${esc(rowKey)}">
     <span style="font-weight:700;font-size:13px">${esc(r.dow)}</span>
     <span style="color:#64748b;font-size:12.5px">${esc(r.reg)}${r.isPool?' <span title="pool">🚚</span>':''}</span>
     <input type="time" data-tsf="start" data-row="${esc(rowKey)}" value="${tsFmtMin(r.startMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
     <input type="time" data-tsf="end" data-row="${esc(rowKey)}" value="${tsFmtMin(r.endMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
     <input type="number" min="0" max="120" step="5" data-tsf="lunch" data-row="${esc(rowKey)}" value="${lunch}" placeholder="${dfltLunch}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit;width:78px">
-    <span data-paid style="font-weight:700;font-size:13px;color:${h.paid>0?'#0a7d33':'#64748b'}">${hmSpan(h.paid)}</span>
+    <span data-paid style="font-size:13px">${paidHtml}</span>
     <button title="Drop this row" onclick="tsDropRow('${esc(rowKey)}')" style="background:#e2e8f0;border:none;border-radius:6px;padding:3px 6px;cursor:pointer;color:#64748b">✕</button>
   </div>`;
 }
@@ -760,14 +775,23 @@ function tsRowChanged(el){
   if(field==="start"){ const m=tsMinFromHHmm(el.value); if(m!=null) r.startMin=m; }
   else if(field==="end"){ const m=tsMinFromHHmm(el.value); if(m!=null) r.endMin=m; }
   else if(field==="lunch"){ const v=el.value===""?null:Math.max(0,Math.round(Number(el.value)||0)); r.lunchOverride=v; }
-  // Recompute paid on this row.
+  // Recompute paid — uses this driver's per-user lunch/morningCap/homeCap
+  // overrides (falls back to defaults). Their morningCommute and homeCommute
+  // are what the tracker measured for THIS day; we cap them at the driver's max.
   const cfg=window.__tsCfg;
-  const bu=cfg.byUser[r.driverUser]||{}; const dflt=(bu.lunch!=null&&isFinite(Number(bu.lunch)))?Number(bu.lunch):(Number(cfg.defaults.lunch)||30);
-  const lunch=r.lunchOverride!=null?Number(r.lunchOverride):dflt;
-  const caps={morningCap:cfg.defaults.morningCap||30,homeCap:cfg.defaults.homeCap||30};
+  const bu=cfg.byUser[r.driverUser]||{};
+  const dfltL=(bu.lunch!=null&&isFinite(Number(bu.lunch)))?Number(bu.lunch):(Number(cfg.defaults.lunch)||30);
+  const lunch=r.lunchOverride!=null?Number(r.lunchOverride):dfltL;
+  const caps={
+    morningCap:(bu.morningCap!=null&&isFinite(Number(bu.morningCap)))?Number(bu.morningCap):(Number(cfg.defaults.morningCap)||30),
+    homeCap:(bu.homeCap!=null&&isFinite(Number(bu.homeCap)))?Number(bu.homeCap):(Number(cfg.defaults.homeCap)||30),
+  };
   const h=tsHoursCalc(r.startMin,r.endMin,r.morning,r.home,lunch,caps);
   const row=document.querySelector('[data-tsrow="'+CSS.escape(rowKey)+'"]');
-  if(row){ const p=row.querySelector("[data-paid]"); if(p){ p.textContent=hmSpan(h.paid); p.style.color=h.paid>0?'#0a7d33':'#64748b'; } }
+  if(row){
+    const p=row.querySelector("[data-paid]");
+    if(p){ p.innerHTML=`<b style="color:${h.paid>0?'#0a7d33':'#64748b'}">${hmSpan(h.paid)}</b><span style="color:#94a3b8;font-size:11.5px;margin-left:6px">− ${h.morning}m am · ${h.home}m pm · ${h.lunch}m lunch</span>`; }
+  }
 }
 function tsDropRow(rowKey){
   const idx=(window.__tsRows||[]).findIndex(r=>((r.driverUser||"")+"|"+r.date)===rowKey);
