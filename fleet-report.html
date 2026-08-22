@@ -628,9 +628,14 @@ async function loadTrackerSites(){
         const t=String(raw).toLowerCase().trim();
         if(t && t.length>=12) out.byAddr.push({lc:t,name,num,postcode:pc,isProject:/^p\d/i.test(String(num))||String(s.client||"").toLowerCase()==="projects"});
       }
-      // Full list for the pin typeahead — every site once, with search text.
+      // Portal sites' saved coords for the coord-based matcher below.
+      const lat = Number(s.lat), lon = Number(s.lon ?? s.lng);
+      const hasCoord = Number.isFinite(lat) && Number.isFinite(lon);
+      // Full list for the pin typeahead — every site once, with search text
+      // and (when available) lat/lng so the nearest-site match can use them.
       if(num || name) TRACKER_ALL.push({
         name, num, postcode: pc, client, address,
+        lat: hasCoord ? lat : null, lon: hasCoord ? lon : null,
         searchLC: (name+" "+num+" "+pc+" "+address+" "+client).toLowerCase(),
         isProject: /^p\d/i.test(num) || client === "projects",
       });
@@ -654,6 +659,84 @@ function trkNorm(s){ return String(s||"").toLowerCase().replace(/['’`]/g,"").r
 // Match a free-text location (a trip's `to` string) to a portal site. Postcode
 // wins (a valid full postcode is unambiguous), then a full name substring,
 // then a site number. Returns { name, num, postcode } or null.
+// Coord-based site matching — the ACCURATE fallback when text/address matches
+// are ambiguous. Extracts a UK postcode from the trip text, looks up its
+// lat/lng via postcodes.io (free, no key), then returns the nearest portal
+// site within a 500 m radius. Projects win ties by ≤ 200 m.
+const TRK_GEO_CACHE = (function(){
+  try { return JSON.parse(sessionStorage.getItem("mlTrkGeo_v1") || "{}"); } catch(e){ return {}; }
+})();
+function trkSaveGeoCache(){ try{ sessionStorage.setItem("mlTrkGeo_v1", JSON.stringify(TRK_GEO_CACHE)); }catch(e){} }
+async function trkGeocodePostcode(pc){
+  const key = String(pc||"").replace(/\s+/g,"").toUpperCase();
+  if(!key) return null;
+  if(key in TRK_GEO_CACHE) return TRK_GEO_CACHE[key];
+  try{
+    const r = await fetch("https://api.postcodes.io/postcodes/"+encodeURIComponent(key));
+    if(!r.ok){ TRK_GEO_CACHE[key]=null; trkSaveGeoCache(); return null; }
+    const j = await r.json();
+    if(j && j.result && j.result.latitude!=null && j.result.longitude!=null){
+      TRK_GEO_CACHE[key] = { lat:j.result.latitude, lon:j.result.longitude };
+    } else TRK_GEO_CACHE[key] = null;
+  }catch(e){ TRK_GEO_CACHE[key] = null; }
+  trkSaveGeoCache();
+  return TRK_GEO_CACHE[key];
+}
+function trkHaversineM(a, b){
+  const R = 6371000, toR = d => d * Math.PI / 180;
+  const dLat = toR(b.lat - a.lat), dLon = toR(b.lon - a.lon);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(s));
+}
+async function trkMatchByCoords(txt){
+  if(!TRACKER_ALL || !TRACKER_ALL.length) return null;
+  // Grab a full postcode (partial "PO15" doesn't geocode reliably to one point).
+  const up = String(txt||"").toUpperCase();
+  const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+  if(!pcm) return null;
+  const coord = await trkGeocodePostcode(pcm[0]);
+  if(!coord) return null;
+  // Nearest portal site with saved coords.
+  let best = null, bestD = 501;   // metres — hard cap at 500 m
+  for(const s of TRACKER_ALL){
+    if(s.lat==null || s.lon==null) continue;
+    const d = trkHaversineM(coord, {lat:s.lat, lon:s.lon});
+    if(d < bestD){ best = s; bestD = d; }
+    else if(d < bestD + 100 && s.isProject && best && !best.isProject){
+      // Project within 100 m of the current best wins the tie — engineers are
+      // typically on the project, not a shop next door.
+      best = s; bestD = d;
+    }
+  }
+  return best;
+}
+// Text → site map filled by precomputeCoordMatches() so trackerMatchSite can
+// stay synchronous. Session-scoped; cleared whenever the site list reloads.
+let TRK_TEXT_TO_SITE = {};
+async function precomputeCoordMatches(R){
+  if(!R || !R.vehicles) return;
+  // Every unique trip "to" text that contains a UK postcode.
+  const wants = new Set();
+  for(const v of R.vehicles){
+    for(const d of (v.days||[])){
+      for(const t of (d.trips||[])){
+        const s = String(t.to||"");
+        if(!s) continue;
+        if(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(s)) wants.add(s);
+      }
+    }
+  }
+  // Resolve each in parallel — postcodes.io is fast and free; results cache
+  // in sessionStorage so a re-run doesn't hit the API again.
+  const list = [...wants];
+  await Promise.all(list.map(async txt => {
+    if(txt in TRK_TEXT_TO_SITE) return;
+    try {
+      const site = await trkMatchByCoords(txt);
+      TRK_TEXT_TO_SITE[txt] = site || null;
+    } catch(e){ TRK_TEXT_TO_SITE[txt] = null; }
+  }));
+}
 function trackerMatchSite(txt){
   if(!txt || !TRACKER_SITES) return null;
   const raw = String(txt).trim(); if(!raw) return null;
@@ -673,7 +756,18 @@ function trackerMatchSite(txt){
       if(hit) return hit;
     }
   }
-  // 2. Full UK postcode — the only signal strong enough to auto-attribute.
+  // 2. Coord match — the postcode inside the text was geocoded via
+  //    postcodes.io, then compared to every portal site's saved lat/lng
+  //    (500 m cap, project wins ties within 100 m). Populated by
+  //    precomputeCoordMatches() before this runs. This is the highest-
+  //    accuracy signal we have and beats text/address ambiguity — a Co-op
+  //    on a different road that shares a village name loses to a project
+  //    that's actually AT the coord.
+  if(raw in TRK_TEXT_TO_SITE){
+    const g = TRK_TEXT_TO_SITE[raw];
+    if(g) return g;
+  }
+  // 3. Full UK postcode — sites with the exact stored postcode.
   //    Project sites at the same postcode win over other sites.
   const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
   if(pcm){
@@ -817,6 +911,10 @@ async function autoTrackerReconcile(R, dryRun){
   if(!R) return { ok:false, wrote:0 };
   try{
     await loadTrackerSites();
+    // Geocode every unique trip postcode + find nearest portal site — this
+    // is the reliable signal that beats text/address ambiguity, especially
+    // for projects sharing a village with retail stores.
+    await precomputeCoordMatches(R);
     const { rows, unmatched } = buildTrackerRows(R);
     if(!rows.length && !unmatched.length) return { ok:true, wrote:0, preview:[], unmatched:[], rowCount:0 };
     const r = await authFetch("/fleet/tracker-reconcile", {
