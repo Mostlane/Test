@@ -584,6 +584,225 @@ function downloadReport(){
 }
 window.downloadReport=downloadReport;
 
+/* ═══ Confirm & save timesheets modal ══════════════════════════════════════
+   One place to review every driver-day in the week: assigned drivers show
+   with their van, pool/unassigned days show at the top with a driver picker.
+   Start / Finish default to the van's first-trip / last-trip time; Lunch
+   defaults to the driver's paycfg default (30 min if not set). Everything
+   is editable per row. Saves the whole batch to /fleet/timesheet with a
+   per-day lunchOverride, and remembers any changed lunch default in paycfg.
+   ══════════════════════════════════════════════════════════════════════ */
+function tsDowName(iso){ return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(iso+"T12:00:00Z").getUTCDay()]; }
+function buildTimesheetRows(){
+  const R=window.__reportData; if(!R) return { rows:[], unallocated:[] };
+  const rows=[], unalloc=[];
+  for(const v of R.vehicles||[]){
+    const single=(R.dmap&&R.dmap[v.reg]&&R.dmap[v.reg]!==POOL_VAL)?R.dmap[v.reg]:null;
+    for(const d of (v.days||[])){
+      if(!d.trips||!d.trips.length||d.startMin==null||d.endMin==null) continue;
+      const un = v.isPool ? (POOLALLOC[v.reg+"|"+d.date]||"") : (single||"");
+      const morning=(d.trips.find(t=>t.type==="Commute Out")||{}).drive||0;
+      const home=(d.trips.find(t=>t.type==="Commute Home")||{}).drive||0;
+      const row = { reg:v.reg, date:d.date, dow:tsDowName(d.date), startMin:d.startMin, endMin:d.endMin, morning, home, isPool:!!v.isPool, driverUser:un };
+      if(!un) unalloc.push(row); else rows.push(row);
+    }
+  }
+  return { rows, unalloc };
+}
+let TS_CFG_CACHE=null;
+async function loadPayCfg(){
+  if(TS_CFG_CACHE) return TS_CFG_CACHE;
+  try{ TS_CFG_CACHE=await authFetch("/fleet/paycfg").then(r=>r.json()); }catch(e){ TS_CFG_CACHE={ok:true,defaults:{lunch:30},byUser:{}}; }
+  return TS_CFG_CACHE;
+}
+function tsFmtMin(m){ if(m==null) return "—"; const h=Math.floor(m/60), r=m%60; return (h<10?"0":"")+h+":"+(r<10?"0":"")+r; }
+function tsMinFromHHmm(v){ const m=/^(\d{1,2}):(\d{2})$/.exec(String(v||"").trim()); if(!m) return null; return (+m[1])*60+(+m[2]); }
+function tsHoursCalc(startMin, endMin, morning, home, lunch, caps){
+  if(startMin==null||endMin==null) return {span:0,paid:0,lunch:0};
+  const span=Math.max(0,endMin-startMin);
+  const m=Math.min(caps.morningCap||30, morning||0);
+  const h=Math.min(caps.homeCap||30, home||0);
+  const l=Math.max(0, Math.round(lunch||0));
+  return { span, paid: Math.max(0, span-m-h-l), lunch:l, morning:m, home:h };
+}
+async function openTimesheetBuilder(){
+  const R=window.__reportData;
+  const msg=$("saveMsg");
+  if(!R){ if(msg) msg.textContent="Generate a report first."; return; }
+  await loadPayCfg();
+  const cfg=TS_CFG_CACHE||{defaults:{lunch:30},byUser:{}};
+  const defaults=cfg.defaults||{lunch:30};
+  const byUser=cfg.byUser||{};
+  const { rows, unalloc } = buildTimesheetRows();
+  // Cache for editing; the modal binds inputs into these rows.
+  window.__tsRows = rows.slice();
+  window.__tsUnalloc = unalloc.slice();
+  // Options for the pool driver picker.
+  const uOpts=(USERS||[]).slice().sort(mlUserCmp).map(u=>{
+    const name=[u.FirstName,u.LastName].map(x=>x==null?"":String(x).trim()).filter(Boolean).join(" ")||u.Username;
+    return `<option value="${esc(u.Username)}">${esc(name)}</option>`;
+  }).join("");
+  document.getElementById("tsModal")?.remove();
+  const host=document.createElement("div"); host.id="tsModal";
+  host.style.cssText="position:fixed;inset:0;background:rgba(8,18,34,.55);z-index:3000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px;font-family:inherit";
+  const rangeLbl = fmtRange(R.minD,R.maxD);
+  host.innerHTML=`<div style="background:#fff;border-radius:16px;max-width:960px;width:100%;padding:18px;margin-top:2vh;color:#0f172a">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:19px">🧾 Confirm &amp; save timesheets — ${esc(rangeLbl)}</h2>
+      <button onclick="document.getElementById('tsModal').remove()" style="border:none;background:#e2e8f0;border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit">✕</button>
+    </div>
+    <p style="color:#475569;font-size:13px;margin:6px 0 10px">Every driver-day pulled from the trips. Start / Finish default to the van's first / last movement. Lunch defaults to the driver's saved setting. Any change here goes straight to the Van Timesheet.</p>
+    ${unalloc.length?`<div id="tsUnallocSec" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:10px 12px;margin-bottom:12px">
+      <b style="font-size:14px">🚚 ${unalloc.length} pool / unassigned day${unalloc.length===1?'':'s'} — pick a driver for each</b>
+      <div id="tsUnallocBody" style="margin-top:6px"></div>
+    </div>`:''}
+    <div id="tsBody" style="max-height:52vh;overflow:auto;border:1px solid #e5e7eb;border-radius:10px;padding:6px 4px"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <button id="tsSaveBtn" onclick="saveTimesheetsFromModal(this)" style="background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px 18px;font-weight:800;cursor:pointer;font:inherit">💾 Save timesheets</button>
+      <button onclick="document.getElementById('tsModal').remove()" style="background:#e2e8f0;border:none;border-radius:9px;padding:10px 16px;cursor:pointer;font:inherit">Cancel</button>
+      <span id="tsMsg" style="font-size:13px;color:#475569;margin-left:auto"></span>
+    </div></div>`;
+  document.body.appendChild(host);
+  window.__tsOpts=uOpts;
+  window.__tsCfg={defaults,byUser};
+  renderTsUnalloc();
+  renderTsBody();
+}
+function renderTsUnalloc(){
+  const box=document.getElementById("tsUnallocBody"); if(!box) return;
+  const items=window.__tsUnalloc||[];
+  box.innerHTML = items.map((r,i)=>`
+    <div style="display:flex;gap:8px;align-items:center;padding:6px 4px;border-top:1px solid #fde68a;font-size:13.5px">
+      <span style="flex:0 0 90px"><b>${esc(r.reg)}</b></span>
+      <span style="flex:0 0 130px">${esc(r.dow)} ${esc(r.date.slice(5))}</span>
+      <span style="flex:0 0 140px">${tsFmtMin(r.startMin)} – ${tsFmtMin(r.endMin)}</span>
+      <select data-unalloc-i="${i}" style="flex:1;padding:6px;border:1px solid #cdd2e6;border-radius:7px;font:inherit"><option value="">— pick driver —</option>${window.__tsOpts||''}</select>
+    </div>`).join('');
+  box.querySelectorAll("select[data-unalloc-i]").forEach(s=>{
+    s.onchange=()=>{
+      const idx=+s.dataset.unallocI; const row=window.__tsUnalloc[idx]; if(!row) return;
+      if(!s.value){ row.driverUser=""; return; }
+      row.driverUser=s.value;
+      // Move it into the main rows list and re-render everything so it shows
+      // grouped under the picked driver.
+      window.__tsRows.push(row); window.__tsUnalloc.splice(idx,1);
+      // Also record it in POOLALLOC so a re-open remembers.
+      if(row.isPool){ POOLALLOC[row.reg+"|"+row.date]=s.value; try{ authFetch("/fleet/pool-alloc",{method:"POST",body:JSON.stringify({key:row.reg+"|"+row.date,username:s.value})}); }catch(e){} }
+      renderTsUnalloc(); renderTsBody();
+    };
+  });
+}
+function renderTsBody(){
+  const host=document.getElementById("tsBody"); if(!host) return;
+  const rows=(window.__tsRows||[]).slice().sort((a,b)=>{
+    const na=driverName(a.driverUser)||a.driverUser||"", nb=driverName(b.driverUser)||b.driverUser||"";
+    if(na!==nb) return na.localeCompare(nb);
+    return a.date.localeCompare(b.date);
+  });
+  const byU={}; for(const r of rows){ (byU[r.driverUser]=byU[r.driverUser]||[]).push(r); }
+  const users=Object.keys(byU);
+  if(!users.length){ host.innerHTML='<p style="color:#64748b;padding:10px 8px;font-size:13px">No assigned driver-days yet. Pick drivers for any pool days above.</p>'; return; }
+  const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+  host.innerHTML = users.map(u=>{
+    const bu = cfg.byUser[u]||{};
+    const dflt = (bu.lunch!=null && isFinite(Number(bu.lunch))) ? Number(bu.lunch) : (Number(cfg.defaults.lunch)||30);
+    const drows = byU[u];
+    return `<div style="border-top:2px solid #cbd5e1;margin-top:4px;padding:6px 4px">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 2px;flex-wrap:wrap">
+        <b style="font-size:14.5px;color:#0f172a">${esc(driverName(u)||u)}</b>
+        <span style="color:#64748b;font-size:12px">${drows.length} day${drows.length===1?'':'s'}</span>
+        <span style="margin-left:auto;font-size:12.5px;color:#334155">Default lunch: <input type="number" min="0" max="120" step="5" value="${dflt}" data-default-lunch="${esc(u)}" style="width:56px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> min</span>
+      </div>
+      <div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 90px 40px;gap:6px;padding:4px 2px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;font-weight:700">
+        <span>Day</span><span>Van</span><span>Start</span><span>Finish</span><span>Lunch (m)</span><span>Paid</span><span></span>
+      </div>
+      ${drows.map((r,i)=>tsDayRow(u,r,i,dflt)).join('')}
+    </div>`;
+  }).join('');
+  host.querySelectorAll("[data-default-lunch]").forEach(el=>{
+    el.addEventListener("input",()=>{
+      const u=el.getAttribute("data-default-lunch"); const v=Math.max(0,Math.round(Number(el.value)||0));
+      const cfg=window.__tsCfg; cfg.byUser[u]=cfg.byUser[u]||{}; cfg.byUser[u].lunch=v;
+      // Refresh rows below so paid figures update.
+      renderTsBody();
+    });
+  });
+  host.querySelectorAll("[data-tsf]").forEach(el=>{ el.addEventListener("input",()=>tsRowChanged(el)); });
+}
+function tsDayRow(u,r,i,dfltLunch){
+  const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+  const lunch = r.lunchOverride!=null ? Number(r.lunchOverride) : dfltLunch;
+  const caps={morningCap:cfg.defaults.morningCap||30,homeCap:cfg.defaults.homeCap||30};
+  const h = tsHoursCalc(r.startMin,r.endMin,r.morning,r.home,lunch,caps);
+  const rowKey = u+"|"+r.date;
+  return `<div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 90px 40px;gap:6px;padding:5px 2px;align-items:center;border-top:1px solid #eef" data-tsrow="${esc(rowKey)}">
+    <span style="font-weight:700;font-size:13px">${esc(r.dow)}</span>
+    <span style="color:#64748b;font-size:12.5px">${esc(r.reg)}${r.isPool?' <span title="pool">🚚</span>':''}</span>
+    <input type="time" data-tsf="start" data-row="${esc(rowKey)}" value="${tsFmtMin(r.startMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
+    <input type="time" data-tsf="end" data-row="${esc(rowKey)}" value="${tsFmtMin(r.endMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
+    <input type="number" min="0" max="120" step="5" data-tsf="lunch" data-row="${esc(rowKey)}" value="${lunch}" placeholder="${dfltLunch}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit;width:78px">
+    <span data-paid style="font-weight:700;font-size:13px;color:${h.paid>0?'#0a7d33':'#64748b'}">${hmSpan(h.paid)}</span>
+    <button title="Drop this row" onclick="tsDropRow('${esc(rowKey)}')" style="background:#e2e8f0;border:none;border-radius:6px;padding:3px 6px;cursor:pointer;color:#64748b">✕</button>
+  </div>`;
+}
+function tsFindRow(rowKey){
+  return (window.__tsRows||[]).find(r=>((r.driverUser||"")+"|"+r.date)===rowKey);
+}
+function tsRowChanged(el){
+  const rowKey=el.getAttribute("data-row"); const field=el.getAttribute("data-tsf");
+  const r=tsFindRow(rowKey); if(!r) return;
+  if(field==="start"){ const m=tsMinFromHHmm(el.value); if(m!=null) r.startMin=m; }
+  else if(field==="end"){ const m=tsMinFromHHmm(el.value); if(m!=null) r.endMin=m; }
+  else if(field==="lunch"){ const v=el.value===""?null:Math.max(0,Math.round(Number(el.value)||0)); r.lunchOverride=v; }
+  // Recompute paid on this row.
+  const cfg=window.__tsCfg;
+  const bu=cfg.byUser[r.driverUser]||{}; const dflt=(bu.lunch!=null&&isFinite(Number(bu.lunch)))?Number(bu.lunch):(Number(cfg.defaults.lunch)||30);
+  const lunch=r.lunchOverride!=null?Number(r.lunchOverride):dflt;
+  const caps={morningCap:cfg.defaults.morningCap||30,homeCap:cfg.defaults.homeCap||30};
+  const h=tsHoursCalc(r.startMin,r.endMin,r.morning,r.home,lunch,caps);
+  const row=document.querySelector('[data-tsrow="'+CSS.escape(rowKey)+'"]');
+  if(row){ const p=row.querySelector("[data-paid]"); if(p){ p.textContent=hmSpan(h.paid); p.style.color=h.paid>0?'#0a7d33':'#64748b'; } }
+}
+function tsDropRow(rowKey){
+  const idx=(window.__tsRows||[]).findIndex(r=>((r.driverUser||"")+"|"+r.date)===rowKey);
+  if(idx>=0){ window.__tsRows.splice(idx,1); renderTsBody(); }
+}
+async function saveTimesheetsFromModal(btn){
+  const msg=document.getElementById("tsMsg");
+  const rows=window.__tsRows||[]; const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+  if(!rows.length){ if(msg) msg.textContent="Nothing to save."; return; }
+  if(btn) btn.disabled=true; if(msg) msg.textContent="Saving…";
+  // Group by (week × username).
+  const byWeek={};
+  for(const r of rows){
+    if(!r.driverUser) continue;
+    const wk=mondayOf(r.date);
+    (byWeek[wk]=byWeek[wk]||{})[r.driverUser]=(byWeek[wk][r.driverUser]||{});
+    byWeek[wk][r.driverUser][r.date] = {
+      startMin:r.startMin, endMin:r.endMin,
+      morningCommute:r.morning, homeCommute:r.home,
+      leavingHome:true, arrivingHome:true,
+      lunchOverride: (r.lunchOverride!=null && isFinite(Number(r.lunchOverride))) ? Math.max(0,Math.round(Number(r.lunchOverride))) : null,
+    };
+  }
+  try{
+    // Persist per-driver lunch defaults that changed.
+    await authFetch("/fleet/paycfg",{method:"POST",body:JSON.stringify({defaults:cfg.defaults,byUser:cfg.byUser})});
+    // Post each week's rows.
+    for(const wk of Object.keys(byWeek)){
+      const users=byWeek[wk];
+      const rows=Object.keys(users).map(u=>({username:u, days:users[u]}));
+      await authFetch("/fleet/timesheet",{method:"POST",body:JSON.stringify({week:wk,rows})});
+    }
+    if(msg) msg.textContent="✓ Saved. Open Van Timesheet to review.";
+    setTimeout(()=>{ document.getElementById("tsModal")?.remove(); },1200);
+    const sm=$("saveMsg"); if(sm) sm.textContent="✓ Van timesheets saved.";
+  }catch(e){ if(msg) msg.textContent="Save failed: "+(e&&e.message||e); if(btn) btn.disabled=false; }
+}
+window.openTimesheetBuilder=openTimesheetBuilder;
+window.saveTimesheetsFromModal=saveTimesheetsFromModal;
+window.tsDropRow=tsDropRow;
+
 // Push the report's door-to-door hours into the Van Timesheet (per week).
 async function saveTimesheet(){
   const R=window.__reportData; if(!R){ return; }
@@ -674,6 +893,20 @@ async function generate(){
     window.scrollTo(0,0);
     saveReport({auto:true});   // every generated report saves to the portal automatically
     if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
+    // Any pool / unassigned van days with real journeys? Nudge the admin to
+    // allocate a driver + confirm start/finish/lunch straight into a
+    // timesheet, so the report → payroll pipeline is one continuous flow.
+    try{
+      const { unalloc } = buildTimesheetRows();
+      if(unalloc.length){
+        const nudge=document.createElement("div");
+        nudge.style.cssText="margin:10px 0;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;font-size:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap";
+        nudge.innerHTML='<b>🚚 '+unalloc.length+' pool/unassigned day'+(unalloc.length===1?'':'s')+' need a driver</b> <span style="color:#78350f">— open the timesheet builder to allocate them + confirm start / finish / lunch.</span>' +
+          ' <button onclick="openTimesheetBuilder()" style="margin-left:auto;background:#0a7d33;color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;font-weight:700">🧾 Open builder</button>';
+        const host=document.getElementById("report")||document.body;
+        host.insertBefore(nudge, host.firstChild);
+      }
+    }catch(e){}
   }catch(e){ console.error(e); $("status").textContent="Couldn't build the report: "+(e.message||e); $("genBtn").disabled=false; }
 }
 
@@ -815,7 +1048,7 @@ function renderReport(R){
     <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again</button>
     <button class="btn" onclick="openSendScores()">📤 Send van scores</button>
     <button class="btn grey" onclick="downloadReport()">⬇️ Export HTML file</button>
-    <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
+    <button class="btn" onclick="openTimesheetBuilder()">🧾 Confirm &amp; save timesheets</button>
     <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>
     <button class="btn grey" onclick="location.reload()">↻ New report</button>
     <span id="saveMsg" style="font-size:13px;color:#475569"></span></div></div>`;

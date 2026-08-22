@@ -112,7 +112,12 @@ function vanPay(day,c){
   const span=Math.max(0,e-s);
   const morning=(day.leavingHome!==false)?Math.min(c.morningCap, day.morningCommute||0):0;
   const home=(day.arrivingHome!==false)?Math.min(c.homeCap, day.homeCommute||0):0;
-  const lunch=(span>=c.thresholdH*60)?c.lunch:0;
+  // Per-day lunch override (set on the fleet-report "Confirm & save timesheets"
+  // modal) beats the default rule. A number 0/15/30/45/60 wins; null falls
+  // back to the default (paycfg lunch on days ≥ thresholdH hours).
+  const lunch=(day.lunchOverride!=null && isFinite(Number(day.lunchOverride)))
+    ? Math.max(0, Math.round(Number(day.lunchOverride)))
+    : ((span>=c.thresholdH*60)?c.lunch:0);
   return {paid:Math.max(0,span-morning-home-lunch),span,morning,home,lunch};
 }
 
