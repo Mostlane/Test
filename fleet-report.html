@@ -65,6 +65,38 @@
   .rpt-month{background:#003468;color:#fff;font-weight:800;padding:7px 12px;border-radius:8px;margin:16px 0 2px;font-size:14px}
   .rpt-month:first-child{margin-top:4px}
   .rpt-row{display:flex;gap:10px;align-items:center;padding:8px 4px;border-top:1px solid #eef}
+  /* Report container needs mobile padding so tables/panels don't run edge-to-edge. */
+  #report{padding:0 12px;max-width:1400px;margin:0 auto}
+  /* Tracker → job-costing preview panel. Grid stacks on narrow screens so
+     everything fits on a phone. */
+  .trkbox{margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468}
+  .trkbox-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  .trkbox-hd b{font-size:15px}
+  .trkbox-hd .tot{font-size:12.5px;color:#334155}
+  .trkbox-list{max-height:60vh;overflow:auto;border:1px solid #cdddf5;border-radius:8px;background:#fff;padding:6px 0}
+  .trk-drv-hd{padding:8px 12px;background:#f8fbff;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:0;z-index:1;border-bottom:1px solid #e2e8f0}
+  .trk-drv-hd b{font-size:14px;color:#003468}
+  .trk-drv-hd .sub{color:#334155;font-size:12px}
+  .trk-day{padding:8px 12px;font-size:13px;display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:start;border-top:1px solid #f0f4fa}
+  .trk-day .dt{color:#64748b;font-weight:600}
+  .trk-day .cost{text-align:right;font-weight:700;color:#0a7d33;white-space:nowrap}
+  .trk-site{margin:2px 0}
+  .trk-site b{color:#0f172a}
+  .trk-site .meta{color:#94a3b8;font-size:11px;margin-left:4px}
+  .trk-site .times{color:#64748b;font-size:11.5px;margin-top:2px}
+  .trk-site .tag{background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:700;padding:1px 5px;border-radius:5px;margin-left:4px;display:inline-block}
+  .trk-wrong{background:none;border:none;color:#b91c1c;cursor:pointer;padding:0 4px;font-size:11px;margin-left:4px}
+  @media(max-width:640px){
+    #report{padding:0 8px}
+    .trkbox{padding:10px 10px;margin:10px 0}
+    .trkbox-list{max-height:none}
+    /* Stack: date row, then site block full-width, then cost aligned right. */
+    .trk-day{grid-template-columns:1fr auto;padding:8px 10px}
+    .trk-day .dt{grid-column:1 / -1;margin-bottom:2px}
+    .trk-drv-hd{padding:8px 10px}
+    .trkbox-hd{gap:6px}
+    .trkbox-hd .tot{width:100%}
+  }
 </style>
 </head>
 <body>
@@ -994,16 +1026,14 @@ function renderTrackerPreview(p, host, unmatched, opts){
     </div>`;
   }
   host.innerHTML = `
-    <div style="margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-        <b style="font-size:15px">🚐 Tracker → job costing — preview</b>
-        <span style="font-size:12.5px;color:#334155">${(p||[]).length} matched · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
+    <div class="trkbox">
+      <div class="trkbox-hd">
+        <b>🚐 Tracker → job costing — preview</b>
+        <span class="tot">${(p||[]).length} matched · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
       </div>
       ${aiApplied && (aiApplied.aliases||aiApplied.poolDrivers) ? '<div style="font-size:12px;color:#0a7d33;margin:0 0 8px">🤖 AI auto-resolved '+(aiApplied.aliases||0)+' site match'+(aiApplied.aliases===1?'':'es')+(aiApplied.poolDrivers?' + '+aiApplied.poolDrivers+' pool driver'+(aiApplied.poolDrivers===1?'':'s'):'')+' (learned for future reports).</div>' : ''}
-      <div style="max-height:52vh;overflow:auto;border:1px solid #cdddf5;border-radius:8px;background:#fff;padding:6px 0">
+      <div class="trkbox-list">
         ${(() => {
-          // Group by driver → date → sites. Answers "where was X on Wed?"
-          // in one glance instead of scanning a flat table.
           const byU = {};
           for(const x of (p||[])){
             const u = x.username || "(unknown)";
@@ -1016,14 +1046,13 @@ function renderTrackerPreview(p, host, unmatched, opts){
             const dates = Object.keys(byU[u]).sort();
             let uOn=0, uTr=0, uCost=0;
             for(const d of dates) for(const x of byU[u][d]){ uOn+=x.onsiteMins||0; uTr+=x.travelMins||0; uCost+=x.cost||0; }
-            return `<div style="border-bottom:1px solid #eef">
-              <div style="padding:8px 12px;background:#f8fbff;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:0;z-index:1">
-                <b style="font-size:14px;color:#003468">${esc(u)}</b>
-                <span style="color:#334155;font-size:12px">${dates.length} day${dates.length===1?'':'s'} · ${hmm(uOn)} on-site · ${hmm(uTr)} travel · <b>${money(uCost)}</b></span>
+            return `<div>
+              <div class="trk-drv-hd">
+                <b>${esc(u)}</b>
+                <span class="sub">${dates.length} day${dates.length===1?'':'s'} · ${hmm(uOn)} on-site · ${hmm(uTr)} travel · <b>${money(uCost)}</b></span>
               </div>
               ${dates.map(d => {
                 const rows = byU[u][d];
-                // De-dupe sites per day (a rare split visit lists once with combined time).
                 const bySite = {};
                 for(const r of rows){
                   const k = r.siteCode || r.siteName || "?";
@@ -1031,26 +1060,24 @@ function renderTrackerPreview(p, host, unmatched, opts){
                   s.onsiteMins += r.onsiteMins||0; s.travelMins += r.travelMins||0; s.cost += r.cost||0; s.skippedOnsiteMins += r.skippedOnsiteMins||0;
                 }
                 const sites = Object.values(bySite);
-                const dayOn = sites.reduce((a,x)=>a+x.onsiteMins,0);
-                const dayTr = sites.reduce((a,x)=>a+x.travelMins,0);
                 const dayCost = sites.reduce((a,x)=>a+x.cost,0);
                 const dateLbl = (function(){ try{ const dt=new Date(d+"T12:00:00Z"); return dt.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}); }catch(e){ return d; } })();
-                return `<div style="padding:6px 12px 8px 24px;font-size:13px;display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:start">
-                  <div style="color:#64748b;font-weight:600">${dateLbl}</div>
+                return `<div class="trk-day">
+                  <div class="dt">${dateLbl}</div>
                   <div>
                     ${sites.map(s => {
-                      const dedup = s.skippedOnsiteMins>0 ? `<span style="color:#94a3b8;font-size:11px"> · − ${hmm(s.skippedOnsiteMins)} in SiteLog</span>` : "";
-                      const wrongBtn = `<button title="Wrong site? Click to reject this attribution and unlearn any pin for future reports." data-wrong-site="${esc(s.code||'')}" style="background:none;border:none;color:#b91c1c;cursor:pointer;padding:0 4px;font-size:11px;margin-left:4px">✕ wrong</button>`;
-                      const cd = s.code ? '<span style="color:#94a3b8;font-size:11px"> · '+esc(s.code)+'</span>' : '';
+                      const dedup = s.skippedOnsiteMins>0 ? `<span class="meta"> · − ${hmm(s.skippedOnsiteMins)} in SiteLog</span>` : "";
+                      const wrongBtn = `<button title="Wrong site? Click to reject this attribution and unlearn any pin for future reports." class="trk-wrong" data-wrong-site="${esc(s.code||'')}">✕ wrong</button>`;
+                      const cd = s.code ? '<span class="meta"> · '+esc(s.code)+'</span>' : '';
                       const isProj = /^p\d/i.test(String(s.code||""));
-                      const tag = isProj ? '<span style="background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:700;padding:1px 5px;border-radius:5px;margin-left:4px">PROJECT</span>' : '';
-                      return `<div style="margin:2px 0">
+                      const tag = isProj ? '<span class="tag">PROJECT</span>' : '';
+                      return `<div class="trk-site">
                         <b>${esc(s.name||"(unknown site)")}</b>${tag}${cd}${dedup}${wrongBtn}
-                        <div style="color:#64748b;font-size:11.5px">🛠 ${hmm(s.onsiteMins)} on-site · 🚐 ${hmm(s.travelMins)} travel</div>
+                        <div class="times">🛠 ${hmm(s.onsiteMins)} on-site · 🚐 ${hmm(s.travelMins)} travel</div>
                       </div>`;
                     }).join('')}
                   </div>
-                  <div style="text-align:right;font-weight:700;color:#0a7d33">${money(dayCost)}</div>
+                  <div class="cost">${money(dayCost)}</div>
                 </div>`;
               }).join("")}
             </div>`;
