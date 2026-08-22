@@ -726,49 +726,73 @@ function buildPoolDays(R){
 }
 function buildTrackerRows(R){
   if(!R || !R.vehicles) return { rows:[], unmatched:[] };
+  // Rule: every minute of a driver's day should be costed to a job.
+  //   • A drive is costed to whichever endpoint is a known site: prefer
+  //     the DESTINATION (travel to), fall back to the ORIGIN (travel from
+  //     — this catches "leaving Site A to head home / to lunch").
+  //   • Stopped time at a known site is costed to that site.
+  //   • Stopped time at an UNKNOWN location between two matched stops is
+  //     attributed to the site JUST LEFT (they're still on that job).
+  //   • Only truly homeless trips (both ends unknown, no prior site) fall
+  //     into the unmatched review list.
   const out=[], unmatched={};   // unmatched: `to_text` -> { text, drivers:Set, totalMins }
   for(const v of R.vehicles){
-    const dr = v.driverUser || "";      // only cost time for a real portal user
+    const dr = v.driverUser || "";
     if(!dr) continue;
     for(const d of (v.days||[])){
       const trips = d.trips||[]; if(!trips.length) continue;
+      let lastKnownSite = null;   // last matched site the driver was at, this day
       for(let i=0;i<trips.length;i++){
-        const t=trips[i];
-        if(isHomeText(t.to, v.home)) continue;   // home = never a costable site
-        const site = trackerMatchSite(t.to);
-        if(!site){
-          // Aggregate unmatched stops. Only count the on-site duration
-          // (t.end → next trip.start) so tiny drive-throughs don't clutter
-          // the list. Trips where the van never stopped again are skipped.
-          const nextTrip = trips[i+1];
-          const startMin = toMin(t.end);
-          const endMin = nextTrip ? toMin(nextTrip.start) : null;
-          if(startMin==null || endMin==null || endMin<=startMin) continue;
-          const stayMin = endMin - startMin;
-          if(stayMin < 20) continue;   // ignore fleeting drop-offs (min 20 min)
-          const key = String(t.to||"").trim(); if(!key) continue;
-          const u = unmatched[key] || (unmatched[key] = { text:key, drivers:{}, totalMins:0, occurrences:0 });
-          u.totalMins += stayMin; u.occurrences++;
-          u.drivers[dr] = (u.drivers[dr]||0) + stayMin;
-          continue;
-        }
-        const visitStart = t.end || null;
-        const nextTrip = trips[i+1];
-        const visitEnd = nextTrip ? nextTrip.start : t.end;
-        if(visitStart && visitEnd && visitEnd !== visitStart){
-          out.push({
-            username: dr, date: d.date, kind: "onsite",
-            siteName: site.name, siteCode: site.num, postcode: site.postcode,
-            startedAt: d.date+"T"+visitStart+":00", endedAt: d.date+"T"+visitEnd+":00",
-          });
-        }
-        if(t.start && t.end && (t.drive||0) > 0){
+        const t = trips[i];
+        const toIsHome = isHomeText(t.to, v.home);
+        const fromIsHome = isHomeText(t.from, v.home);
+        const toSite = toIsHome ? null : trackerMatchSite(t.to);
+        const fromSite = fromIsHome ? null : trackerMatchSite(t.from);
+        // 1) TRAVEL — belongs to the arrival site if known, else to the
+        //    departure site if known, else to the last known site of the day.
+        const travelSite = toSite || fromSite || lastKnownSite;
+        if(travelSite && t.start && t.end && (t.drive||0) > 0){
           out.push({
             username: dr, date: d.date, kind: "travel",
-            siteName: site.name, siteCode: site.num, postcode: site.postcode,
+            siteName: travelSite.name, siteCode: travelSite.num, postcode: travelSite.postcode,
             startedAt: d.date+"T"+t.start+":00", endedAt: d.date+"T"+t.end+":00",
           });
         }
+        // 2) STOPPED TIME after this trip and before the next.
+        const nextTrip = trips[i+1];
+        const stopStart = t.end || null;
+        const stopEnd = nextTrip ? nextTrip.start : null;
+        if(stopStart && stopEnd && stopEnd !== stopStart){
+          const stayMin = Math.max(0, (toMin(stopEnd)||0) - (toMin(stopStart)||0));
+          if(stayMin > 0){
+            // Choose the site this stopped period belongs to:
+            //   • toSite if the trip arrived somewhere known
+            //   • lastKnownSite otherwise (they didn't teleport)
+            //   • unmatched only when they've never yet been anywhere known
+            const stopSite = toSite || lastKnownSite;
+            if(stopSite){
+              out.push({
+                username: dr, date: d.date, kind: "onsite",
+                siteName: stopSite.name, siteCode: stopSite.num, postcode: stopSite.postcode,
+                startedAt: d.date+"T"+stopStart+":00", endedAt: d.date+"T"+stopEnd+":00",
+              });
+            } else if(!toIsHome && stayMin >= 20){
+              // Truly unresolvable — day started with an unknown stop and we
+              // have no prior site to attribute it to. Send to AI/manual pin.
+              const key = String(t.to||"").trim();
+              if(key){
+                const u = unmatched[key] || (unmatched[key] = { text:key, drivers:{}, totalMins:0, occurrences:0 });
+                u.totalMins += stayMin; u.occurrences++;
+                u.drivers[dr] = (u.drivers[dr]||0) + stayMin;
+              }
+            }
+          }
+        }
+        // Update the running "last known site" for the day — a matched arrival
+        // sets it; going home clears it (next day starts fresh anyway, but this
+        // also stops a home visit inheriting the previous job).
+        if(toSite) lastKnownSite = toSite;
+        else if(toIsHome) lastKnownSite = null;
       }
     }
   }
