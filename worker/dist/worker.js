@@ -18450,6 +18450,157 @@ async function handle22(request, env, ctx, url, sess) {
       return jr3({ ok: true }, headers);
     }
   }
+  if (sub === "/tracker-ai-resolve" && method === "POST") {
+    const b = await readJson4(request);
+    const unmatched = Array.isArray(b.unmatched) ? b.unmatched.slice(0, 40) : [];
+    const poolDays = Array.isArray(b.poolDays) ? b.poolDays.slice(0, 40) : [];
+    if (!unmatched.length && !poolDays.length) return jr3({ ok: true, applied: { aliases: 0, poolDrivers: 0 }, unresolved: { unmatched: [], poolDays: [] } }, headers);
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      sites = (results || []).map((r) => {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const addr = [d.address1, d.street, d.town, d.county].filter(Boolean).join(", ");
+        return { num: r.site_number, name: r.site_name, postcode: r.postcode || "", client: r.client || "", address: addr, isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || "")) };
+      }).filter((s) => s.num || s.name);
+    } catch {
+    }
+    let drivers = [];
+    try {
+      const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='Active' OR status='')").bind(tid).all();
+      drivers = (results || []).map((u) => {
+        let p = {};
+        try {
+          p = u.profile ? JSON.parse(u.profile) : {};
+        } catch {
+        }
+        const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
+        return { username: u.username, name, homePostcode: p.homePostcode || "", staffType: p.staffType || "" };
+      }).filter((d) => d.staffType === "field" || d.homePostcode);
+    } catch {
+    }
+    const key = env.ANTHROPIC_API_KEY;
+    if (!key) return jr3({ ok: false, error: "ANTHROPIC_API_KEY not set" }, headers, 200);
+    const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+    const schema = {
+      type: "object",
+      properties: {
+        siteAliases: {
+          type: "array",
+          description: "One entry per unmatched trip text you can confidently map to a portal site. Skip anything you're not sure about.",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "The tracker 'to' text exactly as given." },
+              siteNumber: { type: "string", description: "The site number you're pinning it to." },
+              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.75 will be applied." },
+              reason: { type: "string" }
+            },
+            required: ["text", "siteNumber", "confidence"]
+          }
+        },
+        poolDrivers: {
+          type: "array",
+          description: "One entry per pool-van day you can confidently attribute to a driver, by matching the first trip's origin (or last trip's destination) to a driver's home postcode / area.",
+          items: {
+            type: "object",
+            properties: {
+              vanKey: { type: "string", description: "The van|date key exactly as given." },
+              username: { type: "string", description: "The driver's portal username." },
+              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.75 will be applied." },
+              reason: { type: "string" }
+            },
+            required: ["vanKey", "username", "confidence"]
+          }
+        }
+      },
+      required: ["siteAliases", "poolDrivers"]
+    };
+    const system = "You are helping match van tracker text to a UK field-service company's portal. Rules: (1) Only return matches you're >=75% confident about. (2) For siteAliases: prefer a match on postcode > site name > address street/town. Project sites (isProject:true) are often the right answer for repeat stops at unfamiliar text. (3) For poolDrivers: match the trip origin/destination to a driver's home postcode area (e.g. text 'Whiteley, PO15 7LJ' matches homePostcode 'PO15 7LJ' or the same PO15 area). Never guess; empty output is fine when unsure.";
+    const compactSites = sites.slice(0, 400).map((s) => (s.isProject ? "P" : "S") + " " + s.num + " | " + s.name + (s.postcode ? " | " + s.postcode : "") + (s.address ? " | " + s.address : ""));
+    const compactDrivers = drivers.slice(0, 120).map((d) => d.username + " | " + d.name + (d.homePostcode ? " | " + d.homePostcode : ""));
+    const compactUnmatched = unmatched.map((u) => "TEXT: " + (u.text || "") + "  (" + (u.occurrences || 0) + " stops, " + (u.totalMins || 0) + " min total)");
+    const compactPool = poolDays.map((p) => "VAN " + p.van + " | DATE " + p.date + " | first from: " + (p.firstFrom || "?") + " | last to: " + (p.lastTo || "?"));
+    const userContent = "SITES (prefix P=project, S=other):\n" + compactSites.join("\n") + "\n\nDRIVERS (username | name | homePostcode):\n" + compactDrivers.join("\n") + "\n\n" + (compactUnmatched.length ? "UNMATCHED TRIP TEXTS TO PLACE:\n" + compactUnmatched.join("\n") + "\n\n" : "") + (compactPool.length ? "POOL-VAN DAYS TO ATTRIBUTE TO A DRIVER:\n" + compactPool.join("\n") + "\n" : "") + "Return your matches via the resolve_tracker tool.";
+    let resp;
+    try {
+      resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model,
+          max_tokens: 3e3,
+          system,
+          tools: [{ name: "resolve_tracker", description: "Return confident matches.", input_schema: schema }],
+          tool_choice: { type: "tool", name: "resolve_tracker" },
+          messages: [{ role: "user", content: userContent }]
+        })
+      });
+    } catch (e) {
+      return jr3({ ok: false, error: "AI unreachable: " + e.message }, headers, 200);
+    }
+    if (!resp.ok) {
+      let detail = "";
+      try {
+        const j = await resp.json();
+        detail = j?.error?.message || "";
+      } catch {
+      }
+      return jr3({ ok: false, error: "AI error " + resp.status + (detail ? " (" + detail + ")" : "") }, headers, 200);
+    }
+    let payload;
+    try {
+      payload = await resp.json();
+    } catch {
+      return jr3({ ok: false, error: "AI reply unreadable" }, headers, 200);
+    }
+    const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "resolve_tracker") : null;
+    const out = block && block.input || { siteAliases: [], poolDrivers: [] };
+    const validNums = new Set(sites.map((s) => String(s.num)));
+    let appliedAliases = 0;
+    if (Array.isArray(out.siteAliases)) {
+      const cur = await cfgReadWrap(env, tid, "site_aliases", {});
+      const norm = (s) => String(s || "").toLowerCase().replace(/['’`]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      for (const a of out.siteAliases) {
+        if (!a || !a.text || !a.siteNumber) continue;
+        if (Number(a.confidence) < 0.75) continue;
+        if (!validNums.has(String(a.siteNumber))) continue;
+        const site = sites.find((s) => String(s.num) === String(a.siteNumber));
+        cur[norm(a.text)] = { client: site && site.client || "", siteNumber: String(a.siteNumber), label: String(a.text).slice(0, 200), aiConfidence: a.confidence, aiReason: a.reason || "" };
+        appliedAliases++;
+      }
+      await cfgWriteWrap(env, tid, "site_aliases", cur);
+    }
+    const validUsers = new Set(drivers.map((d) => String(d.username)));
+    let appliedPool = 0;
+    if (Array.isArray(out.poolDrivers)) {
+      const cur = await cfgReadWrap(env, tid, "fleet:poolalloc", {});
+      for (const p of out.poolDrivers) {
+        if (!p || !p.vanKey || !p.username) continue;
+        if (Number(p.confidence) < 0.75) continue;
+        if (!validUsers.has(String(p.username))) continue;
+        cur[p.vanKey] = p.username;
+        appliedPool++;
+      }
+      await cfgWriteWrap(env, tid, "fleet:poolalloc", cur);
+    }
+    const okTexts = new Set((out.siteAliases || []).filter((a) => Number(a.confidence) >= 0.75).map((a) => a.text));
+    const okPool = new Set((out.poolDrivers || []).filter((p) => Number(p.confidence) >= 0.75).map((p) => p.vanKey));
+    return jr3({
+      ok: true,
+      applied: { aliases: appliedAliases, poolDrivers: appliedPool },
+      unresolved: {
+        unmatched: unmatched.filter((u) => !okTexts.has(u.text)),
+        poolDays: poolDays.filter((p) => !okPool.has(p.van + "|" + p.date))
+      }
+    }, headers);
+  }
   if (sub === "/tracker-reconcile" && method === "POST") {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
@@ -18582,6 +18733,19 @@ function normSite(s) {
   const t = String(s || "").trim();
   if (!t) return "";
   return /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+async function cfgReadWrap(env, tid, name, fallback) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {
+  }
+  return fallback;
+}
+async function cfgWriteWrap(env, tid, name, value) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
 }
 async function ensureVehTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicles (

@@ -705,6 +705,25 @@ function isHomeText(txt, homes){
 }
 // Turn a report's parsed vehicles into tracker segments — one on-site row
 // per visit + one travel row per drive TO that site (excluding home commute).
+// Pool-van days that have journeys but no allocated driver — the AI resolver
+// tries to attribute each to a driver by matching first/last trip text to
+// driver home postcodes. Returned alongside the row-builder output.
+function buildPoolDays(R){
+  if(!R || !R.vehicles) return [];
+  const out=[];
+  for(const v of R.vehicles){
+    if(!v.isPool) continue;
+    for(const d of (v.days||[])){
+      if(!d.trips||!d.trips.length) continue;
+      const key = v.reg+"|"+d.date;
+      if(POOLALLOC[key]) continue;   // already picked
+      const firstFrom = d.trips[0].from || "";
+      const lastTo = d.trips[d.trips.length-1].to || "";
+      out.push({ van: v.reg, date: d.date, firstFrom, lastTo });
+    }
+  }
+  return out;
+}
 function buildTrackerRows(R){
   if(!R || !R.vehicles) return { rows:[], unmatched:[] };
   const out=[], unmatched={};   // unmatched: `to_text` -> { text, drivers:Set, totalMins }
@@ -774,7 +793,9 @@ async function autoTrackerReconcile(R, dryRun){
 // apply, with an "Apply to job costing" button. Every driver x site x day
 // gets one row: on-site minutes + travel minutes + £ at the driver's rate.
 // Skipped rows (SiteLog already covers) show muted so nothing is silent.
-function renderTrackerPreview(p, host, unmatched){
+function renderTrackerPreview(p, host, unmatched, opts){
+  opts = opts || {};
+  const aiApplied = opts.aiApplied || null;
   const hmm = m => { m=Math.max(0,Math.round(m||0)); const h=Math.floor(m/60), r=m%60; return (h?h+"h ":"")+(r||!h?r+"m":""); };
   const money = n => "£"+(Math.round((n||0)*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
   const totCost = (p||[]).reduce((a,x)=>a+(x.cost||0),0);
@@ -820,10 +841,11 @@ function renderTrackerPreview(p, host, unmatched){
   }
   host.innerHTML = `
     <div style="margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
         <b style="font-size:15px">🚐 Tracker → job costing — preview</b>
         <span style="font-size:12.5px;color:#334155">${(p||[]).length} matched · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
       </div>
+      ${aiApplied && (aiApplied.aliases||aiApplied.poolDrivers) ? '<div style="font-size:12px;color:#0a7d33;margin:0 0 8px">🤖 AI auto-resolved '+(aiApplied.aliases||0)+' site match'+(aiApplied.aliases===1?'':'es')+(aiApplied.poolDrivers?' + '+aiApplied.poolDrivers+' pool driver'+(aiApplied.poolDrivers===1?'':'s'):'')+' (learned for future reports).</div>' : ''}
       <div style="max-height:38vh;overflow:auto;border:1px solid #cdddf5;border-radius:8px;background:#fff">
         <table style="width:100%;border-collapse:collapse;font-size:12.5px">
           <thead style="background:#f1f5f9;position:sticky;top:0">
@@ -846,11 +868,12 @@ function renderTrackerPreview(p, host, unmatched){
         </table>
       </div>
       ${((unmatched||[]).length ? `
-        <div style="margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-            <b style="color:#9a3412;font-size:14px">🧭 ${unmatched.length} unmatched trip location${unmatched.length===1?'':'s'} — the tracker text didn't line up with a portal site</b>
-            <span style="color:#78350f;font-size:12px">Pin one to a site → the reconciler learns it for future reports.</span>
-          </div>
+        <details style="margin-top:8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:8px 12px">
+          <summary style="cursor:pointer;color:#9a3412;font-size:13px;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <span>🧭 ${unmatched.length} stop${unmatched.length===1?'':'s'} AI couldn't confidently match — pin them once</span>
+            <span style="color:#78350f;font-size:11.5px;font-weight:normal">Expand to review</span>
+          </summary>
+          <div style="margin-top:6px"></div>
           <div style="max-height:30vh;overflow:auto;border:1px solid #fed7aa;border-radius:8px;background:#fff">
             <table style="width:100%;border-collapse:collapse;font-size:12.5px">
               <thead style="background:#fff7ed;position:sticky;top:0">
@@ -869,7 +892,7 @@ function renderTrackerPreview(p, host, unmatched){
               </tbody>
             </table>
           </div>
-        </div>` : '')}
+        </details>` : '')}
       <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
         <button id="applyTrackerBtn" style="background:#0a7d33;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font:inherit">✓ Apply to job costing</button>
         <button id="reRunTrackerBtn" style="background:#e2e8f0;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit">🔄 Re-check</button>
@@ -1304,19 +1327,47 @@ async function generate(){
     (async () => {
       try {
         const R = window.__reportData;
-        const r = await autoTrackerReconcile(R, true);   // dryRun
         const host = document.getElementById("report") || document.body;
         const wrap = document.createElement("div");
         host.insertBefore(wrap, host.firstChild);
+        wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: matching sites…</div>';
+        // First-pass dry run.
+        let r = await autoTrackerReconcile(R, true);
         if (!r || !r.ok) {
-          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost preview skipped — '+((r&&r.error)||"unknown")+'</div>';
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost skipped — '+((r&&r.error)||"unknown")+'</div>';
           return;
         }
-        if (!(r.preview||[]).length && !(r.unmatched||[]).length) {
-          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: no matched or unmatched stops this week — nothing to write.</div>';
+        // AI resolve any unmatched trips + any unallocated pool days in one
+        // call. High-confidence hits get pinned server-side (aliases + POOLALLOC).
+        const unmatched = r.unmatched || [];
+        const poolDays = buildPoolDays(R);
+        let aiApplied = { aliases: 0, poolDrivers: 0 };
+        let stillAmbiguous = { unmatched: unmatched, poolDays: poolDays };
+        if (unmatched.length || poolDays.length) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🤖 Asking AI to resolve '+unmatched.length+' unmatched stop'+(unmatched.length===1?'':'s')+(poolDays.length?' + '+poolDays.length+' pool day'+(poolDays.length===1?'':'s'):'')+'…</div>';
+          try {
+            const aiRes = await authFetch("/fleet/tracker-ai-resolve", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ unmatched, poolDays })
+            }).then(r=>r.json());
+            if (aiRes && aiRes.ok) {
+              aiApplied = aiRes.applied || aiApplied;
+              stillAmbiguous = aiRes.unresolved || stillAmbiguous;
+              // Refresh alias cache and pool-alloc map from what AI pinned.
+              TRACKER_ALIASES = null; POOLALLOC = POOLALLOC || {};
+              await loadTrackerSites();   // reloads TRACKER_ALIASES
+              try { const d = await authFetch("/fleet/pool-alloc").then(r=>r.json()); if(d.ok) POOLALLOC = d.alloc || POOLALLOC; } catch(e){}
+              // Re-run the dry run so newly-pinned trips move into the matched view.
+              r = await autoTrackerReconcile(R, true);
+              if (r && r.ok) r.unmatched = stillAmbiguous.unmatched;   // AI knows better than the deterministic list
+            }
+          } catch(e){}
+        }
+        if (!(r.preview||[]).length && !(stillAmbiguous.unmatched||[]).length) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: no stops to attribute this week.</div>';
           return;
         }
-        renderTrackerPreview(r.preview||[], wrap, r.unmatched||[]);
+        renderTrackerPreview(r.preview||[], wrap, stillAmbiguous.unmatched||[], { aiApplied });
       } catch (e) {}
     })();
     if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
