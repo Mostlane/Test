@@ -462,19 +462,66 @@ async function loadPastReports(){
     const monthName=k=>{ if(k==="0000-00")return "Undated"; const p=k.split("-"); return new Date(Date.UTC(+p[0],+p[1]-1,1)).toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
     const keys=Object.keys(groups).sort().reverse();
     el.innerHTML=keys.map(k=>{
-      const rows=groups[k].map(r=>`<div class="rpt-row">
-          <div style="flex:1"><b>${esc(r.title)}</b><br><span class="muted" style="font-size:12px">Saved ${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}</span></div>
+      const rows=groups[k].map(r=>{
+        const isDraft=(r.status||"approved")==="draft";
+        const badge = isDraft
+          ? '<span style="background:#fef3c7;color:#78350f;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:.03em">DRAFT</span>'
+          : '<span style="background:#dcfce7;color:#166534;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:.03em" title="'+esc(r.approvedBy?"Approved by "+r.approvedBy+((r.approvedAt||"")?" · "+r.approvedAt.slice(0,10):""):"Approved")+'">APPROVED</span>';
+        const btn = isDraft
+          ? '<button class="btn" style="padding:7px 12px;background:#0a7d33;color:#fff" data-approve="'+esc(r.key)+'">✓ Approve</button>'
+          : '<button class="btn grey" style="padding:7px 12px" data-draft="'+esc(r.key)+'" title="Move back to draft">↺ Reopen</button>';
+        return `<div class="rpt-row">
+          <div style="flex:1;min-width:0"><b>${esc(r.title)}</b> ${badge}<br><span class="muted" style="font-size:12px">Saved ${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}${!isDraft&&r.approvedBy?" · approved by "+esc(r.approvedBy):""}</span></div>
           <a class="btn grey" style="text-decoration:none;padding:7px 12px" href="${esc(r.url)}" target="_blank" rel="noopener">Open</a>
+          ${btn}
           <button class="btn grey" style="padding:7px 12px;color:#dc2626" data-del="${esc(r.key)}">Delete</button>
-        </div>`).join("");
+        </div>`;
+      }).join("");
       return `<div class="rpt-month">${esc(monthName(k))} <span style="font-weight:400;opacity:.75">(${groups[k].length})</span></div>${rows}`;
     }).join("");
     el.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>deleteReport(b.getAttribute("data-del"))));
+    el.querySelectorAll("[data-approve]").forEach(b=>b.addEventListener("click",()=>approveReport(b.getAttribute("data-approve"),"approved")));
+    el.querySelectorAll("[data-draft]").forEach(b=>b.addEventListener("click",()=>approveReport(b.getAttribute("data-draft"),"draft")));
   }catch(e){ el.innerHTML='<span class="muted">Couldn\'t load.</span>'; }
 }
 async function deleteReport(key){
   if(!confirm("Delete this saved report? This cannot be undone.")) return;
   try{ const r=await authFetch("/fleet/report-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})}).then(r=>r.json()); if(r.ok) loadPastReports(); }catch(e){}
+}
+// One-tap approve for the report currently on screen. Uses the R2 key saved
+// on window.__lastReport by the auto-save path; if that's not set, does a
+// save first so approving always has something to approve.
+async function approveThisReport(btn){
+  const L = window.__lastReport || {};
+  if(!L.reportKey){
+    if(btn) btn.disabled=true;
+    await saveReport({auto:true});
+  }
+  const key = (window.__lastReport||{}).reportKey;
+  if(!key){ if(btn) btn.disabled=false; alert("Couldn't find the saved report key — save again first."); return; }
+  if(btn) btn.disabled=true;
+  try{
+    const r = await authFetch("/fleet/report-approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,status:"approved"})}).then(r=>r.json());
+    if(r && r.ok){
+      const chip = document.getElementById("reportStatusChip");
+      if(chip){ chip.textContent="APPROVED"; chip.style.background="#dcfce7"; chip.style.color="#166534"; }
+      if(btn){ btn.textContent="✓ Approved"; btn.style.background="#94a3b8"; }
+      const sm = $("saveMsg"); if(sm) sm.textContent = "✓ Report APPROVED — visible in the saved list.";
+      loadPastReports();
+    } else { if(btn) btn.disabled=false; alert("Couldn't approve — "+((r&&r.error)||"unknown")); }
+  }catch(e){ if(btn) btn.disabled=false; alert("Couldn't approve — "+e.message); }
+}
+window.approveThisReport = approveThisReport;
+async function approveReport(key, status){
+  // Flip a saved report's status between draft ↔ approved. Nothing rewrites
+  // the report body — R2 metadata carries the flag + who approved when.
+  const label = status==="approved" ? "Approve this report? It'll be marked APPROVED." : "Move this report back to DRAFT?";
+  if(!confirm(label)) return;
+  try{
+    const r = await authFetch("/fleet/report-approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,status})}).then(r=>r.json());
+    if(r && r.ok) loadPastReports();
+    else alert("Couldn't update — " + ((r&&r.error)||"unknown"));
+  }catch(e){ alert("Couldn't update — "+e.message); }
 }
 function buildStandalone(){
   // Grab THIS report's stylesheet by id — not document.querySelector("style"),
@@ -496,6 +543,9 @@ async function saveReport(opts){
     form.append("title", window.__lastReport.title);
     form.append("weekStart", window.__lastReport.weekStart);
     form.append("weekEnd", window.__lastReport.weekEnd);
+    // Every save from here goes in as DRAFT — the office approves separately
+    // once they've reviewed / made edits. Legacy rows show as approved by default.
+    form.append("status", (opts && opts.status) || "draft");
     const r=await authFetch("/fleet/report",{method:"POST",body:form}).then(r=>r.json());
     if(msg)msg.textContent = r.ok ? (auto?"✓ Saved automatically":"✓ Saved to portal") : ("Save failed — "+(r.error||""));
     if(r&&r.ok){
@@ -591,7 +641,8 @@ function openSendScores(){
       <button onclick="closeSendScores()" style="background:#e2e8f0;border:none;border-radius:9px;padding:10px 16px;cursor:pointer;font:inherit">Not now</button>
       <span id="ssMsg" style="font-size:13px;color:#475569"></span>
     </div></div>`;
-  host.addEventListener('click',e=>{ if(e.target===host) closeSendScores(); });
+  // Backdrop click no longer closes — an accidental tap outside must not
+  // discard picks. Use ✕ / Not now to close on purpose.
   document.body.appendChild(host);
 }
 function closeSendScores(){ const m=document.getElementById('sendScoresModal'); if(m)m.remove(); }
@@ -1765,7 +1816,9 @@ function renderReport(R){
   const poolUI=buildPoolAllocUI(R);
 
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again</button>
+    <span id="reportStatusChip" style="background:#fef3c7;color:#78350f;font-size:11px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:.03em">DRAFT</span>
+    <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again (draft)</button>
+    <button class="btn" onclick="approveThisReport(this)" id="approveThisBtn" style="background:#0a7d33;color:#fff" title="Mark this report APPROVED once you've reviewed / confirmed timesheets">✓ Approve report</button>
     <button class="btn" onclick="openSendScores()">📤 Send van scores</button>
     <button class="btn grey" onclick="downloadReport()">⬇️ Export HTML file</button>
     <button class="btn" onclick="openTimesheetBuilder()">🧾 Confirm &amp; save timesheets</button>

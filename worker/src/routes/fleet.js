@@ -451,15 +451,37 @@ export async function handle(request, env, ctx, url, sess) {
       } catch {}
     }
     const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
+    // Status: 'draft' by default (fresh save), 'approved' once the office
+    // confirms via /report-approve. Kept in R2 customMetadata so no schema
+    // change; the reports list surfaces it as a badge.
+    const status = String(form.get("status") || "draft") === "approved" ? "approved" : "draft";
     await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
       customMetadata: {
         title: String(form.get("title") || "Fleet report").slice(0, 160),
-        weekStart, weekEnd,
+        weekStart, weekEnd, status,
         by: sess.user.username, at: new Date().toISOString()
       }
     });
-    return jr({ ok: true, key }, headers, 201);
+    return jr({ ok: true, key, status }, headers, 201);
+  }
+
+  // ── Flip a saved report's status → approved (or back to draft) ────────────
+  // POST { key, status } — copies the R2 object with new customMetadata (R2
+  // doesn't let you edit metadata in place, so re-put with the same body).
+  if (sub === "/report-approve" && method === "POST") {
+    const b = await readJson(request);
+    const key = String(b.key || "");
+    const status = String(b.status || "approved") === "draft" ? "draft" : "approved";
+    if (!key || !key.startsWith(prefix(tid))) return jr({ error: "Bad key" }, headers, 400);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return jr({ error: "Not found" }, headers, 404);
+    const m = obj.customMetadata || {};
+    await env.JOB_FILES.put(key, obj.body, {
+      httpMetadata: obj.httpMetadata,
+      customMetadata: { ...m, status, approvedBy: status === "approved" ? sess.user.username : "", approvedAt: status === "approved" ? new Date().toISOString() : "" }
+    });
+    return jr({ ok: true, status }, headers);
   }
 
   // ── List saved reports ─────────────────────────────────────────────────────
@@ -471,6 +493,8 @@ export async function handle(request, env, ctx, url, sess) {
       reports.push({
         key: o.key, title: m.title || "Fleet report", weekStart: m.weekStart || "", weekEnd: m.weekEnd || "",
         by: m.by || "", at: m.at || (o.uploaded ? new Date(o.uploaded).toISOString() : ""), size: o.size,
+        status: m.status || "approved",   // legacy rows (no status metadata) treated as approved
+        approvedBy: m.approvedBy || "", approvedAt: m.approvedAt || "",
         url: await signedFileUrl(env, url.origin, "/fleet/report", o.key)
       });
     }

@@ -17131,17 +17131,33 @@ async function handle22(request, env, ctx, url, sess) {
       }
     }
     const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
+    const status = String(form.get("status") || "draft") === "approved" ? "approved" : "draft";
     await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
       customMetadata: {
         title: String(form.get("title") || "Fleet report").slice(0, 160),
         weekStart,
         weekEnd,
+        status,
         by: sess.user.username,
         at: (/* @__PURE__ */ new Date()).toISOString()
       }
     });
-    return jr3({ ok: true, key }, headers, 201);
+    return jr3({ ok: true, key, status }, headers, 201);
+  }
+  if (sub === "/report-approve" && method === "POST") {
+    const b = await readJson4(request);
+    const key = String(b.key || "");
+    const status = String(b.status || "approved") === "draft" ? "draft" : "approved";
+    if (!key || !key.startsWith(prefix(tid))) return jr3({ error: "Bad key" }, headers, 400);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return jr3({ error: "Not found" }, headers, 404);
+    const m = obj.customMetadata || {};
+    await env.JOB_FILES.put(key, obj.body, {
+      httpMetadata: obj.httpMetadata,
+      customMetadata: { ...m, status, approvedBy: status === "approved" ? sess.user.username : "", approvedAt: status === "approved" ? (/* @__PURE__ */ new Date()).toISOString() : "" }
+    });
+    return jr3({ ok: true, status }, headers);
   }
   if (sub === "/reports" && method === "GET") {
     const listed = await env.JOB_FILES.list({ prefix: prefix(tid), include: ["customMetadata"] });
@@ -17156,6 +17172,10 @@ async function handle22(request, env, ctx, url, sess) {
         by: m.by || "",
         at: m.at || (o.uploaded ? new Date(o.uploaded).toISOString() : ""),
         size: o.size,
+        status: m.status || "approved",
+        // legacy rows (no status metadata) treated as approved
+        approvedBy: m.approvedBy || "",
+        approvedAt: m.approvedAt || "",
         url: await signedFileUrl(env, url.origin, "/fleet/report", o.key)
       });
     }
