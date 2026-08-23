@@ -914,6 +914,65 @@ function isHomeText(txt, homes){
 }
 // Turn a report's parsed vehicles into tracker segments — one on-site row
 // per visit + one travel row per drive TO that site (excluding home commute).
+// Smoothing pass — before we send rows to the reconciler, absorb noise into
+// the day's real site. A tracker "to" text like "Verwood, Ringwood Road" (a
+// short move within a project's grounds) currently becomes its own row; the
+// office sees "Lake Road Surgery 9h + Ringwood Road 11m + Winchester 11m"
+// when the truth is one day on the project.
+// Rule (per user, per day):
+//   1. Compute total on-site mins per site.
+//   2. If one site has ≥ 120 min on-site (a "dominant" site for the day), any
+//      site with < 30 min on-site AND less than half the dominant's total is
+//      re-attributed to the dominant. Travel-only rows (0 min on-site) same.
+//   3. Rows collapse by site+kind so a day = one on-site row + one travel row
+//      per site max.
+function smoothTrackerRows(rows){
+  if(!rows || !rows.length) return rows||[];
+  const minsOf = r => Math.max(0, (Date.parse(r.endedAt) - Date.parse(r.startedAt))/60000);
+  // Aggregate mins per (user, date, site).
+  const daySite = {};
+  for(const r of rows){
+    const d = r.username+"|"+r.date;
+    const sk = r.siteCode || r.siteName || "?";
+    const dd = daySite[d] = daySite[d] || {};
+    const ss = dd[sk] = dd[sk] || { onsite:0, travel:0, sample:r };
+    if(r.kind === "travel") ss.travel += minsOf(r); else ss.onsite += minsOf(r);
+    if(!ss.sample.siteName && r.siteName) ss.sample = r;
+  }
+  // Build remap: (user|date|shortSite) -> dominantSite sample row.
+  const remap = {};
+  for(const dKey in daySite){
+    const sites = daySite[dKey];
+    let dom = null, domMins = 0;
+    for(const sk in sites){ if(sites[sk].onsite > domMins){ dom = sk; domMins = sites[sk].onsite; } }
+    if(!dom || domMins < 120) continue;
+    for(const sk in sites){
+      if(sk === dom) continue;
+      const ss = sites[sk];
+      // Small enough to be noise AND much smaller than the dominant.
+      if(ss.onsite >= 30 || ss.onsite >= domMins * 0.5) continue;
+      remap[dKey+"|"+sk] = sites[dom].sample;
+    }
+  }
+  // Apply remap.
+  const rewritten = rows.map(r => {
+    const dKey = r.username+"|"+r.date;
+    const sk = r.siteCode || r.siteName || "?";
+    const target = remap[dKey+"|"+sk];
+    if(!target) return r;
+    return { ...r, siteName: target.siteName, siteCode: target.siteCode, postcode: target.postcode };
+  });
+  // Collapse duplicates (user|date|site|kind) — extend the time range so
+  // signed URL sig still works if regenerated.
+  const merged = {};
+  for(const r of rewritten){
+    const k = r.username+"|"+r.date+"|"+(r.siteCode||r.siteName||"?")+"|"+r.kind;
+    if(!merged[k]){ merged[k] = { ...r }; continue; }
+    if(r.startedAt < merged[k].startedAt) merged[k].startedAt = r.startedAt;
+    if(r.endedAt > merged[k].endedAt) merged[k].endedAt = r.endedAt;
+  }
+  return Object.values(merged);
+}
 // Pool-van days that have journeys but no allocated driver — the AI resolver
 // tries to attribute each to a driver by matching first/last trip text to
 // driver home postcodes. Returned alongside the row-builder output.
@@ -1016,7 +1075,11 @@ async function autoTrackerReconcile(R, dryRun){
     // is the reliable signal that beats text/address ambiguity, especially
     // for projects sharing a village with retail stores.
     await precomputeCoordMatches(R);
-    const { rows, unmatched } = buildTrackerRows(R);
+    let { rows, unmatched } = buildTrackerRows(R);
+    // Smooth away 11-min "sites" that are really the same day at the
+    // project — everything under 30 min on-site collapses into the day's
+    // dominant site when one is clearly the main venue.
+    rows = smoothTrackerRows(rows);
     if(!rows.length && !unmatched.length) return { ok:true, wrote:0, preview:[], unmatched:[], rowCount:0 };
     const r = await authFetch("/fleet/tracker-reconcile", {
       method:"POST", headers:{"Content-Type":"application/json"},
