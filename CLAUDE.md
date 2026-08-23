@@ -1964,20 +1964,28 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   + free add); **4** review → POST **/project/create** → project-hub.
 - **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
   the links + presence; manual tick via /project/todo), build actions
-  (**Programme**: POST /prog/save then /project/link → programme-edit; **RAMS**:
-  → `hs-docs.html?newRams=1&site=&project=<id>` which links back on save **OR
-  "🔗 Link existing"** — a picker of every portal RAMS (GET /hs/docs?type=rams,
-  searchable) that links/unlinks via POST /project/link `kind:"rams"` /
-  `"rams-remove"` (→ `data.links.ramsIds[]`); linked RAMS show as pills on the
-  to-do row; **CPP**: link-out to `hs-plan/#…&projectName=&projectNo=` PRE-FILLED
-  (hs-plan applyLaunchParams reads those hash params) **OR "📄 Link / upload
-  file"** — CPPs aren't stored in the portal (built in the hs-plan planner), so a
-  CPP is attached as a **project document**: the picker uploads a file (POST
-  /project/doc `section:"Construction Phase Plan"` → the new id) and/or ticks an
-  existing project document, linking via POST /project/link `kind:"cpp-file"` /
-  `"cpp-file-remove"` (→ `data.links.cppFiles[]`, mirrors ramsIds; the CPP to-do
-  auto-ticks on `cppRef || cppFiles.length`; /project/doc-delete strips a deleted
-  file's id from cppFiles); linked CPP files show as pills (open in docviewer);
+  **UNIFIED doc-attach (Aug 2026): every required document offers the same three
+  routes via one "📎 Add / link" button (admin-only, `data-docpick`) opening a
+  GENERIC picker (`#docPick`, config `DOCTYPES`): (1) BUILD in the portal, (2)
+  LINK an existing portal record, (3) UPLOAD/attach a file.** Per type —
+  **Programme**: build = POST /prog/save → programme-edit; link existing = GET
+  /prog/list (single-select → `data.links.programmeId`, POST /project/link
+  `kind:"programme"`). **RAMS**: build = `hs-docs.html?newRams=1&site=&project=`;
+  link existing = GET /hs/docs?type=rams (multi-tick → `data.links.ramsIds[]`,
+  `kind:"rams"`/`"rams-remove"`). **CPP**: build = the hs-plan planner (no portal
+  CPP records, so no "link existing"). **File attach is generic for ALL types**:
+  the picker uploads (POST /project/doc, section = the doc-type label → returns
+  the file id) or ticks an existing project document, linked via POST
+  /project/link **`kind:"doc-file"`/`"doc-file-remove"` with `docKey`** into
+  **`data.links.docFiles[key][]`** (`normLinks()` guarantees the map + migrates
+  legacy `cppFiles`→`docFiles.cpp`; `cpp-file`/`cpp-file-remove` kept as aliases).
+  A required doc's to-do auto-ticks on its portal link OR `docFiles[key].length`;
+  /project/doc-delete strips a deleted id from every `docFiles[*]`. Linked
+  records + files show as pills per to-do row (`loadDocRefs`, open in docviewer).
+  **Uploaded files are project_files, so they already surface to engineers in
+  Site Documents** (the `/sla/site/docs` "Project Documents" injection) on the
+  site-folder AND on portal jobs — portal-built RAMS/programmes are rendered
+  documents, not stored files, so only their attached-file form appears there.
   **Valuations**: sets proj_fin value),
   **Project Documents** (drag-drop upload, hide/show, delete; engineers with
   Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to

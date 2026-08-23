@@ -161,20 +161,38 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
   } catch { return false; }
 }
 
+// Normalise a project's `links` object: guarantees a `docFiles` map
+// (docKey → [project_file id]) for the "upload / attach a file" route that
+// every required document supports, and folds the legacy `cppFiles` array into
+// `docFiles.cpp` so old projects keep working. Returns the same object mutated.
+function normLinks(links) {
+  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", costingKey: "" }, links || {});
+  if (!Array.isArray(l.ramsIds)) l.ramsIds = [];
+  l.docFiles = (l.docFiles && typeof l.docFiles === "object" && !Array.isArray(l.docFiles)) ? l.docFiles : {};
+  if (Array.isArray(l.cppFiles) && l.cppFiles.length) {
+    l.docFiles.cpp = [...new Set([...(l.docFiles.cpp || []), ...l.cppFiles])];
+  }
+  return l;
+}
+
 // Compute the To-Do list from the required-docs config + the current links +
 // what actually exists, honouring any manual overrides stored in data.doneOverride.
 function computeTodo(p, data, fileCount) {
   const req = data.required || {};
-  const links = data.links || {};
+  const links = normLinks(data.links);
+  const df = links.docFiles || {};
   const done = data.doneOverride || {};
   const fin = data.contractValue != null && Number(data.contractValue) > 0;
+  const nf = k => Array.isArray(df[k]) && df[k].length > 0;   // has an attached file
   const out = [];
   for (const dt of DOC_TYPES) {
     if (!bool(req[dt.key])) continue;
     let auto = false;
-    if (dt.key === "programme") auto = !!links.programmeId;
-    else if (dt.key === "rams") auto = Array.isArray(links.ramsIds) && links.ramsIds.length > 0;
-    else if (dt.key === "cpp") auto = !!links.cppRef || (Array.isArray(links.cppFiles) && links.cppFiles.length > 0);
+    // Every buildable doc type is "done" if it's built/linked in the portal OR
+    // an external file has been attached for it.
+    if (dt.key === "programme") auto = !!links.programmeId || nf("programme");
+    else if (dt.key === "rams") auto = (links.ramsIds.length > 0) || nf("rams");
+    else if (dt.key === "cpp") auto = !!links.cppRef || nf("cpp");
     else if (dt.key === "valuations") auto = fin;
     else if (dt.key === "projectDocs") auto = fileCount > 0;
     const isDone = done[dt.key] === true || auto;
@@ -195,7 +213,7 @@ function projectView(row, data, fileCount) {
     required: data.required || {},
     sitelog: data.sitelog || { rules: "", visitorRules: "", companies: [] },
     contractValue: data.contractValue ?? null,
-    links: data.links || {},
+    links: normLinks(data.links),
     costingKey: (data.links && data.links.costingKey) || normName(row.name),
     visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
     todo: computeTodo(row, data, fileCount),
@@ -318,7 +336,7 @@ export async function handle(request, env, ctx, url, sess) {
       required,
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
-      links: { programmeId: "", ramsIds: [], cppRef: "", cppFiles: [], costingKey },
+      links: { programmeId: "", ramsIds: [], cppRef: "", docFiles: {}, costingKey },
       visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {},
     };
@@ -449,23 +467,27 @@ export async function handle(request, env, ctx, url, sess) {
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
     const data = parse(row);
-    data.links = data.links || { ramsIds: [] };
+    data.links = normLinks(data.links);
     const kind = String(b.kind || ""), value = String(b.value || "").trim();
+    // docKey for the generic file-attach kinds (programme|rams|cpp|…); cpp-file
+    // is the legacy alias for docKey "cpp".
+    const docKey = kind.startsWith("cpp-file") ? "cpp" : String(b.docKey || "").trim();
     if (kind === "programme") data.links.programmeId = value;
     else if (kind === "cpp") data.links.cppRef = value;
     else if (kind === "rams") {
-      data.links.ramsIds = Array.isArray(data.links.ramsIds) ? data.links.ramsIds : [];
       if (value && !data.links.ramsIds.includes(value)) data.links.ramsIds.push(value);
     } else if (kind === "rams-remove") {
-      data.links.ramsIds = (data.links.ramsIds || []).filter(x => x !== value);
-    } else if (kind === "cpp-file") {
-      // A Construction Phase Plan attached as a project document (uploaded or
-      // linked from an existing doc). Mirrors ramsIds.
-      data.links.cppFiles = Array.isArray(data.links.cppFiles) ? data.links.cppFiles : [];
-      if (value && !data.links.cppFiles.includes(value)) data.links.cppFiles.push(value);
-    } else if (kind === "cpp-file-remove") {
-      data.links.cppFiles = (data.links.cppFiles || []).filter(x => x !== value);
+      data.links.ramsIds = data.links.ramsIds.filter(x => x !== value);
+    } else if (kind === "doc-file" || kind === "cpp-file") {
+      // An external file attached for a required document (uploaded or linked
+      // from an existing project document). Stored per doc type in docFiles.
+      if (!docKey) return error("Missing docKey", 400, env, request);
+      data.links.docFiles[docKey] = Array.isArray(data.links.docFiles[docKey]) ? data.links.docFiles[docKey] : [];
+      if (value && !data.links.docFiles[docKey].includes(value)) data.links.docFiles[docKey].push(value);
+    } else if (kind === "doc-file-remove" || kind === "cpp-file-remove") {
+      if (docKey && Array.isArray(data.links.docFiles[docKey])) data.links.docFiles[docKey] = data.links.docFiles[docKey].filter(x => x !== value);
     } else return error("Unknown link kind", 400, env, request);
+    delete data.links.cppFiles; // migrated into docFiles.cpp by normLinks
     await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(JSON.stringify(data), new Date().toISOString(), db.tenantId, row.id).run();
     return json({ ok: true, links: data.links }, {}, env, request);
@@ -549,18 +571,22 @@ export async function handle(request, env, ctx, url, sess) {
     if (!f) return error("File not found", 404, env, request);
     try { await env.JOB_FILES.delete(f.r2_key); } catch {}
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
-    // If this file was linked as a CPP, drop the dangling reference so the
-    // Construction Phase Plan to-do doesn't stay ticked by a deleted file.
+    // If this file was attached to a required document, drop the dangling
+    // reference so that doc's to-do doesn't stay ticked by a deleted file.
     try {
       const prow = await getRow(String(f.project_id || ""));
       if (prow) {
         const pdata = parse(prow);
-        const cf = (pdata.links && pdata.links.cppFiles) || [];
-        if (Array.isArray(cf) && cf.includes(f.id)) {
-          pdata.links.cppFiles = cf.filter(x => x !== f.id);
-          await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?")
-            .bind(JSON.stringify(pdata), new Date().toISOString(), db.tenantId, prow.id).run();
+        pdata.links = normLinks(pdata.links);
+        let changed = false;
+        for (const k of Object.keys(pdata.links.docFiles)) {
+          if (Array.isArray(pdata.links.docFiles[k]) && pdata.links.docFiles[k].includes(f.id)) {
+            pdata.links.docFiles[k] = pdata.links.docFiles[k].filter(x => x !== f.id); changed = true;
+          }
         }
+        delete pdata.links.cppFiles;
+        if (changed) await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?")
+          .bind(JSON.stringify(pdata), new Date().toISOString(), db.tenantId, prow.id).run();
       }
     } catch {}
     return json({ ok: true }, {}, env, request);
