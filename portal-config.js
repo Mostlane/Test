@@ -847,7 +847,8 @@
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
           { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"], match: ["vehicles.html", "fleet-report.html", "van-checks.html", "van-timesheet.html"] },
-          { label: "CCTV Wall", href: "cctv.html", icon: "eye", perms: ["__fullOnly"], match: ["cctv.html"] }
+          { label: "CCTV Wall", href: "cctv.html", icon: "eye", perms: ["__fullOnly"], match: ["cctv.html"] },
+          { label: "Yard Gate", href: "yard-gate.html", icon: "eye", perms: ["YardGate"], match: ["yard-gate.html"] }
         ]},
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users", "DeviceAdmin"], hrefBy: [["Users", "users-admin.html"], ["DeviceAdmin", "device-admin.html"]], match: ["users-admin.html", "device-admin.html"] },

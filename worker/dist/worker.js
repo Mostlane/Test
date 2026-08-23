@@ -820,8 +820,10 @@ var PERMISSION_KEYS = [
   // personalisation: may pick a portal colour theme
   "ThemeBackground",
   // personalisation: may change the menu background
-  "Programmes"
+  "Programmes",
   // job programmes: build/issue/share programmes of works
+  "YardGate"
+  // trigger the yard gate (Tuya) + see its open/closed state
 ];
 function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -24878,6 +24880,257 @@ async function handle32(request, env, ctx, url, sess) {
   return json3({ error: "Not found" }, 404, env, request);
 }
 
+// src/routes/tuya.js
+var CFG_KEY3 = "tuya:config";
+var TOK_KEY = "tuya:token";
+var WATCH_KEY = "tuya:gatewatch";
+var REGION_BASE = {
+  eu: "https://openapi.tuyaeu.com",
+  us: "https://openapi.tuyaus.com",
+  cn: "https://openapi.tuyacn.com",
+  in: "https://openapi.tuyain.com"
+};
+function baseFor(cfg) {
+  return REGION_BASE[cfg && cfg.region || "eu"] || REGION_BASE.eu;
+}
+async function loadCfg(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY3).first();
+  let cfg = {};
+  try {
+    cfg = row ? JSON.parse(row.value) : {};
+  } catch {
+  }
+  return cfg && typeof cfg === "object" ? cfg : {};
+}
+async function saveCfg2(db, cfg) {
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, CFG_KEY3, JSON.stringify(cfg)).run();
+}
+async function loadKV(db, key) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+  try {
+    return row ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function saveKV(db, key, obj) {
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
+}
+async function sha256Hex2(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str || ""));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function hmacSha256Hex(secret, msg) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+async function signRequest(accessId, secret, accessToken, method, path, bodyStr, t) {
+  const contentHash = await sha256Hex2(bodyStr || "");
+  const stringToSign = method.toUpperCase() + "\n" + contentHash + "\n\n" + path;
+  const signStr = accessId + (accessToken || "") + t + stringToSign;
+  return hmacSha256Hex(secret, signStr);
+}
+async function getToken(env, db, cfg) {
+  const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
+  if (!accessId || !secret) throw new Error("Tuya not configured (add TUYA_ACCESS_ID / TUYA_ACCESS_SECRET secrets)");
+  const cached = await loadKV(db, TOK_KEY);
+  const now = Date.now();
+  if (cached && cached.access_token && cached.region === (cfg.region || "eu") && cached.expireAt - 6e4 > now) {
+    return cached.access_token;
+  }
+  const base = baseFor(cfg);
+  const path = "/v1.0/token?grant_type=1";
+  const t = String(now);
+  const sign = await signRequest(accessId, secret, "", "GET", path, "", t);
+  const resp = await fetch(base + path, {
+    method: "GET",
+    headers: { client_id: accessId, sign, t, sign_method: "HMAC-SHA256", "Content-Type": "application/json" }
+  });
+  const jr7 = await resp.json().catch(() => ({}));
+  if (!jr7.success || !jr7.result || !jr7.result.access_token) {
+    throw new Error("Tuya token failed: " + (jr7.msg || jr7.code || resp.status));
+  }
+  const token = jr7.result.access_token;
+  const expireSecs = Number(jr7.result.expire_time || 7200);
+  await saveKV(db, TOK_KEY, { access_token: token, expireAt: now + expireSecs * 1e3, region: cfg.region || "eu" });
+  return token;
+}
+async function api(env, db, cfg, method, path, body) {
+  const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
+  const token = await getToken(env, db, cfg);
+  const base = baseFor(cfg);
+  const bodyStr = body != null ? JSON.stringify(body) : "";
+  const t = String(Date.now());
+  const sign = await signRequest(accessId, secret, token, method, path, bodyStr, t);
+  const resp = await fetch(base + path, {
+    method: method.toUpperCase(),
+    headers: { client_id: accessId, access_token: token, sign, t, sign_method: "HMAC-SHA256", "Content-Type": "application/json" },
+    body: bodyStr || void 0
+  });
+  return resp.json().catch(() => ({ success: false, msg: "bad response " + resp.status }));
+}
+async function deviceStatus(env, db, cfg, deviceId) {
+  const jr7 = await api(env, db, cfg, "GET", `/v1.0/devices/${encodeURIComponent(deviceId)}/status`);
+  if (!jr7.success) throw new Error(jr7.msg || "device status failed");
+  return Array.isArray(jr7.result) ? jr7.result : [];
+}
+async function readGateOpen(env, db, cfg) {
+  if (!cfg.stateDeviceId || !cfg.stateCode) return null;
+  const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
+  const dp = status.find((s) => s.code === cfg.stateCode);
+  if (!dp) return null;
+  const openVal = cfg.stateOpenValue === void 0 ? true : cfg.stateOpenValue;
+  return String(dp.value) === String(openVal);
+}
+async function handle33(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  const isFull4 = perms.FullAccess === "Yes";
+  const canGate = isFull4 || perms.YardGate === "Yes";
+  const db = tenantDB(env, sess.tenantId);
+  if (path === "/tuya/config" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    return json4({ ok: true, config: cfg, hasSecrets: !!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET) });
+  }
+  if (path === "/tuya/config" && method === "POST") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const cfg = await loadCfg(db);
+    const set = (k, v, dflt) => {
+      if (v !== void 0) cfg[k] = v;
+      else if (cfg[k] === void 0 && dflt !== void 0) cfg[k] = dflt;
+    };
+    if (typeof b.region === "string") cfg.region = b.region.trim().toLowerCase();
+    set("gateDeviceId", b.gateDeviceId != null ? String(b.gateDeviceId).trim() : void 0, "");
+    set("openCode", b.openCode != null ? String(b.openCode).trim() : void 0, "switch_1");
+    if (b.openValue !== void 0) cfg.openValue = b.openValue;
+    else if (cfg.openValue === void 0) cfg.openValue = true;
+    set("stateDeviceId", b.stateDeviceId != null ? String(b.stateDeviceId).trim() : void 0, "");
+    set("stateCode", b.stateCode != null ? String(b.stateCode).trim() : void 0, "");
+    if (b.stateOpenValue !== void 0) cfg.stateOpenValue = b.stateOpenValue;
+    if (b.thresholdMins !== void 0) cfg.thresholdMins = Math.max(1, parseInt(b.thresholdMins, 10) || 10);
+    else if (cfg.thresholdMins === void 0) cfg.thresholdMins = 10;
+    if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
+    else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
+    if (!cfg.region) cfg.region = "eu";
+    await saveCfg2(db, cfg);
+    return json4({ ok: true, config: cfg });
+  }
+  if (path === "/tuya/device-status" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const deviceId = (url.searchParams.get("deviceId") || "").trim();
+    if (!deviceId) return json4({ ok: false, error: "Pass ?deviceId=" }, 400);
+    const cfg = await loadCfg(db);
+    try {
+      const status = await deviceStatus(env, db, cfg, deviceId);
+      let info = null;
+      try {
+        const jr7 = await api(env, db, cfg, "GET", `/v1.0/devices/${encodeURIComponent(deviceId)}`);
+        if (jr7.success && jr7.result) info = { name: jr7.result.name, online: jr7.result.online, category: jr7.result.category, product_name: jr7.result.product_name };
+      } catch {
+      }
+      return json4({ ok: true, deviceId, info, status });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  if (path === "/tuya/devices" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    try {
+      const jr7 = await api(env, db, cfg, "GET", "/v1.0/users/devices");
+      const list = jr7.success && Array.isArray(jr7.result) ? jr7.result.map((d) => ({ id: d.id, name: d.name, online: d.online, category: d.category })) : [];
+      return json4({ ok: true, devices: list, raw: jr7.success ? void 0 : jr7.msg });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  if (path === "/tuya/gate/open" && method === "POST") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet \u2014 add the Tuya device in Yard Gate settings." }, 400);
+    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
+    const code = cfg.openCode || "switch_1";
+    const value = cfg.openValue === void 0 ? true : cfg.openValue;
+    try {
+      const jr7 = await api(
+        env,
+        db,
+        cfg,
+        "POST",
+        `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
+        { commands: [{ code, value }] }
+      );
+      if (!jr7.success) return json4({ ok: false, error: jr7.msg || "Tuya rejected the command" }, 502);
+      return json4({ ok: true, sent: { code, value } });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  if (path === "/tuya/gate/state" && method === "GET") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    const configured = !!cfg.gateDeviceId;
+    const watched = !!(cfg.stateDeviceId && cfg.stateCode);
+    if (!watched) return json4({ ok: true, configured, watched: false });
+    try {
+      const open = await readGateOpen(env, db, cfg);
+      const watch = await loadKV(db, WATCH_KEY) || {};
+      let since = null, mins = 0;
+      if (open) {
+        since = watch.open && watch.since ? watch.since : (/* @__PURE__ */ new Date()).toISOString();
+        mins = Math.round((Date.now() - Date.parse(since)) / 6e4);
+      }
+      return json4({ ok: true, configured, watched: true, open: !!open, since, mins });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  return json4({ ok: false, error: "Not found: " + path }, 404);
+}
+async function checkGateLeftOpen(env, tenantId) {
+  try {
+    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
+    const db = tenantDB(env, tenantId);
+    const cfg = await loadCfg(db);
+    if (!cfg.stateDeviceId || !cfg.stateCode) return;
+    const open = await readGateOpen(env, db, cfg);
+    if (open === null) return;
+    const watch = await loadKV(db, WATCH_KEY) || {};
+    const now = Date.now();
+    if (!open) {
+      if (watch.open) await saveKV(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
+      return;
+    }
+    const since = watch.open && watch.since ? watch.since : new Date(now).toISOString();
+    const openMins = Math.round((now - Date.parse(since)) / 6e4);
+    const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
+    const repeat = Math.max(5, parseInt(cfg.repeatMins, 10) || 30);
+    const lastAlertAt = watch.lastAlertAt ? Date.parse(watch.lastAlertAt) : 0;
+    let newLastAlert = watch.lastAlertAt || null;
+    if (openMins >= threshold && (!lastAlertAt || now - lastAlertAt >= repeat * 6e4)) {
+      await sendToPermission(env, tenantId, ["FullAccess", "YardGate"], {
+        title: "\u26A0\uFE0F Yard gate left open",
+        body: `The yard gate has been open for ${openMins} min.`,
+        url: "/yard-gate.html",
+        tag: "yardgate-open"
+      }).catch(() => {
+      });
+      newLastAlert = new Date(now).toISOString();
+    }
+    await saveKV(db, WATCH_KEY, { open: true, since, lastAlertAt: newLastAlert });
+  } catch (e) {
+    console.error("checkGateLeftOpen:", e && e.message);
+  }
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -24970,8 +25223,10 @@ var ROUTES = [
   // Projects: list (longest prefix wins over /project)
   ["*", "/project", handle31],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle32]
+  ["*", "/health/", handle32],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
+  ["*", "/tuya", handle33]
+  // yard gate: Tuya Cloud open command + gate-open state
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -25056,6 +25311,7 @@ var worker = {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
+    ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
