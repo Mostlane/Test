@@ -1965,9 +1965,20 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
 - **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
   the links + presence; manual tick via /project/todo), build actions
   (**Programme**: POST /prog/save then /project/link → programme-edit; **RAMS**:
-  → `hs-docs.html?newRams=1&site=&project=<id>` which links back on save;
-  **CPP**: link-out to `hs-plan/#…&projectName=&projectNo=` PRE-FILLED (hs-plan
-  applyLaunchParams reads those hash params); **Valuations**: sets proj_fin value),
+  → `hs-docs.html?newRams=1&site=&project=<id>` which links back on save **OR
+  "🔗 Link existing"** — a picker of every portal RAMS (GET /hs/docs?type=rams,
+  searchable) that links/unlinks via POST /project/link `kind:"rams"` /
+  `"rams-remove"` (→ `data.links.ramsIds[]`); linked RAMS show as pills on the
+  to-do row; **CPP**: link-out to `hs-plan/#…&projectName=&projectNo=` PRE-FILLED
+  (hs-plan applyLaunchParams reads those hash params) **OR "📄 Link / upload
+  file"** — CPPs aren't stored in the portal (built in the hs-plan planner), so a
+  CPP is attached as a **project document**: the picker uploads a file (POST
+  /project/doc `section:"Construction Phase Plan"` → the new id) and/or ticks an
+  existing project document, linking via POST /project/link `kind:"cpp-file"` /
+  `"cpp-file-remove"` (→ `data.links.cppFiles[]`, mirrors ramsIds; the CPP to-do
+  auto-ticks on `cppRef || cppFiles.length`; /project/doc-delete strips a deleted
+  file's id from cppFiles); linked CPP files show as pills (open in docviewer);
+  **Valuations**: sets proj_fin value),
   **Project Documents** (drag-drop upload, hide/show, delete; engineers with
   Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+

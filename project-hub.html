@@ -83,6 +83,30 @@
     </div>
   </div>
 
+  <!-- Construction Phase Plan: upload a file or link an existing project document -->
+  <div id="cppPick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;padding:16px;overflow:auto;">
+    <div style="max-width:560px;margin:5vh auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.3);">
+      <div style="padding:14px 16px;border-bottom:1px solid #e6ecf3;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <h2 style="margin:0;font-size:18px;">📄 Construction Phase Plan</h2>
+        <button class="btn grey small" id="cppPickX">Close</button>
+      </div>
+      <div style="padding:14px 16px;">
+        <p class="muted" style="margin:0 0 8px;">Upload a CPP file (PDF/Word). It attaches to this project and ticks the CPP off.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input type="file" id="cppFile" accept=".pdf,application/pdf,.doc,.docx,image/*" style="font-size:13px;">
+          <button class="btn small" id="cppUpBtn">Upload &amp; attach</button>
+        </div>
+        <hr style="border:none;border-top:1px solid #e6ecf3;margin:14px 0 6px;">
+        <p class="muted" style="margin:0 0 6px;">…or tick an existing project document to use as the CPP:</p>
+        <div id="cppPickList" style="max-height:40vh;overflow:auto;"><p class="muted">Loading…</p></div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e6ecf3;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <span class="msg" id="cppPickMsg"></span>
+        <span><button class="btn ghost small" id="cppPickCancel">Cancel</button> <button class="btn small" id="cppPickSave">Save links</button></span>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API = window.MOSTLANE_API;
     const g = id => document.getElementById(id);
@@ -157,6 +181,7 @@
       loadJobsVisits();
       loadDocs();
       loadRamsRefs();
+      loadCppRefs();
     }
 
     function summaryCard() {
@@ -186,7 +211,7 @@
       const done = items.filter(i => i.done).length;
       const body = items.map(it => `<div class="todo">
           <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${it.key}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
-          <span class="lbl">${esc(it.label)}${it.key === "rams" ? `<small id="ramsRefLine"></small>` : ""}</span>
+          <span class="lbl">${esc(it.label)}${it.key === "rams" ? `<small id="ramsRefLine"></small>` : ""}${it.key === "cpp" ? `<small id="cppRefLine"></small>` : ""}</span>
           <span class="act" data-actfor="${it.key}"></span>
         </div>`).join("");
       return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
@@ -199,7 +224,7 @@
         : (CAN ? `<button class="btn small" data-build="programme">${BUILD.programme.build}</button>` : "");
       if (key === "rams") return CAN ? `<button class="btn small" data-build="rams">${BUILD.rams.build}</button> <button class="btn small ghost" data-linkrams="1">🔗 Link existing</button>` : "";
       if (key === "cpp") return CAN
-        ? `<button class="btn small" data-build="cpp">${L.cppRef ? BUILD.cpp.open : BUILD.cpp.build}</button>` : "";
+        ? `<button class="btn small" data-build="cpp">${L.cppRef ? BUILD.cpp.open : BUILD.cpp.build}</button> <button class="btn small ghost" data-cpppick="1">📄 Link / upload file</button>` : "";
       if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
         return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
       if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="var el=document.getElementById('docsCardEl');if(el){el.setAttribute('open','');el.scrollIntoView({behavior:'smooth'});}return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
@@ -408,6 +433,8 @@
       document.querySelectorAll("[data-build]").forEach(el => el.onclick = () => build(el.dataset.build));
       // link existing RAMS
       document.querySelectorAll("[data-linkrams]").forEach(el => el.onclick = openRamsPicker);
+      // link / upload CPP file
+      document.querySelectorAll("[data-cpppick]").forEach(el => el.onclick = openCppPicker);
       // sitelog
       if (CAN) {
         g("coAdd").onclick = () => { const v = g("coInput").value.trim(); if (v && !COMPANIES.some(c => c.toLowerCase() === v.toLowerCase())) { COMPANIES.push(v); g("coInput").value = ""; renderCo(); } };
@@ -581,6 +608,86 @@
     g("ramsPickSave").onclick = saveRamsPick;
     g("ramsPickSearch").addEventListener("input", renderRamsPick);
     g("ramsPick").addEventListener("click", e => { if (e.target === g("ramsPick")) closeRamsPicker(); });
+
+    // ── Construction Phase Plan: linked file pills + upload/link picker ─────────
+    async function loadCppRefs() {
+      const line = g("cppRefLine"); if (!line) return;
+      const ids = (P.links && P.links.cppFiles) || [];
+      if (!ids.length) { line.textContent = ""; return; }
+      try {
+        const d = await authFetch("/project/docs?id=" + encodeURIComponent(PID)).then(r => r.json());
+        const byId = {}; (d.files || []).forEach(f => byId[f.id] = f);
+        line.innerHTML = " " + ids.map(id => byId[id] ? `<a class="pill" href="#" data-cppopen="${esc(byId[id].url)}" data-cppname="${esc(byId[id].title || "CPP")}" style="text-decoration:none;">📄 ${esc(byId[id].title || "CPP")}</a>` : "").join(" ");
+        line.querySelectorAll("[data-cppopen]").forEach(a => a.onclick = e => { e.preventDefault();
+          if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.cppopen, fetchUrl: a.dataset.cppopen, name: a.dataset.cppname, downloadUrl: a.dataset.cppopen });
+          else window.open(a.dataset.cppopen, "_blank");
+        });
+      } catch {}
+    }
+
+    let CPP_DOCS = [], CPP_SEL = new Set();
+    async function openCppPicker() {
+      g("cppPick").style.display = "block";
+      g("cppPickMsg").textContent = ""; g("cppPickMsg").className = "msg";
+      g("cppFile").value = "";
+      CPP_SEL = new Set((P.links && P.links.cppFiles) || []);
+      g("cppPickList").innerHTML = "<p class='muted'>Loading…</p>";
+      await refreshCppDocs();
+    }
+    function closeCppPicker() { g("cppPick").style.display = "none"; }
+    async function refreshCppDocs() {
+      try { const d = await authFetch("/project/docs?id=" + encodeURIComponent(PID)).then(r => r.json()); CPP_DOCS = d.files || []; }
+      catch { CPP_DOCS = []; }
+      renderCppPick();
+    }
+    function renderCppPick() {
+      const el = g("cppPickList");
+      if (!CPP_DOCS.length) { el.innerHTML = "<p class='muted'>No documents on this project yet. Upload a CPP above, or add files in Project Documents.</p>"; return; }
+      el.innerHTML = CPP_DOCS.map(f => {
+        const on = CPP_SEL.has(f.id);
+        return `<label style="display:flex;gap:10px;align-items:flex-start;padding:9px 6px;border-bottom:1px solid #eef1f5;cursor:pointer;">
+          <input type="checkbox" data-cid="${esc(f.id)}" ${on ? "checked" : ""} style="margin-top:3px;width:18px;height:18px;">
+          <span>📄 <b>${esc(f.title || "Document")}</b>${f.section ? ` <span class="muted">· ${esc(f.section)}</span>` : ""}<br><span class="muted" style="font-size:12px;">${esc(f.uploadedBy || "")}</span></span>
+        </label>`;
+      }).join("");
+      el.querySelectorAll("[data-cid]").forEach(cb => cb.onchange = () => { cb.checked ? CPP_SEL.add(cb.dataset.cid) : CPP_SEL.delete(cb.dataset.cid); });
+    }
+    async function uploadCpp() {
+      const inp = g("cppFile"); const file = inp.files && inp.files[0];
+      if (!file) { g("cppPickMsg").textContent = "Choose a file first."; g("cppPickMsg").className = "msg err"; return; }
+      g("cppPickMsg").textContent = "Uploading…"; g("cppPickMsg").className = "msg"; g("cppUpBtn").disabled = true;
+      try {
+        const fd = new FormData(); fd.append("file", file); fd.append("id", PID); fd.append("section", "Construction Phase Plan"); fd.append("title", file.name);
+        const r = await authFetch("/project/doc", { method: "POST", body: fd }).then(r => r.json());
+        if (r.ok && r.id) {
+          // Attach it as the CPP straight away, and keep local state so the Save diff stays correct.
+          await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: PID, kind: "cpp-file", value: r.id }) });
+          P.links = P.links || {}; P.links.cppFiles = Array.isArray(P.links.cppFiles) ? P.links.cppFiles : [];
+          if (!P.links.cppFiles.includes(r.id)) P.links.cppFiles.push(r.id);
+          CPP_SEL.add(r.id); inp.value = "";
+          g("cppPickMsg").textContent = "Uploaded & attached ✓"; g("cppPickMsg").className = "msg ok";
+          await refreshCppDocs();
+        } else { g("cppPickMsg").textContent = r.error || "Upload failed."; g("cppPickMsg").className = "msg err"; }
+      } catch { g("cppPickMsg").textContent = "Upload failed — try again."; g("cppPickMsg").className = "msg err"; }
+      g("cppUpBtn").disabled = false;
+    }
+    async function saveCppPick() {
+      const before = new Set((P.links && P.links.cppFiles) || []);
+      const toAdd = [...CPP_SEL].filter(id => !before.has(id));
+      const toRemove = [...before].filter(id => !CPP_SEL.has(id));
+      if (!toAdd.length && !toRemove.length) { closeCppPicker(); return; }
+      g("cppPickMsg").textContent = "Saving…"; g("cppPickMsg").className = "msg"; g("cppPickSave").disabled = true;
+      try {
+        for (const id of toAdd)    await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: PID, kind: "cpp-file", value: id }) });
+        for (const id of toRemove) await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: PID, kind: "cpp-file-remove", value: id }) });
+        g("cppPickSave").disabled = false; closeCppPicker(); await loadProject();
+      } catch { g("cppPickSave").disabled = false; g("cppPickMsg").textContent = "Couldn't save — try again."; g("cppPickMsg").className = "msg err"; }
+    }
+    g("cppPickX").onclick = closeCppPicker;
+    g("cppPickCancel").onclick = closeCppPicker;
+    g("cppPickSave").onclick = saveCppPick;
+    g("cppUpBtn").onclick = uploadCpp;
+    g("cppPick").addEventListener("click", e => { if (e.target === g("cppPick")) closeCppPicker(); });
 
     // ── Documents ─────────────────────────────────────────────────────────────
     async function loadDocs() {
