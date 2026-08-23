@@ -155,6 +155,17 @@ async function readGateOpen(env, db, cfg) {
   return String(dp.value) === String(openVal);
 }
 
+// Name whoever opened the gate, IF a portal open happened recently enough to be
+// this open event (within ~8 min, covering the up-to-5-min poll lag). Returns
+// null when the gate opened without the portal — i.e. the emergency keypad/fob —
+// so the alert can say so honestly rather than blaming the last portal user.
+async function attributeOpener(db, nowMs) {
+  const lastOpen = await loadKV(db, "tuya:lastopen");
+  if (!lastOpen || !lastOpen.at) return null;
+  const gap = nowMs - Date.parse(lastOpen.at);
+  return (gap >= 0 && gap <= 8 * 60000) ? (lastOpen.user || null) : null;
+}
+
 /* --------------------------------- handler -------------------------------- */
 export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -247,7 +258,18 @@ export async function handle(request, env, ctx, url, sess) {
       const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
         { commands: [{ code, value }] });
       if (!jr.success) return json({ ok: false, error: jr.msg || "Tuya rejected the command" }, 502);
-      return json({ ok: true, sent: { code, value } });
+      // Access record: the portal is now the way in, so log WHO opened it. The
+      // audit middleware already records the action; this dedicated log powers
+      // the on-page history and lets the left-open alert name the opener.
+      const nowIso = new Date().toISOString();
+      const opener = (sess.user && sess.user.username) || "?";
+      try {
+        await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
+        const log = (await loadKV(db, "tuya:openlog")) || [];
+        log.unshift({ user: opener, at: nowIso });
+        await saveKV(db, "tuya:openlog", log.slice(0, 50));
+      } catch {}
+      return json({ ok: true, sent: { code, value }, by: opener });
     } catch (e) {
       return json({ ok: false, error: String(e && e.message || e) }, 502);
     }
@@ -263,15 +285,23 @@ export async function handle(request, env, ctx, url, sess) {
       const open = await readGateOpen(env, db, cfg);
       // Reuse the watch record's `since` so the tile can show how long it's open.
       const watch = await loadKV(db, WATCH_KEY) || {};
-      let since = null, mins = 0;
+      let since = null, mins = 0, openedBy = null;
       if (open) {
         since = watch.open && watch.since ? watch.since : new Date().toISOString();
         mins = Math.round((Date.now() - Date.parse(since)) / 60000);
+        openedBy = watch.openedBy || (await attributeOpener(db, Date.now()));
       }
-      return json({ ok: true, configured, watched: true, open: !!open, since, mins });
+      return json({ ok: true, configured, watched: true, open: !!open, since, mins, openedBy });
     } catch (e) {
       return json({ ok: false, error: String(e && e.message || e) }, 502);
     }
+  }
+
+  // Recent opens — the access record (Full-Access).
+  if (path === "/tuya/gate/log" && method === "GET") {
+    if (!isFull) return json({ ok: false, error: "Forbidden" }, 403);
+    const log = (await loadKV(db, "tuya:openlog")) || [];
+    return json({ ok: true, log: log.slice(0, 50) });
   }
 
   return json({ ok: false, error: "Not found: " + path }, 404);
@@ -301,8 +331,13 @@ export async function checkGateLeftOpen(env, tenantId) {
       return;
     }
 
-    // Open — establish/keep the "since" moment.
-    const since = watch.open && watch.since ? watch.since : new Date(now).toISOString();
+    // Open — establish/keep the "since" moment and who opened it. On the
+    // transition to open, attribute it to the recent portal opener (else null =
+    // opened via the emergency keypad/fob).
+    let since, openedBy;
+    if (watch.open && watch.since) { since = watch.since; openedBy = watch.openedBy || null; }
+    else { since = new Date(now).toISOString(); openedBy = await attributeOpener(db, now); }
+
     const openMins = Math.round((now - Date.parse(since)) / 60000);
     const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
     const repeat = Math.max(5, parseInt(cfg.repeatMins, 10) || 30);
@@ -310,15 +345,16 @@ export async function checkGateLeftOpen(env, tenantId) {
 
     let newLastAlert = watch.lastAlertAt || null;
     if (openMins >= threshold && (!lastAlertAt || (now - lastAlertAt) >= repeat * 60000)) {
+      const who = openedBy ? `${openedBy} opened the yard gate and it's still open` : `The yard gate has been open (opened without the portal — check emergency access)`;
       await sendToPermission(env, tenantId, ["FullAccess", "YardGate"], {
         title: "⚠️ Yard gate left open",
-        body: `The yard gate has been open for ${openMins} min.`,
+        body: `${who} — ${openMins} min.`,
         url: "/yard-gate.html",
         tag: "yardgate-open",
       }).catch(() => {});
       newLastAlert = new Date(now).toISOString();
     }
-    await saveKV(db, WATCH_KEY, { open: true, since, lastAlertAt: newLastAlert });
+    await saveKV(db, WATCH_KEY, { open: true, since, openedBy, lastAlertAt: newLastAlert });
   } catch (e) {
     console.error("checkGateLeftOpen:", e && e.message);
   }

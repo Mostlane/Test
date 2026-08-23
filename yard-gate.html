@@ -62,6 +62,13 @@
       <div style="text-align:center;margin-top:12px"><button id="refreshBtn" class="btn small">↻ Refresh state</button></div>
     </div>
 
+    <!-- RECENT OPENS (Full-Access only) -->
+    <div class="card" id="logCard" style="display:none">
+      <h2>🕵️ Who opened the gate</h2>
+      <p class="sub">Every portal open is logged. Emergency keypad/fob opens aren't named (they don't go through the portal).</p>
+      <div id="logList" class="muted">Loading…</div>
+    </div>
+
     <!-- SETUP (Full-Access only) -->
     <div class="card" id="setupCard" style="display:none">
       <h2>⚙️ Gate setup</h2>
@@ -125,6 +132,8 @@ function perms(){ try{return JSON.parse(localStorage.getItem("mostlanePermission
 const isFull = String(perms().FullAccess||"").toLowerCase()==="yes";
 
 const $ = id => document.getElementById(id);
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function whenTxt(iso){ try{ const d=new Date(iso); return d.toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch{ return iso||""; } }
 
 /* ---- state + open ---- */
 let busy=false;
@@ -135,7 +144,11 @@ async function loadState(){
     if(!j.ok){ box.className="state unknown"; txt.textContent=j.error||"Couldn't read the gate"; return; }
     if(!j.configured){ box.className="state unknown"; txt.innerHTML="Not set up yet"+(isFull?" — open <b>Gate setup</b> below.":"."); return; }
     if(!j.watched){ box.className="state unknown"; txt.innerHTML="Gate ready. <small>No open/closed sensor configured.</small>"; return; }
-    if(j.open){ box.className="state open"; txt.innerHTML="Gate is OPEN"+(j.mins?` <small>for ${j.mins} min</small>`:""); }
+    if(j.open){
+      const who = j.openedBy ? ` — opened by ${esc(j.openedBy)}` : "";
+      box.className="state open";
+      txt.innerHTML="Gate is OPEN"+(j.mins?` <small>for ${j.mins} min${who}</small>`:(who?` <small>${who.replace(/^ — /,"")}</small>`:""));
+    }
     else { box.className="state closed"; txt.innerHTML="Gate is closed"; }
   }catch(e){ box.className="state unknown"; txt.textContent="Offline — can't reach the portal"; }
 }
@@ -150,7 +163,7 @@ async function openGate(){
   }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
   finally{
     b.querySelector("span:last-child").textContent="Open the gate";
-    setTimeout(()=>{ b.disabled=false; busy=false; loadState(); }, 1500);
+    setTimeout(()=>{ b.disabled=false; busy=false; loadState(); loadLog(); }, 1500);
   }
 }
 $("openBtn").addEventListener("click", openGate);
@@ -209,7 +222,18 @@ $("dumpBtn") && $("dumpBtn").addEventListener("click", async ()=>{
   }catch(e){ out.textContent="Network error"; }
 });
 
-loadState(); loadCfg();
+async function loadLog(){
+  if(!isFull) return;
+  $("logCard").style.display="";
+  try{
+    const r=await aFetch("/tuya/gate/log"); const j=await r.json();
+    const list=$("logList");
+    if(!j.ok || !(j.log||[]).length){ list.innerHTML='<span class="muted">No opens logged yet.</span>'; return; }
+    list.innerHTML=j.log.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef2f7"><b>${esc(e.user)}</b><span class="muted">${esc(whenTxt(e.at))}</span></div>`).join("");
+  }catch{ $("logList").innerHTML='<span class="muted">Couldn’t load the log.</span>'; }
+}
+
+loadState(); loadCfg(); loadLog();
 setInterval(loadState, 30000);
 </script>
 </body>

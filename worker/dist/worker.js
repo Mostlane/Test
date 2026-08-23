@@ -24983,6 +24983,12 @@ async function readGateOpen(env, db, cfg) {
   const openVal = cfg.stateOpenValue === void 0 ? true : cfg.stateOpenValue;
   return String(dp.value) === String(openVal);
 }
+async function attributeOpener(db, nowMs) {
+  const lastOpen = await loadKV(db, "tuya:lastopen");
+  if (!lastOpen || !lastOpen.at) return null;
+  const gap = nowMs - Date.parse(lastOpen.at);
+  return gap >= 0 && gap <= 8 * 6e4 ? lastOpen.user || null : null;
+}
 async function handle33(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
@@ -25069,7 +25075,16 @@ async function handle33(request, env, ctx, url, sess) {
         { commands: [{ code, value }] }
       );
       if (!jr7.success) return json4({ ok: false, error: jr7.msg || "Tuya rejected the command" }, 502);
-      return json4({ ok: true, sent: { code, value } });
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const opener = sess.user && sess.user.username || "?";
+      try {
+        await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
+        const log = await loadKV(db, "tuya:openlog") || [];
+        log.unshift({ user: opener, at: nowIso });
+        await saveKV(db, "tuya:openlog", log.slice(0, 50));
+      } catch {
+      }
+      return json4({ ok: true, sent: { code, value }, by: opener });
     } catch (e) {
       return json4({ ok: false, error: String(e && e.message || e) }, 502);
     }
@@ -25083,15 +25098,21 @@ async function handle33(request, env, ctx, url, sess) {
     try {
       const open = await readGateOpen(env, db, cfg);
       const watch = await loadKV(db, WATCH_KEY) || {};
-      let since = null, mins = 0;
+      let since = null, mins = 0, openedBy = null;
       if (open) {
         since = watch.open && watch.since ? watch.since : (/* @__PURE__ */ new Date()).toISOString();
         mins = Math.round((Date.now() - Date.parse(since)) / 6e4);
+        openedBy = watch.openedBy || await attributeOpener(db, Date.now());
       }
-      return json4({ ok: true, configured, watched: true, open: !!open, since, mins });
+      return json4({ ok: true, configured, watched: true, open: !!open, since, mins, openedBy });
     } catch (e) {
       return json4({ ok: false, error: String(e && e.message || e) }, 502);
     }
+  }
+  if (path === "/tuya/gate/log" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const log = await loadKV(db, "tuya:openlog") || [];
+    return json4({ ok: true, log: log.slice(0, 50) });
   }
   return json4({ ok: false, error: "Not found: " + path }, 404);
 }
@@ -25109,23 +25130,31 @@ async function checkGateLeftOpen(env, tenantId) {
       if (watch.open) await saveKV(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
       return;
     }
-    const since = watch.open && watch.since ? watch.since : new Date(now).toISOString();
+    let since, openedBy;
+    if (watch.open && watch.since) {
+      since = watch.since;
+      openedBy = watch.openedBy || null;
+    } else {
+      since = new Date(now).toISOString();
+      openedBy = await attributeOpener(db, now);
+    }
     const openMins = Math.round((now - Date.parse(since)) / 6e4);
     const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
     const repeat = Math.max(5, parseInt(cfg.repeatMins, 10) || 30);
     const lastAlertAt = watch.lastAlertAt ? Date.parse(watch.lastAlertAt) : 0;
     let newLastAlert = watch.lastAlertAt || null;
     if (openMins >= threshold && (!lastAlertAt || now - lastAlertAt >= repeat * 6e4)) {
+      const who = openedBy ? `${openedBy} opened the yard gate and it's still open` : `The yard gate has been open (opened without the portal \u2014 check emergency access)`;
       await sendToPermission(env, tenantId, ["FullAccess", "YardGate"], {
         title: "\u26A0\uFE0F Yard gate left open",
-        body: `The yard gate has been open for ${openMins} min.`,
+        body: `${who} \u2014 ${openMins} min.`,
         url: "/yard-gate.html",
         tag: "yardgate-open"
       }).catch(() => {
       });
       newLastAlert = new Date(now).toISOString();
     }
-    await saveKV(db, WATCH_KEY, { open: true, since, lastAlertAt: newLastAlert });
+    await saveKV(db, WATCH_KEY, { open: true, since, openedBy, lastAlertAt: newLastAlert });
   } catch (e) {
     console.error("checkGateLeftOpen:", e && e.message);
   }
