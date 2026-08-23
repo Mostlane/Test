@@ -7,7 +7,7 @@
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=17"></script>
+  <script src="sla-jobedit.js?v=19"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -257,6 +257,7 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
         <button class="btn" id="openAutoBtn" title="Auto-build a day from unscheduled jobs, across the team">🤖 Auto day</button>
+        <button class="btn" id="undoAutoBtn" style="display:none;background:#fef2f2;border-color:#fecaca;color:#b91c1c;" title="Revert the jobs booked in by the last auto-day">↩ Undo last auto-day</button>
         <button class="btn" id="openMapBtn">🗺️ Map view</button>
         <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
         <a class="btn" href="job-durations.html" title="See how job length estimates are learned + which jobs ran over">⏱ Durations</a>
@@ -457,9 +458,12 @@
     </div>
     <div id="autoStatus" style="font-size:13px;color:var(--muted);margin:10px 0;">Building a plan…</div>
     <div id="autoResult"></div>
-    <div id="autoFoot" style="display:none;margin-top:12px;justify-content:space-between;align-items:center;gap:10px;">
-      <span style="font-size:12px;color:var(--muted);">Untick any engineer you don't want to add.</span>
-      <button type="button" class="btn btn-primary" id="autoApply">✓ Add ticked days</button>
+    <div id="autoFoot" style="display:none;margin-top:12px;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="autoAll" onclick="toggleAutoAll(this.checked)" style="width:16px;height:16px;">
+        <span>Select all · <b id="autoPickCount">nothing</b> ticked. This is a draft — nothing is booked until you press below.</span>
+      </label>
+      <button type="button" class="btn btn-primary" id="autoApply" disabled>✓ Book in ticked days</button>
     </div>
   </div>
 </div>
@@ -1072,6 +1076,7 @@ async function onPointerUp(e){
   const job = jobs.find(j => j.id === jobId);
   if(!job){ setStatus("Drop: job not found", true); return; }
   if(targetEngineer == null || targetMins == null){ render(); return; }
+  const prevPrimary = (job.assignedEngineers[0] || "").toLowerCase();   // before the drop reassigns
 
   const h = Math.floor(targetMins/60), m = targetMins%60;
   const startDate = withTime(selectedDate, h, m);
@@ -1114,6 +1119,18 @@ async function onPointerUp(e){
     const idx = jobs.findIndex(j => j.id === job.id);
     if(idx >= 0) jobs[idx] = normaliseJob(saved);
     render();
+    // A genuine (re)assignment — dropped from the tray, or handed to a different
+    // engineer — raises the same "whilst you're here" same-site/nearby pop-up as
+    // the editor (never on a plain time move to the same engineer).
+    const newPrimary = newEngineers[0] || "";
+    if(newPrimary && newPrimary.toLowerCase() !== prevPrimary && window.MLJobEdit && MLJobEdit.suggestNearby){
+      MLJobEdit.suggestNearby(saved, newPrimary, sv => {
+        const i = jobs.findIndex(j => j.id === sv.id);
+        const nj = normaliseJob(sv);
+        if(i >= 0) jobs[i] = nj; else jobs.push(nj);
+        render();
+      });
+    }
   }catch(err){
     setStatus("⚠️ Save failed — reloading. " + err.message, true);
     await loadJobs(); render();
@@ -1262,7 +1279,7 @@ async function runOptimise(){
 function renderOptimise(data){
   const s = data.summary, dayStart = data.dayStart;
   const endClock = optWallClock(optCtx.date, dayStart, s.dayLengthMins);
-  const srcLabel = data.matrixSource === "google" ? "live driving times" : "estimated distances (no Maps key)";
+  const srcLabel = data.matrixSource && data.matrixSource !== "estimate" ? "live driving times" : "estimated distances";
   $("optStatus").innerHTML = (data.aiUsed ? "🤖 AI-ordered · " : "📐 Shortest-driving · ") + srcLabel;
   $("optSummary").innerHTML =
     `<div class="opt-sum">
@@ -1388,6 +1405,15 @@ async function applyOptimise(){
   if(!fail) setTimeout(() => { $("optBackdrop").style.display = "none"; }, 800);
 }
 document.getElementById("engDayOptimise").addEventListener("click", openRouteOptimise);
+// Open the optimiser for a specific engineer/day and auto-run the preview. Called
+// by the shared editor's "whilst you're here" pop-up after jobs are accepted, so
+// the newly-added stops get sequenced (office reviews the preview, then Applies).
+function optimiseEngineerDay(username, name, date){
+  engDayCtx = { username, name: name || username, date: (date instanceof Date ? date : new Date(date)) };
+  openRouteOptimise();
+  runOptimise();
+}
+window.mlOptimiseEngineerDay = optimiseEngineerDay;
 document.getElementById("engDayAuto").addEventListener("click", () => { if(engDayCtx) runAutoSchedule([engDayCtx.username], engDayCtx.name, engDayCtx.date); });
 document.getElementById("optClose").addEventListener("click", () => { $("optBackdrop").style.display = "none"; });
 document.getElementById("optBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("optBackdrop")) $("optBackdrop").style.display = "none"; });
@@ -1561,7 +1587,7 @@ function renderAutoPreview(d){
   const parts = [];
   const totDrive = (d.plan||[]).reduce((a,p)=>a+(p.summary.driveMins||0),0);
   const totSite = (d.plan||[]).reduce((a,p)=>a+(p.summary.siteMins||0),0);
-  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs across <b>${(d.plan||[]).length}</b> engineer${(d.plan||[]).length===1?"":"s"} · ${optFmtMins(totSite)} on site · ${optFmtMins(totDrive)} driving ${d.matrixSource==="google"?'<span style="color:#0a7d33;">· live drive times ✓</span>':'<span style="color:var(--muted)">(est. drive times)</span>'}.</div>`);
+  parts.push(`<div style="font-size:13px;margin-bottom:8px;">Placed <b>${d.placed}</b> of ${d.total} jobs across <b>${(d.plan||[]).length}</b> engineer${(d.plan||[]).length===1?"":"s"} · ${optFmtMins(totSite)} on site · ${optFmtMins(totDrive)} driving ${d.matrixSource!=="estimate"?'<span style="color:#0a7d33;">· live drive times ✓</span>':'<span style="color:var(--muted)">(est. drive times)</span>'}.</div>`);
   if(d.durModel){
     const dm = d.durModel;
     const how = d.aiUsed ? `${d.aiUsed} estimated by AI` : (d.estimatedCount ? `${d.estimatedCount} used the learned typical` : "");
@@ -1588,7 +1614,7 @@ function renderAutoPreview(d){
     const s = p.summary;
     parts.push(`<details ${i===0?"open":""} style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;">
       <summary style="cursor:pointer;padding:9px 11px;list-style:none;display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" class="autoPick" data-user="${escapeAttr(p.username)}" checked onclick="event.stopPropagation()" title="Add this engineer's day to the scheduler" style="width:18px;height:18px;flex:none;">
+        <input type="checkbox" class="autoPick" data-user="${escapeAttr(p.username)}" onclick="event.stopPropagation();syncAutoAll()" title="Tick to book this engineer's day into the scheduler" style="width:18px;height:18px;flex:none;">
         <span style="font-weight:700;">${escapeHtml(p.name)}</span>
         <span style="margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;">${s.jobs} jobs · ${optFmtMins(s.dayLengthMins)} · 🚗 ${optFmtMins(s.driveMins)}</span>
       </summary>
@@ -1616,36 +1642,103 @@ function renderAutoPreview(d){
   $("autoStatus").textContent = "";
   $("autoResult").innerHTML = parts.join("");
   $("autoFoot").style.display = d.placed ? "flex" : "none";
+  syncAutoAll();
 }
+// Tick/untick reconciliation for the per-engineer day checkboxes. Days default
+// UNticked (a draft) — the office deliberately picks whose day to book in, so a
+// single-engineer run can never book everyone. Keeps the footer count, the
+// "Select all" master box and the apply button's enabled state in step.
+function syncAutoAll(){
+  const boxes = [...document.querySelectorAll(".autoPick")];
+  const ticked = boxes.filter(b => b.checked);
+  const all = $("autoAll"), btn = $("autoApply"), lbl = $("autoPickCount");
+  if(all){ all.checked = boxes.length>0 && ticked.length===boxes.length; all.indeterminate = ticked.length>0 && ticked.length<boxes.length; }
+  if(lbl) lbl.textContent = ticked.length ? `${ticked.length} of ${boxes.length}` : "nothing";
+  if(btn){ btn.disabled = ticked.length===0; btn.textContent = ticked.length ? `✓ Book in ${ticked.length} day${ticked.length!==1?"s":""}` : "✓ Book in ticked days"; }
+}
+function toggleAutoAll(on){ document.querySelectorAll(".autoPick").forEach(b => b.checked = on); syncAutoAll(); }
 async function applyAutoPlan(){
   if(!autoPlan || !autoPlan.plan) return;
   // Apply only the engineers' days that are ticked (each section has a checkbox).
   const picked = new Set([...document.querySelectorAll(".autoPick:checked")].map(c => c.getAttribute("data-user")));
   const plans = autoPlan.plan.filter(p => picked.has(p.username));
   if(!plans.length){ $("autoStatus").textContent = "Tick at least one engineer's day to add it to the scheduler."; return; }
+  // "Are you sure" — this is where the draft becomes real bookings. Name exactly
+  // who is being booked and how many jobs, so a mis-tick is caught here.
+  const totJobs = plans.reduce((a,p)=>a+p.legs.length,0);
+  const who = plans.map(p=>p.name).join(", ");
+  const dateStr = (autoDate||selectedDate).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  const msg = `Book in ${totJobs} job${totJobs!==1?"s":""} for ${plans.length} engineer${plans.length!==1?"s":""} on ${dateStr}?\n\n${who}\n\nThis writes the jobs straight into the scheduler.`;
+  const ok = window.MLUI ? await MLUI.confirm(msg,{title:"Book in this day?",okLabel:"Yes, book them in",danger:false}) : confirm(msg);
+  if(!ok) return;
   const btn = $("autoApply"); btn.disabled = true; btn.textContent = "Adding…";
   const [Y,Mo,Da] = formatDateInput(autoDate || selectedDate).split("-").map(Number);
   let done = 0, fail = 0;
+  const appliedIds = [];   // remember what we booked so it can be undone in one tap
   for(const p of plans){
     for(const l of p.legs){
       const at = new Date(Y, Mo-1, Da, 0, 0, 0, 0); at.setMinutes(8*60 + Number(l.arrivalOffset||0));
       try{
         const res = await authFetch("/sla/jobs/"+encodeURIComponent(l.jobId), { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ assignedEngineers:[p.username], assignedTo:p.username, scheduledAt: at.toISOString(), durationMinutes: l.durationMin, changedBy: currentUser||"auto-schedule" }) });
-        if(res.ok) done++; else fail++;
+        if(res.ok){ done++; appliedIds.push(l.jobId); } else fail++;
       }catch(e){ fail++; }
     }
     // Once applied, drop that engineer's day from the preview + untick it.
     autoPlan.plan = autoPlan.plan.filter(x => x.username !== p.username);
   }
+  // Record this batch server-side so "↩ Undo last auto-day" can revert exactly
+  // these jobs (only the ones still untouched since — see /sla/auto-schedule/undo).
+  if(appliedIds.length){
+    try{ await authFetch("/sla/auto-schedule/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ date: formatDateInput(autoDate||selectedDate), jobIds: appliedIds, engineers: plans.map(p=>p.name), by: currentUser||"" })}); }catch(e){}
+    refreshUndoBtn();
+  }
   $("autoStatus").textContent = `✓ Added ${done} job${done!==1?"s":""} for ${plans.length} engineer${plans.length!==1?"s":""} to the scheduler${fail?`, ${fail} failed`:""}.`;
   await loadJobs(); render();
-  if(autoPlan.plan.length){ renderAutoPreview(autoPlan); btn.disabled=false; btn.textContent="✓ Add ticked days"; }
-  else { btn.textContent = "Done"; setTimeout(()=>{ $("autoBackdrop").style.display="none"; btn.disabled=false; btn.textContent="✓ Add ticked days"; }, 1200); }
+  if(autoPlan.plan.length){ renderAutoPreview(autoPlan); btn.disabled=false; }
+  else { btn.textContent = "Done"; setTimeout(()=>{ $("autoBackdrop").style.display="none"; btn.disabled=false; syncAutoAll(); }, 1200); }
 }
 $("openAutoBtn").addEventListener("click", ()=> runAutoSchedule(null, "Whole team"));
 $("autoClose").addEventListener("click", ()=> $("autoBackdrop").style.display="none");
 $("autoBackdrop").addEventListener("click", e => { if(e.target === $("autoBackdrop")) $("autoBackdrop").style.display="none"; });
 $("autoApply").addEventListener("click", applyAutoPlan);
+
+/* ── Undo last auto-day ─────────────────────────────────────────────────────
+   The last apply batch is stashed server-side (app_config sla:lastautoday).
+   Undo clears scheduled_at + assignment for ONLY the jobs still exactly as the
+   auto-day left them (an engineer who's since started/moved a job is skipped),
+   so it can never clobber real work done after the booking. */
+let lastUndoInfo = null;
+async function refreshUndoBtn(){
+  const btn = $("undoAutoBtn"); if(!btn) return;
+  try{
+    const d = await (await authFetch("/sla/auto-schedule/last")).json();
+    if(d && d.ok && d.jobIds && d.jobIds.length){
+      lastUndoInfo = d;
+      btn.style.display = "";
+      btn.title = `Revert ${d.jobIds.length} job${d.jobIds.length!==1?"s":""} booked by the last auto-day${d.engineers&&d.engineers.length?` (${d.engineers.join(", ")})`:""}`;
+    } else { lastUndoInfo = null; btn.style.display = "none"; }
+  }catch(e){ btn.style.display = "none"; }
+}
+async function undoLastAutoDay(){
+  if(!lastUndoInfo) return;
+  const n = lastUndoInfo.jobIds.length;
+  const who = (lastUndoInfo.engineers||[]).join(", ");
+  const msg = `Undo the last auto-day?\n\nThis un-schedules the ${n} job${n!==1?"s":""} it booked${who?` for ${who}`:""}. Any of those jobs an engineer has since started or moved is left alone.`;
+  const ok = window.MLUI ? await MLUI.confirm(msg,{title:"Undo last auto-day?",okLabel:"Yes, undo it",danger:true}) : confirm(msg);
+  if(!ok) return;
+  const btn = $("undoAutoBtn"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "Undoing…";
+  try{
+    const d = await (await authFetch("/sla/auto-schedule/undo",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json();
+    if(d && d.ok){
+      await loadJobs(); render();
+      alert(`↩ Un-scheduled ${d.reverted} job${d.reverted!==1?"s":""}${d.skipped?`, ${d.skipped} left alone (already started or moved)`:""}.`);
+    } else { alert((d&&d.error)||"Couldn't undo."); }
+  }catch(e){ alert("Couldn't reach the scheduler."); }
+  btn.disabled = false; btn.textContent = orig;
+  refreshUndoBtn();
+}
+$("undoAutoBtn").addEventListener("click", undoLastAutoDay);
+refreshUndoBtn();
 
 /* Job-card sub-modal — read-only, rendered from the in-memory job (no fetch, no
    re-scan). Stacks over whichever suggestion modal is open; ‹ Back just hides it. */
@@ -2077,7 +2170,9 @@ async function init(){
     $("trayToggle").textContent = collapsed ? "▸" : "▾";
   });
 
-  $("openMapBtn").addEventListener("click", openMap);
+  // Wrap so the click Event isn't passed as `scope` — openMap treats any truthy
+  // scope as an engineer-scoped view and would deref event.date (undefined).
+  $("openMapBtn").addEventListener("click", () => openMap());
   $("closeMapBtn").addEventListener("click", closeMap);
   document.querySelectorAll(".map-chip").forEach(chip => {
     chip.addEventListener("click", () => {

@@ -1369,15 +1369,25 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   /vehicles and /fsm sub-app folders are separate and unmigrated.
 
 ## Chapplins customer (routes/chapplins.js + chapplins.html + chapplins-compliance.html — Aug 2026)
-A whole customer (Chapplins Lettings, `support@chapplins.co.uk`) built from their
-emailed **job-report PDFs**, imported via the **Microsoft 365 / Outlook connector**
-(the job emails are structured: Tenant ref/Name/Property/contacts/Job Number/Date/
-Description; extraction pass lived in the session scratchpad). Modelled as a full
-customer like Co-op/Fareham — NOT a silo:
-- **Sites**: normal `sites` register, **client=`chapplins`**, numbered **4001–4047**
-  (added to the sites.html category dropdown + `ucClient`). 47 sites (unit-level:
-  32A/32B/32C/Communal are distinct). Loaded direct to D1 (PII stays out of the
-  public repo — never commit customer data).
+A whole customer (Chapplins Lettings) built from their emailed **job-report PDFs**,
+imported via the **Microsoft 365 / Outlook connector** across THREE senders —
+`support@`, `ashley@` and `kerry@chapplins.co.uk` (the job emails are structured:
+Tenant ref/Name/Property/contacts/Job Number/Date/Description; resumable
+checkpointed extraction subagents + a three-way merge script lived in the session
+scratchpad — merge3-chapplins.mjs). Modelled as a full customer like Co-op/Fareham
+— NOT a silo. **Live totals (20 Aug 2026): 123 sites · 76 tenants (70 current) ·
+123 compliance stores · 578 archived jobs**, 0 orphans:
+- **Sites**: normal `sites` register, **client=`chapplins`**, numbered **4001–4127**
+  (added to the sites.html category dropdown + `ucClient`), currently 123 live
+  (unit-level: individual flats + communal areas are distinct sites). Loaded direct
+  to D1 (PII stays out of the public repo — never commit customer data). **Duplicate
+  communal records were merged** (20 Aug): the same communal area recorded 2–3× under
+  slightly different names was collapsed to one canonical site (jobs repointed, not
+  deleted) — Woodhouse 4127/4095→4094, Crawford 4074→4109, Andover 4073→4108;
+  individual flats were left untouched. **Any new communal-area sweep: merge only
+  duplicate COMMUNAL records, never fold flats into their block.** NB Jasmine Court
+  4088 and 4044 are TWO SEPARATE buildings (different postcodes PO21 5LT vs 5UR) —
+  confirmed by Jamie, do not merge.
 - **Tenants** (the genuinely new bit): table **`site_tenants`** (self-migrating;
   tenant_id INTEGER, keyed `id=<client>:<siteNumber>:<slug(ref|name)>`), generic
   per-site tenant with **current + previous history** (`is_current`, first/last_seen
@@ -1385,16 +1395,19 @@ customer like Co-op/Fareham — NOT a silo:
   FullAccess|Compliance|SLAAdmin): GET /chapplins/sites (directory + current tenant
   + job count + compliance due), GET /chapplins/site?number= (tenants current-first +
   jobs), POST /chapplins/tenant (upsert, makeCurrent unsets siblings), /tenant/current,
-  /tenant/delete. A real handover is captured at 4039 (BIS44→BISH01).
-- **Jobs**: the 73 job reports live in **`sla_jobs_archive`** (id `CHAP-<jobNumber>`,
-  `site_code`=numeric site number) so each site's **Previous Jobs** tab + the Job
-  Archive search surface them for free. Skeletons now; enrich later from Workever.
+  /tenant/delete. Real handovers captured (newest=current, older=previous) at e.g.
+  4039 (BIS44→BISH01), 4046 (NATH01→CHO202), 4070 (COO600→COOP8), 4077 (MANN12→MANN2),
+  4004 (POT140→OLEK01), 4021 (SKRU01→LAI01). 76 tenant rows total, 70 current.
+- **Jobs**: 578 job reports live in **`sla_jobs_archive`** (id `CHAP-<jobNumber>`;
+  within-sender reused job numbers get a `-2` suffix; `site_code`=numeric site
+  number) so each site's **Previous Jobs** tab + the Job Archive search surface them
+  for free. Skeletons now; enrich later from Workever.
 - **Compliance**: new **`chapplins` scheme** in compliance.js (SCHEME_DEFAULTS/
   SCHEME_LABELS/TYPE_LABELS/canonType) — six landlord cert types **fiveYear(EICR 5y),
   gas(1y), epc(10y), alarms(1y), fire(1y), legionella(2y)**. compliance_stores rows
-  (scheme=chapplins, code=site_number) created empty (no certs in the emails yet —
-  a framework to populate going forward). Page **chapplins-compliance.html** = a clone
-  of fareham.html on scheme=chapplins.
+  (scheme=chapplins, code=site_number; 123 rows, one per live site) created empty
+  (no certs in the emails yet — a framework to populate going forward). Page
+  **chapplins-compliance.html** = a clone of fareham.html on scheme=chapplins.
   **🔑 column + access modal (Aug 2026):** the key button is always a plain 🔑
   (the "🔑❓" not-set variant read as something being wrong with the site; the
   📍 pin keeps its ❓), and its modal shows **Access instructions only** — the
@@ -1418,7 +1431,8 @@ customer like Co-op/Fareham — NOT a silo:
   from the two sibling flats at the same address. 4074 (The Crawford Apartments,
   Percy Road, Exeter) still has none. The button is Chapplins-only for now:
   Fareham's 24 stores have no postcodes to look up (2 exceptions) and the Co-op
-  chart (eicr-portal.html) has no 📍 column at all.
+  chart (eicr-portal.html) has no 📍 column at all. (NB 4073 and 4074 referenced
+  above were later merged away as duplicate communal records — see the Sites bullet.)
 - **Nav**: 🏠 Chapplins tile on main.html (MAP `Chapplins:["Compliance","SLAAdmin"]`),
   sidebar entry in portal-config, a card on compliance.html → chapplins-compliance.html.
   Hub page **chapplins.html** = the directory (search, per-site current tenant +
@@ -1857,6 +1871,31 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   naturally prefers engineers already passing by — i.e. "without going out of
   their way". No worker change and no new endpoint — reuses /sla/route-optimize
   (for the re-optimise) and PATCH /sla/jobs/{id} (for assignment).
+- **Allocation-time "whilst you're here" pop-up (sla-jobedit.js):** when a job is
+  newly allocated to an operative in the **shared editor** (`MLJobEdit`), a
+  self-contained pop-up (`#mlnjOverlay`, injected `#mlnj-style`) offers OTHER OPEN
+  jobs to batch onto the same person — **same site always** + **within a
+  straight-line radius** (default 5 mi, editable inline). Tick + **Assign** PATCHes
+  each to that engineer (landing an unscheduled one on the target's day). Data from
+  **GET /sla/jobs/nearby?jobId=&engineer=&radius=** (sla.js `nearbyForJob`): same
+  site via `siteKeyOf` (project-safe), nearby via `haversineMi` from the target's
+  coords (job lat/lon else `geocodePcServer`; others bulk-geocoded via
+  `geocodePcBulk`), OPEN statuses only, excludes jobs already the engineer's, top
+  12 by distance. Radius default persists in app_config `sla:nearbyRadius` via
+  **POST /sla/jobs/nearby-radius** (SLA admin). Trigger = a newly-added engineer on
+  save (`openEngineers` diff) AND the scheduler drag —
+  `MLJobEdit.suggestNearby(job,eng,cb)` is called from `commitDrop` when a drop
+  hands a job to a NEW primary engineer (tray→lane or engineer→engineer; never a
+  plain time move). **Cross-engineer:** the scan includes OPEN jobs currently with
+  OTHER engineers (flagged "currently <name>") + unassigned ones — only the target
+  engineer's own are excluded. **Assigning keeps the pop-up open** with remaining
+  same-site/nearby rows so a second nearby job stays flagged. **After accepting,
+  closing the pop-up calls `window.mlOptimiseEngineerDay(username,name,date)` when
+  present (the scheduler exposes it) → opens the route optimiser for that
+  engineer's day and auto-runs the preview, so the newly-added stops get sequenced
+  (office reviews → Apply). On sla-main (no optimiser on the page) the jobs are
+  just added to the day.** No pop-up when nothing is same-site or in range.
+  `sla-jobedit.js?v=19`.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
@@ -2807,6 +2846,34 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   `sla.sweepJobReleases` every tick but **gates the hourly work (van-check
   reminders, SiteLog reconcile) to `minute < 5`** so their cadence is unchanged.
   New scheduled jobs hang off the same handler.
+
+## Inbound email → job (Cloudflare Email Routing — replaces the Zapier zap)
+Jobs used to be captured by a Zapier zap watching **enquiries@mostlane.com** for
+Southern Co-op's **Concerto** "New Job Alert" emails (from `noreply@concerto.co.uk`)
+and POSTing them to `/sla/inbound`. That's now done in-portal by a Cloudflare
+**Email Worker**: `worker/src/index.js` exports an **`email(message, env, ctx)`**
+handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
+- **Parsing**: a dependency-free MIME walker (`extractText`) pulls the text body
+  (decodes quoted-printable/base64, strips HTML, DROPS attachments so the PDF work
+  order never reaches the AI). Extraction is **AI-first** — `aiExtract` calls the
+  Anthropic Messages API (`env.ANTHROPIC_API_KEY`, model `env.ANTHROPIC_MODEL`||
+  `claude-sonnet-5`, forced `extract_job` tool → {isJob, reference, priority,
+  siteCode, siteName, address, postcode, telephone, description, raisedAt}) so it
+  copes with ANY client's format and survives template tweaks. A deterministic
+  **`concertoRegex`** is the no-key / AI-error fallback. `isJob=false` (replies,
+  chases, quotes, POs, invoices, status updates, newsletters) is dropped.
+- **Creation**: reuses `/sla/inbound` **verbatim** via an in-process self-request
+  (`fetchSelf` = the worker's own `fetch`, Bearer `JOBS_INBOUND_TOKEN`) — so the
+  dedupe-by-reference, forgiving priority/date parsing and assignment push are all
+  identical to the old zap. `originator:"email"`. No change to sla.js.
+- The `email()` handler **never throws** (a thrown email handler bounces the mail).
+- **Manual setup (dashboard — no MCP tool for it):** (1) Cloudflare → the chosen
+  domain → **Email Routing** on; add address `jobs@<domain>` → **Worker:
+  mostlane-api**. The domain's DNS must be on Cloudflare. (2) Outlook rule on
+  enquiries@: from `noreply@concerto.co.uk` (+ any other job senders) → **forward**
+  (not redirect — forward re-sends from mostlane.com so it passes SPF/DMARC at
+  Cloudflare) to `jobs@<domain>`. Dormant until (1)+(2) are done — the `email`
+  export just sits unused.
 
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system

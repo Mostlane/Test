@@ -479,6 +479,7 @@
     // signal); the /auth/me check below can only ADD it, never depends on it.
     $("mljeDelete").style.display = isSlaAdmin(cachedPerms()) ? "" : "none";
     currentJob = job;
+    openEngineers = (job.assignedEngineers && job.assignedEngineers.slice()) || (job.assignedTo ? [job.assignedTo] : []);
     onSavedCb = (opts && opts.onSaved) || null;
     onDeletedCb = (opts && opts.onDeleted) || (opts && opts.onSaved) || null;
     pickedSite = null;
@@ -728,8 +729,13 @@
       const saved = await r.json();
       msg.textContent = "✅ Saved.";
       msg.className = "mlje-msg ok";
-      if (onSavedCb) { try { onSavedCb(saved); } catch (e) {} }
-      closeTimer = setTimeout(close, 400);
+      const cb = onSavedCb;
+      if (cb) { try { cb(saved); } catch (e) {} }
+      // Newly allocated to an operative? Offer same-site + nearby OPEN jobs to
+      // batch onto the same person before we close.
+      const newlyAssigned = assignedEngineers.filter(e => e && openEngineers.indexOf(e) === -1);
+      if (newlyAssigned.length) { close(); maybeShowNearby(saved, newlyAssigned[0], cb); }
+      else closeTimer = setTimeout(close, 400);
     } catch (e) {
       msg.textContent = "❌ Couldn't save the job (" + e.message + ").";
       msg.className = "mlje-msg err";
@@ -760,5 +766,125 @@
     }
   }
 
-  window.MLJobEdit = { open, wheelify };
+  // ── Allocation-time "whilst you're here" pop-up ────────────────────────────
+  // After a job is newly allocated to an operative, offer other OPEN jobs at the
+  // same site + within a straight-line radius, to send to the same person.
+  let openEngineers = [];
+  function nearbyRadiusPref() { const n = Number(localStorage.getItem("mlNearbyRadius")); return isFinite(n) && n > 0 ? n : 5; }
+  function njStyle() {
+    if ($("mlnj-style")) return;
+    const s = document.createElement("style"); s.id = "mlnj-style";
+    s.textContent = `
+      .mlnj-overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100000;display:flex;align-items:center;justify-content:center;padding:14px;}
+      .mlnj-card{background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:88vh;overflow:auto;padding:16px 18px;font-family:"Segoe UI",system-ui,sans-serif;}
+      .mlnj-head{display:flex;justify-content:space-between;align-items:center;font-size:17px;}
+      .mlnj-x{border:0;background:#f1f5f9;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:15px;}
+      .mlnj-sub{font-size:13px;color:#475569;margin:6px 0 10px;}
+      .mlnj-sec{font-size:12px;font-weight:700;color:#334155;margin:12px 0 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+      .mlnj-sec input{width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;}
+      .mlnj-nocoord{font-weight:400;color:#94a3b8;}
+      .mlnj-row{display:flex;align-items:center;gap:9px;border:1px solid #e2e8f0;border-radius:9px;padding:7px 10px;margin-bottom:6px;cursor:pointer;}
+      .mlnj-row:hover{background:#f8fafc;}
+      .mlnj-row input{width:auto;flex:0 0 auto;}
+      .mlnj-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+      .mlnj-main b{font-size:13px;}
+      .mlnj-meta{font-size:11.5px;color:#64748b;}
+      .mlnj-own{color:#b45309;font-weight:700;margin-left:4px;}
+      .mlnj-new{color:#2563eb;font-weight:700;margin-left:4px;}
+      .mlnj-mi{flex:0 0 auto;font-size:12px;font-weight:800;color:#16a34a;}
+      .mlnj-empty{font-size:12.5px;color:#94a3b8;padding:4px 2px;}
+      .mlnj-foot{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+      .mlnj-btn{border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;}
+      .mlnj-btn.primary{background:#16a34a;color:#fff;border:0;}
+      .mlnj-msg{font-size:12.5px;color:#475569;margin-top:8px;}`;
+    document.head.appendChild(s);
+  }
+  async function maybeShowNearby(job, engineer, cb) {
+    let d = null;
+    try {
+      const res = await authFetch(`/sla/jobs/nearby?jobId=${encodeURIComponent(job.id)}&engineer=${encodeURIComponent(engineer)}&radius=${nearbyRadiusPref()}`);
+      d = await res.json();
+    } catch { }
+    if (d && d.ok && ((d.sameSite && d.sameSite.length) || (d.nearby && d.nearby.length))) showNearby(job, engineer, d, cb);
+  }
+  function njRow(item, withMiles) {
+    const owner = (item.assignedEngineers && item.assignedEngineers.length)
+      ? `<span class="mlnj-own">currently ${esc(item.assignedEngineers.join(", "))}</span>`
+      : `<span class="mlnj-new">unassigned</span>`;
+    return `<label class="mlnj-row"><input type="checkbox" class="mlnj-cb" data-id="${esc(item.id)}">
+      <span class="mlnj-main"><b>${esc(item.ref || item.site || "Job")}</b>
+        <span class="mlnj-meta">${esc(item.site || "")}${item.priority ? " · " + esc(item.priority) : ""} · ${esc(item.status || "")} ${owner}</span></span>
+      <span class="mlnj-mi">${withMiles ? item.miles + " mi" : "same site"}</span></label>`;
+  }
+  function showNearby(job, engineer, data, cb) {
+    njStyle();
+    let assignedAny = false;
+    let ov = $("mlnjOverlay");
+    if (!ov) { ov = document.createElement("div"); ov.id = "mlnjOverlay"; ov.className = "mlnj-overlay"; document.body.appendChild(ov); }
+    const render = (d) => {
+      const site = esc(d.targetSite || job.siteName || job.site || job.siteCode || "this site");
+      ov.innerHTML = `<div class="mlnj-card">
+        <div class="mlnj-head"><b>🧭 Whilst you're here</b><button type="button" class="mlnj-x" id="mlnjClose">✕</button></div>
+        <div class="mlnj-sub"><b>${esc(engineer)}</b> is going to <b>${site}</b>. Also send them any of these?</div>
+        ${d.sameSite && d.sameSite.length ? `<div class="mlnj-sec">🏢 Same site (${d.sameSite.length})</div>${d.sameSite.map(x => njRow(x, false)).join("")}` : ""}
+        <div class="mlnj-sec">📍 Within <input type="number" id="mlnjRad" min="1" max="50" step="1" value="${d.radius}"> miles${d.nearby && d.nearby.length ? " (" + d.nearby.length + ")" : ""}${d.hasCoords ? "" : ' <span class="mlnj-nocoord">— no map location on this job</span>'}</div>
+        ${d.nearby && d.nearby.length ? d.nearby.map(x => njRow(x, true)).join("") : (d.hasCoords ? `<div class="mlnj-empty">Nothing else open within ${d.radius} miles.</div>` : "")}
+        <div class="mlnj-foot"><button type="button" class="mlnj-btn primary" id="mlnjAssign">Assign ticked to ${esc(engineer)}</button><button type="button" class="mlnj-btn" id="mlnjSkip">Skip</button></div>
+        <div class="mlnj-msg" id="mlnjMsg"></div>
+      </div>`;
+      const done = () => {
+        ov.remove();
+        // On the scheduler, sequence the newly-added stops: open the optimiser
+        // preview for this engineer's day (office reviews, then Applies). On the
+        // board there's no optimiser here — the jobs are simply added to the day.
+        if (assignedAny && window.mlOptimiseEngineerDay) {
+          const dt = job.scheduledAt ? new Date(job.scheduledAt) : new Date();
+          try { window.mlOptimiseEngineerDay(engineer, engineer, dt); } catch (e) { }
+        }
+      };
+      $("mlnjClose").onclick = done; $("mlnjSkip").onclick = done;
+      $("mlnjRad").onchange = async (e) => {
+        const n = Math.max(1, Math.min(50, Number(e.target.value) || 5));
+        localStorage.setItem("mlNearbyRadius", String(n));
+        authFetch("/sla/jobs/nearby-radius", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ radius: n }) }).catch(() => { });
+        try { const res = await authFetch(`/sla/jobs/nearby?jobId=${encodeURIComponent(job.id)}&engineer=${encodeURIComponent(engineer)}&radius=${n}`); const nd = await res.json(); if (nd && nd.ok) render(nd); } catch { }
+      };
+      $("mlnjAssign").onclick = async () => {
+        const ids = [...ov.querySelectorAll(".mlnj-cb:checked")].map(c => c.getAttribute("data-id"));
+        if (!ids.length) { done(); return; }
+        $("mlnjAssign").disabled = true; $("mlnjMsg").textContent = "Assigning…";
+        const pool = [...(d.sameSite || []), ...(d.nearby || [])];
+        let ok = 0;
+        for (const id of ids) {
+          const patch = { assignedEngineers: [engineer], assignedTo: engineer, changedBy: currentUser() };
+          const item = pool.find(x => x.id === id);
+          if (item && !item.scheduledAt && job.scheduledAt) {
+            const t = new Date(job.scheduledAt);
+            patch.scheduledAt = new Date(t.getFullYear(), t.getMonth(), t.getDate(), 8, 0, 0, 0).toISOString();
+          }
+          try {
+            const res = await authFetch("/sla/jobs/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+            if (res.ok) { ok++; const sv = await res.json().catch(() => null); if (sv && cb) { try { cb(sv); } catch { } } }
+          } catch { }
+        }
+        if (ok) assignedAny = true;   // closing will open the optimiser to sequence them
+        // Drop the ones just assigned, but KEEP the pop-up open so any remaining
+        // same-site / nearby job is still flagged (a second one isn't lost).
+        d.sameSite = (d.sameSite || []).filter(x => ids.indexOf(x.id) === -1);
+        d.nearby = (d.nearby || []).filter(x => ids.indexOf(x.id) === -1);
+        if (d.sameSite.length || d.nearby.length) {
+          render(d);
+          $("mlnjMsg").textContent = `✅ Assigned ${ok} to ${esc(engineer)}. Anything else?`;
+        } else {
+          $("mlnjMsg").textContent = `✅ Assigned ${ok} to ${esc(engineer)}.`;
+          setTimeout(done, 900);
+        }
+      };
+    };
+    render(data);
+  }
+
+  // Exposed so the scheduler's drag-drop (tray→lane, engineer→engineer) can raise
+  // the same pop-up, not just the editor save.
+  window.MLJobEdit = { open, wheelify, suggestNearby: maybeShowNearby };
 })();

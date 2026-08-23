@@ -42,6 +42,21 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
   }
 
+  // POST /sla/speed-check — read the body, discard it, return 200 with the
+  // received byte count. Used by engineer-job.html's "high-quality upload"
+  // toggle: the client POSTs a ~500KB blob and times it. If it takes >4s
+  // the toggle snaps back off, so a full-res photo isn't queued on a phone
+  // that can't push it. Cheap: reads the stream and drops each chunk.
+  if (subpath === "/speed-check" && method === "POST") {
+    let bytes = 0;
+    try {
+      const reader = request.body && request.body.getReader ? request.body.getReader() : null;
+      if (reader) { for (;;) { const { done, value } = await reader.read(); if (done) break; bytes += value ? value.length : 0; } }
+      else { const ab = await request.arrayBuffer(); bytes = ab.byteLength; }
+    } catch { /* truncated body → still returns the bytes we managed to read */ }
+    return jsonResponse({ ok: true, bytes }, headers);
+  }
+
   /* GET /sla/categories — custom job categories (any session, so every page can
      merge them into its status list). POST — replace the whole list (SLA admin). */
   if (subpath === "/categories") {
@@ -825,6 +840,69 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(await autoScheduleDay(env, tenantId, await readJson(request)), headers);
   }
 
+  /* POST /sla/auto-schedule/record — stash the batch of jobs the office just
+     booked in from an auto-day, so it can be reverted in one tap. SLA admin. */
+  if (subpath === "/auto-schedule/record" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const b = await readJson(request);
+    const jobIds = Array.isArray(b.jobIds) ? b.jobIds.map(String).slice(0, 500) : [];
+    if (!jobIds.length) return jsonResponse({ ok: false, error: "No jobs to record." }, headers, 400);
+    const rec = {
+      date: String(b.date || todayStr()),
+      jobIds,
+      engineers: Array.isArray(b.engineers) ? b.engineers.map(String).slice(0, 40) : [],
+      by: String(b.by || (sess.user && sess.user.username) || ""),
+      at: new Date().toISOString(),
+    };
+    try { await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:lastautoday:" + tenantId, JSON.stringify(rec)).run(); } catch {}
+    return jsonResponse({ ok: true }, headers);
+  }
+
+  /* GET /sla/auto-schedule/last — the last recorded auto-day batch (for the
+     scheduler's "↩ Undo last auto-day" button). SLA admin. */
+  if (subpath === "/auto-schedule/last" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try { const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first(); if (row) rec = JSON.parse(row.value); } catch {}
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false }, headers);
+    return jsonResponse({ ok: true, date: rec.date, jobIds: rec.jobIds, engineers: rec.engineers || [], by: rec.by || "", at: rec.at || "" }, headers);
+  }
+
+  /* POST /sla/auto-schedule/undo — revert the last auto-day: un-schedule +
+     un-assign ONLY the jobs still exactly as the auto-day left them (status
+     "Scheduled" and still on that date). A job an engineer has since started,
+     or the office has moved/reassigned, is left untouched. SLA admin. */
+  if (subpath === "/auto-schedule/undo" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    let rec = null;
+    try { const row = await tenantDB(env, tenantId).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).first(); if (row) rec = JSON.parse(row.value); } catch {}
+    if (!rec || !Array.isArray(rec.jobIds) || !rec.jobIds.length) return jsonResponse({ ok: false, error: "Nothing to undo." }, headers, 400);
+    const now = new Date().toISOString();
+    let reverted = 0, skipped = 0;
+    for (const id of rec.jobIds) {
+      let job = null;
+      try { job = await getJob(env, tenantId, id); } catch {}
+      // Skip anything that's gone, moved off the recorded date, or that an
+      // engineer has already started (status past "Scheduled").
+      if (!job || job.status !== "Scheduled" || String(job.scheduledAt || "").slice(0, 10) !== String(rec.date).slice(0, 10)) { skipped++; continue; }
+      job.scheduledAt = null;
+      job.scheduledEnd = null;
+      job.assignedTo = "";
+      job.assignedEngineers = [];
+      job.engStatus = undefined;
+      job.status = "Pending";
+      (job.statusHistory ||= []).push({ status: "Pending", at: now, by: "undo-auto-day" });
+      job.updatedAt = now;
+      try { await saveJob(env, tenantId, job); reverted++; } catch { skipped++; }
+    }
+    // Consume the record so a second Undo doesn't re-fire on already-reverted jobs.
+    try { await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:lastautoday:" + tenantId).run(); } catch {}
+    return jsonResponse({ ok: true, reverted, skipped }, headers);
+  }
+
   /* GET /sla/duration-insights — the learned duration model + overruns + a
      review sample (allocated vs actual vs AI estimate). SLA admin. */
   if (subpath === "/duration-insights" && method === "GET") {
@@ -849,6 +927,27 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse({ error: "SLA admins only." }, headers, 403);
     try { await tenantDB(env, tenantId).prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, "sla:aidur:" + tenantId).run(); } catch {}
     return jsonResponse({ ok: true }, headers);
+  }
+
+  /* GET /sla/jobs/nearby?jobId=&engineer=&radius= — same-site + within-radius OPEN
+     jobs, for the allocation-time "whilst you're here…" suggestion pop-up. */
+  if (subpath === "/jobs/nearby" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const jobId = searchParams.get("jobId");
+    if (!jobId) return jsonResponse({ ok: false, error: "jobId required" }, headers, 400);
+    const def = await getNearbyRadius(env, tenantId);
+    const radius = Math.max(0.5, Math.min(50, Number(searchParams.get("radius")) || def));
+    return jsonResponse(await nearbyForJob(env, tenantId, jobId, searchParams.get("engineer") || "", radius), headers);
+  }
+  /* POST /sla/jobs/nearby-radius {radius} — save the office's default radius (SLA admin). */
+  if (subpath === "/jobs/nearby-radius" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const b = await readJson(request);
+    const n = Math.max(0.5, Math.min(50, Number(b.radius) || 5));
+    const db = tenantDB(env, tenantId);
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla:nearbyRadius', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, String(n)).run();
+    return jsonResponse({ ok: true, radius: n }, headers);
   }
 
   /* ===== Story Mode: daily shift (clock on / off) ===== */
@@ -1057,7 +1156,13 @@ export async function handle(request, env, ctx, url, sess) {
     // POST /sla/jobs/{id}/files?filename=  -> upload photo to R2
     if (parts[2] === "files" && method === "POST") {
       const filename = searchParams.get("filename");
-      const form = await request.formData();
+      // A truncated multipart body (an upload cut off on weak signal) makes
+      // request.formData() throw "No initial boundary string". That's a BAD
+      // REQUEST from a dropped connection, not a server fault — return 400 so it
+      // isn't logged as a 500 error/alert; the client keeps the photo and retries.
+      let form;
+      try { form = await request.formData(); }
+      catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
       const file = form.get("file");
       if (!filename || !file) return jsonResponse({ error: "Missing file" }, headers, 400);
       // Before / During / After label the engineer picks with the photo slider.
@@ -1576,7 +1681,9 @@ export async function handle(request, env, ctx, url, sess) {
     const code = siteKeyOf(searchParams.get("siteCode"));
     const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
     if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
-    const form = await request.formData();
+    let form;
+    try { form = await request.formData(); }
+    catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
     const file = form.get("file");
     if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
     const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
@@ -1623,7 +1730,9 @@ export async function handle(request, env, ctx, url, sess) {
   // Store a thumbnail for an EXISTING photo (backfill) — client generates it.
   if (subpath === "/site/thumb" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
-    const form = await request.formData();
+    let form;
+    try { form = await request.formData(); }
+    catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
     const key = String(form.get("key") || "");
     const thumb = form.get("thumb");
     if (!key || !(key.startsWith("sitedocs/") || key.startsWith("jobs/")) || !thumb || typeof thumb.stream !== "function")
@@ -2619,6 +2728,65 @@ async function geocodePcServer(pc) {
   } catch { }
   return null;
 }
+/* ── Same-site + nearby OPEN jobs (allocation-time "whilst you're here" pop-up) ──
+   Same-site = same normalised site code (project-safe via siteKeyOf). Nearby =
+   straight-line miles from the target job's site to other open jobs' sites,
+   within a radius (app_config `sla:nearbyRadius`, default 5). Coords come from a
+   job's stored lat/lon else a bulk postcodes.io geocode (edge-cached). */
+const NEARBY_FINISHED = new Set(["Complete", "Closed Jobs", "Invoiced", "Cancelled"]);
+const isOpenJobStatus = s => !NEARBY_FINISHED.has(String(s || ""));
+async function getNearbyRadius(env, tenantId) {
+  try {
+    const db = tenantDB(env, tenantId);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla:nearbyRadius'").bind(tenantId).first();
+    const n = Number(row && row.value);
+    return isFinite(n) && n > 0 ? n : 5;
+  } catch { return 5; }
+}
+async function geocodePcBulk(pcs) {
+  const clean = [...new Set(pcs.map(p => String(p || "").toUpperCase().replace(/\s+/g, "").trim()).filter(Boolean))];
+  const out = new Map();
+  for (let i = 0; i < clean.length; i += 100) {
+    const batch = clean.slice(i, i + 100);
+    try {
+      const res = await fetch("https://api.postcodes.io/postcodes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ postcodes: batch }), cf: { cacheTtl: 2592000, cacheEverything: true } });
+      const d = await res.json();
+      (d.result || []).forEach(r => { const q = String(r.query || "").toUpperCase().replace(/\s+/g, ""); if (r.result && isFinite(r.result.latitude)) out.set(q, [Number(r.result.latitude), Number(r.result.longitude)]); });
+    } catch { }
+  }
+  return out;
+}
+function jobStoredCoord(j) { const lat = Number(j.lat), lng = Number(j.lon); return (isFinite(lat) && isFinite(lng) && (lat || lng)) ? [lat, lng] : null; }
+async function jobCoordServer(env, job) {
+  const c = jobStoredCoord(job); if (c) return c;
+  const pc = String(job.postcode || "").trim();
+  if (pc) { const g = await geocodePcServer(pc); if (g) return g; }
+  return null;
+}
+const nearbyLite = j => ({ id: j.id, ref: j.helpdeskRef || j.siteName || j.siteCode || j.id, site: j.siteName || j.siteCode || "", siteCode: j.siteCode || "", status: j.status || "", priority: j.priority || "", scheduledAt: j.scheduledAt || null, assignedEngineers: assignedList(j) });
+async function nearbyForJob(env, tenantId, jobId, engineer, radius) {
+  const target = await getJob(env, tenantId, jobId);
+  if (!target) return { ok: false, error: "job not found" };
+  const eng = normId(engineer || "");
+  const tKey = siteKeyOf(target.siteCode);
+  const all = (await listJobs(env, tenantId)).filter(j => j.id !== jobId && isOpenJobStatus(j.status));
+  const notTheirs = j => !eng || !assignedList(j).some(a => normId(a) === eng);
+  const sameSite = all.filter(j => tKey && siteKeyOf(j.siteCode) === tKey && notTheirs(j)).map(nearbyLite);
+  const sameIds = new Set(sameSite.map(s => s.id));
+  let nearby = [];
+  const tc = await jobCoordServer(env, target);
+  if (tc) {
+    const cand = all.filter(j => !sameIds.has(j.id) && !(tKey && siteKeyOf(j.siteCode) === tKey) && notTheirs(j));
+    const map = new Map(); const needPc = [];
+    for (const j of cand) { const c = jobStoredCoord(j); if (c) map.set(j.id, c); else { const pc = String(j.postcode || "").toUpperCase().replace(/\s+/g, "").trim(); if (pc) needPc.push([j.id, pc]); } }
+    if (needPc.length) { const geo = await geocodePcBulk(needPc.map(x => x[1])); for (const [id, pc] of needPc) { const cc = geo.get(pc); if (cc) map.set(id, cc); } }
+    for (const j of cand) { const c = map.get(j.id); if (!c) continue; const mi = haversineMi(tc, c); if (mi <= radius) nearby.push({ ...nearbyLite(j), miles: Math.round(mi * 10) / 10 }); }
+    nearby.sort((a, b) => a.miles - b.miles);
+    nearby = nearby.slice(0, 12);
+  }
+  return { ok: true, radius, targetSite: target.siteName || target.siteCode || "", hasCoords: !!tc, sameSite, nearby };
+}
+
 async function engineerHome(env, tenantId, username) {
   const db = tenantDB(env, tenantId);
   let row = null;
@@ -2631,6 +2799,30 @@ async function engineerHome(env, tenantId, username) {
   return null;
 }
 // Full driving-time + distance matrix over an array of [lat,lng] points. Google
+// FREE real road-time matrix via OSRM (OpenStreetMap routing — no API key, no
+// cost). One request returns an N×N duration matrix. Public server allows ~100
+// coordinates per request; returns null on any problem so callers fall back.
+async function osrmTable(pts) {
+  if (!pts || pts.length < 2 || pts.length > 100) return null;
+  const coords = pts.map(p => `${p[1]},${p[0]}`).join(";");   // OSRM wants lng,lat
+  try {
+    const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration`, { signal: AbortSignal.timeout(7000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.code !== "Ok" || !Array.isArray(data.durations)) return null;
+    const mins = data.durations.map(row => row.map(s => (s == null ? 0 : Math.max(1, Math.round(s / 60)))));
+    return { mins, source: "osrm" };
+  } catch { return null; }
+}
+// Free real times (OSRM) when they fit one request, else a haversine estimate.
+async function roadMatrix(pts) {
+  const osrm = await osrmTable(pts);
+  if (osrm) return osrm;
+  const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) mins[i][j] = Math.max(1, Math.round(haversineMi(pts[i], pts[j]) * 1.25 / 30 * 60));
+  return { mins, source: "estimate" };
+}
+
 // Distance Matrix (chunked to the 100-element-per-request cap); on any failure /
 // no key, a haversine × 1.25 road-factor estimate at ~30 mph.
 async function driveMatrix(env, pts) {
@@ -2888,15 +3080,15 @@ async function autoScheduleDay(env, tenantId, body) {
   // One matrix over all points: engineer homes first, then jobs. Cap Google use.
   const pts = [...engs.map(e => e.coord), ...jobs.map(j => j.coord)];
   const NE = engs.length;
+  // Free real road times (OSRM) when the whole set fits one request; otherwise a
+  // fast haversine estimate just to DECIDE the assignment — each engineer's final
+  // route is then re-timed with real OSRM below (a day is only a few stops).
   let M;
-  if (pts.length <= 45) M = await driveMatrix(env, pts);
+  if (pts.length <= 90) M = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
     M = { mins, source: "estimate" };
-    // No warning: this fast estimate only DECIDES the assignment; each engineer's
-    // final route is then recomputed with REAL Google times below (cheap — a day
-    // is only a handful of stops).
   }
   const pE = i => i, pJ = k => NE + k;
 
@@ -2994,12 +3186,12 @@ async function autoScheduleDay(env, tenantId, body) {
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter(p => p.legs.length);
 
-  // REAL driving times for the SHOWN routes. The assignment above used a fast
-  // estimate (a full Google matrix over every job would be thousands of elements),
-  // but each engineer's actual day is only a few stops — so recompute just those
-  // legs with Google. Cheap, and every time on screen becomes real.
+  // REAL driving times for the SHOWN routes, FREE via OSRM. The assignment above
+  // may have used a fast estimate (a full matrix over every job is too big for one
+  // request), but each engineer's actual day is only a few stops — so re-time just
+  // those legs with OSRM. No API key, no cost, and every time on screen is real.
   let matrixSource = M.source;
-  if (M.source !== "google" && env.GOOGLE_MAPS_KEY && plan.length) {
+  if (M.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map(j => [j.id, j.coord]));
     const engCoord = new Map(engs.map(e => [e.username, e.coord]));
     let allReal = true;
@@ -3007,8 +3199,8 @@ async function autoScheduleDay(env, tenantId, body) {
       const home = engCoord.get(p.username);
       const pts2 = [home, ...p.legs.map(l => coordById.get(l.jobId))];
       if (!home || pts2.some(c => !c) || pts2.length < 2) { allReal = false; continue; }
-      const dm = await driveMatrix(env, pts2);       // small: home + this day's stops
-      if (dm.source !== "google") { allReal = false; continue; }
+      const dm = await roadMatrix(pts2);             // small: home + this day's stops
+      if (dm.source !== "osrm") { allReal = false; continue; }
       let t = 0, drive = 0, site = 0, lunchDone = lunch === 0, cur = 0;
       p.legs.forEach((l, idx) => {
         const to = idx + 1, dMin = dm.mins[cur][to]; drive += dMin;
@@ -3020,10 +3212,8 @@ async function autoScheduleDay(env, tenantId, body) {
       const homeMin = dm.mins[cur][0]; drive += homeMin;
       p.summary = { jobs: p.legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) };
     }
-    matrixSource = allReal ? "google" : "estimate";
-    if (!allReal) warnings.push("Some routes fell back to estimated driving times (Google didn't answer for every one).");
-  } else if (M.source !== "google" && !env.GOOGLE_MAPS_KEY) {
-    warnings.push("Live driving times need a Google Maps key on the server — showing estimates.");
+    matrixSource = allReal ? "osrm" : "estimate";
+    if (!allReal) warnings.push("Some routes fell back to estimated driving times (the free routing service didn't answer for every one — try again in a moment).");
   }
 
   // Plain-English "why these jobs" per engineer + a shared-area explainer.

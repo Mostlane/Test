@@ -28,6 +28,7 @@ import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-s
 import * as portal from "./routes/portal.js";      // DONE  (settings, on-call rota, daily logs)
 import * as sitelog from "./routes/sitelog.js";    // DONE  (portal↔SiteLog bridge: launch token + admin proxy → local module or remote)
 import * as sitelogApi from "./routes/sitelog-api.js"; // DONE  (ported SiteLog backend: scanner API on api.site-log.co.uk + daily auto-close)
+import { handleInboundEmail } from "./routes/emailjob.js"; // DONE  (Cloudflare Email Routing → job intake, replaces the Zapier email zap)
 import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
@@ -118,7 +119,7 @@ const ROUTES = [
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
 
-export default {
+const worker = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
@@ -263,7 +264,22 @@ export default {
       if (env.SITELOG_DB) ctx.waitUntil(sitelogApi.sweepAutoClose(env).catch(e => console.error("scheduled sitelog auto-close:", e)));
     }
   },
+
+  // ── Inbound email → job (Cloudflare Email Routing) ─────────────────────────
+  // Point a routed address (e.g. jobs@<a-mostlane-domain-on-cloudflare>) at this
+  // worker in the dashboard (Email → Email Workers). Forward job emails there
+  // from Outlook. Each one is parsed and logged as a job via /sla/inbound. The
+  // handler NEVER throws (a thrown email handler would bounce the mail).
+  async email(message, env, ctx) {
+    try {
+      await handleInboundEmail(message, env, ctx, worker.fetch);
+    } catch (e) {
+      console.error("email handler:", e && e.message);
+    }
+  },
 };
+
+export default worker;
 
 // Once-a-day (~08:00 London) re-nudge for outstanding holiday requests + equipment
 // transfers, deduped per day so a retry can't double-send.
