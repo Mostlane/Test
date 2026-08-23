@@ -23781,7 +23781,7 @@ function computeTodo(p, data, fileCount) {
     let auto = false;
     if (dt.key === "programme") auto = !!links.programmeId;
     else if (dt.key === "rams") auto = Array.isArray(links.ramsIds) && links.ramsIds.length > 0;
-    else if (dt.key === "cpp") auto = !!links.cppRef;
+    else if (dt.key === "cpp") auto = !!links.cppRef || Array.isArray(links.cppFiles) && links.cppFiles.length > 0;
     else if (dt.key === "valuations") auto = fin;
     else if (dt.key === "projectDocs") auto = fileCount > 0;
     const isDone = done[dt.key] === true || auto;
@@ -23918,7 +23918,7 @@ async function handle31(request, env, ctx, url, sess) {
       required,
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
-      links: { programmeId: "", ramsIds: [], cppRef: "", costingKey },
+      links: { programmeId: "", ramsIds: [], cppRef: "", cppFiles: [], costingKey },
       visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {}
     };
@@ -24048,6 +24048,11 @@ async function handle31(request, env, ctx, url, sess) {
       if (value && !data.links.ramsIds.includes(value)) data.links.ramsIds.push(value);
     } else if (kind === "rams-remove") {
       data.links.ramsIds = (data.links.ramsIds || []).filter((x) => x !== value);
+    } else if (kind === "cpp-file") {
+      data.links.cppFiles = Array.isArray(data.links.cppFiles) ? data.links.cppFiles : [];
+      if (value && !data.links.cppFiles.includes(value)) data.links.cppFiles.push(value);
+    } else if (kind === "cpp-file-remove") {
+      data.links.cppFiles = (data.links.cppFiles || []).filter((x) => x !== value);
     } else return error("Unknown link kind", 400, env, request);
     await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, row.id).run();
     return json({ ok: true, links: data.links }, {}, env, request);
@@ -24141,6 +24146,18 @@ async function handle31(request, env, ctx, url, sess) {
     } catch {
     }
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
+    try {
+      const prow = await getRow(String(f.project_id || ""));
+      if (prow) {
+        const pdata = parse2(prow);
+        const cf = pdata.links && pdata.links.cppFiles || [];
+        if (Array.isArray(cf) && cf.includes(f.id)) {
+          pdata.links.cppFiles = cf.filter((x) => x !== f.id);
+          await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(pdata), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, prow.id).run();
+        }
+      }
+    } catch {
+    }
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/project/create-job" && method === "POST") {
