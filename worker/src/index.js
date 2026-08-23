@@ -51,6 +51,7 @@ import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin tas
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
+import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -115,6 +116,7 @@ const ROUTES = [
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   ["*", "/health/",    health.handle],     // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
+  ["*", "/tuya",       tuya.handle],        // yard gate: Tuya Cloud open command + gate-open state
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -238,6 +240,10 @@ const worker = {
     // that keep health.html fresh and push the owner (deduped) the moment a probe
     // fails or server errors spike. Fails soft; never blocks the other cron work.
     ctx.waitUntil(health.runHealthChecks(env, 1).catch(e => console.error("scheduled health probe:", e)));
+    // Yard gate left-open watch — polls the gate's Tuya sensor and pushes an
+    // alert if it's been open past the configured threshold. Self-gates: does
+    // nothing until the Tuya secrets AND a state device/code are configured.
+    ctx.waitUntil(tuya.checkGateLeftOpen(env, 1).catch(e => console.error("scheduled yard-gate watch:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
     if (new Date().getUTCMinutes() % 10 < 5) {

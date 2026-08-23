@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=17"></script>
+  <title>Mostlane • Yard Gate</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="/portal.css?v=1"/>
+  <script src="auth.js"></script>
+  <script src="device-auth.js"></script>
+  <style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:#eef2f7;color:#1c2733;}
+  header.page{background:#003366;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;}
+  .wrap{max-width:640px;margin:0 auto;padding:18px 14px 60px;}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
+  .card h2{margin:0 0 4px;font-size:15px;font-weight:700;color:#003366;}
+  .card p.sub{margin:0 0 14px;color:#64748b;font-size:13px;}
+  .gatebtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:16px;padding:34px 16px;font:inherit;font-size:20px;font-weight:800;color:#fff;background:linear-gradient(160deg,#0b7d3e,#0a9c4a);cursor:pointer;box-shadow:0 6px 18px rgba(10,156,74,.35);transition:.12s;}
+  .gatebtn:active{transform:scale(.985);}
+  .gatebtn[disabled]{opacity:.55;cursor:default;box-shadow:none;}
+  .gatebtn .ico{font-size:40px;line-height:1;}
+  .state{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;font-weight:700;font-size:15px;}
+  .state .dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto;}
+  .state.open{background:#fef2f2;color:#b91c1c;} .state.open .dot{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.18);}
+  .state.closed{background:#f0fdf4;color:#166534;} .state.closed .dot{background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18);}
+  .state.unknown{background:#f1f5f9;color:#475569;} .state.unknown .dot{background:#94a3b8;}
+  .state small{display:block;font-weight:500;opacity:.85;font-size:12.5px;margin-top:2px;}
+  .msg{font-size:13.5px;padding:10px 12px;border-radius:10px;margin-top:12px;display:none;}
+  .msg.ok{background:#f0fdf4;color:#166534;display:block;}
+  .msg.err{background:#fef2f2;color:#b91c1c;display:block;}
+  .btn{appearance:none;border:1px solid #cbd5e1;background:#fff;color:#003366;border-radius:9px;padding:9px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;}
+  .btn.primary{background:#003366;color:#fff;border-color:#003366;}
+  .btn.small{padding:6px 10px;font-size:12.5px;}
+  label.f{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:10px 0 4px;}
+  input,select{width:100%;padding:9px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:14px;background:#fff;color:#1c2733;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .hint{font-size:12px;color:#64748b;margin-top:4px;line-height:1.5;}
+  details.setup{margin-top:2px;}
+  details.setup summary{cursor:pointer;font-weight:700;color:#003366;font-size:14px;padding:6px 0;}
+  pre.dump{background:#0f172a;color:#d1e3ff;border-radius:10px;padding:12px;font-size:12px;overflow:auto;max-height:260px;margin:8px 0 0;}
+  .setrow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
+  .setrow>div{flex:1;min-width:150px;}
+  .muted{color:#64748b;font-size:12.5px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+    <h1>🚪 Yard Gate</h1>
+  </header>
+
+  <div class="wrap">
+    <!-- OPEN + STATE -->
+    <div class="card">
+      <div id="stateBox" class="state unknown"><span class="dot"></span><span id="stateTxt">Checking gate…</span></div>
+      <div style="height:14px"></div>
+      <button id="openBtn" class="gatebtn"><span class="ico">🚪</span><span>Open the gate</span></button>
+      <div id="opMsg" class="msg"></div>
+      <div style="text-align:center;margin-top:12px"><button id="refreshBtn" class="btn small">↻ Refresh state</button></div>
+    </div>
+
+    <!-- SETUP (Full-Access only) -->
+    <div class="card" id="setupCard" style="display:none">
+      <h2>⚙️ Gate setup</h2>
+      <p class="sub">Configure the Tuya device that triggers the gate and (optionally) the sensor that reports it's open. You only do this once.</p>
+
+      <div id="secretWarn" class="msg err" style="display:none">The Tuya keys aren't set on the worker yet. Add <b>TUYA_ACCESS_ID</b> and <b>TUYA_ACCESS_SECRET</b> as secrets in the Cloudflare dashboard, then Deploy.</div>
+
+      <label class="f">Tuya region (data centre)</label>
+      <select id="cRegion">
+        <option value="eu">Western Europe (UK) — recommended</option>
+        <option value="us">Americas</option>
+        <option value="cn">China</option>
+        <option value="in">India</option>
+      </select>
+
+      <label class="f">Gate device ID (the module that opens the gate)</label>
+      <input id="cGateId" type="text" placeholder="e.g. bf1234abcd…"/>
+      <div class="row2">
+        <div><label class="f">Open command code</label><input id="cOpenCode" type="text" placeholder="switch_1"/></div>
+        <div><label class="f">Open value</label>
+          <select id="cOpenVal"><option value="true">true (on/pulse)</option><option value="false">false</option></select>
+        </div>
+      </div>
+      <div class="hint">Not sure of the code? Paste the device ID above, save, then use <b>Read device</b> below to see exactly what it exposes — the switch/trigger DP is the one to use here. Make sure the Tuya module is set to <b>momentary / "inching"</b> mode so it pulses the FAAC OPEN input rather than latching.</div>
+
+      <label class="f">Gate-open sensor device ID <span class="muted">(optional — leave blank if none yet)</span></label>
+      <input id="cStateId" type="text" placeholder="e.g. the FAAC 'gate open' contact fed into a Tuya sensor"/>
+      <div class="row2">
+        <div><label class="f">State code</label><input id="cStateCode" type="text" placeholder="doorcontact_state"/></div>
+        <div><label class="f">"Open" value</label>
+          <select id="cStateVal"><option value="true">true</option><option value="false">false</option></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div><label class="f">Alert after (mins open)</label><input id="cThreshold" type="number" min="1" value="10"/></div>
+        <div><label class="f">Re-alert every (mins)</label><input id="cRepeat" type="number" min="5" value="30"/></div>
+      </div>
+      <div class="hint">On your FAAC 415L, set an E145 <b>OUT1/OUT2</b> (or the 452 warning-light) output to the "gate open" function, wire it into a Tuya contact sensor (share the 0V ground), then read that device below to find its state code.</div>
+
+      <div style="margin-top:14px"><button id="saveCfg" class="btn primary">Save setup</button> <span id="cfgMsg" class="muted"></span></div>
+
+      <details class="setup" style="margin-top:16px">
+        <summary>🔎 Read a device (find its codes)</summary>
+        <div class="setrow" style="margin-top:8px">
+          <div><input id="dumpId" type="text" placeholder="Paste a Tuya device ID"/></div>
+          <button id="dumpBtn" class="btn">Read device</button>
+        </div>
+        <div class="hint">Shows the live data points (DPs) the device reports — the switch to open with, and any door/contact state to watch.</div>
+        <pre class="dump" id="dumpOut" style="display:none"></pre>
+      </details>
+    </div>
+
+    <p class="muted" style="text-align:center">The keypad still works as normal — this is an extra way in, logged every time.</p>
+  </div>
+
+<script>
+const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+function tok(){ return localStorage.getItem("mostlaneToken") || ""; }
+function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+function perms(){ try{return JSON.parse(localStorage.getItem("mostlanePermissions")||"{}");}catch{return {};} }
+const isFull = String(perms().FullAccess||"").toLowerCase()==="yes";
+
+const $ = id => document.getElementById(id);
+
+/* ---- state + open ---- */
+let busy=false;
+async function loadState(){
+  const box=$("stateBox"), txt=$("stateTxt");
+  try{
+    const r=await aFetch("/tuya/gate/state"); const j=await r.json();
+    if(!j.ok){ box.className="state unknown"; txt.textContent=j.error||"Couldn't read the gate"; return; }
+    if(!j.configured){ box.className="state unknown"; txt.innerHTML="Not set up yet"+(isFull?" — open <b>Gate setup</b> below.":"."); return; }
+    if(!j.watched){ box.className="state unknown"; txt.innerHTML="Gate ready. <small>No open/closed sensor configured.</small>"; return; }
+    if(j.open){ box.className="state open"; txt.innerHTML="Gate is OPEN"+(j.mins?` <small>for ${j.mins} min</small>`:""); }
+    else { box.className="state closed"; txt.innerHTML="Gate is closed"; }
+  }catch(e){ box.className="state unknown"; txt.textContent="Offline — can't reach the portal"; }
+}
+async function openGate(){
+  if(busy) return; busy=true;
+  const b=$("openBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
+  b.querySelector("span:last-child").textContent="Opening…";
+  try{
+    const r=await aFetch("/tuya/gate/open",{method:"POST",body:JSON.stringify({})}); const j=await r.json();
+    if(j.ok){ m.className="msg ok"; m.textContent="✓ Open signal sent to the gate."; }
+    else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
+  }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
+  finally{
+    b.querySelector("span:last-child").textContent="Open the gate";
+    setTimeout(()=>{ b.disabled=false; busy=false; loadState(); }, 1500);
+  }
+}
+$("openBtn").addEventListener("click", openGate);
+$("refreshBtn").addEventListener("click", loadState);
+
+/* ---- setup (Full-Access) ---- */
+async function loadCfg(){
+  if(!isFull) return;
+  $("setupCard").style.display="";
+  try{
+    const r=await aFetch("/tuya/config"); const j=await r.json();
+    if(!j.ok) return;
+    if(!j.hasSecrets) $("secretWarn").style.display="block";
+    const c=j.config||{};
+    $("cRegion").value=c.region||"eu";
+    $("cGateId").value=c.gateDeviceId||"";
+    $("cOpenCode").value=c.openCode||"switch_1";
+    $("cOpenVal").value=String(c.openValue===false?false:true);
+    $("cStateId").value=c.stateDeviceId||"";
+    $("cStateCode").value=c.stateCode||"";
+    $("cStateVal").value=String(c.stateOpenValue===false?false:true);
+    $("cThreshold").value=c.thresholdMins||10;
+    $("cRepeat").value=c.repeatMins||30;
+  }catch{}
+}
+$("saveCfg") && $("saveCfg").addEventListener("click", async ()=>{
+  const msg=$("cfgMsg"); msg.textContent="Saving…";
+  const body={
+    region:$("cRegion").value,
+    gateDeviceId:$("cGateId").value.trim(),
+    openCode:$("cOpenCode").value.trim()||"switch_1",
+    openValue:$("cOpenVal").value==="true",
+    stateDeviceId:$("cStateId").value.trim(),
+    stateCode:$("cStateCode").value.trim(),
+    stateOpenValue:$("cStateVal").value==="true",
+    thresholdMins:parseInt($("cThreshold").value,10)||10,
+    repeatMins:parseInt($("cRepeat").value,10)||30,
+  };
+  try{
+    const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
+    msg.textContent=j.ok?"Saved ✓":(j.error||"Failed");
+    if(j.ok) loadState();
+  }catch{ msg.textContent="Failed"; }
+});
+$("dumpBtn") && $("dumpBtn").addEventListener("click", async ()=>{
+  const id=$("dumpId").value.trim(); const out=$("dumpOut");
+  if(!id){ out.style.display="block"; out.textContent="Enter a device ID first."; return; }
+  out.style.display="block"; out.textContent="Reading…";
+  try{
+    const r=await aFetch("/tuya/device-status?deviceId="+encodeURIComponent(id)); const j=await r.json();
+    if(!j.ok){ out.textContent="Error: "+(j.error||"failed"); return; }
+    let s=(j.info? (j.info.name+" — "+(j.info.online?"online":"offline")+"\n\n"):"");
+    s+="Data points (code = value):\n";
+    (j.status||[]).forEach(d=> s+="  "+d.code+" = "+JSON.stringify(d.value)+"\n");
+    out.textContent=s;
+  }catch(e){ out.textContent="Network error"; }
+});
+
+loadState(); loadCfg();
+setInterval(loadState, 30000);
+</script>
+</body>
+</html>

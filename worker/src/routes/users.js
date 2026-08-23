@@ -366,6 +366,7 @@ const PERMISSION_KEYS = [
   "ThemeColour",     // personalisation: may pick a portal colour theme
   "ThemeBackground", // personalisation: may change the menu background
   "Programmes",      // job programmes: build/issue/share programmes of works
+  "YardGate",        // trigger the yard gate (Tuya) + see its open/closed state
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly
