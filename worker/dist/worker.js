@@ -25345,8 +25345,11 @@ var worker = {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
-      if ((/* @__PURE__ */ new Date()).getUTCHours() === 3) {
-        ctx.waitUntil(runIntegrityChecks(env, 1).catch((e) => console.error("scheduled integrity sweep:", e)));
+      {
+        const d = /* @__PURE__ */ new Date();
+        if (d.getUTCDay() === 0 && d.getUTCHours() === 3) {
+          ctx.waitUntil(runIntegrityChecks(env, 1).catch((e) => console.error("scheduled integrity sweep:", e)));
+        }
       }
       ctx.waitUntil(remindDailyApprovals(env).catch((e) => console.error("scheduled daily approvals:", e)));
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
