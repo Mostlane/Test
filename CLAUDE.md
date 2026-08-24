@@ -2539,7 +2539,11 @@ Two automatic, always-on quality checks — one for the LIVE system, one for the
   guaranteed record) if it isn't set as a GitHub secret. To WIDEN scope: relax
   `inScope`/`PROTECTED` in autofix.mjs — but keep auth/permissions/routing protected.
 - **Data-integrity catalogue** (health.js `INTEGRITY_CHECKS` + `runIntegrityChecks`,
-  hourly on the cron, gated minute<5). The "do all the areas actually JOIN UP?" layer:
+  **ONCE DAILY at ~03:00 UTC** on the cron — was hourly, but its correlated
+  NOT-EXISTS joins are the worker's heaviest read source (compliance_stores ×
+  sites alone ≈ 600k row-reads), so hourly blew past D1's free-tier 5M/day limit;
+  daily is plenty since integrity drifts slowly, and admins can still run it on
+  demand via /health/run). The "do all the areas actually JOIN UP?" layer:
   ~20 declarative invariants, each a COUNT of VIOLATING rows against the central D1
   (0 = healthy), written against the REAL schema. Covers Fleet (assignments/maintenance/
   odometer/fuel/user-van → real vehicle & user), SLA (segments→jobs & users, job→site
