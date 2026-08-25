@@ -221,6 +221,13 @@ function londonNow() {
   return { dow: wd[get("weekday")] ?? 0, mins: (parseInt(get("hour"), 10) || 0) * 60 + (parseInt(get("minute"), 10) || 0) };
 }
 function toMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? (+m[1] * 60 + +m[2]) : null; }
+// Metres between two lat/lng points (geofence — must be AT the yard to operate).
+function haversineM(a, b) {
+  const rad = x => x * Math.PI / 180, R = 6371000;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
 const DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const normU = u => String(u || "").toLowerCase().trim();
 // Access hours are now PER-USER: cfg.access.byUser[<lower username>] = {windows:[…]}.
@@ -272,6 +279,9 @@ export async function handle(request, env, ctx, url, sess) {
   if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const isFull = perms.FullAccess === "Yes";
+  // Geofence exemption: Full-Access, OR a user given the "operate from anywhere"
+  // permission. Everyone else must be at the yard (when a geofence is set).
+  const geoExempt = isFull || perms.YardGateAnywhere === "Yes";
   const canGate = isFull || perms.YardGate === "Yes";
   const db = tenantDB(env, sess.tenantId);
 
@@ -315,6 +325,15 @@ export async function handle(request, env, ctx, url, sess) {
     if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera: a direct image URL (fallback)
     if (b.cameraSiteId !== undefined) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();             // gate camera: a CCTV-Wall site+camera (preferred)
     if (b.cameraId !== undefined) cfg.cameraId = String(b.cameraId || "").trim();
+    // Geofence: non-Full-Access users must be within radiusM of this point to operate.
+    if (b.geo !== undefined) {
+      const g = b.geo || {};
+      if (g.clear) delete cfg.geo;
+      else {
+        const lat = Number(g.lat), lng = Number(g.lng), r = Math.max(20, parseInt(g.radiusM, 10) || 150);
+        if (isFinite(lat) && isFinite(lng)) cfg.geo = { lat, lng, radiusM: r };
+      }
+    }
     if (!cfg.region) cfg.region = "eu";
     await saveCfg(db, cfg);
     return json({ ok: true, config: cfg });
@@ -367,10 +386,24 @@ export async function handle(request, env, ctx, url, sess) {
     if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
     const user = (sess.user && sess.user.username) || "?";
+    const body = await request.json().catch(() => ({}));
     // Per-user access-hour restriction (Full-Access always allowed).
     if (!isFull && !accessAllowedForUser(cfg, user, londonNow())) {
       const s = accessSummaryForUser(cfg, user);
       return json({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
+    // Geofence: non-Full-Access users must be AT the yard to operate (stops
+    // accidental remote operation). Full-Access users have camera access and
+    // may operate from anywhere.
+    if (!geoExempt && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
+      const lat = Number(body.lat), lng = Number(body.lng);
+      if (!isFinite(lat) || !isFinite(lng)) {
+        return json({ ok: false, denied: "location", error: "Turn on location to operate the gate — you must be at the yard." }, 403);
+      }
+      const dist = haversineM({ lat: cfg.geo.lat, lng: cfg.geo.lng }, { lat, lng });
+      if (dist > cfg.geo.radiusM) {
+        return json({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
+      }
     }
     const st = await getGateState(db);
     if (st.open === wantOpen) {
@@ -411,10 +444,14 @@ export async function handle(request, env, ctx, url, sess) {
     const open = !!st.open, since = st.at || null;
     const mins = (open && since) ? Math.round((Date.now() - Date.parse(since)) / 60000) : 0;
     const me = (sess.user && sess.user.username) || "";
+    const geoOn = !!(cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng));
     return json({
       ok: true, configured, watched: configured, tracked: true,
       open, since, mins, openedBy: open ? (st.by || null) : null,
       access: accessSummaryForUser(cfg, me), allowedNow: isFull || accessAllowedForUser(cfg, me, londonNow()),
+      // Geofence: whether THIS caller must prove they're at the yard to operate.
+      needLocation: !geoExempt && geoOn,
+      geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false },
     });
   }
 

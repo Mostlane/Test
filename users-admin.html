@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -44,7 +44,7 @@
     .lvl-full   { background:#f3e8ff; color:#7c2d92; }
     .muted { color:#667085; font-size:12px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
-    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; }
+    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; padding-top:calc(env(safe-area-inset-top, 0px) + 18px); overflow:auto; }
     .overlay.open { display:flex; }
     .panel { background:#fff; border-radius:12px; width:100%; max-width:680px; padding:18px; }
     .panel h2 { color:#003366; margin:0 0 6px; font-size:18px; }
@@ -99,8 +99,9 @@
       .ucell.uactions .btn.small{ flex:1 1 calc(50% - 4px); text-align:center; padding:10px; font-size:13px; }
       .urow .grip{ position:absolute; top:8px; right:8px; font-size:22px; padding:4px 6px; }
 
-      /* Editor modal → full-width, comfortable tap targets */
-      .overlay{ padding:8px; }
+      /* Editor modal → full-width, comfortable tap targets. Clear the notch so
+         the tabs bar isn't hidden under the iOS clock on an installed PWA. */
+      .overlay{ padding:8px; padding-top:calc(env(safe-area-inset-top, 0px) + 8px); }
       .panel{ padding:16px; border-radius:14px; }
       .tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; margin:10px -2px 14px; padding-bottom:4px; }
       .tabs button{ flex:0 0 auto; }
@@ -350,7 +351,7 @@
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
-      "EngTimesheet","ThemeColour","ThemeBackground","YardGate"];
+      "EngTimesheet","ThemeColour","ThemeBackground","YardGate","YardGateAnywhere"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -369,7 +370,8 @@
       OfficeClock:"Office clock in/out", OfficeTimesheet:"Office timesheet (view all)",
       EngTimesheet:"Engineer timesheet (times, jobs, invoices)",
       ThemeColour:"Personalise — colour theme", ThemeBackground:"Personalise — menu background",
-      YardGate:"Yard gate — open + see status"
+      YardGate:"Yard gate — open + see status",
+      YardGateAnywhere:"Yard gate — operate from anywhere (skip the at-the-yard geofence)"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
@@ -383,7 +385,7 @@
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
       { title:"Compliance & docs",    perms:["Compliance","MyDocuments","HSPlan"] },
-      { title:"Facilities",           perms:["YardGate"] },
+      { title:"Facilities",           perms:["YardGate","YardGateAnywhere"] },
       { title:"Personalisation",      perms:["ThemeColour","ThemeBackground"] }
     ];
 
@@ -424,7 +426,7 @@
       let ov = g("homePinOverlay");
       if (!ov) {
         ov = document.createElement("div"); ov.id = "homePinOverlay";
-        ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;";
+        ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2147483200;display:flex;align-items:flex-start;justify-content:center;padding:16px;padding-top:calc(env(safe-area-inset-top, 0px) + 16px);overflow:auto;";
         ov.innerHTML = `<div style="background:#fff;border-radius:12px;max-width:660px;width:100%;overflow:hidden;">
           <div style="display:flex;gap:8px;padding:10px 12px;align-items:center;border-bottom:1px solid #e2e8f0;">
             <input id="homePinPc" placeholder="Jump to a postcode…" style="flex:1;padding:8px;border:1px solid #cbd5e1;border-radius:8px;text-transform:uppercase;">

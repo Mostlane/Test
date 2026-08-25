@@ -367,6 +367,7 @@ const PERMISSION_KEYS = [
   "ThemeBackground", // personalisation: may change the menu background
   "Programmes",      // job programmes: build/issue/share programmes of works
   "YardGate",        // trigger the yard gate (Tuya) + see its open/closed state
+  "YardGateAnywhere",// exempt from the yard-gate geofence (operate from anywhere)
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly
