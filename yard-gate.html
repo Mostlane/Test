@@ -126,6 +126,12 @@
       </div>
       <div class="hint">On your FAAC 415L, set an E145 <b>OUT1/OUT2</b> (or the 452 warning-light) output to the "gate open" function, wire it into a Tuya contact sensor (share the 0V ground), then read that device below to find its state code.</div>
 
+      <hr style="border:none;border-top:1px solid #e6ecf3;margin:14px 0 10px;">
+      <div><label class="f">Gate camera (for the safety check)</label>
+        <select id="cCamera" style="min-width:240px;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"><option value="">— none —</option></select>
+        <div class="hint" id="cCamHint">Add the gate's DVR in the <b>CCTV Wall</b> first, then pick its camera here — the snapshot then shows in the safety dialog.</div>
+      </div>
+
       <div style="margin-top:14px"><button id="saveCfg" class="btn primary">Save setup</button> <span id="cfgMsg" class="muted"></span></div>
 
       <details class="setup" style="margin-top:16px">
@@ -249,12 +255,12 @@ $("safetyCamRefresh") && $("safetyCamRefresh").addEventListener("click",loadGate
 async function loadGateSnapshot(){
   const wrap=$("safetyCam"), img=$("safetyCamImg"), msg=$("safetyCamMsg");
   try{
-    const r=await aFetch("/tuya/config"); const j=await r.json();
-    const url=((j.config||{}).snapshotUrl||"").trim();
+    const r=await aFetch("/tuya/gate/snapshot-url"); const j=await r.json();
+    const url=(j&&j.url)||"";
     if(!url){ wrap.style.display="none"; return; }
     wrap.style.display=""; msg.textContent="Loading…";
     img.onload=()=>{ msg.textContent="Updated "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
-    img.onerror=()=>{ msg.textContent="Snapshot unavailable"; };
+    img.onerror=()=>{ msg.textContent="Snapshot unavailable — check the camera in the CCTV Wall."; };
     img.src=url+(url.includes("?")?"&":"?")+"_="+Date.now();
   }catch{ wrap.style.display="none"; }
 }
@@ -283,6 +289,17 @@ async function loadCfg(){
     $("cStateVal").value=String(c.stateOpenValue===false?false:true);
     $("cThreshold").value=c.thresholdMins||10;
     $("cRepeat").value=c.repeatMins||30;
+    // Gate-camera picker: list CCTV-Wall cameras (Full-Access).
+    try{
+      const cr=await aFetch("/cctv/sites"); const cj=await cr.json();
+      const opts=['<option value="">— none —</option>'];
+      (cj.sites||[]).forEach(s=>(s.cameras||[]).forEach(cam=>{
+        const val=s.id+"|"+cam.id, sel=(c.cameraSiteId===s.id && c.cameraId===cam.id)?" selected":"";
+        opts.push(`<option value="${val}"${sel}>${(s.name||"DVR")} — ${(cam.name||"Camera")}</option>`);
+      }));
+      $("cCamera").innerHTML=opts.join("");
+      if(!(cj.sites||[]).some(s=>(s.cameras||[]).length)) $("cCamHint").innerHTML='No DVR cameras yet — add the gate’s DVR in the <b>CCTV Wall</b> first, then it appears here.';
+    }catch{}
   }catch{}
 }
 $("saveCfg") && $("saveCfg").addEventListener("click", async ()=>{
@@ -298,6 +315,8 @@ $("saveCfg") && $("saveCfg").addEventListener("click", async ()=>{
     thresholdMins:parseInt($("cThreshold").value,10)||10,
     repeatMins:parseInt($("cRepeat").value,10)||30,
   };
+  var camSel=($("cCamera").value||"").split("|");
+  body.cameraSiteId=camSel[0]||""; body.cameraId=camSel[1]||"";
   try{
     const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
     msg.textContent=j.ok?"Saved ✓":(j.error||"Failed");
