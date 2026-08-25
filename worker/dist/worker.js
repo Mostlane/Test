@@ -1787,7 +1787,7 @@ async function handle5(request, env, ctx, url, sess) {
     if (!isAdmin) return text("Forbidden", 403);
     return json4(await listHolidayRequestsForYear());
   }
-  if (path === "/holiday/calendar" && method === "GET") {
+  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
     if (!sess) return text("Not authenticated", 401);
     const q = url.searchParams;
     const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
