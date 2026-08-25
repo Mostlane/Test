@@ -214,7 +214,7 @@
       <div class="header-left">
         <a class="ml-back" href="main.html" title="Back to Menu">‹ Back</a>
         <div>
-          <h1>Jobs</h1>
+          <h1 id="jobsTitle" style="cursor:pointer;" title="Reset the board (clear search + filters)">Jobs</h1>
           <div class="header-sub" id="userLabel">Live job board</div>
         </div>
       </div>
@@ -1181,6 +1181,25 @@ function restoreFilters(){
     return true;
   }catch(e){ return false; }
 }
+function resetSavedFilters(){ try{ sessionStorage.removeItem("slaMainFilters"); }catch(e){} }
+// True only when the page was reached via browser Back/Forward — the one case
+// where we restore the saved filters. A fresh navigation (side menu, the Jobs
+// header) or a reload/refresh starts clean.
+function cameFromBackForward(){
+  try{
+    const nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    if(nav && nav.type) return nav.type === "back_forward";
+    return performance.navigation && performance.navigation.type === 2; // legacy TYPE_BACK_FORWARD
+  }catch(e){ return false; }
+}
+// Clear search + status + priority back to the defaults and forget the saved set.
+function resetView(){
+  activeStatus = "all"; activePriority = "all";
+  const pf = $("priorityFilter"); if(pf) pf.value = "all";
+  $("searchBox").value = ""; archiveMatches = [];
+  resetSavedFilters();
+  render();
+}
 let searchDeb = null;
 function onSearchInput(){
   render();   // instant live filter
@@ -1258,10 +1277,8 @@ function init(){
   });
   $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
   $("searchBox").addEventListener("input", onSearchInput);
-  $("resetBtn").addEventListener("click", () => {
-    activeStatus = "all"; activePriority = "all";
-    $("priorityFilter").value = "all"; $("searchBox").value = ""; archiveMatches = []; render();
-  });
+  $("resetBtn").addEventListener("click", resetView);
+  { const jt = $("jobsTitle"); if(jt) jt.addEventListener("click", resetView); }
   $("updateSiteFilter").addEventListener("input", () => { if(sitesList) fillSiteSelect($("updateSiteFilter").value); });
   $("updateClose").addEventListener("click", closeUpdate);
   $("updateCancel").addEventListener("click", closeUpdate);
@@ -1276,9 +1293,10 @@ function init(){
 
 window.addEventListener("DOMContentLoaded", async () => {
   init();
-  // Restore the last search/status/priority BEFORE the first render so Back
-  // returns to the same filtered board.
-  restoreFilters();
+  // Restore the last search/status/priority ONLY when we arrived via Back/Forward,
+  // so Back from a job card returns to the same filtered board — but a fresh
+  // navigation (side menu / Jobs header) or a refresh starts clean.
+  if(cameFromBackForward()) restoreFilters(); else resetSavedFilters();
   if(await gate()){
     // Jobs load independently of categories — a slow/failed category fetch must
     // never hold up (or blank) the board. Categories merge into the chips/
