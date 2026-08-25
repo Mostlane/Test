@@ -25222,14 +25222,21 @@ async function handle33(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === void 0) cfg.thresholdMins = 10;
     if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
-    if (b.accessUser !== void 0) {
+    if (b.accessUser !== void 0 || Array.isArray(b.accessUsers)) {
       if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
-      const key = normU(b.accessUser);
-      if (key) {
-        const win = sanitiseWindows(b.accessWindows || []);
+      const win = sanitiseWindows(b.accessWindows || []);
+      const targets = Array.isArray(b.accessUsers) ? b.accessUsers : [b.accessUser];
+      for (const t of targets) {
+        const key = normU(t);
+        if (!key) continue;
         if (win.length) cfg.access.byUser[key] = { windows: win };
         else delete cfg.access.byUser[key];
       }
+    }
+    if (b.accessRemove !== void 0) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const rm = Array.isArray(b.accessRemove) ? b.accessRemove : [b.accessRemove];
+      for (const u of rm) delete cfg.access.byUser[normU(u)];
     }
     if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
     if (b.cameraSiteId !== void 0) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();

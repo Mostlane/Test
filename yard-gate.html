@@ -76,15 +76,20 @@
       <div id="logList" class="muted">Loading…</div>
     </div>
 
-    <!-- ACCESS HOURS — per user (Full-Access only) -->
+    <!-- ACCESS HOURS (Full-Access only) -->
     <div class="card" id="accessCard" style="display:none">
-      <h2>⏰ Access hours (per user)</h2>
-      <p class="sub">Limit when a specific person can operate the gate. Full-Access users are always allowed. No windows = that person has no restriction. Times are UK time.</p>
-      <div style="margin:0 0 10px"><label class="f" style="font-size:13px;font-weight:600">Person</label><br><select id="accUser" style="min-width:220px;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"></select></div>
-      <div id="accWindows"></div>
+      <h2>⏰ Access hours</h2>
+      <p class="sub">Restrict when people can operate the gate. Full-Access users are always allowed. Times are UK time.</p>
+      <div id="accRestricted" style="margin-bottom:12px"></div>
+      <hr style="border:none;border-top:1px solid #e6ecf3;margin:6px 0 12px;">
+      <div style="font-weight:700;font-size:14px;color:#003366" id="accFormTitle">Add a restriction</div>
+      <div id="accWindows" style="margin-top:8px"></div>
       <button id="accAdd" class="btn small" type="button">＋ Add a window</button>
-      <div style="margin-top:12px"><button id="accSave" class="btn primary" type="button">Save hours for this person</button> <span id="accMsg" class="muted"></span></div>
-      <div id="accWho" class="sub" style="margin-top:10px"></div>
+      <div style="margin-top:12px"><label class="f" style="font-weight:600">Apply to these people <span class="muted" id="accSelCount"></span></label>
+        <input type="text" id="accSearch" placeholder="Search people…" style="width:100%;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit;margin-bottom:6px">
+        <div id="accUserList" style="max-height:190px;overflow:auto;border:1px solid #e6ecf3;border-radius:9px;padding:6px 10px"></div>
+      </div>
+      <div style="margin-top:12px"><button id="accApply" class="btn primary" type="button">Save restriction</button> <button id="accReset" class="btn small" type="button">Clear form</button> <span id="accMsg" class="muted"></span></div>
     </div>
 
     <!-- GEOFENCE — must be at the yard (Full-Access only to configure) -->
@@ -403,11 +408,43 @@ function renderAcc(){
   host.querySelectorAll("[data-accrm]").forEach(b=>b.onclick=()=>{ ACC.splice(+b.dataset.accrm,1); renderAcc(); });
 }
 const normU = u => String(u||"").toLowerCase().trim();
-let ACC_BYUSER = {};  // { lowerUsername: [windows] }
-function accReloadForUser(){ const u=$("accUser").value; ACC=(ACC_BYUSER[normU(u)]||[]).map(w=>({days:(w.days||[]).slice(),from:w.from||"07:00",to:w.to||"18:00"})); renderAcc(); }
-function renderAccWho(){
-  const who=Object.keys(ACC_BYUSER).filter(k=>(ACC_BYUSER[k]||[]).length);
-  $("accWho").innerHTML = who.length ? ("Restricted: " + who.map(k=>esc(k)).join(", ") + ". Everyone else is unrestricted.") : "No one is restricted yet — everyone with gate access can operate any time.";
+let ACC_BYUSER = {};          // { lowerUsername: {windows:[…]} }
+let ACC_USERS = [];           // all portal usernames
+let ACC_SELECTED = new Set(); // lower-usernames ticked in "Apply to"
+function accNameFor(key){ return ACC_USERS.find(n=>normU(n)===key) || key; }
+function accSumm(w){ const D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return (w||[]).map(x=>((x.days&&x.days.length)?x.days.map(d=>D[d]||"?").join(","):"every day")+" "+x.from+"–"+x.to).join("; "); }
+function accSelCount(){ $("accSelCount").textContent = ACC_SELECTED.size ? "("+ACC_SELECTED.size+" selected)" : ""; }
+// Current restrictions list — each person with Edit + Remove.
+function renderRestricted(){
+  const host=$("accRestricted"); const keys=Object.keys(ACC_BYUSER).filter(k=>(ACC_BYUSER[k].windows||[]).length);
+  if(!keys.length){ host.innerHTML='<p class="muted" style="margin:0">No one is restricted — everyone with gate access can operate any time.</p>'; return; }
+  host.innerHTML='<div class="f" style="font-weight:600;margin:0 0 4px">Current restrictions</div>'+keys.map(k=>
+    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f5">
+      <div><b>${esc(accNameFor(k))}</b><br><span class="muted" style="font-size:12px">${esc(accSumm(ACC_BYUSER[k].windows))}</span></div>
+      <span style="white-space:nowrap"><button class="btn small" data-accedit="${esc(k)}" type="button">Edit</button> <button class="btn small" data-accrm="${esc(k)}" type="button" style="background:#fee2e2;color:#b91c1c;border-color:#fecaca">Remove</button></span>
+    </div>`).join("");
+  host.querySelectorAll("[data-accedit]").forEach(b=>b.onclick=()=>accEdit(b.dataset.accedit));
+  host.querySelectorAll("[data-accrm]").forEach(b=>b.onclick=()=>accRemove(b.dataset.accrm));
+}
+// "Apply to these people" checkbox list (searchable, multi-select).
+function renderAccUsers(filter){
+  const host=$("accUserList"), f=(filter||"").toLowerCase();
+  const list=ACC_USERS.filter(n=>!f||n.toLowerCase().includes(f));
+  host.innerHTML = list.length ? list.map(n=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer"><input type="checkbox" data-accu="${esc(n)}" ${ACC_SELECTED.has(normU(n))?"checked":""} style="width:auto;margin:0"> ${esc(n)}</label>`).join("") : '<span class="muted">No matches.</span>';
+  host.querySelectorAll("[data-accu]").forEach(cb=>cb.onchange=()=>{ cb.checked?ACC_SELECTED.add(normU(cb.dataset.accu)):ACC_SELECTED.delete(normU(cb.dataset.accu)); accSelCount(); });
+  accSelCount();
+}
+function accEdit(key){
+  ACC = (ACC_BYUSER[key].windows||[]).map(w=>({days:(w.days||[]).slice(),from:w.from||"07:00",to:w.to||"18:00"})); renderAcc();
+  ACC_SELECTED = new Set([key]); renderAccUsers($("accSearch").value);
+  $("accFormTitle").textContent="Editing — "+accNameFor(key); $("accMsg").textContent="";
+  $("accApply").scrollIntoView({behavior:"smooth",block:"center"});
+}
+async function accRemove(key){
+  const msg=$("accMsg"); msg.textContent="Removing…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessRemove:accNameFor(key)})}); const j=await r.json();
+    if(j.ok){ msg.textContent="Removed ✓"; ACC_BYUSER=(((j.config||{}).access||{}).byUser)||{}; renderRestricted(); loadState(); } else msg.textContent=j.error||"Couldn't remove"; }
+  catch{ msg.textContent="Couldn't remove"; }
 }
 async function loadAccess(){
   if(!isFull) return;
@@ -416,20 +453,21 @@ async function loadAccess(){
     const [cfgR, usersR] = await Promise.all([ aFetch("/tuya/config").then(r=>r.json()).catch(()=>({})), aFetch("/users").then(r=>r.json()).catch(()=>[]) ]);
     ACC_BYUSER = (((cfgR.config||{}).access||{}).byUser)||{};
     const users = Array.isArray(usersR) ? usersR : (usersR.Users||usersR.users||[]);
-    const names = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
-    $("accUser").innerHTML = names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
-    $("accUser").onchange = accReloadForUser;
-    accReloadForUser(); renderAccWho();
+    ACC_USERS = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+    renderRestricted(); renderAccUsers();
   }catch{}
 }
+$("accSearch") && $("accSearch").addEventListener("input",e=>renderAccUsers(e.target.value));
 $("accAdd") && $("accAdd").addEventListener("click",()=>{ ACC.push({days:[1,2,3,4,5],from:"07:00",to:"18:00"}); renderAcc(); });
-$("accSave") && $("accSave").addEventListener("click", async ()=>{
-  const msg=$("accMsg"), u=$("accUser").value; if(!u){ msg.textContent="Pick a person first"; return; }
+$("accReset") && $("accReset").addEventListener("click",()=>{ ACC=[]; ACC_SELECTED=new Set(); $("accFormTitle").textContent="Add a restriction"; $("accSearch").value=""; $("accMsg").textContent=""; renderAcc(); renderAccUsers(); });
+$("accApply") && $("accApply").addEventListener("click", async ()=>{
+  const msg=$("accMsg"); const names=[...ACC_SELECTED].map(accNameFor);
+  if(!names.length){ msg.textContent="Tick at least one person."; return; }
+  if(!ACC.length){ msg.textContent="Add at least one time window (use Remove to clear someone)."; return; }
   msg.textContent="Saving…";
-  try{
-    const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessUser:u, accessWindows:ACC})}); const j=await r.json();
-    if(j.ok){ msg.textContent="Saved ✓"; ACC_BYUSER[normU(u)] = ACC.length ? ACC.map(w=>({days:w.days.slice(),from:w.from,to:w.to})) : undefined; if(!ACC.length) delete ACC_BYUSER[normU(u)]; renderAccWho(); loadState(); }
-    else msg.textContent = j.error||"Couldn't save";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessUsers:names, accessWindows:ACC})}); const j=await r.json();
+    if(j.ok){ msg.textContent="Saved ✓ — applied to "+names.length+" "+(names.length===1?"person":"people"); ACC_BYUSER=(((j.config||{}).access||{}).byUser)||{}; renderRestricted(); loadState(); }
+    else msg.textContent=j.error||"Couldn't save";
   }catch{ msg.textContent="Couldn't save"; }
 });
 $("markOpen") && $("markOpen").addEventListener("click",()=>markState(true));
