@@ -681,8 +681,23 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   engineer's holiday would appear on the office sheet. The per-person ✏️ Edit
   modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
   clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
+- **Total cost of a job to us** (job-view.html "💷 Total cost to us" card,
+  **office/admin only** — FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
+  (costing.js) sums **labour on-site** (job_time_segments for the job → per-engineer
+  minutes × hourly rate from `ratesMap`; a day rate ÷8; 14h runaway clamp) +
+  **travel labour** (one round trip HQ→site→HQ per engineer per distinct day worked,
+  driving time = miles ÷ 30mph × rate) + **fuel** (those round-trip miles × a FIXED
+  **£0.50/mile**) + **materials** (priced POs; unpriced POs are FLAGGED, never counted
+  as £0). Round-trip miles come from the `site_miles` register first (already a
+  round-trip figure), else a HQ `PO15 5RQ` → site-postcode geocode (postcodes.io) ×
+  1.25 × 2. Returns per-engineer breakdown + `unpricedPOs`/`missingRate`/`hasSegments`
+  flags; the card shows the headline total + labour/travel/fuel/materials rows and an
+  amber "N POs raised but not yet priced — total will rise" note. Nothing stored.
+  The PO-numbers card below it (clickable → filtered PO board) is separate.
 - **Per-job PO materials cost** (job-view.html "🧾 Materials — purchase orders"
-  card, **office/admin only** — FullAccess|SLAAdmin): reads live from the PO
+  card, **office/admin only** — FullAccess|SLAAdmin; shows each PO's **number**,
+  clickable → `po-office.html?search=<po>`, + an "Open all N POs → `?job_id=`" link):
+  reads live from the PO
   system via **GET /costing/job-pos?jobId=** (costing.js `jobPoRows`), which sums
   `po_log.cost_ex_vat` for rows with matching **`job_id`** (the stable key the PO
   worker stamps from a job's "Raise PO" link — `#mlpo` payload). Returns total +
