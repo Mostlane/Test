@@ -2946,12 +2946,14 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   tracked state without a command via **POST /tuya/gate/set-state** `{open}` (the
   "Mark open/closed" buttons). `readGateOpen`/`canReadState` remain for a future
   real contact sensor but are unused in momentary mode.
-- **Access hours:** `tuya:config.access = {windows:[{days:[0..6 Sun..Sat],
-  from:"HH:MM", to:"HH:MM"}]}` (Europe/London; empty = no restriction; overnight
-  windows supported). Enforced server-side on open/close — **Full-Access always
-  bypasses**; a blocked op returns 403 `denied:"hours"` naming the allowed hours.
-  Edited on the page's **⏰ Access hours** card (FullAccess), saved via POST
-  /tuya/config `{access}`.
+- **Access hours (PER USER):** `tuya:config.access.byUser[<lower username>] =
+  {windows:[{days:[0..6 Sun..Sat], from:"HH:MM", to:"HH:MM"}]}` (Europe/London;
+  a user with no windows is unrestricted; overnight windows supported). Enforced
+  server-side per operating user on open/close — **Full-Access always bypasses**;
+  a blocked op returns 403 `denied:"hours"`. Edited on the page's **⏰ Access
+  hours (per user)** card (FullAccess: pick a person → set their windows), saved
+  via POST /tuya/config `{accessUser, accessWindows}` (empty windows clears them).
+  `/tuya/gate/state` returns the caller's OWN summary + `allowedNow`.
 - **Endpoints** (YardGate|FullAccess to operate; FullAccess to configure): POST
   /tuya/gate/open + /tuya/gate/close (both pulse), **POST /tuya/gate/set-state**
   (FullAccess drift fix), GET /tuya/gate/state (tracked open/since/by + access
@@ -2966,12 +2968,13 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   direct image URL, refreshable, cache-busted); off until configured. (Ring
   cloud cameras have no browser-openable snapshot — use the DVR via the CCTV
   system.)
-- **Desktop status banner (portal-config.js `gateBanner`):** a slim clickable bar
-  at the top of every DESKTOP page for FullAccess/YardGate users showing the live
-  gate state (Open red / Closed green), linking to yard-gate.html. Polls
-  /tuya/gate/state (60s, paused when tab hidden), reserves height via `--ml-topbar`.
-  **The Yard Gate desktop SIDEBAR item was removed** — desktop uses this banner;
-  mobile keeps the main.html menu tile.
+- **Desktop status light (portal-config.js `initGateLight`):** a small traffic
+  light UNDER the Mostlane logo in the desktop sidebar (`#pnGate`, green=closed /
+  red=open) for FullAccess/YardGate users, clickable → yard-gate.html. Polls
+  /tuya/gate/state (60s, paused when tab hidden); collapses to just the dot when
+  the sidebar is minimised. **The Yard Gate desktop SIDEBAR nav item was removed**
+  — desktop uses this light; mobile keeps the main.html menu tile. (An earlier
+  full-width top banner was replaced by this on request.)
 - **Front-end yard-gate.html** (🚪 tile mobile, YardGate perm): Open (green) + **Close
   (red)** buttons (both pulse), live TRACKED open/closed state + access-hours line,
   gate activity log (who/action/device/time), FullAccess **⏰ Access hours** editor

@@ -25123,10 +25123,17 @@ function toMin2(s) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ""));
   return m ? +m[1] * 60 + +m[2] : null;
 }
-function accessAllowed(cfg, now) {
-  const acc = cfg.access;
-  if (!acc || !Array.isArray(acc.windows) || !acc.windows.length) return true;
-  for (const w of acc.windows) {
+var DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var normU = (u) => String(u || "").toLowerCase().trim();
+function userWindows(cfg, username) {
+  const bu = cfg.access && cfg.access.byUser || {};
+  const w = bu[normU(username)];
+  return w && Array.isArray(w.windows) ? w.windows : [];
+}
+function accessAllowedForUser(cfg, username, now) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return true;
+  for (const w of windows) {
     const days = Array.isArray(w.days) ? w.days.map(Number) : [];
     if (days.length && !days.includes(now.dow)) continue;
     const from = toMin2(w.from), to = toMin2(w.to);
@@ -25139,23 +25146,21 @@ function accessAllowed(cfg, now) {
   }
   return false;
 }
-var DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-function accessSummary(cfg) {
-  const acc = cfg.access;
-  if (!acc || !Array.isArray(acc.windows) || !acc.windows.length) return "";
-  return acc.windows.map((w) => {
+function accessSummaryForUser(cfg, username) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return "";
+  return windows.map((w) => {
     const days = Array.isArray(w.days) && w.days.length ? w.days.map((d) => DOW_LABEL[d] || "?").join(",") : "every day";
     return `${days} ${w.from}\u2013${w.to}`;
   }).join("; ");
 }
-function sanitiseAccess(a) {
-  if (!a || !Array.isArray(a.windows)) return { windows: [] };
-  const windows = a.windows.map((w) => ({
+function sanitiseWindows(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((w) => ({
     days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter((d) => d >= 0 && d <= 6))] : [],
     from: toMin2(w.from) != null ? w.from : "00:00",
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
-  return { windows };
 }
 async function handle33(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -25195,7 +25200,15 @@ async function handle33(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === void 0) cfg.thresholdMins = 10;
     if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
-    if (b.access !== void 0) cfg.access = sanitiseAccess(b.access);
+    if (b.accessUser !== void 0) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const key = normU(b.accessUser);
+      if (key) {
+        const win = sanitiseWindows(b.accessWindows || []);
+        if (win.length) cfg.access.byUser[key] = { windows: win };
+        else delete cfg.access.byUser[key];
+      }
+    }
     if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
     if (!cfg.region) cfg.region = "eu";
     await saveCfg2(db, cfg);
@@ -25236,11 +25249,11 @@ async function handle33(request, env, ctx, url, sess) {
     const cfg = await loadCfg(db);
     if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
-    if (!isFull4 && !accessAllowed(cfg, londonNow())) {
-      const s = accessSummary(cfg);
-      return json4({ ok: false, denied: "hours", error: "Gate access is outside the allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
-    }
     const user = sess.user && sess.user.username || "?";
+    if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow())) {
+      const s = accessSummaryForUser(cfg, user);
+      return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
     const st = await getGateState(db);
     if (st.open === wantOpen) {
       return json4({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
@@ -25275,6 +25288,7 @@ async function handle33(request, env, ctx, url, sess) {
     const st = await getGateState(db);
     const open = !!st.open, since = st.at || null;
     const mins = open && since ? Math.round((Date.now() - Date.parse(since)) / 6e4) : 0;
+    const me = sess.user && sess.user.username || "";
     return json4({
       ok: true,
       configured,
@@ -25284,8 +25298,8 @@ async function handle33(request, env, ctx, url, sess) {
       since,
       mins,
       openedBy: open ? st.by || null : null,
-      access: accessSummary(cfg),
-      allowedNow: accessAllowed(cfg, londonNow())
+      access: accessSummaryForUser(cfg, me),
+      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow())
     });
   }
   if (path === "/tuya/gate/log" && method === "GET") {
