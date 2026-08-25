@@ -962,7 +962,7 @@
           '<div class="pn-brand"><div class="pn-logobox">'
           + '<img class="full" src="/mostlane-logo.jpg" alt="Mostlane">'
           + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div>'
-          + ((yes(perms.YardGate) || yes(perms.FullAccess)) ? '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Gate</span></a>' : '')
+          + ((yes(perms.YardGate) || yes(perms.FullAccess)) ? '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Yard Gate</span></a>' : '')
           + '</div>'
           + '<nav class="pn-nav" id="pnavNav">' + navInner() + "</nav>"
           + '<div class="pn-foot"><div class="pn-av">' + esc(initials(name)) + "</div>"
@@ -1003,7 +1003,7 @@
               el.style.display = "";
               var open = !!j.open;
               el.className = "pn-gate " + (open ? "open" : "closed");
-              var lbl = el.querySelector(".pn-gate-lbl"); if (lbl) lbl.textContent = open ? "Gate open" : "Gate";
+              var lbl = el.querySelector(".pn-gate-lbl"); if (lbl) lbl.textContent = open ? "Yard Gate Open" : "Yard Gate Closed";
               el.title = "Yard gate: " + (open ? "OPEN" : "Closed") + " — open controls";
             }).catch(function () {});
         }

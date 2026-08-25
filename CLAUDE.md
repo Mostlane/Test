@@ -2964,10 +2964,14 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   `thresholdMins`.
 - **Safety check before EVERY operation:** Open/Close first open a confirm modal
   ("safe to operate & clear of obstruction") — Cancel aborts, Proceed sends. The
-  modal shows a live **camera snapshot** when `tuya:config.snapshotUrl` is set (a
-  direct image URL, refreshable, cache-busted); off until configured. (Ring
-  cloud cameras have no browser-openable snapshot — use the DVR via the CCTV
-  system.)
+  modal shows a live **gate-camera snapshot** via **GET /tuya/gate/snapshot-url**
+  (YardGate|FullAccess): prefers a **CCTV-Wall camera** — `tuya:config.cameraSiteId`
+  + `cameraId` → `cctv.js cameraSnapshotUrl()` mints a signed `/cctv/snapshot` URL
+  (the DVR digest-auth proxy, so a non-admin can view without the DVR admin) —
+  else falls back to a plain `tuya:config.snapshotUrl`. Set the camera in the
+  gate setup (`?setup=1`) from a dropdown of CCTV-Wall cameras; add the (separate)
+  gate DVR to the **CCTV Wall** first. **Ring is NOT usable** (no browser-openable
+  snapshot without an always-on bridge). Snapshot refreshable + cache-busted.
 - **Desktop status light (portal-config.js `initGateLight`):** a small traffic
   light UNDER the Mostlane logo in the desktop sidebar (`#pnGate`, green=closed /
   red=open) for FullAccess/YardGate users, clickable → yard-gate.html. Polls

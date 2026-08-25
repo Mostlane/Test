@@ -38,6 +38,21 @@ const VENDOR_PATH = {
 function defaultCh(vendor, i) { return vendor === "dahua" ? String(i) : String(i * 100 + 1); }
 
 /* ------------------------------- config io ------------------------------- */
+// Mint a signed snapshot URL for one camera, reusable by other routes (the
+// yard-gate safety dialog) so a non-Full-Access user can view the gate camera
+// without exposing the DVR admin. Returns null if the site/camera isn't found.
+export async function cameraSnapshotUrl(env, origin, siteId, cameraId) {
+  try {
+    const db = tenantDB(env, 1);
+    const sites = await loadSites(db);
+    const site = (sites || []).find(s => String(s.id) === String(siteId));
+    if (!site) return null;
+    const cam = (site.cameras || []).find(c => String(c.id) === String(cameraId)) || (site.cameras || [])[0];
+    if (!cam) return null;
+    return await signedFileUrl(env, origin, "/cctv/snapshot", `${site.id}:${cam.ch}`, 24 * 3600);
+  } catch { return null; }
+}
+
 async function loadSites(db) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?")
     .bind(db.tenantId, CFG_KEY).first();

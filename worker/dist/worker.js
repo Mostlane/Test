@@ -21950,6 +21950,19 @@ var VENDOR_PATH = {
 function defaultCh(vendor, i) {
   return vendor === "dahua" ? String(i) : String(i * 100 + 1);
 }
+async function cameraSnapshotUrl(env, origin, siteId, cameraId) {
+  try {
+    const db = tenantDB(env, 1);
+    const sites = await loadSites(db);
+    const site = (sites || []).find((s) => String(s.id) === String(siteId));
+    if (!site) return null;
+    const cam = (site.cameras || []).find((c) => String(c.id) === String(cameraId)) || (site.cameras || [])[0];
+    if (!cam) return null;
+    return await signedFileUrl(env, origin, "/cctv/snapshot", `${site.id}:${cam.ch}`, 24 * 3600);
+  } catch {
+    return null;
+  }
+}
 async function loadSites(db) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY2).first();
   let sites = [];
@@ -25210,6 +25223,8 @@ async function handle33(request, env, ctx, url, sess) {
       }
     }
     if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
+    if (b.cameraSiteId !== void 0) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();
+    if (b.cameraId !== void 0) cfg.cameraId = String(b.cameraId || "").trim();
     if (!cfg.region) cfg.region = "eu";
     await saveCfg2(db, cfg);
     return json4({ ok: true, config: cfg });
@@ -25301,6 +25316,16 @@ async function handle33(request, env, ctx, url, sess) {
       access: accessSummaryForUser(cfg, me),
       allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow())
     });
+  }
+  if (path === "/tuya/gate/snapshot-url" && method === "GET") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (cfg.cameraSiteId && cfg.cameraId) {
+      const u = await cameraSnapshotUrl(env, url.origin, cfg.cameraSiteId, cfg.cameraId);
+      if (u) return json4({ ok: true, url: u, source: "cctv" });
+    }
+    if (cfg.snapshotUrl) return json4({ ok: true, url: cfg.snapshotUrl, source: "url" });
+    return json4({ ok: true, url: "" });
   }
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);

@@ -36,6 +36,7 @@ import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
 import { sendToPermission } from "./push.js";
+import { cameraSnapshotUrl } from "./cctv.js";
 
 const CFG_KEY = "tuya:config";
 const TOK_KEY = "tuya:token";
@@ -311,7 +312,9 @@ export async function handle(request, env, ctx, url, sess) {
         else delete cfg.access.byUser[key];   // empty = clear this user's restriction
       }
     }
-    if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera snapshot (safety check)
+    if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera: a direct image URL (fallback)
+    if (b.cameraSiteId !== undefined) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();             // gate camera: a CCTV-Wall site+camera (preferred)
+    if (b.cameraId !== undefined) cfg.cameraId = String(b.cameraId || "").trim();
     if (!cfg.region) cfg.region = "eu";
     await saveCfg(db, cfg);
     return json({ ok: true, config: cfg });
@@ -413,6 +416,20 @@ export async function handle(request, env, ctx, url, sess) {
       open, since, mins, openedBy: open ? (st.by || null) : null,
       access: accessSummaryForUser(cfg, me), allowedNow: isFull || accessAllowedForUser(cfg, me, londonNow()),
     });
+  }
+
+  // A live signed snapshot URL for the gate camera (YardGate|FullAccess) — the
+  // safety dialog shows it. Prefers a CCTV-Wall camera (secure DVR proxy); falls
+  // back to a plain snapshotUrl. Empty when no camera is configured.
+  if (path === "/tuya/gate/snapshot-url" && method === "GET") {
+    if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (cfg.cameraSiteId && cfg.cameraId) {
+      const u = await cameraSnapshotUrl(env, url.origin, cfg.cameraSiteId, cfg.cameraId);
+      if (u) return json({ ok: true, url: u, source: "cctv" });
+    }
+    if (cfg.snapshotUrl) return json({ ok: true, url: cfg.snapshotUrl, source: "url" });
+    return json({ ok: true, url: "" });
   }
 
   // Recent operations — the access record (Full-Access).
