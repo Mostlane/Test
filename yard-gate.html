@@ -415,7 +415,7 @@ async function loadAccess(){
   try{
     const [cfgR, usersR] = await Promise.all([ aFetch("/tuya/config").then(r=>r.json()).catch(()=>({})), aFetch("/users").then(r=>r.json()).catch(()=>[]) ]);
     ACC_BYUSER = (((cfgR.config||{}).access||{}).byUser)||{};
-    const users = Array.isArray(usersR) ? usersR : (usersR.users||[]);
+    const users = Array.isArray(usersR) ? usersR : (usersR.Users||usersR.users||[]);
     const names = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
     $("accUser").innerHTML = names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
     $("accUser").onchange = accReloadForUser;
