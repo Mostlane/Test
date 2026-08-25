@@ -98,33 +98,114 @@
       color:var(--muted);
     }
 
+    /* Collapsible sections — all collapsed by default */
+    .sect{
+      background:var(--panel);
+      border-radius:14px;
+      box-shadow:0 8px 22px rgba(0,0,0,0.10);
+      margin-bottom:12px;
+      overflow:hidden;
+    }
+    .sect > summary{
+      list-style:none;
+      cursor:pointer;
+      padding:16px 18px;
+      font-weight:700;
+      font-size:16px;
+      color:var(--ml-blue);
+      display:flex;
+      align-items:center;
+      gap:8px;
+      user-select:none;
+    }
+    .sect > summary::-webkit-details-marker{ display:none; }
+    .sect > summary::after{
+      content:"▸";
+      margin-left:auto;
+      color:#94a3b8;
+      font-size:13px;
+      transition:transform .15s;
+    }
+    .sect[open] > summary::after{ transform:rotate(90deg); }
+    .sect > summary:hover{ background:rgba(0,59,130,0.04); }
+    .sect-body{
+      padding:2px 18px 18px;
+      border-top:1px solid #eef2f7;
+    }
+    .sect-body .muted{ color:var(--muted); font-size:14px; margin:12px 0; }
+    .sect-body a.btn{
+      display:inline-block;
+      text-decoration:none;
+    }
+    .page-head{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin:2px 0 14px;
+    }
+    .page-head h1{ margin:0; }
   </style>
 </head>
 
 <body>
 <div class="shell">
-  <div class="card">
-
+  <div class="page-head">
+    <a class="ml-back" href="sla-main.html" title="Back to SLA">‹ Back</a>
     <h1>SLA Settings</h1>
-    <p class="muted">
-      These times define when an SLA becomes breached.
-      Values shown below are the current settings from your live Worker.
-    </p>
-
-    <div id="settingsContainer"></div>
-
-    <div class="actions">
-      <button class="btn secondary" onclick="window.location='sla-main.html'">Back</button>
-      <button class="btn primary" id="editBtn">Edit</button>
-      <span id="status"></span>
-    </div>
-
-    <div class="actions" id="editActions" style="display:none;">
-      <button class="btn secondary" id="cancelEditBtn">Cancel</button>
-      <button class="btn primary" id="saveBtn">Save</button>
-    </div>
-
   </div>
+
+  <!-- SLA breach times (collapsible) -->
+  <details class="sect">
+    <summary>⏱️ SLA breach times</summary>
+    <div class="sect-body">
+      <p class="muted">These times define when an SLA becomes breached.</p>
+      <div id="settingsContainer"></div>
+      <div class="actions">
+        <button class="btn primary" id="editBtn">Edit</button>
+        <span id="status"></span>
+      </div>
+      <div class="actions" id="editActions" style="display:none;">
+        <button class="btn secondary" id="cancelEditBtn">Cancel</button>
+        <button class="btn primary" id="saveBtn">Save</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- Job categories -->
+  <details class="sect">
+    <summary>🏷️ Job categories</summary>
+    <div class="sect-body">
+      <p class="muted">Extra statuses you control — they show as chips on the board and as options everywhere a job's status is set.</p>
+      <a class="btn primary" href="sla-main.html?panel=categories">Manage categories →</a>
+    </div>
+  </details>
+
+  <!-- Job sheet settings -->
+  <details class="sect">
+    <summary>🧾 Job sheet settings</summary>
+    <div class="sect-body">
+      <p class="muted">Choose which fields appear on the Mostlane copy vs the Client copy of the job sheet.</p>
+      <a class="btn primary" href="sla-main.html?panel=sheet">Edit sheet settings →</a>
+    </div>
+  </details>
+
+  <!-- Data tools -->
+  <details class="sect">
+    <summary>🧰 Data tools</summary>
+    <div class="sect-body">
+      <p class="muted">Import job history, review &amp; bulk-delete live jobs, and manage archive photos.</p>
+      <a class="btn primary" href="sla-data-tools.html">Open data tools →</a>
+    </div>
+  </details>
+
+  <!-- Firestopping -->
+  <details class="sect">
+    <summary>🔥 Firestopping</summary>
+    <div class="sect-body">
+      <p class="muted">Manage firestopping products, spec sheets and the RIA record configuration.</p>
+      <a class="btn primary" href="firestop-admin.html">Open firestopping →</a>
+    </div>
+  </details>
 </div>
 
 <script>
