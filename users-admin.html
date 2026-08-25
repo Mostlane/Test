@@ -350,7 +350,7 @@
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","HSPlan","SiteLog","OfficeTimesheet",
-      "EngTimesheet","ThemeColour","ThemeBackground"];
+      "EngTimesheet","ThemeColour","ThemeBackground","YardGate"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","homePostcode","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -368,7 +368,8 @@
       LabourPlanning:"Labour planning", SLA:"SLA — My Jobs (engineer)", SLAAdmin:"SLA Admin — dashboard, scheduler, edit jobs", HSPlan:"H&S planner", SiteLog:"SiteLog",
       OfficeClock:"Office clock in/out", OfficeTimesheet:"Office timesheet (view all)",
       EngTimesheet:"Engineer timesheet (times, jobs, invoices)",
-      ThemeColour:"Personalise — colour theme", ThemeBackground:"Personalise — menu background"
+      ThemeColour:"Personalise — colour theme", ThemeBackground:"Personalise — menu background",
+      YardGate:"Yard gate — open + see status"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
@@ -382,6 +383,7 @@
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
       { title:"Compliance & docs",    perms:["Compliance","MyDocuments","HSPlan"] },
+      { title:"Facilities",           perms:["YardGate"] },
       { title:"Personalisation",      perms:["ThemeColour","ThemeBackground"] }
     ];
 
