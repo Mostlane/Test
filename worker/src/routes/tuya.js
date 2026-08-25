@@ -312,15 +312,23 @@ export async function handle(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === undefined) cfg.thresholdMins = 10;
     if (b.repeatMins !== undefined) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === undefined) cfg.repeatMins = 30;
-    // Per-user access hours: {accessUser, accessWindows} sets one user's windows.
-    if (b.accessUser !== undefined) {
+    // Per-user access hours. {accessUser, accessWindows} sets one; {accessUsers:[…],
+    // accessWindows} tags several with the same windows; {accessRemove:name|[names]}
+    // clears them.
+    if (b.accessUser !== undefined || Array.isArray(b.accessUsers)) {
       if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
-      const key = normU(b.accessUser);
-      if (key) {
-        const win = sanitiseWindows(b.accessWindows || []);
+      const win = sanitiseWindows(b.accessWindows || []);
+      const targets = Array.isArray(b.accessUsers) ? b.accessUsers : [b.accessUser];
+      for (const t of targets) {
+        const key = normU(t); if (!key) continue;
         if (win.length) cfg.access.byUser[key] = { windows: win };
-        else delete cfg.access.byUser[key];   // empty = clear this user's restriction
+        else delete cfg.access.byUser[key];   // empty windows = clear this person's restriction
       }
+    }
+    if (b.accessRemove !== undefined) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const rm = Array.isArray(b.accessRemove) ? b.accessRemove : [b.accessRemove];
+      for (const u of rm) delete cfg.access.byUser[normU(u)];
     }
     if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera: a direct image URL (fallback)
     if (b.cameraSiteId !== undefined) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();             // gate camera: a CCTV-Wall site+camera (preferred)
