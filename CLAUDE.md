@@ -2967,8 +2967,11 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   `geo.lat/geo.lng` to operate — stops accidental remote operation. Enforced
   server-side on open/close (`haversineM`): the client sends `{lat,lng}` (from
   `navigator.geolocation`) and a distance > radius returns 403 `denied:"location"`;
-  no coords → 403 asking to turn location on. **Full-Access bypasses** (they have
-  camera access and operate from anywhere). Set on the page's **📍 Gate location**
+  no coords → 403 asking to turn location on. **Exempt = Full-Access OR the
+  per-user `YardGateAnywhere` permission** (set in Users Admin next to YardGate;
+  OFF by default so the geofence applies to everyone else). The client asks for a
+  FRESH fix each time (`maximumAge:0`), so the browser re-prompts unless the user
+  chose "always allow". Set on the page's **📍 Gate location**
   card (FullAccess: stand at the gate → "Use my current location" + radius, POST
   /tuya/config `{geo:{lat,lng,radiusM}}`; `{geo:{clear:true}}` turns it off).
   `/tuya/gate/state` returns `needLocation` (this caller must prove location) +

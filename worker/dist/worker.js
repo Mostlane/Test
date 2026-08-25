@@ -822,8 +822,10 @@ var PERMISSION_KEYS = [
   // personalisation: may change the menu background
   "Programmes",
   // job programmes: build/issue/share programmes of works
-  "YardGate"
+  "YardGate",
   // trigger the yard gate (Tuya) + see its open/closed state
+  "YardGateAnywhere"
+  // exempt from the yard-gate geofence (operate from anywhere)
 ];
 function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -25190,6 +25192,7 @@ async function handle33(request, env, ctx, url, sess) {
   if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const isFull4 = perms.FullAccess === "Yes";
+  const geoExempt = isFull4 || perms.YardGateAnywhere === "Yes";
   const canGate = isFull4 || perms.YardGate === "Yes";
   const db = tenantDB(env, sess.tenantId);
   if (path === "/tuya/config" && method === "GET") {
@@ -25284,7 +25287,7 @@ async function handle33(request, env, ctx, url, sess) {
       const s = accessSummaryForUser(cfg, user);
       return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
     }
-    if (!isFull4 && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
+    if (!geoExempt && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
       const lat = Number(body.lat), lng = Number(body.lng);
       if (!isFinite(lat) || !isFinite(lng)) {
         return json4({ ok: false, denied: "location", error: "Turn on location to operate the gate \u2014 you must be at the yard." }, 403);
@@ -25342,7 +25345,7 @@ async function handle33(request, env, ctx, url, sess) {
       access: accessSummaryForUser(cfg, me),
       allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow()),
       // Geofence: whether THIS caller must prove they're at the yard to operate.
-      needLocation: !isFull4 && geoOn,
+      needLocation: !geoExempt && geoOn,
       geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false }
     });
   }

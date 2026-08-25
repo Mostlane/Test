@@ -279,6 +279,9 @@ export async function handle(request, env, ctx, url, sess) {
   if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const isFull = perms.FullAccess === "Yes";
+  // Geofence exemption: Full-Access, OR a user given the "operate from anywhere"
+  // permission. Everyone else must be at the yard (when a geofence is set).
+  const geoExempt = isFull || perms.YardGateAnywhere === "Yes";
   const canGate = isFull || perms.YardGate === "Yes";
   const db = tenantDB(env, sess.tenantId);
 
@@ -392,7 +395,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Geofence: non-Full-Access users must be AT the yard to operate (stops
     // accidental remote operation). Full-Access users have camera access and
     // may operate from anywhere.
-    if (!isFull && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
+    if (!geoExempt && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
       const lat = Number(body.lat), lng = Number(body.lng);
       if (!isFinite(lat) || !isFinite(lng)) {
         return json({ ok: false, denied: "location", error: "Turn on location to operate the gate — you must be at the yard." }, 403);
@@ -447,7 +450,7 @@ export async function handle(request, env, ctx, url, sess) {
       open, since, mins, openedBy: open ? (st.by || null) : null,
       access: accessSummaryForUser(cfg, me), allowedNow: isFull || accessAllowedForUser(cfg, me, londonNow()),
       // Geofence: whether THIS caller must prove they're at the yard to operate.
-      needLocation: !isFull && geoOn,
+      needLocation: !geoExempt && geoOn,
       geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false },
     });
   }
