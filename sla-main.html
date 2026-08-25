@@ -520,7 +520,7 @@ let allJobs = [];
 let archiveMatches = [];        // archived jobs matching the current search
 let archiveSeq = 0;             // guards against out-of-order async archive results
 let cachedUsers = [];
-let activeStatus = "open";     // "open" = everything not complete/closed/invoiced
+let activeStatus = "all";      // default board view (restoreFilters may override); "open" = everything not complete/closed/invoiced
 let activePriority = "all";
 let selected = new Set();
 let currentUpdateId = null, currentPdfJobId = null;
@@ -677,6 +677,7 @@ function filteredJobs(){
 }
 
 function render(){
+  persistFilters();   // remember search + status + priority so Back restores them
   renderChips();
   const list = filteredJobs();
   const tbody = $("jobsTbody");
@@ -1168,6 +1169,22 @@ async function catSaveChanges(){
 }
 
 /* ============ search (live + archive together) ============ */
+/* Remember the board's search + status + priority across navigation, so opening
+   a job card and pressing Back returns to the SAME filtered view (not a reset).
+   Kept in sessionStorage (per-tab) — cleared by the Reset button. */
+function persistFilters(){
+  try{ sessionStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority })); }catch(e){}
+}
+function restoreFilters(){
+  try{
+    const s = JSON.parse(sessionStorage.getItem("slaMainFilters") || "null");
+    if(!s) return false;
+    if(typeof s.q === "string") $("searchBox").value = s.q;
+    if(s.status) activeStatus = s.status;
+    if(s.priority){ activePriority = s.priority; const pf = $("priorityFilter"); if(pf) pf.value = s.priority; }
+    return true;
+  }catch(e){ return false; }
+}
 let searchDeb = null;
 function onSearchInput(){
   render();   // instant live filter
@@ -1246,7 +1263,7 @@ function init(){
   $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
   $("searchBox").addEventListener("input", onSearchInput);
   $("resetBtn").addEventListener("click", () => {
-    activeStatus = "open"; activePriority = "all";
+    activeStatus = "all"; activePriority = "all";
     $("priorityFilter").value = "all"; $("searchBox").value = ""; archiveMatches = []; render();
   });
   $("updateSiteFilter").addEventListener("input", () => { if(sitesList) fillSiteSelect($("updateSiteFilter").value); });
@@ -1263,13 +1280,24 @@ function init(){
 
 window.addEventListener("DOMContentLoaded", async () => {
   init();
+  // Restore the last search/status/priority BEFORE the first render so Back
+  // returns to the same filtered board.
+  restoreFilters();
   if(await gate()){
     // Jobs load independently of categories — a slow/failed category fetch must
     // never hold up (or blank) the board. Categories merge into the chips/
     // dropdown as soon as they arrive.
-    ensureUsers().then(() => loadJobs());
+    ensureUsers().then(() => loadJobs()).then(() => {
+      const q = $("searchBox").value.trim();
+      if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
+    });
     loadCategories().then(() => { populateBulkDropdown(); render(); });
   }
+});
+// bfcache (Back on iOS/Safari): the DOM is restored but re-assert the saved
+// filters + repaint so a stale reset can never show through.
+window.addEventListener("pageshow", e => {
+  if(e.persisted && restoreFilters()) render();
 });
 </script>
 </body>
