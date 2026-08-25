@@ -2916,6 +2916,32 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Cloudflare) to `jobs@<domain>`. Dormant until (1)+(2) are done — the `email`
   export just sits unused.
 
+## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
+The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device
+`bf7240c4db7fedd458froe`, Central Europe DC → `eu`/tuyaeu.com). It's a
+**LATCHING relay on channel 1 (`switch_1`)**: `switch_1=true` opens (gate stays
+open), `switch_1=false` closes (stays closed) — NOT a momentary pulse. The route
+signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
+- **Secrets (dashboard):** `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET` (Tuya IoT Cloud
+  project → Overview → Authorization Key). Device ids/DP codes live in app_config
+  `tuya:config` so they're editable without redeploy.
+- **`tuya:config`:** `{region:"eu", gateDeviceId, openCode:"switch_1", openValue:true,
+  closeCode?, closeValue?, stateDeviceId?, stateCode?, stateOpenValue?, thresholdMins:10,
+  repeatMins:30}`. **closeCode defaults to openCode, closeValue defaults to the
+  opposite of openValue** — so a latching gate needs only the open fields set.
+- **State without a sensor:** `readGateOpen` reads a dedicated contact sensor if
+  configured, ELSE falls back to the gate switch's OWN value (on=open) — so
+  open/closed state + the left-open watch work off the relay alone (`canReadState`).
+- **Endpoints** (YardGate|FullAccess to operate; FullAccess to configure): POST
+  /tuya/gate/open, **POST /tuya/gate/close** (latching), GET /tuya/gate/state, GET
+  /tuya/gate/log (openlog entries tagged `action:open|close`), config GET/POST,
+  device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron pushes
+  the owner+YardGate holders if the gate's left open past `thresholdMins`.
+- **Front-end yard-gate.html** (🚪 tile, YardGate perm): Open (green) + **Close
+  (red)** buttons, live open/closed state, access log, and a Full-Access setup
+  panel (device id + codes + a "read device" DP dump). **Dormant until the two
+  secrets are added AND `tuya:config.gateDeviceId` is set.**
+
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system
    now runs INSIDE the portal (`mostlane-api`), not the standalone `mostlane-po`
