@@ -146,13 +146,30 @@ async function deviceStatus(env, db, cfg, deviceId) {
 // Read the gate-open boolean from the configured sensor DP. Returns null when
 // no state device/code is configured (i.e. nothing to watch yet).
 async function readGateOpen(env, db, cfg) {
-  if (!cfg.stateDeviceId || !cfg.stateCode) return null;
-  const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
-  const dp = status.find(s => s.code === cfg.stateCode);
-  if (!dp) return null;
-  const openVal = (cfg.stateOpenValue === undefined) ? true : cfg.stateOpenValue;
-  // Compare loosely so "true"/true/1 all match a configured open value.
-  return String(dp.value) === String(openVal);
+  // 1) A dedicated contact sensor, if one is configured (momentary-pulse gates).
+  if (cfg.stateDeviceId && cfg.stateCode) {
+    const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
+    const dp = status.find(s => s.code === cfg.stateCode);
+    if (!dp) return null;
+    const openVal = (cfg.stateOpenValue === undefined) ? true : cfg.stateOpenValue;
+    // Compare loosely so "true"/true/1 all match a configured open value.
+    return String(dp.value) === String(openVal);
+  }
+  // 2) LATCHING relay (this gate): the OPEN switch's own value IS the state —
+  //    on = open, off = closed — so no separate sensor is needed.
+  if (cfg.gateDeviceId) {
+    const code = cfg.openCode || "switch_1";
+    const status = await deviceStatus(env, db, cfg, cfg.gateDeviceId);
+    const dp = status.find(s => s.code === code);
+    if (!dp) return null;
+    const openVal = (cfg.openValue === undefined) ? true : cfg.openValue;
+    return String(dp.value) === String(openVal);
+  }
+  return null;
+}
+// Can we read a gate open/closed state at all — via a sensor OR the latching relay?
+function canReadState(cfg) {
+  return !!((cfg.stateDeviceId && cfg.stateCode) || (cfg.gateDeviceId && (cfg.openCode || "switch_1")));
 }
 
 // Name whoever opened the gate, IF a portal open happened recently enough to be
@@ -198,6 +215,9 @@ export async function handle(request, env, ctx, url, sess) {
     set("openCode", b.openCode != null ? String(b.openCode).trim() : undefined, "switch_1");
     if (b.openValue !== undefined) cfg.openValue = b.openValue;
     else if (cfg.openValue === undefined) cfg.openValue = true;
+    // Latching gates need a CLOSE too (same channel, opposite value by default).
+    set("closeCode", b.closeCode != null ? String(b.closeCode).trim() : undefined, undefined);
+    if (b.closeValue !== undefined) cfg.closeValue = b.closeValue;
     set("stateDeviceId", b.stateDeviceId != null ? String(b.stateDeviceId).trim() : undefined, "");
     set("stateCode", b.stateCode != null ? String(b.stateCode).trim() : undefined, "");
     if (b.stateOpenValue !== undefined) cfg.stateOpenValue = b.stateOpenValue;
@@ -266,10 +286,36 @@ export async function handle(request, env, ctx, url, sess) {
       try {
         await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
         const log = (await loadKV(db, "tuya:openlog")) || [];
-        log.unshift({ user: opener, at: nowIso });
+        log.unshift({ user: opener, at: nowIso, action: "open" });
         await saveKV(db, "tuya:openlog", log.slice(0, 50));
       } catch {}
       return json({ ok: true, sent: { code, value }, by: opener });
+    } catch (e) {
+      return json({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+
+  // ---- close (latching gate): YardGate | FullAccess ----
+  if (path === "/tuya/gate/close" && method === "POST") {
+    if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet — add the Tuya device in Yard Gate settings." }, 400);
+    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
+    const code = cfg.closeCode || cfg.openCode || "switch_1";
+    const openValue = (cfg.openValue === undefined) ? true : cfg.openValue;
+    const value = (cfg.closeValue !== undefined) ? cfg.closeValue : !openValue;   // opposite of open by default
+    try {
+      const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
+        { commands: [{ code, value }] });
+      if (!jr.success) return json({ ok: false, error: jr.msg || "Tuya rejected the command" }, 502);
+      const nowIso = new Date().toISOString();
+      const closer = (sess.user && sess.user.username) || "?";
+      try {
+        const log = (await loadKV(db, "tuya:openlog")) || [];
+        log.unshift({ user: closer, at: nowIso, action: "close" });
+        await saveKV(db, "tuya:openlog", log.slice(0, 50));
+      } catch {}
+      return json({ ok: true, sent: { code, value }, by: closer });
     } catch (e) {
       return json({ ok: false, error: String(e && e.message || e) }, 502);
     }
@@ -279,7 +325,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     const configured = !!cfg.gateDeviceId;
-    const watched = !!(cfg.stateDeviceId && cfg.stateCode);
+    const watched = canReadState(cfg);   // sensor OR the latching relay's own switch
     if (!watched) return json({ ok: true, configured, watched: false });
     try {
       const open = await readGateOpen(env, db, cfg);
@@ -317,7 +363,7 @@ export async function checkGateLeftOpen(env, tenantId) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
     const db = tenantDB(env, tenantId);
     const cfg = await loadCfg(db);
-    if (!cfg.stateDeviceId || !cfg.stateCode) return;   // nothing to watch
+    if (!canReadState(cfg)) return;   // nothing to watch (no sensor and no relay)
 
     const open = await readGateOpen(env, db, cfg);
     if (open === null) return;

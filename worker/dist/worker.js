@@ -25095,12 +25095,25 @@ async function deviceStatus(env, db, cfg, deviceId) {
   return Array.isArray(jr7.result) ? jr7.result : [];
 }
 async function readGateOpen(env, db, cfg) {
-  if (!cfg.stateDeviceId || !cfg.stateCode) return null;
-  const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
-  const dp = status.find((s) => s.code === cfg.stateCode);
-  if (!dp) return null;
-  const openVal = cfg.stateOpenValue === void 0 ? true : cfg.stateOpenValue;
-  return String(dp.value) === String(openVal);
+  if (cfg.stateDeviceId && cfg.stateCode) {
+    const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
+    const dp = status.find((s) => s.code === cfg.stateCode);
+    if (!dp) return null;
+    const openVal = cfg.stateOpenValue === void 0 ? true : cfg.stateOpenValue;
+    return String(dp.value) === String(openVal);
+  }
+  if (cfg.gateDeviceId) {
+    const code = cfg.openCode || "switch_1";
+    const status = await deviceStatus(env, db, cfg, cfg.gateDeviceId);
+    const dp = status.find((s) => s.code === code);
+    if (!dp) return null;
+    const openVal = cfg.openValue === void 0 ? true : cfg.openValue;
+    return String(dp.value) === String(openVal);
+  }
+  return null;
+}
+function canReadState(cfg) {
+  return !!(cfg.stateDeviceId && cfg.stateCode || cfg.gateDeviceId && (cfg.openCode || "switch_1"));
 }
 async function attributeOpener(db, nowMs) {
   const lastOpen = await loadKV(db, "tuya:lastopen");
@@ -25137,6 +25150,8 @@ async function handle33(request, env, ctx, url, sess) {
     set("openCode", b.openCode != null ? String(b.openCode).trim() : void 0, "switch_1");
     if (b.openValue !== void 0) cfg.openValue = b.openValue;
     else if (cfg.openValue === void 0) cfg.openValue = true;
+    set("closeCode", b.closeCode != null ? String(b.closeCode).trim() : void 0, void 0);
+    if (b.closeValue !== void 0) cfg.closeValue = b.closeValue;
     set("stateDeviceId", b.stateDeviceId != null ? String(b.stateDeviceId).trim() : void 0, "");
     set("stateCode", b.stateCode != null ? String(b.stateCode).trim() : void 0, "");
     if (b.stateOpenValue !== void 0) cfg.stateOpenValue = b.stateOpenValue;
@@ -25199,7 +25214,7 @@ async function handle33(request, env, ctx, url, sess) {
       try {
         await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
         const log = await loadKV(db, "tuya:openlog") || [];
-        log.unshift({ user: opener, at: nowIso });
+        log.unshift({ user: opener, at: nowIso, action: "open" });
         await saveKV(db, "tuya:openlog", log.slice(0, 50));
       } catch {
       }
@@ -25208,11 +25223,42 @@ async function handle33(request, env, ctx, url, sess) {
       return json4({ ok: false, error: String(e && e.message || e) }, 502);
     }
   }
+  if (path === "/tuya/gate/close" && method === "POST") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet \u2014 add the Tuya device in Yard Gate settings." }, 400);
+    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
+    const code = cfg.closeCode || cfg.openCode || "switch_1";
+    const openValue = cfg.openValue === void 0 ? true : cfg.openValue;
+    const value = cfg.closeValue !== void 0 ? cfg.closeValue : !openValue;
+    try {
+      const jr7 = await api(
+        env,
+        db,
+        cfg,
+        "POST",
+        `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
+        { commands: [{ code, value }] }
+      );
+      if (!jr7.success) return json4({ ok: false, error: jr7.msg || "Tuya rejected the command" }, 502);
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const closer = sess.user && sess.user.username || "?";
+      try {
+        const log = await loadKV(db, "tuya:openlog") || [];
+        log.unshift({ user: closer, at: nowIso, action: "close" });
+        await saveKV(db, "tuya:openlog", log.slice(0, 50));
+      } catch {
+      }
+      return json4({ ok: true, sent: { code, value }, by: closer });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
   if (path === "/tuya/gate/state" && method === "GET") {
     if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     const configured = !!cfg.gateDeviceId;
-    const watched = !!(cfg.stateDeviceId && cfg.stateCode);
+    const watched = canReadState(cfg);
     if (!watched) return json4({ ok: true, configured, watched: false });
     try {
       const open = await readGateOpen(env, db, cfg);
@@ -25240,7 +25286,7 @@ async function checkGateLeftOpen(env, tenantId) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
     const db = tenantDB(env, tenantId);
     const cfg = await loadCfg(db);
-    if (!cfg.stateDeviceId || !cfg.stateCode) return;
+    if (!canReadState(cfg)) return;
     const open = await readGateOpen(env, db, cfg);
     if (open === null) return;
     const watch = await loadKV(db, WATCH_KEY) || {};
