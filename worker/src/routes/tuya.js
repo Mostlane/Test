@@ -295,6 +295,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (b.repeatMins !== undefined) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === undefined) cfg.repeatMins = 30;
     if (b.access !== undefined) cfg.access = sanitiseAccess(b.access);   // allowed operating hours
+    if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera snapshot (safety check)
     if (!cfg.region) cfg.region = "eu";
     await saveCfg(db, cfg);
     return json({ ok: true, config: cfg });

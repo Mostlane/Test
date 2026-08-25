@@ -489,6 +489,44 @@
     else add();
   })();
 
+  // ── Yard-gate status banner (desktop admins) ──────────────────────────────
+  // A slim clickable bar at the top of every desktop page for Full-Access /
+  // YardGate users, showing the live gate state (Open/Closed) and linking to the
+  // controls. Reserves its height via --ml-topbar (same mechanism as the cap).
+  // Mobile keeps the menu tile instead; the desktop sidebar item was removed.
+  (function gateBanner() {
+    try {
+      if (window.self !== window.top) return;                                   // not in iframes
+      if (!window.matchMedia || !window.matchMedia("(min-width:1000px)").matches) return; // desktop only
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      if (/^(login|reset-password|forgot-password|onboard|memo-sign|yard-gate|programme-view|offline)/.test(page)) return;
+      var perms = {}; try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {}; } catch (e) {}
+      if (!(perms.FullAccess === "Yes" || perms.YardGate === "Yes")) return;
+      var API = window.MOSTLANE_API || "";
+      var bar = document.createElement("a");
+      bar.href = "yard-gate.html"; bar.id = "mlGateBar"; bar.title = "Open the yard gate controls";
+      bar.style.cssText = "position:fixed;top:0;left:0;right:0;height:34px;z-index:2147482500;display:none;align-items:center;justify-content:center;gap:10px;font:600 13.5px/1 'Segoe UI',system-ui,sans-serif;text-decoration:none;color:#fff;background:#475569;";
+      bar.innerHTML = '<span id="mlGateDot" style="width:10px;height:10px;border-radius:50%;background:#94a3b8"></span><span id="mlGateTxt">Yard gate…</span><span style="opacity:.85;font-weight:500">· controls ›</span>';
+      function mount() { if (document.body && !document.getElementById("mlGateBar")) document.body.appendChild(bar); }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount); else mount();
+      function show(on) { bar.style.display = on ? "flex" : "none"; document.documentElement.style.setProperty("--ml-topbar", on ? "34px" : "0px"); }
+      function refresh() {
+        if (document.hidden) return;
+        fetch(API + "/tuya/gate/state", { headers: { Authorization: "Bearer " + (localStorage.getItem("mostlaneToken") || "") } })
+          .then(function (r) { return r.json(); }).then(function (j) {
+            if (!j || !j.ok || !j.configured) { show(false); return; }
+            show(true);
+            var open = !!j.open, dot = document.getElementById("mlGateDot"), txt = document.getElementById("mlGateTxt");
+            if (dot) dot.style.background = open ? "#fca5a5" : "#86efac";
+            if (txt) txt.textContent = "Yard gate: " + (open ? "OPEN" : "Closed") + (open && j.mins ? " · " + j.mins + " min" : "");
+            bar.style.background = open ? "#991b1b" : "#166534";
+          }).catch(function () {});
+      }
+      refresh(); setInterval(refresh, 60000);
+      document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
+    } catch (e) {}
+  })();
+
   // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
   // There are ~200 "Loading…" strings across ~80 pages, written every which way
   // (static HTML, innerHTML, textContent). Rather than edit them all, this
@@ -847,8 +885,9 @@
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
           { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"], match: ["vehicles.html", "fleet-report.html", "van-checks.html", "van-timesheet.html"] },
-          { label: "CCTV Wall", href: "cctv.html", icon: "eye", perms: ["__fullOnly"], match: ["cctv.html"] },
-          { label: "Yard Gate", href: "yard-gate.html", icon: "eye", perms: ["YardGate"], match: ["yard-gate.html"] }
+          { label: "CCTV Wall", href: "cctv.html", icon: "eye", perms: ["__fullOnly"], match: ["cctv.html"] }
+          // Yard Gate removed from the desktop sidebar — desktop uses the
+          // top status banner (gateBanner above); mobile keeps the menu tile.
         ]},
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users", "DeviceAdmin"], hrefBy: [["Users", "users-admin.html"], ["DeviceAdmin", "device-admin.html"]], match: ["users-admin.html", "device-admin.html"] },

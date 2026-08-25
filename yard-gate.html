@@ -140,6 +140,27 @@
     <p class="muted" style="text-align:center">The keypad still works as normal — this is an extra way in, logged every time.</p>
   </div>
 
+  <!-- Safety check before any gate operation -->
+  <div id="safetyModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;padding:16px;overflow:auto;">
+    <div style="max-width:460px;margin:7vh auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.35);">
+      <div style="padding:16px;">
+        <h2 id="safetyTitle" style="margin:0 0 8px;font-size:19px;">⚠️ Safety check</h2>
+        <p style="margin:0 0 12px;">Confirm the gate is <b>safe to operate</b> and <b>clear of any obstruction, vehicles or people</b> before continuing.</p>
+        <div id="safetyCam" style="display:none;margin:0 0 8px;">
+          <img id="safetyCamImg" alt="Gate camera" style="width:100%;border-radius:10px;background:#111;min-height:140px;object-fit:cover;display:block;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span class="muted" id="safetyCamMsg" style="font-size:12px"></span>
+            <button id="safetyCamRefresh" class="btn small" type="button">↻ Refresh</button>
+          </div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e6ecf3;display:flex;justify-content:space-between;gap:10px;">
+        <button id="safetyCancel" class="btn" type="button">Cancel</button>
+        <button id="safetyOk" class="gatebtn" type="button" style="width:auto;padding:12px 18px;font-size:15px;">✓ Safe — proceed</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
 function tok(){ return localStorage.getItem("mostlaneToken") || ""; }
@@ -175,7 +196,9 @@ async function markState(open){
   loadState(); loadLog();
 }
 async function openGate(){
-  if(busy) return; busy=true;
+  if(busy) return;
+  if(!await askSafety("Open the gate")) return;
+  busy=true;
   const b=$("openBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
   b.querySelector("span:last-child").textContent="Opening…";
   try{
@@ -189,7 +212,9 @@ async function openGate(){
   }
 }
 async function closeGate(){
-  if(busy) return; busy=true;
+  if(busy) return;
+  if(!await askSafety("Close the gate")) return;
+  busy=true;
   const b=$("closeBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
   b.querySelector("span:last-child").textContent="Closing…";
   try{
@@ -201,6 +226,35 @@ async function closeGate(){
     b.querySelector("span:last-child").textContent="Close the gate";
     setTimeout(()=>{ b.disabled=false; busy=false; loadState(); loadLog(); }, 1500);
   }
+}
+/* ---- safety check (obstruction) before any operation ---- */
+let _safetyResolve=null;
+function askSafety(actionLabel){
+  return new Promise(res=>{
+    _safetyResolve=res;
+    $("safetyTitle").textContent="⚠️ Safety check — "+actionLabel;
+    $("safetyModal").style.display="block";
+    loadGateSnapshot();
+  });
+}
+function closeSafety(ok){ $("safetyModal").style.display="none"; const r=_safetyResolve; _safetyResolve=null; if(r) r(!!ok); }
+$("safetyOk") && $("safetyOk").addEventListener("click",()=>closeSafety(true));
+$("safetyCancel") && $("safetyCancel").addEventListener("click",()=>closeSafety(false));
+$("safetyModal") && $("safetyModal").addEventListener("click",e=>{ if(e.target===$("safetyModal")) closeSafety(false); });
+$("safetyCamRefresh") && $("safetyCamRefresh").addEventListener("click",loadGateSnapshot);
+// Live gate snapshot in the safety dialog — shown only if a snapshot URL is set
+// in the gate config (config.snapshotUrl). A cache-buster forces a fresh frame.
+async function loadGateSnapshot(){
+  const wrap=$("safetyCam"), img=$("safetyCamImg"), msg=$("safetyCamMsg");
+  try{
+    const r=await aFetch("/tuya/config"); const j=await r.json();
+    const url=((j.config||{}).snapshotUrl||"").trim();
+    if(!url){ wrap.style.display="none"; return; }
+    wrap.style.display=""; msg.textContent="Loading…";
+    img.onload=()=>{ msg.textContent="Updated "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
+    img.onerror=()=>{ msg.textContent="Snapshot unavailable"; };
+    img.src=url+(url.includes("?")?"&":"?")+"_="+Date.now();
+  }catch{ wrap.style.display="none"; }
 }
 $("openBtn").addEventListener("click", openGate);
 $("closeBtn").addEventListener("click", closeGate);
