@@ -15403,6 +15403,7 @@ async function handle21(request, env, ctx, url, sess) {
         else materials += v;
       } else unpriced++;
       return {
+        poNumber: r.po_number != null ? String(r.po_number) : "",
         supplier: r.supplier || "",
         category: r.cost_category || "",
         trade: r.trade || "",
@@ -16483,7 +16484,7 @@ async function jobPoRows(env, jobId) {
   if (!env.PO_DB || !jobId) return [];
   try {
     const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, substr(COALESCE(issued_at,cost_entered_at),1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
+      "SELECT po_number, engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, substr(COALESCE(issued_at,cost_entered_at),1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
     ).bind(String(jobId)).all();
     return results || [];
   } catch {
@@ -21537,6 +21538,10 @@ async function getPOs(db, params) {
     const term = "%" + params.get("search").toLowerCase() + "%";
     query += ` AND (CAST(po_number AS TEXT) LIKE ? OR LOWER(engineer_name) LIKE ? OR LOWER(site) LIKE ? OR LOWER(incident_no) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(description) LIKE ? OR LOWER(flag_reason) LIKE ? OR LOWER(credit_note) LIKE ?)`;
     binds.push(term, term, term, term, term, term, term, term);
+  }
+  if (params.get("job_id")) {
+    query += ` AND job_id = ?`;
+    binds.push(params.get("job_id"));
   }
   query += ` ORDER BY po_number DESC LIMIT 1000`;
   return (await db.prepare(query).bind(...binds).all()).results;
