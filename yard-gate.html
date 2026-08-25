@@ -202,7 +202,7 @@ function getLoc(){
     navigator.geolocation.getCurrentPosition(
       p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
       err=>rej(err),
-      {enableHighAccuracy:true,timeout:12000,maximumAge:20000}
+      {enableHighAccuracy:true,timeout:12000,maximumAge:0}   // fresh fix every time; re-prompts unless "always allow"
     );
   });
 }
