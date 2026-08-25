@@ -189,6 +189,9 @@ $("refreshBtn").addEventListener("click", loadState);
 /* ---- setup (Full-Access) ---- */
 async function loadCfg(){
   if(!isFull) return;
+  // The device config is pre-seeded and deliberately hidden from the portal.
+  // A Full-Access user can still reach it for maintenance via ?setup=1.
+  if(new URLSearchParams(location.search).get("setup")!=="1") return;
   $("setupCard").style.display="";
   try{
     const r=await aFetch("/tuya/config"); const j=await r.json();

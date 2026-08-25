@@ -2938,9 +2938,12 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron pushes
   the owner+YardGate holders if the gate's left open past `thresholdMins`.
 - **Front-end yard-gate.html** (🚪 tile, YardGate perm): Open (green) + **Close
-  (red)** buttons, live open/closed state, access log, and a Full-Access setup
-  panel (device id + codes + a "read device" DP dump). **Dormant until the two
-  secrets are added AND `tuya:config.gateDeviceId` is set.**
+  (red)** buttons, live open/closed state, access log. **The setup panel is
+  HIDDEN by default** — `tuya:config` is pre-seeded in app_config (gateDeviceId
+  `bf7240c4db7fedd458froe`, switch_1/true) so nobody needs to configure it; a
+  Full-Access user can still reach the setup form for maintenance via
+  **`yard-gate.html?setup=1`**. **Still dormant until the two secrets are added +
+  Deployed** (device config is already in place).
 
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system
