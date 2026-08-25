@@ -76,13 +76,15 @@
       <div id="logList" class="muted">Loading…</div>
     </div>
 
-    <!-- ACCESS HOURS (Full-Access only) -->
+    <!-- ACCESS HOURS — per user (Full-Access only) -->
     <div class="card" id="accessCard" style="display:none">
-      <h2>⏰ Access hours</h2>
-      <p class="sub">Limit when the gate can be operated. Full-Access users are always allowed. No windows = no restriction. Times are UK time.</p>
+      <h2>⏰ Access hours (per user)</h2>
+      <p class="sub">Limit when a specific person can operate the gate. Full-Access users are always allowed. No windows = that person has no restriction. Times are UK time.</p>
+      <div style="margin:0 0 10px"><label class="f" style="font-size:13px;font-weight:600">Person</label><br><select id="accUser" style="min-width:220px;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"></select></div>
       <div id="accWindows"></div>
-      <button id="accAdd" class="btn small">＋ Add a window</button>
-      <div style="margin-top:12px"><button id="accSave" class="btn primary">Save access hours</button> <span id="accMsg" class="muted"></span></div>
+      <button id="accAdd" class="btn small" type="button">＋ Add a window</button>
+      <div style="margin-top:12px"><button id="accSave" class="btn primary" type="button">Save hours for this person</button> <span id="accMsg" class="muted"></span></div>
+      <div id="accWho" class="sub" style="margin-top:10px"></div>
     </div>
 
     <!-- SETUP (Full-Access only) -->
@@ -344,16 +346,35 @@ function renderAcc(){
   host.querySelectorAll("[data-accto]").forEach(inp=>inp.onchange=()=>{ ACC[+inp.dataset.accto].to=inp.value; });
   host.querySelectorAll("[data-accrm]").forEach(b=>b.onclick=()=>{ ACC.splice(+b.dataset.accrm,1); renderAcc(); });
 }
+const normU = u => String(u||"").toLowerCase().trim();
+let ACC_BYUSER = {};  // { lowerUsername: [windows] }
+function accReloadForUser(){ const u=$("accUser").value; ACC=(ACC_BYUSER[normU(u)]||[]).map(w=>({days:(w.days||[]).slice(),from:w.from||"07:00",to:w.to||"18:00"})); renderAcc(); }
+function renderAccWho(){
+  const who=Object.keys(ACC_BYUSER).filter(k=>(ACC_BYUSER[k]||[]).length);
+  $("accWho").innerHTML = who.length ? ("Restricted: " + who.map(k=>esc(k)).join(", ") + ". Everyone else is unrestricted.") : "No one is restricted yet — everyone with gate access can operate any time.";
+}
 async function loadAccess(){
   if(!isFull) return;
   $("accessCard").style.display="";
-  try{ const r=await aFetch("/tuya/config"); const j=await r.json(); if(j.ok){ ACC=(((j.config||{}).access||{}).windows||[]).map(w=>({days:(w.days||[]).slice(),from:w.from||"07:00",to:w.to||"18:00"})); renderAcc(); } }catch{}
+  try{
+    const [cfgR, usersR] = await Promise.all([ aFetch("/tuya/config").then(r=>r.json()).catch(()=>({})), aFetch("/users").then(r=>r.json()).catch(()=>[]) ]);
+    ACC_BYUSER = (((cfgR.config||{}).access||{}).byUser)||{};
+    const users = Array.isArray(usersR) ? usersR : (usersR.users||[]);
+    const names = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+    $("accUser").innerHTML = names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    $("accUser").onchange = accReloadForUser;
+    accReloadForUser(); renderAccWho();
+  }catch{}
 }
 $("accAdd") && $("accAdd").addEventListener("click",()=>{ ACC.push({days:[1,2,3,4,5],from:"07:00",to:"18:00"}); renderAcc(); });
 $("accSave") && $("accSave").addEventListener("click", async ()=>{
-  const msg=$("accMsg"); msg.textContent="Saving…";
-  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({access:{windows:ACC}})}); const j=await r.json(); msg.textContent=j.ok?"Saved ✓":(j.error||"Couldn't save"); loadState(); }
-  catch{ msg.textContent="Couldn't save"; }
+  const msg=$("accMsg"), u=$("accUser").value; if(!u){ msg.textContent="Pick a person first"; return; }
+  msg.textContent="Saving…";
+  try{
+    const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessUser:u, accessWindows:ACC})}); const j=await r.json();
+    if(j.ok){ msg.textContent="Saved ✓"; ACC_BYUSER[normU(u)] = ACC.length ? ACC.map(w=>({days:w.days.slice(),from:w.from,to:w.to})) : undefined; if(!ACC.length) delete ACC_BYUSER[normU(u)]; renderAccWho(); loadState(); }
+    else msg.textContent = j.error||"Couldn't save";
+  }catch{ msg.textContent="Couldn't save"; }
 });
 $("markOpen") && $("markOpen").addEventListener("click",()=>markState(true));
 $("markClosed") && $("markClosed").addEventListener("click",()=>markState(false));

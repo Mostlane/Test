@@ -489,43 +489,6 @@
     else add();
   })();
 
-  // ── Yard-gate status banner (desktop admins) ──────────────────────────────
-  // A slim clickable bar at the top of every desktop page for Full-Access /
-  // YardGate users, showing the live gate state (Open/Closed) and linking to the
-  // controls. Reserves its height via --ml-topbar (same mechanism as the cap).
-  // Mobile keeps the menu tile instead; the desktop sidebar item was removed.
-  (function gateBanner() {
-    try {
-      if (window.self !== window.top) return;                                   // not in iframes
-      if (!window.matchMedia || !window.matchMedia("(min-width:1000px)").matches) return; // desktop only
-      var page = (location.pathname.split("/").pop() || "").toLowerCase();
-      if (/^(login|reset-password|forgot-password|onboard|memo-sign|yard-gate|programme-view|offline)/.test(page)) return;
-      var perms = {}; try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {}; } catch (e) {}
-      if (!(perms.FullAccess === "Yes" || perms.YardGate === "Yes")) return;
-      var API = window.MOSTLANE_API || "";
-      var bar = document.createElement("a");
-      bar.href = "yard-gate.html"; bar.id = "mlGateBar"; bar.title = "Open the yard gate controls";
-      bar.style.cssText = "position:fixed;top:0;left:0;right:0;height:34px;z-index:2147482500;display:none;align-items:center;justify-content:center;gap:10px;font:600 13.5px/1 'Segoe UI',system-ui,sans-serif;text-decoration:none;color:#fff;background:#475569;";
-      bar.innerHTML = '<span id="mlGateDot" style="width:10px;height:10px;border-radius:50%;background:#94a3b8"></span><span id="mlGateTxt">Yard gate…</span><span style="opacity:.85;font-weight:500">· controls ›</span>';
-      function mount() { if (document.body && !document.getElementById("mlGateBar")) document.body.appendChild(bar); }
-      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount); else mount();
-      function show(on) { bar.style.display = on ? "flex" : "none"; document.documentElement.style.setProperty("--ml-topbar", on ? "34px" : "0px"); }
-      function refresh() {
-        if (document.hidden) return;
-        fetch(API + "/tuya/gate/state", { headers: { Authorization: "Bearer " + (localStorage.getItem("mostlaneToken") || "") } })
-          .then(function (r) { return r.json(); }).then(function (j) {
-            if (!j || !j.ok || !j.configured) { show(false); return; }
-            show(true);
-            var open = !!j.open, dot = document.getElementById("mlGateDot"), txt = document.getElementById("mlGateTxt");
-            if (dot) dot.style.background = open ? "#fca5a5" : "#86efac";
-            if (txt) txt.textContent = "Yard gate: " + (open ? "OPEN" : "Closed") + (open && j.mins ? " · " + j.mins + " min" : "");
-            bar.style.background = open ? "#991b1b" : "#166534";
-          }).catch(function () {});
-      }
-      refresh(); setInterval(refresh, 60000);
-      document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
-    } catch (e) {}
-  })();
 
   // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
   // There are ~200 "Loading…" strings across ~80 pages, written every which way
@@ -998,7 +961,9 @@
         el.innerHTML =
           '<div class="pn-brand"><div class="pn-logobox">'
           + '<img class="full" src="/mostlane-logo.jpg" alt="Mostlane">'
-          + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div></div>'
+          + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div>'
+          + ((yes(perms.YardGate) || yes(perms.FullAccess)) ? '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Gate</span></a>' : '')
+          + '</div>'
           + '<nav class="pn-nav" id="pnavNav">' + navInner() + "</nav>"
           + '<div class="pn-foot"><div class="pn-av">' + esc(initials(name)) + "</div>"
           + '<div class="pn-who"><b>' + esc(name) + "</b><span>" + (yes(perms.FullAccess) ? "Full access" : "Team member") + "</span></div>"
@@ -1023,6 +988,27 @@
         try { initOfficeClock(); } catch (e) {}
         try { if (yes(perms.FullAccess)) refreshMenuConfig(); } catch (e) {}
         try { initPalette(); } catch (e) {}
+        try { initGateLight(); } catch (e) {}
+      }
+
+      // Yard-gate traffic light under the sidebar logo: green=closed, red=open.
+      function initGateLight() {
+        var el = document.getElementById("pnGate"); if (!el) return;
+        var API = window.MOSTLANE_API || "";
+        function refresh() {
+          if (document.hidden) return;
+          nativeFetch(API + "/tuya/gate/state", { headers: { "Authorization": "Bearer " + (localStorage.getItem("mostlaneToken") || "") } })
+            .then(function (r) { return r.json(); }).then(function (j) {
+              if (!j || !j.ok || !j.configured) { el.style.display = "none"; return; }
+              el.style.display = "";
+              var open = !!j.open;
+              el.className = "pn-gate " + (open ? "open" : "closed");
+              var lbl = el.querySelector(".pn-gate-lbl"); if (lbl) lbl.textContent = open ? "Gate open" : "Gate";
+              el.title = "Yard gate: " + (open ? "OPEN" : "Closed") + " — open controls";
+            }).catch(function () {});
+        }
+        refresh(); setInterval(refresh, 60000);
+        document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
       }
 
       // ── Command palette (Ctrl+K / Cmd+K, desktop) ──────────────────────────
@@ -1471,6 +1457,13 @@
           + "#pnav .pn-logobox{ background:#fff; border-radius:11px; padding:10px 12px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.18); }"
           + "#pnav .pn-logobox img.full{ width:100%; max-width:168px; height:auto; display:block; } #pnav .pn-logobox img.mark{ display:none; width:34px; height:34px; border-radius:7px; }"
           + "html.pnav-collapsed #pnav .pn-brand{ padding:12px 8px; } html.pnav-collapsed #pnav .pn-logobox{ padding:5px; } html.pnav-collapsed #pnav .pn-logobox img.full{ display:none; } html.pnav-collapsed #pnav .pn-logobox img.mark{ display:block; }"
+          // Yard-gate traffic light under the logo (desktop sidebar).
+          + "#pnav .pn-gate{ display:flex; align-items:center; gap:8px; margin:9px auto 0; padding:5px 11px; border-radius:999px; background:rgba(255,255,255,.13); color:#fff; text-decoration:none; font:600 12px/1 inherit; width:max-content; }"
+          + "#pnav .pn-gate:hover{ background:rgba(255,255,255,.22); }"
+          + "#pnav .pn-gate-dot{ width:11px; height:11px; border-radius:50%; background:#94a3b8; box-shadow:0 0 0 3px rgba(148,163,184,.28); flex:0 0 auto; }"
+          + "#pnav .pn-gate.open .pn-gate-dot{ background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.32); }"
+          + "#pnav .pn-gate.closed .pn-gate-dot{ background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.32); }"
+          + "html.pnav-collapsed #pnav .pn-gate{ padding:6px; margin-top:8px; }"
           + "#pnav .pn-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding:4px 10px 10px; }"
           + "#pnav .pn-grp{ margin-top:14px; } #pnav .pn-grp h4{ font-size:10.5px; text-transform:uppercase; letter-spacing:.9px; color:#9fc0e8; opacity:.75; margin:0 10px 5px; font-weight:600; white-space:nowrap; }"
           + "html.pnav-collapsed #pnav .pn-grp h4{ opacity:0; height:7px; margin:0; overflow:hidden; }"

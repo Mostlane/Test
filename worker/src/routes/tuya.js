@@ -220,36 +220,43 @@ function londonNow() {
   return { dow: wd[get("weekday")] ?? 0, mins: (parseInt(get("hour"), 10) || 0) * 60 + (parseInt(get("minute"), 10) || 0) };
 }
 function toMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? (+m[1] * 60 + +m[2]) : null; }
-function accessAllowed(cfg, now) {
-  const acc = cfg.access;
-  if (!acc || !Array.isArray(acc.windows) || !acc.windows.length) return true; // no restriction set
-  for (const w of acc.windows) {
+const DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const normU = u => String(u || "").toLowerCase().trim();
+// Access hours are now PER-USER: cfg.access.byUser[<lower username>] = {windows:[…]}.
+// A user with no windows set is unrestricted. Full-Access bypasses in the handler.
+function userWindows(cfg, username) {
+  const bu = (cfg.access && cfg.access.byUser) || {};
+  const w = bu[normU(username)];
+  return (w && Array.isArray(w.windows)) ? w.windows : [];
+}
+function accessAllowedForUser(cfg, username, now) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return true;   // no restriction for this user
+  for (const w of windows) {
     const days = Array.isArray(w.days) ? w.days.map(Number) : [];
     if (days.length && !days.includes(now.dow)) continue;
     const from = toMin(w.from), to = toMin(w.to);
     if (from == null || to == null) continue;
     if (from <= to) { if (now.mins >= from && now.mins <= to) return true; }
-    else { if (now.mins >= from || now.mins <= to) return true; }   // window crossing midnight
+    else { if (now.mins >= from || now.mins <= to) return true; }   // crossing midnight
   }
   return false;
 }
-const DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-function accessSummary(cfg) {
-  const acc = cfg.access;
-  if (!acc || !Array.isArray(acc.windows) || !acc.windows.length) return "";
-  return acc.windows.map(w => {
+function accessSummaryForUser(cfg, username) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return "";
+  return windows.map(w => {
     const days = (Array.isArray(w.days) && w.days.length) ? w.days.map(d => DOW_LABEL[d] || "?").join(",") : "every day";
     return `${days} ${w.from}–${w.to}`;
   }).join("; ");
 }
-function sanitiseAccess(a) {
-  if (!a || !Array.isArray(a.windows)) return { windows: [] };
-  const windows = a.windows.map(w => ({
+function sanitiseWindows(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(w => ({
     days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter(d => d >= 0 && d <= 6))] : [],
     from: toMin(w.from) != null ? w.from : "00:00",
     to: toMin(w.to) != null ? w.to : "23:59",
   })).slice(0, 14);
-  return { windows };
 }
 
 /* --------------------------------- handler -------------------------------- */
@@ -294,7 +301,16 @@ export async function handle(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === undefined) cfg.thresholdMins = 10;
     if (b.repeatMins !== undefined) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === undefined) cfg.repeatMins = 30;
-    if (b.access !== undefined) cfg.access = sanitiseAccess(b.access);   // allowed operating hours
+    // Per-user access hours: {accessUser, accessWindows} sets one user's windows.
+    if (b.accessUser !== undefined) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const key = normU(b.accessUser);
+      if (key) {
+        const win = sanitiseWindows(b.accessWindows || []);
+        if (win.length) cfg.access.byUser[key] = { windows: win };
+        else delete cfg.access.byUser[key];   // empty = clear this user's restriction
+      }
+    }
     if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera snapshot (safety check)
     if (!cfg.region) cfg.region = "eu";
     await saveCfg(db, cfg);
@@ -347,12 +363,12 @@ export async function handle(request, env, ctx, url, sess) {
     const cfg = await loadCfg(db);
     if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
-    // Access-hour restriction (Full-Access always allowed).
-    if (!isFull && !accessAllowed(cfg, londonNow())) {
-      const s = accessSummary(cfg);
-      return json({ ok: false, denied: "hours", error: "Gate access is outside the allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
-    }
     const user = (sess.user && sess.user.username) || "?";
+    // Per-user access-hour restriction (Full-Access always allowed).
+    if (!isFull && !accessAllowedForUser(cfg, user, londonNow())) {
+      const s = accessSummaryForUser(cfg, user);
+      return json({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
     const st = await getGateState(db);
     if (st.open === wantOpen) {
       return json({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
@@ -391,10 +407,11 @@ export async function handle(request, env, ctx, url, sess) {
     const st = await getGateState(db);
     const open = !!st.open, since = st.at || null;
     const mins = (open && since) ? Math.round((Date.now() - Date.parse(since)) / 60000) : 0;
+    const me = (sess.user && sess.user.username) || "";
     return json({
       ok: true, configured, watched: configured, tracked: true,
       open, since, mins, openedBy: open ? (st.by || null) : null,
-      access: accessSummary(cfg), allowedNow: accessAllowed(cfg, londonNow()),
+      access: accessSummaryForUser(cfg, me), allowedNow: isFull || accessAllowedForUser(cfg, me, londonNow()),
     });
   }
 
