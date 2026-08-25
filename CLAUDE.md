@@ -2807,7 +2807,11 @@ SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
 POST /prog/ai-draft calls api.anthropic.com; feature fails soft with a clear
-"add the key" message when unset) (secrets); optional var **ANTHROPIC_MODEL**
+"add the key" message when unset), **TUYA_ACCESS_ID** + **TUYA_ACCESS_SECRET**
+(yard gate — BOTH must be SECRETS, not Text vars: mostlane-api auto-deploys from
+git and a deploy replaces the dashboard [vars] with wrangler.toml's, so a Text
+var not in wrangler.toml is WIPED on the next deploy — this bit us once, the ID
+was a Text var and vanished while the Secret survived) (secrets); optional var **ANTHROPIC_MODEL**
 (defaults to `claude-sonnet-5`); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
@@ -2915,6 +2919,74 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   (not redirect — forward re-sends from mostlane.com so it passes SPF/DMARC at
   Cloudflare) to `jobs@<domain>`. Dormant until (1)+(2) are done — the `email`
   export just sits unused.
+
+## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
+The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device
+`bf7240c4db7fedd458froe`, Central Europe DC → `eu`/tuyaeu.com). It's a
+**LATCHING relay on channel 1 (`switch_1`)**: `switch_1=true` opens (gate stays
+open), `switch_1=false` closes (stays closed) — NOT a momentary pulse. The route
+signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
+- **Secrets (dashboard):** `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET` (Tuya IoT Cloud
+  project → Overview → Authorization Key). Device ids/DP codes live in app_config
+  `tuya:config` so they're editable without redeploy.
+- **`tuya:config`:** `{region:"eu", gateDeviceId, openCode:"switch_1", openValue:true,
+  closeCode?, closeValue?, stateDeviceId?, stateCode?, stateOpenValue?, thresholdMins:10,
+  repeatMins:30}`. **closeCode defaults to openCode, closeValue defaults to the
+  opposite of openValue** — so a latching gate needs only the open fields set.
+- **MOMENTARY/inching mode (the real gate):** the module PULSES switch_1 and the
+  FAAC toggles open↔close on each pulse — `false` does nothing. So **Open and
+  Close BOTH send the SAME pulse** (`pulseGate` = openCode/openValue); they differ
+  only in intent. The relay can't report state, so the portal **TRACKS it** in
+  app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
+  flips it. Open pulses only when tracked-closed, Close only when tracked-open
+  (so pressing Open twice can't accidentally close it); if already in the target
+  state it returns `already:true` without pulsing. `/tuya/gate/state` returns the
+  TRACKED state (not a device read — that's why it used to be stuck on "closed").
+  **Drift fix:** if the gate is used by fob/keypad, Full-Access can correct the
+  tracked state without a command via **POST /tuya/gate/set-state** `{open}` (the
+  "Mark open/closed" buttons). `readGateOpen`/`canReadState` remain for a future
+  real contact sensor but are unused in momentary mode.
+- **Access hours (PER USER):** `tuya:config.access.byUser[<lower username>] =
+  {windows:[{days:[0..6 Sun..Sat], from:"HH:MM", to:"HH:MM"}]}` (Europe/London;
+  a user with no windows is unrestricted; overnight windows supported). Enforced
+  server-side per operating user on open/close — **Full-Access always bypasses**;
+  a blocked op returns 403 `denied:"hours"`. Edited on the page's **⏰ Access
+  hours (per user)** card (FullAccess: pick a person → set their windows), saved
+  via POST /tuya/config `{accessUser, accessWindows}` (empty windows clears them).
+  `/tuya/gate/state` returns the caller's OWN summary + `allowedNow`.
+- **Endpoints** (YardGate|FullAccess to operate; FullAccess to configure): POST
+  /tuya/gate/open + /tuya/gate/close (both pulse), **POST /tuya/gate/set-state**
+  (FullAccess drift fix), GET /tuya/gate/state (tracked open/since/by + access
+  summary + allowedNow), GET /tuya/gate/log (entries `{user,action,device,at}`,
+  action open|close|mark-open|mark-closed, kept 100), config GET/POST,
+  device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron reads
+  the TRACKED state and pushes the owner+YardGate holders if left open past
+  `thresholdMins`.
+- **Safety check before EVERY operation:** Open/Close first open a confirm modal
+  ("safe to operate & clear of obstruction") — Cancel aborts, Proceed sends. The
+  modal shows a live **gate-camera snapshot** via **GET /tuya/gate/snapshot-url**
+  (YardGate|FullAccess): prefers a **CCTV-Wall camera** — `tuya:config.cameraSiteId`
+  + `cameraId` → `cctv.js cameraSnapshotUrl()` mints a signed `/cctv/snapshot` URL
+  (the DVR digest-auth proxy, so a non-admin can view without the DVR admin) —
+  else falls back to a plain `tuya:config.snapshotUrl`. Set the camera in the
+  gate setup (`?setup=1`) from a dropdown of CCTV-Wall cameras; add the (separate)
+  gate DVR to the **CCTV Wall** first. **Ring is NOT usable** (no browser-openable
+  snapshot without an always-on bridge). Snapshot refreshable + cache-busted.
+- **Desktop status light (portal-config.js `initGateLight`):** a small traffic
+  light UNDER the Mostlane logo in the desktop sidebar (`#pnGate`, green=closed /
+  red=open) for FullAccess/YardGate users, clickable → yard-gate.html. Polls
+  /tuya/gate/state (60s, paused when tab hidden); collapses to just the dot when
+  the sidebar is minimised. **The Yard Gate desktop SIDEBAR nav item was removed**
+  — desktop uses this light; mobile keeps the main.html menu tile. (An earlier
+  full-width top banner was replaced by this on request.)
+- **Front-end yard-gate.html** (🚪 tile mobile, YardGate perm): Open (green) + **Close
+  (red)** buttons (both pulse), live TRACKED open/closed state + access-hours line,
+  gate activity log (who/action/device/time), FullAccess **⏰ Access hours** editor
+  + **Mark open/closed** drift correction. **The device setup panel is HIDDEN** —
+  `tuya:config` is pre-seeded (gateDeviceId `bf7240c4db7fedd458froe`, switch_1/true);
+  a Full-Access user can reach the setup form for maintenance via
+  **`yard-gate.html?setup=1`**. Live once the two secrets are set (**both as
+  SECRETS** — a Text var is wiped by the next git deploy).
 
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system

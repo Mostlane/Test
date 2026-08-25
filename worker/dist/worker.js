@@ -21950,6 +21950,19 @@ var VENDOR_PATH = {
 function defaultCh(vendor, i) {
   return vendor === "dahua" ? String(i) : String(i * 100 + 1);
 }
+async function cameraSnapshotUrl(env, origin, siteId, cameraId) {
+  try {
+    const db = tenantDB(env, 1);
+    const sites = await loadSites(db);
+    const site = (sites || []).find((s) => String(s.id) === String(siteId));
+    if (!site) return null;
+    const cam = (site.cameras || []).find((c) => String(c.id) === String(cameraId)) || (site.cameras || [])[0];
+    if (!cam) return null;
+    return await signedFileUrl(env, origin, "/cctv/snapshot", `${site.id}:${cam.ch}`, 24 * 3600);
+  } catch {
+    return null;
+  }
+}
 async function loadSites(db) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY2).first();
   let sites = [];
@@ -25094,19 +25107,73 @@ async function deviceStatus(env, db, cfg, deviceId) {
   if (!jr7.success) throw new Error(jr7.msg || "device status failed");
   return Array.isArray(jr7.result) ? jr7.result : [];
 }
-async function readGateOpen(env, db, cfg) {
-  if (!cfg.stateDeviceId || !cfg.stateCode) return null;
-  const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
-  const dp = status.find((s) => s.code === cfg.stateCode);
-  if (!dp) return null;
-  const openVal = cfg.stateOpenValue === void 0 ? true : cfg.stateOpenValue;
-  return String(dp.value) === String(openVal);
+var STATE_KEY = "tuya:gatestate";
+async function getGateState(db) {
+  const s = await loadKV(db, STATE_KEY);
+  return s && typeof s === "object" ? { open: !!s.open, at: s.at || null, by: s.by || null, device: s.device || null } : { open: false, at: null, by: null, device: null };
 }
-async function attributeOpener(db, nowMs) {
-  const lastOpen = await loadKV(db, "tuya:lastopen");
-  if (!lastOpen || !lastOpen.at) return null;
-  const gap = nowMs - Date.parse(lastOpen.at);
-  return gap >= 0 && gap <= 8 * 6e4 ? lastOpen.user || null : null;
+async function setGateState(db, open, by, device, at) {
+  await saveKV(db, STATE_KEY, { open: !!open, at: at || (/* @__PURE__ */ new Date()).toISOString(), by: by || null, device: device || null });
+}
+async function pulseGate(env, db, cfg) {
+  const code = cfg.openCode || "switch_1";
+  const value = cfg.openValue === void 0 ? true : cfg.openValue;
+  const jr7 = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr: jr7, sent: { code, value } };
+}
+async function logGate(db, entry) {
+  const log = await loadKV(db, "tuya:openlog") || [];
+  log.unshift(entry);
+  await saveKV(db, "tuya:openlog", log.slice(0, 100));
+}
+function londonNow() {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(/* @__PURE__ */ new Date());
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value;
+  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: wd[get("weekday")] ?? 0, mins: (parseInt(get("hour"), 10) || 0) * 60 + (parseInt(get("minute"), 10) || 0) };
+}
+function toMin2(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ""));
+  return m ? +m[1] * 60 + +m[2] : null;
+}
+var DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var normU = (u) => String(u || "").toLowerCase().trim();
+function userWindows(cfg, username) {
+  const bu = cfg.access && cfg.access.byUser || {};
+  const w = bu[normU(username)];
+  return w && Array.isArray(w.windows) ? w.windows : [];
+}
+function accessAllowedForUser(cfg, username, now) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return true;
+  for (const w of windows) {
+    const days = Array.isArray(w.days) ? w.days.map(Number) : [];
+    if (days.length && !days.includes(now.dow)) continue;
+    const from = toMin2(w.from), to = toMin2(w.to);
+    if (from == null || to == null) continue;
+    if (from <= to) {
+      if (now.mins >= from && now.mins <= to) return true;
+    } else {
+      if (now.mins >= from || now.mins <= to) return true;
+    }
+  }
+  return false;
+}
+function accessSummaryForUser(cfg, username) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return "";
+  return windows.map((w) => {
+    const days = Array.isArray(w.days) && w.days.length ? w.days.map((d) => DOW_LABEL[d] || "?").join(",") : "every day";
+    return `${days} ${w.from}\u2013${w.to}`;
+  }).join("; ");
+}
+function sanitiseWindows(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((w) => ({
+    days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter((d) => d >= 0 && d <= 6))] : [],
+    from: toMin2(w.from) != null ? w.from : "00:00",
+    to: toMin2(w.to) != null ? w.to : "23:59"
+  })).slice(0, 14);
 }
 async function handle33(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -25137,6 +25204,8 @@ async function handle33(request, env, ctx, url, sess) {
     set("openCode", b.openCode != null ? String(b.openCode).trim() : void 0, "switch_1");
     if (b.openValue !== void 0) cfg.openValue = b.openValue;
     else if (cfg.openValue === void 0) cfg.openValue = true;
+    set("closeCode", b.closeCode != null ? String(b.closeCode).trim() : void 0, void 0);
+    if (b.closeValue !== void 0) cfg.closeValue = b.closeValue;
     set("stateDeviceId", b.stateDeviceId != null ? String(b.stateDeviceId).trim() : void 0, "");
     set("stateCode", b.stateCode != null ? String(b.stateCode).trim() : void 0, "");
     if (b.stateOpenValue !== void 0) cfg.stateOpenValue = b.stateOpenValue;
@@ -25144,6 +25213,18 @@ async function handle33(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === void 0) cfg.thresholdMins = 10;
     if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
+    if (b.accessUser !== void 0) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const key = normU(b.accessUser);
+      if (key) {
+        const win = sanitiseWindows(b.accessWindows || []);
+        if (win.length) cfg.access.byUser[key] = { windows: win };
+        else delete cfg.access.byUser[key];
+      }
+    }
+    if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
+    if (b.cameraSiteId !== void 0) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();
+    if (b.cameraId !== void 0) cfg.cameraId = String(b.cameraId || "").trim();
     if (!cfg.region) cfg.region = "eu";
     await saveCfg2(db, cfg);
     return json4({ ok: true, config: cfg });
@@ -25177,61 +25258,79 @@ async function handle33(request, env, ctx, url, sess) {
       return json4({ ok: false, error: String(e && e.message || e) }, 502);
     }
   }
-  if (path === "/tuya/gate/open" && method === "POST") {
+  if ((path === "/tuya/gate/open" || path === "/tuya/gate/close") && method === "POST") {
     if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const wantOpen = path === "/tuya/gate/open";
     const cfg = await loadCfg(db);
-    if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet \u2014 add the Tuya device in Yard Gate settings." }, 400);
+    if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
-    const code = cfg.openCode || "switch_1";
-    const value = cfg.openValue === void 0 ? true : cfg.openValue;
+    const user = sess.user && sess.user.username || "?";
+    if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow())) {
+      const s = accessSummaryForUser(cfg, user);
+      return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
+    const st = await getGateState(db);
+    if (st.open === wantOpen) {
+      return json4({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
+    }
     try {
-      const jr7 = await api(
-        env,
-        db,
-        cfg,
-        "POST",
-        `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
-        { commands: [{ code, value }] }
-      );
+      const { jr: jr7, sent } = await pulseGate(env, db, cfg);
       if (!jr7.success) return json4({ ok: false, error: jr7.msg || "Tuya rejected the command" }, 502);
       const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-      const opener = sess.user && sess.user.username || "?";
-      try {
-        await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
-        const log = await loadKV(db, "tuya:openlog") || [];
-        log.unshift({ user: opener, at: nowIso });
-        await saveKV(db, "tuya:openlog", log.slice(0, 50));
-      } catch {
-      }
-      return json4({ ok: true, sent: { code, value }, by: opener });
+      await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
+      await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });
+      if (wantOpen) await saveKV(db, "tuya:lastopen", { user, at: nowIso });
+      return json4({ ok: true, open: wantOpen, by: user, sent });
     } catch (e) {
       return json4({ ok: false, error: String(e && e.message || e) }, 502);
     }
+  }
+  if (path === "/tuya/gate/set-state" && method === "POST") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const open = !!b.open;
+    const user = sess.user && sess.user.username || "?";
+    const cfg = await loadCfg(db);
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    await setGateState(db, open, user, cfg.gateDeviceId, nowIso);
+    await logGate(db, { user, action: open ? "mark-open" : "mark-closed", device: cfg.gateDeviceId, at: nowIso });
+    return json4({ ok: true, open });
   }
   if (path === "/tuya/gate/state" && method === "GET") {
     if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     const configured = !!cfg.gateDeviceId;
-    const watched = !!(cfg.stateDeviceId && cfg.stateCode);
-    if (!watched) return json4({ ok: true, configured, watched: false });
-    try {
-      const open = await readGateOpen(env, db, cfg);
-      const watch = await loadKV(db, WATCH_KEY) || {};
-      let since = null, mins = 0, openedBy = null;
-      if (open) {
-        since = watch.open && watch.since ? watch.since : (/* @__PURE__ */ new Date()).toISOString();
-        mins = Math.round((Date.now() - Date.parse(since)) / 6e4);
-        openedBy = watch.openedBy || await attributeOpener(db, Date.now());
-      }
-      return json4({ ok: true, configured, watched: true, open: !!open, since, mins, openedBy });
-    } catch (e) {
-      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    const st = await getGateState(db);
+    const open = !!st.open, since = st.at || null;
+    const mins = open && since ? Math.round((Date.now() - Date.parse(since)) / 6e4) : 0;
+    const me = sess.user && sess.user.username || "";
+    return json4({
+      ok: true,
+      configured,
+      watched: configured,
+      tracked: true,
+      open,
+      since,
+      mins,
+      openedBy: open ? st.by || null : null,
+      access: accessSummaryForUser(cfg, me),
+      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow())
+    });
+  }
+  if (path === "/tuya/gate/snapshot-url" && method === "GET") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (cfg.cameraSiteId && cfg.cameraId) {
+      const u = await cameraSnapshotUrl(env, url.origin, cfg.cameraSiteId, cfg.cameraId);
+      if (u) return json4({ ok: true, url: u, source: "cctv" });
     }
+    if (cfg.snapshotUrl) return json4({ ok: true, url: cfg.snapshotUrl, source: "url" });
+    return json4({ ok: true, url: "" });
   }
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
     const log = await loadKV(db, "tuya:openlog") || [];
-    return json4({ ok: true, log: log.slice(0, 50) });
+    return json4({ ok: true, log: log.slice(0, 100) });
   }
   return json4({ ok: false, error: "Not found: " + path }, 404);
 }
@@ -25240,23 +25339,17 @@ async function checkGateLeftOpen(env, tenantId) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
     const db = tenantDB(env, tenantId);
     const cfg = await loadCfg(db);
-    if (!cfg.stateDeviceId || !cfg.stateCode) return;
-    const open = await readGateOpen(env, db, cfg);
-    if (open === null) return;
+    if (!cfg.gateDeviceId) return;
+    const st = await getGateState(db);
+    const open = !!st.open;
     const watch = await loadKV(db, WATCH_KEY) || {};
     const now = Date.now();
     if (!open) {
       if (watch.open) await saveKV(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
       return;
     }
-    let since, openedBy;
-    if (watch.open && watch.since) {
-      since = watch.since;
-      openedBy = watch.openedBy || null;
-    } else {
-      since = new Date(now).toISOString();
-      openedBy = await attributeOpener(db, now);
-    }
+    const since = st.at || watch.since || new Date(now).toISOString();
+    const openedBy = st.by || watch.openedBy || null;
     const openMins = Math.round((now - Date.parse(since)) / 6e4);
     const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
     const repeat = Math.max(5, parseInt(cfg.repeatMins, 10) || 30);

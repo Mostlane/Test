@@ -19,6 +19,7 @@
   .card h2{margin:0 0 4px;font-size:15px;font-weight:700;color:#003366;}
   .card p.sub{margin:0 0 14px;color:#64748b;font-size:13px;}
   .gatebtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:16px;padding:34px 16px;font:inherit;font-size:20px;font-weight:800;color:#fff;background:linear-gradient(160deg,#0b7d3e,#0a9c4a);cursor:pointer;box-shadow:0 6px 18px rgba(10,156,74,.35);transition:.12s;}
+  .gatebtn.close{background:linear-gradient(160deg,#b91c1c,#dc2626);box-shadow:0 6px 18px rgba(220,38,38,.35);margin-top:12px;}
   .gatebtn:active{transform:scale(.985);}
   .gatebtn[disabled]{opacity:.55;cursor:default;box-shadow:none;}
   .gatebtn .ico{font-size:40px;line-height:1;}
@@ -58,15 +59,32 @@
       <div id="stateBox" class="state unknown"><span class="dot"></span><span id="stateTxt">Checking gate…</span></div>
       <div style="height:14px"></div>
       <button id="openBtn" class="gatebtn"><span class="ico">🚪</span><span>Open the gate</span></button>
+      <button id="closeBtn" class="gatebtn close"><span class="ico">🔒</span><span>Close the gate</span></button>
       <div id="opMsg" class="msg"></div>
       <div style="text-align:center;margin-top:12px"><button id="refreshBtn" class="btn small">↻ Refresh state</button></div>
+      <div id="fixStateRow" style="display:none;text-align:center;margin-top:8px">
+        <span class="muted" style="font-size:12px">Status wrong (opened by fob)? Set it: </span>
+        <button id="markOpen" class="btn small">Mark open</button>
+        <button id="markClosed" class="btn small">Mark closed</button>
+      </div>
     </div>
 
-    <!-- RECENT OPENS (Full-Access only) -->
+    <!-- RECENT OPERATIONS (Full-Access only) -->
     <div class="card" id="logCard" style="display:none">
-      <h2>🕵️ Who opened the gate</h2>
-      <p class="sub">Every portal open is logged. Emergency keypad/fob opens aren't named (they don't go through the portal).</p>
+      <h2>🕵️ Gate activity</h2>
+      <p class="sub">Every portal open/close is logged with who, when and the device. Emergency keypad/fob opens aren't named (they don't go through the portal).</p>
       <div id="logList" class="muted">Loading…</div>
+    </div>
+
+    <!-- ACCESS HOURS — per user (Full-Access only) -->
+    <div class="card" id="accessCard" style="display:none">
+      <h2>⏰ Access hours (per user)</h2>
+      <p class="sub">Limit when a specific person can operate the gate. Full-Access users are always allowed. No windows = that person has no restriction. Times are UK time.</p>
+      <div style="margin:0 0 10px"><label class="f" style="font-size:13px;font-weight:600">Person</label><br><select id="accUser" style="min-width:220px;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"></select></div>
+      <div id="accWindows"></div>
+      <button id="accAdd" class="btn small" type="button">＋ Add a window</button>
+      <div style="margin-top:12px"><button id="accSave" class="btn primary" type="button">Save hours for this person</button> <span id="accMsg" class="muted"></span></div>
+      <div id="accWho" class="sub" style="margin-top:10px"></div>
     </div>
 
     <!-- SETUP (Full-Access only) -->
@@ -108,6 +126,12 @@
       </div>
       <div class="hint">On your FAAC 415L, set an E145 <b>OUT1/OUT2</b> (or the 452 warning-light) output to the "gate open" function, wire it into a Tuya contact sensor (share the 0V ground), then read that device below to find its state code.</div>
 
+      <hr style="border:none;border-top:1px solid #e6ecf3;margin:14px 0 10px;">
+      <div><label class="f">Gate camera (for the safety check)</label>
+        <select id="cCamera" style="min-width:240px;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"><option value="">— none —</option></select>
+        <div class="hint" id="cCamHint">Add the gate's DVR in the <b>CCTV Wall</b> first, then pick its camera here — the snapshot then shows in the safety dialog.</div>
+      </div>
+
       <div style="margin-top:14px"><button id="saveCfg" class="btn primary">Save setup</button> <span id="cfgMsg" class="muted"></span></div>
 
       <details class="setup" style="margin-top:16px">
@@ -122,6 +146,27 @@
     </div>
 
     <p class="muted" style="text-align:center">The keypad still works as normal — this is an extra way in, logged every time.</p>
+  </div>
+
+  <!-- Safety check before any gate operation -->
+  <div id="safetyModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;padding:16px;overflow:auto;">
+    <div style="max-width:460px;margin:7vh auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.35);">
+      <div style="padding:16px;">
+        <h2 id="safetyTitle" style="margin:0 0 8px;font-size:19px;">⚠️ Safety check</h2>
+        <p style="margin:0 0 12px;">Confirm the gate is <b>safe to operate</b> and <b>clear of any obstruction, vehicles or people</b> before continuing.</p>
+        <div id="safetyCam" style="display:none;margin:0 0 8px;">
+          <img id="safetyCamImg" alt="Gate camera" style="width:100%;border-radius:10px;background:#111;min-height:140px;object-fit:cover;display:block;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span class="muted" id="safetyCamMsg" style="font-size:12px"></span>
+            <button id="safetyCamRefresh" class="btn small" type="button">↻ Refresh</button>
+          </div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e6ecf3;display:flex;justify-content:space-between;gap:10px;">
+        <button id="safetyCancel" class="btn" type="button">Cancel</button>
+        <button id="safetyOk" class="gatebtn" type="button" style="width:auto;padding:12px 18px;font-size:15px;">✓ Safe — proceed</button>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -142,23 +187,31 @@ async function loadState(){
   try{
     const r=await aFetch("/tuya/gate/state"); const j=await r.json();
     if(!j.ok){ box.className="state unknown"; txt.textContent=j.error||"Couldn't read the gate"; return; }
-    if(!j.configured){ box.className="state unknown"; txt.innerHTML="Not set up yet"+(isFull?" — open <b>Gate setup</b> below.":"."); return; }
-    if(!j.watched){ box.className="state unknown"; txt.innerHTML="Gate ready. <small>No open/closed sensor configured.</small>"; return; }
+    if(!j.configured){ box.className="state unknown"; txt.innerHTML="Not set up yet"+(isFull?".":"."); $("fixStateRow").style.display="none"; return; }
+    $("fixStateRow").style.display = isFull ? "" : "none";
+    // Access-hours line (server tells us the summary + whether we're inside it now).
+    const accLine = j.access ? `<small>Access hours: ${esc(j.access)}${j.allowedNow===false?" — <b>closed to non-admins now</b>":""}</small>` : "";
     if(j.open){
-      const who = j.openedBy ? ` — opened by ${esc(j.openedBy)}` : "";
+      const who = j.openedBy ? ` by ${esc(j.openedBy)}` : "";
       box.className="state open";
-      txt.innerHTML="Gate is OPEN"+(j.mins?` <small>for ${j.mins} min${who}</small>`:(who?` <small>${who.replace(/^ — /,"")}</small>`:""));
+      txt.innerHTML="Gate is OPEN"+(j.mins?` <small>for ${j.mins} min${who?" ·"+who:""}</small>`:(who?` <small>${who.replace(/^ /,"")}</small>`:""))+(accLine?`<br>${accLine}`:"");
     }
-    else { box.className="state closed"; txt.innerHTML="Gate is closed"; }
+    else { box.className="state closed"; txt.innerHTML="Gate is closed"+(accLine?`<br>${accLine}`:""); }
   }catch(e){ box.className="state unknown"; txt.textContent="Offline — can't reach the portal"; }
 }
+async function markState(open){
+  try{ await aFetch("/tuya/gate/set-state",{method:"POST",body:JSON.stringify({open})}); }catch(e){}
+  loadState(); loadLog();
+}
 async function openGate(){
-  if(busy) return; busy=true;
+  if(busy) return;
+  if(!await askSafety("Open the gate")) return;
+  busy=true;
   const b=$("openBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
   b.querySelector("span:last-child").textContent="Opening…";
   try{
     const r=await aFetch("/tuya/gate/open",{method:"POST",body:JSON.stringify({})}); const j=await r.json();
-    if(j.ok){ m.className="msg ok"; m.textContent="✓ Open signal sent to the gate."; }
+    if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already open.")) : "✓ Open signal sent to the gate."; }
     else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
   }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
   finally{
@@ -166,12 +219,61 @@ async function openGate(){
     setTimeout(()=>{ b.disabled=false; busy=false; loadState(); loadLog(); }, 1500);
   }
 }
+async function closeGate(){
+  if(busy) return;
+  if(!await askSafety("Close the gate")) return;
+  busy=true;
+  const b=$("closeBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
+  b.querySelector("span:last-child").textContent="Closing…";
+  try{
+    const r=await aFetch("/tuya/gate/close",{method:"POST",body:JSON.stringify({})}); const j=await r.json();
+    if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already closed.")) : "✓ Close signal sent to the gate."; }
+    else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
+  }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
+  finally{
+    b.querySelector("span:last-child").textContent="Close the gate";
+    setTimeout(()=>{ b.disabled=false; busy=false; loadState(); loadLog(); }, 1500);
+  }
+}
+/* ---- safety check (obstruction) before any operation ---- */
+let _safetyResolve=null;
+function askSafety(actionLabel){
+  return new Promise(res=>{
+    _safetyResolve=res;
+    $("safetyTitle").textContent="⚠️ Safety check — "+actionLabel;
+    $("safetyModal").style.display="block";
+    loadGateSnapshot();
+  });
+}
+function closeSafety(ok){ $("safetyModal").style.display="none"; const r=_safetyResolve; _safetyResolve=null; if(r) r(!!ok); }
+$("safetyOk") && $("safetyOk").addEventListener("click",()=>closeSafety(true));
+$("safetyCancel") && $("safetyCancel").addEventListener("click",()=>closeSafety(false));
+$("safetyModal") && $("safetyModal").addEventListener("click",e=>{ if(e.target===$("safetyModal")) closeSafety(false); });
+$("safetyCamRefresh") && $("safetyCamRefresh").addEventListener("click",loadGateSnapshot);
+// Live gate snapshot in the safety dialog — shown only if a snapshot URL is set
+// in the gate config (config.snapshotUrl). A cache-buster forces a fresh frame.
+async function loadGateSnapshot(){
+  const wrap=$("safetyCam"), img=$("safetyCamImg"), msg=$("safetyCamMsg");
+  try{
+    const r=await aFetch("/tuya/gate/snapshot-url"); const j=await r.json();
+    const url=(j&&j.url)||"";
+    if(!url){ wrap.style.display="none"; return; }
+    wrap.style.display=""; msg.textContent="Loading…";
+    img.onload=()=>{ msg.textContent="Updated "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
+    img.onerror=()=>{ msg.textContent="Snapshot unavailable — check the camera in the CCTV Wall."; };
+    img.src=url+(url.includes("?")?"&":"?")+"_="+Date.now();
+  }catch{ wrap.style.display="none"; }
+}
 $("openBtn").addEventListener("click", openGate);
+$("closeBtn").addEventListener("click", closeGate);
 $("refreshBtn").addEventListener("click", loadState);
 
 /* ---- setup (Full-Access) ---- */
 async function loadCfg(){
   if(!isFull) return;
+  // The device config is pre-seeded and deliberately hidden from the portal.
+  // A Full-Access user can still reach it for maintenance via ?setup=1.
+  if(new URLSearchParams(location.search).get("setup")!=="1") return;
   $("setupCard").style.display="";
   try{
     const r=await aFetch("/tuya/config"); const j=await r.json();
@@ -187,6 +289,17 @@ async function loadCfg(){
     $("cStateVal").value=String(c.stateOpenValue===false?false:true);
     $("cThreshold").value=c.thresholdMins||10;
     $("cRepeat").value=c.repeatMins||30;
+    // Gate-camera picker: list CCTV-Wall cameras (Full-Access).
+    try{
+      const cr=await aFetch("/cctv/sites"); const cj=await cr.json();
+      const opts=['<option value="">— none —</option>'];
+      (cj.sites||[]).forEach(s=>(s.cameras||[]).forEach(cam=>{
+        const val=s.id+"|"+cam.id, sel=(c.cameraSiteId===s.id && c.cameraId===cam.id)?" selected":"";
+        opts.push(`<option value="${val}"${sel}>${(s.name||"DVR")} — ${(cam.name||"Camera")}</option>`);
+      }));
+      $("cCamera").innerHTML=opts.join("");
+      if(!(cj.sites||[]).some(s=>(s.cameras||[]).length)) $("cCamHint").innerHTML='No DVR cameras yet — add the gate’s DVR in the <b>CCTV Wall</b> first, then it appears here.';
+    }catch{}
   }catch{}
 }
 $("saveCfg") && $("saveCfg").addEventListener("click", async ()=>{
@@ -202,6 +315,8 @@ $("saveCfg") && $("saveCfg").addEventListener("click", async ()=>{
     thresholdMins:parseInt($("cThreshold").value,10)||10,
     repeatMins:parseInt($("cRepeat").value,10)||30,
   };
+  var camSel=($("cCamera").value||"").split("|");
+  body.cameraSiteId=camSel[0]||""; body.cameraId=camSel[1]||"";
   try{
     const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
     msg.textContent=j.ok?"Saved ✓":(j.error||"Failed");
@@ -228,12 +343,62 @@ async function loadLog(){
   try{
     const r=await aFetch("/tuya/gate/log"); const j=await r.json();
     const list=$("logList");
-    if(!j.ok || !(j.log||[]).length){ list.innerHTML='<span class="muted">No opens logged yet.</span>'; return; }
-    list.innerHTML=j.log.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef2f7"><b>${esc(e.user)}</b><span class="muted">${esc(whenTxt(e.at))}</span></div>`).join("");
+    if(!j.ok || !(j.log||[]).length){ list.innerHTML='<span class="muted">No activity logged yet.</span>'; return; }
+    const actTxt = a => a==="close"?"🔒 Closed":a==="mark-open"?"✎ Marked open":a==="mark-closed"?"✎ Marked closed":"🚪 Opened";
+    list.innerHTML=j.log.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef2f7">
+      <span>${actTxt(e.action)} by <b>${esc(e.user)}</b>${e.device?`<br><span class="muted" style="font-size:11px">device ${esc(e.device)}</span>`:""}</span>
+      <span class="muted" style="white-space:nowrap">${esc(whenTxt(e.at))}</span></div>`).join("");
   }catch{ $("logList").innerHTML='<span class="muted">Couldn’t load the log.</span>'; }
 }
+/* ---- access hours (Full-Access) ---- */
+let ACC=[]; // [{days:[0..6], from:"HH:MM", to:"HH:MM"}]
+const DOWS=[["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
+function renderAcc(){
+  const host=$("accWindows"); if(!host) return;
+  if(!ACC.length){ host.innerHTML='<p class="muted" style="margin:0 0 8px">No restriction — the gate can be operated any time.</p>'; return; }
+  host.innerHTML=ACC.map((w,i)=>`<div style="border:1px solid #e6ecf3;border-radius:10px;padding:10px;margin-bottom:8px">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px">${DOWS.map(([lbl,d])=>`<label style="font-size:13px;white-space:nowrap"><input type="checkbox" data-accd="${i}:${d}" ${(w.days||[]).includes(d)?"checked":""}> ${lbl}</label>`).join("")}</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">From <input type="time" data-accfrom="${i}" value="${esc(w.from||"07:00")}"> to <input type="time" data-accto="${i}" value="${esc(w.to||"18:00")}"> <button class="btn small" data-accrm="${i}" style="margin-left:auto">Remove</button></div>
+  </div>`).join("");
+  host.querySelectorAll("[data-accd]").forEach(cb=>cb.onchange=()=>{ const [i,d]=cb.dataset.accd.split(":").map(Number); const w=ACC[i]; w.days=w.days||[]; if(cb.checked){ if(!w.days.includes(d)) w.days.push(d); } else w.days=w.days.filter(x=>x!==d); });
+  host.querySelectorAll("[data-accfrom]").forEach(inp=>inp.onchange=()=>{ ACC[+inp.dataset.accfrom].from=inp.value; });
+  host.querySelectorAll("[data-accto]").forEach(inp=>inp.onchange=()=>{ ACC[+inp.dataset.accto].to=inp.value; });
+  host.querySelectorAll("[data-accrm]").forEach(b=>b.onclick=()=>{ ACC.splice(+b.dataset.accrm,1); renderAcc(); });
+}
+const normU = u => String(u||"").toLowerCase().trim();
+let ACC_BYUSER = {};  // { lowerUsername: [windows] }
+function accReloadForUser(){ const u=$("accUser").value; ACC=(ACC_BYUSER[normU(u)]||[]).map(w=>({days:(w.days||[]).slice(),from:w.from||"07:00",to:w.to||"18:00"})); renderAcc(); }
+function renderAccWho(){
+  const who=Object.keys(ACC_BYUSER).filter(k=>(ACC_BYUSER[k]||[]).length);
+  $("accWho").innerHTML = who.length ? ("Restricted: " + who.map(k=>esc(k)).join(", ") + ". Everyone else is unrestricted.") : "No one is restricted yet — everyone with gate access can operate any time.";
+}
+async function loadAccess(){
+  if(!isFull) return;
+  $("accessCard").style.display="";
+  try{
+    const [cfgR, usersR] = await Promise.all([ aFetch("/tuya/config").then(r=>r.json()).catch(()=>({})), aFetch("/users").then(r=>r.json()).catch(()=>[]) ]);
+    ACC_BYUSER = (((cfgR.config||{}).access||{}).byUser)||{};
+    const users = Array.isArray(usersR) ? usersR : (usersR.users||[]);
+    const names = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+    $("accUser").innerHTML = names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    $("accUser").onchange = accReloadForUser;
+    accReloadForUser(); renderAccWho();
+  }catch{}
+}
+$("accAdd") && $("accAdd").addEventListener("click",()=>{ ACC.push({days:[1,2,3,4,5],from:"07:00",to:"18:00"}); renderAcc(); });
+$("accSave") && $("accSave").addEventListener("click", async ()=>{
+  const msg=$("accMsg"), u=$("accUser").value; if(!u){ msg.textContent="Pick a person first"; return; }
+  msg.textContent="Saving…";
+  try{
+    const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessUser:u, accessWindows:ACC})}); const j=await r.json();
+    if(j.ok){ msg.textContent="Saved ✓"; ACC_BYUSER[normU(u)] = ACC.length ? ACC.map(w=>({days:w.days.slice(),from:w.from,to:w.to})) : undefined; if(!ACC.length) delete ACC_BYUSER[normU(u)]; renderAccWho(); loadState(); }
+    else msg.textContent = j.error||"Couldn't save";
+  }catch{ msg.textContent="Couldn't save"; }
+});
+$("markOpen") && $("markOpen").addEventListener("click",()=>markState(true));
+$("markClosed") && $("markClosed").addEventListener("click",()=>markState(false));
 
-loadState(); loadCfg(); loadLog();
+loadState(); loadCfg(); loadLog(); loadAccess();
 setInterval(loadState, 30000);
 </script>
 </body>

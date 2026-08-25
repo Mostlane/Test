@@ -36,6 +36,7 @@ import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
 import { sendToPermission } from "./push.js";
+import { cameraSnapshotUrl } from "./cctv.js";
 
 const CFG_KEY = "tuya:config";
 const TOK_KEY = "tuya:token";
@@ -146,13 +147,30 @@ async function deviceStatus(env, db, cfg, deviceId) {
 // Read the gate-open boolean from the configured sensor DP. Returns null when
 // no state device/code is configured (i.e. nothing to watch yet).
 async function readGateOpen(env, db, cfg) {
-  if (!cfg.stateDeviceId || !cfg.stateCode) return null;
-  const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
-  const dp = status.find(s => s.code === cfg.stateCode);
-  if (!dp) return null;
-  const openVal = (cfg.stateOpenValue === undefined) ? true : cfg.stateOpenValue;
-  // Compare loosely so "true"/true/1 all match a configured open value.
-  return String(dp.value) === String(openVal);
+  // 1) A dedicated contact sensor, if one is configured (momentary-pulse gates).
+  if (cfg.stateDeviceId && cfg.stateCode) {
+    const status = await deviceStatus(env, db, cfg, cfg.stateDeviceId);
+    const dp = status.find(s => s.code === cfg.stateCode);
+    if (!dp) return null;
+    const openVal = (cfg.stateOpenValue === undefined) ? true : cfg.stateOpenValue;
+    // Compare loosely so "true"/true/1 all match a configured open value.
+    return String(dp.value) === String(openVal);
+  }
+  // 2) LATCHING relay (this gate): the OPEN switch's own value IS the state —
+  //    on = open, off = closed — so no separate sensor is needed.
+  if (cfg.gateDeviceId) {
+    const code = cfg.openCode || "switch_1";
+    const status = await deviceStatus(env, db, cfg, cfg.gateDeviceId);
+    const dp = status.find(s => s.code === code);
+    if (!dp) return null;
+    const openVal = (cfg.openValue === undefined) ? true : cfg.openValue;
+    return String(dp.value) === String(openVal);
+  }
+  return null;
+}
+// Can we read a gate open/closed state at all — via a sensor OR the latching relay?
+function canReadState(cfg) {
+  return !!((cfg.stateDeviceId && cfg.stateCode) || (cfg.gateDeviceId && (cfg.openCode || "switch_1")));
 }
 
 // Name whoever opened the gate, IF a portal open happened recently enough to be
@@ -164,6 +182,82 @@ async function attributeOpener(db, nowMs) {
   if (!lastOpen || !lastOpen.at) return null;
   const gap = nowMs - Date.parse(lastOpen.at);
   return (gap >= 0 && gap <= 8 * 60000) ? (lastOpen.user || null) : null;
+}
+
+/* ------------------------- tracked open/closed state ---------------------- */
+// The relay is momentary/inching (a pulse that TOGGLES the FAAC), so the switch
+// DP never holds "open" — we can't read the gate's state from the device. We
+// therefore TRACK it ourselves: each successful open/close pulse records the new
+// state here. `tuya:gatestate` = { open, at, by, device }.
+const STATE_KEY = "tuya:gatestate";
+async function getGateState(db) {
+  const s = await loadKV(db, STATE_KEY);
+  return (s && typeof s === "object") ? { open: !!s.open, at: s.at || null, by: s.by || null, device: s.device || null } : { open: false, at: null, by: null, device: null };
+}
+async function setGateState(db, open, by, device, at) {
+  await saveKV(db, STATE_KEY, { open: !!open, at: at || new Date().toISOString(), by: by || null, device: device || null });
+}
+// Send the single pulse (openCode=openValue) — the ONE command both Open and
+// Close use, because the gate toggles on each pulse.
+async function pulseGate(env, db, cfg) {
+  const code = cfg.openCode || "switch_1";
+  const value = (cfg.openValue === undefined) ? true : cfg.openValue;
+  const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr, sent: { code, value } };
+}
+async function logGate(db, entry) {
+  const log = (await loadKV(db, "tuya:openlog")) || [];
+  log.unshift(entry);
+  await saveKV(db, "tuya:openlog", log.slice(0, 100));
+}
+
+/* --------------------------- access-hour windows -------------------------- */
+// cfg.access = { windows:[{days:[0..6], from:"HH:MM", to:"HH:MM"}] } — days are
+// Sun=0..Sat=6, times in Europe/London. Empty/absent = no restriction.
+function londonNow() {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
+  const get = t => (parts.find(p => p.type === t) || {}).value;
+  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: wd[get("weekday")] ?? 0, mins: (parseInt(get("hour"), 10) || 0) * 60 + (parseInt(get("minute"), 10) || 0) };
+}
+function toMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? (+m[1] * 60 + +m[2]) : null; }
+const DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const normU = u => String(u || "").toLowerCase().trim();
+// Access hours are now PER-USER: cfg.access.byUser[<lower username>] = {windows:[…]}.
+// A user with no windows set is unrestricted. Full-Access bypasses in the handler.
+function userWindows(cfg, username) {
+  const bu = (cfg.access && cfg.access.byUser) || {};
+  const w = bu[normU(username)];
+  return (w && Array.isArray(w.windows)) ? w.windows : [];
+}
+function accessAllowedForUser(cfg, username, now) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return true;   // no restriction for this user
+  for (const w of windows) {
+    const days = Array.isArray(w.days) ? w.days.map(Number) : [];
+    if (days.length && !days.includes(now.dow)) continue;
+    const from = toMin(w.from), to = toMin(w.to);
+    if (from == null || to == null) continue;
+    if (from <= to) { if (now.mins >= from && now.mins <= to) return true; }
+    else { if (now.mins >= from || now.mins <= to) return true; }   // crossing midnight
+  }
+  return false;
+}
+function accessSummaryForUser(cfg, username) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return "";
+  return windows.map(w => {
+    const days = (Array.isArray(w.days) && w.days.length) ? w.days.map(d => DOW_LABEL[d] || "?").join(",") : "every day";
+    return `${days} ${w.from}–${w.to}`;
+  }).join("; ");
+}
+function sanitiseWindows(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(w => ({
+    days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter(d => d >= 0 && d <= 6))] : [],
+    from: toMin(w.from) != null ? w.from : "00:00",
+    to: toMin(w.to) != null ? w.to : "23:59",
+  })).slice(0, 14);
 }
 
 /* --------------------------------- handler -------------------------------- */
@@ -198,6 +292,9 @@ export async function handle(request, env, ctx, url, sess) {
     set("openCode", b.openCode != null ? String(b.openCode).trim() : undefined, "switch_1");
     if (b.openValue !== undefined) cfg.openValue = b.openValue;
     else if (cfg.openValue === undefined) cfg.openValue = true;
+    // Latching gates need a CLOSE too (same channel, opposite value by default).
+    set("closeCode", b.closeCode != null ? String(b.closeCode).trim() : undefined, undefined);
+    if (b.closeValue !== undefined) cfg.closeValue = b.closeValue;
     set("stateDeviceId", b.stateDeviceId != null ? String(b.stateDeviceId).trim() : undefined, "");
     set("stateCode", b.stateCode != null ? String(b.stateCode).trim() : undefined, "");
     if (b.stateOpenValue !== undefined) cfg.stateOpenValue = b.stateOpenValue;
@@ -205,6 +302,19 @@ export async function handle(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === undefined) cfg.thresholdMins = 10;
     if (b.repeatMins !== undefined) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === undefined) cfg.repeatMins = 30;
+    // Per-user access hours: {accessUser, accessWindows} sets one user's windows.
+    if (b.accessUser !== undefined) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const key = normU(b.accessUser);
+      if (key) {
+        const win = sanitiseWindows(b.accessWindows || []);
+        if (win.length) cfg.access.byUser[key] = { windows: win };
+        else delete cfg.access.byUser[key];   // empty = clear this user's restriction
+      }
+    }
+    if (b.snapshotUrl !== undefined) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);  // gate camera: a direct image URL (fallback)
+    if (b.cameraSiteId !== undefined) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();             // gate camera: a CCTV-Wall site+camera (preferred)
+    if (b.cameraId !== undefined) cfg.cameraId = String(b.cameraId || "").trim();
     if (!cfg.region) cfg.region = "eu";
     await saveCfg(db, cfg);
     return json({ ok: true, config: cfg });
@@ -247,61 +357,86 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ---- operate: YardGate | FullAccess ----
-  if (path === "/tuya/gate/open" && method === "POST") {
+  // Open / Close BOTH send the same pulse (the gate toggles); the portal tracks
+  // which way it left the gate. Only pulses when a change is needed, so pressing
+  // Open twice can't accidentally close it.
+  if ((path === "/tuya/gate/open" || path === "/tuya/gate/close") && method === "POST") {
     if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
+    const wantOpen = path === "/tuya/gate/open";
     const cfg = await loadCfg(db);
-    if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet — add the Tuya device in Yard Gate settings." }, 400);
+    if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
-    const code = cfg.openCode || "switch_1";
-    const value = (cfg.openValue === undefined) ? true : cfg.openValue;
+    const user = (sess.user && sess.user.username) || "?";
+    // Per-user access-hour restriction (Full-Access always allowed).
+    if (!isFull && !accessAllowedForUser(cfg, user, londonNow())) {
+      const s = accessSummaryForUser(cfg, user);
+      return json({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
+    const st = await getGateState(db);
+    if (st.open === wantOpen) {
+      return json({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
+    }
     try {
-      const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
-        { commands: [{ code, value }] });
+      const { jr, sent } = await pulseGate(env, db, cfg);
       if (!jr.success) return json({ ok: false, error: jr.msg || "Tuya rejected the command" }, 502);
-      // Access record: the portal is now the way in, so log WHO opened it. The
-      // audit middleware already records the action; this dedicated log powers
-      // the on-page history and lets the left-open alert name the opener.
       const nowIso = new Date().toISOString();
-      const opener = (sess.user && sess.user.username) || "?";
-      try {
-        await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
-        const log = (await loadKV(db, "tuya:openlog")) || [];
-        log.unshift({ user: opener, at: nowIso });
-        await saveKV(db, "tuya:openlog", log.slice(0, 50));
-      } catch {}
-      return json({ ok: true, sent: { code, value }, by: opener });
+      await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
+      await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });
+      if (wantOpen) await saveKV(db, "tuya:lastopen", { user, at: nowIso });
+      return json({ ok: true, open: wantOpen, by: user, sent });
     } catch (e) {
       return json({ ok: false, error: String(e && e.message || e) }, 502);
     }
+  }
+
+  // Correct the tracked state without sending a command (Full-Access) — for when
+  // the gate was operated by fob/keypad and the portal drifted out of sync.
+  if (path === "/tuya/gate/set-state" && method === "POST") {
+    if (!isFull) return json({ ok: false, error: "Forbidden" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const open = !!b.open;
+    const user = (sess.user && sess.user.username) || "?";
+    const cfg = await loadCfg(db);
+    const nowIso = new Date().toISOString();
+    await setGateState(db, open, user, cfg.gateDeviceId, nowIso);
+    await logGate(db, { user, action: open ? "mark-open" : "mark-closed", device: cfg.gateDeviceId, at: nowIso });
+    return json({ ok: true, open });
   }
 
   if (path === "/tuya/gate/state" && method === "GET") {
     if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     const configured = !!cfg.gateDeviceId;
-    const watched = !!(cfg.stateDeviceId && cfg.stateCode);
-    if (!watched) return json({ ok: true, configured, watched: false });
-    try {
-      const open = await readGateOpen(env, db, cfg);
-      // Reuse the watch record's `since` so the tile can show how long it's open.
-      const watch = await loadKV(db, WATCH_KEY) || {};
-      let since = null, mins = 0, openedBy = null;
-      if (open) {
-        since = watch.open && watch.since ? watch.since : new Date().toISOString();
-        mins = Math.round((Date.now() - Date.parse(since)) / 60000);
-        openedBy = watch.openedBy || (await attributeOpener(db, Date.now()));
-      }
-      return json({ ok: true, configured, watched: true, open: !!open, since, mins, openedBy });
-    } catch (e) {
-      return json({ ok: false, error: String(e && e.message || e) }, 502);
-    }
+    const st = await getGateState(db);
+    const open = !!st.open, since = st.at || null;
+    const mins = (open && since) ? Math.round((Date.now() - Date.parse(since)) / 60000) : 0;
+    const me = (sess.user && sess.user.username) || "";
+    return json({
+      ok: true, configured, watched: configured, tracked: true,
+      open, since, mins, openedBy: open ? (st.by || null) : null,
+      access: accessSummaryForUser(cfg, me), allowedNow: isFull || accessAllowedForUser(cfg, me, londonNow()),
+    });
   }
 
-  // Recent opens — the access record (Full-Access).
+  // A live signed snapshot URL for the gate camera (YardGate|FullAccess) — the
+  // safety dialog shows it. Prefers a CCTV-Wall camera (secure DVR proxy); falls
+  // back to a plain snapshotUrl. Empty when no camera is configured.
+  if (path === "/tuya/gate/snapshot-url" && method === "GET") {
+    if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (cfg.cameraSiteId && cfg.cameraId) {
+      const u = await cameraSnapshotUrl(env, url.origin, cfg.cameraSiteId, cfg.cameraId);
+      if (u) return json({ ok: true, url: u, source: "cctv" });
+    }
+    if (cfg.snapshotUrl) return json({ ok: true, url: cfg.snapshotUrl, source: "url" });
+    return json({ ok: true, url: "" });
+  }
+
+  // Recent operations — the access record (Full-Access).
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull) return json({ ok: false, error: "Forbidden" }, 403);
     const log = (await loadKV(db, "tuya:openlog")) || [];
-    return json({ ok: true, log: log.slice(0, 50) });
+    return json({ ok: true, log: log.slice(0, 100) });
   }
 
   return json({ ok: false, error: "Not found: " + path }, 404);
@@ -317,26 +452,24 @@ export async function checkGateLeftOpen(env, tenantId) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
     const db = tenantDB(env, tenantId);
     const cfg = await loadCfg(db);
-    if (!cfg.stateDeviceId || !cfg.stateCode) return;   // nothing to watch
+    if (!cfg.gateDeviceId) return;   // not set up
 
-    const open = await readGateOpen(env, db, cfg);
-    if (open === null) return;
+    // The momentary relay can't report state, so watch the TRACKED state — set
+    // by the last successful open/close pulse.
+    const st = await getGateState(db);
+    const open = !!st.open;
 
     const watch = (await loadKV(db, WATCH_KEY)) || {};
     const now = Date.now();
 
     if (!open) {
-      // Closed — reset if we were tracking an open state.
       if (watch.open) await saveKV(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
       return;
     }
 
-    // Open — establish/keep the "since" moment and who opened it. On the
-    // transition to open, attribute it to the recent portal opener (else null =
-    // opened via the emergency keypad/fob).
-    let since, openedBy;
-    if (watch.open && watch.since) { since = watch.since; openedBy = watch.openedBy || null; }
-    else { since = new Date(now).toISOString(); openedBy = await attributeOpener(db, now); }
+    // Open — "since"/"who" come from the tracked state (when/who opened it).
+    const since = st.at || watch.since || new Date(now).toISOString();
+    const openedBy = st.by || watch.openedBy || null;
 
     const openMins = Math.round((now - Date.parse(since)) / 60000);
     const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
