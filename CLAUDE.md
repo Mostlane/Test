@@ -2807,7 +2807,11 @@ SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
 POST /prog/ai-draft calls api.anthropic.com; feature fails soft with a clear
-"add the key" message when unset) (secrets); optional var **ANTHROPIC_MODEL**
+"add the key" message when unset), **TUYA_ACCESS_ID** + **TUYA_ACCESS_SECRET**
+(yard gate — BOTH must be SECRETS, not Text vars: mostlane-api auto-deploys from
+git and a deploy replaces the dashboard [vars] with wrangler.toml's, so a Text
+var not in wrangler.toml is WIPED on the next deploy — this bit us once, the ID
+was a Text var and vanished while the Secret survived) (secrets); optional var **ANTHROPIC_MODEL**
 (defaults to `claude-sonnet-5`); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
