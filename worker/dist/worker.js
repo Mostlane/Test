@@ -25196,6 +25196,7 @@ async function handle33(request, env, ctx, url, sess) {
     if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
     if (b.access !== void 0) cfg.access = sanitiseAccess(b.access);
+    if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
     if (!cfg.region) cfg.region = "eu";
     await saveCfg2(db, cfg);
     return json4({ ok: true, config: cfg });

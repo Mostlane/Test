@@ -2960,7 +2960,19 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron reads
   the TRACKED state and pushes the owner+YardGate holders if left open past
   `thresholdMins`.
-- **Front-end yard-gate.html** (🚪 tile, YardGate perm): Open (green) + **Close
+- **Safety check before EVERY operation:** Open/Close first open a confirm modal
+  ("safe to operate & clear of obstruction") — Cancel aborts, Proceed sends. The
+  modal shows a live **camera snapshot** when `tuya:config.snapshotUrl` is set (a
+  direct image URL, refreshable, cache-busted); off until configured. (Ring
+  cloud cameras have no browser-openable snapshot — use the DVR via the CCTV
+  system.)
+- **Desktop status banner (portal-config.js `gateBanner`):** a slim clickable bar
+  at the top of every DESKTOP page for FullAccess/YardGate users showing the live
+  gate state (Open red / Closed green), linking to yard-gate.html. Polls
+  /tuya/gate/state (60s, paused when tab hidden), reserves height via `--ml-topbar`.
+  **The Yard Gate desktop SIDEBAR item was removed** — desktop uses this banner;
+  mobile keeps the main.html menu tile.
+- **Front-end yard-gate.html** (🚪 tile mobile, YardGate perm): Open (green) + **Close
   (red)** buttons (both pulse), live TRACKED open/closed state + access-hours line,
   gate activity log (who/action/device/time), FullAccess **⏰ Access hours** editor
   + **Mark open/closed** drift correction. **The device setup panel is HIDDEN** —
