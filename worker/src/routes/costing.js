@@ -294,6 +294,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (String(r.cost_category || "").toLowerCase() === "subcontractor") subcontractor += v; else materials += v;
       } else unpriced++;
       return {
+        poNumber: r.po_number != null ? String(r.po_number) : "",
         supplier: r.supplier || "", category: r.cost_category || "", trade: r.trade || "",
         cost: priced ? Math.round(v * 100) / 100 : null,
         incident: r.incident_no || r.job_ref || "", by: r.engineer_name || "", date: r.d || ""
@@ -1282,7 +1283,7 @@ async function jobPoRows(env, jobId) {
   if (!env.PO_DB || !jobId) return [];
   try {
     const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, " +
+      "SELECT po_number, engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, " +
       "substr(COALESCE(issued_at,cost_entered_at),1,10) AS d " +
       "FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
     ).bind(String(jobId)).all();
