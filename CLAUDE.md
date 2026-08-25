@@ -2933,21 +2933,41 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   closeCode?, closeValue?, stateDeviceId?, stateCode?, stateOpenValue?, thresholdMins:10,
   repeatMins:30}`. **closeCode defaults to openCode, closeValue defaults to the
   opposite of openValue** — so a latching gate needs only the open fields set.
-- **State without a sensor:** `readGateOpen` reads a dedicated contact sensor if
-  configured, ELSE falls back to the gate switch's OWN value (on=open) — so
-  open/closed state + the left-open watch work off the relay alone (`canReadState`).
+- **MOMENTARY/inching mode (the real gate):** the module PULSES switch_1 and the
+  FAAC toggles open↔close on each pulse — `false` does nothing. So **Open and
+  Close BOTH send the SAME pulse** (`pulseGate` = openCode/openValue); they differ
+  only in intent. The relay can't report state, so the portal **TRACKS it** in
+  app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
+  flips it. Open pulses only when tracked-closed, Close only when tracked-open
+  (so pressing Open twice can't accidentally close it); if already in the target
+  state it returns `already:true` without pulsing. `/tuya/gate/state` returns the
+  TRACKED state (not a device read — that's why it used to be stuck on "closed").
+  **Drift fix:** if the gate is used by fob/keypad, Full-Access can correct the
+  tracked state without a command via **POST /tuya/gate/set-state** `{open}` (the
+  "Mark open/closed" buttons). `readGateOpen`/`canReadState` remain for a future
+  real contact sensor but are unused in momentary mode.
+- **Access hours:** `tuya:config.access = {windows:[{days:[0..6 Sun..Sat],
+  from:"HH:MM", to:"HH:MM"}]}` (Europe/London; empty = no restriction; overnight
+  windows supported). Enforced server-side on open/close — **Full-Access always
+  bypasses**; a blocked op returns 403 `denied:"hours"` naming the allowed hours.
+  Edited on the page's **⏰ Access hours** card (FullAccess), saved via POST
+  /tuya/config `{access}`.
 - **Endpoints** (YardGate|FullAccess to operate; FullAccess to configure): POST
-  /tuya/gate/open, **POST /tuya/gate/close** (latching), GET /tuya/gate/state, GET
-  /tuya/gate/log (openlog entries tagged `action:open|close`), config GET/POST,
-  device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron pushes
-  the owner+YardGate holders if the gate's left open past `thresholdMins`.
+  /tuya/gate/open + /tuya/gate/close (both pulse), **POST /tuya/gate/set-state**
+  (FullAccess drift fix), GET /tuya/gate/state (tracked open/since/by + access
+  summary + allowedNow), GET /tuya/gate/log (entries `{user,action,device,at}`,
+  action open|close|mark-open|mark-closed, kept 100), config GET/POST,
+  device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron reads
+  the TRACKED state and pushes the owner+YardGate holders if left open past
+  `thresholdMins`.
 - **Front-end yard-gate.html** (🚪 tile, YardGate perm): Open (green) + **Close
-  (red)** buttons, live open/closed state, access log. **The setup panel is
-  HIDDEN by default** — `tuya:config` is pre-seeded in app_config (gateDeviceId
-  `bf7240c4db7fedd458froe`, switch_1/true) so nobody needs to configure it; a
-  Full-Access user can still reach the setup form for maintenance via
-  **`yard-gate.html?setup=1`**. **Still dormant until the two secrets are added +
-  Deployed** (device config is already in place).
+  (red)** buttons (both pulse), live TRACKED open/closed state + access-hours line,
+  gate activity log (who/action/device/time), FullAccess **⏰ Access hours** editor
+  + **Mark open/closed** drift correction. **The device setup panel is HIDDEN** —
+  `tuya:config` is pre-seeded (gateDeviceId `bf7240c4db7fedd458froe`, switch_1/true);
+  a Full-Access user can reach the setup form for maintenance via
+  **`yard-gate.html?setup=1`**. Live once the two secrets are set (**both as
+  SECRETS** — a Text var is wiped by the next git deploy).
 
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system

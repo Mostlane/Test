@@ -183,6 +183,75 @@ async function attributeOpener(db, nowMs) {
   return (gap >= 0 && gap <= 8 * 60000) ? (lastOpen.user || null) : null;
 }
 
+/* ------------------------- tracked open/closed state ---------------------- */
+// The relay is momentary/inching (a pulse that TOGGLES the FAAC), so the switch
+// DP never holds "open" — we can't read the gate's state from the device. We
+// therefore TRACK it ourselves: each successful open/close pulse records the new
+// state here. `tuya:gatestate` = { open, at, by, device }.
+const STATE_KEY = "tuya:gatestate";
+async function getGateState(db) {
+  const s = await loadKV(db, STATE_KEY);
+  return (s && typeof s === "object") ? { open: !!s.open, at: s.at || null, by: s.by || null, device: s.device || null } : { open: false, at: null, by: null, device: null };
+}
+async function setGateState(db, open, by, device, at) {
+  await saveKV(db, STATE_KEY, { open: !!open, at: at || new Date().toISOString(), by: by || null, device: device || null });
+}
+// Send the single pulse (openCode=openValue) — the ONE command both Open and
+// Close use, because the gate toggles on each pulse.
+async function pulseGate(env, db, cfg) {
+  const code = cfg.openCode || "switch_1";
+  const value = (cfg.openValue === undefined) ? true : cfg.openValue;
+  const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr, sent: { code, value } };
+}
+async function logGate(db, entry) {
+  const log = (await loadKV(db, "tuya:openlog")) || [];
+  log.unshift(entry);
+  await saveKV(db, "tuya:openlog", log.slice(0, 100));
+}
+
+/* --------------------------- access-hour windows -------------------------- */
+// cfg.access = { windows:[{days:[0..6], from:"HH:MM", to:"HH:MM"}] } — days are
+// Sun=0..Sat=6, times in Europe/London. Empty/absent = no restriction.
+function londonNow() {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
+  const get = t => (parts.find(p => p.type === t) || {}).value;
+  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: wd[get("weekday")] ?? 0, mins: (parseInt(get("hour"), 10) || 0) * 60 + (parseInt(get("minute"), 10) || 0) };
+}
+function toMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? (+m[1] * 60 + +m[2]) : null; }
+function accessAllowed(cfg, now) {
+  const acc = cfg.access;
+  if (!acc || !Array.isArray(acc.windows) || !acc.windows.length) return true; // no restriction set
+  for (const w of acc.windows) {
+    const days = Array.isArray(w.days) ? w.days.map(Number) : [];
+    if (days.length && !days.includes(now.dow)) continue;
+    const from = toMin(w.from), to = toMin(w.to);
+    if (from == null || to == null) continue;
+    if (from <= to) { if (now.mins >= from && now.mins <= to) return true; }
+    else { if (now.mins >= from || now.mins <= to) return true; }   // window crossing midnight
+  }
+  return false;
+}
+const DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function accessSummary(cfg) {
+  const acc = cfg.access;
+  if (!acc || !Array.isArray(acc.windows) || !acc.windows.length) return "";
+  return acc.windows.map(w => {
+    const days = (Array.isArray(w.days) && w.days.length) ? w.days.map(d => DOW_LABEL[d] || "?").join(",") : "every day";
+    return `${days} ${w.from}–${w.to}`;
+  }).join("; ");
+}
+function sanitiseAccess(a) {
+  if (!a || !Array.isArray(a.windows)) return { windows: [] };
+  const windows = a.windows.map(w => ({
+    days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter(d => d >= 0 && d <= 6))] : [],
+    from: toMin(w.from) != null ? w.from : "00:00",
+    to: toMin(w.to) != null ? w.to : "23:59",
+  })).slice(0, 14);
+  return { windows };
+}
+
 /* --------------------------------- handler -------------------------------- */
 export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -225,6 +294,7 @@ export async function handle(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === undefined) cfg.thresholdMins = 10;
     if (b.repeatMins !== undefined) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === undefined) cfg.repeatMins = 30;
+    if (b.access !== undefined) cfg.access = sanitiseAccess(b.access);   // allowed operating hours
     if (!cfg.region) cfg.region = "eu";
     await saveCfg(db, cfg);
     return json({ ok: true, config: cfg });
@@ -267,87 +337,71 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ---- operate: YardGate | FullAccess ----
-  if (path === "/tuya/gate/open" && method === "POST") {
+  // Open / Close BOTH send the same pulse (the gate toggles); the portal tracks
+  // which way it left the gate. Only pulses when a change is needed, so pressing
+  // Open twice can't accidentally close it.
+  if ((path === "/tuya/gate/open" || path === "/tuya/gate/close") && method === "POST") {
     if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
+    const wantOpen = path === "/tuya/gate/open";
     const cfg = await loadCfg(db);
-    if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet — add the Tuya device in Yard Gate settings." }, 400);
+    if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
-    const code = cfg.openCode || "switch_1";
-    const value = (cfg.openValue === undefined) ? true : cfg.openValue;
+    // Access-hour restriction (Full-Access always allowed).
+    if (!isFull && !accessAllowed(cfg, londonNow())) {
+      const s = accessSummary(cfg);
+      return json({ ok: false, denied: "hours", error: "Gate access is outside the allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
+    const user = (sess.user && sess.user.username) || "?";
+    const st = await getGateState(db);
+    if (st.open === wantOpen) {
+      return json({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
+    }
     try {
-      const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
-        { commands: [{ code, value }] });
+      const { jr, sent } = await pulseGate(env, db, cfg);
       if (!jr.success) return json({ ok: false, error: jr.msg || "Tuya rejected the command" }, 502);
-      // Access record: the portal is now the way in, so log WHO opened it. The
-      // audit middleware already records the action; this dedicated log powers
-      // the on-page history and lets the left-open alert name the opener.
       const nowIso = new Date().toISOString();
-      const opener = (sess.user && sess.user.username) || "?";
-      try {
-        await saveKV(db, "tuya:lastopen", { user: opener, at: nowIso });
-        const log = (await loadKV(db, "tuya:openlog")) || [];
-        log.unshift({ user: opener, at: nowIso, action: "open" });
-        await saveKV(db, "tuya:openlog", log.slice(0, 50));
-      } catch {}
-      return json({ ok: true, sent: { code, value }, by: opener });
+      await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
+      await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });
+      if (wantOpen) await saveKV(db, "tuya:lastopen", { user, at: nowIso });
+      return json({ ok: true, open: wantOpen, by: user, sent });
     } catch (e) {
       return json({ ok: false, error: String(e && e.message || e) }, 502);
     }
   }
 
-  // ---- close (latching gate): YardGate | FullAccess ----
-  if (path === "/tuya/gate/close" && method === "POST") {
-    if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
+  // Correct the tracked state without sending a command (Full-Access) — for when
+  // the gate was operated by fob/keypad and the portal drifted out of sync.
+  if (path === "/tuya/gate/set-state" && method === "POST") {
+    if (!isFull) return json({ ok: false, error: "Forbidden" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const open = !!b.open;
+    const user = (sess.user && sess.user.username) || "?";
     const cfg = await loadCfg(db);
-    if (!cfg.gateDeviceId) return json({ ok: false, error: "Gate not set up yet — add the Tuya device in Yard Gate settings." }, 400);
-    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
-    const code = cfg.closeCode || cfg.openCode || "switch_1";
-    const openValue = (cfg.openValue === undefined) ? true : cfg.openValue;
-    const value = (cfg.closeValue !== undefined) ? cfg.closeValue : !openValue;   // opposite of open by default
-    try {
-      const jr = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`,
-        { commands: [{ code, value }] });
-      if (!jr.success) return json({ ok: false, error: jr.msg || "Tuya rejected the command" }, 502);
-      const nowIso = new Date().toISOString();
-      const closer = (sess.user && sess.user.username) || "?";
-      try {
-        const log = (await loadKV(db, "tuya:openlog")) || [];
-        log.unshift({ user: closer, at: nowIso, action: "close" });
-        await saveKV(db, "tuya:openlog", log.slice(0, 50));
-      } catch {}
-      return json({ ok: true, sent: { code, value }, by: closer });
-    } catch (e) {
-      return json({ ok: false, error: String(e && e.message || e) }, 502);
-    }
+    const nowIso = new Date().toISOString();
+    await setGateState(db, open, user, cfg.gateDeviceId, nowIso);
+    await logGate(db, { user, action: open ? "mark-open" : "mark-closed", device: cfg.gateDeviceId, at: nowIso });
+    return json({ ok: true, open });
   }
 
   if (path === "/tuya/gate/state" && method === "GET") {
     if (!canGate) return json({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     const configured = !!cfg.gateDeviceId;
-    const watched = canReadState(cfg);   // sensor OR the latching relay's own switch
-    if (!watched) return json({ ok: true, configured, watched: false });
-    try {
-      const open = await readGateOpen(env, db, cfg);
-      // Reuse the watch record's `since` so the tile can show how long it's open.
-      const watch = await loadKV(db, WATCH_KEY) || {};
-      let since = null, mins = 0, openedBy = null;
-      if (open) {
-        since = watch.open && watch.since ? watch.since : new Date().toISOString();
-        mins = Math.round((Date.now() - Date.parse(since)) / 60000);
-        openedBy = watch.openedBy || (await attributeOpener(db, Date.now()));
-      }
-      return json({ ok: true, configured, watched: true, open: !!open, since, mins, openedBy });
-    } catch (e) {
-      return json({ ok: false, error: String(e && e.message || e) }, 502);
-    }
+    const st = await getGateState(db);
+    const open = !!st.open, since = st.at || null;
+    const mins = (open && since) ? Math.round((Date.now() - Date.parse(since)) / 60000) : 0;
+    return json({
+      ok: true, configured, watched: configured, tracked: true,
+      open, since, mins, openedBy: open ? (st.by || null) : null,
+      access: accessSummary(cfg), allowedNow: accessAllowed(cfg, londonNow()),
+    });
   }
 
-  // Recent opens — the access record (Full-Access).
+  // Recent operations — the access record (Full-Access).
   if (path === "/tuya/gate/log" && method === "GET") {
     if (!isFull) return json({ ok: false, error: "Forbidden" }, 403);
     const log = (await loadKV(db, "tuya:openlog")) || [];
-    return json({ ok: true, log: log.slice(0, 50) });
+    return json({ ok: true, log: log.slice(0, 100) });
   }
 
   return json({ ok: false, error: "Not found: " + path }, 404);
@@ -363,26 +417,24 @@ export async function checkGateLeftOpen(env, tenantId) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
     const db = tenantDB(env, tenantId);
     const cfg = await loadCfg(db);
-    if (!canReadState(cfg)) return;   // nothing to watch (no sensor and no relay)
+    if (!cfg.gateDeviceId) return;   // not set up
 
-    const open = await readGateOpen(env, db, cfg);
-    if (open === null) return;
+    // The momentary relay can't report state, so watch the TRACKED state — set
+    // by the last successful open/close pulse.
+    const st = await getGateState(db);
+    const open = !!st.open;
 
     const watch = (await loadKV(db, WATCH_KEY)) || {};
     const now = Date.now();
 
     if (!open) {
-      // Closed — reset if we were tracking an open state.
       if (watch.open) await saveKV(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
       return;
     }
 
-    // Open — establish/keep the "since" moment and who opened it. On the
-    // transition to open, attribute it to the recent portal opener (else null =
-    // opened via the emergency keypad/fob).
-    let since, openedBy;
-    if (watch.open && watch.since) { since = watch.since; openedBy = watch.openedBy || null; }
-    else { since = new Date(now).toISOString(); openedBy = await attributeOpener(db, now); }
+    // Open — "since"/"who" come from the tracked state (when/who opened it).
+    const since = st.at || watch.since || new Date(now).toISOString();
+    const openedBy = st.by || watch.openedBy || null;
 
     const openMins = Math.round((now - Date.parse(since)) / 60000);
     const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
