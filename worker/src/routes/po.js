@@ -381,6 +381,12 @@ async function getPOs(db, params) {
     query += ` AND (CAST(po_number AS TEXT) LIKE ? OR LOWER(engineer_name) LIKE ? OR LOWER(site) LIKE ? OR LOWER(incident_no) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(description) LIKE ? OR LOWER(flag_reason) LIKE ? OR LOWER(credit_note) LIKE ?)`;
     binds.push(term, term, term, term, term, term, term, term);
   }
+  if (params.get("job_id")) {
+    // Deep-link from a job card: show only the POs raised against that SLA job
+    // (po_log.job_id is stamped from the job's "Raise PO" link).
+    query += ` AND job_id = ?`;
+    binds.push(params.get("job_id"));
+  }
   query += ` ORDER BY po_number DESC LIMIT 1000`;
   return (await db.prepare(query).bind(...binds).all()).results;
 }

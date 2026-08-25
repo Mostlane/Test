@@ -988,11 +988,18 @@ async function loadJobPOs(){
     const rows = d.pos.map(p => {
       const cat = p.category === "subcontractor" ? ("Subcontractor" + (p.trade ? " · " + esc(p.trade) : "")) : "Materials";
       const cost = p.cost == null ? '<span class="sub" style="color:#b45309;">awaiting price</span>' : ("<b>" + money(p.cost) + "</b>");
+      // Clickable PO number → the PO board, filtered to that PO.
+      const poNo = p.poNumber
+        ? '<a href="/po-office.html?search=' + encodeURIComponent(p.poNumber) + '" title="Open PO ' + esc(p.poNumber) + ' in the PO system" style="font-weight:700;color:#003366;text-decoration:none;">PO ' + esc(p.poNumber) + '</a>'
+        : '<span class="sub">(no number)</span>';
       return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #eef1f5;">' +
-        '<div><div>' + (esc(p.supplier) || '<span class="sub">(no supplier)</span>') + '</div>' +
+        '<div><div>' + poNo + (p.supplier ? ' · ' + esc(p.supplier) : '') + '</div>' +
         '<div class="sub">' + cat + (p.date ? ' · ' + esc(p.date) : '') + '</div></div>' +
         '<div style="text-align:right;white-space:nowrap;">' + cost + '</div></div>';
     }).join("");
+    // Header link to see ALL of this job's POs together on the PO board.
+    const viewAll = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #eef1f5;">' +
+      '<a href="/po-office.html?job_id=' + encodeURIComponent(job.id) + '" style="color:#003366;font-weight:600;text-decoration:none;">Open all ' + d.count + ' PO' + (d.count === 1 ? '' : 's') + ' in the PO system →</a></div>';
     const split = [];
     if(d.materials) split.push("Materials " + money(d.materials));
     if(d.subcontractor) split.push("Subcontractor " + money(d.subcontractor));
@@ -1002,7 +1009,7 @@ async function loadJobPOs(){
       '<div class="sub">' + d.count + ' PO' + (d.count === 1 ? '' : 's') +
       (d.unpriced ? ' · <span style="color:#b45309;font-weight:700;">' + d.unpriced + ' awaiting price</span>' : '') + '</div></div>' +
       (split.length ? '<div class="sub" style="margin-top:2px;">' + split.join(' · ') + '</div>' : '') +
-      rows;
+      rows + viewAll;
     card.style.display = "";
   }catch(e){ card.style.display = "none"; }
 }

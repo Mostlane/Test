@@ -252,9 +252,18 @@ const worker = {
       ctx.waitUntil(sla.remindPendingHolds(env, 1).catch(e => console.error("scheduled hold reminder:", e)));
     }
     if (new Date().getUTCMinutes() < 5) {
-      // Hourly data-integrity sweep — the cross-area "does everything join up?"
-      // catalogue (jobs↔sites, assignments↔users↔vehicles, compliance↔sites …).
-      ctx.waitUntil(health.runIntegrityChecks(env, 1).catch(e => console.error("scheduled integrity sweep:", e)));
+      // Data-integrity sweep — the cross-area "does everything join up?" catalogue
+      // (jobs↔sites, assignments↔users↔vehicles, compliance↔sites …). Its
+      // correlated NOT-EXISTS joins are the heaviest read source in the whole
+      // worker (compliance_stores × sites alone ≈ 600k row-reads), so it runs
+      // ONCE WEEKLY — Sunday ~03:00 UTC, NOT hourly/daily. Integrity drifts
+      // slowly, so weekly is ample and keeps D1 row-reads far inside the
+      // free-tier limit. The lightweight liveness probes (runHealthChecks) still
+      // run every 5 min and are what actually catch + alert on an outage. Admins
+      // can run the full catalogue on demand via the health page → /health/run.
+      { const d = new Date(); if (d.getUTCDay() === 0 && d.getUTCHours() === 3) {
+        ctx.waitUntil(health.runIntegrityChecks(env, 1).catch(e => console.error("scheduled integrity sweep:", e)));
+      } }
       // Daily chase (~08:00 London, deduped) for holiday requests + equipment
       // transfers still outstanding.
       ctx.waitUntil(remindDailyApprovals(env).catch(e => console.error("scheduled daily approvals:", e)));
