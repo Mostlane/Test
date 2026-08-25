@@ -25136,6 +25136,12 @@ function toMin2(s) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ""));
   return m ? +m[1] * 60 + +m[2] : null;
 }
+function haversineM(a, b) {
+  const rad = (x) => x * Math.PI / 180, R = 6371e3;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
 var DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var normU = (u) => String(u || "").toLowerCase().trim();
 function userWindows(cfg, username) {
@@ -25225,6 +25231,14 @@ async function handle33(request, env, ctx, url, sess) {
     if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
     if (b.cameraSiteId !== void 0) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();
     if (b.cameraId !== void 0) cfg.cameraId = String(b.cameraId || "").trim();
+    if (b.geo !== void 0) {
+      const g = b.geo || {};
+      if (g.clear) delete cfg.geo;
+      else {
+        const lat = Number(g.lat), lng = Number(g.lng), r = Math.max(20, parseInt(g.radiusM, 10) || 150);
+        if (isFinite(lat) && isFinite(lng)) cfg.geo = { lat, lng, radiusM: r };
+      }
+    }
     if (!cfg.region) cfg.region = "eu";
     await saveCfg2(db, cfg);
     return json4({ ok: true, config: cfg });
@@ -25265,9 +25279,20 @@ async function handle33(request, env, ctx, url, sess) {
     if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet." }, 400);
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
     const user = sess.user && sess.user.username || "?";
+    const body = await request.json().catch(() => ({}));
     if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow())) {
       const s = accessSummaryForUser(cfg, user);
       return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
+    if (!isFull4 && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
+      const lat = Number(body.lat), lng = Number(body.lng);
+      if (!isFinite(lat) || !isFinite(lng)) {
+        return json4({ ok: false, denied: "location", error: "Turn on location to operate the gate \u2014 you must be at the yard." }, 403);
+      }
+      const dist = haversineM({ lat: cfg.geo.lat, lng: cfg.geo.lng }, { lat, lng });
+      if (dist > cfg.geo.radiusM) {
+        return json4({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
+      }
     }
     const st = await getGateState(db);
     if (st.open === wantOpen) {
@@ -25304,6 +25329,7 @@ async function handle33(request, env, ctx, url, sess) {
     const open = !!st.open, since = st.at || null;
     const mins = open && since ? Math.round((Date.now() - Date.parse(since)) / 6e4) : 0;
     const me = sess.user && sess.user.username || "";
+    const geoOn = !!(cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng));
     return json4({
       ok: true,
       configured,
@@ -25314,7 +25340,10 @@ async function handle33(request, env, ctx, url, sess) {
       mins,
       openedBy: open ? st.by || null : null,
       access: accessSummaryForUser(cfg, me),
-      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow())
+      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow()),
+      // Geofence: whether THIS caller must prove they're at the yard to operate.
+      needLocation: !isFull4 && geoOn,
+      geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false }
     });
   }
   if (path === "/tuya/gate/snapshot-url" && method === "GET") {
