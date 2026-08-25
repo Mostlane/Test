@@ -1655,7 +1655,7 @@
           }
           // 3. Force the core shell past the browser HTTP cache so the reload
           //    picks up fresh copies immediately (best-effort, failures ignored).
-          var core = ["/portal-config.js?v=17", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+          var core = ["/portal-config.js?v=18", "/portal.css?v=1", "/auth.js", "/device-auth.js",
             location.pathname + location.search];
           await Promise.all(core.map(function (u) {
             return fetch(u, { cache: "reload" }).catch(function () {});
