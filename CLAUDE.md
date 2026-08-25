@@ -2950,10 +2950,13 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   {windows:[{days:[0..6 Sun..Sat], from:"HH:MM", to:"HH:MM"}]}` (Europe/London;
   a user with no windows is unrestricted; overnight windows supported). Enforced
   server-side per operating user on open/close — **Full-Access always bypasses**;
-  a blocked op returns 403 `denied:"hours"`. Edited on the page's **⏰ Access
-  hours (per user)** card (FullAccess: pick a person → set their windows), saved
-  via POST /tuya/config `{accessUser, accessWindows}` (empty windows clears them).
-  `/tuya/gate/state` returns the caller's OWN summary + `allowedNow`.
+  a blocked op returns 403 `denied:"hours"`. Managed on the page's **⏰ Access
+  hours** card (FullAccess): a **Current restrictions** list (each person → Edit /
+  Remove) + an editor that tags one or MANY people (searchable checkbox list) with
+  the same windows. POST /tuya/config accepts `{accessUsers:[…], accessWindows}`
+  (tag several), `{accessUser, …}` (one), and `{accessRemove:name|[names]}` (clear;
+  empty windows also clears). `/tuya/gate/state` returns the caller's OWN summary
+  + `allowedNow`.
 - **Endpoints** (YardGate|FullAccess to operate; FullAccess to configure): POST
   /tuya/gate/open + /tuya/gate/close (both pulse), **POST /tuya/gate/set-state**
   (FullAccess drift fix), GET /tuya/gate/state (tracked open/since/by + access
