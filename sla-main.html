@@ -226,8 +226,6 @@
         <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
         <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
-        <a href="sla-data-tools.html" class="btn" id="dataToolsLink" style="display:none">🧰 Data</a>
-        <a href="firestop-admin.html" class="btn" id="firestopLink" style="display:none">🔥 Firestopping</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
       </div>
     </header>
@@ -240,8 +238,8 @@
         var yes = v => String(v||"").toLowerCase() === "yes";
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
-          document.getElementById("dataToolsLink").style.display = "";
-          document.getElementById("firestopLink").style.display = "";
+          // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
+          // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
         }
         var isField = (function(){
           if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();
@@ -268,8 +266,6 @@
         <option value="Closed Jobs">Closed Jobs</option>
       </select>
       <button class="btn small" id="bulkApply">Apply</button>
-      <button class="btn small" id="catManageBtn" title="Create / edit / delete job categories">🏷️ Categories</button>
-      <button class="btn small" id="sheetCfgBtn" title="Choose what appears on Mostlane vs Client job sheets">🧾 Sheet settings</button>
       <select id="priorityFilter">
         <option value="all">All priorities</option>
         <option value="Priority 1">P1</option>
@@ -1263,8 +1259,8 @@ function init(){
     });
   });
   $("bulkApply").addEventListener("click", applyBulk);
-  $("catManageBtn").addEventListener("click", openCatModal);
-  $("sheetCfgBtn").addEventListener("click", openSheetCfg);
+  // 🏷️ Categories / 🧾 Sheet settings buttons moved to ⚙️ Settings; the modals
+  // still live here and open via ?panel=categories|sheet (see DOMContentLoaded).
   $("sheetCfgClose").addEventListener("click", closeSheetCfg);
   $("sheetCfgCancel").addEventListener("click", closeSheetCfg);
   $("sheetCfgSave").addEventListener("click", saveSheetCfg);
@@ -1309,7 +1305,17 @@ window.addEventListener("DOMContentLoaded", async () => {
       const q = $("searchBox").value.trim();
       if(q.length >= 2) fetchArchiveMatches(q);   // restore archive matches too
     });
-    loadCategories().then(() => { populateBulkDropdown(); render(); });
+    loadCategories().then(() => {
+      populateBulkDropdown(); render();
+      // Deep-link from ⚙️ Settings: open the Categories / Sheet-settings modal
+      // (their buttons now live on sla-settings.html). Categories must be loaded
+      // first, so this runs after loadCategories resolves.
+      try{
+        const panel = new URLSearchParams(location.search).get("panel");
+        if(panel === "categories") openCatModal();
+        else if(panel === "sheet") openSheetCfg();
+      }catch(e){}
+    });
   }
 });
 // bfcache (Back on iOS/Safari): the DOM is restored but re-assert the saved

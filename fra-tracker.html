@@ -9,8 +9,8 @@
   <script src="auth.js"></script>
 <style>
   :root{ --blue:#003b82; --line:#e2e8f0; --grey:#64748b; }
-  html,body{ margin:0; background:#eef1f5; color:#0f172a; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; }
-  .wrap{ max-width:1200px; margin:14px auto 60px; padding:0 12px; }
+  html,body{ margin:0; background:transparent; color:#0f172a; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; }
+  .wrap{ max-width:1440px; margin:14px auto 60px; padding:0 12px; }
   header.page{ display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap; }
   header.page h1{ font-size:19px; color:var(--blue); margin:0; }
   .sub{ color:var(--grey); font-size:13px; }
@@ -46,7 +46,7 @@
   td.num{ color:var(--grey); }
   td.site{ font-weight:600; white-space:nowrap; }
   td.pc{ white-space:nowrap; color:#334155; }
-  td.works{ min-width:280px; max-width:440px; line-height:1.4; color:#334155; }
+  td.works{ min-width:220px; max-width:330px; line-height:1.4; color:#334155; }
   td.nowrap{ white-space:nowrap; }
   .chip{ display:inline-block; font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:999px; color:#fff; white-space:nowrap; }
   .open-lnk{ color:#1d4ed8; font-weight:700; text-decoration:none; white-space:nowrap; }
@@ -55,9 +55,9 @@
   tbody tr.clickable{ cursor:pointer; }
 
   /* Office follow-up control */
-  td.follow{ min-width:210px; }
+  td.follow{ min-width:220px; width:220px; }
   .fu{ display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
-  .fu-btn{ border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px; padding:4px 9px; font-size:11.5px; font-weight:700; cursor:pointer; white-space:nowrap; }
+  .fu-btn{ border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap; }
   .fu-btn:hover{ background:#f1f5f9; }
   .fu-btn.on[data-s="quote_needed"]{ background:#f59e0b; border-color:#f59e0b; color:#fff; }
   .fu-btn.on[data-s="quote_submitted"]{ background:#2563eb; border-color:#2563eb; color:#fff; }
