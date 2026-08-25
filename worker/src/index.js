@@ -52,6 +52,7 @@ import * as programmes from "./routes/programmes.js"; // DONE (job programmes: b
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
+import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -117,6 +118,7 @@ const ROUTES = [
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   ["*", "/health/",    health.handle],     // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
   ["*", "/tuya",       tuya.handle],        // yard gate: Tuya Cloud open command + gate-open state
+  ["*", "/fra",        fra.handle],          // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -438,6 +440,8 @@ const PUBLIC_ROUTES = [
   ["POST", "/prog/shared/export"],   // client PDF download — token+code verified in-handler
   // Project documents streamed for the in-app viewer / new tab — signed URL, verified in-handler.
   ["GET", "/project/doc"],
+  // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
+  ["GET", "/fra/quote"],
 ];
 
 function isPublic(method, pathname) {
