@@ -2962,6 +2962,17 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron reads
   the TRACKED state and pushes the owner+YardGate holders if left open past
   `thresholdMins`.
+- **Geofence — must be AT the yard (Aug 2026):** non-Full-Access users must
+  share their location AND be within `tuya:config.geo.radiusM` of
+  `geo.lat/geo.lng` to operate — stops accidental remote operation. Enforced
+  server-side on open/close (`haversineM`): the client sends `{lat,lng}` (from
+  `navigator.geolocation`) and a distance > radius returns 403 `denied:"location"`;
+  no coords → 403 asking to turn location on. **Full-Access bypasses** (they have
+  camera access and operate from anywhere). Set on the page's **📍 Gate location**
+  card (FullAccess: stand at the gate → "Use my current location" + radius, POST
+  /tuya/config `{geo:{lat,lng,radiusM}}`; `{geo:{clear:true}}` turns it off).
+  `/tuya/gate/state` returns `needLocation` (this caller must prove location) +
+  `geo:{enabled,radiusM}`. **Off until an admin sets the location on site.**
 - **Safety check before EVERY operation:** Open/Close first open a confirm modal
   ("safe to operate & clear of obstruction") — Cancel aborts, Proceed sends. The
   modal shows a live **gate-camera snapshot** via **GET /tuya/gate/snapshot-url**

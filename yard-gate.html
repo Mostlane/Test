@@ -87,6 +87,19 @@
       <div id="accWho" class="sub" style="margin-top:10px"></div>
     </div>
 
+    <!-- GEOFENCE — must be at the yard (Full-Access only to configure) -->
+    <div class="card" id="geoCard" style="display:none">
+      <h2>📍 Gate location (safety geofence)</h2>
+      <p class="sub">Non-admin users must be within this distance of the gate to operate it — this stops accidental remote operation. Full-Access users can operate from anywhere. Stand at the yard and tap “Use my current location”.</p>
+      <div id="geoNow" class="sub" style="margin-bottom:8px">Loading…</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="geoSet" class="btn small" type="button">📍 Use my current location</button>
+        <label class="f" style="font-size:13px;font-weight:600">Radius (m)</label>
+        <input id="geoRadius" type="number" min="20" value="150" style="width:90px;padding:8px;border:1px solid #cdd7e2;border-radius:9px;font:inherit">
+      </div>
+      <div style="margin-top:12px"><button id="geoSave" class="btn primary" type="button">Save geofence</button> <button id="geoOff" class="btn small" type="button">Turn off</button> <span id="geoMsg" class="muted"></span></div>
+    </div>
+
     <!-- SETUP (Full-Access only) -->
     <div class="card" id="setupCard" style="display:none">
       <h2>⚙️ Gate setup</h2>
@@ -181,12 +194,30 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;",
 function whenTxt(iso){ try{ const d=new Date(iso); return d.toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch{ return iso||""; } }
 
 /* ---- state + open ---- */
-let busy=false;
+let busy=false, NEED_LOC=false;
+// Ask the browser for the device's location (geofence: non-admins must be at the yard).
+function getLoc(){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation) return rej(new Error("no-geo"));
+    navigator.geolocation.getCurrentPosition(
+      p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+      err=>rej(err),
+      {enableHighAccuracy:true,timeout:12000,maximumAge:20000}
+    );
+  });
+}
+// Build the operate-command body — includes coords when this user is geofenced.
+async function gateBody(){
+  if(!NEED_LOC) return {};
+  const l=await getLoc();      // throws if denied/unavailable → caller blocks
+  return {lat:l.lat,lng:l.lng};
+}
 async function loadState(){
   const box=$("stateBox"), txt=$("stateTxt");
   try{
     const r=await aFetch("/tuya/gate/state"); const j=await r.json();
     if(!j.ok){ box.className="state unknown"; txt.textContent=j.error||"Couldn't read the gate"; return; }
+    NEED_LOC = !!j.needLocation;
     if(!j.configured){ box.className="state unknown"; txt.innerHTML="Not set up yet"+(isFull?".":"."); $("fixStateRow").style.display="none"; return; }
     $("fixStateRow").style.display = isFull ? "" : "none";
     // Access-hours line (server tells us the summary + whether we're inside it now).
@@ -205,12 +236,15 @@ async function markState(open){
 }
 async function openGate(){
   if(busy) return;
+  let body;
+  try{ body=await gateBody(); }
+  catch(e){ const m=$("opMsg"); m.className="msg err"; m.textContent="✕ Turn on location to operate the gate — you must be at the yard."; return; }
   if(!await askSafety("Open the gate")) return;
   busy=true;
   const b=$("openBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
   b.querySelector("span:last-child").textContent="Opening…";
   try{
-    const r=await aFetch("/tuya/gate/open",{method:"POST",body:JSON.stringify({})}); const j=await r.json();
+    const r=await aFetch("/tuya/gate/open",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
     if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already open.")) : "✓ Open signal sent to the gate."; }
     else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
   }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
@@ -221,12 +255,15 @@ async function openGate(){
 }
 async function closeGate(){
   if(busy) return;
+  let body;
+  try{ body=await gateBody(); }
+  catch(e){ const m=$("opMsg"); m.className="msg err"; m.textContent="✕ Turn on location to operate the gate — you must be at the yard."; return; }
   if(!await askSafety("Close the gate")) return;
   busy=true;
   const b=$("closeBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
   b.querySelector("span:last-child").textContent="Closing…";
   try{
-    const r=await aFetch("/tuya/gate/close",{method:"POST",body:JSON.stringify({})}); const j=await r.json();
+    const r=await aFetch("/tuya/gate/close",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
     if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already closed.")) : "✓ Close signal sent to the gate."; }
     else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
   }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
@@ -398,7 +435,34 @@ $("accSave") && $("accSave").addEventListener("click", async ()=>{
 $("markOpen") && $("markOpen").addEventListener("click",()=>markState(true));
 $("markClosed") && $("markClosed").addEventListener("click",()=>markState(false));
 
-loadState(); loadCfg(); loadLog(); loadAccess();
+/* ---- geofence (Full-Access) ---- */
+let GEO_PICK=null;
+async function loadGeo(){
+  if(!isFull) return;
+  $("geoCard").style.display="";
+  try{ const r=await aFetch("/tuya/config"); const j=await r.json(); const g=(j.config||{}).geo;
+    if(g&&isFinite(g.lat)){ $("geoNow").innerHTML="✅ Geofence <b>ON</b> — non-admins must be within <b>"+(g.radiusM||150)+" m</b> of the gate."; $("geoRadius").value=g.radiusM||150; }
+    else $("geoNow").textContent="Geofence off — non-admins can operate from anywhere.";
+  }catch{}
+}
+$("geoSet") && $("geoSet").addEventListener("click", async ()=>{
+  const msg=$("geoMsg"); msg.textContent="Getting your location…";
+  try{ GEO_PICK=await getLoc(); msg.textContent="Location captured ✓ (±"+Math.round(GEO_PICK.acc||0)+" m) — now press Save."; }
+  catch(e){ msg.textContent="Couldn’t get location — allow it in the browser and try again."; }
+});
+$("geoSave") && $("geoSave").addEventListener("click", async ()=>{
+  const msg=$("geoMsg"); if(!GEO_PICK){ msg.textContent="Tap “Use my current location” first."; return; }
+  const radiusM=parseInt($("geoRadius").value,10)||150; msg.textContent="Saving…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({geo:{lat:GEO_PICK.lat,lng:GEO_PICK.lng,radiusM}})}); const j=await r.json(); msg.textContent=j.ok?"Saved ✓ — geofence on.":(j.error||"Couldn’t save"); loadGeo(); loadState(); }
+  catch{ msg.textContent="Couldn’t save"; }
+});
+$("geoOff") && $("geoOff").addEventListener("click", async ()=>{
+  const msg=$("geoMsg"); msg.textContent="Turning off…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({geo:{clear:true}})}); const j=await r.json(); GEO_PICK=null; msg.textContent=j.ok?"Geofence off.":(j.error||"Couldn’t save"); loadGeo(); loadState(); }
+  catch{ msg.textContent="Couldn’t save"; }
+});
+
+loadState(); loadCfg(); loadLog(); loadAccess(); loadGeo();
 setInterval(loadState, 30000);
 </script>
 </body>
