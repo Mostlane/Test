@@ -19015,8 +19015,10 @@ async function ensureVehTable(env) {
     "warn_miles INTEGER",
     "specs TEXT",
     // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
-    "finance TEXT"
+    "finance TEXT",
     // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
+    "pool INTEGER DEFAULT 0"
+    // shared/pool vehicle (e.g. tippers) — any engineer may raise a PO against it
   ];
   for (const c of cols) {
     try {
@@ -21388,12 +21390,12 @@ async function getVehicles(env) {
     const where = [];
     if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
     if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
-    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")} FROM vehicles` + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
+    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles` + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
     const rows = await db.prepare(sql).all();
     return (rows.results || []).filter((r) => r.reg && String(r.reg).trim()).map((r) => {
       const reg = String(r.reg).trim().toUpperCase();
       const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
-      return { reg, make: r.make || null, model: r.model || null, desc, label: desc ? `${reg} \u2014 ${desc}` : reg };
+      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} \u2014 ${desc}` : reg };
     });
   } catch (e) {
     console.error("PO vehicle lookup failed:", e.message);
@@ -21428,7 +21430,7 @@ async function getRaiseOptions(env, username) {
     mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
   } catch (e) {
   }
-  const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg }));
+  const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
   return { projects, vehicles };
 }
 async function handle27(request, env, ctx, url, sess) {

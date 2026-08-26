@@ -2080,7 +2080,8 @@ async function ensureVehTable(env) {
     "last_service_date TEXT", "last_service_miles INTEGER",
     "warn_days INTEGER", "warn_miles INTEGER",
     "specs TEXT",  // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
-    "finance TEXT" // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
+    "finance TEXT", // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
+    "pool INTEGER DEFAULT 0" // shared/pool vehicle (e.g. tippers) — any engineer may raise a PO against it
   ];
   for (const c of cols) { try { await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run(); } catch {} }
 }
