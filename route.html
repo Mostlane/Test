@@ -316,7 +316,7 @@
     // If our cached map is bound to a stale container, tear it down and rebuild
     // on the new node — otherwise it renders blank after clock-on re-renders.
     if(map){ try{ if(map.getContainer()!==host){ map.remove(); map=null; layer=null; } }catch(e){ map=null; layer=null; } }
-    if(!map){ map=L.map(host,{zoomControl:false,attributionControl:false}); L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd",attribution:"© OpenStreetMap © CARTO"}).addTo(map); layer=L.layerGroup().addTo(map); }
+    if(!map){ map=L.map(host,{zoomControl:false,attributionControl:false}); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:20,subdomains:"abcd",attribution:"© OpenStreetMap contributors"}).addTo(map); layer=L.layerGroup().addTo(map); }
     setTimeout(function(){
       map.invalidateSize(); layer.clearLayers(); var pts=[];
       jobs.forEach(function(j){ var pt=jobCoords(j); if(!pt) return; var col=isDone(j)?"#17b26a":(isUrgent(j)?"#e0344b":(STATUS_COL[j.status]||"#2f6fed"));

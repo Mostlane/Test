@@ -26381,7 +26381,8 @@ async function handle35(request, env, ctx, url, sess) {
     const jobId = String(b.jobId || "").trim();
     const files = Array.isArray(b.files) ? b.files : [];
     if (!jobId || !files.length) return json4({ ok: true, imported: 0, skipped: 0, failed: 0 });
-    let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null;
+    const isoDate2 = (s) => s && /^\d{4}-\d{2}-\d{2}/.test(String(s)) ? String(s) : null;
+    let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null, sigDate = null;
     for (const f of files) {
       try {
         if (!f || !f.url) {
@@ -26392,7 +26393,10 @@ async function handle35(request, env, ctx, url, sess) {
         const extRaw = (String(f.name || "").split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
         const ext = extRaw || ((f.type || "").split("/").pop() || "jpg");
         const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png` : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}` : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
-        if (f.kind === "signature" && !sigKey) sigKey = key;
+        if (f.kind === "signature") {
+          if (!sigKey) sigKey = key;
+          if (!sigDate) sigDate = isoDate2(f.date);
+        }
         if (await env.JOB_FILES.head(key)) {
           skipped++;
           continue;
@@ -26419,7 +26423,7 @@ async function handle35(request, env, ctx, url, sess) {
           } catch {
           }
           if (!d.signature || !d.signature.fileKey) {
-            d.signature = { signedBy: "Customer (Workever)", signedAt: (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
+            d.signature = { signedBy: "Customer (Workever)", signedAt: sigDate || isoDate2(b.signedAt) || (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
             await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, jobId).run();
           }
         }

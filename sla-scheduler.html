@@ -2097,10 +2097,10 @@ function openMap(scope){
   }
   if(!map){
     map = L.map("jobsMap");
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       subdomains: "abcd",
-      attribution: "© OpenStreetMap © CARTO"
+      attribution: "© OpenStreetMap contributors"
     }).addTo(map);
     mapLayer = L.layerGroup().addTo(map);
   }
