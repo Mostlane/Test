@@ -333,6 +333,9 @@
           <input id="editPhone" placeholder="e.g. 02392 123456">
         </div>
       </div>
+      <label>Email <span style="font-weight:400;color:#6b7280">(customer job-update emails go here)</span></label>
+      <input id="editEmail" placeholder="e.g. store@example.co.uk">
+
 
       <label>Store image</label>
       <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
@@ -487,6 +490,7 @@ Fob – Main Gate
   const editName = document.getElementById("editName");
   const editPostcode = document.getElementById("editPostcode");
   const editPhone = document.getElementById("editPhone");
+  const editEmail = document.getElementById("editEmail");
   const editImageUrl = document.getElementById("editImageUrl");
   const editLat = document.getElementById("editLat");
   const editLon = document.getElementById("editLon");
@@ -998,6 +1002,7 @@ jobInput.value = isProject
     editName.value = currentEditing.siteName || "";
 editPostcode.value = cleanPostcode(currentEditing) || "";
     editPhone.value = telOf(currentEditing) || "";
+    editEmail.value = currentEditing.email || "";
     editImageUrl.value = currentEditing.imageURL || currentEditing.image || "";
     { const _img = document.getElementById("editImgPreview"); const _u = editImageUrl.value.trim();
       if(_img){ if(_u){ _img.src = _u; _img.style.display=""; } else { _img.removeAttribute("src"); _img.style.display="none"; } } }
@@ -1065,9 +1070,14 @@ if (marker && marker.setPosition) {
       currentEditing.client = editClient.value;
       const isProjectSave = (currentEditing.client || "").toLowerCase() === "projects";
 
-// If project → Worker assigns jobNumber, so we NEVER keep siteNumber
+// Projects: a BRAND-NEW project sends no number (the Worker assigns the next
+// P-number). An EXISTING project must send its number (= the P-number / job
+// number) so /update-site can find and validate the record — otherwise the
+// save is rejected with "siteNumber required".
 if (isProjectSave) {
-  delete currentEditing.siteNumber;
+  const projNum = currentEditing.jobNumber || oldNum;
+  if (projNum) currentEditing.siteNumber = projNum;
+  else delete currentEditing.siteNumber;
 } else {
   // Read the box; if it comes back empty (autofill/timing quirk that made the
   // first save wrongly say "siteNumber required") fall back to the site's
@@ -1084,6 +1094,7 @@ currentEditing.postcode = editPostcode.value.trim();
 currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       const phone = editPhone.value.trim();
       if (phone) currentEditing.telephone = phone;
+      currentEditing.email = editEmail.value.trim() || undefined;
       currentEditing.imageURL = editImageUrl.value.trim() || undefined;
       currentEditing.lat = editLat.value ? parseFloat(editLat.value) : "";
       currentEditing.lon = editLon.value ? parseFloat(editLon.value) : "";
