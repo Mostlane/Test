@@ -304,6 +304,18 @@
 .photo-pick-btn:active{
   background:#e0e7ff;
 }
+    /* --- Site-audit checklist (office read-only) --- */
+    .au-row{border:1px solid #e3e8ee;border-radius:12px;padding:12px;margin-bottom:10px;background:#fbfcfe;}
+    .au-row.done{border-color:#a6dcbd;background:#f2fbf6;}
+    .au-row-h{display:flex;align-items:flex-start;gap:9px;flex-wrap:wrap;}
+    .au-num{flex:none;width:24px;height:24px;border-radius:999px;background:#003366;color:#fff;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;}
+    .au-txt{flex:1;min-width:160px;font-weight:600;font-size:15px;line-height:1.35;}
+    .au-imgs{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;}
+    .au-cell{margin:0;text-align:center;}
+    .au-cell figcaption{font-size:11px;color:#667085;margin-top:3px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
+    .au-img{width:104px;height:104px;object-fit:cover;border-radius:10px;border:1px solid #d7dee6;cursor:pointer;background:#eef2f6;}
+    .au-img.au-done{border-color:#58b784;}
+    .au-cell.au-empty .au-ph{width:104px;height:104px;border-radius:10px;border:1px dashed #cdd6e0;display:flex;align-items:center;justify-content:center;color:#b5c0cc;background:#f6f8fb;}
     /* --- Modal viewer --- */
     .photo-modal{
       position:fixed;
@@ -534,6 +546,12 @@
   <div class="card" id="firestopCard" style="display:none;">
     <h2 class="section-title">🔥 Firestopping record</h2>
     <div id="firestopHost"></div>
+  </div>
+
+  <!-- SITE AUDIT (checklist) — shown only for site-audit jobs -->
+  <div class="card" id="auditCard" style="display:none;">
+    <h2 class="section-title">🔍 Site audit checklist <span class="sub" id="auditProgress" style="font-weight:400;"></span></h2>
+    <div id="auditBody"></div>
   </div>
 
   <!-- TOTAL COST TO US (labour + travel + fuel + materials) — office/admin only -->
@@ -958,9 +976,39 @@ function renderJob(){
   loadJobCost();
   loadJobPOs();
   mountFirestopView();
+  renderAuditView();
 
   startCountdownLoop();
 }
+
+// Site-audit jobs: read-only checklist with each item's reference (before) +
+// completion (after) photo, and who did it / when. Photos are public R2 URLs
+// returned on the job (auditItems[].refPhotoUrls / donePhotoUrl).
+function renderAuditView(){
+  const card = $("auditCard"); if(!card || !job) return;
+  const items = Array.isArray(job.auditItems) ? job.auditItems : [];
+  if(!items.length){ card.style.display = "none"; return; }
+  card.style.display = "";
+  const doneN = items.filter(it => it.done && it.donePhoto).length;
+  const prog = $("auditProgress"); if(prog) prog.textContent = "· " + doneN + " / " + items.length + " done";
+  const cell = (p, cls, label) => p && (p.url || p.thumb)
+    ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt=""><figcaption>'+label+'</figcaption></figure>'
+    : '<figure class="au-cell au-empty"><div class="au-ph">—</div><figcaption>'+label+'</figcaption></figure>';
+  $("auditBody").innerHTML = items.map((it, i) => {
+    const refs = (it.refPhotoUrls || []);
+    const refHtml = refs.length ? refs.map(p => cell(p, "au-img", "Reference")).join("") : cell(null, "", "Reference");
+    const doneHtml = (it.done && it.donePhotoUrl) ? cell(it.donePhotoUrl, "au-img au-done", "Completed") : cell(null, "", "Completed");
+    const when = (it.done && it.doneAt) ? ('<span class="sub">✓ ' + esc(it.doneBy || "") + (it.doneAt ? ' · ' + fmtWhen(it.doneAt) : '') + '</span>') : '<span class="sub" style="color:#b45309;">Outstanding</span>';
+    return '<div class="au-row'+((it.done&&it.donePhoto)?' done':'')+'">'+
+      '<div class="au-row-h"><span class="au-num">'+(i+1)+'</span><div class="au-txt">'+esc(it.text||"")+'</div>'+when+'</div>'+
+      '<div class="au-imgs">'+refHtml+doneHtml+'</div></div>';
+  }).join("");
+  // Open any thumbnail full-size in the existing photo modal.
+  [].forEach.call($("auditBody").querySelectorAll("img[data-full]"), im => {
+    im.onclick = () => { const u = im.getAttribute("data-full"); if(u && typeof openPhotoModalUrl === "function") openPhotoModalUrl(u); else if(u) window.open(u, "_blank"); };
+  });
+}
+function fmtWhen(iso){ try{ const d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 
 // Firestopping jobs: show the read-only RIA record + Download PDF/bundle.
 let fsViewMounted = false;

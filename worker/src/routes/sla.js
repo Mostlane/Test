@@ -1248,6 +1248,66 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse({ files }, headers);
     }
 
+    // POST /sla/jobs/{id}/audit-photo  -> attach a photo to a site-audit checklist
+    // item. stage=ref (office reference/before) OR stage=done (engineer completion,
+    // which marks the item complete). Multipart: file, thumb?, itemId, stage.
+    if (parts[2] === "audit-photo" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      let form;
+      try { form = await request.formData(); }
+      catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
+      const file = form.get("file");
+      const itemId = String(form.get("itemId") || searchParams.get("itemId") || "");
+      const stage = (String(form.get("stage") || searchParams.get("stage") || "done") === "ref") ? "ref" : "done";
+      if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const item = (job.auditItems || []).find(it => it && it.id === itemId);
+      if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
+      const fn = `${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const key = `jobs/${id}/audit/${itemId}/${fn}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try { await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } }); } catch {}
+      }
+      if (stage === "ref") {
+        item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
+        item.refPhotos.push(key);
+      } else {
+        item.donePhoto = key; item.done = true;
+        item.doneAt = new Date().toISOString();
+        item.doneBy = (sess.user && sess.user.username) || "";
+      }
+      job.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+      const remaining = (job.auditItems || []).filter(it => !(it.done && it.donePhoto)).length;
+      return jsonResponse({ ok: true, itemId, stage, key, url: r2Url(env, key),
+        thumb: r2Url(env, key + ".thumb"), done: !!item.done, remaining }, headers, 201);
+    }
+
+    // POST /sla/jobs/{id}/audit-item  -> item tweaks: undo a completion, or remove
+    // a reference photo. JSON { itemId, undo?, removeRef? (key) }.
+    if (parts[2] === "audit-item" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const item = (job.auditItems || []).find(it => it && it.id === String(b.itemId || ""));
+      if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
+      if (b.undo) {
+        if (item.donePhoto) { try { await env.JOB_FILES.delete(item.donePhoto); await env.JOB_FILES.delete(item.donePhoto + ".thumb"); } catch {} }
+        item.done = false; item.donePhoto = null; item.doneAt = null; item.doneBy = null;
+      }
+      if (b.removeRef) {
+        item.refPhotos = (item.refPhotos || []).filter(k => k !== b.removeRef);
+        try { await env.JOB_FILES.delete(b.removeRef); await env.JOB_FILES.delete(b.removeRef + ".thumb"); } catch {}
+      }
+      job.updatedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
+    }
+
     // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
     // (Before/During/After). Stored as a job.photoStages override; no R2 rewrite.
     if (parts[2] === "photo-stage" && method === "POST") {
@@ -1409,6 +1469,7 @@ export async function handle(request, env, ctx, url, sess) {
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));   // this viewer's own slice
+      if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);   // add viewable photo URLs
       return jsonResponse(d, headers);
     }
 
@@ -1894,10 +1955,50 @@ function firestopMissing(job) {
   if (!rec.signatureKey) miss.push("the signed declaration");
   return miss;
 }
+// Site-audit job: a single job carrying a checklist of items (job.auditItems),
+// each needing ONE completion photo in the field. Completion is per-item, not the
+// standard note/photo/signature.
+function isAuditJob(job) { return !!(job && Array.isArray(job.auditItems) && job.auditItems.length); }
+function auditMissing(job) {
+  const items = (job && job.auditItems) || [];
+  const outstanding = items.filter(it => !(it && it.done && it.donePhoto));
+  if (!outstanding.length) return [];
+  return [`a completion photo on ${outstanding.length} of ${items.length} audit item${items.length === 1 ? "" : "s"}`];
+}
+// Normalise a builder's audit-item list into the stored shape, PRESERVING each
+// item's completion state + photos from the existing job (matched by id) so an
+// office text edit never wipes an engineer's completed work.
+function normAuditItems(input, existing) {
+  if (!Array.isArray(input)) return existing?.auditItems;   // undefined = leave untouched
+  const prev = {};
+  for (const it of (existing?.auditItems || [])) if (it && it.id) prev[it.id] = it;
+  const out = [];
+  for (const raw of input) {
+    if (!raw) continue;
+    const text = String(raw.text || raw.title || "").trim();
+    if (!text && !(raw.id && prev[raw.id])) continue;       // drop blank new rows
+    const id = String(raw.id || "") || crypto.randomUUID();
+    const was = prev[id] || {};
+    out.push({
+      id,
+      text: (text || was.text || "").slice(0, 2000),
+      refPhotos: Array.isArray(raw.refPhotos) ? raw.refPhotos.filter(Boolean).slice(0, 12)
+                 : (Array.isArray(was.refPhotos) ? was.refPhotos : []),
+      done: !!was.done,
+      donePhoto: was.donePhoto || null,
+      doneAt: was.doneAt || null,
+      doneBy: was.doneBy || null,
+    });
+    if (out.length >= 200) break;                            // sane cap
+  }
+  return out;
+}
 function completionMissing(job, patch, afterPhotoCount) {
   // Firestopping jobs are completed by the RIA record (seals + photos +
   // signed declaration), NOT the standard note/photo/signature.
   if (job && job.firestopping) return firestopMissing(job);
+  // Site-audit jobs complete when every checklist item has its completion photo.
+  if (isAuditJob(job)) return auditMissing(job);
   // Investigate-only jobs have relaxed gates — Connor sets Quote/Complete freely.
   if (job && job.investigateOnly) return [];
   const miss = [];
@@ -2415,14 +2516,18 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // signature. Default OFF for projects (P-numbered site / projects client), ON
   // for everything else. An explicit value from the form/editor wins; an existing
   // job's stored value is preserved when not re-specified. (isProjJob computed above.)
+  // Site-audit job: completion is per-item (each checklist item needs one photo),
+  // so the standard whole-job gates default OFF (an explicit value still wins).
+  const isAudit = Array.isArray(body.auditItems) ? body.auditItems.length > 0 : isAuditJob(existing);
+  const gateDefault = !isProjJob && !isAudit;
   const requiresRA = body.requiresRA !== undefined ? !!body.requiresRA
-    : (existing?.requiresRA !== undefined ? !!existing.requiresRA : !isProjJob);
+    : (existing?.requiresRA !== undefined ? !!existing.requiresRA : gateDefault);
   const requiresSignature = body.requiresSignature !== undefined ? !!body.requiresSignature
-    : (existing?.requiresSignature !== undefined ? !!existing.requiresSignature : !isProjJob);
+    : (existing?.requiresSignature !== undefined ? !!existing.requiresSignature : gateDefault);
   const requiresPhoto = body.requiresPhoto !== undefined ? !!body.requiresPhoto
-    : (existing?.requiresPhoto !== undefined ? !!existing.requiresPhoto : !isProjJob);
+    : (existing?.requiresPhoto !== undefined ? !!existing.requiresPhoto : gateDefault);
   const requiresNote = body.requiresNote !== undefined ? !!body.requiresNote
-    : (existing?.requiresNote !== undefined ? !!existing.requiresNote : !isProjJob);
+    : (existing?.requiresNote !== undefined ? !!existing.requiresNote : gateDefault);
 
   // A job's reference must never be the internal UUID — that shows up as gibberish
   // in lists and notifications. When no reference is typed, default it to a CLEAR
@@ -2471,6 +2576,9 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the standard completion (photo/note/signature). Preserved across re-saves.
     firestopping: body.firestopping !== undefined ? !!body.firestopping : (existing?.firestopping || false),
     firestop: existing?.firestop,
+    // Site-audit checklist: ONE job, many items, each item needing a completion
+    // photo in the field. Text edits preserve completed items (matched by id).
+    auditItems: normAuditItems(body.auditItems, existing),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
@@ -2573,6 +2681,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.requiresPhoto !== undefined) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
+  if (patch.auditItems !== undefined) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
@@ -4015,6 +4124,17 @@ async function inferWorkArea(env, tenantId, description) {
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+// Attach public view URLs to a site-audit job's checklist items (their photos
+// live in the public JOB_FILES bucket). Response-only — never stored.
+function decorateAuditItems(env, items) {
+  if (!Array.isArray(items)) return items;
+  const ph = k => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") });
+  return items.map(it => ({
+    ...it,
+    refPhotoUrls: (it.refPhotos || []).map(ph),
+    donePhotoUrl: it.donePhoto ? ph(it.donePhoto) : null,
+  }));
 }
 
 // Access-controlled URL for a site document / photo. Routes through the worker
