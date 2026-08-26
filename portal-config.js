@@ -463,16 +463,21 @@
       // currently the van-score banner. It's fixed, so without reserving space
       // it simply covered the first row of the page (Jamie saw the Van Check /
       // Holiday tiles sliced in half). Whatever sets it must clear it again.
+      // padding-top is !important: portal-config runs as a head script and
+      // injects this BEFORE a page's own <style> is parsed, so a page that
+      // resets `html{padding:0}` (e.g. po-office) would otherwise zero the inset
+      // and its header/back button would sit UNDER the fixed cap. !important
+      // keeps the cap's inset winning regardless of a page's own html padding.
       "html{ box-sizing:border-box; min-height:100vh;"
-      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)); }"
+      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)) !important; }"
       // `vh` is measured against the FULL screen and ignores the padding above,
       // so a page with `body{min-height:100vh}` (route.html and friends) ends up
       // exactly one inset too tall — the blank strip again. Re-base it. Pages
       // with no min-height simply gain a full-height body, which is harmless
       // and makes short pages fill the screen rather than half-paint it.
       + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px) - var(--ml-topbar, 0px)); }"
-      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px);"
-      + "  padding-right:env(safe-area-inset-right, 0px); } }"
+      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px) !important;"
+      + "  padding-right:env(safe-area-inset-right, 0px) !important; } }"
       + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
       + "  background:#003468; z-index:2147483000; pointer-events:none; }"
 ;
@@ -488,6 +493,7 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add);
     else add();
   })();
+
 
   // ── Loading indicator: the Mostlane "M" spins, rests, spins again ───────────
   // There are ~200 "Loading…" strings across ~80 pages, written every which way
@@ -848,6 +854,8 @@
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
           { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"], match: ["vehicles.html", "fleet-report.html", "van-checks.html", "van-timesheet.html"] },
           { label: "CCTV Wall", href: "cctv.html", icon: "eye", perms: ["__fullOnly"], match: ["cctv.html"] }
+          // Yard Gate removed from the desktop sidebar — desktop uses the
+          // top status banner (gateBanner above); mobile keeps the menu tile.
         ]},
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users", "DeviceAdmin"], hrefBy: [["Users", "users-admin.html"], ["DeviceAdmin", "device-admin.html"]], match: ["users-admin.html", "device-admin.html"] },
@@ -958,7 +966,9 @@
         el.innerHTML =
           '<div class="pn-brand"><div class="pn-logobox">'
           + '<img class="full" src="/mostlane-logo.jpg" alt="Mostlane">'
-          + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div></div>'
+          + '<img class="mark" src="/icons/icon-512.png" alt="Mostlane"></div>'
+          + ((yes(perms.YardGate) || yes(perms.FullAccess)) ? '<a class="pn-gate" id="pnGate" href="yard-gate.html" title="Yard gate" style="display:none"><span class="pn-gate-dot"></span><span class="pn-gate-lbl pn-label">Yard Gate</span></a>' : '')
+          + '</div>'
           + '<nav class="pn-nav" id="pnavNav">' + navInner() + "</nav>"
           + '<div class="pn-foot"><div class="pn-av">' + esc(initials(name)) + "</div>"
           + '<div class="pn-who"><b>' + esc(name) + "</b><span>" + (yes(perms.FullAccess) ? "Full access" : "Team member") + "</span></div>"
@@ -983,6 +993,27 @@
         try { initOfficeClock(); } catch (e) {}
         try { if (yes(perms.FullAccess)) refreshMenuConfig(); } catch (e) {}
         try { initPalette(); } catch (e) {}
+        try { initGateLight(); } catch (e) {}
+      }
+
+      // Yard-gate traffic light under the sidebar logo: green=closed, red=open.
+      function initGateLight() {
+        var el = document.getElementById("pnGate"); if (!el) return;
+        var API = window.MOSTLANE_API || "";
+        function refresh() {
+          if (document.hidden) return;
+          nativeFetch(API + "/tuya/gate/state", { headers: { "Authorization": "Bearer " + (localStorage.getItem("mostlaneToken") || "") } })
+            .then(function (r) { return r.json(); }).then(function (j) {
+              if (!j || !j.ok || !j.configured) { el.style.display = "none"; return; }
+              el.style.display = "";
+              var open = !!j.open;
+              el.className = "pn-gate " + (open ? "open" : "closed");
+              var lbl = el.querySelector(".pn-gate-lbl"); if (lbl) lbl.textContent = open ? "Yard Gate Open" : "Yard Gate Closed";
+              el.title = "Yard gate: " + (open ? "OPEN" : "Closed") + " — open controls";
+            }).catch(function () {});
+        }
+        refresh(); setInterval(refresh, 60000);
+        document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
       }
 
       // ── Command palette (Ctrl+K / Cmd+K, desktop) ──────────────────────────
@@ -1431,6 +1462,13 @@
           + "#pnav .pn-logobox{ background:#fff; border-radius:11px; padding:10px 12px; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.18); }"
           + "#pnav .pn-logobox img.full{ width:100%; max-width:168px; height:auto; display:block; } #pnav .pn-logobox img.mark{ display:none; width:34px; height:34px; border-radius:7px; }"
           + "html.pnav-collapsed #pnav .pn-brand{ padding:12px 8px; } html.pnav-collapsed #pnav .pn-logobox{ padding:5px; } html.pnav-collapsed #pnav .pn-logobox img.full{ display:none; } html.pnav-collapsed #pnav .pn-logobox img.mark{ display:block; }"
+          // Yard-gate traffic light under the logo (desktop sidebar).
+          + "#pnav .pn-gate{ display:flex; align-items:center; gap:8px; margin:9px auto 0; padding:5px 11px; border-radius:999px; background:rgba(255,255,255,.13); color:#fff; text-decoration:none; font:600 12px/1 inherit; width:max-content; }"
+          + "#pnav .pn-gate:hover{ background:rgba(255,255,255,.22); }"
+          + "#pnav .pn-gate-dot{ width:11px; height:11px; border-radius:50%; background:#94a3b8; box-shadow:0 0 0 3px rgba(148,163,184,.28); flex:0 0 auto; }"
+          + "#pnav .pn-gate.open .pn-gate-dot{ background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.32); }"
+          + "#pnav .pn-gate.closed .pn-gate-dot{ background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.32); }"
+          + "html.pnav-collapsed #pnav .pn-gate{ padding:6px; margin-top:8px; }"
           + "#pnav .pn-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding:4px 10px 10px; }"
           + "#pnav .pn-grp{ margin-top:14px; } #pnav .pn-grp h4{ font-size:10.5px; text-transform:uppercase; letter-spacing:.9px; color:#9fc0e8; opacity:.75; margin:0 10px 5px; font-weight:600; white-space:nowrap; }"
           + "html.pnav-collapsed #pnav .pn-grp h4{ opacity:0; height:7px; margin:0; overflow:hidden; }"
@@ -1622,7 +1660,7 @@
           }
           // 3. Force the core shell past the browser HTTP cache so the reload
           //    picks up fresh copies immediately (best-effort, failures ignored).
-          var core = ["/portal-config.js?v=17", "/portal.css?v=1", "/auth.js", "/device-auth.js",
+          var core = ["/portal-config.js?v=18", "/portal.css?v=1", "/auth.js", "/device-auth.js",
             location.pathname + location.search];
           await Promise.all(core.map(function (u) {
             return fetch(u, { cache: "reload" }).catch(function () {});

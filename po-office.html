@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -197,6 +197,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
       <div class="field" style="margin-bottom:10px">
         <input id="search-input" type="text" placeholder="🔍 Search PO #, engineer, site, incident no, supplier, description..." oninput="loadPOs()">
       </div>
+      <div id="jobFilterBanner" style="display:none;"></div>
       <div class="filter-bar">
         <select id="filter-engineer"><option value="">All engineers</option></select>
         <select id="filter-office-user"><option value="">All office users</option></select>
@@ -255,6 +256,7 @@ function printReport(pos){ var money=function(n){return "\u00a3"+Number(n||0).to
 async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}} if(!(u.FullAccess==="Yes"||(u.PurchaseOrders==="Yes"&&u.StaffType!=="field"))){ document.getElementById("poGate").innerHTML="This page needs the Purchase Orders permission."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
 let allPOs = [], allEngineers = [], allSuppliers = [], allSites = [], allSubcontractors = [], allTrades = [];
 let currentStatus = '';
+let currentJobId = '';   // set from ?job_id= deep-link; filters to one job's POs
 async function init() {
   const [engineers, suppliers, sites, officeUsers, subs, trades] = await Promise.all([
     authFetch('/po/api/engineers').then(r => r.json()),
@@ -272,6 +274,13 @@ async function init() {
   document.querySelectorAll('#status-tabs .tab').forEach(t => {
     t.addEventListener('click', () => { setStatusTab(t.dataset.status || ''); loadPOs(); });
   });
+  // Deep-link from a job card: ?search=<PO number> isolates one PO;
+  // ?job_id=<SLA job id> shows every PO raised against that job.
+  const qp = new URLSearchParams(location.search);
+  const dlSearch = qp.get('search') || qp.get('po');
+  currentJobId = qp.get('job_id') || '';
+  if (dlSearch) document.getElementById('search-input').value = dlSearch;
+  renderJobFilterBanner();
   loadPOs();
   loadDashboard();
   openNewPOFromJob();
@@ -403,6 +412,7 @@ async function loadPOs() {
   if (unmatchedSite) params.set('unmatched_site', '1');
   if (search) params.set('search', search);
   if (currentStatus) params.set('status', currentStatus);
+  if (currentJobId) params.set('job_id', currentJobId);
   allPOs = await authFetch('/po/api/pos?' + params).then(r => r.json());
   renderStats(); renderPOs(allPOs);
 }
@@ -413,7 +423,22 @@ function resetFilterInputs() {
   document.getElementById('filter-unmatched-site').checked = false;
   setStatusTab('');
 }
-function clearFilters() { resetFilterInputs(); loadPOs(); }
+function renderJobFilterBanner() {
+  const b = document.getElementById('jobFilterBanner');
+  if (!b) return;
+  if (currentJobId) {
+    b.style.display = '';
+    b.innerHTML = '<div style="background:#eef4ff;border:1px solid #cdddf5;border-radius:9px;padding:9px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
+      '<span style="color:#003366;font-weight:600;">🧾 Showing purchase orders raised against one job</span>' +
+      '<button class="ghost small" onclick="clearJobFilter()">Show all POs</button></div>';
+  } else { b.style.display = 'none'; b.innerHTML = ''; }
+}
+function clearJobFilter() {
+  currentJobId = '';
+  try { const u = new URL(location.href); u.searchParams.delete('job_id'); history.replaceState(null, '', u); } catch (e) {}
+  renderJobFilterBanner(); loadPOs();
+}
+function clearFilters() { currentJobId = ''; renderJobFilterBanner(); resetFilterInputs(); loadPOs(); }
 function statusBadge(p) {
   const s = p.status || 'open';
   const map = {

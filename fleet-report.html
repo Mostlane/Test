@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>Fleet Report — Mostlane</title>
-<script src="/portal-config.js?v=17"></script>
+<script src="/portal-config.js?v=18"></script>
 <script src="auth.js"></script>
 <style id="fleetCss">
   :root{--indigo-dark:#1a237e;--indigo-mid:#283593;--indigo-light:#3949ab;--yellow:#ffd600;
@@ -65,6 +65,38 @@
   .rpt-month{background:#003468;color:#fff;font-weight:800;padding:7px 12px;border-radius:8px;margin:16px 0 2px;font-size:14px}
   .rpt-month:first-child{margin-top:4px}
   .rpt-row{display:flex;gap:10px;align-items:center;padding:8px 4px;border-top:1px solid #eef}
+  /* Report container needs mobile padding so tables/panels don't run edge-to-edge. */
+  #report{padding:0 12px;max-width:1400px;margin:0 auto}
+  /* Tracker → job-costing preview panel. Grid stacks on narrow screens so
+     everything fits on a phone. */
+  .trkbox{margin:12px 0;padding:12px 14px;background:#eef4ff;border:1px solid #cdddf5;border-radius:12px;color:#003468}
+  .trkbox-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  .trkbox-hd b{font-size:15px}
+  .trkbox-hd .tot{font-size:12.5px;color:#334155}
+  .trkbox-list{max-height:60vh;overflow:auto;border:1px solid #cdddf5;border-radius:8px;background:#fff;padding:6px 0}
+  .trk-drv-hd{padding:8px 12px;background:#f8fbff;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:0;z-index:1;border-bottom:1px solid #e2e8f0}
+  .trk-drv-hd b{font-size:14px;color:#003468}
+  .trk-drv-hd .sub{color:#334155;font-size:12px}
+  .trk-day{padding:8px 12px;font-size:13px;display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:start;border-top:1px solid #f0f4fa}
+  .trk-day .dt{color:#64748b;font-weight:600}
+  .trk-day .cost{text-align:right;font-weight:700;color:#0a7d33;white-space:nowrap}
+  .trk-site{margin:2px 0}
+  .trk-site b{color:#0f172a}
+  .trk-site .meta{color:#94a3b8;font-size:11px;margin-left:4px}
+  .trk-site .times{color:#64748b;font-size:11.5px;margin-top:2px}
+  .trk-site .tag{background:#e0e7ff;color:#3730a3;font-size:10px;font-weight:700;padding:1px 5px;border-radius:5px;margin-left:4px;display:inline-block}
+  .trk-wrong{background:none;border:none;color:#b91c1c;cursor:pointer;padding:0 4px;font-size:11px;margin-left:4px}
+  @media(max-width:640px){
+    #report{padding:0 8px}
+    .trkbox{padding:10px 10px;margin:10px 0}
+    .trkbox-list{max-height:none}
+    /* Stack: date row, then site block full-width, then cost aligned right. */
+    .trk-day{grid-template-columns:1fr auto;padding:8px 10px}
+    .trk-day .dt{grid-column:1 / -1;margin-bottom:2px}
+    .trk-drv-hd{padding:8px 10px}
+    .trkbox-hd{gap:6px}
+    .trkbox-hd .tot{width:100%}
+  }
 </style>
 </head>
 <body>
@@ -112,9 +144,15 @@
   </div>
 
   <div class="card">
-    <h3 style="margin-bottom:4px;color:var(--indigo-dark);font-size:15px;">🧑‍🔧 Vehicle drivers <span id="driverSaveState" style="font-size:11.5px;font-weight:600;color:#6b7280;margin-left:6px"></span></h3>
-    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Pre-filled from the <b>Vehicles</b> registry (current drivers). Change any that differ for this report's week — the report uses these names. <b>Each change saves on its own</b> and is remembered for next week. To change a driver permanently, do it on the Vehicles page (it keeps a history).</p>
-    <div id="driverMap"><span class="muted">Loading…</span></div>
+    <details style="margin:0">
+      <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;padding:2px 0">
+        <span style="color:#6b7280;font-size:14px">▸</span>
+        <h3 style="margin:0;color:var(--indigo-dark);font-size:15px;flex:1">🧑‍🔧 Vehicle drivers <span style="font-size:12px;color:#6b7280;font-weight:normal">— pre-filled from Vehicles; you'll also be prompted to confirm per-day on Save</span> <span id="driverSaveState" style="font-size:11.5px;font-weight:600;color:#6b7280;margin-left:6px"></span></h3>
+      </summary>
+      <p style="font-size:12.5px;color:#78809a;margin:8px 0;">Pre-filled from the <b>Vehicles</b> registry (current drivers). Change any that differ for this report's week — the report uses these names. <b>Each change saves on its own</b> and is remembered for next week. To change a driver permanently, do it on the Vehicles page (it keeps a history). Any pool / unassigned vans that moved will show up per day in the <b>Confirm &amp; save timesheets</b> step after generating.</p>
+      <div id="driverMap"><span class="muted">Loading…</span></div>
+    </details>
+    <style>details summary::-webkit-details-marker{display:none} details[open] summary > span:first-child{transform:rotate(90deg);display:inline-block}</style>
   </div>
 
   <div class="card">
@@ -424,19 +462,66 @@ async function loadPastReports(){
     const monthName=k=>{ if(k==="0000-00")return "Undated"; const p=k.split("-"); return new Date(Date.UTC(+p[0],+p[1]-1,1)).toLocaleDateString("en-GB",{month:"long",year:"numeric"}); };
     const keys=Object.keys(groups).sort().reverse();
     el.innerHTML=keys.map(k=>{
-      const rows=groups[k].map(r=>`<div class="rpt-row">
-          <div style="flex:1"><b>${esc(r.title)}</b><br><span class="muted" style="font-size:12px">Saved ${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}</span></div>
+      const rows=groups[k].map(r=>{
+        const isDraft=(r.status||"approved")==="draft";
+        const badge = isDraft
+          ? '<span style="background:#fef3c7;color:#78350f;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:.03em">DRAFT</span>'
+          : '<span style="background:#dcfce7;color:#166534;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:.03em" title="'+esc(r.approvedBy?"Approved by "+r.approvedBy+((r.approvedAt||"")?" · "+r.approvedAt.slice(0,10):""):"Approved")+'">APPROVED</span>';
+        const btn = isDraft
+          ? '<button class="btn" style="padding:7px 12px;background:#0a7d33;color:#fff" data-approve="'+esc(r.key)+'">✓ Approve</button>'
+          : '<button class="btn grey" style="padding:7px 12px" data-draft="'+esc(r.key)+'" title="Move back to draft">↺ Reopen</button>';
+        return `<div class="rpt-row">
+          <div style="flex:1;min-width:0"><b>${esc(r.title)}</b> ${badge}<br><span class="muted" style="font-size:12px">Saved ${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}${!isDraft&&r.approvedBy?" · approved by "+esc(r.approvedBy):""}</span></div>
           <a class="btn grey" style="text-decoration:none;padding:7px 12px" href="${esc(r.url)}" target="_blank" rel="noopener">Open</a>
+          ${btn}
           <button class="btn grey" style="padding:7px 12px;color:#dc2626" data-del="${esc(r.key)}">Delete</button>
-        </div>`).join("");
+        </div>`;
+      }).join("");
       return `<div class="rpt-month">${esc(monthName(k))} <span style="font-weight:400;opacity:.75">(${groups[k].length})</span></div>${rows}`;
     }).join("");
     el.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>deleteReport(b.getAttribute("data-del"))));
+    el.querySelectorAll("[data-approve]").forEach(b=>b.addEventListener("click",()=>approveReport(b.getAttribute("data-approve"),"approved")));
+    el.querySelectorAll("[data-draft]").forEach(b=>b.addEventListener("click",()=>approveReport(b.getAttribute("data-draft"),"draft")));
   }catch(e){ el.innerHTML='<span class="muted">Couldn\'t load.</span>'; }
 }
 async function deleteReport(key){
   if(!confirm("Delete this saved report? This cannot be undone.")) return;
   try{ const r=await authFetch("/fleet/report-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})}).then(r=>r.json()); if(r.ok) loadPastReports(); }catch(e){}
+}
+// One-tap approve for the report currently on screen. Uses the R2 key saved
+// on window.__lastReport by the auto-save path; if that's not set, does a
+// save first so approving always has something to approve.
+async function approveThisReport(btn){
+  const L = window.__lastReport || {};
+  if(!L.reportKey){
+    if(btn) btn.disabled=true;
+    await saveReport({auto:true});
+  }
+  const key = (window.__lastReport||{}).reportKey;
+  if(!key){ if(btn) btn.disabled=false; alert("Couldn't find the saved report key — save again first."); return; }
+  if(btn) btn.disabled=true;
+  try{
+    const r = await authFetch("/fleet/report-approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,status:"approved"})}).then(r=>r.json());
+    if(r && r.ok){
+      const chip = document.getElementById("reportStatusChip");
+      if(chip){ chip.textContent="APPROVED"; chip.style.background="#dcfce7"; chip.style.color="#166534"; }
+      if(btn){ btn.textContent="✓ Approved"; btn.style.background="#94a3b8"; }
+      const sm = $("saveMsg"); if(sm) sm.textContent = "✓ Report APPROVED — visible in the saved list.";
+      loadPastReports();
+    } else { if(btn) btn.disabled=false; alert("Couldn't approve — "+((r&&r.error)||"unknown")); }
+  }catch(e){ if(btn) btn.disabled=false; alert("Couldn't approve — "+e.message); }
+}
+window.approveThisReport = approveThisReport;
+async function approveReport(key, status){
+  // Flip a saved report's status between draft ↔ approved. Nothing rewrites
+  // the report body — R2 metadata carries the flag + who approved when.
+  const label = status==="approved" ? "Approve this report? It'll be marked APPROVED." : "Move this report back to DRAFT?";
+  if(!confirm(label)) return;
+  try{
+    const r = await authFetch("/fleet/report-approve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,status})}).then(r=>r.json());
+    if(r && r.ok) loadPastReports();
+    else alert("Couldn't update — " + ((r&&r.error)||"unknown"));
+  }catch(e){ alert("Couldn't update — "+e.message); }
 }
 function buildStandalone(){
   // Grab THIS report's stylesheet by id — not document.querySelector("style"),
@@ -458,9 +543,18 @@ async function saveReport(opts){
     form.append("title", window.__lastReport.title);
     form.append("weekStart", window.__lastReport.weekStart);
     form.append("weekEnd", window.__lastReport.weekEnd);
+    // Every save from here goes in as DRAFT — the office approves separately
+    // once they've reviewed / made edits. Legacy rows show as approved by default.
+    form.append("status", (opts && opts.status) || "draft");
     const r=await authFetch("/fleet/report",{method:"POST",body:form}).then(r=>r.json());
     if(msg)msg.textContent = r.ok ? (auto?"✓ Saved automatically":"✓ Saved to portal") : ("Save failed — "+(r.error||""));
-    if(r&&r.ok) loadPastReports();   // refresh the saved list (under its month banner)
+    if(r&&r.ok){
+      // Remember the R2 key + saved-at so the timesheet builder can stamp
+      // every day it writes with "these times came from THIS report",
+      // giving a clean audit trail for later disputes.
+      if(window.__lastReport){ window.__lastReport.reportKey=r.key||""; window.__lastReport.savedAt=new Date().toISOString(); }
+      loadPastReports();   // refresh the saved list (under its month banner)
+    }
   }catch(e){ if($("saveMsg"))$("saveMsg").textContent="Save failed"; }
 }
 window.saveReport=saveReport;
@@ -468,6 +562,22 @@ window.saveReport=saveReport;
 /* ═══ Send van driver scores to engineers ═══
    Each vehicle with an ASSIGNED engineer (driverUser) + a score becomes a
    pickable recipient. Sending pushes them and files the score to their history. */
+// Weekly drive time per vehicle (minutes) — used to keep barely-driven vans
+// out of the fleet ranking so someone who was on holiday most of the week
+// doesn't get "5th of 11" when only 9 vans actually did a proper week.
+function vehicleWeekDriveMin(v){
+  var m = 0;
+  var days = (v && v.days) || [];
+  for (var i=0;i<days.length;i++){
+    var trips = (days[i] && days[i].trips) || [];
+    for (var j=0;j<trips.length;j++) m += Number(trips[j].drive || 0);
+  }
+  return m;
+}
+// A vehicle counts toward the fleet ranking only if it was driven for at
+// least 6 hours in the week (360 min). Adjust MIN_DRIVE_MIN if the standard
+// working-week threshold changes.
+var MIN_DRIVE_MIN = 360;
 function scoreRecipients(){
   const R=window.__reportData; if(!R) return [];
   const seen=new Set(), out=[];
@@ -475,21 +585,47 @@ function scoreRecipients(){
     if(v.isPool||!v.driverUser) continue;            // need one real assigned engineer
     const sc=R.scores?R.scores[v.reg]:null; if(sc==null) continue;
     if(seen.has(v.driverUser)) continue; seen.add(v.driverUser);
-    out.push({username:v.driverUser, name:v.driver||v.driverUser, reg:v.reg, score:sc});
+    out.push({username:v.driverUser, name:v.driver||v.driverUser, reg:v.reg, score:sc, driveMin: vehicleWeekDriveMin(v)});
+  }
+  // Rank across EVERY vehicle that met the drive-time threshold — barely-used
+  // vans are excluded from both the denominator AND placings. Ties share a
+  // rank ("standard competition ranking": 1,2,2,4).
+  const eligible = (R.vehicles||[]).filter(v => {
+    const sc = R.scores ? R.scores[v.reg] : null;
+    if (sc == null || !isFinite(sc)) return false;
+    return vehicleWeekDriveMin(v) >= MIN_DRIVE_MIN;
+  });
+  const allScores = eligible.map(v => R.scores[v.reg]).sort((a,b) => b - a);
+  const total = allScores.length;
+  for (const r of out) {
+    if (r.driveMin < MIN_DRIVE_MIN) { r.rank = null; r.total = total; r.belowMinDrive = true; continue; }
+    const idx = allScores.indexOf(r.score);
+    r.rank = idx >= 0 ? idx + 1 : null;
+    r.total = total;
+    r.belowMinDrive = false;
   }
   return out;
 }
 function scoreColour(s){ return s>=85?'#0a8a35':s>=70?'#b45309':'#d11f2a'; }
+function medal(rank){ return rank===1?'🏆':rank===2?'🥈':rank===3?'🥉':''; }
+function rankLabel(rank,tot){ if(!rank||!tot) return ''; const s=rank%100; const suf=(s>=11&&s<=13)?'th':['th','st','nd','rd','th','th','th','th','th','th'][rank%10]; return rank+suf+' of '+tot; }
 function openSendScores(){
   closeSendScores();
   const R=window.__reportData; const recs=scoreRecipients(); window.__scoreRecs=recs;
   const range=R?fmtRange(R.minD,R.maxD):'';
-  const rows=recs.length?recs.map((r,i)=>`
+  const rows=recs.length?recs.map((r,i)=>{
+    const m = medal(r.rank);
+    const isLast = r.rank && r.total && r.rank === r.total && r.total > 1;
+    const meta = r.belowMinDrive
+      ? `<span style="color:#64748b;font-size:12px">not ranked · &lt;6h driven</span>`
+      : (r.rank ? `<span style="color:${m?'#0a8a35':(r.score<70?'#d11f2a':'#64748b')};font-weight:${m?700:600};font-size:12px">${m?m+' ':''}${rankLabel(r.rank,r.total)}${isLast?' · last':''}${r.score<70?' · under 70':''}</span>` : '');
+    return `
     <label style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-top:1px solid #eef;cursor:pointer">
       <input type="checkbox" class="ss-ck" data-i="${i}" checked style="width:18px;height:18px;flex:none">
-      <span style="flex:1;min-width:0"><b>${esc(r.name)}</b><br><span style="color:#64748b;font-size:12px">${esc(r.reg)}</span></span>
+      <span style="flex:1;min-width:0"><b>${esc(r.name)}</b><br><span style="color:#64748b;font-size:12px">${esc(r.reg)}</span>${meta?' · '+meta:''}</span>
       <span style="font-weight:800;font-size:17px;color:${scoreColour(r.score)}">${r.score}</span>
-    </label>`).join(''):'<p style="color:#64748b;font-size:14px">No engineer scores to send — a report needs an <b>assigned driver</b> and a driver-score PDF.</p>';
+    </label>`;
+  }).join(''):'<p style="color:#64748b;font-size:14px">No engineer scores to send — a report needs an <b>assigned driver</b> and a driver-score PDF.</p>';
   const host=document.createElement('div'); host.id='sendScoresModal';
   host.style.cssText='position:fixed;inset:0;background:rgba(8,18,34,.55);z-index:3000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px;font-family:inherit';
   host.innerHTML=`<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:18px;margin-top:4vh;color:#0f172a">
@@ -505,7 +641,8 @@ function openSendScores(){
       <button onclick="closeSendScores()" style="background:#e2e8f0;border:none;border-radius:9px;padding:10px 16px;cursor:pointer;font:inherit">Not now</button>
       <span id="ssMsg" style="font-size:13px;color:#475569"></span>
     </div></div>`;
-  host.addEventListener('click',e=>{ if(e.target===host) closeSendScores(); });
+  // Backdrop click no longer closes — an accidental tap outside must not
+  // discard picks. Use ✕ / Not now to close on purpose.
   document.body.appendChild(host);
 }
 function closeSendScores(){ const m=document.getElementById('sendScoresModal'); if(m)m.remove(); }
@@ -516,7 +653,7 @@ async function sendScores(btn){
   if(!picks.length){ if(msg)msg.textContent='Tick at least one engineer.'; return; }
   if(btn)btn.disabled=true; if(msg)msg.textContent='Sending…';
   try{
-    const body={ weekStart:R.minD, weekEnd:R.maxD, scores:picks.map(p=>({username:p.username,reg:p.reg,score:p.score})) };
+    const body={ weekStart:R.minD, weekEnd:R.maxD, scores:picks.map(p=>({username:p.username,reg:p.reg,score:p.score,rank:p.rank,total:p.total})) };
     const r=await authFetch('/fleet/scores/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
     if(r&&r.ok){ if(msg)msg.textContent='✓ Sent to '+r.sent+' engineer'+(r.sent===1?'':'s'); setTimeout(closeSendScores,1200); }
     else { if(btn)btn.disabled=false; if(msg)msg.textContent='Send failed'+(r&&r.error?' — '+r.error:''); }
@@ -541,6 +678,913 @@ function downloadReport(){
   }catch(e){ const msg=$("saveMsg"); if(msg)msg.textContent="Download failed"; }
 }
 window.downloadReport=downloadReport;
+
+/* ═══ Auto tracker → job costing ═══════════════════════════════════════════
+   Turn each van's trips into per-site visit + travel segments and post them
+   to /fleet/tracker-reconcile. That writes job_time_segments rows tagged
+   src=tracker so /costing/summary automatically folds them into every site
+   card AND every project P&L — no job need be allocated. Runs on every
+   report generation. Idempotent: a re-run replaces its own prior writes.
+   ══════════════════════════════════════════════════════════════════════ */
+let TRACKER_SITES=null, TRACKER_ALIASES=null, TRACKER_ALL=[];
+async function loadTrackerSites(){
+  if(TRACKER_SITES) return TRACKER_SITES;
+  const out={ byPostcode:{}, byNum:{}, byName:[], byAddr:[] };
+  try{
+    const sites = await authFetch("/get-sites?category=all").then(r=>r.json());
+    for(const s of (sites||[])){
+      const name = String(s.siteName||"").trim();
+      const num  = String(s.siteNumber||"").trim();
+      const pc   = String(s.postcode||"").replace(/\*+$/,"").trim().toUpperCase();
+      const client = String(s.client||"").trim();
+      const address = [s.address1, s.street, s.town, s.county, s.address].filter(Boolean).join(", ");
+      if(pc) (out.byPostcode[pc.replace(/\s+/g,"")] = out.byPostcode[pc.replace(/\s+/g,"")] || []).push({name,num,postcode:pc});
+      if(num) out.byNum[num.toLowerCase()] = {name,num,postcode:pc};
+      if(name) out.byName.push({lc:name.toLowerCase(),name,num,postcode:pc});
+      // Match by address-line words. STRICT: only specific street lines —
+      // NOT town/county/full-address — because "Titchfield" or "Whiteley"
+      // would false-match every Co-op / Chapplins site in the same town and
+      // silently overwrite the correct project. Min 12 chars so short
+      // generic streets ("High St", "The Street") don't over-match either.
+      const bits = [s.address1, s.street].filter(Boolean);
+      for(const raw of bits){
+        const t=String(raw).toLowerCase().trim();
+        if(t && t.length>=12) out.byAddr.push({lc:t,name,num,postcode:pc,isProject:/^p\d/i.test(String(num))||String(s.client||"").toLowerCase()==="projects"});
+      }
+      // Portal sites' saved coords for the coord-based matcher below.
+      const lat = Number(s.lat), lon = Number(s.lon ?? s.lng);
+      const hasCoord = Number.isFinite(lat) && Number.isFinite(lon);
+      // Full list for the pin typeahead — every site once, with search text
+      // and (when available) lat/lng so the nearest-site match can use them.
+      if(num || name) TRACKER_ALL.push({
+        name, num, postcode: pc, client, address,
+        lat: hasCoord ? lat : null, lon: hasCoord ? lon : null,
+        searchLC: (name+" "+num+" "+pc+" "+address+" "+client).toLowerCase(),
+        isProject: /^p\d/i.test(num) || client === "projects",
+      });
+    }
+    // Longest first so "5 woodlands close" beats "close".
+    out.byName.sort((a,b)=>b.lc.length-a.lc.length);
+    out.byAddr.sort((a,b)=>b.lc.length-a.lc.length);
+  }catch(e){}
+  TRACKER_SITES=out;
+  // Load remembered pins (aliases) so a previously-assigned trip text always
+  // maps to the same site next time — one-click "this text = this site" learn.
+  try{
+    const d = await authFetch("/sites/register").then(r=>r.json());
+    TRACKER_ALIASES = (d && d.aliases) || {};
+  }catch(e){ TRACKER_ALIASES = {}; }
+  return out;
+}
+// Same normalisation costing.js uses on aliases, so a pin saved via
+// /sites/register/merge is picked up here without a server round trip.
+function trkNorm(s){ return String(s||"").toLowerCase().replace(/['’`]/g,"").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim(); }
+// Match a free-text location (a trip's `to` string) to a portal site. Postcode
+// wins (a valid full postcode is unambiguous), then a full name substring,
+// then a site number. Returns { name, num, postcode } or null.
+// Coord-based site matching — the ACCURATE fallback when text/address matches
+// are ambiguous. Extracts a UK postcode from the trip text, looks up its
+// lat/lng via postcodes.io (free, no key), then returns the nearest portal
+// site within a 500 m radius. Projects win ties by ≤ 200 m.
+const TRK_GEO_CACHE = (function(){
+  try { return JSON.parse(sessionStorage.getItem("mlTrkGeo_v1") || "{}"); } catch(e){ return {}; }
+})();
+function trkSaveGeoCache(){ try{ sessionStorage.setItem("mlTrkGeo_v1", JSON.stringify(TRK_GEO_CACHE)); }catch(e){} }
+async function trkGeocodePostcode(pc){
+  const key = String(pc||"").replace(/\s+/g,"").toUpperCase();
+  if(!key) return null;
+  if(key in TRK_GEO_CACHE) return TRK_GEO_CACHE[key];
+  try{
+    const r = await fetch("https://api.postcodes.io/postcodes/"+encodeURIComponent(key));
+    if(!r.ok){ TRK_GEO_CACHE[key]=null; trkSaveGeoCache(); return null; }
+    const j = await r.json();
+    if(j && j.result && j.result.latitude!=null && j.result.longitude!=null){
+      TRK_GEO_CACHE[key] = { lat:j.result.latitude, lon:j.result.longitude };
+    } else TRK_GEO_CACHE[key] = null;
+  }catch(e){ TRK_GEO_CACHE[key] = null; }
+  trkSaveGeoCache();
+  return TRK_GEO_CACHE[key];
+}
+function trkHaversineM(a, b){
+  const R = 6371000, toR = d => d * Math.PI / 180;
+  const dLat = toR(b.lat - a.lat), dLon = toR(b.lon - a.lon);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(s));
+}
+async function trkMatchByCoords(txt){
+  if(!TRACKER_ALL || !TRACKER_ALL.length) return null;
+  // Grab a full postcode (partial "PO15" doesn't geocode reliably to one point).
+  const up = String(txt||"").toUpperCase();
+  const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+  if(!pcm) return null;
+  const coord = await trkGeocodePostcode(pcm[0]);
+  if(!coord) return null;
+  // Nearest portal site with saved coords.
+  let best = null, bestD = 501;   // metres — hard cap at 500 m
+  for(const s of TRACKER_ALL){
+    if(s.lat==null || s.lon==null) continue;
+    const d = trkHaversineM(coord, {lat:s.lat, lon:s.lon});
+    if(d < bestD){ best = s; bestD = d; }
+    else if(d < bestD + 100 && s.isProject && best && !best.isProject){
+      // Project within 100 m of the current best wins the tie — engineers are
+      // typically on the project, not a shop next door.
+      best = s; bestD = d;
+    }
+  }
+  return best;
+}
+// Text → site map filled by precomputeCoordMatches() so trackerMatchSite can
+// stay synchronous. Session-scoped; cleared whenever the site list reloads.
+let TRK_TEXT_TO_SITE = {};
+async function precomputeCoordMatches(R){
+  if(!R || !R.vehicles) return;
+  // Every unique trip "to" text worth geocoding. We send them ALL to the
+  // server (which uses Google Geocoding + falls back to postcodes.io) so
+  // free-text place names — not just postcodes — resolve to a coord and get
+  // matched to the nearest portal site.
+  const wants = new Set();
+  for(const v of R.vehicles){
+    for(const d of (v.days||[])){
+      for(const t of (d.trips||[])){
+        const s = String(t.to||"").trim();
+        if(s && s.length>=4 && !(s in TRK_TEXT_TO_SITE)) wants.add(s);
+      }
+    }
+  }
+  const list = [...wants];
+  if(!list.length) return;
+  // Chunk to keep the server request small — Google is billed per request
+  // so batches of ~30 keep costs low without a huge single call.
+  for(let i=0;i<list.length;i+=30){
+    const batch = list.slice(i, i+30);
+    try{
+      const r = await authFetch("/fleet/tracker-geocode", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ texts: batch })
+      }).then(r=>r.json());
+      if(r && r.ok && Array.isArray(r.results)){
+        for(const row of r.results){
+          if(!row) continue;
+          if(row.siteNumber){
+            // Look up the full site record so trackerMatchSite can return the
+            // {name, num, postcode} shape it expects.
+            const site = (TRACKER_ALL||[]).find(s => String(s.num)===String(row.siteNumber));
+            TRK_TEXT_TO_SITE[row.text] = site || { name: row.siteName, num: row.siteNumber, postcode: "" };
+          } else {
+            TRK_TEXT_TO_SITE[row.text] = null;
+          }
+        }
+      }
+    }catch(e){}
+  }
+}
+function trackerMatchSite(txt){
+  if(!txt || !TRACKER_SITES) return null;
+  const raw = String(txt).trim(); if(!raw) return null;
+  const up = raw.toUpperCase();
+  const lc = raw.toLowerCase();
+  const isProj = s => /^p\d/i.test(String(s.num||""));
+  // Prefer a project site when several candidates share the same signal —
+  // engineers are typically on projects for weeks so a project hit is more
+  // likely correct than a retail/private site sharing the same town/postcode.
+  const preferProject = arr => arr.length ? (arr.find(isProj) || arr[0]) : null;
+  // 1. Remembered pin — the office (or AI) previously said "this text = this site".
+  if(TRACKER_ALIASES){
+    const nk = trkNorm(raw);
+    const tgt = TRACKER_ALIASES[nk];
+    if(tgt && tgt.siteNumber){
+      const hit = TRACKER_SITES.byNum[String(tgt.siteNumber).toLowerCase()];
+      if(hit) return hit;
+    }
+  }
+  // 2. Coord match — the postcode inside the text was geocoded via
+  //    postcodes.io, then compared to every portal site's saved lat/lng
+  //    (500 m cap, project wins ties within 100 m). Populated by
+  //    precomputeCoordMatches() before this runs. This is the highest-
+  //    accuracy signal we have and beats text/address ambiguity — a Co-op
+  //    on a different road that shares a village name loses to a project
+  //    that's actually AT the coord.
+  if(raw in TRK_TEXT_TO_SITE){
+    const g = TRK_TEXT_TO_SITE[raw];
+    if(g) return g;
+  }
+  // 3. Full UK postcode — sites with the exact stored postcode.
+  //    Project sites at the same postcode win over other sites.
+  const pcm = up.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+  if(pcm){
+    const key = pcm[0].replace(/\s+/g,"");
+    const hits = TRACKER_SITES.byPostcode[key];
+    if(hits && hits.length) return preferProject(hits);
+  }
+  // 3. Site number token — Pxxxx or a bare 4-digit that appears as its own
+  //    word. This is a strong signal.
+  const numM = raw.match(/\bP\d{3,5}\b|\b\d{4}\b/i);
+  if(numM){
+    const k = numM[0].toLowerCase();
+    if(TRACKER_SITES.byNum[k]) return TRACKER_SITES.byNum[k];
+    const stripped = k.replace(/^p?0+/,"").toLowerCase();
+    if(TRACKER_SITES.byNum[stripped]) return TRACKER_SITES.byNum[stripped];
+    const padded = ("0000"+k).slice(-4);
+    if(TRACKER_SITES.byNum[padded]) return TRACKER_SITES.byNum[padded];
+  }
+  // 4. Site NAME substring — only accept when the site name is ≥ 10 chars
+  //    (short generic names like "Bristol" would over-match otherwise).
+  //    Collect all hits and prefer a project when several match.
+  const nameHits = [];
+  for(const s of TRACKER_SITES.byName){
+    if(s.lc && s.lc.length>=10 && lc.indexOf(s.lc)>=0) nameHits.push(s);
+  }
+  if(nameHits.length) return preferProject(nameHits);
+  // 5. STRICT address-line match — only specific streets (address1 / street),
+  //    min 12 chars — NEVER town or county. Collect all candidates and prefer
+  //    a project when several match. This is the fix for Steve's project
+  //    losing out to a Co-op / Chapplins in the same town.
+  const addrHits = [];
+  for(const s of TRACKER_SITES.byAddr){
+    if(s.lc && s.lc.length>=12 && lc.indexOf(s.lc)>=0) addrHits.push(s);
+  }
+  if(addrHits.length) return preferProject(addrHits);
+  return null;
+}
+// Home strings for a vehicle (crude match — same pattern classifyDay uses).
+function isHomeText(txt, homes){
+  if(!txt) return false;
+  const l=String(txt).toLowerCase();
+  return (homes||[]).some(h=>l.includes(h)) || l.includes("yard") || l.includes("office");
+}
+// Turn a report's parsed vehicles into tracker segments — one on-site row
+// per visit + one travel row per drive TO that site (excluding home commute).
+// Smoothing pass — before we send rows to the reconciler, absorb noise into
+// the day's real site. A tracker "to" text like "Verwood, Ringwood Road" (a
+// short move within a project's grounds) currently becomes its own row; the
+// office sees "Lake Road Surgery 9h + Ringwood Road 11m + Winchester 11m"
+// when the truth is one day on the project.
+// Rule (per user, per day):
+//   1. Compute total on-site mins per site.
+//   2. If one site has ≥ 120 min on-site (a "dominant" site for the day), any
+//      site with < 30 min on-site AND less than half the dominant's total is
+//      re-attributed to the dominant. Travel-only rows (0 min on-site) same.
+//   3. Rows collapse by site+kind so a day = one on-site row + one travel row
+//      per site max.
+function smoothTrackerRows(rows){
+  if(!rows || !rows.length) return rows||[];
+  const minsOf = r => Math.max(0, (Date.parse(r.endedAt) - Date.parse(r.startedAt))/60000);
+  // Aggregate mins per (user, date, site).
+  const daySite = {};
+  for(const r of rows){
+    const d = r.username+"|"+r.date;
+    const sk = r.siteCode || r.siteName || "?";
+    const dd = daySite[d] = daySite[d] || {};
+    const ss = dd[sk] = dd[sk] || { onsite:0, travel:0, sample:r };
+    if(r.kind === "travel") ss.travel += minsOf(r); else ss.onsite += minsOf(r);
+    if(!ss.sample.siteName && r.siteName) ss.sample = r;
+  }
+  // Build remap: (user|date|shortSite) -> dominantSite sample row.
+  const remap = {};
+  for(const dKey in daySite){
+    const sites = daySite[dKey];
+    let dom = null, domMins = 0;
+    for(const sk in sites){ if(sites[sk].onsite > domMins){ dom = sk; domMins = sites[sk].onsite; } }
+    if(!dom || domMins < 120) continue;
+    for(const sk in sites){
+      if(sk === dom) continue;
+      const ss = sites[sk];
+      // Small enough to be noise AND much smaller than the dominant.
+      if(ss.onsite >= 30 || ss.onsite >= domMins * 0.5) continue;
+      remap[dKey+"|"+sk] = sites[dom].sample;
+    }
+  }
+  // Apply remap.
+  const rewritten = rows.map(r => {
+    const dKey = r.username+"|"+r.date;
+    const sk = r.siteCode || r.siteName || "?";
+    const target = remap[dKey+"|"+sk];
+    if(!target) return r;
+    return { ...r, siteName: target.siteName, siteCode: target.siteCode, postcode: target.postcode };
+  });
+  // Collapse duplicates (user|date|site|kind) — extend the time range so
+  // signed URL sig still works if regenerated.
+  const merged = {};
+  for(const r of rewritten){
+    const k = r.username+"|"+r.date+"|"+(r.siteCode||r.siteName||"?")+"|"+r.kind;
+    if(!merged[k]){ merged[k] = { ...r }; continue; }
+    if(r.startedAt < merged[k].startedAt) merged[k].startedAt = r.startedAt;
+    if(r.endedAt > merged[k].endedAt) merged[k].endedAt = r.endedAt;
+  }
+  return Object.values(merged);
+}
+// Pool-van days that have journeys but no allocated driver — the AI resolver
+// tries to attribute each to a driver by matching first/last trip text to
+// driver home postcodes. Returned alongside the row-builder output.
+function buildPoolDays(R){
+  if(!R || !R.vehicles) return [];
+  const out=[];
+  for(const v of R.vehicles){
+    if(!v.isPool) continue;
+    for(const d of (v.days||[])){
+      if(!d.trips||!d.trips.length) continue;
+      const key = v.reg+"|"+d.date;
+      if(POOLALLOC[key]) continue;   // already picked
+      const firstFrom = d.trips[0].from || "";
+      const lastTo = d.trips[d.trips.length-1].to || "";
+      out.push({ van: v.reg, date: d.date, firstFrom, lastTo });
+    }
+  }
+  return out;
+}
+function buildTrackerRows(R){
+  if(!R || !R.vehicles) return { rows:[], unmatched:[] };
+  // Rule: every minute of a driver's day should be costed to a job.
+  //   • A drive is costed to whichever endpoint is a known site: prefer
+  //     the DESTINATION (travel to), fall back to the ORIGIN (travel from
+  //     — this catches "leaving Site A to head home / to lunch").
+  //   • Stopped time at a known site is costed to that site.
+  //   • Stopped time at an UNKNOWN location between two matched stops is
+  //     attributed to the site JUST LEFT (they're still on that job).
+  //   • Only truly homeless trips (both ends unknown, no prior site) fall
+  //     into the unmatched review list.
+  const out=[], unmatched={};   // unmatched: `to_text` -> { text, drivers:Set, totalMins }
+  for(const v of R.vehicles){
+    const dr = v.driverUser || "";
+    if(!dr) continue;
+    for(const d of (v.days||[])){
+      const trips = d.trips||[]; if(!trips.length) continue;
+      let lastKnownSite = null;   // last matched site the driver was at, this day
+      for(let i=0;i<trips.length;i++){
+        const t = trips[i];
+        const toIsHome = isHomeText(t.to, v.home);
+        const fromIsHome = isHomeText(t.from, v.home);
+        const toSite = toIsHome ? null : trackerMatchSite(t.to);
+        const fromSite = fromIsHome ? null : trackerMatchSite(t.from);
+        // 1) TRAVEL — belongs to the arrival site if known, else to the
+        //    departure site if known, else to the last known site of the day.
+        const travelSite = toSite || fromSite || lastKnownSite;
+        if(travelSite && t.start && t.end && (t.drive||0) > 0){
+          out.push({
+            username: dr, date: d.date, kind: "travel",
+            siteName: travelSite.name, siteCode: travelSite.num, postcode: travelSite.postcode,
+            startedAt: d.date+"T"+t.start+":00", endedAt: d.date+"T"+t.end+":00",
+          });
+        }
+        // 2) STOPPED TIME after this trip and before the next.
+        const nextTrip = trips[i+1];
+        const stopStart = t.end || null;
+        const stopEnd = nextTrip ? nextTrip.start : null;
+        if(stopStart && stopEnd && stopEnd !== stopStart){
+          const stayMin = Math.max(0, (toMin(stopEnd)||0) - (toMin(stopStart)||0));
+          if(stayMin > 0){
+            // Choose the site this stopped period belongs to:
+            //   • toSite if the trip arrived somewhere known
+            //   • lastKnownSite otherwise (they didn't teleport)
+            //   • unmatched only when they've never yet been anywhere known
+            const stopSite = toSite || lastKnownSite;
+            if(stopSite){
+              out.push({
+                username: dr, date: d.date, kind: "onsite",
+                siteName: stopSite.name, siteCode: stopSite.num, postcode: stopSite.postcode,
+                startedAt: d.date+"T"+stopStart+":00", endedAt: d.date+"T"+stopEnd+":00",
+              });
+            } else if(!toIsHome && stayMin >= 20){
+              // Truly unresolvable — day started with an unknown stop and we
+              // have no prior site to attribute it to. Send to AI/manual pin.
+              const key = String(t.to||"").trim();
+              if(key){
+                const u = unmatched[key] || (unmatched[key] = { text:key, drivers:{}, totalMins:0, occurrences:0 });
+                u.totalMins += stayMin; u.occurrences++;
+                u.drivers[dr] = (u.drivers[dr]||0) + stayMin;
+              }
+            }
+          }
+        }
+        // Update the running "last known site" for the day — a matched arrival
+        // sets it; going home clears it (next day starts fresh anyway, but this
+        // also stops a home visit inheriting the previous job).
+        if(toSite) lastKnownSite = toSite;
+        else if(toIsHome) lastKnownSite = null;
+      }
+    }
+  }
+  const unmatchedArr = Object.values(unmatched).sort((a,b)=>b.totalMins-a.totalMins).slice(0,30);
+  return { rows: out, unmatched: unmatchedArr };
+}
+async function autoTrackerReconcile(R, dryRun){
+  if(!R) return { ok:false, wrote:0 };
+  try{
+    await loadTrackerSites();
+    // Geocode every unique trip postcode + find nearest portal site — this
+    // is the reliable signal that beats text/address ambiguity, especially
+    // for projects sharing a village with retail stores.
+    await precomputeCoordMatches(R);
+    let { rows, unmatched } = buildTrackerRows(R);
+    // Smooth away 11-min "sites" that are really the same day at the
+    // project — everything under 30 min on-site collapses into the day's
+    // dominant site when one is clearly the main venue.
+    rows = smoothTrackerRows(rows);
+    if(!rows.length && !unmatched.length) return { ok:true, wrote:0, preview:[], unmatched:[], rowCount:0 };
+    const r = await authFetch("/fleet/tracker-reconcile", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ rows, dryRun: !!dryRun })
+    }).then(r=>r.json());
+    if(r){ r.rowCount = rows.length; r.unmatched = unmatched; }
+    return r || { ok:false };
+  }catch(e){ return { ok:false, error:e.message }; }
+}
+// Render the tracker preview as a table under the report — shown before we
+// apply, with an "Apply to job costing" button. Every driver x site x day
+// gets one row: on-site minutes + travel minutes + £ at the driver's rate.
+// Skipped rows (SiteLog already covers) show muted so nothing is silent.
+function renderTrackerPreview(p, host, unmatched, opts){
+  opts = opts || {};
+  const aiApplied = opts.aiApplied || null;
+  const hmm = m => { m=Math.max(0,Math.round(m||0)); const h=Math.floor(m/60), r=m%60; return (h?h+"h ":"")+(r||!h?r+"m":""); };
+  const money = n => "£"+(Math.round((n||0)*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const totCost = (p||[]).reduce((a,x)=>a+(x.cost||0),0);
+  const totOn = (p||[]).reduce((a,x)=>a+(x.onsiteMins||0),0);
+  const totTr = (p||[]).reduce((a,x)=>a+(x.travelMins||0),0);
+  // Rank sites by how likely they match a specific tracker "to" text — near
+  // ones surface first, projects always show, alphabetical fallback. Words
+  // in common with the text (≥4 chars) score highest. Postcode area
+  // (e.g. "SO31") in the text scores a bit lower.
+  function suggestFor(txt, limit){
+    if(!TRACKER_ALL.length) return [];
+    const t = String(txt||"").toLowerCase();
+    const words = (t.match(/[a-z0-9]{4,}/g) || []).filter((w,i,a)=>a.indexOf(w)===i);
+    const pcArea = (String(txt||"").toUpperCase().match(/\b[A-Z]{1,2}\d{1,2}\b/)||[])[0]||"";
+    const scored = TRACKER_ALL.map(s => {
+      let score = 0;
+      const sLC = s.searchLC;
+      for(const w of words){ if(sLC.indexOf(w)>=0) score += 3; }
+      if(pcArea && s.postcode && s.postcode.replace(/\s+/g,"").startsWith(pcArea)) score += 2;
+      if(s.isProject) score += 1;   // surface projects slightly (Steve-case)
+      return { s, score };
+    });
+    scored.sort((a,b) => b.score - a.score || a.s.name.localeCompare(b.s.name));
+    return scored.slice(0, limit||15).map(x=>x.s);
+  }
+  // Renders one pin control: a search box + a live suggestions dropdown.
+  // Default suggestions = suggestFor(trip text). Typing filters ALL sites.
+  function pinControlHtml(uText){
+    const initial = suggestFor(uText, 12);
+    const initHtml = initial.map((s,i)=>pinItemHtml(s,i===0)).join('');
+    return `<div class="pin-wrap" style="position:relative">
+      <input type="search" class="pin-search" data-pin-text="${esc(uText)}" placeholder="🔍 Search sites…" style="width:100%;padding:5px 8px;border:1px solid #fed7aa;border-radius:6px;font:inherit">
+      <div class="pin-list" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #fed7aa;border-top:none;border-radius:0 0 8px 8px;max-height:220px;overflow:auto;z-index:20;display:none;box-shadow:0 6px 14px rgba(0,0,0,.08)">${initHtml}</div>
+    </div>`;
+  }
+  function pinItemHtml(s){
+    const tag = s.isProject ? '<span style="background:#e0e7ff;color:#3730a3;font-size:10.5px;font-weight:700;padding:1px 5px;border-radius:6px;margin-left:4px">PROJECT</span>' : '';
+    const meta = [s.num, s.postcode].filter(Boolean).join(" · ");
+    return `<div class="pin-item" data-num="${esc(s.num)}" data-label="${esc(s.name+' · '+s.num)}" style="padding:6px 10px;cursor:pointer;border-top:1px solid #fdf1e1;font-size:13px">
+      <div><b>${esc(s.name||"(no name)")}</b>${tag}</div>
+      <div style="color:#94a3b8;font-size:11.5px">${esc(meta)}${s.address?" · "+esc(s.address.slice(0,60)):""}</div>
+    </div>`;
+  }
+  host.innerHTML = `
+    <div class="trkbox">
+      <div class="trkbox-hd">
+        <b>🚐 Tracker → job costing — preview</b>
+        <span class="tot">${(p||[]).length} matched · ${hmm(totOn)} on-site · ${hmm(totTr)} travel · <b>${money(totCost)}</b></span>
+      </div>
+      ${aiApplied && (aiApplied.aliases||aiApplied.poolDrivers) ? '<div style="font-size:12px;color:#0a7d33;margin:0 0 8px">🤖 AI auto-resolved '+(aiApplied.aliases||0)+' site match'+(aiApplied.aliases===1?'':'es')+(aiApplied.poolDrivers?' + '+aiApplied.poolDrivers+' pool driver'+(aiApplied.poolDrivers===1?'':'s'):'')+' (learned for future reports).</div>' : ''}
+      <div class="trkbox-list">
+        ${(() => {
+          const byU = {};
+          for(const x of (p||[])){
+            const u = x.username || "(unknown)";
+            (byU[u] = byU[u] || {})[x.date] = (byU[u][x.date] || []);
+            byU[u][x.date].push(x);
+          }
+          const users = Object.keys(byU).sort();
+          if(!users.length) return '<div style="padding:14px;color:#64748b;text-align:center">No matched stops yet — see unmatched below.</div>';
+          return users.map(u => {
+            const dates = Object.keys(byU[u]).sort();
+            let uOn=0, uTr=0, uCost=0;
+            for(const d of dates) for(const x of byU[u][d]){ uOn+=x.onsiteMins||0; uTr+=x.travelMins||0; uCost+=x.cost||0; }
+            return `<div>
+              <div class="trk-drv-hd">
+                <b>${esc(u)}</b>
+                <span class="sub">${dates.length} day${dates.length===1?'':'s'} · ${hmm(uOn)} on-site · ${hmm(uTr)} travel · <b>${money(uCost)}</b></span>
+              </div>
+              ${dates.map(d => {
+                const rows = byU[u][d];
+                const bySite = {};
+                for(const r of rows){
+                  const k = r.siteCode || r.siteName || "?";
+                  const s = bySite[k] || (bySite[k] = { name:r.siteName, code:r.siteCode, onsiteMins:0, travelMins:0, cost:0, skippedOnsiteMins:0 });
+                  s.onsiteMins += r.onsiteMins||0; s.travelMins += r.travelMins||0; s.cost += r.cost||0; s.skippedOnsiteMins += r.skippedOnsiteMins||0;
+                }
+                const sites = Object.values(bySite);
+                const dayCost = sites.reduce((a,x)=>a+x.cost,0);
+                const dateLbl = (function(){ try{ const dt=new Date(d+"T12:00:00Z"); return dt.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}); }catch(e){ return d; } })();
+                return `<div class="trk-day">
+                  <div class="dt">${dateLbl}</div>
+                  <div>
+                    ${sites.map(s => {
+                      const dedup = s.skippedOnsiteMins>0 ? `<span class="meta"> · − ${hmm(s.skippedOnsiteMins)} in SiteLog</span>` : "";
+                      const wrongBtn = `<button title="Wrong site? Click to reject this attribution and unlearn any pin for future reports." class="trk-wrong" data-wrong-site="${esc(s.code||'')}">✕ wrong</button>`;
+                      const cd = s.code ? '<span class="meta"> · '+esc(s.code)+'</span>' : '';
+                      const isProj = /^p\d/i.test(String(s.code||""));
+                      const tag = isProj ? '<span class="tag">PROJECT</span>' : '';
+                      return `<div class="trk-site">
+                        <b>${esc(s.name||"(unknown site)")}</b>${tag}${cd}${dedup}${wrongBtn}
+                        <div class="times">🛠 ${hmm(s.onsiteMins)} on-site · 🚐 ${hmm(s.travelMins)} travel</div>
+                      </div>`;
+                    }).join('')}
+                  </div>
+                  <div class="cost">${money(dayCost)}</div>
+                </div>`;
+              }).join("")}
+            </div>`;
+          }).join('');
+        })()}
+      </div>
+      ${((unmatched||[]).length ? `
+        <details style="margin-top:8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:8px 12px">
+          <summary style="cursor:pointer;color:#9a3412;font-size:13px;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <span>🧭 ${unmatched.length} stop${unmatched.length===1?'':'s'} AI couldn't confidently match — pin them once</span>
+            <span style="color:#78350f;font-size:11.5px;font-weight:normal">Expand to review</span>
+          </summary>
+          <div style="margin-top:6px"></div>
+          <div style="max-height:30vh;overflow:auto;border:1px solid #fed7aa;border-radius:8px;background:#fff">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead style="background:#fff7ed;position:sticky;top:0">
+                <tr><th style="text-align:left;padding:6px 8px">Tracker "to" text</th><th style="padding:6px 8px">Time spent</th><th style="text-align:left;padding:6px 8px">Drivers</th><th style="text-align:left;padding:6px 8px;min-width:220px">Pin to site</th></tr>
+              </thead>
+              <tbody>
+              ${unmatched.map((u,i)=>{
+                const drivers = Object.keys(u.drivers||{}).join(", ");
+                return `<tr style="border-top:1px solid #fed7aa">
+                  <td style="padding:6px 8px;color:#9a3412"><b>${esc(u.text)}</b><div style="color:#94a3b8;font-size:11px">${u.occurrences||0} stop${u.occurrences===1?'':'s'}</div></td>
+                  <td style="padding:6px 8px;text-align:right;color:#9a3412;font-weight:700">${hmm(u.totalMins)}</td>
+                  <td style="padding:6px 8px;color:#334155">${esc(drivers)}</td>
+                  <td style="padding:6px 8px;overflow:visible">${pinControlHtml(u.text)}</td>
+                </tr>`;
+              }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </details>` : '')}
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
+        <button id="applyTrackerBtn" style="background:#0a7d33;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font:inherit">✓ Apply to job costing</button>
+        <button id="reRunTrackerBtn" style="background:#e2e8f0;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit">🔄 Re-check</button>
+        <span id="trackerApplyMsg" style="font-size:13px;color:#334155"></span>
+      </div>
+    </div>`;
+  // Wire the pin search boxes: focus opens, typing refilters, click on a
+  // suggestion pins that text → site and re-checks. Clicking outside closes.
+  host.querySelectorAll(".pin-wrap").forEach(wrap => {
+    const input = wrap.querySelector(".pin-search");
+    const list = wrap.querySelector(".pin-list");
+    const text = input.getAttribute("data-pin-text") || "";
+    const showList = () => { list.style.display = "block"; };
+    const hideList = () => { list.style.display = "none"; };
+    input.addEventListener("focus", showList);
+    input.addEventListener("input", () => {
+      const q = (input.value || "").toLowerCase().trim();
+      // Empty search → the trip-text relevance list; typing → full-site filter.
+      const src = q ? TRACKER_ALL.filter(s => s.searchLC.indexOf(q) >= 0) : suggestFor(text, 12);
+      // Cap to 40 when searching so long lists stay usable.
+      list.innerHTML = src.slice(0, q ? 40 : 12).map(s => pinItemHtml(s)).join("") ||
+        '<div style="padding:8px 10px;color:#94a3b8;font-size:12.5px">No sites match.</div>';
+      showList();
+    });
+    document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) hideList(); });
+    list.addEventListener("click", async (e) => {
+      const it = e.target.closest(".pin-item"); if(!it) return;
+      const num = it.getAttribute("data-num"); const label = it.getAttribute("data-label");
+      if(!num) return;
+      hideList();
+      input.value = label;
+      input.disabled = true;
+      const msg = host.querySelector("#trackerApplyMsg");
+      if(msg) msg.textContent = "Pinning “"+text+"” to "+label+"…";
+      try {
+        const site = TRACKER_ALL.find(s => String(s.num) === String(num));
+        const client = (site && site.client) || "projects";
+        await authFetch("/sites/register/merge", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ alias: text, client, siteNumber: num })
+        });
+        // Update the local alias cache so this-tab re-check picks it up.
+        if(TRACKER_ALIASES) TRACKER_ALIASES[trkNorm(text)] = { client, siteNumber: num };
+        if(msg) msg.textContent = "✓ Pinned — re-checking…";
+        const R = window.__reportData;
+        const r = await autoTrackerReconcile(R, true);
+        if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[]);
+      } catch(err){
+        input.disabled = false;
+        if(msg) msg.textContent = "Pin failed — "+err.message;
+      }
+    });
+  });
+  // "✕ wrong" — the row was pinned to a site the office says is incorrect.
+  // Prompt for the trip text (defaults to the site name they see) and
+  // un-pin the alias for it so future reports won't repeat the mistake.
+  host.querySelectorAll("[data-wrong-site]").forEach(btn => {
+    btn.onclick = async () => {
+      const label = btn.closest("tr")?.children[2]?.innerText || "";
+      const guess = String(label).replace(/− .*|✕.*|from project|from compliance chart/gi, "").trim();
+      const text = prompt("Which tracker 'to' text mapped here wrongly?\n\n(Type the exact text as it appears in the trip table, or leave blank to just record the site as wrong.)", guess);
+      if(text === null) return;
+      const t = String(text||"").trim(); if(!t){ alert("Cancelled — nothing changed."); return; }
+      try{
+        await authFetch("/sites/register/unmerge", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ alias: t })
+        });
+        // Wipe local alias cache so this-tab re-check picks up the un-pin.
+        if(TRACKER_ALIASES) delete TRACKER_ALIASES[trkNorm(t)];
+        const msg = host.querySelector("#trackerApplyMsg");
+        if(msg) msg.textContent = "✓ Un-pinned “"+t+"” — re-checking…";
+        const R = window.__reportData;
+        const r = await autoTrackerReconcile(R, true);
+        if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[], {});
+      }catch(e){ alert("Un-pin failed — "+e.message); }
+    };
+  });
+  host.querySelector("#applyTrackerBtn").onclick = async (e) => {
+    e.target.disabled=true;
+    host.querySelector("#trackerApplyMsg").textContent = "Applying…";
+    const R = window.__reportData;
+    const r = await autoTrackerReconcile(R, false);
+    host.querySelector("#trackerApplyMsg").innerHTML = r && r.ok
+      ? "✓ Written to job costing — " + (r.wrote||0) + " segment"+((r.wrote||0)===1?"":"s")+((r.skippedSitelog||0)>0?" · "+r.skippedSitelog+" skipped (SiteLog covered)":"")+"."
+      : "❌ Apply failed — " + ((r&&r.error)||"see console");
+  };
+  host.querySelector("#reRunTrackerBtn").onclick = async (e) => {
+    e.target.disabled=true;
+    host.querySelector("#trackerApplyMsg").textContent = "Re-checking…";
+    const R = window.__reportData;
+    const r = await autoTrackerReconcile(R, true);
+    if(r && r.ok) renderTrackerPreview(r.preview||[], host, r.unmatched||[]);
+  };
+}
+
+/* ═══ Confirm & save timesheets modal ══════════════════════════════════════
+   One place to review every driver-day in the week: assigned drivers show
+   with their van, pool/unassigned days show at the top with a driver picker.
+   Start / Finish default to the van's first-trip / last-trip time; Lunch
+   defaults to the driver's paycfg default (30 min if not set). Everything
+   is editable per row. Saves the whole batch to /fleet/timesheet with a
+   per-day lunchOverride, and remembers any changed lunch default in paycfg.
+   ══════════════════════════════════════════════════════════════════════ */
+function tsDowName(iso){ return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(iso+"T12:00:00Z").getUTCDay()]; }
+function buildTimesheetRows(){
+  const R=window.__reportData; if(!R) return { rows:[], unallocated:[] };
+  const rows=[], unalloc=[];
+  for(const v of R.vehicles||[]){
+    const single=(R.dmap&&R.dmap[v.reg]&&R.dmap[v.reg]!==POOL_VAL)?R.dmap[v.reg]:null;
+    for(const d of (v.days||[])){
+      if(!d.trips||!d.trips.length||d.startMin==null||d.endMin==null) continue;
+      const un = v.isPool ? (POOLALLOC[v.reg+"|"+d.date]||"") : (single||"");
+      const morning=(d.trips.find(t=>t.type==="Commute Out")||{}).drive||0;
+      const home=(d.trips.find(t=>t.type==="Commute Home")||{}).drive||0;
+      const row = { reg:v.reg, date:d.date, dow:tsDowName(d.date), startMin:d.startMin, endMin:d.endMin, morning, home, isPool:!!v.isPool, driverUser:un };
+      if(!un) unalloc.push(row); else rows.push(row);
+    }
+  }
+  return { rows, unalloc };
+}
+let TS_CFG_CACHE=null;
+async function loadPayCfg(){
+  if(TS_CFG_CACHE) return TS_CFG_CACHE;
+  try{ TS_CFG_CACHE=await authFetch("/fleet/paycfg").then(r=>r.json()); }catch(e){ TS_CFG_CACHE={ok:true,defaults:{lunch:30},byUser:{}}; }
+  return TS_CFG_CACHE;
+}
+function tsFmtMin(m){ if(m==null) return "—"; const h=Math.floor(m/60), r=m%60; return (h<10?"0":"")+h+":"+(r<10?"0":"")+r; }
+function tsMinFromHHmm(v){ const m=/^(\d{1,2}):(\d{2})$/.exec(String(v||"").trim()); if(!m) return null; return (+m[1])*60+(+m[2]); }
+function tsHoursCalc(startMin, endMin, morning, home, lunch, caps){
+  if(startMin==null||endMin==null) return {span:0,paid:0,lunch:0};
+  const span=Math.max(0,endMin-startMin);
+  const m=Math.min(caps.morningCap||30, morning||0);
+  const h=Math.min(caps.homeCap||30, home||0);
+  const l=Math.max(0, Math.round(lunch||0));
+  return { span, paid: Math.max(0, span-m-h-l), lunch:l, morning:m, home:h };
+}
+async function openTimesheetBuilder(){
+  const R=window.__reportData;
+  const msg=$("saveMsg");
+  if(!R){ if(msg) msg.textContent="Generate a report first."; return; }
+  await loadPayCfg();
+  const cfg=TS_CFG_CACHE||{defaults:{lunch:30},byUser:{}};
+  const defaults=cfg.defaults||{lunch:30};
+  const byUser=cfg.byUser||{};
+  const { rows, unalloc } = buildTimesheetRows();
+  // Cache for editing; the modal binds inputs into these rows.
+  window.__tsRows = rows.slice();
+  window.__tsUnalloc = unalloc.slice();
+  // Options for the pool driver picker.
+  const uOpts=(USERS||[]).slice().sort(mlUserCmp).map(u=>{
+    const name=[u.FirstName,u.LastName].map(x=>x==null?"":String(x).trim()).filter(Boolean).join(" ")||u.Username;
+    return `<option value="${esc(u.Username)}">${esc(name)}</option>`;
+  }).join("");
+  document.getElementById("tsModal")?.remove();
+  const host=document.createElement("div"); host.id="tsModal";
+  host.style.cssText="position:fixed;inset:0;background:rgba(8,18,34,.55);z-index:3000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px;font-family:inherit";
+  const rangeLbl = fmtRange(R.minD,R.maxD);
+  host.innerHTML=`<div style="background:#fff;border-radius:16px;max-width:960px;width:100%;padding:18px;margin-top:2vh;color:#0f172a">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:19px">🧾 Confirm &amp; save timesheets — ${esc(rangeLbl)}</h2>
+      <button onclick="document.getElementById('tsModal').remove()" style="border:none;background:#e2e8f0;border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit">✕</button>
+    </div>
+    <p style="color:#475569;font-size:13px;margin:6px 0 10px">Every driver-day pulled from the trips. Start / Finish default to the van's first / last movement. Lunch defaults to the driver's saved setting. Any change here goes straight to the Van Timesheet.</p>
+    ${unalloc.length?`<div id="tsUnallocSec" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:10px 12px;margin-bottom:12px">
+      <b style="font-size:14px">🚚 ${unalloc.length} pool / unassigned day${unalloc.length===1?'':'s'} — pick a driver for each</b>
+      <div id="tsUnallocBody" style="margin-top:6px"></div>
+    </div>`:''}
+    <div id="tsBody" style="max-height:52vh;overflow:auto;border:1px solid #e5e7eb;border-radius:10px;padding:6px 4px"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <button id="tsSaveBtn" onclick="saveTimesheetsFromModal(this)" style="background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px 18px;font-weight:800;cursor:pointer;font:inherit">💾 Save timesheets</button>
+      <button onclick="document.getElementById('tsModal').remove()" style="background:#e2e8f0;border:none;border-radius:9px;padding:10px 16px;cursor:pointer;font:inherit">Cancel</button>
+      <span id="tsMsg" style="font-size:13px;color:#475569;margin-left:auto"></span>
+    </div></div>`;
+  document.body.appendChild(host);
+  window.__tsOpts=uOpts;
+  window.__tsCfg={defaults,byUser};
+  renderTsUnalloc();
+  renderTsBody();
+}
+function renderTsUnalloc(){
+  const box=document.getElementById("tsUnallocBody"); if(!box) return;
+  const items=window.__tsUnalloc||[];
+  box.innerHTML = items.map((r,i)=>`
+    <div style="display:flex;gap:8px;align-items:center;padding:6px 4px;border-top:1px solid #fde68a;font-size:13.5px">
+      <span style="flex:0 0 90px"><b>${esc(r.reg)}</b></span>
+      <span style="flex:0 0 130px">${esc(r.dow)} ${esc(r.date.slice(5))}</span>
+      <span style="flex:0 0 140px">${tsFmtMin(r.startMin)} – ${tsFmtMin(r.endMin)}</span>
+      <select data-unalloc-i="${i}" style="flex:1;padding:6px;border:1px solid #cdd2e6;border-radius:7px;font:inherit"><option value="">— pick driver —</option>${window.__tsOpts||''}</select>
+    </div>`).join('');
+  box.querySelectorAll("select[data-unalloc-i]").forEach(s=>{
+    s.onchange=()=>{
+      const idx=+s.dataset.unallocI; const row=window.__tsUnalloc[idx]; if(!row) return;
+      if(!s.value){ row.driverUser=""; return; }
+      row.driverUser=s.value;
+      // Move it into the main rows list and re-render everything so it shows
+      // grouped under the picked driver.
+      window.__tsRows.push(row); window.__tsUnalloc.splice(idx,1);
+      // Also record it in POOLALLOC so a re-open remembers.
+      if(row.isPool){ POOLALLOC[row.reg+"|"+row.date]=s.value; try{ authFetch("/fleet/pool-alloc",{method:"POST",body:JSON.stringify({key:row.reg+"|"+row.date,username:s.value})}); }catch(e){} }
+      renderTsUnalloc(); renderTsBody();
+    };
+  });
+}
+function renderTsBody(){
+  const host=document.getElementById("tsBody"); if(!host) return;
+  const rows=(window.__tsRows||[]).slice().sort((a,b)=>{
+    const na=driverName(a.driverUser)||a.driverUser||"", nb=driverName(b.driverUser)||b.driverUser||"";
+    if(na!==nb) return na.localeCompare(nb);
+    return a.date.localeCompare(b.date);
+  });
+  const byU={}; for(const r of rows){ (byU[r.driverUser]=byU[r.driverUser]||[]).push(r); }
+  const users=Object.keys(byU);
+  if(!users.length){ host.innerHTML='<p style="color:#64748b;padding:10px 8px;font-size:13px">No assigned driver-days yet. Pick drivers for any pool days above.</p>'; return; }
+  const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+  const dfltCaps = { morning: Number(cfg.defaults.morningCap)||30, home: Number(cfg.defaults.homeCap)||30 };
+  host.innerHTML = users.map(u=>{
+    const bu = cfg.byUser[u]||{};
+    const dfltL = (bu.lunch!=null && isFinite(Number(bu.lunch))) ? Number(bu.lunch) : (Number(cfg.defaults.lunch)||30);
+    const dfltM = (bu.morningCap!=null && isFinite(Number(bu.morningCap))) ? Number(bu.morningCap) : dfltCaps.morning;
+    const dfltH = (bu.homeCap!=null && isFinite(Number(bu.homeCap))) ? Number(bu.homeCap) : dfltCaps.home;
+    const drows = byU[u];
+    return `<div style="border-top:2px solid #cbd5e1;margin-top:4px;padding:6px 4px">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 2px;flex-wrap:wrap">
+        <b style="font-size:14.5px;color:#0f172a">${esc(driverName(u)||u)}</b>
+        <span style="color:#64748b;font-size:12px">${drows.length} day${drows.length===1?'':'s'}</span>
+        <span style="margin-left:auto;font-size:12.5px;color:#334155;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span title="Max deducted for morning commute (their actual drive is used if shorter)">Morning cap <input type="number" min="0" max="120" step="5" value="${dfltM}" data-driver-cap="morningCap|${esc(u)}" style="width:52px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> m</span>
+          <span title="Max deducted for home commute (their actual drive is used if shorter)">Home cap <input type="number" min="0" max="120" step="5" value="${dfltH}" data-driver-cap="homeCap|${esc(u)}" style="width:52px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> m</span>
+          <span>Default lunch <input type="number" min="0" max="120" step="5" value="${dfltL}" data-default-lunch="${esc(u)}" style="width:52px;padding:4px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit"> m</span>
+        </span>
+      </div>
+      <div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 190px 40px;gap:6px;padding:4px 2px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;font-weight:700">
+        <span>Day</span><span>Van</span><span>Start</span><span>Finish</span><span>Lunch (m)</span><span>Paid — deductions</span><span></span>
+      </div>
+      ${drows.map((r,i)=>tsDayRow(u,r,i,dfltL,dfltM,dfltH)).join('')}
+    </div>`;
+  }).join('');
+  host.querySelectorAll("[data-default-lunch]").forEach(el=>{
+    el.addEventListener("input",()=>{
+      const u=el.getAttribute("data-default-lunch"); const v=Math.max(0,Math.round(Number(el.value)||0));
+      const cfg=window.__tsCfg; cfg.byUser[u]=cfg.byUser[u]||{}; cfg.byUser[u].lunch=v;
+      renderTsBody();
+    });
+  });
+  host.querySelectorAll("[data-driver-cap]").forEach(el=>{
+    el.addEventListener("input",()=>{
+      const [field,u]=String(el.getAttribute("data-driver-cap")).split("|");
+      const v=Math.max(0,Math.round(Number(el.value)||0));
+      const cfg=window.__tsCfg; cfg.byUser[u]=cfg.byUser[u]||{}; cfg.byUser[u][field]=v;
+      renderTsBody();
+    });
+  });
+  host.querySelectorAll("[data-tsf]").forEach(el=>{ el.addEventListener("input",()=>tsRowChanged(el)); });
+}
+function tsDayRow(u,r,i,dfltLunch,dfltMcap,dfltHcap){
+  const lunch = r.lunchOverride!=null ? Number(r.lunchOverride) : dfltLunch;
+  const caps = { morningCap: dfltMcap!=null?dfltMcap:30, homeCap: dfltHcap!=null?dfltHcap:30 };
+  const h = tsHoursCalc(r.startMin,r.endMin,r.morning,r.home,lunch,caps);
+  const rowKey = u+"|"+r.date;
+  const paidHtml = `<b style="color:${h.paid>0?'#0a7d33':'#64748b'}">${hmSpan(h.paid)}</b>` +
+    `<span style="color:#94a3b8;font-size:11.5px;margin-left:6px" title="Deductions applied — morning / home / lunch">− ${h.morning}m am · ${h.home}m pm · ${h.lunch}m lunch</span>`;
+  return `<div style="display:grid;grid-template-columns:60px 90px 100px 100px 96px 190px 40px;gap:6px;padding:5px 2px;align-items:center;border-top:1px solid #eef" data-tsrow="${esc(rowKey)}">
+    <span style="font-weight:700;font-size:13px">${esc(r.dow)}</span>
+    <span style="color:#64748b;font-size:12.5px">${esc(r.reg)}${r.isPool?' <span title="pool">🚚</span>':''}</span>
+    <input type="time" data-tsf="start" data-row="${esc(rowKey)}" value="${tsFmtMin(r.startMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
+    <input type="time" data-tsf="end" data-row="${esc(rowKey)}" value="${tsFmtMin(r.endMin)}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit">
+    <input type="number" min="0" max="120" step="5" data-tsf="lunch" data-row="${esc(rowKey)}" value="${lunch}" placeholder="${dfltLunch}" style="padding:5px 6px;border:1px solid #cdd2e6;border-radius:6px;font:inherit;width:78px">
+    <span data-paid style="font-size:13px">${paidHtml}</span>
+    <button title="Drop this row" onclick="tsDropRow('${esc(rowKey)}')" style="background:#e2e8f0;border:none;border-radius:6px;padding:3px 6px;cursor:pointer;color:#64748b">✕</button>
+  </div>`;
+}
+function tsFindRow(rowKey){
+  return (window.__tsRows||[]).find(r=>((r.driverUser||"")+"|"+r.date)===rowKey);
+}
+function tsRowChanged(el){
+  const rowKey=el.getAttribute("data-row"); const field=el.getAttribute("data-tsf");
+  const r=tsFindRow(rowKey); if(!r) return;
+  if(field==="start"){ const m=tsMinFromHHmm(el.value); if(m!=null) r.startMin=m; }
+  else if(field==="end"){ const m=tsMinFromHHmm(el.value); if(m!=null) r.endMin=m; }
+  else if(field==="lunch"){ const v=el.value===""?null:Math.max(0,Math.round(Number(el.value)||0)); r.lunchOverride=v; }
+  // Recompute paid — uses this driver's per-user lunch/morningCap/homeCap
+  // overrides (falls back to defaults). Their morningCommute and homeCommute
+  // are what the tracker measured for THIS day; we cap them at the driver's max.
+  const cfg=window.__tsCfg;
+  const bu=cfg.byUser[r.driverUser]||{};
+  const dfltL=(bu.lunch!=null&&isFinite(Number(bu.lunch)))?Number(bu.lunch):(Number(cfg.defaults.lunch)||30);
+  const lunch=r.lunchOverride!=null?Number(r.lunchOverride):dfltL;
+  const caps={
+    morningCap:(bu.morningCap!=null&&isFinite(Number(bu.morningCap)))?Number(bu.morningCap):(Number(cfg.defaults.morningCap)||30),
+    homeCap:(bu.homeCap!=null&&isFinite(Number(bu.homeCap)))?Number(bu.homeCap):(Number(cfg.defaults.homeCap)||30),
+  };
+  const h=tsHoursCalc(r.startMin,r.endMin,r.morning,r.home,lunch,caps);
+  const row=document.querySelector('[data-tsrow="'+CSS.escape(rowKey)+'"]');
+  if(row){
+    const p=row.querySelector("[data-paid]");
+    if(p){ p.innerHTML=`<b style="color:${h.paid>0?'#0a7d33':'#64748b'}">${hmSpan(h.paid)}</b><span style="color:#94a3b8;font-size:11.5px;margin-left:6px">− ${h.morning}m am · ${h.home}m pm · ${h.lunch}m lunch</span>`; }
+  }
+}
+function tsDropRow(rowKey){
+  const idx=(window.__tsRows||[]).findIndex(r=>((r.driverUser||"")+"|"+r.date)===rowKey);
+  if(idx>=0){ window.__tsRows.splice(idx,1); renderTsBody(); }
+}
+async function saveTimesheetsFromModal(btn){
+  const msg=document.getElementById("tsMsg");
+  const rows=window.__tsRows||[]; const cfg=window.__tsCfg||{defaults:{lunch:30},byUser:{}};
+  if(!rows.length){ if(msg) msg.textContent="Nothing to save."; return; }
+  if(btn) btn.disabled=true; if(msg) msg.textContent="Saving…";
+  // Audit trail — every day written from this modal carries the R2 key of
+  // the report it came from + the ORIGINAL tracker start/end (before any
+  // human edit) + who confirmed it and when. If someone later disputes a
+  // start/finish, the timesheet row links back to the exact report + shows
+  // "picked 07:30 from a van that moved 07:15 → 17:30, confirmed by Jamie".
+  const L=window.__lastReport||{};
+  const reportKey = L.reportKey || "";
+  const reportTitle = L.title || "";
+  const pickedBy = (localStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUser") || "").trim();
+  const pickedAt = new Date().toISOString();
+  // Look up ORIGINAL tracker times keyed by (user|date) from what we built
+  // in buildTimesheetRows — this is what the van actually did before an edit.
+  const orig = {};
+  for(const r0 of ((window.__tsRows||[]).concat(window.__tsUnalloc||[]))){
+    if(!r0.driverUser) continue;
+    orig[r0.driverUser+"|"+r0.date] = { startMin:r0.startMin, endMin:r0.endMin };
+  }
+  // Group by (week × username).
+  const byWeek={};
+  for(const r of rows){
+    if(!r.driverUser) continue;
+    const wk=mondayOf(r.date);
+    (byWeek[wk]=byWeek[wk]||{})[r.driverUser]=(byWeek[wk][r.driverUser]||{});
+    const o = orig[r.driverUser+"|"+r.date] || { startMin:r.startMin, endMin:r.endMin };
+    byWeek[wk][r.driverUser][r.date] = {
+      startMin:r.startMin, endMin:r.endMin,
+      morningCommute:r.morning, homeCommute:r.home,
+      leavingHome:true, arrivingHome:true,
+      lunchOverride: (r.lunchOverride!=null && isFinite(Number(r.lunchOverride))) ? Math.max(0,Math.round(Number(r.lunchOverride))) : null,
+      // Audit fields — untouched by van-timesheet.html's own edits, which
+      // write their own editStart/editEnd on top when the office corrects.
+      sourceReportKey: reportKey, sourceReportTitle: reportTitle,
+      trackerStartMin: o.startMin, trackerEndMin: o.endMin,
+      pickedBy, pickedAt, van: r.reg,
+    };
+  }
+  try{
+    // Persist per-driver lunch defaults that changed.
+    await authFetch("/fleet/paycfg",{method:"POST",body:JSON.stringify({defaults:cfg.defaults,byUser:cfg.byUser})});
+    // Post each week's rows.
+    for(const wk of Object.keys(byWeek)){
+      const users=byWeek[wk];
+      const rows=Object.keys(users).map(u=>({username:u, days:users[u]}));
+      await authFetch("/fleet/timesheet",{method:"POST",body:JSON.stringify({week:wk,rows})});
+    }
+    if(msg) msg.textContent="✓ Saved. Open Van Timesheet to review.";
+    setTimeout(()=>{ document.getElementById("tsModal")?.remove(); },1200);
+    const sm=$("saveMsg"); if(sm) sm.textContent="✓ Van timesheets saved.";
+  }catch(e){ if(msg) msg.textContent="Save failed: "+(e&&e.message||e); if(btn) btn.disabled=false; }
+}
+window.openTimesheetBuilder=openTimesheetBuilder;
+window.saveTimesheetsFromModal=saveTimesheetsFromModal;
+window.tsDropRow=tsDropRow;
 
 // Push the report's door-to-door hours into the Van Timesheet (per week).
 async function saveTimesheet(){
@@ -631,7 +1675,72 @@ async function generate(){
     $("genPane").style.display="none";
     window.scrollTo(0,0);
     saveReport({auto:true});   // every generated report saves to the portal automatically
+    // Auto-run a DRY RUN of the tracker→job-costing reconciler and show a
+    // preview panel at the top of the report. Nothing is written yet. The
+    // panel has an "Apply to job costing" button so the office can eyeball
+    // the matched sites, hours + £ before it commits. This addresses the
+    // "let me see what would happen first" ask — full audit before any DB write.
+    (async () => {
+      try {
+        const R = window.__reportData;
+        const host = document.getElementById("report") || document.body;
+        const wrap = document.createElement("div");
+        host.insertBefore(wrap, host.firstChild);
+        wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: matching sites…</div>';
+        // First-pass dry run.
+        let r = await autoTrackerReconcile(R, true);
+        if (!r || !r.ok) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:10px;font-size:13.5px">🚐 Tracker auto-cost skipped — '+((r&&r.error)||"unknown")+'</div>';
+          return;
+        }
+        // AI resolve any unmatched trips + any unallocated pool days in one
+        // call. High-confidence hits get pinned server-side (aliases + POOLALLOC).
+        const unmatched = r.unmatched || [];
+        const poolDays = buildPoolDays(R);
+        let aiApplied = { aliases: 0, poolDrivers: 0 };
+        let stillAmbiguous = { unmatched: unmatched, poolDays: poolDays };
+        if (unmatched.length || poolDays.length) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🤖 Asking AI to resolve '+unmatched.length+' unmatched stop'+(unmatched.length===1?'':'s')+(poolDays.length?' + '+poolDays.length+' pool day'+(poolDays.length===1?'':'s'):'')+'…</div>';
+          try {
+            const aiRes = await authFetch("/fleet/tracker-ai-resolve", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body: JSON.stringify({ unmatched, poolDays })
+            }).then(r=>r.json());
+            if (aiRes && aiRes.ok) {
+              aiApplied = aiRes.applied || aiApplied;
+              stillAmbiguous = aiRes.unresolved || stillAmbiguous;
+              // Refresh alias cache and pool-alloc map from what AI pinned.
+              TRACKER_ALIASES = null; POOLALLOC = POOLALLOC || {};
+              await loadTrackerSites();   // reloads TRACKER_ALIASES
+              try { const d = await authFetch("/fleet/pool-alloc").then(r=>r.json()); if(d.ok) POOLALLOC = d.alloc || POOLALLOC; } catch(e){}
+              // Re-run the dry run so newly-pinned trips move into the matched view.
+              r = await autoTrackerReconcile(R, true);
+              if (r && r.ok) r.unmatched = stillAmbiguous.unmatched;   // AI knows better than the deterministic list
+            }
+          } catch(e){}
+        }
+        if (!(r.preview||[]).length && !(stillAmbiguous.unmatched||[]).length) {
+          wrap.innerHTML = '<div style="margin:12px 0;padding:9px 13px;background:#eef4ff;border:1px solid #cdddf5;color:#003468;border-radius:10px;font-size:13.5px">🚐 Tracker → job costing: no stops to attribute this week.</div>';
+          return;
+        }
+        renderTrackerPreview(r.preview||[], wrap, stillAmbiguous.unmatched||[], { aiApplied });
+      } catch (e) {}
+    })();
     if(scoreRecipients().length) openSendScores();   // prompt to send driver scores
+    // Any pool / unassigned van days with real journeys? Nudge the admin to
+    // allocate a driver + confirm start/finish/lunch straight into a
+    // timesheet, so the report → payroll pipeline is one continuous flow.
+    try{
+      const { unalloc } = buildTimesheetRows();
+      if(unalloc.length){
+        const nudge=document.createElement("div");
+        nudge.style.cssText="margin:10px 0;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;font-size:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap";
+        nudge.innerHTML='<b>🚚 '+unalloc.length+' pool/unassigned day'+(unalloc.length===1?'':'s')+' need a driver</b> <span style="color:#78350f">— open the timesheet builder to allocate them + confirm start / finish / lunch.</span>' +
+          ' <button onclick="openTimesheetBuilder()" style="margin-left:auto;background:#0a7d33;color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;font-weight:700">🧾 Open builder</button>';
+        const host=document.getElementById("report")||document.body;
+        host.insertBefore(nudge, host.firstChild);
+      }
+    }catch(e){}
   }catch(e){ console.error(e); $("status").textContent="Couldn't build the report: "+(e.message||e); $("genBtn").disabled=false; }
 }
 
@@ -770,10 +1879,12 @@ function renderReport(R){
   const poolUI=buildPoolAllocUI(R);
 
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-    <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again</button>
+    <span id="reportStatusChip" style="background:#fef3c7;color:#78350f;font-size:11px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:.03em">DRAFT</span>
+    <button class="btn grey" onclick="saveReport()" title="Saved automatically — use this to re-save after changes">💾 Save again (draft)</button>
+    <button class="btn" onclick="approveThisReport(this)" id="approveThisBtn" style="background:#0a7d33;color:#fff" title="Mark this report APPROVED once you've reviewed / confirmed timesheets">✓ Approve report</button>
     <button class="btn" onclick="openSendScores()">📤 Send van scores</button>
     <button class="btn grey" onclick="downloadReport()">⬇️ Export HTML file</button>
-    <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
+    <button class="btn" onclick="openTimesheetBuilder()">🧾 Confirm &amp; save timesheets</button>
     <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>
     <button class="btn grey" onclick="location.reload()">↻ New report</button>
     <span id="saveMsg" style="font-size:13px;color:#475569"></span></div></div>`;

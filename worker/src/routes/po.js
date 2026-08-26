@@ -41,15 +41,54 @@ async function getVehicles(env) {
     const where = [];
     if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
     if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
-    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")} FROM vehicles`
+    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles`
       + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
     const rows = await db.prepare(sql).all();
     return (rows.results || []).filter(r => r.reg && String(r.reg).trim()).map(r => {
       const reg = String(r.reg).trim().toUpperCase();
       const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
-      return { reg, make: r.make || null, model: r.model || null, desc, label: desc ? `${reg} — ${desc}` : reg };
+      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} — ${desc}` : reg };
     });
   } catch (e) { console.error("PO vehicle lookup failed:", e.message); return []; }
+}
+
+// Names of LIVE projects (the only sites an engineer may raise a PO against
+// from the standalone form). Reads the portal projects table (env.DB). Archived
+// / complete projects are excluded so a finished job can't take new spend.
+async function liveProjectNames(env) {
+  const db = env.DB;
+  if (!db) return [];
+  try {
+    const rows = await db.prepare(
+      `SELECT name FROM projects WHERE tenant_id IN ('1.0','1',1) AND (status='live' OR status IS NULL) ORDER BY name`
+    ).all();
+    return (rows.results || []).map(r => String(r.name || "").trim()).filter(Boolean);
+  } catch (e) { console.error("PO live-project lookup failed:", e.message); return []; }
+}
+async function isLiveProjectSite(env, name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  return (await liveProjectNames(env)).some(p => p.toLowerCase() === n);
+}
+
+// The engineer raise-PO form's option set: every LIVE project (as a pickable
+// "site") + all vehicles, with the caller's own assigned van flagged `mine` so
+// the front-end can surface it first. Reactive-maintenance jobs are deliberately
+// NOT here — those POs are raised from the job card so they tie to a job.
+async function getRaiseOptions(env, username) {
+  const projects = (await liveProjectNames(env)).map(name => ({ name }));
+  let mineReg = "";
+  try {
+    const u = await env.DB.prepare(
+      `SELECT vehicle_assigned FROM users WHERE tenant_id IN ('1.0','1',1) AND lower(username)=lower(?)`
+    ).bind(String(username || "")).first();
+    mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
+  } catch (e) { /* no assigned van */ }
+  // Engineers pick ONLY their assigned van + shared/pool vehicles (e.g. tippers).
+  const vehicles = (await getVehicles(env))
+    .map(v => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg }))
+    .filter(v => v.mine || v.pool);
+  return { projects, vehicles };
 }
 
 // ── Router: everything under /po/* ─────────────────────────────────────────
@@ -82,6 +121,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (path === "/api/engineers" && method === "GET") return jr(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr(await getVehicles(env));
+    if (path === "/api/raise-options" && method === "GET") return jr(await getRaiseOptions(env, sess.user.username));
     if (path === "/api/closures" && method === "GET") return jr(await getClosures(db));
     if (path === "/api/jobs/search" && method === "GET") return jr(await searchJobs(db, q));
 
@@ -97,7 +137,7 @@ export async function handle(request, env, ctx, url, sess) {
         b.engineer_slug = userSlug(sess); b.engineer_name = userName(sess);
         b.cost_category = "materials"; // engineers never raise subcontractor POs
       }
-      const res = await issuePO(db, b);
+      const res = await issuePO(db, b, env);
       return jr(res, res.error ? 400 : 200);
     }
 
@@ -135,6 +175,8 @@ export async function handle(request, env, ctx, url, sess) {
     if (path.startsWith("/api/subcontractors/") && method === "DELETE") return jr(await deleteSubcontractor(db, path.split("/").pop()));
     if (path === "/api/trades" && method === "POST") return jr(await addTrade(db, await bodyOf()));
     if (path.startsWith("/api/trades/") && method === "DELETE") return jr(await deleteTrade(db, path.split("/").pop()));
+    if (path === "/api/sites/usage" && method === "GET") return jr(await siteUsage(db));
+    if (path === "/api/sites/merge" && method === "POST") return jr(await mergeSites(db, await bodyOf()));
     if (path === "/api/sites" && method === "POST") return jr(await addSite(db, await bodyOf()));
     if (path.startsWith("/api/sites/") && method === "DELETE") return jr(await deleteSite(db, path.split("/").pop()));
     if (path === "/api/closures" && method === "POST") return jr(await addClosure(db, await bodyOf()));
@@ -307,6 +349,47 @@ async function deleteSite(db, id) {
   return { success: true };
 }
 
+// Every site NAME that actually appears on a PO, with how many POs use it and
+// whether it's a known (active) site — so the merge tool can surface the
+// free-text / duplicate names that need collapsing, not just the tidy list.
+async function siteUsage(db) {
+  const known = new Set((await db.prepare(`SELECT LOWER(name) AS n FROM sites WHERE active = 1`).all()).results.map(r => r.n));
+  const rows = (await db.prepare(
+    `SELECT site AS name, COUNT(*) AS pos FROM po_log
+       WHERE site IS NOT NULL AND TRIM(site) <> '' GROUP BY site ORDER BY LOWER(site)`
+  ).all()).results;
+  // Also include known sites that carry NO POs yet (so a duplicate can be merged
+  // INTO a clean site that just hasn't been used).
+  const seen = new Set(rows.map(r => String(r.name).toLowerCase()));
+  const empties = (await db.prepare(`SELECT name FROM sites WHERE active = 1 ORDER BY name`).all()).results
+    .filter(r => !seen.has(String(r.name).toLowerCase()))
+    .map(r => ({ name: r.name, pos: 0 }));
+  return rows.concat(empties)
+    .map(r => ({ name: r.name, pos: r.pos, known: known.has(String(r.name).toLowerCase()) }))
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
+// Collapse several duplicate site names onto one canonical name: rewrite every
+// PO's `site` to the target (so job costing rolls up onto ONE site) and retire
+// the merged-away source sites from the pickable list. The target becomes a
+// known active site so it's always pickable afterwards.
+async function mergeSites(db, body) {
+  const into = (body && body.into || "").trim();
+  const from = Array.isArray(body && body.from) ? body.from.map(s => String(s || "").trim()).filter(Boolean) : [];
+  if (!into) return { error: "Pick the site to merge into" };
+  const sources = from.filter(s => s.toLowerCase() !== into.toLowerCase());
+  if (!sources.length) return { error: "Pick at least one different site to merge in" };
+  // Make sure the target exists as a known active site.
+  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(into).run();
+  const ph = sources.map(() => "?").join(",");
+  // Repoint every PO on a source name to the target.
+  const upd = await db.prepare(`UPDATE po_log SET site = ? WHERE site IN (${ph})`).bind(into, ...sources).run();
+  const moved = (upd && upd.meta && upd.meta.changes) || 0;
+  // Retire the merged-away sites so they can't be picked again.
+  await db.prepare(`UPDATE sites SET active = 0 WHERE name IN (${ph})`).bind(...sources).run();
+  return { success: true, into, merged: sources.length, posMoved: moved };
+}
+
 async function searchJobs(db, params) {
   const q = (params.get("q") || "").trim();
   if (q.length < 2) return [];
@@ -381,6 +464,12 @@ async function getPOs(db, params) {
     query += ` AND (CAST(po_number AS TEXT) LIKE ? OR LOWER(engineer_name) LIKE ? OR LOWER(site) LIKE ? OR LOWER(incident_no) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(description) LIKE ? OR LOWER(flag_reason) LIKE ? OR LOWER(credit_note) LIKE ?)`;
     binds.push(term, term, term, term, term, term, term, term);
   }
+  if (params.get("job_id")) {
+    // Deep-link from a job card: show only the POs raised against that SLA job
+    // (po_log.job_id is stamped from the job's "Raise PO" link).
+    query += ` AND job_id = ?`;
+    binds.push(params.get("job_id"));
+  }
   query += ` ORDER BY po_number DESC LIMIT 1000`;
   return (await db.prepare(query).bind(...binds).all()).results;
 }
@@ -447,7 +536,7 @@ async function nextPoNumber(db) {
   return row.next;
 }
 
-async function issuePO(db, body) {
+async function issuePO(db, body, env) {
   const status = await getSystemStatus(db);
   if (status.mode === "disabled") return { error: status.message };
   if (status.mode === "office_hours" && body.source !== "office") return { error: status.message };
@@ -471,6 +560,18 @@ async function issuePO(db, body) {
     if (!body.description || !body.description.trim()) return { error: "Description is required" };
     const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
     if (!supplierCheck) return { error: "Supplier must be picked from the list" };
+    // Engineers raise ONLY against: a company vehicle (vehicle_reg, AdBlue/parts),
+    // a reactive job via the job-card "Raise PO for this job" link (job_id ties
+    // it), or a LIVE PROJECT site. A plainly-typed site (reactive or otherwise) is
+    // rejected — reactive POs must come from the job card so they tie to a job and
+    // job costing stays clean.
+    const hasVehicle = body.vehicle_reg && String(body.vehicle_reg).trim();
+    const hasJob = body.job_id && String(body.job_id).trim();
+    if (hasSite && !hasVehicle && !hasJob) {
+      if (!(env && await isLiveProjectSite(env, body.site.trim()))) {
+        return { error: "Engineers can only raise POs against a live project or your vehicle. For a reactive job, use “Raise PO for this job” inside the job card." };
+      }
+    }
   }
   const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
   let poNumber;

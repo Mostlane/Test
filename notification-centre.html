@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Notification Centre — Mostlane</title>
-<script src="/portal-config.js?v=17"></script>
+<script src="/portal-config.js?v=18"></script>
 <script src="auth.js"></script>
 <style>
   :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
@@ -57,7 +57,7 @@
 
   <div class="card" id="pushStatusCard">
     <h2>📱 Who has notifications on</h2>
-    <p class="sub">Every active user and whether they currently have push notifications enabled on at least one device. <b>On</b> = a device is registered; <b>Off</b> = none registered (they've never enabled it, turned it off, or reinstalled). Each of a user's devices is listed with its type (e.g. <i>iPhone · Safari</i>, from the browser it enabled on — the portal doesn't ask people to name a device) and when the server last successfully delivered a push to it.</p>
+    <p class="sub">Every active user and whether they currently have push notifications enabled on at least one device. <b>On</b> = push notifications are enabled on at least one device; <b>Off</b> = push isn't enabled (they've never turned it on, turned it off, or reinstalled). This is separate from device registration — an <b>Off</b> user may still have a phone registered for login, shown as "device registered · notifications off". Each of a user's devices is listed with its type (e.g. <i>iPhone · Safari</i>, from the browser it enabled on — the portal doesn't ask people to name a device) and when the server last successfully delivered a push to it.</p>
     <p class="sub" id="psSummary" style="font-weight:600;color:#334155;">Loading…</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
       <button class="btn small grey" id="psRefresh">↻ Refresh</button>
@@ -515,8 +515,12 @@ async function loadPushStatus(){
         : '<span style="font-size:12px;font-weight:700;color:#94a3b8;">Off</span>';
       const meta = on
         ? (u.devices+" device"+(u.devices===1?"":"s")+(u.lastOk?" · last confirmed "+esc(psAgo(u.lastOk)):(u.lastReg?" · enabled "+esc(psAgo(u.lastReg)):"")))
-        : "No devices registered";
-      // Per-device breakdown (each subscription = one device the person enabled).
+        : (u.registeredDevices
+            ? (u.registeredDevices+" device"+(u.registeredDevices===1?"":"s")+" registered · notifications off")
+            : "No device registered · notifications off");
+      // Per-device breakdown. When ON, each push subscription = one device the
+      // person enabled. When OFF, show the device-lock devices they DO have
+      // registered (a phone can be registered for login yet have push off).
       let devHtml = "";
       if(on && (u.devicesList||[]).length){
         devHtml = '<div style="margin:6px 0 0 20px;display:grid;gap:4px;">' + u.devicesList.map(dv => {
@@ -527,6 +531,14 @@ async function loadPushStatus(){
             + '<span style="color:#0a7d33;flex:none;">•</span>'
             + '<span style="font-weight:600;color:#334155;">'+esc(dv.device)+'</span>'
             + '<span style="color:#94a3b8;">— '+when+'</span></div>';
+        }).join("") + '</div>';
+      } else if(!on && (u.registeredList||[]).length){
+        devHtml = '<div style="margin:6px 0 0 20px;display:grid;gap:4px;">' + u.registeredList.map(dv => {
+          const when = dv.registeredAt ? "registered "+esc(psAgo(dv.registeredAt)) : "registered";
+          return '<div style="display:flex;align-items:baseline;gap:6px;font-size:12px;color:#475569;">'
+            + '<span style="color:#cbd5e1;flex:none;">•</span>'
+            + '<span style="font-weight:600;color:#334155;">'+esc(dv.label||"device")+'</span>'
+            + '<span style="color:#94a3b8;">— '+when+' · push off</span></div>';
         }).join("") + '</div>';
       }
       return '<div style="padding:8px 4px;border-bottom:1px solid #eef2f6;">'

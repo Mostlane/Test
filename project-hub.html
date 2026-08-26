@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Project</title>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="docviewer.js?v=6"></script>
@@ -62,8 +62,42 @@
     <a class="ml-back" href="/projects-live.html" style="text-decoration:none;">‹ Back</a>
     <h1 id="hTitle">Project</h1>
     <select id="statusSel" class="hide" style="width:auto;padding:7px 10px;color:#1f2937;"></select>
+    <button id="archiveBtn" class="hide" style="width:auto;padding:7px 12px;border:1px solid #c9d2dd;border-radius:10px;background:#fff;color:#003366;font-weight:700;cursor:pointer;white-space:nowrap;"></button>
   </header>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
+
+  <!-- Generic "attach a required document" picker: build / link existing / upload -->
+  <div id="docPick" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;padding:16px;overflow:auto;">
+    <div style="max-width:580px;margin:5vh auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.3);">
+      <div style="padding:14px 16px;border-bottom:1px solid #e6ecf3;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <h2 style="margin:0;font-size:18px;" id="docPickTitle">Attach document</h2>
+        <button class="btn grey small" id="docPickX">Close</button>
+      </div>
+      <div style="padding:14px 16px;">
+        <div id="docBuildRow" style="display:none;margin-bottom:14px;">
+          <p class="muted" style="margin:0 0 6px;">Create a new one in the portal:</p>
+          <button class="btn small" id="docBuildBtn">Build</button>
+        </div>
+        <div id="docPortalWrap" style="display:none;">
+          <hr style="border:none;border-top:1px solid #e6ecf3;margin:4px 0 10px;">
+          <p class="muted" style="margin:0 0 6px;" id="docPortalLbl">…or link an existing one from the portal:</p>
+          <input type="text" id="docPortalSearch" placeholder="Search…" style="width:100%;padding:8px 11px;border:1px solid #cdd7e2;border-radius:9px;font-size:14px;font-family:inherit;box-sizing:border-box;">
+          <div id="docPortalList" style="margin-top:8px;max-height:34vh;overflow:auto;"><p class="muted">Loading…</p></div>
+        </div>
+        <hr style="border:none;border-top:1px solid #e6ecf3;margin:14px 0 8px;">
+        <p class="muted" style="margin:0 0 6px;">…or attach a file (uploads to this project; engineers see it in Site Documents):</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input type="file" id="docFileInput" accept=".pdf,application/pdf,.doc,.docx,.xls,.xlsx,image/*" style="font-size:13px;">
+          <button class="btn small" id="docUpBtn">Upload &amp; attach</button>
+        </div>
+        <div id="docFileList" style="margin-top:10px;max-height:28vh;overflow:auto;"></div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e6ecf3;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <span class="msg" id="docPickMsg"></span>
+        <span><button class="btn ghost small" id="docPickCancel">Cancel</button> <button class="btn small" id="docPickSave">Save</button></span>
+      </div>
+    </div>
+  </div>
 
   <script>
     const API = window.MOSTLANE_API;
@@ -116,9 +150,35 @@
       if (CAN) {
         const sel = g("statusSel"); sel.classList.remove("hide");
         sel.innerHTML = ["live", "complete", "archived"].map(s => `<option value="${s}" ${P.status === s ? "selected" : ""}>${s[0].toUpperCase() + s.slice(1)}</option>`).join("");
-        sel.onchange = async () => { await authFetch("/project/update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, status: sel.value }) }); };
+        sel.onchange = () => setStatus(sel.value);
+        renderArchiveBtn();
       }
       render();
+    }
+
+    // The prominent Archive / Restore button — the obvious way to take a project
+    // off the live list (which also stops engineers raising POs against it).
+    function renderArchiveBtn() {
+      const b = g("archiveBtn"); if (!b || !CAN) return;
+      b.classList.remove("hide");
+      const archived = (P.status || "live") === "archived";
+      b.textContent = archived ? "♻ Restore" : "🗄 Archive";
+      b.style.background = archived ? "#eef7f0" : "#fff";
+      b.onclick = () => setStatus(archived ? "live" : "archived");
+    }
+    async function setStatus(status) {
+      if (status === "archived") {
+        const ok = window.MLUI ? await MLUI.confirm("Archive “" + (P.name || "this project") + "”? It drops off the live projects list and engineers can no longer raise POs against it. You can restore it any time.", { title: "Archive project", okLabel: "Archive", danger: true }) : confirm("Archive this project?");
+        if (!ok) return;
+      }
+      try {
+        const r = await authFetch("/project/update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, status }) }).then(r => r.json());
+        if (r && r.project) P = r.project; else P.status = status;
+        const sel = g("statusSel"); if (sel) sel.value = P.status || status;
+        renderArchiveBtn();
+        if (window.MLUI && MLUI.toast) MLUI.toast(status === "archived" ? "Project archived" : ("Project set to " + (P.status || status)));
+        render();
+      } catch (e) { alert("Couldn't update the project status: " + e.message); }
     }
 
     function render() {
@@ -138,7 +198,7 @@
       if (CAN) loadVisibility();
       loadJobsVisits();
       loadDocs();
-      loadRamsRefs();
+      loadDocRefs();
     }
 
     function summaryCard() {
@@ -168,7 +228,7 @@
       const done = items.filter(i => i.done).length;
       const body = items.map(it => `<div class="todo">
           <span class="tick ${it.done ? "done" : ""}" ${CAN ? `data-tick="${it.key}"` : ""} title="${it.auto ? "Done automatically" : "Tap to mark done"}">${it.done ? "✓" : ""}</span>
-          <span class="lbl">${esc(it.label)}${it.key === "rams" ? `<small id="ramsRefLine"></small>` : ""}</span>
+          <span class="lbl">${esc(it.label)}${["programme","rams","cpp"].includes(it.key) ? `<small id="${it.key}RefLine"></small>` : ""}</span>
           <span class="act" data-actfor="${it.key}"></span>
         </div>`).join("");
       return sectCard("todo", `✅ To-do — ${done}/${items.length} done`, body, false);
@@ -176,12 +236,12 @@
 
     function actionsFor(key) {
       const L = P.links || {};
-      if (key === "programme") return L.programmeId
-        ? `<a class="btn small" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}">${BUILD.programme.open}</a>`
-        : (CAN ? `<button class="btn small" data-build="programme">${BUILD.programme.build}</button>` : "");
-      if (key === "rams") return CAN ? `<button class="btn small" data-build="rams">${BUILD.rams.build}</button>` : "";
-      if (key === "cpp") return CAN
-        ? `<button class="btn small" data-build="cpp">${L.cppRef ? BUILD.cpp.open : BUILD.cpp.build}</button>` : "";
+      if (key === "programme") {
+        const open = L.programmeId ? `<a class="btn small" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}">${BUILD.programme.open}</a>` : "";
+        return open + (CAN ? `${open ? " " : ""}<button class="btn small ghost" data-docpick="programme">📎 Add / link</button>` : "");
+      }
+      if (key === "rams") return CAN ? `<button class="btn small ghost" data-docpick="rams">📎 Add / link</button>` : "";
+      if (key === "cpp") return CAN ? `<button class="btn small ghost" data-docpick="cpp">📎 Add / link</button>` : "";
       if (key === "valuations") { const jc = "/job-costing.html?project=" + encodeURIComponent(PID) + "&site=" + encodeURIComponent(P.name) + "&back=hub";
         return `<a class="btn small ghost" href="${jc}">${BUILD.valuations.open}</a>` + (CAN ? ` <button class="btn small" data-build="valuations">${P.contractValue ? "Update value" : BUILD.valuations.build}</button>` : ""); }
       if (key === "projectDocs") return `<a class="btn small ghost" href="#docsCard" onclick="var el=document.getElementById('docsCardEl');if(el){el.setAttribute('open','');el.scrollIntoView({behavior:'smooth'});}return false;">${CAN ? BUILD.projectDocs.build : "View documents"}</a>`;
@@ -248,6 +308,21 @@
             <div style="flex:1 1 200px;"><label style="font-size:13px;font-weight:600;">Start</label><input type="datetime-local" id="jvStart"></div>
             <div style="flex:0 0 140px;"><label style="font-size:13px;font-weight:600;">Duration (mins)</label><input type="number" id="jvDur" placeholder="60" min="15" step="15"></div>
           </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;font-weight:600;cursor:pointer;"><input type="checkbox" id="jvMulti" style="width:auto;"> 📆 Send as multiple days (drip-fed)</label>
+          <div id="jvMultiPanel" class="hide" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:#f8fafc;">
+            <p class="muted" style="font-size:12px;margin:0 0 8px;">Each day is hidden from the engineer until the reveal time the evening before — you see them all in the scheduler. A day auto-skips if they already have another job that day.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <div style="flex:1 1 120px;"><label style="font-size:12.5px;font-weight:600;">First day</label><input type="date" id="jvFirst"></div>
+              <div style="flex:0 0 90px;"><label style="font-size:12.5px;font-weight:600;">How many days</label><input type="number" id="jvDays" value="5" min="1" max="60" step="1"></div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+              <div style="flex:1 1 90px;"><label style="font-size:12.5px;font-weight:600;">Start each day</label><input type="time" id="jvDayStart" value="08:00"></div>
+              <div style="flex:1 1 90px;"><label style="font-size:12.5px;font-weight:600;">Finish each day</label><input type="time" id="jvDayEnd" value="16:00"></div>
+              <div style="flex:1 1 90px;"><label style="font-size:12.5px;font-weight:600;">Reveal at (day before)</label><input type="time" id="jvReveal" value="17:00"></div>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="jvWeekends" style="width:auto;"> Include weekends</label>
+            <p class="muted" id="jvPreview" style="font-size:12px;margin:8px 0 0;"></p>
+          </div>
           <label style="font-size:13px;font-weight:600;display:block;margin-top:10px;">Assign to (tick one or more)</label>
           <input type="search" id="jvSearch" placeholder="Filter engineers…" style="margin-bottom:4px;">
           <div id="jvEngs" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:14px;"><p class="muted" style="margin:6px;">Loading engineers…</p></div>
@@ -256,6 +331,7 @@
         </div>` : ""}
         <h3 style="margin:2px 0 6px;font-size:14.5px;">Project jobs</h3>
         <div id="jvJobs"><p class="muted">Loading…</p></div>
+        <div id="jvSeries"></div>
         <h3 style="margin:14px 0 6px;font-size:14.5px;">${CAN ? "Site visits — everyone" : "My site visits"}</h3>
         <div id="jvVisits"></div>
         <div id="jvPerUser"></div>`;
@@ -271,6 +347,7 @@
       catch { document.getElementById("jvJobs").innerHTML = `<p class="muted">Couldn't load — try again.</p>`; return; }
       if (!d || !d.ok) { document.getElementById("jvJobs").innerHTML = `<p class="muted">${esc((d && d.error) || "Couldn't load")}</p>`; return; }
       renderProjJobs(d.jobs || []);
+      renderSeries();
       renderVisits(d.visits || []);
       if (CAN) renderPerUser(d.perUser || []);
     }
@@ -388,6 +465,8 @@
       document.querySelectorAll("[data-tick]").forEach(el => el.onclick = () => toggleTodo(el.dataset.tick, !el.classList.contains("done")));
       // build buttons
       document.querySelectorAll("[data-build]").forEach(el => el.onclick = () => build(el.dataset.build));
+      // required-document picker (build / link existing / upload) — programme, rams, cpp
+      document.querySelectorAll("[data-docpick]").forEach(el => el.onclick = () => openDocPicker(el.dataset.docpick));
       // sitelog
       if (CAN) {
         g("coAdd").onclick = () => { const v = g("coInput").value.trim(); if (v && !COMPANIES.some(c => c.toLowerCase() === v.toLowerCase())) { COMPANIES.push(v); g("coInput").value = ""; renderCo(); } };
@@ -409,8 +488,49 @@
         if (c.checked) JV_PICK.add(c.dataset.jveng); else JV_PICK.delete(c.dataset.jveng);
       });
       btn.onclick = createProjectJob;
+      const multi = document.getElementById("jvMulti");
+      if (multi) {
+        const panel = document.getElementById("jvMultiPanel");
+        const upd = () => { panel.classList.toggle("hide", !multi.checked); document.getElementById("jvDur").disabled = multi.checked; renderDayPreview(); };
+        multi.addEventListener("change", upd);
+        ["jvFirst","jvDays","jvDayStart","jvDayEnd","jvWeekends"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("input", renderDayPreview); });
+      }
+    }
+    // Compute the drip-feed days client-side (browser = London time), skipping
+    // weekends unless included. Matches how the SLA scheduler builds times.
+    function buildSeriesDays() {
+      const n = Math.max(1, Math.min(60, Number(document.getElementById("jvDays").value) || 1));
+      const firstStr = document.getElementById("jvFirst").value;
+      const first = firstStr ? new Date(firstStr + "T00:00:00") : (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0); return d; })();
+      const [sh, sm] = (document.getElementById("jvDayStart").value || "08:00").split(":").map(Number);
+      const [fh, fm] = (document.getElementById("jvDayEnd").value || "16:00").split(":").map(Number);
+      const wk = document.getElementById("jvWeekends").checked;
+      const out = []; const cur = new Date(first);
+      let guard = 0;
+      while (out.length < n && guard++ < 400) {
+        const dow = cur.getDay();
+        if (wk || (dow !== 0 && dow !== 6)) {
+          const s = new Date(cur); s.setHours(sh, sm, 0, 0);
+          const f = new Date(cur); f.setHours(fh, fm, 0, 0);
+          let dur = Math.round((f - s) / 60000); if (dur <= 0) dur += 24 * 60;
+          out.push({ scheduledAt: s.toISOString(), durationMinutes: dur });
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      return out;
+    }
+    function renderDayPreview() {
+      const el = document.getElementById("jvPreview"); if (!el) return;
+      try {
+        const days = buildSeriesDays();
+        if (!days.length) { el.textContent = ""; return; }
+        const f = iso => new Date(iso).toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" });
+        el.textContent = days.length + " day" + (days.length===1?"":"s") + ": " + f(days[0].scheduledAt) + " → " + f(days[days.length-1].scheduledAt);
+      } catch { el.textContent = ""; }
     }
     async function createProjectJob() {
+      const multi = document.getElementById("jvMulti") && document.getElementById("jvMulti").checked;
+      if (multi) return createProjectSeries();
       const desc = document.getElementById("jvDesc").value.trim();
       const msg = document.getElementById("jvMsg");
       if (!desc) { msg.textContent = "Say what the job is."; msg.className = "msg err"; return; }
@@ -426,6 +546,63 @@
         JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
         loadJobsVisits();
       } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    }
+    async function createProjectSeries() {
+      const desc = document.getElementById("jvDesc").value.trim();
+      const msg = document.getElementById("jvMsg");
+      if (!desc) { msg.textContent = "Say what the job is."; msg.className = "msg err"; return; }
+      const engineers = Array.from(JV_PICK);
+      if (!engineers.length) { msg.textContent = "Pick at least one engineer."; msg.className = "msg err"; return; }
+      const days = buildSeriesDays();
+      if (!days.length) { msg.textContent = "Set the days."; msg.className = "msg err"; return; }
+      const [rh] = (document.getElementById("jvReveal").value || "17:00").split(":").map(Number);
+      msg.textContent = "Creating " + days.length + " days…"; msg.className = "msg";
+      try {
+        const r = await authFetch("/project/create-day-series", { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ id: PID, description: desc, engineers, days, releaseHour: rh }) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't create");
+        msg.textContent = "Created ✓ " + r.count + " days drip-fed"; msg.className = "msg ok";
+        document.getElementById("jvDesc").value = "";
+        document.getElementById("jvMulti").checked = false; document.getElementById("jvMultiPanel").classList.add("hide"); document.getElementById("jvDur").disabled = false;
+        JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
+        loadJobsVisits();
+      } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    }
+    // Active drip series for this project, each with a Stop button.
+    async function renderSeries() {
+      const el = document.getElementById("jvSeries"); if (!el) return;
+      let d; try { d = await authFetch("/project/series?id=" + encodeURIComponent(PID)).then(r => r.json()); } catch { el.innerHTML = ""; return; }
+      const series = (d && d.series) || [];
+      if (!series.length) { el.innerHTML = ""; return; }
+      const fday = iso => iso ? new Date(iso).toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" }) : "—";
+      el.innerHTML = `<h3 style="margin:14px 0 6px;font-size:14.5px;">📆 Drip-fed multi-day runs</h3>` + series.map(s => {
+        const engs = (s.engineers || []).map(niceName).join(", ");
+        const done = s.days.filter(x => x.released && !x.skipped).length, skip = s.days.filter(x => x.skipped).length, pend = s.pendingDays;
+        const rows = s.days.map(x => {
+          const tag = x.skipped ? '<span class="badge" style="background:#fef3c7;color:#92400e;">skipped</span>'
+            : x.released ? '<span class="badge" style="background:#e6f6ec;color:#065f46;">visible</span>'
+            : '<span class="badge" style="background:#eef2f7;color:#475569;">hidden</span>';
+          return `<div class="frow" style="font-size:12.5px;"><span style="flex:1;">${fday(x.scheduledAt)}</span>${tag}</div>`;
+        }).join("");
+        return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <b style="flex:1;font-size:13.5px;">${esc(s.description || "Project run")} · ${esc(engs)}</b>
+            ${CAN && pend ? `<button class="btn" data-stopseries="${esc(s.seriesId)}" style="background:#fee2e2;color:#991b1b;padding:5px 10px;font-size:12.5px;">■ Stop drip (${pend} to come)</button>` : (pend ? "" : '<span class="muted" style="font-size:12px;">finished</span>')}
+          </div>
+          <p class="muted" style="font-size:12px;margin:6px 0;">${done} visible · ${pend} hidden${skip ? " · " + skip + " skipped" : ""}</p>
+          <div style="max-height:150px;overflow:auto;">${rows}</div>
+        </div>`;
+      }).join("");
+      el.querySelectorAll("[data-stopseries]").forEach(b => b.onclick = () => stopSeries(b.dataset.stopseries));
+    }
+    async function stopSeries(seriesId) {
+      const ok = window.MLUI ? await MLUI.confirm("Stop this drip-feed? The days the engineer hasn't seen yet are removed; days already visible stay.", { title:"Stop drip-feed", okLabel:"Stop", danger:true }) : confirm("Stop this drip-feed?");
+      if (!ok) return;
+      try {
+        const r = await authFetch("/project/series/stop", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, seriesId }) }).then(r => r.json());
+        if (window.MLUI && MLUI.toast) MLUI.toast("Removed " + ((r && r.removed) || 0) + " upcoming days");
+        loadJobsVisits();
+      } catch (e) { alert("Couldn't stop: " + e.message); }
     }
     function wireVisibility() {
       const box = document.getElementById("visPeople");
@@ -501,17 +678,168 @@
       else { g("reqMsg").textContent = (r.error || "Couldn't save"); g("reqMsg").className = "msg err"; }
     }
 
-    // ── RAMS linked refs ──────────────────────────────────────────────────────
-    async function loadRamsRefs() {
-      const ids = (P.links && P.links.ramsIds) || [];
-      const line = g("ramsRefLine"); if (!line) return;
-      if (!ids.length) { line.textContent = ""; return; }
-      try {
-        const d = await authFetch("/hs/docs?type=rams").then(r => r.json());
-        const byId = {}; (d.docs || []).forEach(x => byId[x.id] = x);
-        line.innerHTML = ids.map(id => byId[id] ? `<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">${esc(byId[id].ref || "RAMS")}</a>` : "").join(" ");
-      } catch {}
+    // ── Required-document attach: build / link existing (portal) / upload file ──
+    function fmtDay(s) { if (!s) return ""; const d = new Date(String(s).replace(" ", "T") + (/[zZ]|[+\-]\d\d:?\d\d$/.test(s) ? "" : "Z")); return isNaN(d) ? "" : d.toLocaleDateString("en-GB"); }
+
+    // Per-required-document config. `build` reuses build(kind); `portal` (when set)
+    // is how to list & link an existing portal record. Every type also supports
+    // attaching a file (stored in links.docFiles[key]) which surfaces to engineers
+    // in Site Documents.
+    const DOCTYPES = {
+      programme: {
+        title: "📊 Programme of works", build: () => build("programme"), buildLabel: "Build in the portal",
+        portal: {
+          label: "…or link an existing programme:", single: true, linkKind: "programme",
+          list: async () => (await authFetch("/prog/list").then(r => r.json()).catch(() => ({}))).programmes || [],
+          linked: () => (P.links && P.links.programmeId) ? [P.links.programmeId] : [],
+          name: x => x.title || x.site || x.id, sub: x => [x.site, x.client].filter(Boolean).join(" · "),
+          match: (x, q) => (String(x.title || "") + " " + String(x.site || "") + " " + String(x.client || "")).toLowerCase().includes(q),
+        },
+      },
+      rams: {
+        title: "🦺 Risk Assessment (RAMS)", build: () => build("rams"), buildLabel: "Build in the portal",
+        portal: {
+          label: "…or link an existing RAMS from the portal:", single: false, linkKind: "rams", removeKind: "rams-remove",
+          list: async () => (await authFetch("/hs/docs?type=rams").then(r => r.json()).catch(() => ({}))).docs || [],
+          linked: () => (P.links && P.links.ramsIds) || [],
+          name: x => x.ref || "RAMS", sub: x => [x.site, x.status, x.created_at ? fmtDay(x.created_at) : ""].filter(Boolean).join(" · "),
+          match: (x, q) => (String(x.ref || "") + " " + String(x.site || "")).toLowerCase().includes(q),
+        },
+      },
+      cpp: {
+        title: "📄 Construction Phase Plan", build: () => build("cpp"), buildLabel: "Build in the planner",
+        portal: null, // CPPs aren't stored in the portal — attach the file instead
+      },
+    };
+
+    // Linked-doc pills on each to-do row (programme / rams / cpp).
+    async function loadDocRefs() {
+      const keys = ["programme", "rams", "cpp"].filter(k => g(k + "RefLine"));
+      if (!keys.length) return;
+      const L = P.links || {}, df = L.docFiles || {};
+      let docs = [];
+      try { docs = (await authFetch("/project/docs?id=" + encodeURIComponent(PID)).then(r => r.json())).files || []; } catch {}
+      const docById = {}; docs.forEach(f => docById[f.id] = f);
+      let ramsBy = {}, progBy = {};
+      if ((L.ramsIds || []).length) { try { ((await authFetch("/hs/docs?type=rams").then(r => r.json())).docs || []).forEach(x => ramsBy[x.id] = x); } catch {} }
+      if (L.programmeId) { try { ((await authFetch("/prog/list").then(r => r.json())).programmes || []).forEach(x => progBy[x.id] = x); } catch {} }
+      const filePill = id => { const f = docById[id]; return f ? `<a class="pill" href="#" data-docopen="${esc(f.url)}" data-docname="${esc(f.title || "File")}" style="text-decoration:none;">📎 ${esc(f.title || "File")}</a>` : ""; };
+      for (const key of keys) {
+        const line = g(key + "RefLine"); const pills = [];
+        if (key === "programme" && L.programmeId) pills.push(`<a class="pill" href="/programme-edit.html?id=${encodeURIComponent(L.programmeId)}" style="text-decoration:none;">📊 ${esc((progBy[L.programmeId] && (progBy[L.programmeId].title || progBy[L.programmeId].site)) || "Programme")}</a>`);
+        if (key === "rams") (L.ramsIds || []).forEach(id => pills.push(`<a class="pill" href="/hs-docs.html?open=${encodeURIComponent(id)}" style="text-decoration:none;">🦺 ${esc((ramsBy[id] && ramsBy[id].ref) || "RAMS")}</a>`));
+        (df[key] || []).forEach(id => { const p = filePill(id); if (p) pills.push(p); });
+        line.innerHTML = pills.length ? " " + pills.join(" ") : "";
+      }
+      document.querySelectorAll("[data-docopen]").forEach(a => a.onclick = e => { e.preventDefault();
+        if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.docopen, fetchUrl: a.dataset.docopen, name: a.dataset.docname, downloadUrl: a.dataset.docopen });
+        else window.open(a.dataset.docopen, "_blank");
+      });
     }
+
+    // The generic picker.
+    let DP = null; // { key, cfg, portalAll, portalSel:Set, projDocs, fileSel:Set }
+    async function openDocPicker(key) {
+      const cfg = DOCTYPES[key]; if (!cfg) return;
+      DP = { key, cfg, portalAll: [], portalSel: new Set(cfg.portal ? cfg.portal.linked() : []), projDocs: [], fileSel: new Set((P.links && P.links.docFiles && P.links.docFiles[key]) || []) };
+      g("docPickTitle").textContent = cfg.title;
+      g("docPickMsg").textContent = ""; g("docPickMsg").className = "msg";
+      g("docFileInput").value = "";
+      const br = g("docBuildRow");
+      if (cfg.build) { br.style.display = ""; g("docBuildBtn").textContent = "＋ " + (cfg.buildLabel || "Build in the portal"); } else br.style.display = "none";
+      const pw = g("docPortalWrap");
+      if (cfg.portal) { pw.style.display = ""; g("docPortalLbl").textContent = cfg.portal.label; g("docPortalSearch").value = ""; g("docPortalList").innerHTML = "<p class='muted'>Loading…</p>"; } else pw.style.display = "none";
+      g("docFileList").innerHTML = "<p class='muted'>Loading documents…</p>";
+      g("docPick").style.display = "block";
+      if (cfg.portal) { try { DP.portalAll = await cfg.portal.list(); } catch { DP.portalAll = []; } renderPortalList(); }
+      await refreshProjDocs();
+    }
+    function closeDocPicker() { g("docPick").style.display = "none"; DP = null; }
+    function renderPortalList() {
+      if (!DP || !DP.cfg.portal) return;
+      const cfg = DP.cfg.portal, q = (g("docPortalSearch").value || "").toLowerCase().trim();
+      const el = g("docPortalList");
+      if (!DP.portalAll.length) { el.innerHTML = "<p class='muted'>None found in the portal yet.</p>"; return; }
+      const list = DP.portalAll.filter(x => !q || cfg.match(x, q));
+      if (!list.length) { el.innerHTML = "<p class='muted'>No matches.</p>"; return; }
+      const type = cfg.single ? "radio" : "checkbox";
+      el.innerHTML = list.map(x => {
+        const on = DP.portalSel.has(x.id);
+        return `<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 6px;border-bottom:1px solid #eef1f5;cursor:pointer;">
+          <input type="${type}" name="docPortal" data-pid="${esc(x.id)}" ${on ? "checked" : ""} style="margin-top:3px;width:18px;height:18px;">
+          <span><b>${esc(cfg.name(x))}</b>${cfg.sub(x) ? ` <span class="muted" style="font-size:12px;">· ${esc(cfg.sub(x))}</span>` : ""}</span>
+        </label>`;
+      }).join("");
+      el.querySelectorAll("[data-pid]").forEach(inp => inp.onchange = () => {
+        if (cfg.single) DP.portalSel = new Set(inp.checked ? [inp.dataset.pid] : []);
+        else inp.checked ? DP.portalSel.add(inp.dataset.pid) : DP.portalSel.delete(inp.dataset.pid);
+      });
+    }
+    async function refreshProjDocs() {
+      try { DP.projDocs = (await authFetch("/project/docs?id=" + encodeURIComponent(PID)).then(r => r.json())).files || []; } catch { DP.projDocs = []; }
+      renderFileList();
+    }
+    function renderFileList() {
+      if (!DP) return;
+      const el = g("docFileList");
+      if (!DP.projDocs.length) { el.innerHTML = "<p class='muted'>No files on this project yet — upload one above.</p>"; return; }
+      el.innerHTML = "<p class='muted' style='margin:0 0 4px;'>…or tick an existing project file:</p>" + DP.projDocs.map(f => {
+        const on = DP.fileSel.has(f.id);
+        return `<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 6px;border-bottom:1px solid #eef1f5;cursor:pointer;">
+          <input type="checkbox" data-fid="${esc(f.id)}" ${on ? "checked" : ""} style="margin-top:3px;width:18px;height:18px;">
+          <span>📎 <b>${esc(f.title || "Document")}</b>${f.section ? ` <span class="muted" style="font-size:12px;">· ${esc(f.section)}</span>` : ""}</span>
+        </label>`;
+      }).join("");
+      el.querySelectorAll("[data-fid]").forEach(cb => cb.onchange = () => { cb.checked ? DP.fileSel.add(cb.dataset.fid) : DP.fileSel.delete(cb.dataset.fid); });
+    }
+    async function uploadDocFile() {
+      if (!DP) return;
+      const inp = g("docFileInput"), file = inp.files && inp.files[0];
+      if (!file) { g("docPickMsg").textContent = "Choose a file first."; g("docPickMsg").className = "msg err"; return; }
+      g("docPickMsg").textContent = "Uploading…"; g("docPickMsg").className = "msg"; g("docUpBtn").disabled = true;
+      try {
+        const fd = new FormData(); fd.append("file", file); fd.append("id", PID); fd.append("section", DP.cfg.title.replace(/^[^A-Za-z0-9]+/, "").trim()); fd.append("title", file.name);
+        const r = await authFetch("/project/doc", { method: "POST", body: fd }).then(r => r.json());
+        if (r.ok && r.id) {
+          await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: PID, kind: "doc-file", docKey: DP.key, value: r.id }) });
+          P.links = P.links || {}; P.links.docFiles = P.links.docFiles || {}; P.links.docFiles[DP.key] = P.links.docFiles[DP.key] || [];
+          if (!P.links.docFiles[DP.key].includes(r.id)) P.links.docFiles[DP.key].push(r.id);
+          DP.fileSel.add(r.id); inp.value = "";
+          g("docPickMsg").textContent = "Uploaded & attached ✓"; g("docPickMsg").className = "msg ok";
+          await refreshProjDocs();
+        } else { g("docPickMsg").textContent = r.error || "Upload failed."; g("docPickMsg").className = "msg err"; }
+      } catch { g("docPickMsg").textContent = "Upload failed — try again."; g("docPickMsg").className = "msg err"; }
+      g("docUpBtn").disabled = false;
+    }
+    async function saveDocPicker() {
+      if (!DP) return;
+      const key = DP.key, cfg = DP.cfg;
+      g("docPickMsg").textContent = "Saving…"; g("docPickMsg").className = "msg"; g("docPickSave").disabled = true;
+      const link = body => authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ id: PID }, body)) });
+      try {
+        if (cfg.portal) {
+          if (cfg.portal.single) {
+            const chosen = [...DP.portalSel][0] || "", cur = (P.links && P.links.programmeId) || "";
+            if (chosen !== cur) await link({ kind: cfg.portal.linkKind, value: chosen });
+          } else {
+            const before = new Set(cfg.portal.linked());
+            for (const id of [...DP.portalSel].filter(x => !before.has(x))) await link({ kind: cfg.portal.linkKind, value: id });
+            for (const id of [...before].filter(x => !DP.portalSel.has(x))) await link({ kind: cfg.portal.removeKind, value: id });
+          }
+        }
+        const fbefore = new Set((P.links && P.links.docFiles && P.links.docFiles[key]) || []);
+        for (const id of [...DP.fileSel].filter(x => !fbefore.has(x))) await link({ kind: "doc-file", docKey: key, value: id });
+        for (const id of [...fbefore].filter(x => !DP.fileSel.has(x))) await link({ kind: "doc-file-remove", docKey: key, value: id });
+        g("docPickSave").disabled = false; closeDocPicker(); await loadProject();
+      } catch { g("docPickSave").disabled = false; g("docPickMsg").textContent = "Couldn't save — try again."; g("docPickMsg").className = "msg err"; }
+    }
+    g("docPickX").onclick = closeDocPicker;
+    g("docPickCancel").onclick = closeDocPicker;
+    g("docPickSave").onclick = saveDocPicker;
+    g("docUpBtn").onclick = uploadDocFile;
+    g("docBuildBtn").onclick = () => { if (DP && DP.cfg.build) DP.cfg.build(); };
+    g("docPortalSearch").addEventListener("input", renderPortalList);
+    g("docPick").addEventListener("click", e => { if (e.target === g("docPick")) closeDocPicker(); });
 
     // ── Documents ─────────────────────────────────────────────────────────────
     async function loadDocs() {

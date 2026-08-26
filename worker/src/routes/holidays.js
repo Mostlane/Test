@@ -358,7 +358,10 @@ export async function handle(request, env, ctx, url, sess) {
 
   // GET /holiday/calendar?from=&to=  — approved leave per user per day, for the
   // SLA scheduler to overlay who's off. Any logged-in office user may read it.
-  if (path === "/holiday/calendar" && method === "GET") {
+  // NB scoped to requests that carry from/to — the holiday-admin WALL CHART also
+  // hits /holiday/calendar but with ?year=&month= and expects a different shape
+  // ({daysInMonth, engineers}); that request falls through to the handler below.
+  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
     if (!sess) return text("Not authenticated", 401);
     const q = url.searchParams;
     const iso = s => (/^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "");

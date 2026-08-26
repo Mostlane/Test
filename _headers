@@ -117,6 +117,8 @@
   Cache-Control: no-cache
 /cctv.html
   Cache-Control: no-cache
+/yard-gate.html
+  Cache-Control: no-cache
 /my-tasks.html
   Cache-Control: no-cache
 /tasks-admin.html

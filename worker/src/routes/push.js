@@ -284,6 +284,20 @@ export async function handle(request, env, ctx, url, sess) {
       });
     }
 
+    // Registered devices from the device-lock `devices` table (separate from push
+    // subscriptions). A user can have a phone registered here yet have push OFF —
+    // so the card can show "device registered · notifications off" instead of
+    // implying they have no device at all.
+    const byDev = {};
+    try {
+      const d = await env.DB.prepare(
+        "SELECT lower(username) uk, label, registered_at FROM devices WHERE tenant_id = ? ORDER BY registered_at"
+      ).bind(tid).all();
+      for (const row of (d.results || [])) {
+        (byDev[row.uk] = byDev[row.uk] || []).push({ label: row.label || "device", registeredAt: row.registered_at || null });
+      }
+    } catch { /* devices table absent -> no registered-device info */ }
+
     // All active users.
     let users = [];
     try {
@@ -298,12 +312,16 @@ export async function handle(request, env, ctx, url, sess) {
       const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.username;
       const lastOk = devs.reduce((m, d) => (d.lastOk && (!m || d.lastOk > m)) ? d.lastOk : m, null);
       const lastReg = devs.reduce((m, d) => (d.lastReg && (!m || d.lastReg > m)) ? d.lastReg : m, null);
+      const regDevs = byDev[String(u.username || "").toLowerCase()] || [];
       return {
         username: u.username,
         name,
         on: devs.length > 0,
         devices: devs.length,
         devicesList: devs,
+        // Device-lock devices — present even when push notifications are off.
+        registeredDevices: regDevs.length,
+        registeredList: regDevs,
         lastOk,
         lastReg
       };

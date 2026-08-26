@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>My Van Scores — Mostlane</title>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <script src="auth.js"></script>
   <style>
     *{box-sizing:border-box}
@@ -44,6 +44,8 @@
     const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const colour=s=>s>=85?"#0a8a35":s>=70?"#b45309":"#d11f2a";
     const band=s=>s>=85?"Great":s>=70?"OK":"Needs care";
+    const medal=r=>r===1?"🏆":r===2?"🥈":r===3?"🥉":"";
+    function rankLabel(rank,tot){ if(!rank||!tot) return ""; const s=rank%100; const suf=(s>=11&&s<=13)?"th":["th","st","nd","rd","th","th","th","th","th","th"][rank%10]; return rank+suf+" of "+tot; }
     function fmtRange(a,b){
       const f=iso=>{ const d=new Date(iso+"T12:00:00Z"); return isNaN(d)?iso:d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}); };
       if(!b||b===a) return f(a);
@@ -67,18 +69,51 @@
       const latest=scores[0];
       const hero=document.getElementById("hero");
       hero.style.display="";
+      // Hero: big score + medal for top-3, position, and a red note under 70
+      // or for last place (nudge to focus on smoother driving next week).
+      const lm = medal(latest.rank);
+      const isLast = latest.rank && latest.total && latest.rank === latest.total && latest.total > 1;
+      const below = latest.score != null && latest.score < 70;
+      const rankLine = latest.rank && latest.total
+        ? `<div style="font-weight:700;font-size:14.5px;color:${lm?'#0a8a35':(below?'#d11f2a':'#334155')};margin-top:4px">${lm?lm+" ":""}${rankLabel(latest.rank, latest.total)} in the fleet${isLast?" · last place":""}</div>`
+        : "";
+      // Firm message when the score is below 70; a neutral "last place" note
+      // for anyone who happens to be at the bottom with a passing score.
+      const warn = below
+        ? `<div style="margin-top:12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.45">
+             <b>Below 70 — this is not an acceptable driving standard and must be improved.</b>
+           </div>`
+        : (isLast
+            ? `<div style="margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.45">
+                 <b>Bottom of the fleet this week.</b> Let's aim higher next week.
+               </div>`
+            : "");
+      const cheer = latest.rank === 1
+        ? `<div style="margin-top:12px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:10px;padding:10px 12px;font-size:13.5px">
+             <b>🏆 Top of the fleet — nice work!</b> Keep it up.
+           </div>` : "";
       hero.innerHTML=`<div class="hero">
         <div class="big" style="color:${colour(latest.score)}">${latest.score}</div>
         <div><div class="lbl">Latest score · ${esc(band(latest.score))}</div>
           <div style="font-weight:600">${esc(fmtRange(latest.weekStart,latest.weekEnd))}</div>
-          ${latest.reg?`<div class="muted" style="font-size:12px">${esc(latest.reg)}</div>`:""}</div></div>`;
+          ${latest.reg?`<div class="muted" style="font-size:12px">${esc(latest.reg)}</div>`:""}
+          ${rankLine}
+        </div></div>${warn}${cheer}`;
       // Group by year.
       const groups={}; for(const s of scores){ (groups[yearOf(s.weekStart)||"—"]=groups[yearOf(s.weekStart)||"—"]||[]).push(s); }
       const years=Object.keys(groups).sort().reverse();
       list.innerHTML=years.map(y=>{
-        const rows=groups[y].map(s=>`<div class="row">
-          <div class="rng"><b>${esc(fmtRange(s.weekStart,s.weekEnd))}</b>${s.reg?`<div class="reg">${esc(s.reg)}</div>`:""}</div>
-          <div class="chip" style="background:${colour(s.score)}">${s.score}</div></div>`).join("");
+        const rows=groups[y].map(s=>{
+          const m = medal(s.rank);
+          const last = s.rank && s.total && s.rank === s.total && s.total > 1;
+          const b = s.score != null && s.score < 70;
+          const rk = s.rank && s.total
+            ? `<div style="color:${m?'#0a8a35':(b?'#d11f2a':'#64748b')};font-size:12px;font-weight:${m?700:500}">${m?m+" ":""}${rankLabel(s.rank,s.total)}${last?" · last":""}${b?" · under 70":""}</div>`
+            : "";
+          return `<div class="row">
+            <div class="rng"><b>${esc(fmtRange(s.weekStart,s.weekEnd))}</b>${s.reg?`<div class="reg">${esc(s.reg)}</div>`:""}${rk}</div>
+            <div class="chip" style="background:${colour(s.score)}">${s.score}</div></div>`;
+        }).join("");
         return `<div class="yr">${esc(y)}</div>${rows}`;
       }).join("");
       markSeen(latest.sentAt||"");

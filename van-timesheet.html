@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>Van Timesheet — Mostlane</title>
-<script src="/portal-config.js?v=17"></script>
+<script src="/portal-config.js?v=18"></script>
 <script src="auth.js"></script>
 <style>
   :root{--ink:#0f172a;--line:#e2e8f0;--brand:#1a237e;--muted:#64748b}
@@ -103,6 +103,19 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const toMin=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(t||""));return m?(+m[1])*60+(+m[2]):null;};
 
 let WEEK=mondayOf(new Date()), USERS=[], CFG={defaults:{morningCap:30,homeCap:30,lunch:30,thresholdH:6},byUser:{}}, ROWS={}, EDIT_U=null;
+// Cache of saved fleet reports (key -> {url, title, at}). Populated lazily on
+// first edit so the "source report" link can be shown for any day whose
+// audit trail names its parent report.
+let REPORTS_MAP=null;
+async function loadReportsMap(){
+  if(REPORTS_MAP) return REPORTS_MAP;
+  REPORTS_MAP={};
+  try{
+    const d=await authFetch("/fleet/reports").then(r=>r.json());
+    for(const r of (d&&d.reports)||[]) REPORTS_MAP[r.key]={ url:r.url, title:r.title||"", at:r.at||"" };
+  }catch(e){}
+  return REPORTS_MAP;
+}
 function uLabel(u){const n=((u.FirstName||"")+" "+(u.LastName||"")).trim();return n||u.Username;}
 function nameOf(un){const u=USERS.find(x=>x.Username===un);return u?uLabel(u):un;}
 function cfgFor(un){return Object.assign({},CFG.defaults,CFG.byUser[un]||{});}
@@ -112,7 +125,12 @@ function vanPay(day,c){
   const span=Math.max(0,e-s);
   const morning=(day.leavingHome!==false)?Math.min(c.morningCap, day.morningCommute||0):0;
   const home=(day.arrivingHome!==false)?Math.min(c.homeCap, day.homeCommute||0):0;
-  const lunch=(span>=c.thresholdH*60)?c.lunch:0;
+  // Per-day lunch override (set on the fleet-report "Confirm & save timesheets"
+  // modal) beats the default rule. A number 0/15/30/45/60 wins; null falls
+  // back to the default (paycfg lunch on days ≥ thresholdH hours).
+  const lunch=(day.lunchOverride!=null && isFinite(Number(day.lunchOverride)))
+    ? Math.max(0, Math.round(Number(day.lunchOverride)))
+    : ((span>=c.thresholdH*60)?c.lunch:0);
   return {paid:Math.max(0,span-morning-home-lunch),span,morning,home,lunch};
 }
 
@@ -140,15 +158,31 @@ function render(){
   }).join("");
 }
 
-function openEdit(un){
+async function openEdit(un){
   EDIT_U=un; const c=cfgFor(un); const dates=DOW.map((_,i)=>addDays(WEEK,i));
   g("editTitle").textContent=nameOf(un)+" — hours";
   g("editSub").textContent="Recorded times shown; edit if the tracker was wrong. Untick “Arrived home” if the last time is them leaving site (no home-commute deduction).";
+  // Ensure the report catalogue is loaded so the "source report" link resolves.
+  await loadReportsMap();
   g("editBody").innerHTML=dates.map((dt,i)=>{
     const day=ROWS[un][dt];
     if(!day) return `<div class="eday ${i>4?'wk':''}"><h4>${DOW[i]} · ${dt.slice(8)}/${dt.slice(5,7)}</h4><span class="ded">No activity recorded.</span></div>`;
     const s=day.editStart!=null?day.editStart:day.startMin, e=day.editEnd!=null?day.editEnd:day.endMin;
     const p=vanPay(day,c);
+    // Audit trail from the fleet-report builder. Present only on days written
+    // via "Confirm & save timesheets" — older/manual rows just omit this block.
+    const audit=(() => {
+      const parts=[];
+      if(day.van) parts.push("🚐 "+esc(day.van));
+      if(day.trackerStartMin!=null && day.trackerEndMin!=null){
+        parts.push("van moved "+hm(day.trackerStartMin)+" → "+hm(day.trackerEndMin));
+      }
+      if(day.pickedBy){ parts.push("confirmed by "+esc(day.pickedBy)+(day.pickedAt?" · "+new Date(day.pickedAt).toLocaleDateString("en-GB",{day:"2-digit",month:"short"}):"")); }
+      const rp=day.sourceReportKey && REPORTS_MAP && REPORTS_MAP[day.sourceReportKey];
+      const link = rp ? `<a href="${esc(rp.url)}" target="_blank" rel="noopener" style="color:#003468;text-decoration:underline;margin-left:6px">📊 open report</a>` : "";
+      if(!parts.length && !link) return "";
+      return `<div class="ded" style="color:#334155;background:#f1f5f9;border-left:3px solid #94a3b8;padding:4px 8px;border-radius:6px;margin-top:4px">${parts.join(" · ")}${link}</div>`;
+    })();
     return `<div class="eday ${i>4?'wk':''}" data-d="${dt}"><h4>${DOW[i]} · ${dt.slice(8)}/${dt.slice(5,7)}</h4>
       <div class="erow">
         <span>In <input type="time" value="${hm(s)}" data-f="in"></span>
@@ -158,6 +192,7 @@ function openEdit(un){
         <span class="paid" data-paid>${hmS(p.paid)}</span>
       </div>
       <div class="ded" data-ded>door-to-door ${hmS(p.span)} · −am ${p.morning}m · −home ${p.home}m · −lunch ${p.lunch}m</div>
+      ${audit}
     </div>`;
   }).join("");
   g("editBody").querySelectorAll(".eday[data-d] input").forEach(inp=>inp.addEventListener("input",()=>recalcRow(inp.closest(".eday"),un)));

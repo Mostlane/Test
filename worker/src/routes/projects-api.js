@@ -27,7 +27,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
-import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries } from "./sla.js";
 import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
 import { syncSiteToSiteLog, removeSiteFromSiteLog, syncSiteToCompliance, setPOSiteActive } from "./sites.js";
 
@@ -161,20 +161,38 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
   } catch { return false; }
 }
 
+// Normalise a project's `links` object: guarantees a `docFiles` map
+// (docKey → [project_file id]) for the "upload / attach a file" route that
+// every required document supports, and folds the legacy `cppFiles` array into
+// `docFiles.cpp` so old projects keep working. Returns the same object mutated.
+function normLinks(links) {
+  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", costingKey: "" }, links || {});
+  if (!Array.isArray(l.ramsIds)) l.ramsIds = [];
+  l.docFiles = (l.docFiles && typeof l.docFiles === "object" && !Array.isArray(l.docFiles)) ? l.docFiles : {};
+  if (Array.isArray(l.cppFiles) && l.cppFiles.length) {
+    l.docFiles.cpp = [...new Set([...(l.docFiles.cpp || []), ...l.cppFiles])];
+  }
+  return l;
+}
+
 // Compute the To-Do list from the required-docs config + the current links +
 // what actually exists, honouring any manual overrides stored in data.doneOverride.
 function computeTodo(p, data, fileCount) {
   const req = data.required || {};
-  const links = data.links || {};
+  const links = normLinks(data.links);
+  const df = links.docFiles || {};
   const done = data.doneOverride || {};
   const fin = data.contractValue != null && Number(data.contractValue) > 0;
+  const nf = k => Array.isArray(df[k]) && df[k].length > 0;   // has an attached file
   const out = [];
   for (const dt of DOC_TYPES) {
     if (!bool(req[dt.key])) continue;
     let auto = false;
-    if (dt.key === "programme") auto = !!links.programmeId;
-    else if (dt.key === "rams") auto = Array.isArray(links.ramsIds) && links.ramsIds.length > 0;
-    else if (dt.key === "cpp") auto = !!links.cppRef;
+    // Every buildable doc type is "done" if it's built/linked in the portal OR
+    // an external file has been attached for it.
+    if (dt.key === "programme") auto = !!links.programmeId || nf("programme");
+    else if (dt.key === "rams") auto = (links.ramsIds.length > 0) || nf("rams");
+    else if (dt.key === "cpp") auto = !!links.cppRef || nf("cpp");
     else if (dt.key === "valuations") auto = fin;
     else if (dt.key === "projectDocs") auto = fileCount > 0;
     const isDone = done[dt.key] === true || auto;
@@ -195,7 +213,7 @@ function projectView(row, data, fileCount) {
     required: data.required || {},
     sitelog: data.sitelog || { rules: "", visitorRules: "", companies: [] },
     contractValue: data.contractValue ?? null,
-    links: data.links || {},
+    links: normLinks(data.links),
     costingKey: (data.links && data.links.costingKey) || normName(row.name),
     visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
     todo: computeTodo(row, data, fileCount),
@@ -318,7 +336,7 @@ export async function handle(request, env, ctx, url, sess) {
       required,
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
-      links: { programmeId: "", ramsIds: [], cppRef: "", costingKey },
+      links: { programmeId: "", ramsIds: [], cppRef: "", docFiles: {}, costingKey },
       visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {},
     };
@@ -449,16 +467,27 @@ export async function handle(request, env, ctx, url, sess) {
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
     const data = parse(row);
-    data.links = data.links || { ramsIds: [] };
+    data.links = normLinks(data.links);
     const kind = String(b.kind || ""), value = String(b.value || "").trim();
+    // docKey for the generic file-attach kinds (programme|rams|cpp|…); cpp-file
+    // is the legacy alias for docKey "cpp".
+    const docKey = kind.startsWith("cpp-file") ? "cpp" : String(b.docKey || "").trim();
     if (kind === "programme") data.links.programmeId = value;
     else if (kind === "cpp") data.links.cppRef = value;
     else if (kind === "rams") {
-      data.links.ramsIds = Array.isArray(data.links.ramsIds) ? data.links.ramsIds : [];
       if (value && !data.links.ramsIds.includes(value)) data.links.ramsIds.push(value);
     } else if (kind === "rams-remove") {
-      data.links.ramsIds = (data.links.ramsIds || []).filter(x => x !== value);
+      data.links.ramsIds = data.links.ramsIds.filter(x => x !== value);
+    } else if (kind === "doc-file" || kind === "cpp-file") {
+      // An external file attached for a required document (uploaded or linked
+      // from an existing project document). Stored per doc type in docFiles.
+      if (!docKey) return error("Missing docKey", 400, env, request);
+      data.links.docFiles[docKey] = Array.isArray(data.links.docFiles[docKey]) ? data.links.docFiles[docKey] : [];
+      if (value && !data.links.docFiles[docKey].includes(value)) data.links.docFiles[docKey].push(value);
+    } else if (kind === "doc-file-remove" || kind === "cpp-file-remove") {
+      if (docKey && Array.isArray(data.links.docFiles[docKey])) data.links.docFiles[docKey] = data.links.docFiles[docKey].filter(x => x !== value);
     } else return error("Unknown link kind", 400, env, request);
+    delete data.links.cppFiles; // migrated into docFiles.cpp by normLinks
     await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(JSON.stringify(data), new Date().toISOString(), db.tenantId, row.id).run();
     return json({ ok: true, links: data.links }, {}, env, request);
@@ -542,6 +571,24 @@ export async function handle(request, env, ctx, url, sess) {
     if (!f) return error("File not found", 404, env, request);
     try { await env.JOB_FILES.delete(f.r2_key); } catch {}
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
+    // If this file was attached to a required document, drop the dangling
+    // reference so that doc's to-do doesn't stay ticked by a deleted file.
+    try {
+      const prow = await getRow(String(f.project_id || ""));
+      if (prow) {
+        const pdata = parse(prow);
+        pdata.links = normLinks(pdata.links);
+        let changed = false;
+        for (const k of Object.keys(pdata.links.docFiles)) {
+          if (Array.isArray(pdata.links.docFiles[k]) && pdata.links.docFiles[k].includes(f.id)) {
+            pdata.links.docFiles[k] = pdata.links.docFiles[k].filter(x => x !== f.id); changed = true;
+          }
+        }
+        delete pdata.links.cppFiles;
+        if (changed) await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?")
+          .bind(JSON.stringify(pdata), new Date().toISOString(), db.tenantId, prow.id).run();
+      }
+    } catch {}
     return json({ ok: true }, {}, env, request);
   }
 
@@ -597,6 +644,96 @@ export async function handle(request, env, ctx, url, sess) {
     // notifyNewlyAssigned(before, after): brand-new job → before is null so the
     // release reconciler above sends the assignment push.
     return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+
+  // ── Multi-day project assignment ("drip series") ──────────────────────────
+  // Creates one job per day for the same project + engineer(s), all linked by a
+  // seriesId. Each day is HIDDEN from the engineer until `releaseHour` the
+  // evening before (Europe/London) — so they can't see too far ahead — but the
+  // office sees them all in the scheduler. The client sends each day already
+  // resolved to an absolute scheduledAt (it knows London time) + duration.
+  if (path === "/project/create-day-series" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map(s => String(s || "").trim()).filter(Boolean) : [];
+    if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
+    const days = Array.isArray(b.days)
+      ? b.days.map(d => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes }))
+        .filter(d => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    if (!days.length) return error("No days given", 400, env, request);
+    if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
+    const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;
+    const seriesId = "SER-" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 12) : Math.abs(Date.parse(days[0].scheduledAt)).toString(36) + engineers[0]);
+    // Same site details the single create-job uses.
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {}
+    let siteData = {}; try { if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data); } catch {}
+    const base = {
+      description, projectId: row.id, seriesId,
+      siteCode: row.number, siteName: row.name, storeType: "projects",
+      address: (siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ")) || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: (siteRow && siteRow.postcode) || data.postcode || "",
+      lat: data.lat != null ? data.lat : (siteData.lat != null ? siteData.lat : undefined),
+      lon: data.lon != null ? data.lon : (siteData.lng != null ? siteData.lng : (siteData.lon != null ? siteData.lon : undefined)),
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : undefined,
+      assignedEngineers: engineers,
+      requiresRA: b.requiresRA === true, requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true, requiresNote: b.requiresNote === true,
+      changedBy: me,
+    };
+    const ids = [];
+    for (const d of days) {
+      const payload = { ...base,
+        scheduledAt: new Date(d.scheduledAt).toISOString(),
+        durationMinutes: d.durationMinutes ? Math.max(15, Number(d.durationMinutes)) : undefined,
+        release: { mode: "dayBefore", hour: releaseHour },
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      ids.push(job.id);
+      // Announce any day whose release has already passed (e.g. today's).
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
+    }
+    return json({ ok: true, seriesId, count: ids.length, ids }, {}, env, request);
+  }
+
+  // List this project's drip series (grouped days) — for the hub's manage view.
+  if (path === "/project/series" && method === "GET") {
+    const pid = url.searchParams.get("id") || "";
+    const row = await getRow(pid);
+    if (!row || !canSeeProject(parse(row), me, canManage)) return error("Project not found", 404, env, request);
+    const jobs = (await listJobs(env, tenantId)).filter(j => j.seriesId && j.projectId === row.id);
+    const byId = {};
+    for (const j of jobs) {
+      const s = byId[j.seriesId] || (byId[j.seriesId] = { seriesId: j.seriesId, engineers: [], releaseHour: (j.release && j.release.hour != null ? j.release.hour : 17), days: [] });
+      if (!s.engineers.length) s.engineers = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+      s.days.push({ id: j.id, scheduledAt: j.scheduledAt || null, scheduledEnd: j.scheduledEnd || null,
+        status: j.status || "Pending", released: !!j.releaseNotified, skipped: !!j.seriesSkipped });
+    }
+    const series = Object.values(byId).map(s => {
+      s.days.sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+      s.pendingDays = s.days.filter(d => !d.released && !d.skipped).length;
+      s.description = (jobs.find(j => j.seriesId === s.seriesId) || {}).description || "";
+      return s;
+    }).sort((a, b) => String(a.days[0]?.scheduledAt).localeCompare(String(b.days[0]?.scheduledAt)));
+    return json({ ok: true, series, canManage }, {}, env, request);
+  }
+
+  // Stop a drip series — removes every day the engineer hasn't seen yet.
+  if (path === "/project/series/stop" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const res = await stopSeries(env, tenantId, String(b.seriesId || ""));
+    return json({ ok: true, ...res }, {}, env, request);
   }
 
   // ── Site visits for this project (jobs + per-engineer time segments) ──────

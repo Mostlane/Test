@@ -294,6 +294,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (String(r.cost_category || "").toLowerCase() === "subcontractor") subcontractor += v; else materials += v;
       } else unpriced++;
       return {
+        poNumber: r.po_number != null ? String(r.po_number) : "",
         supplier: r.supplier || "", category: r.cost_category || "", trade: r.trade || "",
         cost: priced ? Math.round(v * 100) / 100 : null,
         incident: r.incident_no || r.job_ref || "", by: r.engineer_name || "", date: r.d || ""
@@ -304,6 +305,85 @@ export async function handle(request, env, ctx, url, sess) {
       ok: true, jobId, poBound: !!env.PO_DB, count: pos.length,
       total: round(total), materials: round(materials), subcontractor: round(subcontractor),
       unpriced, pos
+    }, {}, env, request);
+  }
+
+  // ── Total cost of a job to the company (office/admin only) ──────────────────
+  // Labour (on-site time from status-tap segments) + travel labour (a round trip
+  // HQ→site→HQ per engineer per day worked) + fuel for those round trips at a
+  // fixed £0.50/mile + materials (priced POs; unpriced ones are flagged, never
+  // counted as £0). Everything is derived — nothing new is stored.
+  if (path === "/costing/job-full-cost" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const jobId = q.get("jobId") || q.get("job") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR = 1.25, HQ_PC = "PO15 5RQ";
+    const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
+    const geoPc = async pc => { try {
+      const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(String(pc || "").toUpperCase().replace(/\s+/g, "")), { cf: { cacheTtl: 2592000, cacheEverything: true } });
+      if (!r.ok) return null; const j = await r.json(); const res = j && j.result;
+      return res && res.latitude != null ? { lat: res.latitude, lng: res.longitude } : null;
+    } catch { return null; } };
+    const havMi = (a, b) => { const rad = x => x * Math.PI / 180, R = 3958.8; const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng); const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+
+    // 1) the job (site name + postcode)
+    const jrow = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+    let jd = {}; try { jd = jrow && jrow.data ? JSON.parse(jrow.data) : {}; } catch {}
+    const siteName = jd.siteName || jd.siteCode || "";
+    const sitePc = jd.postcode || "";
+
+    // 2) on-site labour: closed segments for this job → per-engineer minutes + days
+    const { results: segs } = await env.DB.prepare(
+      "SELECT username, started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND job_id=? AND ended_at IS NOT NULL"
+    ).bind(tid, jobId).all();
+    const byEng = {};
+    for (const s of segs || []) {
+      const st = new Date(String(s.started_at).replace(" ", "T") + "Z"), en = new Date(String(s.ended_at).replace(" ", "T") + "Z");
+      let mins = (en - st) / 60000; if (!isFinite(mins) || mins <= 0) continue; if (mins > 14 * 60) mins = 14 * 60;
+      const u = s.username || ""; if (!u) continue;
+      const e = byEng[u] || (byEng[u] = { mins: 0, days: new Set() });
+      e.mins += mins; e.days.add(String(s.started_at).slice(0, 10));
+    }
+
+    // 3) round-trip miles for the site: the admin's site_miles register first
+    //    (already a round-trip figure), else a HQ→site geocode × road factor × 2.
+    let rtMiles = 0, milesSource = "unknown";
+    const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (key) { try { const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).first(); if (row && row.miles != null) { rtMiles = Number(row.miles) || 0; milesSource = "register"; } } catch {} }
+    if (!rtMiles && sitePc) { const base = await geoPc(HQ_PC), dest = await geoPc(sitePc); if (base && dest) { rtMiles = r1(havMi(base, dest) * ROAD_FACTOR * 2); milesSource = "geocoded"; } }
+
+    // 4) rates (hourly; a day rate → /8)
+    const rates = await ratesMap(env, tid);
+    const hourlyOf = u => { const r = rates[u] || rates[String(u).toLowerCase()] || {}; if (r.rate == null) return null; return r.rateType === "day" ? r.rate / 8 : r.rate; };
+
+    let onSiteCost = 0, travelCost = 0, fuelCost = 0, onSiteMins = 0, travelMins = 0, totalMiles = 0, anyNoRate = false;
+    const engineers = [];
+    for (const [u, e] of Object.entries(byEng)) {
+      const rate = hourlyOf(u); if (rate == null) anyNoRate = true;
+      const days = e.days.size || 0;
+      const engMiles = rtMiles * days;
+      const tMins = rtMiles > 0 ? (rtMiles / SPEED_MPH) * 60 * days : 0;
+      const oCost = rate != null ? (e.mins / 60) * rate : 0;
+      const tCost = rate != null ? (tMins / 60) * rate : 0;
+      const fCost = engMiles * FUEL_PER_MILE;
+      onSiteMins += e.mins; travelMins += tMins; totalMiles += engMiles;
+      onSiteCost += oCost; travelCost += tCost; fuelCost += fCost;
+      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null });
+    }
+
+    // 5) materials from POs (priced total + unpriced flag)
+    const poRows = await jobPoRows(env, jobId);
+    let materials = 0, unpriced = 0;
+    for (const r of poRows) { const v = (r.cost_ex_vat != null && r.cost_ex_vat !== "") ? Number(r.cost_ex_vat) : null; if (v != null && isFinite(v)) materials += v; else unpriced++; }
+
+    const labourCost = onSiteCost + travelCost;
+    const total = labourCost + fuelCost + materials;
+    return json({
+      ok: true, jobId, poBound: !!env.PO_DB, site: siteName, milesSource, roundTripMiles: r1(rtMiles),
+      labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
+      fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
+      materials: { cost: r2(materials), unpriced, count: poRows.length },
+      total: r2(total), unpricedPOs: unpriced, hasSegments: (segs || []).length > 0
     }, {}, env, request);
   }
 
@@ -920,7 +1000,7 @@ async function reconcileRange(env, tid, from, to, reg) {
 
 /* ══ Register loading + resolution ══════════════════════════════════════════ */
 
-async function loadRegister(env, tid) {
+export async function loadRegister(env, tid) {
   const list = [];
   const byNorm = {};
   try {
@@ -957,7 +1037,7 @@ async function loadRegister(env, tid) {
   return { list, byNorm, byCode, aliases, ignored };
 }
 
-function resolveSite(reg, name) {
+export function resolveSite(reg, name) {
   const k = normName(name);
   return (k && reg.byNorm[k]) || null;
 }
@@ -1282,7 +1362,7 @@ async function jobPoRows(env, jobId) {
   if (!env.PO_DB || !jobId) return [];
   try {
     const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, " +
+      "SELECT po_number, engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, " +
       "substr(COALESCE(issued_at,cost_entered_at),1,10) AS d " +
       "FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
     ).bind(String(jobId)).all();

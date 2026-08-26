@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=19"></script>
+  <script src="sla-jobedit.js?v=21"></script>
   <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
@@ -554,6 +554,12 @@
     <div id="auditBody"></div>
   </div>
 
+  <!-- TOTAL COST TO US (labour + travel + fuel + materials) — office/admin only -->
+  <div class="card" id="jobCostCard" style="display:none;">
+    <h2 class="section-title">💷 Total cost to us</h2>
+    <div id="jobCostBody"><div class="sub">Loading…</div></div>
+  </div>
+
   <!-- MATERIALS (POs raised against this job) — office/admin only -->
   <div class="card" id="poCard" style="display:none;">
     <h2 class="section-title">🧾 Materials — purchase orders</h2>
@@ -967,6 +973,7 @@ function renderJob(){
 
   const invB = $("investigateBanner"); if(invB) invB.style.display = job.investigateOnly ? "" : "none";
   fillPoButton();
+  loadJobCost();
   loadJobPOs();
   mountFirestopView();
   renderAuditView();
@@ -1020,6 +1027,44 @@ function mountFirestopView(){
 /* Materials cost: the POs raised against THIS job (office/admin only). Reads
    live from the PO system via the portal, so it reflects the true material
    spend and updates automatically as each PO is priced. */
+/* Total cost to us: labour (on-site + travel) + fuel (round trips @ £0.50/mi) +
+   materials (priced POs). Office/admin only. Unpriced POs are flagged, never
+   silently counted as £0. */
+async function loadJobCost(){
+  const card = $("jobCostCard"); if(!card || !job) return;
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  let admin = false;
+  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
+  if(!admin){ card.style.display = "none"; return; }
+  const money = n => "£" + (Number(n)||0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const hm = mins => { mins = Math.round(Number(mins)||0); const h = Math.floor(mins/60), m = mins%60; return (h? h+"h ":"") + m + "m"; };
+  try{
+    const t = localStorage.getItem("mostlaneToken");
+    const d = await fetch(window.MOSTLANE_API + "/costing/job-full-cost?jobId=" + encodeURIComponent(job.id), { headers: t ? { "Authorization": "Bearer " + t } : {} }).then(r => r.json());
+    if(!d || !d.ok){ card.style.display = "none"; return; }
+    const lab = d.labour || {}, fuel = d.fuel || {}, mat = d.materials || {};
+    const row = (label, val, sub) => '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid #eef1f5;">' +
+      '<div>' + esc(label) + (sub ? ' <span class="sub">' + esc(sub) + '</span>' : '') + '</div>' +
+      '<div style="text-align:right;white-space:nowrap;font-weight:600;">' + val + '</div></div>';
+    // Unpriced-PO warning — cost may rise once these are priced.
+    const warn = d.unpricedPOs
+      ? '<div style="margin-top:6px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;color:#9a3412;font-size:13px;">⚠️ ' + d.unpricedPOs + ' purchase order' + (d.unpricedPOs===1?'':'s') + ' raised but not yet priced — the total will rise once ' + (d.unpricedPOs===1?'it is':'they are') + ' costed.</div>'
+      : '';
+    const noRateNote = lab.missingRate ? '<div class="sub" style="margin-top:4px;color:#9a3412;">Some engineers have no labour rate set — their time isn’t costed.</div>' : '';
+    const noTimeNote = !d.hasSegments ? '<div class="sub" style="margin-top:4px;">No on-site time captured yet (engineer hasn’t started the job), so labour &amp; travel are £0 so far.</div>' : '';
+    const milesNote = d.milesSource === 'geocoded' ? ' (est. from postcode)' : (d.milesSource === 'register' ? '' : (d.roundTripMiles ? '' : ' — no site mileage'));
+    $("jobCostBody").innerHTML =
+      '<div style="font-size:26px;font-weight:800;color:#0f172a;">' + money(d.total) + '</div>' +
+      '<div class="sub" style="margin-bottom:6px;">Estimated cost to the company' + (d.unpricedPOs ? ' so far' : '') + '</div>' +
+      row('Labour — on site', money(lab.onSiteCost), lab.onSiteMinutes ? hm(lab.onSiteMinutes) : '') +
+      row('Labour — travel', money(lab.travelCost), lab.travelMinutes ? hm(lab.travelMinutes) + ' round trips' : '') +
+      row('Fuel', money(fuel.cost), (fuel.miles ? fuel.miles + ' mi @ £' + (fuel.perMile||0.5).toFixed(2) + '/mi' + milesNote : milesNote.replace(/^ /,''))) +
+      row('Materials (POs)', money(mat.cost), mat.count ? (mat.count + ' PO' + (mat.count===1?'':'s') + (d.unpricedPOs? ' · ' + d.unpricedPOs + ' unpriced':'')) : 'none') +
+      warn + noRateNote + noTimeNote;
+    card.style.display = "";
+  }catch(e){ card.style.display = "none"; }
+}
+
 async function loadJobPOs(){
   const card = $("poCard"); if(!card || !job) return;
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1036,11 +1081,18 @@ async function loadJobPOs(){
     const rows = d.pos.map(p => {
       const cat = p.category === "subcontractor" ? ("Subcontractor" + (p.trade ? " · " + esc(p.trade) : "")) : "Materials";
       const cost = p.cost == null ? '<span class="sub" style="color:#b45309;">awaiting price</span>' : ("<b>" + money(p.cost) + "</b>");
+      // Clickable PO number → the PO board, filtered to that PO.
+      const poNo = p.poNumber
+        ? '<a href="/po-office.html?search=' + encodeURIComponent(p.poNumber) + '" title="Open PO ' + esc(p.poNumber) + ' in the PO system" style="font-weight:700;color:#003366;text-decoration:none;">PO ' + esc(p.poNumber) + '</a>'
+        : '<span class="sub">(no number)</span>';
       return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #eef1f5;">' +
-        '<div><div>' + (esc(p.supplier) || '<span class="sub">(no supplier)</span>') + '</div>' +
+        '<div><div>' + poNo + (p.supplier ? ' · ' + esc(p.supplier) : '') + '</div>' +
         '<div class="sub">' + cat + (p.date ? ' · ' + esc(p.date) : '') + '</div></div>' +
         '<div style="text-align:right;white-space:nowrap;">' + cost + '</div></div>';
     }).join("");
+    // Header link to see ALL of this job's POs together on the PO board.
+    const viewAll = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #eef1f5;">' +
+      '<a href="/po-office.html?job_id=' + encodeURIComponent(job.id) + '" style="color:#003366;font-weight:600;text-decoration:none;">Open all ' + d.count + ' PO' + (d.count === 1 ? '' : 's') + ' in the PO system →</a></div>';
     const split = [];
     if(d.materials) split.push("Materials " + money(d.materials));
     if(d.subcontractor) split.push("Subcontractor " + money(d.subcontractor));
@@ -1050,7 +1102,7 @@ async function loadJobPOs(){
       '<div class="sub">' + d.count + ' PO' + (d.count === 1 ? '' : 's') +
       (d.unpriced ? ' · <span style="color:#b45309;font-weight:700;">' + d.unpriced + ' awaiting price</span>' : '') + '</div></div>' +
       (split.length ? '<div class="sub" style="margin-top:2px;">' + split.join(' · ') + '</div>' : '') +
-      rows;
+      rows + viewAll;
     card.style.display = "";
   }catch(e){ card.style.display = "none"; }
 }
@@ -1119,36 +1171,25 @@ async function loadJob(){
   }
 }
 
-/* "Raise PO" opens this user's personal link on the PO system, carrying the
-   job details in the URL (#mlpo=…) so the PO can pre-fill everything except
-   the materials and the supplier. */
-async function fillPoButton(){
+/* "Raise PO" opens the in-portal PO raise form (po-raise.html), carrying the
+   job details on the URL (#mlpo=…) so the PO pre-fills the site + job link
+   (job_id ties it to the job for costing) — the engineer just adds the
+   supplier + materials. */
+function fillPoButton(){
   const btn = $("poBtn");
   if(!btn || btn.dataset.done) return;
   btn.dataset.done = "1";
   try{
-    const t = localStorage.getItem("mostlaneToken");
-    const r = await fetch(window.MOSTLANE_API + "/po-config", { headers: t ? { "Authorization": "Bearer " + t } : {} });
-    const c = await r.json().catch(() => ({}));
-    if(r.ok && c.ok && c.url){
-      let href = c.url;
-      try{
-        const payload = {
-          jobRef: job?.helpdeskRef || job?.id || "",
-          jobId: job?.id || "",
-          site: job?.siteName || job?.siteCode || "",
-          address: [job?.address, job?.postcode].filter(Boolean).join(", "),
-          description: job?.description || "",
-          by: getUser()
-        };
-        href += (href.includes("#") ? "&" : "#") + "mlpo=" +
-                btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-      }catch(e){}
-      btn.href = href;
-      return;
-    }
-  }catch(e){}
-  btn.style.display = "none";   // no PO link on this account — hide the button
+    const payload = {
+      jobRef: job?.helpdeskRef || job?.id || "",
+      jobId: job?.id || "",
+      site: job?.siteName || job?.siteCode || "",
+      address: [job?.address, job?.postcode].filter(Boolean).join(", "),
+      description: job?.description || "",
+      by: getUser()
+    };
+    btn.href = "po-raise.html#mlpo=" + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  }catch(e){ btn.href = "po-raise.html"; }
 }
 
 /* ---- Site details (from the job, else looked up in the sites DB) ---- */

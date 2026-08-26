@@ -18,6 +18,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
 import { evalAlerts, answerWord } from "./vancheck.js";
+import { loadRegister, resolveSite } from "./costing.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -143,6 +144,10 @@ async function ensureScoresTable(env) {
     PRIMARY KEY (tenant_id, username, week_start)
   )`).run();
   try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_dscores_user ON driver_scores(tenant_id,username,week_start)").run(); } catch {}
+  // Rank + fleet size at send time (1 = top). Snapshotted so the number in the
+  // engineer's history reflects where they were IN THAT WEEK.
+  try { await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN rank INTEGER").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN total INTEGER").run(); } catch {}
 }
 async function ensureHandoverTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_handovers (
@@ -399,9 +404,12 @@ export async function handle(request, env, ctx, url, sess) {
       return jr({ ok: true, count: (row && row.n) || 0, latest: (row && row.latest) || "" }, headers);
     }
     const { results } = await env.DB.prepare(
-      "SELECT week_start, week_end, reg, score, sent_at FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
+      "SELECT week_start, week_end, reg, score, sent_at, rank, total FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
     ).bind(tid, me).all();
-    const scores = (results || []).map(r => ({ weekStart: r.week_start, weekEnd: r.week_end || "", reg: r.reg || "", score: r.score, sentAt: r.sent_at || "" }));
+    const scores = (results || []).map(r => ({
+      weekStart: r.week_start, weekEnd: r.week_end || "", reg: r.reg || "", score: r.score, sentAt: r.sent_at || "",
+      rank: r.rank || null, total: r.total || null,
+    }));
     return jr({ ok: true, scores }, headers);
   }
 
@@ -443,15 +451,37 @@ export async function handle(request, env, ctx, url, sess) {
       } catch {}
     }
     const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
+    // Status: 'draft' by default (fresh save), 'approved' once the office
+    // confirms via /report-approve. Kept in R2 customMetadata so no schema
+    // change; the reports list surfaces it as a badge.
+    const status = String(form.get("status") || "draft") === "approved" ? "approved" : "draft";
     await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
       customMetadata: {
         title: String(form.get("title") || "Fleet report").slice(0, 160),
-        weekStart, weekEnd,
+        weekStart, weekEnd, status,
         by: sess.user.username, at: new Date().toISOString()
       }
     });
-    return jr({ ok: true, key }, headers, 201);
+    return jr({ ok: true, key, status }, headers, 201);
+  }
+
+  // ── Flip a saved report's status → approved (or back to draft) ────────────
+  // POST { key, status } — copies the R2 object with new customMetadata (R2
+  // doesn't let you edit metadata in place, so re-put with the same body).
+  if (sub === "/report-approve" && method === "POST") {
+    const b = await readJson(request);
+    const key = String(b.key || "");
+    const status = String(b.status || "approved") === "draft" ? "draft" : "approved";
+    if (!key || !key.startsWith(prefix(tid))) return jr({ error: "Bad key" }, headers, 400);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return jr({ error: "Not found" }, headers, 404);
+    const m = obj.customMetadata || {};
+    await env.JOB_FILES.put(key, obj.body, {
+      httpMetadata: obj.httpMetadata,
+      customMetadata: { ...m, status, approvedBy: status === "approved" ? sess.user.username : "", approvedAt: status === "approved" ? new Date().toISOString() : "" }
+    });
+    return jr({ ok: true, status }, headers);
   }
 
   // ── List saved reports ─────────────────────────────────────────────────────
@@ -463,6 +493,8 @@ export async function handle(request, env, ctx, url, sess) {
       reports.push({
         key: o.key, title: m.title || "Fleet report", weekStart: m.weekStart || "", weekEnd: m.weekEnd || "",
         by: m.by || "", at: m.at || (o.uploaded ? new Date(o.uploaded).toISOString() : ""), size: o.size,
+        status: m.status || "approved",   // legacy rows (no status metadata) treated as approved
+        approvedBy: m.approvedBy || "", approvedAt: m.approvedAt || "",
         url: await signedFileUrl(env, url.origin, "/fleet/report", o.key)
       });
     }
@@ -546,7 +578,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Gather everything the cards need CONCURRENTLY — these lookups are
     // independent, so running them in parallel turns ~10 stacked round trips into
     // one, which is the main win for this page's speed.
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, hoRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -557,7 +589,11 @@ export async function handle(request, env, ctx, url, sess) {
       appCfg(DEFECTCLR_KEY(tid)),        // defects marked resolved by an admin
       appCfg(VCACK_KEY(tid)),
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
+      // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
+      // and can't re-request until it's done). Fails soft if the table is absent.
+      env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] })),
     ]);
+    const pendVc = new Set((pendVcRes.results || []).map(r => dn(r.reg)));
     const defects = await vanCheckDefects(env, tid, defResolved);
     // Handover state per reg: latest completed (card's direct link) + whether one
     // is still pending (a badge / "awaiting handover" hint).
@@ -617,6 +653,8 @@ export async function handle(request, env, ctx, url, sess) {
         defectSince: (defects[dn(v.reg)] || {}).since || "",
         lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),   // card status bar: ok | ack | due
+        vanCheckRequested: pendVc.has(dn(v.reg)),  // a one-off check is pending — hide the Request button
+
         // Money views — Full Access only.
         finance: money ? financeOf(v) : undefined,
         runningCost: money ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : undefined
@@ -1293,21 +1331,47 @@ export async function handle(request, env, ctx, url, sess) {
     const by = (sess && sess.user && sess.user.username) || "";
     const rangeLabel = weekEnd && weekEnd !== weekStart ? `${weekStart} → ${weekEnd}` : weekStart;
     let sent = 0;
+    // Rank medal / bottom-of-fleet warning threshold. < 70 = needs work.
+    const SCORE_MIN = 70;
+    const medal = r => r === 1 ? "🏆" : r === 2 ? "🥈" : r === 3 ? "🥉" : "";
+    const rankLabel = (r, tot) => {
+      if (!r || !tot) return "";
+      const suf = (n) => { const s = n % 100; return (s >= 11 && s <= 13) ? "th" : ["th","st","nd","rd","th","th","th","th","th","th"][n % 10]; };
+      return `${r}${suf(r)} of ${tot}`;
+    };
     for (const s of list) {
       const username = String(s.username || "").trim();
       const score = s.score == null ? null : Math.max(0, Math.min(100, Math.round(Number(s.score))));
       if (!username || score == null || !isFinite(score)) continue;
       const reg = String(s.reg || "").trim();
+      const rank = s.rank != null && isFinite(Number(s.rank)) ? Math.max(1, Math.round(Number(s.rank))) : null;
+      const total = s.total != null && isFinite(Number(s.total)) ? Math.max(1, Math.round(Number(s.total))) : null;
       await env.DB.prepare(
-        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at)
-         VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at, rank, total)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id, username, week_start) DO UPDATE SET
-           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score, sent_by=excluded.sent_by, sent_at=excluded.sent_at`
-      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at).run();
+           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score,
+           sent_by=excluded.sent_by, sent_at=excluded.sent_at,
+           rank=excluded.rank, total=excluded.total`
+      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at, rank, total).run();
       sent++;
+      // Push body: put the place in the TITLE for EVERY ranked driver — 1st,
+      // 4th, 7th etc all see where they came at a glance. Medal for the top
+      // three. Unranked (light-week vans) get the plain default title.
+      let m = medal(rank);
+      let title;
+      if (!rank || !total) title = "🚐 Your van driving score";
+      else if (rank === 1) title = "🏆 You topped the fleet!";
+      else if (rank === total && total > 1) title = `🚐 ${rankLabel(rank, total)} in the fleet — last place`;
+      else title = `${m ? m + " " : "🚐 "}${rankLabel(rank, total)} in the fleet`;
+      // Body: score + a nudge. The rank is already in the title so no need to
+      // repeat it in the body — keeps the notification short.
+      const nudge = score < SCORE_MIN
+        ? " This is not an acceptable driving standard and must be improved."
+        : (rank === 1 ? " Great work — keep it up!" : "");
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
-        title: "🚐 Your van driving score",
-        body: `Your driving score for ${rangeLabel} is ${score}/100. Tap to see your history.`,
+        title,
+        body: `Your driving score for ${rangeLabel} is ${score}/100.${nudge} Tap to see your history.`,
         url: "/my-van-scores.html", tag: "van-score"
       }).catch(() => {}));
     }
@@ -1618,7 +1682,397 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  // ── Geocode tracker "to" texts → nearest portal site ─────────────────────
+  // POST /fleet/tracker-geocode { texts: [] } → [{text, lat, lon, siteNumber,
+  //   siteName, distanceM}]. Uses Google Geocoding (env.GOOGLE_MAPS_KEY) so
+  //   free-text place names ("5 Woodlands Close, Sarisbury Green") resolve,
+  //   not just full postcodes. Nearest portal site with saved lat/lng within
+  //   800 m wins; projects win ties inside 150 m.
+  if (sub === "/tracker-geocode" && method === "POST") {
+    const b = await readJson(request);
+    const texts = Array.isArray(b.texts) ? b.texts.slice(0, 80) : [];
+    if (!texts.length) return jr({ ok: true, results: [] }, headers);
+    const key = env.GOOGLE_MAPS_KEY || "";
+    // Sites with coords — indexed once for the lookup.
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      for (const r of results || []) {
+        let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+        const lat = Number(d.lat), lon = Number(d.lon ?? d.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        sites.push({ num: r.site_number, name: r.site_name, postcode: r.postcode || "", lat, lon,
+          isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || "")) });
+      }
+    } catch {}
+    const R = 6371000, toR = d => d * Math.PI / 180;
+    const dist = (a, bb) => { const dLat = toR(bb.lat - a.lat), dLon = toR(bb.lon - a.lon);
+      const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat)) * Math.cos(toR(bb.lat)) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.asin(Math.sqrt(s)); };
+    const nearest = (lat, lon) => {
+      let best = null, bestD = 801;
+      for (const s of sites) { const d = dist({lat,lon}, s); if (d < bestD) { best = s; bestD = d; } }
+      // Project bias inside 150 m — if a project sits within 150 m of the
+      // best hit and the best isn't a project, project wins.
+      if (best && !best.isProject) {
+        for (const s of sites) {
+          if (!s.isProject) continue;
+          const d = dist({lat,lon}, s);
+          if (d <= bestD + 150) { best = s; bestD = d; break; }
+        }
+      }
+      return best ? { num: best.num, name: best.name, distanceM: Math.round(bestD) } : null;
+    };
+    const out = [];
+    for (const t of texts) {
+      const text = String(t || "").trim();
+      if (!text) { out.push({ text: t, lat: null, lon: null, siteNumber: null }); continue; }
+      let lat = null, lon = null, source = "";
+      // 1) Google Geocoding — handles free text (address, street, town).
+      if (key) {
+        try {
+          const gr = await fetch("https://maps.googleapis.com/maps/api/geocode/json?address=" + encodeURIComponent(text + ", UK") + "&region=uk&key=" + encodeURIComponent(key));
+          const gj = await gr.json();
+          const first = gj && Array.isArray(gj.results) && gj.results[0];
+          if (first && first.geometry && first.geometry.location) {
+            lat = Number(first.geometry.location.lat);
+            lon = Number(first.geometry.location.lng);
+            source = "google";
+          }
+        } catch {}
+      }
+      // 2) postcodes.io fallback — postcode-only, free.
+      if (!Number.isFinite(lat)) {
+        const pc = String(text).toUpperCase().match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+        if (pc) {
+          try {
+            const pr = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc[0]));
+            const pj = pr.ok ? await pr.json() : null;
+            if (pj && pj.result) { lat = Number(pj.result.latitude); lon = Number(pj.result.longitude); source = "postcodes.io"; }
+          } catch {}
+        }
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        out.push({ text: t, lat: null, lon: null, siteNumber: null, source: "" });
+        continue;
+      }
+      const near = nearest(lat, lon);
+      out.push({ text: t, lat, lon, source, siteNumber: near ? near.num : null, siteName: near ? near.name : null, distanceM: near ? near.distanceM : null });
+    }
+    return jr({ ok: true, results: out }, headers);
+  }
+
+  // ── AI resolver for unmatched tracker stops + pool-van drivers ────────────
+  // Fed the trip texts the deterministic matcher missed + any pool-van days
+  // with no allocated driver, plus the sites catalogue + drivers directory
+  // (with home postcodes). Claude returns confident matches only; we persist
+  // them (aliases + POOLALLOC) so future reports pick them up too. Applied
+  // silently in the background — the office only sees what AI couldn't decide.
+  if (sub === "/tracker-ai-resolve" && method === "POST") {
+    const b = await readJson(request);
+    const unmatched = Array.isArray(b.unmatched) ? b.unmatched.slice(0, 40) : [];
+    const poolDays = Array.isArray(b.poolDays) ? b.poolDays.slice(0, 40) : [];
+    if (!unmatched.length && !poolDays.length) return jr({ ok: true, applied: { aliases: 0, poolDrivers: 0 }, unresolved: { unmatched: [], poolDays: [] } }, headers);
+    // Site catalogue for the prompt (compact).
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      sites = (results || []).map(r => {
+        let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+        const addr = [d.address1, d.street, d.town, d.county].filter(Boolean).join(", ");
+        return { num: r.site_number, name: r.site_name, postcode: r.postcode || "", client: r.client || "", address: addr, isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || "")) };
+      }).filter(s => s.num || s.name);
+    } catch {}
+    // Drivers with home postcodes for the pool resolver.
+    let drivers = [];
+    try {
+      const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='Active' OR status='')").bind(tid).all();
+      drivers = (results || []).map(u => {
+        let p = {}; try { p = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+        const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
+        return { username: u.username, name, homePostcode: p.homePostcode || "", staffType: p.staffType || "" };
+      }).filter(d => d.staffType === "field" || d.homePostcode);
+    } catch {}
+    const key = env.ANTHROPIC_API_KEY;
+    if (!key) return jr({ ok: false, error: "ANTHROPIC_API_KEY not set" }, headers, 200);
+    const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+    const schema = {
+      type: "object",
+      properties: {
+        siteAliases: {
+          type: "array",
+          description: "One entry per unmatched trip text you can confidently map to a portal site. Skip anything you're not sure about.",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "The tracker 'to' text exactly as given." },
+              siteNumber: { type: "string", description: "The site number you're pinning it to." },
+              confidence: { type: "number", description: "0..1 — only entries >= 0.9 will be applied. Prefer to omit rather than guess." },
+              reason: { type: "string" }
+            },
+            required: ["text", "siteNumber", "confidence"]
+          }
+        },
+        poolDrivers: {
+          type: "array",
+          description: "One entry per pool-van day you can confidently attribute to a driver, by matching the first trip's origin (or last trip's destination) to a driver's home postcode / area.",
+          items: {
+            type: "object",
+            properties: {
+              vanKey: { type: "string", description: "The van|date key exactly as given." },
+              username: { type: "string", description: "The driver's portal username." },
+              confidence: { type: "number", description: "0..1 — only entries >= 0.9 will be applied. Prefer to omit rather than guess." },
+              reason: { type: "string" }
+            },
+            required: ["vanKey", "username", "confidence"]
+          }
+        }
+      },
+      required: ["siteAliases", "poolDrivers"]
+    };
+    const system = [
+      "You are helping match van tracker text to a UK field-service company's portal.",
+      "ACCURACY OVER RECALL — a wrong pin is much worse than no pin. When several sites plausibly fit, DO NOT GUESS: omit.",
+      "Only return an entry with confidence >= 0.9. Below that, LEAVE IT OUT.",
+      "Rules for siteAliases:",
+      " (a) An EXACT full-postcode match in the trip text against a site's postcode is the ONLY signal strong enough to auto-attribute alone (confidence 0.95+).",
+      " (b) Address-line match (specific STREET NAME 12+ chars) with a project site is strong (0.9). With a NON-PROJECT site sharing the same town it's weak — skip.",
+      " (c) A TOWN name alone (e.g. 'Whiteley', 'Titchfield', 'Sarisbury Green', 'Verwood') is NEVER enough — many sites share a town. Never pin on town alone.",
+      " (d) Prefer PROJECT sites (isProject prefix P) over other clients when the tracker text is close to project territory — engineers spend weeks on a project, so a project match is usually correct.",
+      " (e) NEVER pick a Southern Co-op, Chapplins, ELS, Cobra, Wenzel's site unless the tracker text unambiguously names it (site number OR full site name).",
+      "Rules for poolDrivers:",
+      " Match the trip origin/destination to a driver's home postcode area (e.g. 'Whiteley, PO15 7LJ' matches homePostcode PO15 7LJ or the same PO15 area). Only if a single driver's home is a clear match.",
+      "When unsure — output empty."
+    ].join(" ");
+    const compactSites = sites.slice(0, 400).map(s => (s.isProject ? "P" : "S") + " " + s.num + " | " + s.name + (s.postcode ? " | " + s.postcode : "") + (s.address ? " | " + s.address : ""));
+    const compactDrivers = drivers.slice(0, 120).map(d => d.username + " | " + d.name + (d.homePostcode ? " | " + d.homePostcode : ""));
+    const compactUnmatched = unmatched.map(u => "TEXT: " + (u.text || "") + "  (" + (u.occurrences || 0) + " stops, " + (u.totalMins || 0) + " min total)");
+    const compactPool = poolDays.map(p => "VAN " + p.van + " | DATE " + p.date + " | first from: " + (p.firstFrom || "?") + " | last to: " + (p.lastTo || "?"));
+    const userContent =
+      "SITES (prefix P=project, S=other):\n" + compactSites.join("\n") + "\n\n" +
+      "DRIVERS (username | name | homePostcode):\n" + compactDrivers.join("\n") + "\n\n" +
+      (compactUnmatched.length ? "UNMATCHED TRIP TEXTS TO PLACE:\n" + compactUnmatched.join("\n") + "\n\n" : "") +
+      (compactPool.length ? "POOL-VAN DAYS TO ATTRIBUTE TO A DRIVER:\n" + compactPool.join("\n") + "\n" : "") +
+      "Return your matches via the resolve_tracker tool.";
+    let resp;
+    try {
+      resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model, max_tokens: 3000, system,
+          tools: [{ name: "resolve_tracker", description: "Return confident matches.", input_schema: schema }],
+          tool_choice: { type: "tool", name: "resolve_tracker" },
+          messages: [{ role: "user", content: userContent }]
+        }),
+      });
+    } catch (e) { return jr({ ok: false, error: "AI unreachable: " + e.message }, headers, 200); }
+    if (!resp.ok) {
+      let detail = ""; try { const j = await resp.json(); detail = j?.error?.message || ""; } catch {}
+      return jr({ ok: false, error: "AI error " + resp.status + (detail ? " (" + detail + ")" : "") }, headers, 200);
+    }
+    let payload; try { payload = await resp.json(); } catch { return jr({ ok: false, error: "AI reply unreadable" }, headers, 200); }
+    const block = Array.isArray(payload.content) ? payload.content.find(c => c.type === "tool_use" && c.name === "resolve_tracker") : null;
+    const out = (block && block.input) || { siteAliases: [], poolDrivers: [] };
+    // Apply site aliases (confidence gate + must be a real site number).
+    const validNums = new Set(sites.map(s => String(s.num)));
+    let appliedAliases = 0;
+    if (Array.isArray(out.siteAliases)) {
+      const cur = (await cfgReadWrap(env, tid, "site_aliases", {}));
+      const norm = s => String(s || "").toLowerCase().replace(/['’`]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      for (const a of out.siteAliases) {
+        if (!a || !a.text || !a.siteNumber) continue;
+        if (Number(a.confidence) < 0.9) continue;
+        if (!validNums.has(String(a.siteNumber))) continue;
+        const site = sites.find(s => String(s.num) === String(a.siteNumber));
+        cur[norm(a.text)] = { client: site && site.client || "", siteNumber: String(a.siteNumber), label: String(a.text).slice(0, 200), aiConfidence: a.confidence, aiReason: a.reason || "" };
+        appliedAliases++;
+      }
+      await cfgWriteWrap(env, tid, "site_aliases", cur);
+    }
+    // Apply pool driver picks (POOLALLOC keys van|date -> username).
+    const validUsers = new Set(drivers.map(d => String(d.username)));
+    let appliedPool = 0;
+    if (Array.isArray(out.poolDrivers)) {
+      const cur = (await cfgReadWrap(env, tid, "fleet:poolalloc", {}));
+      for (const p of out.poolDrivers) {
+        if (!p || !p.vanKey || !p.username) continue;
+        if (Number(p.confidence) < 0.9) continue;
+        if (!validUsers.has(String(p.username))) continue;
+        cur[p.vanKey] = p.username;
+        appliedPool++;
+      }
+      await cfgWriteWrap(env, tid, "fleet:poolalloc", cur);
+    }
+    // Return what's still ambiguous so the client can surface a tiny UI for it.
+    const okTexts = new Set((out.siteAliases || []).filter(a => Number(a.confidence) >= 0.9).map(a => a.text));
+    const okPool = new Set((out.poolDrivers || []).filter(p => Number(p.confidence) >= 0.9).map(p => p.vanKey));
+    return jr({
+      ok: true,
+      applied: { aliases: appliedAliases, poolDrivers: appliedPool },
+      unresolved: {
+        unmatched: unmatched.filter(u => !okTexts.has(u.text)),
+        poolDays: poolDays.filter(p => !okPool.has(p.van + "|" + p.date)),
+      }
+    }, headers);
+  }
+
+  // ── Auto-cost the van tracker's on-site + travel time ─────────────────────
+  // POST /fleet/tracker-reconcile  — write tracker-derived time to
+  // job_time_segments so job-costing folds it in like SLA taps and SiteLog
+  // scans. Doesn't need a job to be allocated — the driver was there, time
+  // gets attributed to the SITE. Deduped against SiteLog for the same
+  // (user, site, day); SiteLog is authoritative when both exist.
+  //
+  // Body: { rows: [{ username, date, siteName?, siteCode?, postcode?,
+  //   startedAt, endedAt, kind: "onsite"|"travel" }] }
+  //   (rows are pre-built client-side from the fleet report — one per
+  //   matched site visit + one for the drive to it.)
+  //
+  // Every write carries a stable synthetic job_id `tracker:<username>:
+  // <date>:<site>:<kind>:<seq>` so re-runs of the same report REPLACE
+  // rather than duplicate.
+  if (sub === "/tracker-reconcile" && method === "POST") {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT)`).run();
+    try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
+    try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+    const b = await readJson(request);
+    const rows = Array.isArray(b.rows) ? b.rows : [];
+    const dryRun = !!b.dryRun;
+    if (!rows.length) return jr({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty", dryRun, preview: [] }, headers);
+    // Ask SiteLog what it knows for the covered days so we don't double-cost a
+    // (user, site, date) that SiteLog has authoritatively captured.
+    const dates = new Set(rows.map(r => String(r.date || "").slice(0, 10)).filter(Boolean));
+    const users = new Set(rows.map(r => String(r.username || "").trim().toLowerCase()).filter(Boolean));
+    const slCover = new Set();   // "user::siteKey::date"
+    if (env.SITELOG_DB && dates.size) {
+      try {
+        const from = [...dates].sort()[0], to = [...dates].sort().reverse()[0];
+        // fetchSitelogVisits is on costing.js but not exported — inline the query.
+        const { results } = await env.SITELOG_DB.prepare(
+          "SELECT portal_username, site_code, site_name, check_in_at, check_out_at FROM visits WHERE date(check_in_at) BETWEEN date(?) AND date(?)"
+        ).bind(from, to).all().catch(() => ({ results: [] }));
+        for (const v of results || []) {
+          const u = String(v.portal_username || "").trim().toLowerCase();
+          if (!users.has(u)) continue;
+          const d = String(v.check_in_at || "").slice(0, 10);
+          const key = u + "::" + normSite(v.site_code || v.site_name || "") + "::" + d;
+          slCover.add(key);
+        }
+      } catch {}
+    }
+    // Look up each user's hourly rate so the preview can show £ before we
+    // write. Real writes don't need it (costing computes £ on read); the
+    // preview does so the office sees "3h × £20 = £60" per driver-site-day.
+    const rates = {};
+    try {
+      const cfg = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("engts:cfg:" + tid).first();
+      const parsed = cfg && cfg.value ? JSON.parse(cfg.value) : { byUser: {} };
+      const byUser = parsed.byUser || {};
+      const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of results || []) {
+        let profile = {}; try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+        const mine = byUser[u.username] || {};
+        const rate = Number(mine.rate) || Number(profile.hourlyRate) || null;
+        if (rate) rates[u.username] = rate;
+      }
+    } catch {}
+    // Wipe our previous tracker inserts for (user, date) — idempotent replace.
+    // Skipped in dryRun so a preview never touches the DB.
+    if (!dryRun) {
+      for (const d of dates) {
+        for (const u of users) {
+          try {
+            await env.DB.prepare(
+              "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
+            ).bind(tid, u, "tracker:%", d).run();
+          } catch {}
+        }
+      }
+    }
+    // Aggregate the rows for a compact preview: one entry per (user, site, day)
+    // with total on-site minutes + travel minutes + a matching £ figure.
+    const bucket = new Map();   // key -> { username, siteName, siteKey, postcode, date, onsiteMins, travelMins }
+    let wrote = 0, skippedSL = 0;
+    let seq = 0;
+    for (const r of rows) {
+      const username = String(r.username || "").trim();
+      const date = String(r.date || "").slice(0, 10);
+      if (!username || !date || !r.startedAt || !r.endedAt) continue;
+      const kind = r.kind === "travel" ? "travel" : "onsite";
+      const siteName = String(r.siteName || "").trim();
+      const siteKey = normSite(r.siteCode || siteName);
+      const mins = Math.max(0, Math.round((Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 60000));
+      if (!mins) continue;
+      // SiteLog dedupe — skip on-site tracker time when SiteLog already covers
+      // this (user, site, day). Travel is never in SiteLog, so travel always goes in.
+      let skipped = false;
+      if (kind === "onsite" && siteKey) {
+        const key = username.toLowerCase() + "::" + siteKey + "::" + date;
+        if (slCover.has(key)) { skippedSL++; skipped = true; }
+      }
+      // Preview aggregate (unconditional — we want to show what SiteLog is
+      // covering too so it's visible, not silent).
+      const bKey = username + "|" + siteKey + "|" + date;
+      let b = bucket.get(bKey);
+      if (!b) { b = { username, siteName, siteKey, postcode: String(r.postcode || ""), date, onsiteMins: 0, travelMins: 0, skippedOnsiteMins: 0 }; bucket.set(bKey, b); }
+      if (kind === "onsite") { if (skipped) b.skippedOnsiteMins += mins; else b.onsiteMins += mins; }
+      else b.travelMins += mins;
+      if (skipped || dryRun) continue;
+      seq++;
+      const jobId = "tracker:" + username + ":" + date + ":" + (siteKey || "unknown") + ":" + kind + ":" + seq;
+      try {
+        await env.DB.prepare(
+          "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind) VALUES (?,?,?,?,?,?,?,?,?)"
+        ).bind(tid, username, jobId, "van tracker", siteName, String(r.postcode || "").toUpperCase(), r.startedAt, r.endedAt, kind).run();
+        wrote++;
+      } catch {}
+    }
+    // Preview array with £ figures attached (uses each user's rate).
+    const preview = Array.from(bucket.values()).map(b => {
+      const rate = rates[b.username] || 0;
+      const hoursCosted = (b.onsiteMins + b.travelMins) / 60;   // skipped on-site is NOT costed
+      const cost = Math.round(hoursCosted * rate * 100) / 100;
+      return {
+        username: b.username, siteName: b.siteName, siteKey: b.siteKey, postcode: b.postcode, date: b.date,
+        onsiteMins: b.onsiteMins, travelMins: b.travelMins, skippedOnsiteMins: b.skippedOnsiteMins,
+        rate, cost,
+      };
+    }).sort((a, b) => (a.username + a.date + a.siteName).localeCompare(b.username + b.date + b.siteName));
+    return jr({ ok: true, wrote, skippedSitelog: skippedSL, dryRun, preview }, headers);
+  }
+
   return jr({ error: "Not found: " + sub }, headers, 404);
+}
+
+// Compact site key for the SiteLog dedupe (numeric store code if the value is
+// pure digits, else uppercased alphanumerics — mirrors sla.siteKeyOf).
+function normSite(s) {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+// Small wrappers around app_config so the tracker AI resolver isn't riddled
+// with SQL boilerplate. Same shape as costing.js's cfgGet/cfgSet — one key
+// per tenant, JSON value.
+async function cfgReadWrap(env, tid, name, fallback) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {}
+  return fallback;
+}
+async function cfgWriteWrap(env, tid, name, value) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
 }
 
 async function ensureVehTable(env) {
@@ -1632,7 +2086,8 @@ async function ensureVehTable(env) {
     "last_service_date TEXT", "last_service_miles INTEGER",
     "warn_days INTEGER", "warn_miles INTEGER",
     "specs TEXT",  // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
-    "finance TEXT" // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
+    "finance TEXT", // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
+    "pool INTEGER DEFAULT 0" // shared/pool vehicle (e.g. tippers) — any engineer may raise a PO against it
   ];
   for (const c of cols) { try { await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run(); } catch {} }
 }

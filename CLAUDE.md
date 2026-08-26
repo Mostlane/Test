@@ -470,6 +470,23 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the original scheduled slot and the hover shows "Scheduled HH:MM (worked HH:MM)".
   Falls back to the scheduled slot when there are no actual times (office-marked
   complete) or the work wasn't on the shown day. Week view just greens the chip.
+  **Overlapping jobs STACK in the day view (Aug 2026):** overlapping blocks used
+  to sit on top of each other (top:6px each — hard to tap the right one). Day view
+  now packs an engineer's jobs into **sub-lanes** (greedy interval packing sorted
+  by start; a <4px shared edge still counts as clear so touching jobs share a
+  line) and **auto-sizes the row** to fit however many lanes are needed — each
+  block gets `top = 6 + lane*(JOB_H+GAP)` and a per-lane height (26px when
+  stacked, 32px single). The now-line height sums the variable row heights
+  (`bodyH`), not `count*DAY_ROW_HEIGHT`. Lanes are purely visual — drag still
+  reads x for time / the row for engineer.
+  **Field engineers only by default + "Show office staff" toggle (Aug 2026):** the
+  scheduler shows only FIELD staff by default; a **Show office staff** checkbox in
+  the toolbar reveals office/admin staff, **remembered per user** (localStorage
+  `mlSchedShowOffice` for instant paint + mirrored to **/prefs `schedShowOffice`**
+  so it follows them across devices — the server copy wins on load). `isFieldEng`
+  (staffType!=="office") drives `getFilteredEngineers` + the Engineer dropdown
+  (`populateEngineerFilter`, rebuilt on toggle); picking a specific engineer in the
+  dropdown still shows them regardless. Applies to both day + week views.
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference
@@ -560,6 +577,43 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   handles adding an engineer to an ALREADY-announced job. The office board
   (sla-main) shows a 🕒/⛓ badge on gated jobs (from `decorate.releaseView`);
   engineers never receive them. Editor is `sla-jobedit.js?v=12`.
+  **Multi-day project drip series (Aug 2026):** a project can be assigned to an
+  engineer for **N days at once**, drip-fed so they can't see too far ahead. From
+  **project-hub.html** "Create a job" → tick **📆 Send as multiple days**: first
+  day, how many days, daily start/finish, **reveal time** (the evening before),
+  include-weekends. The client builds each day's absolute `scheduledAt` (London)
+  and POSTs **/project/create-day-series** (projects-api.js), which creates one
+  SLA job per day linked by **`job.seriesId`**, each with
+  `release:{mode:"dayBefore", hour:<revealHour>}` (the dayBefore release hour is
+  now **configurable** — `londonHourDayBefore`). The office sees every day in the
+  scheduler; the engineer only sees a day from the reveal time the evening before.
+  **Auto skip-on-clash safeguard:** a series day is DROPPED (never revealed) if the
+  engineer already has another job that day — `engineerHasOtherJobThatDay` gates
+  `releaseVisibleNow` live, and `sweepJobReleases` persists `job.seriesSkipped=true`
+  at release time (so a forgotten day can't double-book). Skipped days are just
+  dropped (no auto-extend, per Jamie). **Stop** the drip any time from the hub
+  (**/project/series/stop** → `stopSeries` deletes days not yet revealed; visible
+  days stay). The hub lists each series with per-day hidden/visible/skipped badges
+  (**GET /project/series**). **Interactive clash prompt (`sla-jobedit.js?v=20`):**
+  when the office allocates a job to an engineer who has a series day that date
+  (checked via **GET /sla/series-clash?engineer=&date=&excludeId=**), a modal
+  offers **Fit the project after this job** (default — shifts the series day's
+  start to this job's finish, keeping its set finish time), **Skip that day**
+  (`seriesSkipped=true`), or **Leave it** (the auto-safeguard skips it anyway).
+  `seriesId`/`seriesSkipped` + `release.hour` are threaded through
+  createOrUpdateJobFromPayload + patchJob and surfaced on `releaseView`
+  (mode "skipped" / `series:true`).
+  **Already-booked-that-day warning (`sla-jobedit.js?v=21`, Aug 2026):** when the
+  office assigns a job to an engineer who ALREADY has job(s) that day — a normal
+  job OR a hidden project drip day — a **pre-save** warning modal lists them
+  ("⚠ Already booked that day … Assign anyway / Cancel"). It runs in `save()`
+  BEFORE the PATCH (Cancel aborts the save), only for a NEWLY-added engineer on a
+  scheduled job, via **GET /sla/engineer-day?engineer=&date=&excludeId=** (all the
+  engineer's jobs that date incl. hidden series days, excl. cancelled/skipped).
+  It is **independent of and composes with** the post-save series-clash prompt
+  (fit-after/skip) and the "whilst you're here" nearby-jobs pop-up — the warning
+  fires first (pre-save), the others after a successful save. Best-effort: any
+  lookup error never blocks the save.
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).
@@ -681,8 +735,23 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   engineer's holiday would appear on the office sheet. The per-person ✏️ Edit
   modal shows the leave too. NB `hm(0)` renders "–", so the split line omits the
   clocked half when nothing was clocked ("40h 0m leave", not "–  + 40h 0m").
+- **Total cost of a job to us** (job-view.html "💷 Total cost to us" card,
+  **office/admin only** — FullAccess|SLAAdmin): **GET /costing/job-full-cost?jobId=**
+  (costing.js) sums **labour on-site** (job_time_segments for the job → per-engineer
+  minutes × hourly rate from `ratesMap`; a day rate ÷8; 14h runaway clamp) +
+  **travel labour** (one round trip HQ→site→HQ per engineer per distinct day worked,
+  driving time = miles ÷ 30mph × rate) + **fuel** (those round-trip miles × a FIXED
+  **£0.50/mile**) + **materials** (priced POs; unpriced POs are FLAGGED, never counted
+  as £0). Round-trip miles come from the `site_miles` register first (already a
+  round-trip figure), else a HQ `PO15 5RQ` → site-postcode geocode (postcodes.io) ×
+  1.25 × 2. Returns per-engineer breakdown + `unpricedPOs`/`missingRate`/`hasSegments`
+  flags; the card shows the headline total + labour/travel/fuel/materials rows and an
+  amber "N POs raised but not yet priced — total will rise" note. Nothing stored.
+  The PO-numbers card below it (clickable → filtered PO board) is separate.
 - **Per-job PO materials cost** (job-view.html "🧾 Materials — purchase orders"
-  card, **office/admin only** — FullAccess|SLAAdmin): reads live from the PO
+  card, **office/admin only** — FullAccess|SLAAdmin; shows each PO's **number**,
+  clickable → `po-office.html?search=<po>`, + an "Open all N POs → `?job_id=`" link):
+  reads live from the PO
   system via **GET /costing/job-pos?jobId=** (costing.js `jobPoRows`), which sums
   `po_log.cost_ex_vat` for rows with matching **`job_id`** (the stable key the PO
   worker stamps from a job's "Raise PO" link — `#mlpo` payload). Returns total +
@@ -836,6 +905,44 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   getRules/saveRules), so the blunt on/off is controllable in one place instead of
   buried in the notification centre. Front-end: van-checks.html grid has an
   On✓/Off toggle column + the pause banner.
+  **Request a van check for ONE vehicle (Aug 2026):** a **🧷 Request check** button
+  on each vehicle card + deep-dive in **vehicles.html** (shown when the van has a
+  driver) opens a modal — driver name, **Complete-by deadline preset to the normal
+  weekly deadline** (`nextVanDeadline` from GET /vancheck/settings dueDow/dueTime),
+  and an **"Allow snooze" tickbox** — then POSTs **/vancheck/request** `{reg, dueAt,
+  snooze}` (Vehicles|FullAccess). Use case: a driver did a check on a fleet/pool van
+  but their OWN van's weekly check is still outstanding. It reuses the existing
+  **custom_van_checks** flow (extended with `due_at` + `snooze` columns): resolves
+  the reg's assigned driver, creates a pending check with the STANDARD checklist
+  from settings, and pushes them (`/van-check.html?custom=<id>`; the normal submit
+  path marks it done). **/vancheck/attention now returns `customChecks[]`** (each
+  pending request's `{id,reg,dueAt,overdue,snooze}`), and **main.html's attention
+  gate** renders one note per request with that deadline — snoozeable up to 2h
+  before the deadline when `snooze` is on, or **non-snoozable (`maxSnooze:0`)** when
+  the tickbox was cleared. custom-get serves the check's `due_at` as its deadline.
+  **The card won't re-request while one is pending:** `/fleet/vehicles` returns
+  **`vanCheckRequested`** per reg (a `DISTINCT reg` scan of `custom_van_checks`
+  status='pending'), so the button renders **"✓ Check requested" (disabled)**
+  instead of 🧷 Request check; it flips back only once the driver COMPLETES the
+  check (status→done clears the pending flag on the next load). The button also
+  flips immediately client-side after a successful request (sets the FLEET row +
+  renderFleet).
+  **Pool/tipper checks DON'T satisfy the weekly assigned-van check (Aug 2026):**
+  a driver who did a check on a POOL vehicle (a tipper — not their assigned van)
+  used to have it counted as their weekly check (the weekly row is keyed by
+  (username, week) regardless of reg). Now **/vancheck/submit stores a check on a
+  non-assigned reg under a distinct key** `week = "pool:<mondayWeek>:<REG>"`, so
+  the weekly grid + `mineDue` keep showing the driver's OWN van as outstanding
+  until they check IT (or it's skipped). The engineer form (**van-check.html**)
+  makes **Vehicle a `<select>`** — their assigned van (default) + any shared/pool
+  tipper (`/vancheck/config` returns **`poolVehicles`** = vehicles.pool=1), **no
+  free text**. **Pool-van request → engineer picker:** on an unassigned/pool van
+  the vehicles.html "Request check" modal shows a **"Request from which engineer?"**
+  dropdown and **/vancheck/request accepts an explicit `username`** (else it
+  resolves the reg's assigned driver). **Home hub count includes requests:**
+  /vancheck/week returns **`customPending[]`** (pending requests, incl. pool-van
+  ones) and the hub Van-checks widget + KPI fold them into the outstanding total,
+  deduped against drivers already weekly-outstanding.
 - `fleet.js` — the whole Vehicles/Fleet backend (gate: FullAccess|Vehicles).
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
@@ -1964,10 +2071,29 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   + free add); **4** review → POST **/project/create** → project-hub.
 - **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
   the links + presence; manual tick via /project/todo), build actions
-  (**Programme**: POST /prog/save then /project/link → programme-edit; **RAMS**:
-  → `hs-docs.html?newRams=1&site=&project=<id>` which links back on save;
-  **CPP**: link-out to `hs-plan/#…&projectName=&projectNo=` PRE-FILLED (hs-plan
-  applyLaunchParams reads those hash params); **Valuations**: sets proj_fin value),
+  **UNIFIED doc-attach (Aug 2026): every required document offers the same three
+  routes via one "📎 Add / link" button (admin-only, `data-docpick`) opening a
+  GENERIC picker (`#docPick`, config `DOCTYPES`): (1) BUILD in the portal, (2)
+  LINK an existing portal record, (3) UPLOAD/attach a file.** Per type —
+  **Programme**: build = POST /prog/save → programme-edit; link existing = GET
+  /prog/list (single-select → `data.links.programmeId`, POST /project/link
+  `kind:"programme"`). **RAMS**: build = `hs-docs.html?newRams=1&site=&project=`;
+  link existing = GET /hs/docs?type=rams (multi-tick → `data.links.ramsIds[]`,
+  `kind:"rams"`/`"rams-remove"`). **CPP**: build = the hs-plan planner (no portal
+  CPP records, so no "link existing"). **File attach is generic for ALL types**:
+  the picker uploads (POST /project/doc, section = the doc-type label → returns
+  the file id) or ticks an existing project document, linked via POST
+  /project/link **`kind:"doc-file"`/`"doc-file-remove"` with `docKey`** into
+  **`data.links.docFiles[key][]`** (`normLinks()` guarantees the map + migrates
+  legacy `cppFiles`→`docFiles.cpp`; `cpp-file`/`cpp-file-remove` kept as aliases).
+  A required doc's to-do auto-ticks on its portal link OR `docFiles[key].length`;
+  /project/doc-delete strips a deleted id from every `docFiles[*]`. Linked
+  records + files show as pills per to-do row (`loadDocRefs`, open in docviewer).
+  **Uploaded files are project_files, so they already surface to engineers in
+  Site Documents** (the `/sla/site/docs` "Project Documents" injection) on the
+  site-folder AND on portal jobs — portal-built RAMS/programmes are rendered
+  documents, not stored files, so only their attached-file form appears there.
+  **Valuations**: sets proj_fin value),
   **Project Documents** (drag-drop upload, hide/show, delete; engineers with
   Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
@@ -2128,6 +2254,17 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   **project-hub.html** shows a matching **👥 Who can see this project** card
   (admins only — same UI) saving via **POST /project/update** `{visibleTo:[…]}`.
   Case-insensitive match; `sanitiseVisible` dedupes/caps 200.
+- **Archive / Restore (Aug 2026):** status is `live | complete | archived` and the
+  status change already cascades (deactivates the Pxxxx site → compliance_stores,
+  PO_DB via `setPOSiteActive`, SiteLog geofence; back to live/complete
+  re-activates). **project-hub.html** now has an explicit **🗄 Archive** / **♻
+  Restore** button in the header (admins) next to the live/complete/archived
+  dropdown — `setStatus()` confirms an archive (MLUI), POSTs /project/update
+  `{status}`, toasts, and re-renders the badge (the old bare dropdown gave no
+  feedback, so it read as "can't archive"). **projects-live.html** already tabs
+  Live / Complete / Archived / All (defaults Live), so an archived project drops
+  off the live list. **Archiving also removes the project from the engineer PO
+  picker** (po.js `liveProjectNames` is status='live' only).
 - **Endpoints (routes/projects-api.js, mounted /project + /projects):** GET
   /projects/list, GET /project/get, POST /project/create|update|link|todo|delete
   (manage=ProjectsAdmin|FullAccess), GET /project/docs, POST /project/doc (multipart)
@@ -2520,7 +2657,14 @@ Two automatic, always-on quality checks — one for the LIVE system, one for the
   guaranteed record) if it isn't set as a GitHub secret. To WIDEN scope: relax
   `inScope`/`PROTECTED` in autofix.mjs — but keep auth/permissions/routing protected.
 - **Data-integrity catalogue** (health.js `INTEGRITY_CHECKS` + `runIntegrityChecks`,
-  hourly on the cron, gated minute<5). The "do all the areas actually JOIN UP?" layer:
+  **ONCE WEEKLY — Sunday ~03:00 UTC** on the cron (`getUTCDay()===0 &&
+  getUTCHours()===3`) — was hourly, but its correlated NOT-EXISTS joins are the
+  worker's heaviest read source (compliance_stores × sites alone ≈ 600k
+  row-reads), so hourly blew past D1's free-tier 5M/day limit; weekly is plenty
+  since integrity drifts slowly, and admins can still run it on demand via
+  /health/run. The lightweight liveness probes (`runHealthChecks`) still run
+  every 5 min — they're what actually catch + alert on an outage). The "do all
+  the areas actually JOIN UP?" layer:
   ~20 declarative invariants, each a COUNT of VIOLATING rows against the central D1
   (0 = healthy), written against the REAL schema. Covers Fleet (assignments/maintenance/
   odometer/fuel/user-van → real vehicle & user), SLA (segments→jobs & users, job→site
@@ -2766,7 +2910,11 @@ SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN**,
 extractor; POST /compliance/file + GET /compliance/has verify it in-handler),
 **ANTHROPIC_API_KEY** (powers the Job-Programmes "🤖 Draft from a document" AI —
 POST /prog/ai-draft calls api.anthropic.com; feature fails soft with a clear
-"add the key" message when unset) (secrets); optional var **ANTHROPIC_MODEL**
+"add the key" message when unset), **TUYA_ACCESS_ID** + **TUYA_ACCESS_SECRET**
+(yard gate — BOTH must be SECRETS, not Text vars: mostlane-api auto-deploys from
+git and a deploy replaces the dashboard [vars] with wrangler.toml's, so a Text
+var not in wrangler.toml is WIPED on the next deploy — this bit us once, the ID
+was a Text var and vanished while the Secret survived) (secrets); optional var **ANTHROPIC_MODEL**
 (defaults to `claude-sonnet-5`); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
@@ -2875,6 +3023,91 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
   Cloudflare) to `jobs@<domain>`. Dormant until (1)+(2) are done — the `email`
   export just sits unused.
 
+## Yard gate (routes/tuya.js + yard-gate.html — Aug 2026)
+The yard's FAAC 415L gate has a Tuya 4-channel WiFi relay (device
+`bf7240c4db7fedd458froe`, Central Europe DC → `eu`/tuyaeu.com). It's a
+**LATCHING relay on channel 1 (`switch_1`)**: `switch_1=true` opens (gate stays
+open), `switch_1=false` closes (stays closed) — NOT a momentary pulse. The route
+signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
+- **Secrets (dashboard):** `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET` (Tuya IoT Cloud
+  project → Overview → Authorization Key). Device ids/DP codes live in app_config
+  `tuya:config` so they're editable without redeploy.
+- **`tuya:config`:** `{region:"eu", gateDeviceId, openCode:"switch_1", openValue:true,
+  closeCode?, closeValue?, stateDeviceId?, stateCode?, stateOpenValue?, thresholdMins:10,
+  repeatMins:30}`. **closeCode defaults to openCode, closeValue defaults to the
+  opposite of openValue** — so a latching gate needs only the open fields set.
+- **MOMENTARY/inching mode (the real gate):** the module PULSES switch_1 and the
+  FAAC toggles open↔close on each pulse — `false` does nothing. So **Open and
+  Close BOTH send the SAME pulse** (`pulseGate` = openCode/openValue); they differ
+  only in intent. The relay can't report state, so the portal **TRACKS it** in
+  app_config **`tuya:gatestate`** `{open,at,by,device}`: each successful pulse
+  flips it. Open pulses only when tracked-closed, Close only when tracked-open
+  (so pressing Open twice can't accidentally close it); if already in the target
+  state it returns `already:true` without pulsing. `/tuya/gate/state` returns the
+  TRACKED state (not a device read — that's why it used to be stuck on "closed").
+  **Drift fix:** if the gate is used by fob/keypad, Full-Access can correct the
+  tracked state without a command via **POST /tuya/gate/set-state** `{open}` (the
+  "Mark open/closed" buttons). `readGateOpen`/`canReadState` remain for a future
+  real contact sensor but are unused in momentary mode.
+- **Access hours (PER USER):** `tuya:config.access.byUser[<lower username>] =
+  {windows:[{days:[0..6 Sun..Sat], from:"HH:MM", to:"HH:MM"}]}` (Europe/London;
+  a user with no windows is unrestricted; overnight windows supported). Enforced
+  server-side per operating user on open/close — **Full-Access always bypasses**;
+  a blocked op returns 403 `denied:"hours"`. Managed on the page's **⏰ Access
+  hours** card (FullAccess): a **Current restrictions** list (each person → Edit /
+  Remove) + an editor that tags one or MANY people (searchable checkbox list) with
+  the same windows. POST /tuya/config accepts `{accessUsers:[…], accessWindows}`
+  (tag several), `{accessUser, …}` (one), and `{accessRemove:name|[names]}` (clear;
+  empty windows also clears). `/tuya/gate/state` returns the caller's OWN summary
+  + `allowedNow`.
+- **Endpoints** (YardGate|FullAccess to operate; FullAccess to configure): POST
+  /tuya/gate/open + /tuya/gate/close (both pulse), **POST /tuya/gate/set-state**
+  (FullAccess drift fix), GET /tuya/gate/state (tracked open/since/by + access
+  summary + allowedNow), GET /tuya/gate/log (entries `{user,action,device,at}`,
+  action open|close|mark-open|mark-closed, kept 100), config GET/POST,
+  device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron reads
+  the TRACKED state and pushes the owner+YardGate holders if left open past
+  `thresholdMins`.
+- **Geofence — must be AT the yard (Aug 2026):** non-Full-Access users must
+  share their location AND be within `tuya:config.geo.radiusM` of
+  `geo.lat/geo.lng` to operate — stops accidental remote operation. Enforced
+  server-side on open/close (`haversineM`): the client sends `{lat,lng}` (from
+  `navigator.geolocation`) and a distance > radius returns 403 `denied:"location"`;
+  no coords → 403 asking to turn location on. **Exempt = Full-Access OR the
+  per-user `YardGateAnywhere` permission** (set in Users Admin next to YardGate;
+  OFF by default so the geofence applies to everyone else). The client asks for a
+  FRESH fix each time (`maximumAge:0`), so the browser re-prompts unless the user
+  chose "always allow". Set on the page's **📍 Gate location**
+  card (FullAccess: stand at the gate → "Use my current location" + radius, POST
+  /tuya/config `{geo:{lat,lng,radiusM}}`; `{geo:{clear:true}}` turns it off).
+  `/tuya/gate/state` returns `needLocation` (this caller must prove location) +
+  `geo:{enabled,radiusM}`. **Off until an admin sets the location on site.**
+- **Safety check before EVERY operation:** Open/Close first open a confirm modal
+  ("safe to operate & clear of obstruction") — Cancel aborts, Proceed sends. The
+  modal shows a live **gate-camera snapshot** via **GET /tuya/gate/snapshot-url**
+  (YardGate|FullAccess): prefers a **CCTV-Wall camera** — `tuya:config.cameraSiteId`
+  + `cameraId` → `cctv.js cameraSnapshotUrl()` mints a signed `/cctv/snapshot` URL
+  (the DVR digest-auth proxy, so a non-admin can view without the DVR admin) —
+  else falls back to a plain `tuya:config.snapshotUrl`. Set the camera in the
+  gate setup (`?setup=1`) from a dropdown of CCTV-Wall cameras; add the (separate)
+  gate DVR to the **CCTV Wall** first. **Ring is NOT usable** (no browser-openable
+  snapshot without an always-on bridge). Snapshot refreshable + cache-busted.
+- **Desktop status light (portal-config.js `initGateLight`):** a small traffic
+  light UNDER the Mostlane logo in the desktop sidebar (`#pnGate`, green=closed /
+  red=open) for FullAccess/YardGate users, clickable → yard-gate.html. Polls
+  /tuya/gate/state (60s, paused when tab hidden); collapses to just the dot when
+  the sidebar is minimised. **The Yard Gate desktop SIDEBAR nav item was removed**
+  — desktop uses this light; mobile keeps the main.html menu tile. (An earlier
+  full-width top banner was replaced by this on request.)
+- **Front-end yard-gate.html** (🚪 tile mobile, YardGate perm): Open (green) + **Close
+  (red)** buttons (both pulse), live TRACKED open/closed state + access-hours line,
+  gate activity log (who/action/device/time), FullAccess **⏰ Access hours** editor
+  + **Mark open/closed** drift correction. **The device setup panel is HIDDEN** —
+  `tuya:config` is pre-seeded (gateDeviceId `bf7240c4db7fedd458froe`, switch_1/true);
+  a Full-Access user can reach the setup form for maintenance via
+  **`yard-gate.html?setup=1`**. Live once the two secrets are set (**both as
+  SECRETS** — a Text var is wiped by the next git deploy).
+
 ## Satellite systems
 1. **PO system — MIGRATED IN-PORTAL (14 Aug 2026).** The Purchase Order system
    now runs INSIDE the portal (`mostlane-api`), not the standalone `mostlane-po`
@@ -2900,6 +3133,49 @@ handler that calls **`handleInboundEmail`** (`worker/src/routes/emailjob.js`).
      `po-admin.html` (system config + suppliers/subcontractors/trades/sites/
      closures — the obsolete Engineers/Office-Users token-link tabs were dropped).
      CSV + print are done CLIENT-side (no un-authenticated new tab).
+   - **Engineers raise ONLY against a live project / their vehicle / a job-linked
+     reactive PO (Aug 2026):** from the standalone po-raise.html form an engineer
+     can pick only a **LIVE PROJECT** (as a site) or a **company vehicle** — no
+     free-text sites, and no loose reactive/incident POs. A REACTIVE maintenance
+     PO must be raised from the job card's **"Raise PO for this job"** button,
+     which opens po-raise.html with `#mlpo=` carrying the job's `job_id` (+ site +
+     ref) so the PO ties to the job for costing. Enforced client-side
+     (po-raise.html: options come from **GET /po/api/raise-options** = live
+     projects + **only the engineer's assigned van + shared/pool vehicles** (a
+     `vehicles.pool` flag, self-migrating in fleet.js — e.g. the tippers any
+     engineer may raise against; getRaiseOptions filters `v.mine || v.pool`); the picker
+     has a type-ahead AND a **▾ All** browse-all dropdown grouped Live projects /
+     Your vehicle / Shared vehicles; the incident field is hidden on a fresh open
+     and only revealed read-only when prefilled from a job link; `submitPO` allows
+     only a project, a vehicle, or a `job_id`-carrying reactive PO) AND server-side
+     (po.js `issuePO` engineer branch: allow if `vehicle_reg` OR `job_id` present,
+     else `site` must be a **live project** via `isLiveProjectSite(env, name)`
+     which reads the portal `projects` table status='live'). Office POs are
+     UNAFFECTED (the office manages the full site list on po-admin.html → Sites).
+     `getRaiseOptions`/`liveProjectNames`/`isLiveProjectSite` are the po.js helpers;
+     they read env.DB (projects + users.vehicle_assigned).
+   - **Shared/pool vehicles (Aug 2026):** an engineer's vehicle options are their
+     **assigned van + any shared/pool vehicle** (the tippers) — `vehicles.pool`
+     (self-migrating in fleet.js; the two tippers HN69 SYP + WM73 VFL are pool=1).
+     getRaiseOptions filters `v.mine || v.pool`; po-raise groups **Your vehicle /
+     Shared vehicles**. Mark a new shared vehicle with `UPDATE vehicles SET pool=1`.
+   - **Job-card "Raise PO for this job" now opens the IN-PORTAL form (Aug 2026):**
+     the button on **job-view.html** + **engineer-job.html** (and my-day.html's
+     generic "Raise a PO" link) build **`po-raise.html#mlpo=<base64(JSON)>`** —
+     NOT the old `/po-config` personal URL to the standalone worker (that opened
+     the retired PO system). The reactive PO carries `job_id` so it ties to the
+     job and bypasses the project-only rule (po-raise reveals the read-only job
+     ref + submits). `/po-config` + `profile.poUrl` are fully dead now.
+   - **Merge duplicate sites (Aug 2026):** the same place saved under several
+     names splits its costing. po-admin.html → Sites → **"Merge duplicate sites"**
+     card: tick the duplicates, pick the one site to keep, Merge. Backend
+     (po.js): **GET /po/api/sites/usage** (office — every site NAME on a PO with
+     its PO count + `known` flag, plus known sites with 0 POs, so a duplicate can
+     be merged into a clean unused site) and **POST /po/api/sites/merge**
+     `{into, from:[names]}` (office — `UPDATE po_log SET site=into WHERE site IN
+     from`, then deactivates the source `sites` rows and ensures `into` is a known
+     active site; returns `{merged, posMoved}`). Since costing matches
+     `po_log.site` by NAME, the spend rolls straight up onto the kept site.
    - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
      field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
      FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a
