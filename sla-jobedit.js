@@ -720,6 +720,14 @@
       requiresNote: $("mljeReqNote").checked,
       changedBy: currentUser()
     };
+    // Pre-save safeguard: warn if a NEWLY-added engineer already has job(s) that
+    // day (incl. a project drip day). Runs before the save so the office can back
+    // out; it's independent of the post-save series-clash + nearby suggestions.
+    const preNewEngs = assignedEngineers.filter(e => e && openEngineers.indexOf(e) === -1);
+    if (preNewEngs.length && scheduledAt) {
+      const proceed = await warnDayClash(preNewEngs, scheduledAt, currentJob.id);
+      if (!proceed) { msg.textContent = ""; $("mljeSave").disabled = false; return; }
+    }
     try {
       msg.textContent = "Saving job…";
       const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id), {
@@ -731,6 +739,9 @@
       msg.className = "mlje-msg ok";
       const cb = onSavedCb;
       if (cb) { try { cb(saved); } catch (e) {} }
+      // Clash with a project drip day? Offer to fit the project after this job,
+      // skip it, or leave it (it auto-skips that day anyway).
+      await maybeSeriesClash(saved);
       // Newly allocated to an operative? Offer same-site + nearby OPEN jobs to
       // batch onto the same person before we close.
       const newlyAssigned = assignedEngineers.filter(e => e && openEngineers.indexOf(e) === -1);
@@ -741,6 +752,110 @@
       msg.className = "mlje-msg err";
       $("mljeSave").disabled = false;
     }
+  }
+
+  // After allocating a job, check whether the engineer already has a project
+  // drip-series day that date and let the office decide what to do with it.
+  async function maybeSeriesClash(saved) {
+    try {
+      if (!saved || !saved.scheduledAt || saved.seriesId) return;
+      const engs = (Array.isArray(saved.assignedEngineers) && saved.assignedEngineers.length)
+        ? saved.assignedEngineers : (saved.assignedTo ? [saved.assignedTo] : []);
+      if (!engs.length) return;
+      const date = new Date(saved.scheduledAt).toISOString().slice(0, 10);
+      for (const eng of engs) {
+        const res = await authFetch("/sla/series-clash?engineer=" + encodeURIComponent(eng) + "&date=" + date + "&excludeId=" + encodeURIComponent(saved.id));
+        const d = await res.json().catch(() => ({}));
+        const clash = d && d.clash;
+        if (!clash) continue;
+        const choice = await seriesClashPrompt(clash);
+        if (choice === "fit") {
+          const newStart = saved.scheduledEnd || saved.scheduledAt;
+          const keepEnd = clash.scheduledEnd && Date.parse(clash.scheduledEnd) > Date.parse(newStart) ? clash.scheduledEnd : null;
+          let dur = keepEnd ? Math.round((Date.parse(keepEnd) - Date.parse(newStart)) / 60000) : 60;
+          if (!(dur > 0)) dur = 60;
+          await authFetch("/sla/jobs/" + encodeURIComponent(clash.id), { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scheduledAt: newStart, scheduledEnd: keepEnd || undefined, durationMinutes: dur }) });
+        } else if (choice === "skip") {
+          await authFetch("/sla/jobs/" + encodeURIComponent(clash.id), { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ seriesSkipped: true }) });
+        }
+        break;   // one clash decision is enough
+      }
+    } catch (e) { /* clash prompt is best-effort — the auto safeguard still covers it */ }
+  }
+  function seriesClashPrompt(clash) {
+    return new Promise(resolve => {
+      const day = clash.scheduledAt ? new Date(clash.scheduledAt).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }) : "that day";
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+      const btn = "display:block;width:100%;padding:11px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;text-align:left;";
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:410px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
+        + '<h3 style="margin:0 0 8px;color:#003366;font-size:17px;">Project day clash</h3>'
+        + '<p style="margin:0 0 14px;color:#334;font-size:14px;line-height:1.5;">This engineer already has a project day on <b>' + day + '</b>. What should happen to it?</p>'
+        + '<div style="display:flex;flex-direction:column;gap:8px;">'
+        + '<button data-c="fit" style="' + btn + 'background:#003366;color:#fff;border-color:#003366;">✅ Fit the project in <b>after</b> this job</button>'
+        + '<button data-c="skip" style="' + btn + 'background:#fff;color:#991b1b;">⏭ Skip the project that day</button>'
+        + '<button data-c="leave" style="' + btn + 'background:#f4f6f9;color:#475569;">Leave it for now</button>'
+        + '</div></div>';
+      ov.addEventListener("click", e => {
+        const b = e.target.closest("[data-c]");
+        if (b) { document.body.removeChild(ov); resolve(b.dataset.c); }
+        else if (e.target === ov) { document.body.removeChild(ov); resolve("leave"); }
+      });
+      document.body.appendChild(ov);
+    });
+  }
+
+  function engName(u) {
+    const f = (engineers || []).find(x => String(x.username || "").toLowerCase() === String(u || "").toLowerCase());
+    return (f && f.name) || u;
+  }
+  // Pre-save safeguard: does a newly-assigned engineer already have job(s) that
+  // day? Returns true to proceed with the assignment, false to back out.
+  async function warnDayClash(newEngs, scheduledAt, excludeId) {
+    try {
+      const date = new Date(scheduledAt).toISOString().slice(0, 10);
+      const groups = [];
+      for (const eng of newEngs) {
+        const res = await authFetch("/sla/engineer-day?engineer=" + encodeURIComponent(eng) + "&date=" + date + "&excludeId=" + encodeURIComponent(excludeId || ""));
+        const d = await res.json().catch(() => ({}));
+        const jobs = (d && d.jobs) || [];
+        if (jobs.length) groups.push({ eng, jobs });
+      }
+      if (!groups.length) return true;   // no clash — proceed silently
+      return await dayClashPrompt(groups, date);
+    } catch (e) { return true; }   // best-effort — never block a save on an error
+  }
+  function dayClashPrompt(groups, date) {
+    return new Promise(resolve => {
+      const dstr = (() => { try { return new Date(date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }); } catch { return date; } })();
+      const tm = iso => { try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+      const body = groups.map(g => {
+        const rows = g.jobs.map(j => '<li style="margin:2px 0;">' + (j.scheduledAt ? '<b>' + tm(j.scheduledAt) + '</b> · ' : '')
+          + esc(j.ref) + (j.siteName ? ' <span style="color:#64748b;">— ' + esc(j.siteName) + '</span>' : '')
+          + (j.series ? ' <span style="background:#ede9fe;color:#5b21b6;border-radius:6px;padding:0 6px;font-size:11px;">project day</span>' : '')
+          + ' <span style="color:#64748b;font-size:12px;">' + esc(j.status) + '</span></li>').join("");
+        return '<p style="margin:8px 0 2px;font-weight:700;color:#334;">' + esc(engName(g.eng)) + ' already has ' + g.jobs.length + ' job' + (g.jobs.length === 1 ? '' : 's') + ' this day:</p><ul style="margin:0 0 4px 18px;padding:0;font-size:13.5px;">' + rows + '</ul>';
+      }).join("");
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+      const btn = "padding:10px 16px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;";
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);max-height:80vh;overflow:auto;">'
+        + '<h3 style="margin:0 0 6px;color:#92400e;font-size:17px;">⚠ Already booked that day</h3>'
+        + '<p style="margin:0 0 6px;color:#334;font-size:13.5px;">On <b>' + dstr + '</b>:</p>'
+        + body
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'
+        + '<button data-c="cancel" style="' + btn + 'background:#fff;color:#334;">Cancel</button>'
+        + '<button data-c="ok" style="' + btn + 'background:#92400e;color:#fff;border-color:#92400e;">Assign anyway</button>'
+        + '</div></div>';
+      ov.addEventListener("click", e => {
+        const b = e.target.closest("[data-c]");
+        if (b) { document.body.removeChild(ov); resolve(b.dataset.c === "ok"); }
+        else if (e.target === ov) { document.body.removeChild(ov); resolve(false); }
+      });
+      document.body.appendChild(ov);
+    });
   }
 
   async function del() {

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • SLA Settings</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -98,33 +98,162 @@
       color:var(--muted);
     }
 
+    /* Collapsible sections — all collapsed by default */
+    .sect{
+      background:var(--panel);
+      border-radius:14px;
+      box-shadow:0 8px 22px rgba(0,0,0,0.10);
+      margin-bottom:12px;
+      overflow:hidden;
+    }
+    .sect > summary{
+      list-style:none;
+      cursor:pointer;
+      padding:16px 18px;
+      font-weight:700;
+      font-size:16px;
+      color:var(--ml-blue);
+      display:flex;
+      align-items:center;
+      gap:8px;
+      user-select:none;
+    }
+    .sect > summary::-webkit-details-marker{ display:none; }
+    .sect > summary::after{
+      content:"▸";
+      margin-left:auto;
+      color:#94a3b8;
+      font-size:13px;
+      transition:transform .15s;
+    }
+    .sect[open] > summary::after{ transform:rotate(90deg); }
+    .sect > summary:hover{ background:rgba(0,59,130,0.04); }
+    .sect-body{
+      padding:2px 18px 18px;
+      border-top:1px solid #eef2f7;
+    }
+    .sect-body .muted{ color:var(--muted); font-size:14px; margin:12px 0; }
+    .sect-body a.btn{
+      display:inline-block;
+      text-decoration:none;
+    }
+    .page-head{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin:2px 0 14px;
+    }
+    .page-head h1{ margin:0; }
   </style>
 </head>
 
 <body>
 <div class="shell">
-  <div class="card">
-
+  <div class="page-head">
+    <a class="ml-back" href="sla-main.html" title="Back to SLA">‹ Back</a>
     <h1>SLA Settings</h1>
-    <p class="muted">
-      These times define when an SLA becomes breached.
-      Values shown below are the current settings from your live Worker.
-    </p>
-
-    <div id="settingsContainer"></div>
-
-    <div class="actions">
-      <button class="btn secondary" onclick="window.location='sla-main.html'">Back</button>
-      <button class="btn primary" id="editBtn">Edit</button>
-      <span id="status"></span>
-    </div>
-
-    <div class="actions" id="editActions" style="display:none;">
-      <button class="btn secondary" id="cancelEditBtn">Cancel</button>
-      <button class="btn primary" id="saveBtn">Save</button>
-    </div>
-
   </div>
+
+  <!-- SLA breach times (collapsible) -->
+  <details class="sect">
+    <summary>⏱️ SLA breach times</summary>
+    <div class="sect-body">
+      <p class="muted">These times define when an SLA becomes breached.</p>
+      <div id="settingsContainer"></div>
+      <div class="actions">
+        <button class="btn primary" id="editBtn">Edit</button>
+        <span id="status"></span>
+      </div>
+      <div class="actions" id="editActions" style="display:none;">
+        <button class="btn secondary" id="cancelEditBtn">Cancel</button>
+        <button class="btn primary" id="saveBtn">Save</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- Job categories -->
+  <details class="sect">
+    <summary>🏷️ Job categories</summary>
+    <div class="sect-body">
+      <p class="muted">Extra statuses you control — they show as chips on the board and as options everywhere a job's status is set.</p>
+      <a class="btn primary" href="sla-main.html?panel=categories">Manage categories →</a>
+    </div>
+  </details>
+
+  <!-- Job sheet settings -->
+  <details class="sect">
+    <summary>🧾 Job sheet settings</summary>
+    <div class="sect-body">
+      <p class="muted">Choose which fields appear on the Mostlane copy vs the Client copy of the job sheet.</p>
+      <a class="btn primary" href="sla-main.html?panel=sheet">Edit sheet settings →</a>
+    </div>
+  </details>
+
+  <!-- Data tools -->
+  <details class="sect">
+    <summary>🧰 Data tools</summary>
+    <div class="sect-body">
+      <p class="muted">Import job history, review &amp; bulk-delete live jobs, and manage archive photos.</p>
+      <a class="btn primary" href="sla-data-tools.html">Open data tools →</a>
+    </div>
+  </details>
+
+  <!-- Firestopping -->
+  <details class="sect">
+    <summary>🔥 Firestopping</summary>
+    <div class="sect-body">
+      <p class="muted">Manage firestopping products, spec sheets and the RIA record configuration.</p>
+      <a class="btn primary" href="firestop-admin.html">Open firestopping →</a>
+    </div>
+  </details>
+
+  <!-- Site audit -->
+  <details class="sect">
+    <summary>🔍 Site audit</summary>
+    <div class="sect-body">
+      <p class="muted">Create a site audit as one job with a photo checklist — the engineer completes each item with a photo. Assign it to an engineer in one step.</p>
+      <a class="btn primary" href="site-audit.html">Create a site audit →</a>
+    </div>
+  </details>
+
+  <!-- Sync with Workever -->
+  <details class="sect">
+    <summary>🔄 Sync with Workever</summary>
+    <div class="sect-body">
+      <p class="muted">Bring the portal in line with Workever — update jobs that are done there but still showing as pending here, and pull in any job that's missing from your records. Runs from a snippet you paste into your logged-in Workever tab (Workever has no API key, so the fetch has to happen there).</p>
+
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:6px 0">1 · Status mapping</div>
+      <p class="muted" style="margin-top:2px">How each Workever status maps into the portal, and which ones count as <b>done</b> (a live job is only ever closed, never re-opened). Defaults are set — adjust if needed.</p>
+      <div id="wkMap" class="muted">Loading…</div>
+      <div style="margin-top:8px"><button class="btn primary" id="wkSaveMap">Save mapping</button> <span id="wkMapMsg" class="muted"></span></div>
+
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">2 · Test one job first (recommended)</div>
+      <p class="muted" style="margin-top:2px">Enter the <b>MOS number</b> (or job id) of a job you know is <b>done in Workever but still Pending here</b>. It syncs just that one job and reports whether its notes, signature and photos all arrived — a clear ❌ if anything Workever holds fails to transfer. Paste the runner into the Workever console like the full run.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="wkTestMos" placeholder="e.g. MOS24356" style="flex:1;min-width:160px;padding:9px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit">
+        <button class="btn primary" id="wkTestBtn">📋 Copy test runner</button>
+      </div>
+      <span id="wkTestMsg" class="muted"></span>
+      <textarea id="wkTestRunner" readonly style="width:100%;height:60px;margin-top:8px;font-family:monospace;font-size:11px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;display:none"></textarea>
+
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">3 · Run the full sync</div>
+      <ol class="muted" style="margin:0 0 8px 18px;padding:0;line-height:1.7">
+        <li>Open <b>mostlane.workever.app</b> in another tab and make sure you're logged in.</li>
+        <li>Press the button below to copy the runner, then in that Workever tab open the console (F12 → Console), paste, and press Enter.</li>
+        <li>Leave it running — it pages through every job and reports progress; it's safe to stop and re-run (it resumes).</li>
+      </ol>
+      <button class="btn primary" id="wkCopy">📋 Copy sync runner</button>
+      <span id="wkCopyMsg" class="muted"></span>
+      <textarea id="wkRunner" readonly style="width:100%;height:70px;margin-top:8px;font-family:monospace;font-size:11px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;display:none"></textarea>
+
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">4 · What changed</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="wkLoad">Refresh change log</button><button class="btn secondary" id="wkReset" title="Clear the log to start a fresh run count">Clear log</button></div>
+      <div id="wkSummary" class="muted" style="margin-top:8px"></div>
+      <div id="wkLog" style="margin-top:8px;max-height:340px;overflow:auto"></div>
+
+      <p class="muted" style="margin-top:14px;font-size:12px">Brings across job <b>records</b> (status, description, cost, site) <b>and</b> their <b>photos, signatures &amp; documents</b> — but only for jobs it actually syncs; a job you completed in the portal is never touched, and files already in your archive are skipped. Photos stream in the background, so the file count may keep rising for a moment after the pages finish.</p>
+    </div>
+  </details>
 </div>
 
 <script>
@@ -240,6 +369,259 @@ document.getElementById("cancelEditBtn").onclick = renderReadOnly;
 document.getElementById("saveBtn").onclick = saveConfig;
 
 loadConfig();
+
+/* ================= Workever sync ================= */
+const PAPI = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
+function pFetch(p, opts={}){ opts.headers = Object.assign({ "Authorization":"Bearer "+pTok() }, opts.headers||{}); if(opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"]="application/json"; return fetch(PAPI+p, opts); }
+const wkEsc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const PORTAL_STATUSES = ["Pending","Scheduled","Travelling","In Progress","On Hold","Quote","Order","Complete","Closed Jobs","Invoiced","Cancelled","FRA Works"];
+let WK_MAP = {};
+
+async function wkLoadConfig(){
+  try{
+    const j = await pFetch("/sla/workever/config").then(r=>r.json());
+    WK_MAP = j.map || {};
+    renderWkMap();
+    if(j.lastrun) renderWkSummary(j.lastrun);
+  }catch(e){ document.getElementById("wkMap").textContent = "Couldn't load — check you're logged in."; }
+}
+function renderWkMap(){
+  const box = document.getElementById("wkMap");
+  const rows = Object.entries(WK_MAP).sort((a,b)=>a[0].localeCompare(b[0]));
+  box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <tr style="text-align:left;color:#64748b"><th style="padding:4px 6px">Workever status</th><th style="padding:4px 6px">Portal status</th><th style="padding:4px 6px">Done?</th></tr>
+    ${rows.map(([k,v])=>`<tr data-k="${wkEsc(k)}">
+      <td style="padding:4px 6px;text-transform:capitalize">${wkEsc(k)}</td>
+      <td style="padding:4px 6px"><select class="wk-portal" style="padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;font:inherit;font-size:12.5px">${PORTAL_STATUSES.map(s=>`<option${s===v.portal?" selected":""}>${s}</option>`).join("")}</select></td>
+      <td style="padding:4px 6px"><input type="checkbox" class="wk-done"${v.done?" checked":""}></td>
+    </tr>`).join("")}
+  </table>`;
+}
+document.getElementById("wkSaveMap").addEventListener("click", async ()=>{
+  const msg = document.getElementById("wkMapMsg"); msg.textContent = "Saving…";
+  const map = {};
+  document.querySelectorAll("#wkMap tr[data-k]").forEach(tr=>{
+    map[tr.dataset.k] = { portal: tr.querySelector(".wk-portal").value, done: tr.querySelector(".wk-done").checked };
+  });
+  try{ const j = await pFetch("/sla/workever/config",{method:"POST",body:JSON.stringify({map})}).then(r=>r.json()); WK_MAP = j.map||map; msg.textContent = j.ok?"Saved ✓":"Failed"; }
+  catch{ msg.textContent="Failed"; }
+});
+
+// The runner: pastes into the Workever console. Carries the portal token + API base.
+function buildRunner(){
+  const token = pTok();
+  const api = PAPI;
+  return `/* Mostlane → Workever sync runner. Paste into the console on mostlane.workever.app (must be logged in). Safe to re-run. */
+(async () => {
+  const API=${JSON.stringify(api)}, TOKEN=${JSON.stringify(token)};
+  const RUN = "wk-"+Date.now();   // a fresh run every time — always starts at page 1
+  const wg = async u => { try{ const r=await fetch(u,{credentials:"include",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}}); return r.ok?r.json():null; }catch{ return null; } };
+  const post = (p,b) => fetch(API+p,{method:"POST",headers:{Authorization:"Bearer "+TOKEN,"Content-Type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json());
+  console.log("%cWorkever sync starting…","color:#06c;font-weight:bold");
+  const sName={}, need={}; let p=1,pages=1;
+  do{ const j=await wg("/api/v1/jobs-list?page="+p+"&size=50"); if(!j)break; pages=j.totalPages;
+      for(const it of (j.items||[])) if(it.jobStatusId && !sName[it.jobStatusId] && !need[it.jobStatusId]) need[it.jobStatusId]=it.id; p++; }while(p<=pages&&p<=40);
+  for(const [sid,jid] of Object.entries(need)){ const d=await wg("/api/v1/jobs/"+jid); if(d&&d.jobStatus) sName[sid]=d.jobStatus.name; }
+  console.log("%clearned "+Object.keys(sName).length+" statuses","color:#0a0");
+  const first=await wg("/api/v1/jobs-list?page=1&size=50"); pages=first?first.totalPages:0;
+  const T={updatedLive:0,importedArchive:0,updatedArchive:0,skipped:0,errors:0,files:0};
+  let batch=[], batchU={}, ABORT=null, INGEST_FAIL=0;
+  // Harvest a job's documents (photos/signatures/PDFs) and hand the public S3
+  // URLs to the portal's importer (idempotent — files already in R2 are skipped).
+  const harvestPhotos=async(np)=>{
+    let all=[], page=1, guard=0;
+    while(guard++<12){ const d=await wg("/documents/"+np.uuid+"/job/photos"+(page>1?"?page="+page:"")); if(!d||!d.files||!d.files.length) break; all=all.concat(d.files); const pc=d.pagesCount||0; if(page>=pc) break; page++; }
+    const seen={}, out=[];
+    for(const f of all){ const url=f&&f.links&&f.links.file; if(!url||seen[f.id]) continue; seen[f.id]=1;
+      const base=decodeURIComponent(String(url).split("/").pop().split("?")[0]);
+      const t=(f.documentType||"").toLowerCase(), nm=((f.fileName||"")+" "+(f.description||"")).toLowerCase();
+      const kind=/sign/.test(nm)?"signature":(t.indexOf("image/")===0?"photo":"document");
+      out.push({ id:np.mos+":"+base, mos:np.mos, name:f.fileName||"", url, type:f.documentType||"", bytes:f.documentLength||0, kind });
+    }
+    return out;
+  };
+  // Workever's activity log → the REAL status-change times. Parses "17/08/2026 -
+  // 09:22" (UK local) to ISO (BST-aware) and finds the completion time.
+  const ukToIso=(s)=>{ const m=String(s||"").match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})\\D+(\\d{2}):(\\d{2})/); if(!m)return null; const dd=+m[1],mo=+m[2],yy=+m[3],hh=+m[4],mi=+m[5]; const utc=Date.UTC(yy,mo-1,dd,hh,mi); const lastSun=(mon)=>{ const x=new Date(Date.UTC(yy,mon+1,0)); return x.getUTCDate()-x.getUTCDay(); }; const bstStart=Date.UTC(yy,2,lastSun(2),1), bstEnd=Date.UTC(yy,9,lastSun(9),1); const off=(utc>=bstStart&&utc<bstEnd)?60:0; return new Date(utc-off*60000).toISOString(); };
+  const DONEST=/closed|complete|invoiced/i;
+  const workeverHistory=async(uuid)=>{ const j=await wg("/api/v1/jobs/"+uuid+"/activities"); const items=(j&&j.items)||[]; const history=[]; let completedAt=null,maxAt=null; for(const a of items){ if(!a||!a.statusName)continue; const at=ukToIso(a.creationDateFormatted); if(!at)continue; history.push({status:a.statusName,at,by:a.createdByName||"Workever"}); if(!maxAt||at>maxAt)maxAt=at; if(DONEST.test(a.statusName)&&(!completedAt||at>completedAt))completedAt=at; } if(!completedAt)completedAt=maxAt; return {history,completedAt}; };
+  const flush=async()=>{ if(!batch.length)return; let res=null; try{ res=await post("/sla/workever/ingest",{runId:RUN,jobs:batch}); }catch(e){ res=null; }
+    if(!res || !res.counts){ INGEST_FAIL++; if(INGEST_FAIL>=3){ ABORT={reason:"the portal rejected the sync (server error) "+((res&&res.error)?("— "+res.error):"— check the red 500 lines above"), mos:[], sample:[]}; } batch=[]; batchU={}; return; } else INGEST_FAIL=0;
+    if(res&&res.counts) for(const k in T) if(k!=="files") T[k]+=res.counts[k]||0;
+    if(res&&res.needDetail&&res.needDetail.length){ const items=[]; for(const mos of res.needDetail){ const jid=batchU[mos]; if(!jid)continue; const d=await wg("/api/v1/jobs/"+jid); if(d&&d.description) items.push({mos,description:d.description}); } if(items.length) await post("/sla/workever/enrich",{items}); }
+    if(res&&res.needPhotos&&res.needPhotos.length){
+      // Import files. A job that HAS files but they fail to store is a genuine
+      // failure → retry once, then ABORT the whole run (kept resumable). A job
+      // with nothing to transfer sends nothing, so it can never trip this.
+      // LIVE jobs → the live job's own folder (visible on the card); others →
+      // the archive store.
+      const impf=async(ep,payload,cnt,mosArr,names)=>{ let pr=null; try{ pr=await post(ep,payload); }catch(e){ pr={failed:cnt}; }
+        if(pr&&pr.failed>0){ let pr2=null; try{ pr2=await post(ep,payload); }catch(e){ pr2={failed:cnt}; }
+          if(pr2&&pr2.failed>0){ ABORT={reason:"file transfer failed", failed:pr2.failed, mos:mosArr.slice(0,10), sample:(names||[]).slice(0,3)}; if(pr2.imported)T.files+=pr2.imported; return; }
+          if(pr2)T.files+=pr2.imported||0; } else if(pr)T.files+=pr.imported||0; };
+      let archFb=[]; const flushArch=async()=>{ if(!archFb.length)return; const files=archFb; archFb=[]; await impf("/sla/archive/photos/import",{files},files.length,[...new Set(files.map(f=>f.mos))],files.map(f=>f.name)); };
+      for(const np of res.needPhotos){ if(ABORT)break; if(!np.uuid) continue; const files=await harvestPhotos(np);
+        const wh=await workeverHistory(np.uuid); if(wh&&(wh.history.length||wh.completedAt)) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:np.mos,history:wh.history,completedAt:wh.completedAt});
+        if(np.target==="live"&&np.portalId){ if(files.length){ await impf("/sla/workever/job-files",{jobId:np.portalId,files},files.length,[np.mos],files.map(f=>f.name)); if(ABORT)break; } }
+        else { for(const f of files){ archFb.push(f); if(archFb.length>=15){ await flushArch(); if(ABORT)break; } } if(ABORT)break; } }
+      if(!ABORT) await flushArch(); }
+    batch=[]; batchU={}; };
+  // Fetch pages in parallel WINDOWS (Workever caps a page at ~15 jobs, so 1514
+  // pages sequentially is slow) — grab WIN pages at once, ingest the window,
+  // then advance the resume marker (only after the batch is SAVED, so a failure
+  // re-processes rather than skips).
+  const WIN=6;
+  for(let pg=1; pg<=pages && !ABORT; pg+=WIN){
+    const nums=[]; for(let k=0;k<WIN && (pg+k)<=pages;k++) nums.push(pg+k);
+    const results=await Promise.all(nums.map(n=>wg("/api/v1/jobs-list?page="+n+"&size=50")));
+    for(const j of results){ if(!j) continue; for(const it of (j.items||[])){ batchU[it.identifier]=it.id; batch.push({ mos:it.identifier, uuid:it.id, name:it.name, status:sName[it.jobStatusId]||"", cost:it.totalCosts||0, priority:it.priority||"", siteCode:it.locationNameJob||"", siteName:it.customerName||"", postcode:it.postalJob||"", customerName:it.customerName||"", address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel||"" }); } }
+    await flush(); if(ABORT) break;
+    const done=Math.min(pages, pg+nums.length-1);
+    console.log("%cpage "+done+"/"+pages+"  live+"+T.updatedLive+" new+"+T.importedArchive+" arch+"+T.updatedArchive+" files+"+T.files+" skip+"+T.skipped+" err+"+T.errors,"color:#06c");
+  }
+  if(ABORT){
+    // Leave the resume marker in place so re-running picks up where it stopped.
+    console.log("%c⛔ STOPPED — a transfer failed","color:#c00;font-weight:bold",ABORT,T);
+    alert("⛔ Sync STOPPED — a job's files failed to transfer.\\n\\nReason: "+ABORT.reason+"\\nAffected MOS: "+ABORT.mos.join(", ")+"\\nExample file(s): "+(ABORT.sample||[]).join(", ")+"\\n\\nNothing was lost — progress is saved. Fix the issue (or just try again) and re-run to resume from here.\\n\\nDone so far — Live: "+T.updatedLive+"  New: "+T.importedArchive+"  Files: "+T.files);
+    return;
+  }
+  delete localStorage.mlSyncPage; delete localStorage.mlSyncRun;
+  console.log("%c✅ Sync complete","color:#0a0;font-weight:bold",T);
+  alert("Workever sync complete!\\n\\nLive jobs updated: "+T.updatedLive+"\\nNew jobs archived: "+T.importedArchive+"\\nArchive updated: "+T.updatedArchive+"\\nPhotos/docs brought in: "+T.files+"\\nSkipped (already current): "+T.skipped+"\\nErrors: "+T.errors+"\\n\\nOpen SLA Settings → Sync with Workever → Refresh change log to review.");
+})();`;
+}
+document.getElementById("wkCopy").addEventListener("click", async ()=>{
+  const msg = document.getElementById("wkCopyMsg"); const ta = document.getElementById("wkRunner");
+  const code = buildRunner(); ta.value = code; ta.style.display = "block";
+  try{ await navigator.clipboard.writeText(code); msg.textContent = "Copied ✓ — paste into the Workever console"; }
+  catch{ ta.select(); msg.textContent = "Select-all + copy the box below"; }
+});
+
+// Single-job test runner — syncs one job and verifies notes/signature/photos landed.
+function buildTestRunner(target){
+  const token = pTok(), api = PAPI;
+  return `/* Mostlane → Workever SINGLE-JOB TEST for ${target}. Paste into the mostlane.workever.app console. */
+(async () => {
+  const API=${JSON.stringify(api)}, TOKEN=${JSON.stringify(token)}, TARGET=${JSON.stringify(target)};
+  const wg = async u => { try{ const r=await fetch(u,{credentials:"include",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}}); return r.ok?r.json():null; }catch{ return null; } };
+  const post = (p,b) => fetch(API+p,{method:"POST",headers:{Authorization:"Bearer "+TOKEN,"Content-Type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json());
+  const pget = p => fetch(API+p,{headers:{Authorization:"Bearer "+TOKEN}}).then(r=>r.json());
+  const isUuid = /^[0-9a-f]{8}-/.test(TARGET);
+  let job=null;
+  if(isUuid){ const d=await wg("/api/v1/jobs/"+TARGET); if(d) job={uuid:TARGET, mos:d.identifier, name:d.name, description:d.description, status:d.jobStatus&&d.jobStatus.name, cost:d.totalAmount, siteName:d.customer&&d.customer.name, siteCode:d.site&&d.site.name, postcode:d.site&&d.site.address&&d.site.address.postalCode}; }
+  else { console.log("Searching Workever for "+TARGET+"…"); let pg=1,pages=1;
+    do{ const j=await wg("/api/v1/jobs-list?page="+pg+"&size=50"); if(!j)break; pages=j.totalPages;
+      const it=(j.items||[]).find(x=>String(x.identifier).toUpperCase()===TARGET.toUpperCase());
+      if(it){ const d=await wg("/api/v1/jobs/"+it.id); job={uuid:it.id, mos:it.identifier, name:it.name, description:d&&d.description, status:d&&d.jobStatus&&d.jobStatus.name, cost:it.totalCosts, siteCode:it.locationNameJob, siteName:it.customerName, postcode:it.postalJob, customerName:it.customerName, address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel}; break; }
+      pg++; }while(pg<=pages&&pg<=300);
+  }
+  if(!job){ alert("Job "+TARGET+" not found in Workever. Open the job and use its id from the URL instead."); return; }
+  // What Workever holds
+  let all=[],page=1,g=0; while(g++<12){ const d=await wg("/documents/"+job.uuid+"/job/photos"+(page>1?"?page="+page:"")); if(!d||!d.files||!d.files.length)break; all=all.concat(d.files); const pc=d.pagesCount||0; if(page>=pc)break; page++; }
+  const kindOf=f=>{ const t=(f.documentType||"").toLowerCase(), nm=((f.fileName||"")+" "+(f.description||"")).toLowerCase(); return /sign/.test(nm)?"signature":(t.indexOf("image/")===0?"photo":"document"); };
+  const W={photo:0,signature:0,document:0}; for(const f of all){ if(f&&f.links&&f.links.file) W[kindOf(f)]++; }
+  console.log("%cWorkever job "+job.mos+" — "+job.name,"font-weight:bold;font-size:13px");
+  console.log("  status="+job.status+"  notes="+(job.description?("yes ("+job.description.length+" chars)"):"no")+"  photos="+W.photo+"  signatures="+W.signature+"  docs="+W.document);
+  // Sync just this job
+  const RUN="wk-test-"+Date.now();
+  const ing = await post("/sla/workever/ingest",{runId:RUN, jobs:[job]});
+  console.log("  ingest →", ing.counts);
+  if(ing.needDetail&&ing.needDetail.length&&job.description) await post("/sla/workever/enrich",{items:[{mos:job.mos,description:job.description}]});
+  const np=(ing.needPhotos&&ing.needPhotos[0])||null;
+  const files=[], seen={}; for(const f of all){ const url=f&&f.links&&f.links.file; if(!url||seen[f.id])continue; seen[f.id]=1; const base=decodeURIComponent(String(url).split("/").pop().split("?")[0]); files.push({id:job.mos+":"+base, mos:job.mos, name:f.fileName||"", url, type:f.documentType||"", bytes:f.documentLength||0, kind:kindOf(f)}); }
+  let imp={imported:0,skipped:0,failed:0}, tgt="(none — job already up to date, portal keeps its own)";
+  if(files.length && np){
+    if(np.target==="live"&&np.portalId){ tgt="live job "+np.portalId; imp=(await post("/sla/workever/job-files",{jobId:np.portalId,files}))||imp; }
+    else { tgt="archive"; imp=(await post("/sla/archive/photos/import",{files}))||imp; }
+  }
+  console.log("  file import ("+tgt+") →", imp);
+  // Real status-change times from Workever's activity log
+  let compAt=null;
+  if(np){
+    const acts=await wg("/api/v1/jobs/"+job.uuid+"/activities"); const items=(acts&&acts.items)||[];
+    const ukToIso=(s)=>{ const m=String(s||"").match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})\\D+(\\d{2}):(\\d{2})/); if(!m)return null; const dd=+m[1],mo=+m[2],yy=+m[3],hh=+m[4],mi=+m[5]; const utc=Date.UTC(yy,mo-1,dd,hh,mi); const lastSun=(mon)=>{ const x=new Date(Date.UTC(yy,mon+1,0)); return x.getUTCDate()-x.getUTCDay(); }; const bstStart=Date.UTC(yy,2,lastSun(2),1), bstEnd=Date.UTC(yy,9,lastSun(9),1); const off=(utc>=bstStart&&utc<bstEnd)?60:0; return new Date(utc-off*60000).toISOString(); };
+    const history=[]; let maxAt=null; for(const a of items){ if(!a||!a.statusName)continue; const at=ukToIso(a.creationDateFormatted); if(!at)continue; history.push({status:a.statusName,at,by:a.createdByName||"Workever"}); if(!maxAt||at>maxAt)maxAt=at; if(/closed|complete|invoiced/i.test(a.statusName)&&(!compAt||at>compAt))compAt=at; } if(!compAt)compAt=maxAt;
+    console.log("  activities:", items.length, "→ completed", compAt);
+    if(history.length||compAt) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:job.mos,history,completedAt:compAt});
+  }
+  // Verify portal side (the right store for where the job landed)
+  const P={photo:0,signature:0,document:0};
+  if(np&&np.target==="live"&&np.portalId){ const jf=await pget("/sla/jobs/"+np.portalId+"/files"); P.photo=((jf&&jf.files)||[]).length; }
+  else { const pf=await pget("/sla/archive/files?mos="+encodeURIComponent(job.mos)); for(const f of ((pf&&pf.files)||[])){ P[f.kind]=(P[f.kind]||0)+1; } }
+  console.log("%cPortal now holds: photos="+P.photo+(np&&np.target==="live"?" (+signature/docs on the job)":" signatures="+P.signature+" docs="+P.document),"font-weight:bold");
+  // Plain tick-by-tick report — no code, no JSON. ✅ done · ❌ failed · ➖ nothing to do.
+  const totalW=W.photo+W.signature+W.document;
+  const liveT = np && np.target==="live";
+  const filesOk = np ? (imp.failed===0 && (imp.imported+imp.skipped)>=totalW) : true;
+  const L=[]; let fail=false;
+  const c=ing.counts;
+  if(c.updatedLive) L.push("✅ Job updated in the portal (was Pending → now marked done)");
+  else if(c.importedArchive) L.push("✅ Imported into the Job Archive");
+  else if(c.updatedArchive) L.push("✅ Status updated in the Job Archive");
+  else if(c.skipped) L.push("➖ Already up to date in the portal — left untouched");
+  else { L.push("❌ Job was NOT matched or updated"); fail=true; }
+  if(!job.description) L.push("➖ Notes: none in Workever");
+  else if(!np) L.push("➖ Notes: already in the portal");
+  else L.push("✅ Notes transferred");
+  const rep=(label,w,pc,verifiable)=>{
+    if(w===0){ L.push("➖ "+label+": none in Workever"); return; }
+    if(!np){ L.push("➖ "+label+" ("+w+"): job already current, portal kept its own"); return; }
+    if(verifiable){ const ok=pc>=w; L.push((ok?"✅":"❌")+" "+label+": "+pc+" of "+w+" now in the portal"); if(!ok)fail=true; }
+    else { L.push((filesOk?"✅":"❌")+" "+label+": "+w+" transferred"); if(!filesOk)fail=true; }
+  };
+  rep("Photos", W.photo, P.photo, true);
+  rep("Signature", W.signature, P.signature, !liveT);
+  rep("Documents", W.document, P.document, !liveT);
+  if(np) L.push((compAt?"✅":"➖")+" Status times from Workever"+(compAt?": completed "+new Date(compAt).toLocaleString("en-GB"):" (none found)"));
+  if(np && totalW>0){ if(imp.failed>0){ L.push("❌ "+imp.failed+" file(s) failed to store"); fail=true; } else L.push("✅ No file transfers failed"); }
+  const overall = fail ? "❌ FAIL" : "✅ PASS";
+  console.log("%c"+overall+"  —  "+job.mos+"  ("+job.name+")","color:"+(fail?"#c00":"#0a0")+";font-weight:bold;font-size:16px");
+  L.forEach(l=>console.log("   "+l));
+  alert("TEST "+overall+"\\n\\nJob "+job.mos+" — "+job.name+"\\nWorkever status: "+job.status+"\\n\\n"+L.join("\\n"));
+})();`;
+}
+document.getElementById("wkTestBtn").addEventListener("click", async ()=>{
+  const msg = document.getElementById("wkTestMsg"), ta = document.getElementById("wkTestRunner");
+  const mos = (document.getElementById("wkTestMos").value||"").trim();
+  if(!mos){ msg.textContent = "Enter a MOS number or job id first."; return; }
+  const code = buildTestRunner(mos); ta.value = code; ta.style.display = "block";
+  try{ await navigator.clipboard.writeText(code); msg.textContent = "Copied ✓ — paste into the Workever console"; }
+  catch{ ta.select(); msg.textContent = "Select-all + copy the box below"; }
+});
+
+function renderWkSummary(lr){
+  if(!lr || !lr.counts){ document.getElementById("wkSummary").textContent=""; return; }
+  const c = lr.counts;
+  document.getElementById("wkSummary").innerHTML =
+    `<b>Last run:</b> ${wkEsc(lr.updatedAt||"")}<br>`+
+    `Live jobs updated <b>${c.updatedLive||0}</b> · New archived <b>${c.importedArchive||0}</b> · Archive updated <b>${c.updatedArchive||0}</b> · Skipped ${c.skipped||0} · Errors ${c.errors||0}`;
+}
+async function wkLoadLog(){
+  const box = document.getElementById("wkLog"); box.textContent = "Loading…";
+  try{
+    const j = await pFetch("/sla/workever/log?limit=500").then(r=>r.json());
+    if(j.lastrun) renderWkSummary(j.lastrun);
+    const rows = j.log || [];
+    if(!rows.length){ box.innerHTML = '<span class="muted">No changes logged yet.</span>'; return; }
+    const badge = a => ({"update-live":"#16a34a","import-archive":"#2563eb","update-archive":"#0ea5e9","error":"#ef4444"}[a]||"#64748b");
+    box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="text-align:left;color:#64748b"><th style="padding:3px 6px">Action</th><th style="padding:3px 6px">MOS</th><th style="padding:3px 6px">Ref/name</th><th style="padding:3px 6px">Change</th></tr>
+      ${rows.map(r=>`<tr style="border-top:1px solid #eef2f7">
+        <td style="padding:3px 6px"><span style="color:#fff;background:${badge(r.action)};border-radius:6px;padding:1px 6px;font-size:10.5px;font-weight:700">${wkEsc(r.action)}</span></td>
+        <td style="padding:3px 6px">${wkEsc(r.mos)}</td>
+        <td style="padding:3px 6px">${wkEsc(r.note||r.ref)}</td>
+        <td style="padding:3px 6px">${r.from_status?wkEsc(r.from_status)+" → ":""}${wkEsc(r.to_status)}</td>
+      </tr>`).join("")}</table>`;
+  }catch(e){ box.textContent = "Couldn't load the log."; }
+}
+document.getElementById("wkLoad").addEventListener("click", wkLoadLog);
+document.getElementById("wkReset").addEventListener("click", async ()=>{
+  if(!(window.MLUI? await MLUI.confirm("Clear the change log and run counter?",{danger:true}) : confirm("Clear the change log?"))) return;
+  await pFetch("/sla/workever/reset",{method:"POST"}); wkLoadLog(); renderWkSummary(null);
+});
+
+wkLoadConfig();
 </script>
 </body>
 </html>

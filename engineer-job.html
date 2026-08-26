@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Job — Mostlane</title>
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
-  <script src="sla-jobedit.js?v=19"></script>
+  <script src="sla-jobedit.js?v=21"></script>
   <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
@@ -50,6 +50,21 @@
     .ph.up{outline:2px solid var(--amber,#f59e0b);outline-offset:-2px}
     @keyframes uppulse{0%,100%{opacity:.55}50%{opacity:1}}
     .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
+    /* Site-audit checklist */
+    .au-item{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--card)}
+    .au-item.au-ok{border-color:#58b784;background:color-mix(in srgb,#58b784 8%,var(--card))}
+    .au-h{display:flex;align-items:flex-start;gap:9px}
+    .au-n{flex:none;width:24px;height:24px;border-radius:999px;background:var(--accent);color:#fff;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+    .au-tx{flex:1;font-size:15px;font-weight:600;line-height:1.35}
+    .au-badge{flex:none;align-self:center;background:#e6f4ec;color:#1f7a44;border:1px solid #a6dcbd;border-radius:999px;font-size:11px;font-weight:700;padding:2px 9px}
+    .au-refs{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0 2px}
+    .au-lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+    .au-ref,.au-done{width:60px;height:60px;border-radius:10px;object-fit:cover;border:1px solid var(--line);cursor:pointer;background:#eef2f6}
+    .au-done{border-color:#58b784}
+    .au-foot{display:flex;align-items:center;gap:10px;margin-top:10px}
+    .au-add{background:var(--accent);color:#fff;border:none}
+    .au-tick{font-size:22px;color:#1f7a44}
+    .au-upl{color:var(--amber,#b45309);font-weight:600;font-size:14px}
     .seg{display:flex;background:var(--chip);border-radius:11px;padding:4px;gap:4px;margin-top:12px}
     .seg button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:650;font-size:13px;padding:8px 0;border-radius:8px;cursor:pointer}
     .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(16,32,58,.12)}
@@ -260,6 +275,9 @@
   // Per-job gates. Projects default to no Risk Assessment and no customer
   // signature; an explicit flag on the job wins. Everything else defaults to both.
   function jobIsProject(){ return /^p\d/i.test(String((job&&job.siteCode)||"")) || /project/i.test(String((job&&(job.storeType||job.client))||"")); }
+  // Site-audit job: a checklist of items, each needing ONE completion photo.
+  function jobIsAudit(){ return !!(job && Array.isArray(job.auditItems) && job.auditItems.length); }
+  function auditOutstanding(){ return (job&&job.auditItems||[]).filter(function(it){ return !(it && it.done && it.donePhoto); }).length; }
   function raRequired(){ return (job&&job.requiresRA!==undefined)? !!job.requiresRA : !jobIsProject(); }
   function sigRequired(){ return (job&&job.requiresSignature!==undefined)? !!job.requiresSignature : !jobIsProject(); }
   function photoRequired(){ return (job&&job.requiresPhoto!==undefined)? !!job.requiresPhoto : !jobIsProject(); }
@@ -331,7 +349,8 @@
       h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
     }
     var fs = !!(job && job.firestopping);
-    if(!fs){
+    var au = jobIsAudit();
+    if(!fs && !au){
       h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
       h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
       h+='<div class="hint">Pick when the photo was taken, then add it.</div>';
@@ -343,11 +362,15 @@
         +'<span id="hqStatus" style="font-size:12px;color:#8a97a6;"></span></div>';
       h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
     }
-    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+(fs?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
+    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     if(fs){
       // Firestopping jobs complete via the RIA form (per-seal photos + products +
       // a signed declaration) — the shared component handles it + the download.
       h+='<div class="card"><div id="firestopHost"></div></div>';
+    } else if(au){
+      // Site-audit job: a checklist — each item needs one completion photo.
+      h+='<div class="card"><div class="sec-h"><span class="t">Audit checklist</span><span class="t" id="auditCount"></span></div><div id="auditList"></div><input type="file" id="auditFile" accept="image/*" capture="environment" style="display:none"></div>';
+      h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
     } else {
       h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
       h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
@@ -401,6 +424,9 @@
     // Firestopping jobs are completed via the RIA panel, not the status grid —
     // leave only the "start work" statuses here.
     if(job && job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
+    // Site-audit jobs: slim set — Travelling · In Progress · Complete (Complete is
+    // gated on every checklist item having its photo).
+    if(jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="Complete"; });
     $("statusGrid").innerHTML=list.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
     [].forEach.call($("statusGrid").querySelectorAll(".sc"),function(el){ el.onclick=function(){ pick(el.dataset.n); }; });
   }
@@ -447,6 +473,8 @@
     // Investigate-only jobs have relaxed gates — any status (incl. Quote / Complete)
     // can be set with nothing required (findings go in the note if he adds one).
     if(job && job.investigateOnly) return [];
+    // Site-audit job: Complete needs every checklist item photographed.
+    if(jobIsAudit()){ if(chosen==="Complete"){ var n=auditOutstanding(); return n? ["a completion photo on "+n+" item"+(n===1?"":"s")] : []; } return null; }
     if(chosen==="Complete"){var m=[];if(noteRequired() && ($("note").value||"").trim().length<15)m.push("a completion note");if(photoRequired() && !photos.some(function(p){return p.stage==="After";}))m.push("a completion photo (use the After tab)");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
     if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
     if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photoRequired() && photos.length<1)m.push("a photo");if(sigRequired() && !signed)m.push("the customer's signature");return m;}
@@ -485,9 +513,10 @@
 
   function wire(){
     var fs = !!(job && job.firestopping);
+    var au = jobIsAudit();
     $("backBtn").onclick=function(){ location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
-    if(!fs){
+    if(!fs && !au){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
       $("fileInput").addEventListener("change",uploadPhotos);
       wireHqToggle();
@@ -495,6 +524,12 @@
       $("note").addEventListener("input",function(){ saveNoteDraft(); refresh(); });
       $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
       $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
+    }
+    if(au){
+      $("auditFile").addEventListener("change", onAuditPhoto);
+      renderAuditList();
+    }
+    if(!fs){   // the completion slider exists for standard AND audit jobs (not firestop)
       var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
       knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
       knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
@@ -517,19 +552,14 @@
       onComplete: function(){ toast("Firestopping job completed"); setTimeout(function(){ location.href=backTo; }, 1200); }
     });
   }
-  async function fillPoButton(){
+  function fillPoButton(){
+    // Opens the in-portal PO raise form with the job details on the URL so the
+    // PO ties to this job (job_id) — no longer the old standalone PO worker.
     var btn=$("poBtn"); if(!btn) return;
-    try{
-      var t=localStorage.getItem("mostlaneToken");
-      var r=await fetch(MOSTLANE_API+"/po-config",{headers:t?{"Authorization":"Bearer "+t}:{}});
-      var c=await r.json().catch(function(){return{};});
-      if(r.ok&&c.ok&&c.url){
-        var href=c.url;
-        try{ var payload={jobRef:job.helpdeskRef||job.id,jobId:job.id,site:job.siteName||job.siteCode||"",address:[job.address,job.postcode].filter(Boolean).join(", "),description:job.description||"",by:getUser()};
-          href += (href.indexOf("#")>=0?"&":"#")+"mlpo="+btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }catch(e){}
-        btn.style.display=""; btn.onclick=function(){ location.href=href; };
-      }
-    }catch(e){}
+    var href="po-raise.html";
+    try{ var payload={jobRef:job.helpdeskRef||job.id,jobId:job.id,site:job.siteName||job.siteCode||"",address:[job.address,job.postcode].filter(Boolean).join(", "),description:job.description||"",by:getUser()};
+      href += "#mlpo="+btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }catch(e){}
+    btn.style.display=""; btn.onclick=function(){ location.href=href; };
   }
   function setupOfficeEdit(){
     // Office-only control — a field engineer never gets it, even with an SLAAdmin
@@ -646,15 +676,27 @@
           }
           var form=new FormData(); form.append("file", upBlob, it.filename||"photo.jpg");
           if(it.thumb) form.append("thumb", it.thumb, "thumb.jpg");
-          var r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/files?filename="+encodeURIComponent(it.filename)+"&stage="+encodeURIComponent(it.stage),{method:"POST",body:form});
-          if(r && r.ok){ await PQ.del(it.id); anyOk=true; }
-          else { throw new Error("bad status "+(r&&r.status)); }   // leave queued, retry
+          var r;
+          if(it.kind==="audit"){
+            // Site-audit completion photo → marks the item done server-side.
+            form.append("itemId", it.itemId); form.append("stage","done");
+            r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/audit-photo",{method:"POST",body:form});
+            if(r && r.ok){ var jr=await r.json().catch(function(){return{};});
+              var item=(job.auditItems||[]).find(function(x){return x.id===it.itemId;});
+              if(item){ item.done=true; item.donePhoto=jr.key||"local"; item.donePhotoUrl={url:jr.url,thumb:jr.thumb}; }
+              await PQ.del(it.id); anyOk=true;
+            } else { throw new Error("bad status "+(r&&r.status)); }
+          } else {
+            r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/files?filename="+encodeURIComponent(it.filename)+"&stage="+encodeURIComponent(it.stage),{method:"POST",body:form});
+            if(r && r.ok){ await PQ.del(it.id); anyOk=true; }
+            else { throw new Error("bad status "+(r&&r.status)); }   // leave queued, retry
+          }
         }catch(e){ /* keep it queued; retry later with backoff */ }
       }
     } finally { _pqFlushing=false; }
     await loadPending();
-    try{ await loadPhotos(); }catch(e){}
-    drawPhotos(); refresh();
+    if(jobIsAudit()){ renderAuditList(); refresh(); }
+    else { try{ await loadPhotos(); }catch(e){} drawPhotos(); refresh(); }
     // Reschedule with EXPONENTIAL BACKOFF + jitter. A photo that keeps failing
     // (weak signal truncating the upload) must NOT re-send every 15s — that
     // turned one bad photo into a request storm. 15s → 30s → 1m → 2m → 4m → 5m
@@ -764,6 +806,58 @@
   function saveNoteDraft(){ try{ var v=$("note")?$("note").value:""; if(v&&v.trim()) localStorage.setItem(noteKey(), v); else localStorage.removeItem(noteKey()); }catch(e){} }
   function restoreNoteDraft(){ try{ var el=$("note"); if(!el) return; var d=localStorage.getItem(noteKey()); if(d && !el.value){ el.value=d; } }catch(e){} }
   function clearNoteDraft(){ try{ localStorage.removeItem(noteKey()); }catch(e){} }
+
+  /* ── Site-audit checklist ──────────────────────────────────────────────────
+     One job, many items. Each item shows the office's reference photo(s) + text,
+     and the engineer adds ONE completion photo to tick it off. Completion photos
+     go through the SAME durable queue as normal photos (kind:"audit"), so they
+     survive weak signal and are never lost. */
+  function auditPendingIds(){ var s={}; (pendingPhotos||[]).forEach(function(p){ if(p.kind==="audit") s[p.itemId]=true; }); return s; }
+  function renderAuditList(){
+    var host=$("auditList"); if(!host) return;
+    var items=(job&&job.auditItems)||[]; var pend=auditPendingIds();
+    var doneCount=items.filter(function(it){return it.done&&it.donePhoto;}).length;
+    var cc=$("auditCount"); if(cc) cc.textContent=items.length? (doneCount+" / "+items.length+" done") : "";
+    host.innerHTML=items.map(function(it,i){
+      var refs=(it.refPhotoUrls||[]).map(function(p){ return '<img class="au-ref" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy">'; }).join("");
+      var pending=pend[it.id] && !(it.done&&it.donePhoto);
+      var doneImg = (it.done&&it.donePhoto&&it.donePhotoUrl) ? '<img class="au-done" data-full="'+esc(it.donePhotoUrl.url||"")+'" src="'+esc(it.donePhotoUrl.thumb||it.donePhotoUrl.url||"")+'" alt="">' : (it.done&&it.donePhoto ? '<span class="au-tick">✓</span>' : '');
+      var action = (it.done&&it.donePhoto)
+        ? '<button class="btn line au-redo" data-redo="'+esc(it.id)+'">Redo photo</button>'
+        : (pending ? '<span class="au-upl">⏳ Uploading…</span>'
+                   : '<button class="btn au-add" data-add="'+esc(it.id)+'">📷 Add completion photo</button>');
+      return '<div class="au-item'+((it.done&&it.donePhoto)?' au-ok':'')+'">'+
+        '<div class="au-h"><span class="au-n">'+(i+1)+'</span><div class="au-tx">'+esc(it.text||"")+'</div>'+((it.done&&it.donePhoto)?'<span class="au-badge">Done</span>':'')+'</div>'+
+        (refs?'<div class="au-refs"><span class="au-lbl">Reference</span>'+refs+'</div>':'')+
+        '<div class="au-foot">'+doneImg+action+'</div>'+
+      '</div>';
+    }).join("") || '<div class="hint">No items on this audit.</div>';
+    [].forEach.call(host.querySelectorAll("[data-add]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-add")); }; });
+    [].forEach.call(host.querySelectorAll("[data-redo]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-redo")); }; });
+    [].forEach.call(host.querySelectorAll(".au-ref,.au-done"),function(im){ im.onclick=function(){ var f=im.getAttribute("data-full"); if(f) openAuditImg(f); }; });
+  }
+  var _auItem=null;
+  function pickAuditPhoto(itemId){ _auItem=itemId; $("auditFile").value=""; $("auditFile").click(); }
+  async function onAuditPhoto(e){
+    var f=e.target.files && e.target.files[0]; e.target.value=""; if(!f||!_auItem) return;
+    var itemId=_auItem; _auItem=null;
+    var th=null; try{ th=await shrinkImage(f,400,0.7); }catch(_){}
+    var full=null; try{ full=await shrinkImage(f,1600,0.72); }catch(_){}
+    var rec={ id:opId(), kind:"audit", jobId:jobId, itemId:itemId, filename:"done.jpg", blob:(full||f), thumb:th, at:Date.now() };
+    try{ await PQ.add(rec); }
+    catch(err){
+      // IndexedDB unavailable — direct upload so the photo isn't dropped.
+      try{ var form=new FormData(); form.append("file",(full||f),"done.jpg"); if(th) form.append("thumb",th,"thumb.jpg"); form.append("itemId",itemId); form.append("stage","done");
+        var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/audit-photo",{method:"POST",body:form});
+        if(r&&r.ok){ var jr=await r.json().catch(function(){return{};}); var item=(job.auditItems||[]).find(function(x){return x.id===itemId;}); if(item){ item.done=true; item.donePhoto=jr.key||"local"; item.donePhotoUrl={url:jr.url,thumb:jr.thumb}; } }
+      }catch(e2){ toast("⚠ Couldn't save that photo — check storage"); }
+    }
+    await loadPending(); renderAuditList(); refresh();
+    flushPhotoQueue();
+    toast("Completion photo saved — uploading…");
+  }
+  function openAuditImg(url){ var lb=$("lightbox"); if(!lb){ window.open(url,"_blank"); return; } var im=$("lxImg"); if(im) im.src=url; var bar=$("lxStage"); if(bar){ bar.classList.remove("show"); bar.innerHTML=""; } lb.classList.add("show"); }
+
   var finishing=false;
   async function doFinish(){
     if(finishing) return;
@@ -771,7 +865,7 @@
     finishing=true;
     var slide=$("slide"); slide.classList.add("go");
     try{
-      if(chosen==="Complete"){ $("slidetxt").textContent="Completing…"; await patchJob({status:"Complete",note:$("note").value.trim()}); clearNoteDraft(); $("slidetxt").textContent="Completed ✓"; toast("Job completed"); }
+      if(chosen==="Complete"){ $("slidetxt").textContent="Completing…"; await patchJob({status:"Complete",note:($("note")?$("note").value.trim():"")}); clearNoteDraft(); $("slidetxt").textContent="Completed ✓"; toast("Job completed"); }
       else if(chosen==="On Hold"){ $("slidetxt").textContent="Sending…"; await patchJob({status:"On Hold",hold:{reason:ntrim("holdReason"),needs:ntrim("holdNeeds")}}); $("slidetxt").textContent="Sent for approval ✓"; toast("Sent to the office for approval"); }
       else if(chosen==="Quote"){ $("slidetxt").textContent="Submitting…"; await patchJob({status:"Quote",note:$("note").value.trim(),quote:collectQuote()}); clearNoteDraft(); $("slidetxt").textContent="Quote submitted ✓"; toast("Quote submitted"); }
       setTimeout(function(){ location.href=backTo; },1200);

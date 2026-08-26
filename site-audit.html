@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Site Audit</title>
+<script src="/portal-config.js?v=17"></script>
+<link rel="stylesheet" href="/portal.css?v=1">
+<style>
+  :root{ --nav:#003366; }
+  body{ font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:var(--ml-bg,#f4f6f9); color:#0f1720; margin:0; }
+  header.page{ background:var(--nav); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+  header.page h1{ font-size:19px; margin:0; font-weight:700; }
+  .wrap{ max-width:760px; margin:0 auto; padding:16px 14px 80px; }
+  .card{ background:#fff; border:1px solid #e3e8ee; border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+  .card h2{ font-size:15px; margin:0 0 12px; color:var(--nav); }
+  label.f{ display:block; font-size:12.5px; font-weight:600; color:#475467; margin:10px 0 4px; }
+  input[type=text],input[type=search],input[type=datetime-local],input[type=number],select,textarea{
+    width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #cdd6e0; border-radius:10px; font-size:15px; font-family:inherit; background:#fff; }
+  textarea{ resize:vertical; min-height:52px; }
+  .row2{ display:flex; gap:10px; flex-wrap:wrap; } .row2 > *{ flex:1; min-width:140px; }
+  .btn{ appearance:none; border:1px solid #cdd6e0; background:#fff; color:#0f1720; border-radius:999px; padding:9px 15px; font-size:14px; font-weight:600; cursor:pointer; }
+  .btn.primary{ background:var(--nav); border-color:var(--nav); color:#fff; }
+  .btn.primary:disabled{ opacity:.5; cursor:not-allowed; }
+  .btn.ghost{ background:#f4f7fb; }
+  .btn.sm{ padding:6px 11px; font-size:13px; }
+  /* audit items */
+  #items{ display:flex; flex-direction:column; gap:12px; }
+  .item{ border:1px solid #e3e8ee; border-radius:12px; padding:12px; background:#fbfcfe; position:relative; }
+  .item .idx{ position:absolute; top:-9px; left:12px; background:var(--nav); color:#fff; font-size:11px; font-weight:700; border-radius:999px; padding:2px 9px; }
+  .item .del{ position:absolute; top:8px; right:8px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; width:28px; height:28px; cursor:pointer; font-size:15px; line-height:1; }
+  .item textarea{ margin-top:6px; }
+  .photorow{ display:flex; align-items:center; gap:10px; margin-top:10px; }
+  .thumb{ width:58px; height:58px; border-radius:10px; object-fit:cover; border:1px solid #d7dee6; background:#eef2f6; flex:none; }
+  .thumb.empty{ display:flex; align-items:center; justify-content:center; color:#94a3b8; font-size:20px; }
+  .muted{ color:#667085; font-size:12.5px; }
+  #statusText{ font-size:14px; margin-top:6px; min-height:18px; } #statusText.err{ color:#b91c1c; }
+  .success{ display:none; background:#e6f4ec; border:1px solid #58b784; border-radius:12px; padding:14px; text-align:center; }
+  .success a{ color:var(--nav); font-weight:700; }
+  .drop{ border:2px dashed #c3d0de; border-radius:12px; padding:16px; text-align:center; color:#667085; font-size:13.5px; background:#f8fbff; }
+  .drop.hot{ border-color:var(--nav); background:#eef4fb; }
+  .bar{ position:sticky; bottom:0; background:linear-gradient(#fff0,#fff 32%); padding:14px 0 6px; display:flex; gap:10px; justify-content:flex-end; }
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="sla-main.html" title="Back">‹ Back</a>
+  <h1>🔍 Site Audit</h1>
+</header>
+
+<div class="wrap">
+  <div id="gateMsg" class="card" style="display:none;">Checking access…</div>
+
+  <div id="builder" style="display:none;">
+    <!-- Import (Phase 2 placeholder — wired once a sample report is supplied) -->
+    <div class="card">
+      <h2>Start an audit</h2>
+      <div class="drop" id="dropZone">
+        📄 <b>Drag a Site Audit Pro PDF here</b> (or tap) to build the audit automatically
+        <div class="muted" id="dropHint" style="margin-top:4px;">It reads each issue's text and photo and fills the checklist below — then pick the site &amp; engineer and create.</div>
+      </div>
+      <input type="file" id="reportPick" accept="application/pdf,.pdf" style="display:none;">
+    </div>
+
+    <!-- Site + job basics -->
+    <div class="card">
+      <h2>Where &amp; who</h2>
+      <label class="f" for="siteSearch">Site</label>
+      <input type="search" id="siteSearch" placeholder="Type a site name or number…" autocomplete="off">
+      <select id="siteSelect" size="1" style="margin-top:8px; display:none;"></select>
+      <div id="sitePicked" class="muted" style="margin-top:6px;"></div>
+
+      <label class="f" for="auditTitle">Audit title (optional)</label>
+      <input type="text" id="auditTitle" placeholder="e.g. Fire door remedial audit — High Street">
+
+      <div class="row2">
+        <div>
+          <label class="f" for="assignedTo">Assign to engineer</label>
+          <select id="assignedTo"><option value="">Select engineer…</option></select>
+        </div>
+        <div>
+          <label class="f" for="scheduledAt">Schedule (optional)</label>
+          <input type="datetime-local" id="scheduledAt">
+        </div>
+      </div>
+    </div>
+
+    <!-- Audit items -->
+    <div class="card">
+      <h2>Audit items <span class="muted" id="itemCount"></span></h2>
+      <div class="muted" style="margin-bottom:10px;">Each item becomes a task on <b>one</b> job. In the field, the engineer adds a completion photo to tick each one off.</div>
+      <div id="items"></div>
+      <div style="margin-top:12px;"><button type="button" class="btn ghost" id="addItem">➕ Add item</button></div>
+    </div>
+
+    <div id="statusText"></div>
+    <div class="bar">
+      <button type="button" class="btn" id="clearBtn">Clear</button>
+      <button type="button" class="btn primary" id="createBtn">Create job for engineer</button>
+    </div>
+
+    <div class="card success" id="success">
+      <div style="font-size:16px; font-weight:700; margin-bottom:6px;">✅ Audit job created</div>
+      <div id="successMsg" class="muted" style="margin-bottom:10px;"></div>
+      <a id="viewJobLink" href="#">Open the job →</a>
+      <div style="margin-top:12px;"><button type="button" class="btn ghost" id="anotherBtn">Start another audit</button></div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="filePick" accept="image/*" capture="environment" style="display:none;">
+
+<script>
+const API_BASE  = "https://mostlane-sla.jamie-def.workers.dev";      // bridged → /sla
+const SITES_API = "https://mostlane-sites.jamie-def.workers.dev";
+const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function loggedInUser(){ return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||""; }
+function hasSLAAdmin(){ try{ const p=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }catch{ return false; } }
+
+/* Shrink a chosen image to a ~1600px JPEG (full) + a 400px thumb, so uploads
+   are small and the grid loads fast. */
+function shrinkImage(file, maxDim, quality){
+  return new Promise(resolve=>{
+    if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
+    const img=new Image(), u=URL.createObjectURL(file);
+    img.onload=()=>{ URL.revokeObjectURL(u);
+      let w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+      w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+      const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+      cv.getContext("2d").drawImage(img,0,0,w,h);
+      cv.toBlob(b=>resolve(b),"image/jpeg",quality||0.72);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(u); resolve(null); };
+    img.src=u;
+  });
+}
+
+/* ---- audit items model ---- */
+let items = [];   // [{text, full:Blob|null, thumb:Blob|null, preview:dataURL|null}]
+function addItem(text){ items.push({ text:text||"", full:null, thumb:null, preview:null }); renderItems(); }
+function renderItems(){
+  const host=$("items"); host.innerHTML="";
+  items.forEach((it,i)=>{
+    const el=document.createElement("div"); el.className="item";
+    el.innerHTML =
+      '<span class="idx">Item '+(i+1)+'</span>'+
+      '<button type="button" class="del" title="Remove" data-del="'+i+'">×</button>'+
+      '<textarea placeholder="What needs doing? (this is the task the engineer sees)" data-text="'+i+'">'+esc(it.text)+'</textarea>'+
+      '<div class="photorow">'+
+        (it.preview ? '<img class="thumb" src="'+it.preview+'" alt="">' : '<div class="thumb empty">📷</div>')+
+        '<button type="button" class="btn sm ghost" data-pic="'+i+'">'+(it.preview?"Change reference photo":"Add reference photo")+'</button>'+
+        (it.preview?'<button type="button" class="btn sm" data-rmpic="'+i+'">Remove</button>':'')+
+      '</div>';
+    host.appendChild(el);
+  });
+  $("itemCount").textContent = items.length ? "· "+items.length : "";
+  // wire
+  host.querySelectorAll("[data-text]").forEach(t=>t.addEventListener("input",e=>{ items[+e.target.dataset.text].text=e.target.value; }));
+  host.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{ items.splice(+b.dataset.del,1); renderItems(); }));
+  host.querySelectorAll("[data-pic]").forEach(b=>b.addEventListener("click",()=>pickPhoto(+b.dataset.pic)));
+  host.querySelectorAll("[data-rmpic]").forEach(b=>b.addEventListener("click",()=>{ const i=+b.dataset.rmpic; items[i].full=items[i].thumb=items[i].preview=null; renderItems(); }));
+}
+let picIndex=-1;
+function pickPhoto(i){ picIndex=i; $("filePick").value=""; $("filePick").click(); }
+$("filePick").addEventListener("change", async e=>{
+  const f=e.target.files && e.target.files[0]; if(!f || picIndex<0) return;
+  const it=items[picIndex];
+  it.full = await shrinkImage(f,1600,0.72) || f;
+  it.thumb = await shrinkImage(f,400,0.7);
+  it.preview = it.thumb ? URL.createObjectURL(it.thumb) : URL.createObjectURL(f);
+  renderItems();
+});
+
+/* ---- sites ---- */
+let allSites=[];
+async function loadSites(){
+  try{
+    const r=await fetch(SITES_API+"/get-sites?category=all&v="+Date.now());
+    const j=await r.json();
+    allSites=(j.sites||j||[]).map(s=>({ code:s.code||s.site_number||s.siteNumber||"", name:s.name||s.site_name||"", address:s.address||"", postcode:s.postcode||"", telephone:s.telephone||"", lat:s.lat, lon:s.lon, storeType:s.storeType||s.client||"" }));
+  }catch{ allSites=[]; }
+}
+let pickedSite=null;
+// Read the NAME first (that's what the office recognises); postcode next; the
+// site code demoted to a faint suffix rather than leading the row.
+function siteLabel(s){
+  const main=[s.name||("Site "+(s.code||"?")), s.postcode].filter(Boolean).join(" — ");
+  return s.code ? main+"   ·   "+s.code : main;
+}
+// Show sites sorted A→Z by name. Empty query = the WHOLE list (browse all);
+// typing filters across name / code / postcode / address. Options carry the
+// site's index (not its code) so blank-coded sites can't collide.
+function renderSiteOptions(q){
+  const sel=$("siteSelect");
+  let list=allSites.map((s,idx)=>({s,idx}));
+  const ql=(q||"").trim().toLowerCase();
+  if(ql) list=list.filter(o=>((o.s.name+" "+o.s.code+" "+o.s.postcode+" "+(o.s.address||"")).toLowerCase().includes(ql)));
+  list.sort((a,b)=>String(a.s.name||"").localeCompare(String(b.s.name||""), undefined, {sensitivity:"base"}));
+  sel.innerHTML="";
+  list.slice(0,800).forEach(o=>{ const op=document.createElement("option"); op.value=String(o.idx); op.textContent=siteLabel(o.s); sel.appendChild(op); });
+  sel.size=Math.min(12,Math.max(2,Math.min(list.length,12)));
+  sel.style.display=list.length?"block":"none";
+  return list.length;
+}
+function wireSiteSearch(){
+  const input=$("siteSearch"), sel=$("siteSelect");
+  input.placeholder="Tap to see every site, or type to filter…";
+  // Tapping the box (with nothing chosen) opens the full list to browse.
+  input.addEventListener("focus",()=>{ if(!pickedSite) renderSiteOptions(input.value); });
+  input.addEventListener("input",()=>{ pickedSite=null; $("sitePicked").textContent=""; renderSiteOptions(input.value); });
+  sel.addEventListener("change",()=>{
+    const s=allSites[+sel.value]; if(!s) return;
+    pickedSite=s; input.value=s.name||""; sel.style.display="none";
+    $("sitePicked").textContent="✓ "+[s.address,s.postcode,s.code?("code "+s.code):""].filter(Boolean).join(" · ");
+  });
+}
+
+/* ---- engineers ---- */
+async function loadEngineers(){
+  const sel=$("assignedTo");
+  try{
+    const r=await fetch(USERS_API+"?v="+Date.now()); const j=await r.json();
+    const users=(j.Users||[]).slice().sort(window.mlUserCmp||(()=>0));
+    sel.innerHTML='<option value="">Select engineer…</option>';
+    users.forEach(u=>{ if(u.StaffType==="office") return; const name=[u.FirstName,u.LastName].map(x=>(x==null?"":String(x)).trim()).filter(Boolean).join(" ")||u.Username; const o=document.createElement("option"); o.value=u.Username; o.textContent=name; sel.appendChild(o); });
+  }catch{ sel.innerHTML='<option value="">(couldn\'t load engineers)</option>'; }
+}
+
+/* ---- create ---- */
+async function createJob(){
+  const st=$("statusText"); st.className=""; st.textContent="";
+  if(!pickedSite){ st.className="err"; st.textContent="Pick a site first."; return; }
+  const filled=items.filter(it=>it.text.trim());
+  if(!filled.length){ st.className="err"; st.textContent="Add at least one audit item with a description."; return; }
+  const btn=$("createBtn"); btn.disabled=true; btn.textContent="Creating…";
+  const iso = $("scheduledAt").value ? new Date($("scheduledAt").value).toISOString() : null;
+  const payload = {
+    siteCode: pickedSite.code||undefined, siteName: pickedSite.name,
+    address: pickedSite.address||undefined, postcode: pickedSite.postcode||undefined,
+    telephone: pickedSite.telephone||undefined, lat: pickedSite.lat, lon: pickedSite.lon,
+    storeType: pickedSite.storeType||undefined,
+    description: ($("auditTitle").value.trim() || ("Site audit — "+pickedSite.name)),
+    assignedTo: $("assignedTo").value||undefined,
+    scheduledAt: iso||undefined,
+    auditItems: filled.map(it=>({ text: it.text.trim() })),
+    originator: loggedInUser()||undefined,
+    changedBy: loggedInUser()||undefined
+  };
+  try{
+    const res=await fetch(API_BASE+"/jobs",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||("HTTP "+res.status));
+    // Upload each reference photo to its item (match by order — server keeps order).
+    const created = data.auditItems||[];
+    st.textContent="Uploading reference photos…";
+    let up=0;
+    for(let i=0;i<filled.length;i++){
+      const it=filled[i], item=created[i]; if(!it.full || !item) continue;
+      const form=new FormData();
+      form.append("file", it.full, "ref.jpg");
+      if(it.thumb) form.append("thumb", it.thumb, "thumb.jpg");
+      form.append("itemId", item.id); form.append("stage","ref");
+      try{ await fetch(API_BASE+"/jobs/"+encodeURIComponent(data.id)+"/audit-photo",{method:"POST",body:form}); up++; }catch{}
+    }
+    $("builder").querySelectorAll(".card,.bar").forEach(n=>{ if(n.id!=="success") n.style.display="none"; });
+    const succ=$("success"); succ.style.display="block";
+    $("successMsg").textContent = data.helpdeskRef+" · "+filled.length+" item"+(filled.length===1?"":"s")+(up?(" · "+up+" reference photo"+(up===1?"":"s")):"");
+    $("viewJobLink").href="job-view.html?jobId="+encodeURIComponent(data.id);
+  }catch(err){
+    st.className="err"; st.textContent="❌ "+(err.message||"Couldn't create the job.");
+    btn.disabled=false; btn.textContent="Create job for engineer";
+  }
+}
+
+/* ---- import a Site Audit Pro PDF ----
+   Reads the PDF with PDF.js: parses each "Issue N" + its description, and crops
+   that issue's photo out of the rendered page (matched to the issue by vertical
+   position). Fills the builder for review — the office still picks the portal
+   site + engineer before creating. Falls back to text-only if a photo can't be
+   cropped, and never hard-fails: worst case it says "build it manually". */
+const PDFJS_BASE = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
+const PDFJS_FONTS = "https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/";
+function loadPdfjs(){
+  return new Promise((resolve,reject)=>{
+    if(window.pdfjsLib) return resolve(window.pdfjsLib);
+    const s=document.createElement("script"); s.src=PDFJS_BASE+"pdf.min.js";
+    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_BASE+"pdf.worker.min.js"; }catch(e){} resolve(window.pdfjsLib); };
+    s.onerror=()=>reject(new Error("pdf.js failed to load"));
+    document.head.appendChild(s);
+  });
+}
+function setDrop(html){ var d=$("dropHint"); if(d) d.innerHTML=html; }
+function mmul(A,B){ return [A[0]*B[0]+A[2]*B[1], A[1]*B[0]+A[3]*B[1], A[0]*B[2]+A[2]*B[3], A[1]*B[2]+A[3]*B[3], A[0]*B[4]+A[2]*B[5]+A[4], A[1]*B[4]+A[3]*B[5]+A[5]]; }
+function mapply(M,x,y){ return [M[0]*x+M[2]*y+M[4], M[1]*x+M[3]*y+M[5]]; }
+function cropCanvas(src, rx, ry, rw, rh, maxDim, q){
+  rx=Math.max(0,Math.floor(rx)); ry=Math.max(0,Math.floor(ry));
+  rw=Math.min(src.width-rx, Math.ceil(rw)); rh=Math.min(src.height-ry, Math.ceil(rh));
+  if(rw<=2||rh<=2) return Promise.resolve(null);
+  var s=Math.min(1, maxDim/Math.max(rw,rh));
+  var w=Math.max(1,Math.round(rw*s)), h=Math.max(1,Math.round(rh*s));
+  var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+  cv.getContext("2d").drawImage(src, rx,ry,rw,rh, 0,0,w,h);
+  return new Promise(res=>cv.toBlob(b=>res(b),"image/jpeg",q||0.72));
+}
+function matchSite(title){
+  if(!title || !allSites.length) return;
+  var q=String(title).toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+  if(q.length<3) return;
+  var hit=allSites.find(s=>{ var n=(s.name||"").toLowerCase(); return n.length>2 && (n.includes(q)||q.includes(n)); });
+  if(hit){ pickedSite=hit; $("siteSearch").value=hit.name||"";
+    $("sitePicked").textContent="✓ "+[hit.address,hit.postcode,hit.code?("code "+hit.code):""].filter(Boolean).join(" · ")+" — matched from the report; change it if wrong"; }
+}
+async function importReport(file){
+  if(!/\.pdf$/i.test(file.name||"") && file.type!=="application/pdf"){ setDrop("That's not a PDF — drop a Site Audit Pro PDF export."); return; }
+  setDrop("Reading report…");
+  var pdfjsLib;
+  try{ pdfjsLib=await loadPdfjs(); }catch(e){ setDrop("Couldn't load the PDF reader — check your connection and try again."); return; }
+  try{
+    var buf=await file.arrayBuffer();
+    var doc=await pdfjsLib.getDocument({ data:new Uint8Array(buf), standardFontDataUrl:PDFJS_FONTS }).promise;
+    var tsRe=/^\d{1,2}:\d{2}\s+\d{1,2}\/\d{1,2}\/\d{2,4}$/, pageRe=/^Page\s+\d+\s+of\s+\d+$/i, issRe=/^Issue\s+(\d+)$/i;
+    var coverTitle="", coverSub="", newItems=[];
+    for(var p=1;p<=doc.numPages;p++){
+      setDrop("Reading page "+p+" of "+doc.numPages+"…");
+      var page=await doc.getPage(p);
+      var vp=page.getViewport({scale:3});
+      var cv=document.createElement("canvas"); cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+      await page.render({ canvasContext:cv.getContext("2d"), viewport:vp }).promise;
+      var tc=await page.getTextContent();
+      if(p===1){ var ss=tc.items.map(i=>(i.str||"").trim()).filter(Boolean); coverTitle=ss[0]||""; coverSub=ss[1]||""; continue; }
+      // Issues (linear reading order) + the y of each "Issue N" label.
+      var issuesOnPage=[], cur=null;
+      tc.items.forEach(function(it){
+        var s=(it.str||"").trim(); if(!s) return;
+        if(tsRe.test(s)||pageRe.test(s)){ cur=null; return; }
+        var mm=s.match(issRe);
+        if(mm){ cur={num:+mm[1], parts:[], y:it.transform[5]}; issuesOnPage.push(cur); return; }
+        if(cur) cur.parts.push(s);
+      });
+      // Images with device-space bbox (track the CTM through the operator list).
+      var ops=await page.getOperatorList();
+      var ctm=[1,0,0,1,0,0], stack=[], crops=[];
+      for(var i=0;i<ops.fnArray.length;i++){
+        var fn=ops.fnArray[i], a=ops.argsArray[i];
+        if(fn===pdfjsLib.OPS.save) stack.push(ctm.slice());
+        else if(fn===pdfjsLib.OPS.restore) ctm=stack.pop()||[1,0,0,1,0,0];
+        else if(fn===pdfjsLib.OPS.transform) ctm=mmul(ctm,a);
+        else if(fn===pdfjsLib.OPS.paintImageXObject){
+          var uc=[[0,0],[1,0],[0,1],[1,1]].map(function(u){ return mapply(ctm,u[0],u[1]); });
+          var dev=uc.map(function(c){ return vp.convertToViewportPoint(c[0],c[1]); });
+          var xs=dev.map(d=>d[0]), ys=dev.map(d=>d[1]);
+          var rx=Math.min.apply(null,xs), ry=Math.min.apply(null,ys), rw=Math.max.apply(null,xs)-rx, rh=Math.max.apply(null,ys)-ry;
+          var uy=Math.max.apply(null,uc.map(c=>c[1]));
+          if(rw>40 && rh>40) crops.push({uy:uy, rx:rx, ry:ry, rw:rw, rh:rh});   // drop tiny icons/logos
+        }
+      }
+      issuesOnPage.sort((a,b)=>b.y-a.y);   // top of page first
+      crops.sort((a,b)=>b.uy-a.uy);
+      for(var k=0;k<issuesOnPage.length;k++){
+        var iss=issuesOnPage[k], text=iss.parts.join(" ").replace(/\s+/g," ").trim();
+        var cr=crops[k], full=null, thumb=null, preview=null;
+        if(cr){ try{ full=await cropCanvas(cv,cr.rx,cr.ry,cr.rw,cr.rh,1600,0.72); thumb=await cropCanvas(cv,cr.rx,cr.ry,cr.rw,cr.rh,420,0.7); if(thumb) preview=URL.createObjectURL(thumb); }catch(e){} }
+        if(!text && !full) continue;   // skip a truly empty issue (e.g. a blank last one)
+        newItems.push({ text:text||("Issue "+iss.num), full:full, thumb:thumb, preview:preview });
+      }
+    }
+    if(!newItems.length){ setDrop("Couldn't find any issues in that PDF. It may be a different format — build the audit manually below, or send the file over."); return; }
+    items=newItems; renderItems();
+    var t=[coverTitle,coverSub].filter(Boolean).join(" — "); if(t) $("auditTitle").value=t;
+    matchSite(coverTitle);
+    var photoN=newItems.filter(it=>it.full).length;
+    setDrop("✓ Imported <b>"+newItems.length+"</b> item"+(newItems.length===1?"":"s")+(photoN?(" with "+photoN+" photo"+(photoN===1?"":"s")):"")+" from “"+esc(coverTitle||file.name)+"”. Review below, pick the site &amp; engineer, then create the job.");
+    try{ window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }catch(e){}
+  }catch(err){ setDrop("Couldn't read that PDF — "+esc(err.message||"unknown error")+". You can still build the audit manually below."); }
+}
+
+/* ---- init ---- */
+(async function init(){
+  if(!hasSLAAdmin()){ $("gateMsg").style.display="block"; $("gateMsg").textContent="Site audits are for SLA admins. Redirecting…"; setTimeout(()=>location.replace("engineer-jobs.html"),1200); return; }
+  $("builder").style.display="block";
+  addItem(""); addItem("");
+  wireSiteSearch();
+  $("addItem").addEventListener("click",()=>addItem(""));
+  $("createBtn").addEventListener("click",createJob);
+  $("clearBtn").addEventListener("click",()=>{ items=[]; addItem(""); $("statusText").textContent=""; });
+  $("anotherBtn").addEventListener("click",()=>location.reload());
+  // Drag-and-drop OR tap to import a Site Audit Pro PDF.
+  const dz=$("dropZone");
+  ["dragover","dragenter"].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.add("hot"); }));
+  ["dragleave"].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.remove("hot"); }));
+  dz.addEventListener("drop",e=>{ e.preventDefault(); dz.classList.remove("hot"); var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) importReport(f); });
+  dz.addEventListener("click",()=>$("reportPick").click());
+  $("reportPick").addEventListener("change",e=>{ var f=e.target.files&&e.target.files[0]; e.target.value=""; if(f) importReport(f); });
+  await Promise.all([loadSites(), loadEngineers()]);
+})();
+</script>
+</body>
+</html>

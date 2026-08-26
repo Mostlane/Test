@@ -74,3 +74,6 @@ PUSH_CONTACT = "mailto:no-reply@mostlane-portal.com"
 #   HS_PLAN_TOKEN          (shared with the mostlane-hs worker as APP_TOKEN)
 #   VAPID_PRIVATE          (pairs with VAPID_PUBLIC above)
 #   JOBS_INBOUND_TOKEN     (shared with the Zapier job-intake zap)
+#   TUYA_ACCESS_ID         (yard gate — Tuya IoT project Access ID; MUST be a
+#                           SECRET, not a Text var, or a git deploy wipes it)
+#   TUYA_ACCESS_SECRET     (yard gate — Tuya IoT project Access Secret)

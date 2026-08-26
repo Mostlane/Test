@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=17"></script>
+  <script src="/portal-config.js?v=18"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>FRA Works Tracker</title>
@@ -9,8 +9,8 @@
   <script src="auth.js"></script>
 <style>
   :root{ --blue:#003b82; --line:#e2e8f0; --grey:#64748b; }
-  html,body{ margin:0; background:#eef1f5; color:#0f172a; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; }
-  .wrap{ max-width:1200px; margin:14px auto 60px; padding:0 12px; }
+  html,body{ margin:0; background:transparent; color:#0f172a; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; }
+  .wrap{ max-width:1440px; margin:14px auto 60px; padding:0 12px; }
   header.page{ display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap; }
   header.page h1{ font-size:19px; color:var(--blue); margin:0; }
   .sub{ color:var(--grey); font-size:13px; }
@@ -46,12 +46,28 @@
   td.num{ color:var(--grey); }
   td.site{ font-weight:600; white-space:nowrap; }
   td.pc{ white-space:nowrap; color:#334155; }
-  td.works{ min-width:280px; max-width:440px; line-height:1.4; color:#334155; }
+  td.works{ min-width:220px; max-width:330px; line-height:1.4; color:#334155; }
   td.nowrap{ white-space:nowrap; }
   .chip{ display:inline-block; font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:999px; color:#fff; white-space:nowrap; }
   .open-lnk{ color:#1d4ed8; font-weight:700; text-decoration:none; white-space:nowrap; }
   .muted{ color:var(--grey); }
   #empty{ text-align:center; color:var(--grey); padding:30px; }
+  tbody tr.clickable{ cursor:pointer; }
+
+  /* Office follow-up control */
+  td.follow{ min-width:220px; width:220px; }
+  .fu{ display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .fu-btn{ border:1px solid #cbd5e1; background:#fff; color:#475569; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap; }
+  .fu-btn:hover{ background:#f1f5f9; }
+  .fu-btn.on[data-s="quote_needed"]{ background:#f59e0b; border-color:#f59e0b; color:#fff; }
+  .fu-btn.on[data-s="quote_submitted"]{ background:#2563eb; border-color:#2563eb; color:#fff; }
+  .fu-btn.on[data-s="nfa"]{ background:#64748b; border-color:#64748b; color:#fff; }
+  .fu-quote{ display:flex; gap:6px; align-items:center; flex-basis:100%; margin-top:3px; font-size:11.5px; }
+  .fu-up{ color:#2563eb; font-weight:700; cursor:pointer; }
+  .fu-view{ color:#1d4ed8; font-weight:700; text-decoration:none; }
+  .fu-rm{ border:none; background:none; color:#ef4444; cursor:pointer; font-size:13px; padding:0 2px; }
+  .fu-meta{ color:var(--grey); font-size:10.5px; flex-basis:100%; }
+  .fu-ro{ font-size:11.5px; font-weight:700; }
 </style>
 </head>
 <body>
@@ -95,6 +111,13 @@ const MOSTLANE_API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.work
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function authFetch(url, init={}){ init.headers=new Headers(init.headers||{}); const t=localStorage.getItem("mostlaneToken"); if(t&&!init.headers.has("Authorization")) init.headers.set("Authorization","Bearer "+t); return fetch(url, init); }
+function perms(){ try{ return JSON.parse(localStorage.getItem("mostlanePermissions")||"{}"); }catch{ return {}; } }
+const P = perms();
+const canEditFollow = String(P.FullAccess||"").toLowerCase()==="yes" || String(P.SLAAdmin||"").toLowerCase()==="yes";
+
+// Office follow-up disposition per job id (loaded from /fra/followup).
+let FOLLOWUP = {};
+const FU_LABEL = { quote_needed:"📝 Quote needed", quote_submitted:"📤 Quote sent", nfa:"✅ No further action" };
 
 // This batch = the FRA works created for Connor on 17 Aug 18:00.
 const BATCH_MIN = "2026-08-17T18:00";
@@ -130,17 +153,52 @@ const COLS = [
   { k:"sched",  label:"Scheduled", get:j=> j.scheduledAt ? esc(fmtDT(j.scheduledAt) + (j.scheduledEnd? " – "+fmtDT(j.scheduledEnd):"")) : '<span class="muted">—</span>', cls:"nowrap", raw:j=>j.scheduledAt||"" },
   { k:"dur",    label:"Duration",  get:j=>esc(fmtHours(durMins(j))),          cls:"nowrap", raw:j=>durMins(j) },
   { k:"upd",    label:"Updated",   get:j=>esc(fmtDT(lastUpdate(j))),          cls:"nowrap muted", raw:j=>lastUpdate(j) },
+  { k:"follow", label:"Office follow-up", get:j=>followCell(j),               cls:"follow", raw:j=>{ const e=FOLLOWUP[j.id]; return e&&e.status? (FU_LABEL[e.status]||e.status):""; } },
   { k:"open",   label:"",          get:j=>`<a class="open-lnk" href="job-view.html?id=${encodeURIComponent(j.id)}" target="_blank">Open ↗</a>`, cls:"nowrap" }
 ];
+
+// The follow-up control: only for COMPLETED jobs (the disposition only makes
+// sense once the works are done). Office users get tappable pills + a quote
+// upload; everyone else sees the current state read-only.
+function followCell(j){
+  if(!isDone(j.status)) return '<span class="muted">—</span>';
+  const e = FOLLOWUP[j.id] || {};
+  const s = e.status || "";
+  if(!canEditFollow){
+    if(!s) return '<span class="muted">—</span>';
+    let h = `<span class="fu-ro">${esc(FU_LABEL[s]||s)}</span>`;
+    if(e.quoteUrl) h += ` <a class="fu-view" href="${esc(e.quoteUrl)}" target="_blank">📄 copy</a>`;
+    return h;
+  }
+  const btn = (v,lab)=>`<button class="fu-btn ${s===v?"on":""}" data-s="${v}">${lab}</button>`;
+  let h = `<div class="fu" data-id="${esc(j.id)}">`
+    + btn("quote_needed","Quote needed") + btn("quote_submitted","Quote sent") + btn("nfa","NFA");
+  if(s==="quote_submitted"){
+    h += `<div class="fu-quote">`;
+    if(e.quoteKey && e.quoteUrl){
+      h += `<a class="fu-view" href="${esc(e.quoteUrl)}" target="_blank">📄 ${esc(e.quoteName||"View copy")}</a><button class="fu-rm" title="Remove copy">✕</button>`;
+    } else {
+      h += `<label class="fu-up">📎 Attach copy<input type="file" hidden accept=".pdf,image/*"></label>`;
+    }
+    h += `</div>`;
+  }
+  if(s && (e.by||e.at)) h += `<div class="fu-meta">${esc(e.by||"")}${e.at?" · "+esc(fmtDT(e.at)):""}</div>`;
+  h += `</div>`;
+  return h;
+}
 
 let batch = [];
 let sortKey = "site", sortDir = 1;
 
 async function load(){
   try{
-    const res = await authFetch(`${MOSTLANE_API}/sla/jobs?t=` + Date.now(), { cache:"no-store" });
+    const [res, fres] = await Promise.all([
+      authFetch(`${MOSTLANE_API}/sla/jobs?t=` + Date.now(), { cache:"no-store" }),
+      authFetch(`${MOSTLANE_API}/fra/followup?t=` + Date.now(), { cache:"no-store" }).catch(()=>null),
+    ]);
     const all = await res.json();
     batch = (Array.isArray(all)?all:[]).filter(inBatch);
+    try{ const fj = fres && await fres.json(); FOLLOWUP = (fj && fj.ok && fj.map) ? fj.map : {}; }catch{ FOLLOWUP = {}; }
   }catch(e){ $("sub").textContent = "Couldn't load jobs — check your connection."; return; }
   $("updated").textContent = "Updated " + new Date().toLocaleTimeString("en-GB");
   renderStats();
@@ -199,7 +257,7 @@ function renderRows(){
   if(col && col.raw){ list.sort((a,b)=>{ const x=String(col.raw(a)||""), y=String(col.raw(b)||""); return x.localeCompare(y, undefined, {numeric:true}) * sortDir; }); }
   $("empty").style.display = list.length ? "none" : "block";
   $("rows").innerHTML = list.map((j,i) =>
-    "<tr>" + COLS.map(c => `<td class="${c.cls||""}">${c.get(j,i)}</td>`).join("") + "</tr>"
+    `<tr class="clickable" data-jobid="${esc(j.id)}">` + COLS.map(c => `<td class="${c.cls||""}">${c.get(j,i)}</td>`).join("") + "</tr>"
   ).join("");
 }
 
@@ -226,6 +284,53 @@ $("search").addEventListener("input", renderRows);
 $("statusFilter").addEventListener("change", renderRows);
 $("refreshBtn").addEventListener("click", load);
 $("csvBtn").addEventListener("click", exportCSV);
+
+// Whole-row click opens the job (new tab) — but never when the click lands on
+// the follow-up control, a link, a button or an input.
+$("rows").addEventListener("click", e => {
+  if(e.target.closest(".fu, a, button, input, label, select")) return;
+  const tr = e.target.closest("tr[data-jobid]");
+  if(!tr) return;
+  window.open("job-view.html?id=" + encodeURIComponent(tr.dataset.jobid), "_blank");
+});
+
+// Office follow-up: set a disposition, upload/remove a quote copy.
+async function setFollow(id, status){
+  try{
+    const r = await authFetch(`${MOSTLANE_API}/fra/followup`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id, status }) });
+    const j = await r.json();
+    if(j.ok){ if(j.entry && (j.entry.status || j.entry.quoteKey)) FOLLOWUP[id]=j.entry; else delete FOLLOWUP[id]; renderRows(); }
+  }catch{}
+}
+async function uploadQuote(id, file){
+  const fd = new FormData(); fd.append("id", id); fd.append("status", "quote_submitted"); fd.append("file", file);
+  try{
+    const r = await authFetch(`${MOSTLANE_API}/fra/followup`, { method:"POST", body: fd });
+    const j = await r.json();
+    if(j.ok && j.entry){ FOLLOWUP[id]=j.entry; renderRows(); }
+  }catch{}
+}
+async function clearQuote(id){
+  try{
+    await authFetch(`${MOSTLANE_API}/fra/followup/clear-quote`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) });
+    if(FOLLOWUP[id]){ delete FOLLOWUP[id].quoteKey; delete FOLLOWUP[id].quoteName; delete FOLLOWUP[id].quoteUrl; }
+    renderRows();
+  }catch{}
+}
+if(canEditFollow){
+  $("rows").addEventListener("click", e => {
+    const btn = e.target.closest(".fu-btn"); const rm = e.target.closest(".fu-rm");
+    const box = e.target.closest(".fu"); if(!box) return;
+    const id = box.dataset.id;
+    if(btn){ const cur = (FOLLOWUP[id]||{}).status||""; const s = btn.dataset.s; setFollow(id, cur===s ? "" : s); }
+    else if(rm){ clearQuote(id); }
+  });
+  $("rows").addEventListener("change", e => {
+    const inp = e.target.closest('.fu-up input[type=file]'); if(!inp || !inp.files || !inp.files[0]) return;
+    const box = e.target.closest(".fu"); if(box) uploadQuote(box.dataset.id, inp.files[0]);
+  });
+}
+
 load();
 setInterval(load, 45000);   // live progress
 </script>

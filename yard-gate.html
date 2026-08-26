@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=18"></script>
+  <title>Mostlane • Yard Gate</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="/portal.css?v=1"/>
+  <script src="auth.js"></script>
+  <script src="device-auth.js"></script>
+  <style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:#eef2f7;color:#1c2733;}
+  header.page{background:#003366;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;}
+  .wrap{max-width:640px;margin:0 auto;padding:18px 14px 60px;}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
+  .card h2{margin:0 0 4px;font-size:15px;font-weight:700;color:#003366;}
+  .card p.sub{margin:0 0 14px;color:#64748b;font-size:13px;}
+  .gatebtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:16px;padding:34px 16px;font:inherit;font-size:20px;font-weight:800;color:#fff;background:linear-gradient(160deg,#0b7d3e,#0a9c4a);cursor:pointer;box-shadow:0 6px 18px rgba(10,156,74,.35);transition:.12s;}
+  .gatebtn.close{background:linear-gradient(160deg,#b91c1c,#dc2626);box-shadow:0 6px 18px rgba(220,38,38,.35);margin-top:12px;}
+  .gatebtn:active{transform:scale(.985);}
+  .gatebtn[disabled]{opacity:.55;cursor:default;box-shadow:none;}
+  .gatebtn .ico{font-size:40px;line-height:1;}
+  .state{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:12px;font-weight:700;font-size:15px;}
+  .state .dot{width:14px;height:14px;border-radius:50%;flex:0 0 auto;}
+  .state.open{background:#fef2f2;color:#b91c1c;} .state.open .dot{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.18);}
+  .state.closed{background:#f0fdf4;color:#166534;} .state.closed .dot{background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.18);}
+  .state.unknown{background:#f1f5f9;color:#475569;} .state.unknown .dot{background:#94a3b8;}
+  .state small{display:block;font-weight:500;opacity:.85;font-size:12.5px;margin-top:2px;}
+  .msg{font-size:13.5px;padding:10px 12px;border-radius:10px;margin-top:12px;display:none;}
+  .msg.ok{background:#f0fdf4;color:#166534;display:block;}
+  .msg.err{background:#fef2f2;color:#b91c1c;display:block;}
+  .btn{appearance:none;border:1px solid #cbd5e1;background:#fff;color:#003366;border-radius:9px;padding:9px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;}
+  .btn.primary{background:#003366;color:#fff;border-color:#003366;}
+  .btn.small{padding:6px 10px;font-size:12.5px;}
+  label.f{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:10px 0 4px;}
+  input,select{width:100%;padding:9px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;font-size:14px;background:#fff;color:#1c2733;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .hint{font-size:12px;color:#64748b;margin-top:4px;line-height:1.5;}
+  details.setup{margin-top:2px;}
+  details.setup summary{cursor:pointer;font-weight:700;color:#003366;font-size:14px;padding:6px 0;}
+  pre.dump{background:#0f172a;color:#d1e3ff;border-radius:10px;padding:12px;font-size:12px;overflow:auto;max-height:260px;margin:8px 0 0;}
+  .setrow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
+  .setrow>div{flex:1;min-width:150px;}
+  .muted{color:#64748b;font-size:12.5px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="main.html" title="Back">‹ Back</a>
+    <h1>🚧 Yard Gate</h1>
+  </header>
+
+  <div class="wrap">
+    <!-- OPEN + STATE -->
+    <div class="card">
+      <div id="stateBox" class="state unknown"><span class="dot"></span><span id="stateTxt">Checking gate…</span></div>
+      <div style="height:14px"></div>
+      <button id="openBtn" class="gatebtn"><span class="ico">🚪</span><span>Open the gate</span></button>
+      <button id="closeBtn" class="gatebtn close"><span class="ico">🔒</span><span>Close the gate</span></button>
+      <div id="opMsg" class="msg"></div>
+      <div style="text-align:center;margin-top:12px"><button id="refreshBtn" class="btn small">↻ Refresh state</button></div>
+      <div id="fixStateRow" style="display:none;text-align:center;margin-top:8px">
+        <span class="muted" style="font-size:12px">Status wrong (opened by fob)? Set it: </span>
+        <button id="markOpen" class="btn small">Mark open</button>
+        <button id="markClosed" class="btn small">Mark closed</button>
+      </div>
+    </div>
+
+    <!-- RECENT OPERATIONS (Full-Access only) -->
+    <div class="card" id="logCard" style="display:none">
+      <h2>🕵️ Gate activity</h2>
+      <p class="sub">Every portal open/close is logged with who, when and the device. Emergency keypad/fob opens aren't named (they don't go through the portal).</p>
+      <div id="logList" class="muted">Loading…</div>
+    </div>
+
+    <!-- ACCESS HOURS (Full-Access only) -->
+    <div class="card" id="accessCard" style="display:none">
+      <h2>⏰ Access hours</h2>
+      <p class="sub">Restrict when people can operate the gate. Full-Access users are always allowed. Times are UK time.</p>
+      <div id="accRestricted" style="margin-bottom:12px"></div>
+      <hr style="border:none;border-top:1px solid #e6ecf3;margin:6px 0 12px;">
+      <div style="font-weight:700;font-size:14px;color:#003366" id="accFormTitle">Add a restriction</div>
+      <div id="accWindows" style="margin-top:8px"></div>
+      <button id="accAdd" class="btn small" type="button">＋ Add a window</button>
+      <div style="margin-top:12px"><label class="f" style="font-weight:600">Apply to these people <span class="muted" id="accSelCount"></span></label>
+        <input type="text" id="accSearch" placeholder="Search people…" style="width:100%;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit;margin-bottom:6px">
+        <div id="accUserList" style="max-height:190px;overflow:auto;border:1px solid #e6ecf3;border-radius:9px;padding:6px 10px"></div>
+      </div>
+      <div style="margin-top:12px"><button id="accApply" class="btn primary" type="button">Save restriction</button> <button id="accReset" class="btn small" type="button">Clear form</button> <span id="accMsg" class="muted"></span></div>
+    </div>
+
+    <!-- GEOFENCE — must be at the yard (Full-Access only to configure) -->
+    <div class="card" id="geoCard" style="display:none">
+      <h2>📍 Gate location (safety geofence)</h2>
+      <p class="sub">Non-admin users must be within this distance of the gate to operate it — this stops accidental remote operation. Full-Access users can operate from anywhere. Stand at the yard and tap “Use my current location”.</p>
+      <div id="geoNow" class="sub" style="margin-bottom:8px">Loading…</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="geoSet" class="btn small" type="button">📍 Use my current location</button>
+        <label class="f" style="font-size:13px;font-weight:600">Radius (m)</label>
+        <input id="geoRadius" type="number" min="20" value="150" style="width:90px;padding:8px;border:1px solid #cdd7e2;border-radius:9px;font:inherit">
+      </div>
+      <div style="margin-top:12px"><button id="geoSave" class="btn primary" type="button">Save geofence</button> <button id="geoOff" class="btn small" type="button">Turn off</button> <span id="geoMsg" class="muted"></span></div>
+    </div>
+
+    <!-- SETUP (Full-Access only) -->
+    <div class="card" id="setupCard" style="display:none">
+      <h2>⚙️ Gate setup</h2>
+      <p class="sub">Configure the Tuya device that triggers the gate and (optionally) the sensor that reports it's open. You only do this once.</p>
+
+      <div id="secretWarn" class="msg err" style="display:none">The Tuya keys aren't set on the worker yet. Add <b>TUYA_ACCESS_ID</b> and <b>TUYA_ACCESS_SECRET</b> as secrets in the Cloudflare dashboard, then Deploy.</div>
+
+      <label class="f">Tuya region (data centre)</label>
+      <select id="cRegion">
+        <option value="eu">Western Europe (UK) — recommended</option>
+        <option value="us">Americas</option>
+        <option value="cn">China</option>
+        <option value="in">India</option>
+      </select>
+
+      <label class="f">Gate device ID (the module that opens the gate)</label>
+      <input id="cGateId" type="text" placeholder="e.g. bf1234abcd…"/>
+      <div class="row2">
+        <div><label class="f">Open command code</label><input id="cOpenCode" type="text" placeholder="switch_1"/></div>
+        <div><label class="f">Open value</label>
+          <select id="cOpenVal"><option value="true">true (on/pulse)</option><option value="false">false</option></select>
+        </div>
+      </div>
+      <div class="hint">Not sure of the code? Paste the device ID above, save, then use <b>Read device</b> below to see exactly what it exposes — the switch/trigger DP is the one to use here. Make sure the Tuya module is set to <b>momentary / "inching"</b> mode so it pulses the FAAC OPEN input rather than latching.</div>
+
+      <label class="f">Gate-open sensor device ID <span class="muted">(optional — leave blank if none yet)</span></label>
+      <input id="cStateId" type="text" placeholder="e.g. the FAAC 'gate open' contact fed into a Tuya sensor"/>
+      <div class="row2">
+        <div><label class="f">State code</label><input id="cStateCode" type="text" placeholder="doorcontact_state"/></div>
+        <div><label class="f">"Open" value</label>
+          <select id="cStateVal"><option value="true">true</option><option value="false">false</option></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div><label class="f">Alert after (mins open)</label><input id="cThreshold" type="number" min="1" value="10"/></div>
+        <div><label class="f">Re-alert every (mins)</label><input id="cRepeat" type="number" min="5" value="30"/></div>
+      </div>
+      <div class="hint">On your FAAC 415L, set an E145 <b>OUT1/OUT2</b> (or the 452 warning-light) output to the "gate open" function, wire it into a Tuya contact sensor (share the 0V ground), then read that device below to find its state code.</div>
+
+      <hr style="border:none;border-top:1px solid #e6ecf3;margin:14px 0 10px;">
+      <div><label class="f">Gate camera (for the safety check)</label>
+        <select id="cCamera" style="min-width:240px;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"><option value="">— none —</option></select>
+        <div class="hint" id="cCamHint">Add the gate's DVR in the <b>CCTV Wall</b> first, then pick its camera here — the snapshot then shows in the safety dialog.</div>
+      </div>
+
+      <div style="margin-top:14px"><button id="saveCfg" class="btn primary">Save setup</button> <span id="cfgMsg" class="muted"></span></div>
+
+      <details class="setup" style="margin-top:16px">
+        <summary>🔎 Read a device (find its codes)</summary>
+        <div class="setrow" style="margin-top:8px">
+          <div><input id="dumpId" type="text" placeholder="Paste a Tuya device ID"/></div>
+          <button id="dumpBtn" class="btn">Read device</button>
+        </div>
+        <div class="hint">Shows the live data points (DPs) the device reports — the switch to open with, and any door/contact state to watch.</div>
+        <pre class="dump" id="dumpOut" style="display:none"></pre>
+      </details>
+    </div>
+
+    <p class="muted" style="text-align:center">The keypad still works as normal — this is an extra way in, logged every time.</p>
+  </div>
+
+  <!-- Safety check before any gate operation -->
+  <div id="safetyModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;padding:16px;overflow:auto;">
+    <div style="max-width:460px;margin:7vh auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.35);">
+      <div style="padding:16px;">
+        <h2 id="safetyTitle" style="margin:0 0 8px;font-size:19px;">⚠️ Safety check</h2>
+        <p style="margin:0 0 12px;">Confirm the gate is <b>safe to operate</b> and <b>clear of any obstruction, vehicles or people</b> before continuing.</p>
+        <div id="safetyCam" style="display:none;margin:0 0 8px;">
+          <img id="safetyCamImg" alt="Gate camera" style="width:100%;border-radius:10px;background:#111;min-height:140px;object-fit:cover;display:block;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+            <span class="muted" id="safetyCamMsg" style="font-size:12px"></span>
+            <button id="safetyCamRefresh" class="btn small" type="button">↻ Refresh</button>
+          </div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #e6ecf3;display:flex;justify-content:space-between;gap:10px;">
+        <button id="safetyCancel" class="btn" type="button">Cancel</button>
+        <button id="safetyOk" class="gatebtn" type="button" style="width:auto;padding:12px 18px;font-size:15px;">✓ Safe — proceed</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+function tok(){ return localStorage.getItem("mostlaneToken") || ""; }
+function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+function perms(){ try{return JSON.parse(localStorage.getItem("mostlanePermissions")||"{}");}catch{return {};} }
+const isFull = String(perms().FullAccess||"").toLowerCase()==="yes";
+
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function whenTxt(iso){ try{ const d=new Date(iso); return d.toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch{ return iso||""; } }
+
+/* ---- state + open ---- */
+let busy=false, NEED_LOC=false;
+// Ask the browser for the device's location (geofence: non-admins must be at the yard).
+function getLoc(){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation) return rej(new Error("no-geo"));
+    navigator.geolocation.getCurrentPosition(
+      p=>res({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy}),
+      err=>rej(err),
+      {enableHighAccuracy:true,timeout:12000,maximumAge:0}   // fresh fix every time; re-prompts unless "always allow"
+    );
+  });
+}
+// Build the operate-command body — includes coords when this user is geofenced.
+async function gateBody(){
+  if(!NEED_LOC) return {};
+  const l=await getLoc();      // throws if denied/unavailable → caller blocks
+  return {lat:l.lat,lng:l.lng};
+}
+async function loadState(){
+  const box=$("stateBox"), txt=$("stateTxt");
+  try{
+    const r=await aFetch("/tuya/gate/state"); const j=await r.json();
+    if(!j.ok){ box.className="state unknown"; txt.textContent=j.error||"Couldn't read the gate"; return; }
+    NEED_LOC = !!j.needLocation;
+    if(!j.configured){ box.className="state unknown"; txt.innerHTML="Not set up yet"+(isFull?".":"."); $("fixStateRow").style.display="none"; return; }
+    $("fixStateRow").style.display = isFull ? "" : "none";
+    // Access-hours line (server tells us the summary + whether we're inside it now).
+    const accLine = j.access ? `<small>Access hours: ${esc(j.access)}${j.allowedNow===false?" — <b>closed to non-admins now</b>":""}</small>` : "";
+    if(j.open){
+      const who = j.openedBy ? ` by ${esc(j.openedBy)}` : "";
+      box.className="state open";
+      txt.innerHTML="Gate is OPEN"+(j.mins?` <small>for ${j.mins} min${who?" ·"+who:""}</small>`:(who?` <small>${who.replace(/^ /,"")}</small>`:""))+(accLine?`<br>${accLine}`:"");
+    }
+    else { box.className="state closed"; txt.innerHTML="Gate is closed"+(accLine?`<br>${accLine}`:""); }
+  }catch(e){ box.className="state unknown"; txt.textContent="Offline — can't reach the portal"; }
+}
+async function markState(open){
+  try{ await aFetch("/tuya/gate/set-state",{method:"POST",body:JSON.stringify({open})}); }catch(e){}
+  loadState(); loadLog();
+}
+async function openGate(){
+  if(busy) return;
+  let body;
+  try{ body=await gateBody(); }
+  catch(e){ const m=$("opMsg"); m.className="msg err"; m.textContent="✕ Turn on location to operate the gate — you must be at the yard."; return; }
+  if(!await askSafety("Open the gate")) return;
+  busy=true;
+  const b=$("openBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
+  b.querySelector("span:last-child").textContent="Opening…";
+  try{
+    const r=await aFetch("/tuya/gate/open",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
+    if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already open.")) : "✓ Open signal sent to the gate."; }
+    else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
+  }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
+  finally{
+    b.querySelector("span:last-child").textContent="Open the gate";
+    setTimeout(()=>{ b.disabled=false; busy=false; loadState(); loadLog(); }, 1500);
+  }
+}
+async function closeGate(){
+  if(busy) return;
+  let body;
+  try{ body=await gateBody(); }
+  catch(e){ const m=$("opMsg"); m.className="msg err"; m.textContent="✕ Turn on location to operate the gate — you must be at the yard."; return; }
+  if(!await askSafety("Close the gate")) return;
+  busy=true;
+  const b=$("closeBtn"), m=$("opMsg"); b.disabled=true; m.className="msg"; m.textContent="";
+  b.querySelector("span:last-child").textContent="Closing…";
+  try{
+    const r=await aFetch("/tuya/gate/close",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
+    if(j.ok){ m.className="msg ok"; m.textContent = j.already ? ("• "+(j.note||"Gate is already closed.")) : "✓ Close signal sent to the gate."; }
+    else { m.className="msg err"; m.textContent="✕ "+(j.error||"Couldn't send the command"); }
+  }catch(e){ m.className="msg err"; m.textContent="✕ Network error"; }
+  finally{
+    b.querySelector("span:last-child").textContent="Close the gate";
+    setTimeout(()=>{ b.disabled=false; busy=false; loadState(); loadLog(); }, 1500);
+  }
+}
+/* ---- safety check (obstruction) before any operation ---- */
+let _safetyResolve=null;
+function askSafety(actionLabel){
+  return new Promise(res=>{
+    _safetyResolve=res;
+    $("safetyTitle").textContent="⚠️ Safety check — "+actionLabel;
+    $("safetyModal").style.display="block";
+    loadGateSnapshot();
+  });
+}
+function closeSafety(ok){ $("safetyModal").style.display="none"; const r=_safetyResolve; _safetyResolve=null; if(r) r(!!ok); }
+$("safetyOk") && $("safetyOk").addEventListener("click",()=>closeSafety(true));
+$("safetyCancel") && $("safetyCancel").addEventListener("click",()=>closeSafety(false));
+$("safetyModal") && $("safetyModal").addEventListener("click",e=>{ if(e.target===$("safetyModal")) closeSafety(false); });
+$("safetyCamRefresh") && $("safetyCamRefresh").addEventListener("click",loadGateSnapshot);
+// Live gate snapshot in the safety dialog — shown only if a snapshot URL is set
+// in the gate config (config.snapshotUrl). A cache-buster forces a fresh frame.
+async function loadGateSnapshot(){
+  const wrap=$("safetyCam"), img=$("safetyCamImg"), msg=$("safetyCamMsg");
+  try{
+    const r=await aFetch("/tuya/gate/snapshot-url"); const j=await r.json();
+    const url=(j&&j.url)||"";
+    if(!url){ wrap.style.display="none"; return; }
+    wrap.style.display=""; msg.textContent="Loading…";
+    img.onload=()=>{ msg.textContent="Updated "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); };
+    img.onerror=()=>{ msg.textContent="Snapshot unavailable — check the camera in the CCTV Wall."; };
+    img.src=url+(url.includes("?")?"&":"?")+"_="+Date.now();
+  }catch{ wrap.style.display="none"; }
+}
+$("openBtn").addEventListener("click", openGate);
+$("closeBtn").addEventListener("click", closeGate);
+$("refreshBtn").addEventListener("click", loadState);
+
+/* ---- setup (Full-Access) ---- */
+async function loadCfg(){
+  if(!isFull) return;
+  // The device config is pre-seeded and deliberately hidden from the portal.
+  // A Full-Access user can still reach it for maintenance via ?setup=1.
+  if(new URLSearchParams(location.search).get("setup")!=="1") return;
+  $("setupCard").style.display="";
+  try{
+    const r=await aFetch("/tuya/config"); const j=await r.json();
+    if(!j.ok) return;
+    if(!j.hasSecrets) $("secretWarn").style.display="block";
+    const c=j.config||{};
+    $("cRegion").value=c.region||"eu";
+    $("cGateId").value=c.gateDeviceId||"";
+    $("cOpenCode").value=c.openCode||"switch_1";
+    $("cOpenVal").value=String(c.openValue===false?false:true);
+    $("cStateId").value=c.stateDeviceId||"";
+    $("cStateCode").value=c.stateCode||"";
+    $("cStateVal").value=String(c.stateOpenValue===false?false:true);
+    $("cThreshold").value=c.thresholdMins||10;
+    $("cRepeat").value=c.repeatMins||30;
+    // Gate-camera picker: list CCTV-Wall cameras (Full-Access).
+    try{
+      const cr=await aFetch("/cctv/sites"); const cj=await cr.json();
+      const opts=['<option value="">— none —</option>'];
+      (cj.sites||[]).forEach(s=>(s.cameras||[]).forEach(cam=>{
+        const val=s.id+"|"+cam.id, sel=(c.cameraSiteId===s.id && c.cameraId===cam.id)?" selected":"";
+        opts.push(`<option value="${val}"${sel}>${(s.name||"DVR")} — ${(cam.name||"Camera")}</option>`);
+      }));
+      $("cCamera").innerHTML=opts.join("");
+      if(!(cj.sites||[]).some(s=>(s.cameras||[]).length)) $("cCamHint").innerHTML='No DVR cameras yet — add the gate’s DVR in the <b>CCTV Wall</b> first, then it appears here.';
+    }catch{}
+  }catch{}
+}
+$("saveCfg") && $("saveCfg").addEventListener("click", async ()=>{
+  const msg=$("cfgMsg"); msg.textContent="Saving…";
+  const body={
+    region:$("cRegion").value,
+    gateDeviceId:$("cGateId").value.trim(),
+    openCode:$("cOpenCode").value.trim()||"switch_1",
+    openValue:$("cOpenVal").value==="true",
+    stateDeviceId:$("cStateId").value.trim(),
+    stateCode:$("cStateCode").value.trim(),
+    stateOpenValue:$("cStateVal").value==="true",
+    thresholdMins:parseInt($("cThreshold").value,10)||10,
+    repeatMins:parseInt($("cRepeat").value,10)||30,
+  };
+  var camSel=($("cCamera").value||"").split("|");
+  body.cameraSiteId=camSel[0]||""; body.cameraId=camSel[1]||"";
+  try{
+    const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
+    msg.textContent=j.ok?"Saved ✓":(j.error||"Failed");
+    if(j.ok) loadState();
+  }catch{ msg.textContent="Failed"; }
+});
+$("dumpBtn") && $("dumpBtn").addEventListener("click", async ()=>{
+  const id=$("dumpId").value.trim(); const out=$("dumpOut");
+  if(!id){ out.style.display="block"; out.textContent="Enter a device ID first."; return; }
+  out.style.display="block"; out.textContent="Reading…";
+  try{
+    const r=await aFetch("/tuya/device-status?deviceId="+encodeURIComponent(id)); const j=await r.json();
+    if(!j.ok){ out.textContent="Error: "+(j.error||"failed"); return; }
+    let s=(j.info? (j.info.name+" — "+(j.info.online?"online":"offline")+"\n\n"):"");
+    s+="Data points (code = value):\n";
+    (j.status||[]).forEach(d=> s+="  "+d.code+" = "+JSON.stringify(d.value)+"\n");
+    out.textContent=s;
+  }catch(e){ out.textContent="Network error"; }
+});
+
+async function loadLog(){
+  if(!isFull) return;
+  $("logCard").style.display="";
+  try{
+    const r=await aFetch("/tuya/gate/log"); const j=await r.json();
+    const list=$("logList");
+    if(!j.ok || !(j.log||[]).length){ list.innerHTML='<span class="muted">No activity logged yet.</span>'; return; }
+    const actTxt = a => a==="close"?"🔒 Closed":a==="mark-open"?"✎ Marked open":a==="mark-closed"?"✎ Marked closed":"🚪 Opened";
+    list.innerHTML=j.log.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef2f7">
+      <span>${actTxt(e.action)} by <b>${esc(e.user)}</b>${e.device?`<br><span class="muted" style="font-size:11px">device ${esc(e.device)}</span>`:""}</span>
+      <span class="muted" style="white-space:nowrap">${esc(whenTxt(e.at))}</span></div>`).join("");
+  }catch{ $("logList").innerHTML='<span class="muted">Couldn’t load the log.</span>'; }
+}
+/* ---- access hours (Full-Access) ---- */
+let ACC=[]; // [{days:[0..6], from:"HH:MM", to:"HH:MM"}]
+const DOWS=[["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
+function renderAcc(){
+  const host=$("accWindows"); if(!host) return;
+  if(!ACC.length){ host.innerHTML='<p class="muted" style="margin:0 0 8px">No restriction — the gate can be operated any time.</p>'; return; }
+  host.innerHTML=ACC.map((w,i)=>`<div style="border:1px solid #e6ecf3;border-radius:10px;padding:10px;margin-bottom:8px">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px">${DOWS.map(([lbl,d])=>`<label style="font-size:13px;white-space:nowrap"><input type="checkbox" data-accd="${i}:${d}" ${(w.days||[]).includes(d)?"checked":""}> ${lbl}</label>`).join("")}</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">From <input type="time" data-accfrom="${i}" value="${esc(w.from||"07:00")}"> to <input type="time" data-accto="${i}" value="${esc(w.to||"18:00")}"> <button class="btn small" data-accrm="${i}" style="margin-left:auto">Remove</button></div>
+  </div>`).join("");
+  host.querySelectorAll("[data-accd]").forEach(cb=>cb.onchange=()=>{ const [i,d]=cb.dataset.accd.split(":").map(Number); const w=ACC[i]; w.days=w.days||[]; if(cb.checked){ if(!w.days.includes(d)) w.days.push(d); } else w.days=w.days.filter(x=>x!==d); });
+  host.querySelectorAll("[data-accfrom]").forEach(inp=>inp.onchange=()=>{ ACC[+inp.dataset.accfrom].from=inp.value; });
+  host.querySelectorAll("[data-accto]").forEach(inp=>inp.onchange=()=>{ ACC[+inp.dataset.accto].to=inp.value; });
+  host.querySelectorAll("[data-accrm]").forEach(b=>b.onclick=()=>{ ACC.splice(+b.dataset.accrm,1); renderAcc(); });
+}
+const normU = u => String(u||"").toLowerCase().trim();
+let ACC_BYUSER = {};          // { lowerUsername: {windows:[…]} }
+let ACC_USERS = [];           // all portal usernames
+let ACC_SELECTED = new Set(); // lower-usernames ticked in "Apply to"
+function accNameFor(key){ return ACC_USERS.find(n=>normU(n)===key) || key; }
+function accSumm(w){ const D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return (w||[]).map(x=>((x.days&&x.days.length)?x.days.map(d=>D[d]||"?").join(","):"every day")+" "+x.from+"–"+x.to).join("; "); }
+function accSelCount(){ $("accSelCount").textContent = ACC_SELECTED.size ? "("+ACC_SELECTED.size+" selected)" : ""; }
+// Current restrictions list — each person with Edit + Remove.
+function renderRestricted(){
+  const host=$("accRestricted"); const keys=Object.keys(ACC_BYUSER).filter(k=>(ACC_BYUSER[k].windows||[]).length);
+  if(!keys.length){ host.innerHTML='<p class="muted" style="margin:0">No one is restricted — everyone with gate access can operate any time.</p>'; return; }
+  host.innerHTML='<div class="f" style="font-weight:600;margin:0 0 4px">Current restrictions</div>'+keys.map(k=>
+    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f5">
+      <div><b>${esc(accNameFor(k))}</b><br><span class="muted" style="font-size:12px">${esc(accSumm(ACC_BYUSER[k].windows))}</span></div>
+      <span style="white-space:nowrap"><button class="btn small" data-accedit="${esc(k)}" type="button">Edit</button> <button class="btn small" data-accrm="${esc(k)}" type="button" style="background:#fee2e2;color:#b91c1c;border-color:#fecaca">Remove</button></span>
+    </div>`).join("");
+  host.querySelectorAll("[data-accedit]").forEach(b=>b.onclick=()=>accEdit(b.dataset.accedit));
+  host.querySelectorAll("[data-accrm]").forEach(b=>b.onclick=()=>accRemove(b.dataset.accrm));
+}
+// "Apply to these people" checkbox list (searchable, multi-select).
+function renderAccUsers(filter){
+  const host=$("accUserList"), f=(filter||"").toLowerCase();
+  const list=ACC_USERS.filter(n=>!f||n.toLowerCase().includes(f));
+  host.innerHTML = list.length ? list.map(n=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer"><input type="checkbox" data-accu="${esc(n)}" ${ACC_SELECTED.has(normU(n))?"checked":""} style="width:auto;margin:0"> ${esc(n)}</label>`).join("") : '<span class="muted">No matches.</span>';
+  host.querySelectorAll("[data-accu]").forEach(cb=>cb.onchange=()=>{ cb.checked?ACC_SELECTED.add(normU(cb.dataset.accu)):ACC_SELECTED.delete(normU(cb.dataset.accu)); accSelCount(); });
+  accSelCount();
+}
+function accEdit(key){
+  ACC = (ACC_BYUSER[key].windows||[]).map(w=>({days:(w.days||[]).slice(),from:w.from||"07:00",to:w.to||"18:00"})); renderAcc();
+  ACC_SELECTED = new Set([key]); renderAccUsers($("accSearch").value);
+  $("accFormTitle").textContent="Editing — "+accNameFor(key); $("accMsg").textContent="";
+  $("accApply").scrollIntoView({behavior:"smooth",block:"center"});
+}
+async function accRemove(key){
+  const msg=$("accMsg"); msg.textContent="Removing…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessRemove:accNameFor(key)})}); const j=await r.json();
+    if(j.ok){ msg.textContent="Removed ✓"; ACC_BYUSER=(((j.config||{}).access||{}).byUser)||{}; renderRestricted(); loadState(); } else msg.textContent=j.error||"Couldn't remove"; }
+  catch{ msg.textContent="Couldn't remove"; }
+}
+async function loadAccess(){
+  if(!isFull) return;
+  $("accessCard").style.display="";
+  try{
+    const [cfgR, usersR] = await Promise.all([ aFetch("/tuya/config").then(r=>r.json()).catch(()=>({})), aFetch("/users").then(r=>r.json()).catch(()=>[]) ]);
+    ACC_BYUSER = (((cfgR.config||{}).access||{}).byUser)||{};
+    const users = Array.isArray(usersR) ? usersR : (usersR.Users||usersR.users||[]);
+    ACC_USERS = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+    renderRestricted(); renderAccUsers();
+  }catch{}
+}
+$("accSearch") && $("accSearch").addEventListener("input",e=>renderAccUsers(e.target.value));
+$("accAdd") && $("accAdd").addEventListener("click",()=>{ ACC.push({days:[1,2,3,4,5],from:"07:00",to:"18:00"}); renderAcc(); });
+$("accReset") && $("accReset").addEventListener("click",()=>{ ACC=[]; ACC_SELECTED=new Set(); $("accFormTitle").textContent="Add a restriction"; $("accSearch").value=""; $("accMsg").textContent=""; renderAcc(); renderAccUsers(); });
+$("accApply") && $("accApply").addEventListener("click", async ()=>{
+  const msg=$("accMsg"); const names=[...ACC_SELECTED].map(accNameFor);
+  if(!names.length){ msg.textContent="Tick at least one person."; return; }
+  if(!ACC.length){ msg.textContent="Add at least one time window (use Remove to clear someone)."; return; }
+  msg.textContent="Saving…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({accessUsers:names, accessWindows:ACC})}); const j=await r.json();
+    if(j.ok){ msg.textContent="Saved ✓ — applied to "+names.length+" "+(names.length===1?"person":"people"); ACC_BYUSER=(((j.config||{}).access||{}).byUser)||{}; renderRestricted(); loadState(); }
+    else msg.textContent=j.error||"Couldn't save";
+  }catch{ msg.textContent="Couldn't save"; }
+});
+$("markOpen") && $("markOpen").addEventListener("click",()=>markState(true));
+$("markClosed") && $("markClosed").addEventListener("click",()=>markState(false));
+
+/* ---- geofence (Full-Access) ---- */
+let GEO_PICK=null;
+async function loadGeo(){
+  if(!isFull) return;
+  $("geoCard").style.display="";
+  try{ const r=await aFetch("/tuya/config"); const j=await r.json(); const g=(j.config||{}).geo;
+    if(g&&isFinite(g.lat)){ $("geoNow").innerHTML="✅ Geofence <b>ON</b> — non-admins must be within <b>"+(g.radiusM||150)+" m</b> of the gate."; $("geoRadius").value=g.radiusM||150; }
+    else $("geoNow").textContent="Geofence off — non-admins can operate from anywhere.";
+  }catch{}
+}
+$("geoSet") && $("geoSet").addEventListener("click", async ()=>{
+  const msg=$("geoMsg"); msg.textContent="Getting your location…";
+  try{ GEO_PICK=await getLoc(); msg.textContent="Location captured ✓ (±"+Math.round(GEO_PICK.acc||0)+" m) — now press Save."; }
+  catch(e){ msg.textContent="Couldn’t get location — allow it in the browser and try again."; }
+});
+$("geoSave") && $("geoSave").addEventListener("click", async ()=>{
+  const msg=$("geoMsg"); if(!GEO_PICK){ msg.textContent="Tap “Use my current location” first."; return; }
+  const radiusM=parseInt($("geoRadius").value,10)||150; msg.textContent="Saving…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({geo:{lat:GEO_PICK.lat,lng:GEO_PICK.lng,radiusM}})}); const j=await r.json(); msg.textContent=j.ok?"Saved ✓ — geofence on.":(j.error||"Couldn’t save"); loadGeo(); loadState(); }
+  catch{ msg.textContent="Couldn’t save"; }
+});
+$("geoOff") && $("geoOff").addEventListener("click", async ()=>{
+  const msg=$("geoMsg"); msg.textContent="Turning off…";
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify({geo:{clear:true}})}); const j=await r.json(); GEO_PICK=null; msg.textContent=j.ok?"Geofence off.":(j.error||"Couldn’t save"); loadGeo(); loadState(); }
+  catch{ msg.textContent="Couldn’t save"; }
+});
+
+loadState(); loadCfg(); loadLog(); loadAccess(); loadGeo();
+setInterval(loadState, 30000);
+</script>
+</body>
+</html>

@@ -51,6 +51,10 @@ import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin tas
 import * as programmes from "./routes/programmes.js"; // DONE (job programmes: builder, revisions, client share links + suggestions)
 import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard record + project-site link + docs + costing spine)
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
+import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
+import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
+import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reconcile portal jobs/archive to Workever, browser-driven)
+import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -70,6 +74,7 @@ const ROUTES = [
   ["*", "/upload-asset-image", assets.handle],
   ["*", "/upload-asset-thumb", assets.handle],
   ["*", "/delete-asset-image", assets.handle],
+  ["*", "/sla/workever", workever.handle], // Workever sync (longest prefix wins over /sla)
   ["*", "/sla",        sla.handle],
   ["*", "/stats",      stats.handle],
   ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
@@ -115,6 +120,10 @@ const ROUTES = [
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   ["*", "/health/",    health.handle],     // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
+  ["*", "/comms",      statuscomms.handle], // customer status-email config + reschedule inbox (admin)
+  ["*", "/customer",   statuscomms.handle], // public: customer reschedule flow (token-verified)
+  ["*", "/tuya",       tuya.handle],        // yard gate: Tuya Cloud open command + gate-open state
+  ["*", "/fra",        fra.handle],          // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -238,15 +247,28 @@ const worker = {
     // that keep health.html fresh and push the owner (deduped) the moment a probe
     // fails or server errors spike. Fails soft; never blocks the other cron work.
     ctx.waitUntil(health.runHealthChecks(env, 1).catch(e => console.error("scheduled health probe:", e)));
+    // Yard gate left-open watch — polls the gate's Tuya sensor and pushes an
+    // alert if it's been open past the configured threshold. Self-gates: does
+    // nothing until the Tuya secrets AND a state device/code are configured.
+    ctx.waitUntil(tuya.checkGateLeftOpen(env, 1).catch(e => console.error("scheduled yard-gate watch:", e)));
     // On-hold approvals block the engineer's next job, so chase SLA admins every
     // ~10 minutes until it's dealt with (push-only — the bell alert already exists).
     if (new Date().getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(sla.remindPendingHolds(env, 1).catch(e => console.error("scheduled hold reminder:", e)));
     }
     if (new Date().getUTCMinutes() < 5) {
-      // Hourly data-integrity sweep — the cross-area "does everything join up?"
-      // catalogue (jobs↔sites, assignments↔users↔vehicles, compliance↔sites …).
-      ctx.waitUntil(health.runIntegrityChecks(env, 1).catch(e => console.error("scheduled integrity sweep:", e)));
+      // Data-integrity sweep — the cross-area "does everything join up?" catalogue
+      // (jobs↔sites, assignments↔users↔vehicles, compliance↔sites …). Its
+      // correlated NOT-EXISTS joins are the heaviest read source in the whole
+      // worker (compliance_stores × sites alone ≈ 600k row-reads), so it runs
+      // ONCE WEEKLY — Sunday ~03:00 UTC, NOT hourly/daily. Integrity drifts
+      // slowly, so weekly is ample and keeps D1 row-reads far inside the
+      // free-tier limit. The lightweight liveness probes (runHealthChecks) still
+      // run every 5 min and are what actually catch + alert on an outage. Admins
+      // can run the full catalogue on demand via the health page → /health/run.
+      { const d = new Date(); if (d.getUTCDay() === 0 && d.getUTCHours() === 3) {
+        ctx.waitUntil(health.runIntegrityChecks(env, 1).catch(e => console.error("scheduled integrity sweep:", e)));
+      } }
       // Daily chase (~08:00 London, deduped) for holiday requests + equipment
       // transfers still outstanding.
       ctx.waitUntil(remindDailyApprovals(env).catch(e => console.error("scheduled daily approvals:", e)));
@@ -432,6 +454,11 @@ const PUBLIC_ROUTES = [
   ["POST", "/prog/shared/export"],   // client PDF download — token+code verified in-handler
   // Project documents streamed for the in-app viewer / new tab — signed URL, verified in-handler.
   ["GET", "/project/doc"],
+  // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
+  ["GET", "/fra/quote"],
+  // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
+  ["POST", "/customer/job"],
+  ["POST", "/customer/reschedule"],
 ];
 
 function isPublic(method, pathname) {

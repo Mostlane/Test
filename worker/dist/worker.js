@@ -193,19 +193,21 @@ async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
   ).bind(token, username, tenantId, expires).run();
   return token;
 }
-async function sendEmail(env, { to, subject, html, text }) {
+async function sendEmail(env, { to, subject, html, text, replyTo }) {
   if (!to) return { ok: false, skipped: true, reason: "no recipient" };
   const body = text || stripHtml(html);
   if (env.RESEND_API_KEY) {
     const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
     try {
+      const payload = { from, to, subject, html, text: body };
+      if (replyTo) payload.reply_to = replyTo;
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${env.RESEND_API_KEY}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ from, to, subject, html, text: body })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
@@ -820,8 +822,12 @@ var PERMISSION_KEYS = [
   // personalisation: may pick a portal colour theme
   "ThemeBackground",
   // personalisation: may change the menu background
-  "Programmes"
+  "Programmes",
   // job programmes: build/issue/share programmes of works
+  "YardGate",
+  // trigger the yard gate (Tuya) + see its open/closed state
+  "YardGateAnywhere"
+  // exempt from the yard-gate geofence (operate from anywhere)
 ];
 function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -1785,7 +1791,7 @@ async function handle5(request, env, ctx, url, sess) {
     if (!isAdmin) return text("Forbidden", 403);
     return json4(await listHolidayRequestsForYear());
   }
-  if (path === "/holiday/calendar" && method === "GET") {
+  if (path === "/holiday/calendar" && method === "GET" && (url.searchParams.has("from") || url.searchParams.has("to"))) {
     if (!sess) return text("Not authenticated", 401);
     const q = url.searchParams;
     const iso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : "";
@@ -3333,18 +3339,18 @@ var PdfDoc = class {
     const y = this._page.h - yTop - h;
     r = Math.max(0, Math.min(r, w / 2, h / 2));
     const k = 0.5523 * r;
-    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
     const f = (n) => n.toFixed(2);
-    const op = `q ${fill} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
+    const op = `q ${fill2} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
     this._ops.push(op);
     return this;
   }
   // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
   poly(points, opt = {}) {
     if (!points.length) return this;
-    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
     const pts = points.map(([x, yT]) => [x, this._page.h - yT]);
-    let op = `q ${fill} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
+    let op = `q ${fill2} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
     for (let i = 1; i < pts.length; i++) op += `${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} l `;
     this._ops.push(op + "h f Q");
     return this;
@@ -5112,6 +5118,267 @@ function logoBytes() {
   return a;
 }
 
+// src/lib/statusemail.js
+var CFG_KEY2 = "sla_status_emails";
+var STATUS_DEFS = [
+  { key: "Scheduled", label: "Scheduled", reschedule: true, defaultOn: true },
+  { key: "Travelling", label: "On our way / Travelling", reschedule: false, defaultOn: true },
+  { key: "In Progress", label: "Job started", reschedule: false, defaultOn: false },
+  { key: "Complete", label: "Completed", reschedule: false, defaultOn: false },
+  { key: "On Hold", label: "On Hold / Delayed", reschedule: false, defaultOn: false }
+];
+function defaultTemplates() {
+  return {
+    Scheduled: {
+      on: true,
+      subject: "Your job {job_ref} at {site_name} has been booked in",
+      intro: "Good news \u2014 your job has been scheduled. The details are below. The time is approximate; you'll get another email when our engineer is on the way.",
+      reschedule: true
+    },
+    Travelling: {
+      on: true,
+      subject: "We're on our way to {site_name}",
+      intro: "Just to let you know, a Mostlane engineer is now on their way to complete your job.",
+      reschedule: false
+    },
+    "In Progress": {
+      on: false,
+      subject: "Work has started at {site_name}",
+      intro: "Our engineer has arrived on site and started work on your job.",
+      reschedule: false
+    },
+    Complete: {
+      on: false,
+      subject: "Job {job_ref} at {site_name} is complete",
+      intro: "Your job has now been completed. Thank you for choosing Mostlane.",
+      reschedule: false
+    },
+    "On Hold": {
+      on: false,
+      subject: "Update on your job {job_ref} at {site_name}",
+      intro: "Your job has been placed on hold. We'll be in touch shortly with an update.",
+      reschedule: false
+    }
+  };
+}
+function defaultConfig() {
+  return {
+    enabled: false,
+    // global master OFF until the office turns it on
+    recipientRule: "siteThenCustomer",
+    fromName: "Mostlane",
+    replyTo: "enquiries@mostlane.com",
+    companyTel: "023 8026 2000",
+    statuses: defaultTemplates()
+  };
+}
+function tdb(env) {
+  return env.DB;
+}
+async function getStatusEmailConfig(env, tid) {
+  try {
+    const row = await tdb(env).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY2).first();
+    if (row && row.value) {
+      const cfg = JSON.parse(row.value);
+      const base = defaultConfig();
+      return { ...base, ...cfg, statuses: { ...base.statuses, ...cfg.statuses || {} } };
+    }
+  } catch {
+  }
+  return defaultConfig();
+}
+async function saveStatusEmailConfig(env, tid, cfg) {
+  const clean = { ...defaultConfig(), ...cfg };
+  await tdb(env).prepare(
+    "INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, CFG_KEY2, JSON.stringify(clean)).run();
+  return clean;
+}
+async function ensureReschedTable(env) {
+  await tdb(env).prepare(`CREATE TABLE IF NOT EXISTS job_reschedule_requests (
+    id TEXT PRIMARY KEY, tenant_id TEXT, job_id TEXT, job_ref TEXT, site_name TEXT,
+    note TEXT, suggestions TEXT, created_at TEXT, status TEXT DEFAULT 'open',
+    resolved_at TEXT, resolved_by TEXT, ip TEXT
+  )`).run();
+}
+async function resolveRecipient(env, tid, job, cfg) {
+  const rule = cfg && cfg.recipientRule || "siteThenCustomer";
+  const emailOf = (s) => {
+    const e = String(s || "").trim();
+    return /\S+@\S+\.\S+/.test(e) ? e : "";
+  };
+  let siteEmail = "";
+  const code = String(job.siteCode || "").trim();
+  const name = String(job.siteName || "").trim();
+  if (code || name) {
+    try {
+      const row = await tdb(env).prepare(
+        `SELECT data FROM sites WHERE tenant_id=? AND (site_number=? OR lower(site_name)=lower(?)) LIMIT 1`
+      ).bind(tid, code, name).first();
+      if (row && row.data) {
+        try {
+          siteEmail = emailOf(JSON.parse(row.data).email);
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+  const custEmail = emailOf(job.customerEmail || job.contactEmail || job.customer && job.customer.email);
+  if (rule === "siteOnly") return siteEmail;
+  return siteEmail || custEmail;
+}
+function fmtWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  try {
+    return d.toLocaleString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/London"
+    });
+  } catch {
+    return d.toISOString();
+  }
+}
+function vars(job) {
+  return {
+    "{job_ref}": String(job.helpdeskRef || job.reference || job.id || "").trim(),
+    "{job_name}": String(job.helpdeskRef || job.siteName || "").trim(),
+    "{site_name}": String(job.siteName || "").trim(),
+    "{site_address}": [job.address, job.postcode].filter(Boolean).join(", "),
+    "{status}": String(job.status || "").trim(),
+    "{scheduled}": fmtWhen(job.scheduledAt),
+    "{description}": String(job.description || "").trim()
+  };
+}
+function fill(str, v) {
+  let out = String(str || "");
+  for (const [k, val] of Object.entries(v)) out = out.split(k).join(val || "");
+  return out;
+}
+function esc2(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
+  const v = vars(job);
+  const subject = fill(tpl.subject, v) || `Update on your job ${v["{job_ref}"]}`;
+  const intro = fill(tpl.intro, v);
+  const base = appBase(env);
+  const logo = `${base}/mostlane-logo.jpg`;
+  const navy = "#003468", ink = "#1f2937", grey = "#6b7280", line = "#e5e7eb";
+  const rows = [];
+  const addRow = (k, val) => {
+    if (val) rows.push(`<tr><td style="padding:6px 0;color:${grey};font-size:13px;width:38%;vertical-align:top">${esc2(k)}</td><td style="padding:6px 0;color:${ink};font-size:14px;font-weight:600">${esc2(val)}</td></tr>`);
+  };
+  addRow("Reference", v["{job_ref}"]);
+  addRow("Site", v["{site_name}"]);
+  addRow("Address", v["{site_address}"]);
+  if (statusDef && statusDef.key === "Scheduled") addRow("Scheduled for", v["{scheduled}"]);
+  addRow("Status", v["{status}"]);
+  const descBlock = v["{description}"] ? `
+        <tr><td style="padding:6px 28px 0">
+          <div style="font-size:12px;color:${grey};font-weight:700;letter-spacing:.03em;margin-bottom:4px">JOB DETAILS</div>
+          <div style="font-size:14px;color:${ink};line-height:1.55">${esc2(v["{description}"])}</div>
+        </td></tr>` : "";
+  const showNotice = tpl.reschedule !== false && statusDef && statusDef.reschedule && contactEmail;
+  const noticeBlock = showNotice ? `
+        <tr><td style="padding:18px 28px 0">
+          <div style="background:#fff8e6;border:1px solid #f0d8a0;border-radius:10px;padding:14px 16px;font-size:13px;color:${ink};line-height:1.55">
+            <strong>Please note:</strong> If this time is not convenient, please email
+            <a href="mailto:${esc2(contactEmail)}" style="color:${navy};font-weight:700;text-decoration:none">${esc2(contactEmail)}</a>
+            as soon as possible so we can rearrange \u2014 otherwise a cancellation charge may apply.
+          </div>
+        </td></tr>` : "";
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f5f8;font-family:Segoe UI,Arial,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line}">
+        <tr><td align="center" style="background:${navy};padding:30px 28px">
+          <img src="${esc2(logo)}" alt="Mostlane" height="72" style="height:72px;display:block;border:0;margin:0 auto" />
+        </td></tr>
+        <tr><td style="padding:28px 28px 8px">
+          <div style="font-size:20px;font-weight:700;color:${ink};margin-bottom:8px">${esc2(fill(tpl.subject, v))}</div>
+          <div style="font-size:15px;color:${ink};line-height:1.5">${esc2(intro)}</div>
+        </td></tr>
+        <tr><td style="padding:8px 28px 0">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line};border-bottom:1px solid ${line};margin:12px 0">${rows.join("")}</table>
+        </td></tr>
+        ${descBlock}
+        ${noticeBlock}
+        <tr><td style="padding:24px 28px 28px">
+          <div style="font-size:13px;color:${grey};line-height:1.5">
+            Kind regards,<br><strong style="color:${ink}">Mostlane</strong><br>
+            ${esc2(tpl && tpl.companyTel || "")}
+          </div>
+        </td></tr>
+      </table>
+      <div style="max-width:560px;margin:14px auto 0;font-size:11px;color:#9aa4b2;text-align:center">This is an automated message about your job. Please do not reply directly \u2014 contact us on the number above.</div>
+    </td></tr>
+  </table></body></html>`;
+  const textLines = [
+    fill(tpl.subject, v),
+    "",
+    intro,
+    "",
+    v["{job_ref}"] ? `Reference: ${v["{job_ref}"]}` : "",
+    v["{site_name}"] ? `Site: ${v["{site_name}"]}` : "",
+    v["{site_address}"] ? `Address: ${v["{site_address}"]}` : "",
+    statusDef && statusDef.key === "Scheduled" && v["{scheduled}"] ? `Scheduled for: ${v["{scheduled}"]}` : "",
+    `Status: ${v["{status}"]}`,
+    v["{description}"] ? `
+Job details: ${v["{description}"]}` : "",
+    showNotice ? `
+Please note: If this time is not convenient, please email ${contactEmail} as soon as possible so we can rearrange \u2014 otherwise a cancellation charge may apply.` : "",
+    "",
+    "Kind regards, Mostlane"
+  ].filter(Boolean);
+  return { subject, html, text: textLines.join("\n") };
+}
+async function hmacHex2(secret, msg) {
+  const enc3 = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc3.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(msg));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function signSecret(env) {
+  return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
+}
+async function verifyResched(env, jobId, exp, sig) {
+  const secret = signSecret(env);
+  if (!secret) return true;
+  const e = parseInt(exp || "0", 10);
+  if (!e || !sig) return false;
+  if (Math.floor(Date.now() / 1e3) > e) return false;
+  const good = await hmacHex2(secret, "resched:" + jobId + "|" + e);
+  if (good.length !== String(sig).length) return false;
+  let diff = 0;
+  for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ String(sig).charCodeAt(i);
+  return diff === 0;
+}
+async function onStatusTransition(env, tid, job, prevStatus, newStatus) {
+  try {
+    if (!newStatus || prevStatus === newStatus) return;
+    const cfg = await getStatusEmailConfig(env, tid);
+    if (!cfg.enabled) return;
+    const tpl = cfg.statuses && cfg.statuses[newStatus];
+    if (!tpl || !tpl.on) return;
+    const to = await resolveRecipient(env, tid, job, cfg);
+    if (!to) return;
+    const statusDef = STATUS_DEFS.find((s) => s.key === newStatus) || { key: newStatus };
+    tpl.companyTel = cfg.companyTel;
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const { subject, html, text } = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
+    await sendEmail(env, { to, subject, html, text, replyTo: cfg.replyTo });
+  } catch {
+  }
+}
+
 // src/routes/sla.js
 async function handle8(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -5141,6 +5408,26 @@ async function handle8(request, env, ctx, url, sess) {
     } catch {
     }
     return jsonResponse({ ok: true, bytes }, headers);
+  }
+  if (subpath === "/series-clash" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const date = searchParams.get("date") || "";
+    const excludeId = searchParams.get("excludeId") || "";
+    if (!engineer || !date) return jsonResponse({ clash: null }, headers);
+    const eid = normId(engineer);
+    const all = await listJobs(env, tenantId);
+    const hit = all.find((j) => j.seriesId && !j.seriesSkipped && j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && assignedList(j).some((a) => normId(a) === eid));
+    return jsonResponse({ clash: hit ? { id: hit.id, description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
+  }
+  if (subpath === "/engineer-day" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const date = searchParams.get("date") || "";
+    const excludeId = searchParams.get("excludeId") || "";
+    if (!engineer || !date) return jsonResponse({ jobs: [] }, headers);
+    const eid = normId(engineer);
+    const all = await listJobs(env, tenantId);
+    const jobs = all.filter((j) => j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && !j.seriesSkipped && String(j.status || "").toLowerCase() !== "cancelled" && assignedList(j).some((a) => normId(a) === eid)).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, scheduledAt: j.scheduledAt || null, status: j.status || "", series: !!j.seriesId, siteName: j.siteName || "" })).sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+    return jsonResponse({ jobs }, headers);
   }
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
@@ -6114,7 +6401,7 @@ async function handle8(request, env, ctx, url, sess) {
       changedBy: body.changedBy || "scheduler"
     };
     const before = await getJob(env, tenantId, id);
-    const updated = await patchJob(env, tenantId, id, patch);
+    const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
     }));
     if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
@@ -6205,6 +6492,87 @@ async function handle8(request, env, ctx, url, sess) {
         });
       }
       return jsonResponse({ files }, headers);
+    }
+    if (parts[2] === "audit-photo" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+      }
+      const file = form.get("file");
+      const itemId = String(form.get("itemId") || searchParams.get("itemId") || "");
+      const stage = String(form.get("stage") || searchParams.get("stage") || "done") === "ref" ? "ref" : "done";
+      if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const item = (job.auditItems || []).find((it) => it && it.id === itemId);
+      if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
+      const fn = `${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const key = `jobs/${id}/audit/${itemId}/${fn}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try {
+          await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+        } catch {
+        }
+      }
+      if (stage === "ref") {
+        item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
+        item.refPhotos.push(key);
+      } else {
+        item.donePhoto = key;
+        item.done = true;
+        item.doneAt = (/* @__PURE__ */ new Date()).toISOString();
+        item.doneBy = sess.user && sess.user.username || "";
+      }
+      job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, job);
+      const remaining = (job.auditItems || []).filter((it) => !(it.done && it.donePhoto)).length;
+      return jsonResponse({
+        ok: true,
+        itemId,
+        stage,
+        key,
+        url: r2Url(env, key),
+        thumb: r2Url(env, key + ".thumb"),
+        done: !!item.done,
+        remaining
+      }, headers, 201);
+    }
+    if (parts[2] === "audit-item" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson2(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const item = (job.auditItems || []).find((it) => it && it.id === String(b.itemId || ""));
+      if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
+      if (b.undo) {
+        if (item.donePhoto) {
+          try {
+            await env.JOB_FILES.delete(item.donePhoto);
+            await env.JOB_FILES.delete(item.donePhoto + ".thumb");
+          } catch {
+          }
+        }
+        item.done = false;
+        item.donePhoto = null;
+        item.doneAt = null;
+        item.doneBy = null;
+      }
+      if (b.removeRef) {
+        item.refPhotos = (item.refPhotos || []).filter((k) => k !== b.removeRef);
+        try {
+          await env.JOB_FILES.delete(b.removeRef);
+          await env.JOB_FILES.delete(b.removeRef + ".thumb");
+        } catch {
+        }
+      }
+      job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
     }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -6352,6 +6720,7 @@ async function handle8(request, env, ctx, url, sess) {
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
+      if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);
       return jsonResponse(d, headers);
     }
     if (method === "DELETE" && !parts[2]) {
@@ -6410,7 +6779,7 @@ async function handle8(request, env, ctx, url, sess) {
           body.hold.approval = isAdmin ? { state: "approved", requestedBy: sess.user.username, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString(), auto: true } : { state: "pending", requestedBy: sess.user.username, requestedAt: (/* @__PURE__ */ new Date()).toISOString() };
         }
       }
-      const updated = await patchJob(env, tenantId, id, body);
+      const updated = await patchJob(env, tenantId, id, body, ctx);
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
       }));
       if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
@@ -6794,8 +7163,42 @@ function firestopMissing(job) {
   if (!rec.signatureKey) miss.push("the signed declaration");
   return miss;
 }
+function isAuditJob(job) {
+  return !!(job && Array.isArray(job.auditItems) && job.auditItems.length);
+}
+function auditMissing(job) {
+  const items = job && job.auditItems || [];
+  const outstanding = items.filter((it) => !(it && it.done && it.donePhoto));
+  if (!outstanding.length) return [];
+  return [`a completion photo on ${outstanding.length} of ${items.length} audit item${items.length === 1 ? "" : "s"}`];
+}
+function normAuditItems(input, existing) {
+  if (!Array.isArray(input)) return existing?.auditItems;
+  const prev = {};
+  for (const it of existing?.auditItems || []) if (it && it.id) prev[it.id] = it;
+  const out = [];
+  for (const raw of input) {
+    if (!raw) continue;
+    const text = String(raw.text || raw.title || "").trim();
+    if (!text && !(raw.id && prev[raw.id])) continue;
+    const id = String(raw.id || "") || crypto.randomUUID();
+    const was = prev[id] || {};
+    out.push({
+      id,
+      text: (text || was.text || "").slice(0, 2e3),
+      refPhotos: Array.isArray(raw.refPhotos) ? raw.refPhotos.filter(Boolean).slice(0, 12) : Array.isArray(was.refPhotos) ? was.refPhotos : [],
+      done: !!was.done,
+      donePhoto: was.donePhoto || null,
+      doneAt: was.doneAt || null,
+      doneBy: was.doneBy || null
+    });
+    if (out.length >= 200) break;
+  }
+  return out;
+}
 function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
+  if (isAuditJob(job)) return auditMissing(job);
   if (job && job.investigateOnly) return [];
   const miss = [];
   if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
@@ -6944,13 +7347,14 @@ function londonInstant(y, mo, d, h, mi) {
   const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
   return guess - londonOffsetMs(guess);
 }
-function londonFivePmDayBefore(schedISO) {
+function londonHourDayBefore(schedISO, hour) {
   const s = Date.parse(schedISO);
   if (!Number.isFinite(s)) return null;
   const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(s)).split("-").map(Number);
   const prev = new Date(Date.UTC(y, m - 1, d));
   prev.setUTCDate(prev.getUTCDate() - 1);
-  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), 17, 0);
+  const h = Number.isFinite(Number(hour)) ? Math.max(0, Math.min(23, Number(hour))) : 17;
+  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), h, 0);
 }
 function releaseInstant(job) {
   const r = job && job.release;
@@ -6959,8 +7363,15 @@ function releaseInstant(job) {
     const t = Date.parse(r.at);
     return Number.isFinite(t) ? t : null;
   }
-  if (r.mode === "dayBefore") return job.scheduledAt ? londonFivePmDayBefore(job.scheduledAt) : null;
+  if (r.mode === "dayBefore") return job.scheduledAt ? londonHourDayBefore(job.scheduledAt, r.hour) : null;
   return null;
+}
+function engineerHasOtherJobThatDay(job, allJobs) {
+  if (!job || !job.scheduledAt || !job.seriesId) return false;
+  const day = new Date(job.scheduledAt).toISOString().slice(0, 10);
+  const engs = new Set(assignedList(job).map(normId));
+  if (!engs.size) return false;
+  return (allJobs || []).some((o) => o.id !== job.id && o.seriesId !== job.seriesId && !o.seriesSkipped && String(o.status || "").toLowerCase() !== "cancelled" && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day && assignedList(o).some((a) => engs.has(normId(a))));
 }
 var RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function jobIsFinished(job) {
@@ -6977,6 +7388,8 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 function releaseVisibleNow(job, allJobs) {
+  if (job && job.seriesSkipped) return false;
+  if (job && job.seriesId && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
   const r = job && job.release;
   if (!r || !r.mode || r.mode === "now") return true;
   if (r.mode === "at" || r.mode === "dayBefore") {
@@ -7035,6 +7448,22 @@ async function pushJobToEngineers(env, tid, job, engineerIds) {
     });
   }
 }
+async function stopSeries(env, tenantId, seriesId) {
+  if (!seriesId) return { removed: 0, total: 0 };
+  const db = tenantDB(env, tenantId);
+  const jobs = await listJobs(env, tenantId);
+  const inSeries = jobs.filter((j) => j.seriesId === seriesId);
+  const kill = inSeries.filter((j) => !j.releaseNotified && !j.seriesSkipped);
+  let removed = 0;
+  for (const j of kill) {
+    try {
+      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, j.id).run();
+      removed++;
+    } catch {
+    }
+  }
+  return { removed, total: inSeries.length };
+}
 async function reconcileRelease(env, tid, job, allJobs) {
   if (!job || job.releaseNotified) return false;
   const engs = assignedList(job);
@@ -7048,9 +7477,18 @@ async function reconcileRelease(env, tid, job, allJobs) {
 async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
-    if (j.releaseNotified || !assignedList(j).length) continue;
+    if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
     const r = j.release;
     if (!r || !r.mode || r.mode === "now") continue;
+    if (j.seriesId && engineerHasOtherJobThatDay(j, jobs)) {
+      const t = releaseInstant(j);
+      if (t == null || t <= Date.now()) {
+        j.seriesSkipped = true;
+        await saveJob(env, tid, j).catch(() => {
+        });
+      }
+      continue;
+    }
     await reconcileRelease(env, tid, j, jobs).catch(() => {
     });
   }
@@ -7186,16 +7624,23 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     }
   }
   const durationMinutes = Number.isFinite(Number(body.durationMinutes)) ? Math.max(15, Math.round(Number(body.durationMinutes))) : existing?.durationMinutes ?? null;
-  const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : !isProjJob;
-  const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
-  const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
-  const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : !isProjJob;
+  const isAudit = Array.isArray(body.auditItems) ? body.auditItems.length > 0 : isAuditJob(existing);
+  const gateDefault = !isProjJob && !isAudit;
+  const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : gateDefault;
+  const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : gateDefault;
+  const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : gateDefault;
+  const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : gateDefault;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let helpdeskRef = body.reference || existing?.helpdeskRef || id;
-  if (!body.reference && (!helpdeskRef || helpdeskRef === id || UUID_RE.test(String(helpdeskRef)))) {
-    const siteNm = String(body.siteName || existing?.siteName || "").trim();
-    const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
-    helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
+  if (!body.reference) {
+    const idIsNumSite = /^\d/.test(String(id)) && !UUID_RE.test(String(id));
+    if (idIsNumSite && !/^\d/.test(String(helpdeskRef))) {
+      helpdeskRef = id;
+    } else if (!helpdeskRef || UUID_RE.test(String(helpdeskRef)) || helpdeskRef === id && !idIsNumSite) {
+      const siteNm = String(body.siteName || existing?.siteName || "").trim();
+      const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
+      helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
+    }
   }
   const job = {
     id,
@@ -7228,6 +7673,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the standard completion (photo/note/signature). Preserved across re-saves.
     firestopping: body.firestopping !== void 0 ? !!body.firestopping : existing?.firestopping || false,
     firestop: existing?.firestop,
+    // Site-audit checklist: ONE job, many items, each item needing a completion
+    // photo in the field. Text edits preserve completed items (matched by id).
+    auditItems: normAuditItems(body.auditItems, existing),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
@@ -7242,8 +7690,12 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     workArea: body.workArea !== void 0 ? String(body.workArea || "") || null : existing?.workArea ?? null,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
-    release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0 } : void 0 : existing?.release,
+    release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0, hour: body.release.hour != null ? Number(body.release.hour) : void 0 } : void 0 : existing?.release,
     releaseNotified: body.release !== void 0 && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null) ? false : existing?.releaseNotified || false,
+    // Project multi-day drip "series": seriesId links the days; seriesSkipped
+    // permanently drops a day (clash safeguard). Both preserved across re-saves.
+    seriesId: body.seriesId !== void 0 ? String(body.seriesId || "") || null : existing?.seriesId ?? null,
+    seriesSkipped: body.seriesSkipped !== void 0 ? !!body.seriesSkipped : existing?.seriesSkipped || false,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -7261,7 +7713,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   await saveJob(env, tenantId, job);
   return job;
 }
-async function patchJob(env, tenantId, id, patch) {
+async function patchJob(env, tenantId, id, patch, ctx) {
   const job = await getJob(env, tenantId, id);
   if (!job) return null;
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -7283,7 +7735,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.release !== void 0) {
     const prev = job.release ? JSON.stringify(job.release) : "";
     if (!patch.release || !patch.release.mode || patch.release.mode === "now") job.release = void 0;
-    else job.release = { mode: patch.release.mode, at: patch.release.at || void 0 };
+    else job.release = { mode: patch.release.mode, at: patch.release.at || void 0, hour: patch.release.hour != null ? Number(patch.release.hour) : void 0 };
     if ((job.release ? JSON.stringify(job.release) : "") !== prev) job.releaseNotified = false;
   }
   if (patch.scheduledAt !== void 0) {
@@ -7311,9 +7763,12 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresPhoto !== void 0) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
+  if (patch.auditItems !== void 0) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
+  if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
+  if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -7324,7 +7779,12 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.helpdeskRef !== void 0 && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
   {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) {
+    const idStr = String(job.id || "");
+    const idIsNumSite = /^\d/.test(idStr) && !uuidRe.test(idStr);
+    const ref = String(job.helpdeskRef || "");
+    if (idIsNumSite && !/^\d/.test(ref)) {
+      job.helpdeskRef = idStr;
+    } else if (!ref || uuidRe.test(ref) || ref === idStr && !idIsNumSite) {
       const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
       const healed = jobIsProject(job) ? siteCd || siteNm : siteNm || siteCd;
       if (healed) job.helpdeskRef = healed;
@@ -7379,6 +7839,12 @@ async function patchJob(env, tenantId, id, patch) {
   }
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
+  if (job.status !== prevStatus && ctx && ctx.waitUntil) {
+    try {
+      ctx.waitUntil(onStatusTransition(env, tenantId, job, prevStatus, job.status));
+    } catch {
+    }
+  }
   return job;
 }
 function digitsOf(s) {
@@ -8505,9 +8971,11 @@ function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
   const state = job.status === "Closed Jobs" || job.status === "Complete" ? "OK" : Date.now() > target ? "BREACHED" : "OK";
   let releaseView;
-  if (job.release && job.release.mode && job.release.mode !== "now") {
+  if (job.seriesSkipped) {
+    releaseView = { mode: "skipped", at: null, label: "Skipped \u2014 engineer had another job that day", series: true };
+  } else if (job.release && job.release.mode && job.release.mode !== "now") {
     const t = releaseInstant(job);
-    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job) };
+    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job), series: !!job.seriesId };
   }
   return { ...job, releaseView, sla: { state, now: (/* @__PURE__ */ new Date()).toISOString() } };
 }
@@ -8843,6 +9311,15 @@ Which single area id best fits this work?`;
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+function decorateAuditItems(env, items) {
+  if (!Array.isArray(items)) return items;
+  const ph = (k) => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") });
+  return items.map((it) => ({
+    ...it,
+    refPhotoUrls: (it.refPhotos || []).map(ph),
+    donePhotoUrl: it.donePhoto ? ph(it.donePhoto) : null
+  }));
 }
 async function fileUrl(env, url, key) {
   return signedFileUrl(env, url.origin, "/sla/site/doc", key);
@@ -13987,6 +14464,12 @@ async function ensureCustomTable(db) {
       items TEXT, status TEXT, sent_by TEXT, sent_at TEXT, submitted_at TEXT)`).run();
   } catch {
   }
+  for (const c of ["due_at TEXT", "snooze INTEGER DEFAULT 1"]) {
+    try {
+      await db.prepare(`ALTER TABLE custom_van_checks ADD COLUMN ${c}`).run();
+    } catch {
+    }
+  }
 }
 async function nameMap(env, tid) {
   const out = {};
@@ -14200,6 +14683,40 @@ async function handle17(request, env, ctx, url, sess) {
     }
     return json({ ok: true, created }, {}, env, request);
   }
+  if (path === "/vancheck/request" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    await ensureCustomTable(db);
+    const b = await request.json().catch(() => ({}));
+    const reg = String(b.reg || "").trim();
+    if (!reg) return error("No vehicle given.", 400, env, request);
+    const norm = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
+    const { results: urows } = await db.prepare("SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(db.tenantId).all();
+    let un;
+    if (b.username) {
+      const chosen = (urows || []).find((u) => String(u.username).toLowerCase() === String(b.username).toLowerCase());
+      if (!chosen) return error("That engineer wasn't found.", 400, env, request);
+      un = chosen.username;
+    } else {
+      const driver = (urows || []).find((u) => norm(u.vehicle_assigned) === norm(reg));
+      if (!driver) return error("No active driver is assigned to " + reg + " \u2014 pick an engineer to request the check from.", 400, env, request);
+      un = driver.username;
+    }
+    const dueAt = b.dueAt && Number.isFinite(Date.parse(b.dueAt)) ? new Date(b.dueAt).toISOString() : deadlineFor(mondayOf3(londonDate2()), await getSettings(db));
+    const snooze = b.snooze === false ? 0 : 1;
+    const s = await getSettings(db);
+    const items = JSON.stringify({ checklist: s.checklist || [], equipment: s.equipment || [], photoSlots: s.photoSlots || [] });
+    const id = "cvc-" + crypto.randomUUID().slice(0, 12);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at,due_at,snooze) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(id, db.tenantId, un, reg, "", "Van check \u2014 " + reg, items, "pending", me, now, dueAt, snooze).run();
+    if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
+      title: "Van check requested",
+      body: `Please complete the van check for ${reg}.`,
+      url: "/van-check.html?custom=" + id,
+      tag: "custom-vancheck",
+      actionable: true
+    }));
+    return json({ ok: true, id, driver: un, reg, dueAt, snooze: !!snooze }, {}, env, request);
+  }
   if (path === "/vancheck/custom-status" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
     await ensureCustomTable(db);
@@ -14239,7 +14756,7 @@ async function handle17(request, env, ctx, url, sess) {
       status: row.status,
       week: row.id,
       vehicle: row.reg || sess.user.vehicle_assigned || "",
-      deadline: { dueAt: new Date(Date.now() + 7 * 864e5).toISOString(), overdue: false },
+      deadline: { dueAt: row.due_at || new Date(Date.now() + 7 * 864e5).toISOString(), overdue: row.due_at ? Date.now() > Date.parse(row.due_at) : false },
       checklist: it.checklist || [],
       equipment: it.equipment || [],
       photoSlots: it.photoSlots || [],
@@ -14253,6 +14770,12 @@ async function handle17(request, env, ctx, url, sess) {
     const dueAt = deadlineFor(week, s);
     await ensureCustomTable(db);
     const { results: customChecks } = await db.prepare("SELECT id, name, sent_at FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
+    let poolVehicles = [];
+    try {
+      const { results: pv } = await env.DB.prepare("SELECT reg, make, model FROM vehicles WHERE (active IS NULL OR active=1) AND pool=1 AND (tenant_id=1 OR tenant_id='1')").all();
+      poolVehicles = (pv || []).map((v) => ({ reg: v.reg, desc: [v.make, v.model].filter(Boolean).join(" ").trim() }));
+    } catch {
+    }
     return json({
       ok: true,
       week,
@@ -14262,8 +14785,10 @@ async function handle17(request, env, ctx, url, sess) {
       equipment: s.equipment || [],
       photoSlots: s.photoSlots,
       myCheck: shapeCheck(mine),
-      customChecks: customChecks || []
+      customChecks: customChecks || [],
       // one-off custom checks the office has sent me
+      poolVehicles
+      // shared tippers the driver may also check
     }, {}, env, request);
   }
   if (path === "/vancheck/submit" && method === "POST") {
@@ -14275,9 +14800,14 @@ async function handle17(request, env, ctx, url, sess) {
       customRow = await db.prepare("SELECT * FROM custom_van_checks WHERE tenant_id=? AND id=? AND username=?").bind(db.tenantId, customId, me).first();
       if (!customRow) return error("Custom check not found.", 404, env, request);
     }
-    const week = customId ? customId : mondayOf3(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
+    let week = customId ? customId : mondayOf3(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
     const vehicle = String(b.vehicle || sess.user.vehicle_assigned || "").trim();
     if (!vehicle) return error("No vehicle \u2014 enter the reg or ask the office to allocate one to you.", 400, env, request);
+    const assignedVan = String(sess.user.vehicle_assigned || "").trim();
+    const normR = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
+    if (!customId && assignedVan && normR(vehicle) !== normR(assignedVan)) {
+      week = "pool:" + week + ":" + normR(vehicle);
+    }
     const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
     if (!customId && !Object.keys(answers).length) return error("Complete the checklist first.", 400, env, request);
     const defectNotes = b.defectNotes && typeof b.defectNotes === "object" ? b.defectNotes : {};
@@ -14378,7 +14908,11 @@ async function handle17(request, env, ctx, url, sess) {
     }
     const dueAt = deadlineFor(week, s);
     const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
-    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
+    await ensureCustomTable(db);
+    const nm = await nameMap(env, db.tenantId);
+    const { results: cpRows } = await db.prepare("SELECT username, reg FROM custom_van_checks WHERE tenant_id=? AND status='pending'").bind(db.tenantId).all();
+    const customPending = (cpRows || []).map((c) => ({ username: c.username, name: nm[c.username] || c.username, reg: c.reg || "" }));
+    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused, customPending }, {}, env, request);
   }
   if (path === "/vancheck/matrix" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
@@ -14630,9 +15164,16 @@ async function handle17(request, env, ctx, url, sess) {
       missing = (drivers || []).filter((u) => !doneSet.has(u.username) && !off.has(u.username)).map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
     }
     await ensureCustomTable(db);
-    const cp = await db.prepare("SELECT COUNT(*) AS n FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending'").bind(db.tenantId, me).first();
-    const customPending = cp ? Number(cp.n) || 0 : 0;
-    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending }, {}, env, request);
+    const { results: crows } = await db.prepare("SELECT id, name, reg, due_at, snooze FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
+    const customChecks = (crows || []).map((r) => ({
+      id: r.id,
+      name: r.name || "Van check",
+      reg: r.reg || "",
+      dueAt: r.due_at || null,
+      overdue: r.due_at ? Date.now() > Date.parse(r.due_at) : false,
+      snooze: r.snooze == null ? true : !!Number(r.snooze)
+    }));
+    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
   }
   return error("Unknown van-check route", 404, env, request);
 }
@@ -15151,6 +15692,1648 @@ async function handle20(request, env, ctx, url, sess) {
   return error("Not found: " + path, 404, env, request);
 }
 
+// src/routes/costing.js
+async function sitelogAdminFetch(env, pathQuery, ms) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
+  if (env.SITELOG_DB) {
+    try {
+      const res = await handle9(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
+      if (res && res.ok) return res;
+    } catch (e) {
+    }
+  }
+  return fetchWithTimeout(target, { headers: { "x-admin-secret": secret } }, ms || 8e3);
+}
+var UNALLOC_MIN = 15;
+var CLAIM_GAP_MIN = 30;
+var MAX_SEG_HOURS = 14;
+var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
+async function handle21(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (path === "/ledger/scan" && method === "POST") return scanIntake(request, env);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  const admin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.TimesheetAdmin === "Yes";
+  await ensure2(env);
+  if (path === "/sites/register" && method === "GET") {
+    const reg = await loadRegister(env, tid);
+    return json({ ok: true, sites: reg.list, aliases: reg.aliases, ignored: reg.ignored }, {}, env, request);
+  }
+  if (path.startsWith("/sites/register/") && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (path === "/sites/register/update") {
+      const client = String(b.client || "").toLowerCase().trim();
+      const num2 = String(b.siteNumber || "").trim();
+      if (!client || !num2) return error("client and siteNumber required", 400, env, request);
+      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num2).first();
+      if (!row) return error("Site not found", 404, env, request);
+      let data = {};
+      try {
+        data = JSON.parse(row.data || "{}");
+      } catch {
+      }
+      if (b.archived !== void 0) data.archived = !!b.archived;
+      if (b.name) data.siteName = String(b.name).trim();
+      if (b.postcode !== void 0) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      const ll = parseLatLngPair(b.lat, b.lng);
+      if (ll) {
+        data.lat = ll.lat;
+        data.lng = ll.lng;
+      }
+      await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
+          postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
+        WHERE tenant_id=? AND client=? AND site_number=?`).bind(
+        b.archived !== void 0 ? b.archived ? 1 : 0 : data.archived ? 1 : 0,
+        b.name ? String(b.name).trim() : null,
+        b.postcode !== void 0 ? String(b.postcode || "").toUpperCase().trim() : null,
+        JSON.stringify(data),
+        tid,
+        client,
+        num2
+      ).run();
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
+    }
+    if (path === "/sites/register/add") {
+      const name = String(b.name || "").trim();
+      if (!name) return error("name required", 400, env, request);
+      const client = String(b.client || "general").toLowerCase().trim() || "general";
+      const num2 = slugNum(name);
+      const ll = parseLatLngPair(b.lat, b.lng);
+      const data = {
+        client,
+        siteNumber: num2,
+        siteName: name,
+        postcode: String(b.postcode || "").toUpperCase().trim(),
+        addedVia: "register"
+      };
+      if (ll) {
+        data.lat = ll.lat;
+        data.lng = ll.lng;
+      }
+      await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
+        VALUES (?,?,?,?,?,1,0,?,datetime('now'))
+        ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
+          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
+      return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
+    }
+    if (path === "/sites/register/merge") {
+      const alias = normName(b.alias);
+      if (!alias) return error("alias required", 400, env, request);
+      const aliases = await cfgGet(env, tid, "site_aliases", {});
+      aliases[alias] = { client: String(b.client || "").toLowerCase(), siteNumber: String(b.siteNumber || ""), label: String(b.alias || "").trim() };
+      await cfgSet(env, tid, "site_aliases", aliases);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/unmerge") {
+      const aliases = await cfgGet(env, tid, "site_aliases", {});
+      delete aliases[normName(b.alias)];
+      await cfgSet(env, tid, "site_aliases", aliases);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/ignore") {
+      const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
+      const k = normName(b.name);
+      if (!k) return error("name required", 400, env, request);
+      if (b.undo) delete ignored[k];
+      else ignored[k] = String(b.name || "").trim();
+      await cfgSet(env, tid, "site_reg_ignore", ignored);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/push-candidates") {
+      const names = Array.isArray(b.names) ? b.names.slice(0, 2e3) : [];
+      const source = String(b.source || "external").slice(0, 30);
+      const ext = await cfgGet(env, tid, "site_reg_ext", {});
+      for (const n of names) {
+        const k = normName(n);
+        if (!k) continue;
+        const cur = ext[k] || { name: String(n).trim(), sources: [] };
+        if (!cur.sources.includes(source)) cur.sources.push(source);
+        ext[k] = cur;
+      }
+      await cfgSet(env, tid, "site_reg_ext", ext);
+      return json({ ok: true, stored: Object.keys(ext).length }, {}, env, request);
+    }
+  }
+  if (path === "/sites/register/candidates" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const reg = await loadRegister(env, tid);
+    const ignored = reg.ignored;
+    const found = {};
+    const add = (name, source) => {
+      const k = normName(name);
+      if (!k || k.length < 3) return;
+      if (reg.byNorm[k] || ignored[k]) return;
+      const cur = found[k] || (found[k] = { name: String(name).trim(), sources: [], count: 0 });
+      cur.count++;
+      if (!cur.sources.includes(source)) cur.sources.push(source);
+    };
+    try {
+      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
+      for (const r of results || []) {
+        try {
+          const j = JSON.parse(r.data || "{}");
+          if (j.siteName) add(j.siteName, "jobs");
+        } catch {
+        }
+      }
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT DISTINCT site FROM job_time_segments WHERE tenant_id=? AND site IS NOT NULL AND site!=''"
+      ).bind(tid).all();
+      for (const r of results || []) add(r.site, "time-capture");
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT DISTINCT site FROM sitelog_scans WHERE tenant_id=? AND site IS NOT NULL AND site!=''"
+      ).bind(tid).all();
+      for (const r of results || []) add(r.site, "sitelog");
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT data FROM eng_timesheets WHERE tenant_id=? ORDER BY week DESC LIMIT 260"
+      ).bind(tid).all();
+      for (const r of results || []) {
+        try {
+          const days = JSON.parse(r.data || "{}").days || {};
+          for (const d of Object.values(days))
+            for (const m of Array.isArray(d.mileage) ? d.mileage : [])
+              if (m && m.site) add(m.site, "timesheets");
+        } catch {
+        }
+      }
+    } catch {
+    }
+    try {
+      for (const n of await poOrderSiteNames(env)) add(n, "po");
+    } catch {
+    }
+    try {
+      const ext = await cfgGet(env, tid, "site_reg_ext", {});
+      for (const [k, v] of Object.entries(ext)) {
+        if (reg.byNorm[k] || ignored[k]) continue;
+        const cur = found[k] || (found[k] = { name: v.name, sources: [], count: 0 });
+        cur.count = Math.max(cur.count, 1);
+        for (const s of v.sources || []) if (!cur.sources.includes(s)) cur.sources.push(s);
+      }
+    } catch {
+    }
+    const candidates = Object.values(found).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 500);
+    return json({ ok: true, candidates }, {}, env, request);
+  }
+  if (path === "/ledger/day" && method === "GET") {
+    const user = q.get("user") || me;
+    if (user !== me && !admin) return error("Forbidden", 403, env, request);
+    const date = q.get("date") || londonDate3((/* @__PURE__ */ new Date()).toISOString());
+    const reg = await loadRegister(env, tid);
+    const day = await buildDay(env, tid, user, date, reg);
+    return json({ ok: true, ...day }, {}, env, request);
+  }
+  if (path === "/ledger/scans" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM sitelog_scans WHERE tenant_id=? ORDER BY at DESC LIMIT 200"
+    ).bind(tid).all();
+    return json({ ok: true, scans: results || [] }, {}, env, request);
+  }
+  if (path === "/costing/reconcile-sitelog" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
+    return json(r, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const prefs = await cfgGet(env, tid, "costing_prefs", { pinned: [], hidden: [], order: [] });
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const arr = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 2e3) : [];
+    const prefs = { pinned: arr(b.pinned), hidden: arr(b.hidden), order: arr(b.order) };
+    await cfgSet(env, tid, "costing_prefs", prefs);
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/job-pos" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const jobId = q.get("jobId") || q.get("job") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const rows = await jobPoRows(env, jobId);
+    let total = 0, unpriced = 0, materials = 0, subcontractor = 0;
+    const pos = rows.map((r) => {
+      const v = r.cost_ex_vat != null && r.cost_ex_vat !== "" ? Number(r.cost_ex_vat) : null;
+      const priced = v != null && isFinite(v);
+      if (priced) {
+        total += v;
+        if (String(r.cost_category || "").toLowerCase() === "subcontractor") subcontractor += v;
+        else materials += v;
+      } else unpriced++;
+      return {
+        poNumber: r.po_number != null ? String(r.po_number) : "",
+        supplier: r.supplier || "",
+        category: r.cost_category || "",
+        trade: r.trade || "",
+        cost: priced ? Math.round(v * 100) / 100 : null,
+        incident: r.incident_no || r.job_ref || "",
+        by: r.engineer_name || "",
+        date: r.d || ""
+      };
+    });
+    const round = (n) => Math.round(n * 100) / 100;
+    return json({
+      ok: true,
+      jobId,
+      poBound: !!env.PO_DB,
+      count: pos.length,
+      total: round(total),
+      materials: round(materials),
+      subcontractor: round(subcontractor),
+      unpriced,
+      pos
+    }, {}, env, request);
+  }
+  if (path === "/costing/job-full-cost" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const jobId = q.get("jobId") || q.get("job") || "";
+    if (!jobId) return error("jobId required", 400, env, request);
+    const SPEED_MPH = 30, FUEL_PER_MILE = 0.5, ROAD_FACTOR2 = 1.25, HQ_PC = "PO15 5RQ";
+    const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
+    const geoPc = async (pc) => {
+      try {
+        const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(String(pc || "").toUpperCase().replace(/\s+/g, "")), { cf: { cacheTtl: 2592e3, cacheEverything: true } });
+        if (!r.ok) return null;
+        const j = await r.json();
+        const res = j && j.result;
+        return res && res.latitude != null ? { lat: res.latitude, lng: res.longitude } : null;
+      } catch {
+        return null;
+      }
+    };
+    const havMi = (a, b) => {
+      const rad = (x) => x * Math.PI / 180, R = 3958.8;
+      const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    };
+    const jrow = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+    let jd = {};
+    try {
+      jd = jrow && jrow.data ? JSON.parse(jrow.data) : {};
+    } catch {
+    }
+    const siteName = jd.siteName || jd.siteCode || "";
+    const sitePc = jd.postcode || "";
+    const { results: segs } = await env.DB.prepare(
+      "SELECT username, started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND job_id=? AND ended_at IS NOT NULL"
+    ).bind(tid, jobId).all();
+    const byEng = {};
+    for (const s of segs || []) {
+      const st = /* @__PURE__ */ new Date(String(s.started_at).replace(" ", "T") + "Z"), en = /* @__PURE__ */ new Date(String(s.ended_at).replace(" ", "T") + "Z");
+      let mins = (en - st) / 6e4;
+      if (!isFinite(mins) || mins <= 0) continue;
+      if (mins > 14 * 60) mins = 14 * 60;
+      const u = s.username || "";
+      if (!u) continue;
+      const e = byEng[u] || (byEng[u] = { mins: 0, days: /* @__PURE__ */ new Set() });
+      e.mins += mins;
+      e.days.add(String(s.started_at).slice(0, 10));
+    }
+    let rtMiles = 0, milesSource = "unknown";
+    const key = String(siteName || "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (key) {
+      try {
+        const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).first();
+        if (row && row.miles != null) {
+          rtMiles = Number(row.miles) || 0;
+          milesSource = "register";
+        }
+      } catch {
+      }
+    }
+    if (!rtMiles && sitePc) {
+      const base = await geoPc(HQ_PC), dest = await geoPc(sitePc);
+      if (base && dest) {
+        rtMiles = r1(havMi(base, dest) * ROAD_FACTOR2 * 2);
+        milesSource = "geocoded";
+      }
+    }
+    const rates = await ratesMap(env, tid);
+    const hourlyOf = (u) => {
+      const r = rates[u] || rates[String(u).toLowerCase()] || {};
+      if (r.rate == null) return null;
+      return r.rateType === "day" ? r.rate / 8 : r.rate;
+    };
+    let onSiteCost = 0, travelCost = 0, fuelCost = 0, onSiteMins = 0, travelMins = 0, totalMiles = 0, anyNoRate = false;
+    const engineers = [];
+    for (const [u, e] of Object.entries(byEng)) {
+      const rate = hourlyOf(u);
+      if (rate == null) anyNoRate = true;
+      const days = e.days.size || 0;
+      const engMiles = rtMiles * days;
+      const tMins = rtMiles > 0 ? rtMiles / SPEED_MPH * 60 * days : 0;
+      const oCost = rate != null ? e.mins / 60 * rate : 0;
+      const tCost = rate != null ? tMins / 60 * rate : 0;
+      const fCost = engMiles * FUEL_PER_MILE;
+      onSiteMins += e.mins;
+      travelMins += tMins;
+      totalMiles += engMiles;
+      onSiteCost += oCost;
+      travelCost += tCost;
+      fuelCost += fCost;
+      engineers.push({ name: u, onSiteMins: Math.round(e.mins), days, roundTripMiles: r1(engMiles), travelMins: Math.round(tMins), rate, onSiteCost: r2(oCost), travelCost: r2(tCost), fuelCost: r2(fCost), noRate: rate == null });
+    }
+    const poRows2 = await jobPoRows(env, jobId);
+    let materials = 0, unpriced = 0;
+    for (const r of poRows2) {
+      const v = r.cost_ex_vat != null && r.cost_ex_vat !== "" ? Number(r.cost_ex_vat) : null;
+      if (v != null && isFinite(v)) materials += v;
+      else unpriced++;
+    }
+    const labourCost = onSiteCost + travelCost;
+    const total = labourCost + fuelCost + materials;
+    return json({
+      ok: true,
+      jobId,
+      poBound: !!env.PO_DB,
+      site: siteName,
+      milesSource,
+      roundTripMiles: r1(rtMiles),
+      labour: { onSiteMinutes: Math.round(onSiteMins), onSiteCost: r2(onSiteCost), travelMinutes: Math.round(travelMins), travelCost: r2(travelCost), cost: r2(labourCost), engineers, missingRate: anyNoRate },
+      fuel: { miles: r1(totalMiles), perMile: FUEL_PER_MILE, cost: r2(fuelCost) },
+      materials: { cost: r2(materials), unpriced, count: poRows2.length },
+      total: r2(total),
+      unpricedPOs: unpriced,
+      hasSegments: (segs || []).length > 0
+    }, {}, env, request);
+  }
+  if (path === "/costing/eng-aliases" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    return json({ ok: true, aliases: await cfgGet(env, tid, "eng_aliases", {}) }, {}, env, request);
+  }
+  if (path === "/costing/po-engineers" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const out = [];
+    if (env.PO_DB) {
+      try {
+        const { results } = await env.PO_DB.prepare(
+          "SELECT engineer_name AS name, COUNT(*) AS n FROM po_log WHERE (deleted IS NULL OR deleted=0) AND engineer_name IS NOT NULL AND TRIM(engineer_name)!='' GROUP BY engineer_name ORDER BY n DESC"
+        ).all();
+        for (const r of results || []) out.push({ name: r.name, count: r.n });
+      } catch {
+      }
+    }
+    return json({ ok: true, engineers: out, poBound: !!env.PO_DB }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const alias = normName(b.alias), user = String(b.user || "").trim();
+    if (!alias || !user) return error("alias and user required", 400, env, request);
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    aliases[alias] = user;
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    delete aliases[normName(b.alias)];
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+  if (path === "/costing/fin" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    if (!key) return error("key required", 400, env, request);
+    const cur = await writeProjFin(env, tid, key, { value: b.value, planned: b.planned, name: b.name });
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    const amount = Number(b.amount);
+    if (!key || !Number.isFinite(amount)) return error("key and amount required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate3((/* @__PURE__ */ new Date()).toISOString());
+    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200), final: !!b.final });
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim(), id = String(b.id || "");
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key];
+    if (cur && Array.isArray(cur.valuations)) {
+      cur.valuations = cur.valuations.filter((v) => v.id !== id);
+      await cfgSet(env, tid, "proj_fin", fin);
+    }
+    return json({ ok: true, fin: cur || null }, {}, env, request);
+  }
+  if (path === "/costing/summary" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { from, to } = rangeOf(q);
+    const reg = await loadRegister(env, tid);
+    const rates = await ratesMap(env, tid);
+    const days = await reconcileRange(env, tid, from, to, reg);
+    const eAlias = await cfgGet(env, tid, "eng_aliases", {});
+    const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
+    const projFin = await cfgGet(env, tid, "proj_fin", {});
+    const bySite = {};
+    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
+    const siteFor = (name, resolved) => {
+      const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
+      return bySite[key] || (bySite[key] = {
+        site: resolved ? resolved.name : name || "(no site)",
+        client: resolved ? resolved.client : "",
+        archived: !!(resolved && resolved.archived),
+        unmatched: !resolved,
+        travelMins: 0,
+        onsiteMins: 0,
+        visitMins: 0,
+        cost: 0,
+        costPartial: false,
+        poTotal: 0,
+        poUnpriced: 0,
+        jobs: {},
+        engineers: {},
+        labD: {},
+        poD: {},
+        suppliers: {}
+        // per-site: labour-by-day, PO-by-day, spend-by-supplier
+      });
+    };
+    const engFor = (s, name) => {
+      let key = Object.keys(s.engineers).find((k) => normName(k) === normName(name)) || name || "(unknown)";
+      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [], src: null, visits: 0, days: /* @__PURE__ */ new Set() });
+    };
+    const addSrc = (eng, src) => {
+      eng.src = !eng.src ? src : eng.src === src ? src : "mixed";
+    };
+    const addDay = (map, day, v) => {
+      const k = String(day || "").slice(0, 10);
+      if (!k) return;
+      map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
+    };
+    const slRate = {};
+    const seededProjects = {};
+    try {
+      const { results: projRows } = await env.DB.prepare(
+        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
+      ).bind(tid).all();
+      for (const p of projRows || []) {
+        const name = String(p.name || "").trim();
+        if (!name) continue;
+        const resolved = resolveSite(reg, name);
+        const s = siteFor(name, resolved);
+        const sKey = siteKeyOf2(resolved, name);
+        seededProjects[sKey] = { id: p.id, number: p.number };
+      }
+    } catch {
+    }
+    const slSites = await fetchSitelogCosting(env, from, to);
+    const slCovered = /* @__PURE__ */ new Set();
+    if (slSites) {
+      for (const slSite of slSites) {
+        const resolved = resolveSiteCode(reg, slSite.siteCode);
+        const s = siteFor(resolved ? resolved.name : slSite.siteCode || "(no site)", resolved);
+        const sKey = siteKeyOf2(resolved, slSite.siteCode);
+        for (const p of slSite.people || []) {
+          if (!p.costedVisits) continue;
+          const portalUser = (p.portalUsername || "").trim();
+          const isEmployee = !!portalUser;
+          const who = canonEng(isEmployee ? portalUser : p.name || "(unknown)");
+          slCovered.add(sKey + "::" + normName(who));
+          const workMins = Math.round((p.workH || 0) * 60);
+          const travMins = Math.round((p.travelH || 0) * 60);
+          s.visitMins += workMins;
+          s.travelMins += travMins;
+          const eng = engFor(s, who);
+          eng.mins += workMins + travMins;
+          eng.visits += (p.costedVisits || 0) + (p.openCount || 0);
+          addSrc(eng, "sitelog");
+          const r = isEmployee ? rates[who] || rates[portalUser] : null;
+          let cost = null;
+          if (r && r.rateType === "hour" && r.rate) {
+            const fuel = r.fuelPerMile != null ? (p.miles || 0) * r.fuelPerMile : p.fuelCost || 0;
+            cost = ((p.workH || 0) + (p.travelH || 0)) * r.rate + fuel;
+          } else {
+            cost = p.total != null ? Number(p.total) : null;
+          }
+          if (cost != null && isFinite(cost)) {
+            cost = Math.round(cost * 100) / 100;
+            eng.cost = Math.round(((eng.cost || 0) + cost) * 100) / 100;
+            s.cost = Math.round((s.cost + cost) * 100) / 100;
+            const hrs = (p.workH || 0) > 0 ? p.workH : (p.workH || 0) + (p.travelH || 0);
+            if (hrs > 0) slRate[sKey + "::" + normName(who)] = { cost, hrs };
+          } else {
+            s.costPartial = true;
+          }
+        }
+      }
+    }
+    for (const d of days) {
+      for (const e of d.entries) {
+        const s = siteFor(e.site, e.resolved);
+        const sKey = siteKeyOf2(e.resolved, e.site);
+        const cu = canonEng(e.user);
+        if (slCovered.has(sKey + "::" + normName(cu))) continue;
+        const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
+        s[bucket] += e.mins;
+        if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
+        const eng = engFor(s, cu);
+        eng.mins += e.mins;
+        eng.days.add(d.date);
+        addSrc(eng, "sla");
+        const r = rates[cu];
+        if (r && r.rateType === "hour" && r.rate) {
+          eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * r.rate) * 100) / 100;
+          s.cost = Math.round((s.cost + e.mins / 60 * r.rate) * 100) / 100;
+          addDay(s.labD, d.date, e.mins / 60 * r.rate);
+        } else if (r && r.rateType === "day") {
+          s.costPartial = true;
+        } else {
+          s.costPartial = true;
+        }
+      }
+    }
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const s = siteFor(p.site, resolved);
+      const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
+      if (val != null && isFinite(val)) {
+        s.poTotal = Math.round((s.poTotal + val) * 100) / 100;
+        addDay(s.poD, p.d || to, val);
+      } else s.poUnpriced++;
+      const eng = engFor(s, canonEng(p.engineer_name || "(unknown)"));
+      if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
+      eng.pos = eng.pos || [];
+      eng.pos.push({
+        supplier: p.supplier || "",
+        cost: val != null && isFinite(val) ? val : null,
+        incident: p.incident_no || "",
+        date: p.d || "",
+        category: p.cost_category || ""
+      });
+      const supName = (p.supplier || "").trim() || "(no supplier)";
+      const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+      sup.count++;
+      if (val != null && isFinite(val)) sup.total = Math.round((sup.total + val) * 100) / 100;
+      else sup.unpriced++;
+    }
+    if (slSites && Object.keys(slRate).length) {
+      const visits = await fetchSitelogVisits(env, from, to);
+      for (const v of visits || []) {
+        if (!v.check_in_at || !v.check_out_at) continue;
+        const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
+        const resolved = resolveSiteCode(reg, v.site_code);
+        const sKey = siteKeyOf2(resolved, v.site_code);
+        const rt = slRate[sKey + "::" + normName(who)];
+        if (!rt) continue;
+        const site = bySite[sKey];
+        if (!site) continue;
+        const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 36e5);
+        if (hrs > 0) addDay(site.labD, londonDate3(v.check_in_at), hrs * (rt.cost / rt.hrs));
+      }
+    }
+    try {
+      const projKeyById = {};
+      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
+      const projIds = Object.keys(projKeyById);
+      if (projIds.length) {
+        for (const pid of projIds) {
+          const { results } = await env.DB.prepare(
+            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
+          ).bind(tid, pid).all();
+          const sKey = projKeyById[pid];
+          const s = bySite[sKey];
+          if (!s) continue;
+          for (const r of results || []) {
+            const amt = Number(r.amount) || 0;
+            if (r.kind === "labour") {
+              s.cost = Math.round((s.cost + amt) * 100) / 100;
+              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
+              addDay(s.labD, r.date, amt);
+              const who = canonEng(r.username || "(manual)");
+              const eng = engFor(s, who);
+              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
+              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
+              if (mins) {
+                s.onsiteMins += mins;
+                eng.mins += mins;
+                if (!eng.days) eng.days = /* @__PURE__ */ new Set();
+                eng.days.add(r.date);
+              }
+              addSrc(eng, "sla");
+            } else {
+              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
+              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
+              addDay(s.poD, r.date, amt);
+              const supName = (r.supplier || "").trim() || "Manual entry";
+              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+              sup.count++;
+              sup.total = Math.round((sup.total + amt) * 100) / 100;
+            }
+          }
+        }
+      }
+    } catch {
+    }
+    let sites = Object.entries(bySite).map(([key, s]) => {
+      const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
+      return {
+        ...s,
+        key,
+        // stable per-site id the front-end pins/hides/orders against
+        project: seededProjects[key] || null,
+        // { id, number } when this site IS a portal project
+        manualLabour: s.manualLabour || 0,
+        manualMaterials: s.manualMaterials || 0,
+        totalMins: s.travelMins + s.onsiteMins + s.visitMins,
+        laborCost,
+        poTotal,
+        poUnpriced: s.poUnpriced || 0,
+        grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
+        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100, mergeDayMaps(s.labD, s.poD)),
+        jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
+        engineers: Object.entries(s.engineers).map(([u, v]) => ({
+          user: u,
+          mins: v.mins || 0,
+          cost: v.cost,
+          poCost: v.poCost || 0,
+          src: v.src || null,
+          visits: (v.visits || 0) + (v.days ? v.days.size : 0),
+          // on-site visits/days
+          pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
+        })).sort((a, b) => (b.cost || 0) + (b.poCost || 0) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
+        // Per-site trend (labour + materials over its own active span) + supplier spend.
+        series: buildSiteSeries(s.labD, s.poD),
+        suppliers: Object.values(s.suppliers).sort((a, b) => b.total - a.total || b.count - a.count)
+      };
+    }).sort((a, b) => b.grandTotal - a.grandTotal || b.totalMins - a.totalMins);
+    const only = normName(q.get("site") || "");
+    if (only) sites = sites.filter((s) => normName(s.site) === only);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null, sitelogReason: slSites != null ? "" : _slDiag }, {}, env, request);
+  }
+  if (path === "/exceptions" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { from, to } = rangeOf(q);
+    const reg = await loadRegister(env, tid);
+    const days = await reconcileRange(env, tid, from, to, reg);
+    const ex = [];
+    for (const d of days) {
+      for (const e of d.entries) {
+        if (e.flags.includes("auto-closed"))
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "auto-closed",
+            site: e.site,
+            detail: `${e.jobRef || e.site || "segment"} was never finished \u2014 closed automatically (${fmtMins(e.mins)} recorded)`
+          });
+        if (e.flags.includes("mismatch"))
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "site-mismatch",
+            site: e.site,
+            detail: `SiteLog scan at "${e.scanSite}" while working job ${e.jobRef || "?"} at "${e.site}"`
+          });
+        if (e.resolved && e.resolved.archived)
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "archived-site",
+            site: e.resolved.name,
+            detail: `${fmtMins(e.mins)} recorded against ARCHIVED site "${e.resolved.name}"${e.jobRef ? " (job " + e.jobRef + ")" : ""}`
+          });
+        if (!e.resolved && e.site)
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "unmatched-site",
+            site: e.site,
+            detail: `"${e.site}" isn't in the site register (${fmtMins(e.mins)}) \u2014 add or merge it`
+          });
+      }
+      if (d.unallocMins > UNALLOC_MIN)
+        ex.push({
+          date: d.date,
+          user: d.user,
+          type: "unallocated",
+          detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead`
+        });
+    }
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const money2 = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? "\xA3" + Number(p.cost_ex_vat).toFixed(2) : "unpriced";
+      if (resolved && resolved.archived)
+        ex.push({
+          date: p.d || to,
+          user: p.engineer_name || "",
+          type: "archived-site",
+          site: resolved.name,
+          detail: `PO (${money2}, ${p.supplier || "supplier"}) raised against ARCHIVED site "${resolved.name}"`
+        });
+      else if (!resolved && p.site)
+        ex.push({
+          date: p.d || to,
+          user: p.engineer_name || "",
+          type: "unmatched-site",
+          site: p.site,
+          detail: `PO (${money2}, ${p.supplier || "supplier"}) on "${p.site}" \u2014 not in the site register; add or merge it`
+        });
+    }
+    const slSites = await fetchSitelogCosting(env, from, to);
+    for (const slSite of slSites || []) {
+      const resolved = resolveSiteCode(reg, slSite.siteCode);
+      const hrs = (slSite.workH || 0) + (slSite.travelH || 0);
+      if (resolved && resolved.archived)
+        ex.push({
+          date: to,
+          user: "",
+          type: "archived-site",
+          site: resolved.name,
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) recorded against ARCHIVED site "${resolved.name}"`
+        });
+      else if (!resolved && slSite.siteCode)
+        ex.push({
+          date: to,
+          user: "",
+          type: "unmatched-site",
+          site: String(slSite.siteCode),
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) at store "${slSite.siteCode}" \u2014 not matched to the site register; add or merge it`
+        });
+    }
+    try {
+      const capByKey = {};
+      for (const d of days) capByKey[d.user + "|" + d.date] = d.entries.reduce((a, e) => a + e.mins, 0);
+      const { results } = await env.DB.prepare(
+        "SELECT username, week, data FROM eng_timesheets WHERE tenant_id=? AND week>=? AND week<=?"
+      ).bind(tid, mondayOf4(from), to).all();
+      for (const r of results || []) {
+        let daysObj = {};
+        try {
+          daysObj = JSON.parse(r.data || "{}").days || {};
+        } catch {
+        }
+        for (const [date, d] of Object.entries(daysObj)) {
+          if (date < from || date > to || !d || !d.start || !d.finish) continue;
+          const span = spanMins(d.start, d.finish);
+          if (span == null) continue;
+          const captured = capByKey[r.username + "|" + date] || 0;
+          const diff = span - captured;
+          if (Math.abs(diff) > CLAIM_GAP_MIN && captured > 0)
+            ex.push({
+              date,
+              user: r.username,
+              type: diff > 0 ? "claimed-over-captured" : "captured-over-claimed",
+              detail: `Timesheet says ${fmtMins(span)}, system captured ${fmtMins(captured)} (${diff > 0 ? "+" : ""}${fmtMins(Math.abs(diff))} difference)`
+            });
+        }
+      }
+    } catch {
+    }
+    ex.sort((a, b) => b.date.localeCompare(a.date) || a.user.localeCompare(b.user));
+    return json({ ok: true, from, to, exceptions: ex.slice(0, 500) }, {}, env, request);
+  }
+  return error("Unknown costing route", 404, env, request);
+}
+async function scanIntake(request, env) {
+  try {
+    const raw = await request.text();
+    const sig = request.headers.get("x-portal-sig") || "";
+    if (!env.PORTAL_BRIDGE_SECRET) return new Response(JSON.stringify({ ok: false, error: "bridge secret unset" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const want = await hmacB64u(env.PORTAL_BRIDGE_SECRET, raw);
+    if (!timingSafeEq(sig, want)) return new Response(JSON.stringify({ ok: false, error: "bad signature" }), { status: 403, headers: { "Content-Type": "application/json" } });
+    const b = JSON.parse(raw || "{}");
+    const username = String(b.username || "").trim();
+    const site = String(b.site || b.siteName || "").trim();
+    const dir = b.direction === "out" ? "out" : "in";
+    if (!username || !site) return new Response(JSON.stringify({ ok: false, error: "username and site required" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    await ensure2(env);
+    await env.DB.prepare(
+      "INSERT INTO sitelog_scans (tenant_id, username, site, direction, at, source) VALUES (?,?,?,?,?,?)"
+    ).bind(
+      Number(b.tenantId) || 1,
+      username,
+      site,
+      dir,
+      b.at ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
+      "sitelog"
+    ).run();
+    return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+}
+async function buildDay(env, tid, user, date, reg) {
+  const entries = [];
+  const dayStart = Date.parse(date + "T00:00:00Z") - 2 * 36e5;
+  const dayEnd = dayStart + 30 * 36e5;
+  const segs = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at"
+    ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
+    for (const s of results || []) if (londonDate3(s.started_at) === date) segs.push(s);
+  } catch {
+  }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  const today = londonDate3(nowIso);
+  for (const s of segs) {
+    let end = s.ended_at, flags = [];
+    if (s.auto_closed) flags.push("auto-closed");
+    if (!end) {
+      if (date < today) {
+        end = lazyCloseAt(s.started_at, date);
+        flags.push("auto-closed");
+      } else {
+        end = nowIso;
+        flags.push("open");
+      }
+    }
+    if (Date.parse(end) - Date.parse(s.started_at) > MAX_SEG_MS2) {
+      end = lazyCloseAt(s.started_at, date);
+      if (!flags.includes("auto-closed")) flags.push("auto-closed");
+    }
+    const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 6e4));
+    if (!mins) continue;
+    entries.push({
+      user,
+      src: "job",
+      kind: s.kind === "travel" ? "travel" : "onsite",
+      site: s.site || "",
+      jobRef: s.job_ref || s.job_id,
+      start: s.started_at,
+      end,
+      mins,
+      flags,
+      resolved: resolveSite(reg, s.site)
+    });
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at"
+    ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
+    let scans = (results || []).filter((s) => londonDate3(s.at) === date);
+    if (!scans.length && env.SITELOG_DB) {
+      const from = new Date(dayStart).toISOString().slice(0, 10);
+      const to = new Date(dayEnd).toISOString().slice(0, 10);
+      try {
+        const visits2 = await fetchSitelogVisits(env, from, to);
+        const nameLike = jcNameLike;
+        for (const v of visits2 || []) {
+          const who = String(v.portal_username || "").trim() || nameLike(v);
+          if (String(who).toLowerCase() !== String(user).toLowerCase()) continue;
+          if (v.check_in_at && londonDate3(v.check_in_at) === date) {
+            scans.push({ at: v.check_in_at, direction: "in", site: v.site_code || v.site_name || "" });
+          }
+          if (v.check_out_at && londonDate3(v.check_out_at) === date) {
+            scans.push({ at: v.check_out_at, direction: "out", site: v.site_code || v.site_name || "" });
+          }
+        }
+        scans.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+      } catch {
+      }
+    }
+    const open = {};
+    const visits = [];
+    for (const s of scans) {
+      const k = normName(s.site);
+      if (s.direction === "in") {
+        if (!open[k]) open[k] = { at: s.at, site: s.site };
+      } else if (open[k]) {
+        visits.push({ site: open[k].site, start: open[k].at, end: s.at, flags: [] });
+        delete open[k];
+      }
+    }
+    for (const k of Object.keys(open)) {
+      const v = open[k];
+      visits.push({ site: v.site, start: v.at, end: lazyCloseAt(v.at, date), flags: ["auto-closed"] });
+    }
+    const jobIv = entries.map((e) => [Date.parse(e.start), Date.parse(e.end), e]);
+    for (const v of visits) {
+      let ivs = [[Date.parse(v.start), Date.parse(v.end)]];
+      const vNorm = normName(v.site);
+      for (const [js, je, e] of jobIv) {
+        const next = [];
+        for (const [vs, ve] of ivs) {
+          if (je <= vs || js >= ve) {
+            next.push([vs, ve]);
+            continue;
+          }
+          if (normName(e.site) !== vNorm && !e.flags.includes("mismatch")) {
+            e.flags.push("mismatch");
+            e.scanSite = v.site;
+          }
+          if (vs < js) next.push([vs, js]);
+          if (ve > je) next.push([je, ve]);
+        }
+        ivs = next;
+      }
+      for (const [vs, ve] of ivs) {
+        const mins = Math.round((ve - vs) / 6e4);
+        if (mins < 3) continue;
+        entries.push({
+          user,
+          src: "sitelog",
+          kind: "onsite",
+          site: v.site,
+          jobRef: "",
+          start: new Date(vs).toISOString(),
+          end: new Date(ve).toISOString(),
+          mins,
+          flags: v.flags.slice(),
+          resolved: resolveSite(reg, v.site)
+        });
+      }
+    }
+  } catch {
+  }
+  let shift = null, unallocMins = 0;
+  try {
+    shift = await env.DB.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, user, date).first();
+  } catch {
+  }
+  if (shift && shift.clock_on_at) {
+    const on = Date.parse(shift.clock_on_at);
+    const off = shift.clock_off_at ? Date.parse(shift.clock_off_at) : date < today ? Date.parse(lazyCloseAt(shift.clock_on_at, date)) : Date.now();
+    let covered = mergeIntervals(entries.map((e) => [Math.max(on, Date.parse(e.start)), Math.min(off, Date.parse(e.end))]).filter(([a, b]) => b > a));
+    const total = Math.max(0, off - on);
+    const cov = covered.reduce((a, [s, e]) => a + (e - s), 0);
+    unallocMins = Math.max(0, Math.round((total - cov) / 6e4));
+  }
+  entries.sort((a, b) => a.start.localeCompare(b.start));
+  return {
+    user,
+    date,
+    entries,
+    unallocMins,
+    shift: shift ? { on: shift.clock_on_at || "", off: shift.clock_off_at || "" } : null,
+    totals: {
+      travelMins: entries.filter((e) => e.kind === "travel").reduce((a, e) => a + e.mins, 0),
+      onsiteMins: entries.filter((e) => e.kind !== "travel" && e.src === "job").reduce((a, e) => a + e.mins, 0),
+      visitMins: entries.filter((e) => e.src === "sitelog").reduce((a, e) => a + e.mins, 0),
+      unallocMins
+    }
+  };
+}
+async function reconcileRange(env, tid, from, to, reg) {
+  const users = /* @__PURE__ */ new Set();
+  const dates = {};
+  const seen = (u, d) => {
+    users.add(u);
+    (dates[u] = dates[u] || /* @__PURE__ */ new Set()).add(d);
+  };
+  const lo = from + "T00:00:00Z", hi = to + "T23:59:59Z";
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, started_at FROM job_time_segments WHERE tenant_id=? AND started_at>=? AND started_at<=?"
+    ).bind(tid, lo, hi).all();
+    for (const r of results || []) {
+      const d = londonDate3(r.started_at);
+      if (d >= from && d <= to) seen(r.username, d);
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, at FROM sitelog_scans WHERE tenant_id=? AND at>=? AND at<=?"
+    ).bind(tid, lo, hi).all();
+    for (const r of results || []) {
+      const d = londonDate3(r.at);
+      if (d >= from && d <= to) seen(r.username, d);
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, date FROM shifts WHERE tenant_id=? AND date>=? AND date<=?"
+    ).bind(tid, from, to).all();
+    for (const r of results || []) seen(r.username, r.date);
+  } catch {
+  }
+  const out = [];
+  for (const u of users) for (const d of dates[u]) out.push(await buildDay(env, tid, u, d, reg));
+  return out;
+}
+async function loadRegister(env, tid) {
+  const list = [];
+  const byNorm = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number, data FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+      }
+      const lat = Number(d.lat), lng = Number(d.lng ?? d.lon);
+      const entry = {
+        client: r.client,
+        siteNumber: r.site_number,
+        name: r.site_name || "Site " + r.site_number,
+        postcode: (r.postcode || "").replace(/\*+$/, ""),
+        active: r.active !== 0,
+        archived: !!r.archived,
+        jobNumber: r.job_number || "",
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null,
+        norm: normName(r.site_name || r.site_number)
+      };
+      list.push(entry);
+      if (entry.norm && !byNorm[entry.norm]) byNorm[entry.norm] = entry;
+    }
+  } catch {
+  }
+  const aliases = await cfgGet(env, tid, "site_aliases", {});
+  for (const [norm, tgt] of Object.entries(aliases)) {
+    const target = list.find((s) => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
+    if (target && !byNorm[norm]) byNorm[norm] = target;
+  }
+  const byCode = {};
+  for (const e of list) {
+    for (const code of [String(e.siteNumber || ""), digitsOf2(e.name), digitsOf2(e.siteNumber)]) {
+      if (code && !byCode[code]) byCode[code] = e;
+    }
+  }
+  const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
+  return { list, byNorm, byCode, aliases, ignored };
+}
+function resolveSite(reg, name) {
+  const k = normName(name);
+  return k && reg.byNorm[k] || null;
+}
+function resolveSiteCode(reg, code) {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  const d = digitsOf2(c);
+  return d && reg.byCode && reg.byCode[d] || reg.byCode && reg.byCode[c] || resolveSite(reg, c) || null;
+}
+function digitsOf2(s) {
+  return String(s || "").replace(/\D+/g, "");
+}
+function parseLatLngPair(latIn, lngIn) {
+  const lat = Number(latIn), lng = Number(lngIn);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+async function pushSiteToSiteLog(env, name, lat, lng, client) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
+    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
+    const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
+    const init = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
+    };
+    let res;
+    if (env.SITELOG_DB) {
+      try {
+        res = await handle9(new Request(target, init), env);
+      } catch (e) {
+        res = null;
+      }
+      if (!res || !res.ok) res = await fetch(target, init);
+    } else {
+      res = await fetch(target, init);
+    }
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+var _slDiag = "";
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function fetchSitelogCosting(env, from, to) {
+  _slDiag = "";
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) {
+    _slDiag = "secret-unset";
+    return null;
+  }
+  const pathQuery = "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await sitelogAdminFetch(env, pathQuery, 8e3);
+      if (!res.ok) {
+        _slDiag = "http-" + res.status;
+        continue;
+      }
+      const j = await res.json();
+      if (j && j.ok && Array.isArray(j.sites)) {
+        _slDiag = "";
+        return j.sites;
+      }
+      _slDiag = "bad-response";
+      return null;
+    } catch (e) {
+      _slDiag = e && e.name === "AbortError" ? "timeout" : "unreachable";
+    }
+  }
+  return null;
+}
+async function fetchSitelogVisits(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  let before = null, got = false;
+  try {
+    for (let page = 0; page < 30; page++) {
+      let pq = "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+      if (before) pq += "&before=" + encodeURIComponent(before);
+      const res = await sitelogAdminFetch(env, pq, 8e3);
+      if (!res.ok) return got ? out : null;
+      const j = await res.json();
+      const rows = Array.isArray(j.visits) ? j.visits : [];
+      got = true;
+      if (!rows.length) break;
+      let added = 0, oldest = null;
+      for (const r of rows) {
+        const id = r.visit_id != null ? r.visit_id : r.person_id + "|" + r.check_in_at;
+        if (!seen.has(id)) {
+          seen.add(id);
+          out.push(r);
+          added++;
+        }
+        if (oldest == null || r.check_in_at && r.check_in_at < oldest) oldest = r.check_in_at;
+      }
+      if (rows.length < 500 || !oldest || added === 0) break;
+      before = oldest;
+    }
+    return out;
+  } catch {
+    return got ? out : null;
+  }
+}
+function jcNameLike(v) {
+  return ((v.first_name || "") + " " + (v.last_name || "")).trim() || "(unknown)";
+}
+function mergeDayMaps(a, b) {
+  const out = {};
+  for (const [d, v] of Object.entries(a || {})) out[d] = (out[d] || 0) + v;
+  for (const [d, v] of Object.entries(b || {})) out[d] = (out[d] || 0) + v;
+  return out;
+}
+function computeFin(f, cost, costByDay) {
+  if (!f || !(Number(f.value) > 0) && !(f.valuations && f.valuations.length) && !(Number(f.planned) > 0)) return null;
+  const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
+  const value = r(f.value);
+  const planned = Math.max(0, Math.round(Number(f.planned) || 0));
+  const valuations = (Array.isArray(f.valuations) ? f.valuations : []).map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const costDays = Object.keys(costByDay || {}).sort();
+  const cumCostUpTo = (date) => {
+    let c = 0;
+    for (const d of costDays) {
+      if (d <= date) c += costByDay[d];
+      else break;
+    }
+    return c;
+  };
+  let prevCumCost = 0, runVal = 0;
+  for (const v of valuations) {
+    runVal += v.amount;
+    const cumCost = cumCostUpTo(v.date);
+    const costPortion = Math.max(0, r(cumCost - prevCumCost));
+    v.costAtTime = costPortion;
+    v.profitAtTime = r(v.amount - costPortion);
+    v.profitToDate = r(runVal - cumCost);
+    prevCumCost = cumCost;
+  }
+  const costSinceLastVal = valuations.length ? Math.max(0, r(cost - prevCumCost)) : r(cost);
+  const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
+  const remainingValue = r(value - valued);
+  const remainingVals = Math.max(0, planned - valuations.length);
+  const position = r(valued - cost);
+  const marginPct = value > 0 ? r((value - cost) / value * 100) : null;
+  const breakEven = Math.max(0, r(cost - valued));
+  const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
+  let suggestedNext = Math.max(breakEven, evenShare);
+  suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
+  const RET = 0.05, FINAL_RET = 0.025;
+  const retBase = value > 0 ? value : valued;
+  const isFinal = valuations.some((v) => v.final);
+  const retentionRate = isFinal ? FINAL_RET : RET;
+  const retentionHeld = r(retentionRate * (isFinal ? retBase : valued));
+  const cashReceived = r(valued - retentionHeld);
+  const nextIsFinal = !isFinal && remainingValue > 5e-3 && remainingVals <= 1;
+  const retentionIfFinal = r(FINAL_RET * retBase);
+  const retentionCurrent = r(RET * valued);
+  return {
+    value,
+    planned,
+    valuations,
+    valued,
+    cost: r(cost),
+    position,
+    marginPct,
+    remainingValue,
+    remainingVals,
+    breakEven: r(breakEven),
+    evenShare: r(evenShare),
+    suggestedNext,
+    overCommitted: breakEven > remainingValue + 5e-3,
+    positionAfterSuggested: r(valued + suggestedNext - cost),
+    retentionRate: retentionRate * 100,
+    retentionHeld,
+    cashReceived,
+    isFinal,
+    nextIsFinal,
+    retentionIfFinal,
+    retentionCurrent,
+    costSinceLastVal
+  };
+}
+function buildSiteSeries(labD, poD) {
+  const days = Object.keys(labD).concat(Object.keys(poD)).filter(Boolean).sort();
+  if (!days.length) return [];
+  const min = days[0], max = days[days.length - 1];
+  const span = Math.max(1, Math.round((Date.parse(max + "T12:00:00Z") - Date.parse(min + "T12:00:00Z")) / 864e5) + 1);
+  const mode = span <= 45 ? "day" : span <= 186 ? "week" : "month";
+  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf4(d) : d.slice(0, 7);
+  const labB = {}, poB = {};
+  const roll = (src, dst) => {
+    for (const [d, v] of Object.entries(src)) {
+      const k = bk(d);
+      dst[k] = Math.round(((dst[k] || 0) + v) * 100) / 100;
+    }
+  };
+  roll(labD, labB);
+  roll(poD, poB);
+  return buildSeriesBuckets(min, max, mode, labB, poB);
+}
+function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
+  const keys = [];
+  if (mode === "day") {
+    let d = /* @__PURE__ */ new Date(from + "T12:00:00Z");
+    const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
+    while (d <= end) {
+      keys.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+  } else if (mode === "week") {
+    let d = /* @__PURE__ */ new Date(mondayOf4(from) + "T12:00:00Z");
+    const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
+    while (d <= end) {
+      keys.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 7);
+    }
+  } else {
+    let d = /* @__PURE__ */ new Date(from.slice(0, 7) + "-01T12:00:00Z");
+    const end = /* @__PURE__ */ new Date(to.slice(0, 7) + "-01T12:00:00Z");
+    while (d <= end) {
+      keys.push(d.toISOString().slice(0, 7));
+      d.setUTCMonth(d.getUTCMonth() + 1);
+    }
+  }
+  return keys.map((k) => {
+    const labour = Math.round((labourByB[k] || 0) * 100) / 100;
+    const po = Math.round((poByB[k] || 0) * 100) / 100;
+    return { label: k, mode, labour, po, total: Math.round((labour + po) * 100) / 100 };
+  });
+}
+async function reconcileSitelogSessions(env, tid, opts) {
+  const o = opts || {};
+  if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
+  await ensure2(env);
+  const now = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
+  const to = londonDate3(now.toISOString());
+  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
+  const from = londonDate3(fromD.toISOString());
+  const visits = await fetchSitelogVisits(env, from, to);
+  if (!visits) return { ok: false, reason: "SiteLog unreachable" };
+  const reg = await loadRegister(env, tid);
+  let closed = 0, created = 0, skipped = 0;
+  for (const v of visits) {
+    const user = String(v.portal_username || "").trim();
+    if (!user) {
+      skipped++;
+      continue;
+    }
+    if (!v.check_in_at || !v.check_out_at) {
+      skipped++;
+      continue;
+    }
+    const inMs = Date.parse(v.check_in_at), outMs = Date.parse(v.check_out_at);
+    if (!(outMs > inMs)) {
+      skipped++;
+      continue;
+    }
+    const resolved = resolveSiteCode(reg, v.site_code);
+    const siteName = resolved ? resolved.name : v.provided_site_name || String(v.site_code || "").trim();
+    const dayKey = londonDate3(v.check_out_at);
+    const dayStartMs = Date.parse(dayKey + "T00:00:00Z") - 2 * 36e5;
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, started_at FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NULL"
+      ).bind(tid, user).all();
+      for (const seg of results || []) {
+        const sMs = Date.parse(seg.started_at);
+        if (sMs <= outMs && sMs >= dayStartMs) {
+          await env.DB.prepare(
+            "UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?"
+          ).bind(new Date(outMs).toISOString(), seg.id, tid).run();
+          closed++;
+        }
+      }
+    } catch {
+    }
+    const vid = "sl:" + (v.visit_id != null ? v.visit_id : user + "|" + v.check_in_at);
+    let exists = false, overlaps = false;
+    try {
+      const dup = await env.DB.prepare(
+        "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND sitelog_visit_id=? LIMIT 1"
+      ).bind(tid, vid).first();
+      exists = !!dup;
+    } catch {
+    }
+    if (!exists) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<=? AND sitelog_visit_id IS NULL"
+        ).bind(tid, user, new Date(dayStartMs).toISOString(), new Date(outMs + 36e5).toISOString()).all();
+        for (const seg of results || []) {
+          const sMs = Date.parse(seg.started_at), eMs = seg.ended_at ? Date.parse(seg.ended_at) : outMs;
+          if (eMs > inMs && sMs < outMs) {
+            overlaps = true;
+            break;
+          }
+        }
+      } catch {
+      }
+      if (!overlaps) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, sitelog_visit_id) VALUES (?,?,?,?,?,?,?,?,?,?)"
+          ).bind(
+            tid,
+            user,
+            vid,
+            "",
+            siteName,
+            resolved ? resolved.postcode : "",
+            new Date(inMs).toISOString(),
+            new Date(outMs).toISOString(),
+            "onsite",
+            vid
+          ).run();
+          created++;
+        } catch {
+        }
+      } else {
+        skipped++;
+      }
+    }
+  }
+  return { ok: true, from, to, closed, created, skipped, visits: visits.length };
+}
+async function poRows(env, from, to) {
+  if (!env.PO_DB) return [];
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, trade, substr(issued_at,1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
+    ).bind(from, to).all();
+    return results || [];
+  } catch {
+    return [];
+  }
+}
+async function jobPoRows(env, jobId) {
+  if (!env.PO_DB || !jobId) return [];
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT po_number, engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, substr(COALESCE(issued_at,cost_entered_at),1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
+    ).bind(String(jobId)).all();
+    return results || [];
+  } catch {
+    return [];
+  }
+}
+async function ratesMap(env, tid) {
+  const out = {};
+  let cfg = { byUser: {} };
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`engts:cfg:${tid}`).first();
+    if (row && row.value) cfg = Object.assign(cfg, JSON.parse(row.value));
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+    const num2 = (v) => {
+      const n = parseFloat(v);
+      return isFinite(n) && n > 0 ? n : null;
+    };
+    const defs = cfg.defaults || {};
+    const defPence = num2(defs.pencePerMile);
+    for (const u of results || []) {
+      let profile = {};
+      try {
+        profile = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      const mine = cfg.byUser && cfg.byUser[u.username] || {};
+      const rateType = mine.rateType === "day" ? "day" : "hour";
+      const rate = num2(mine.rate) ?? (rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate);
+      const pence = num2(mine.pencePerMile) ?? defPence;
+      const fuelPerMile = pence != null ? pence / 100 : null;
+      out[u.username] = { rate, rateType, fuelPerMile };
+    }
+  } catch {
+  }
+  return out;
+}
+async function ensure2(env) {
+  try {
+    await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT)`).run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN sitelog_visit_id TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS sitelog_scans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, site TEXT NOT NULL, direction TEXT NOT NULL,
+      at TEXT NOT NULL, source TEXT)`).run();
+  } catch {
+  }
+}
+async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
+  if (!costingKey) return null;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  const cur = fin[costingKey] || { value: 0, planned: 0, valuations: [] };
+  if (value !== void 0) cur.value = value === null ? 0 : Math.max(0, Number(value) || 0);
+  if (planned !== void 0) cur.planned = Math.max(0, Math.round(Number(planned) || 0));
+  if (name !== void 0) cur.name = String(name || "").slice(0, 120);
+  if (!Array.isArray(cur.valuations)) cur.valuations = [];
+  if ((!cur.value || cur.value === 0) && !cur.valuations.length && !cur.planned) {
+    delete fin[costingKey];
+  } else {
+    fin[costingKey] = cur;
+  }
+  await cfgSet(env, tid, "proj_fin", fin);
+  return fin[costingKey] || null;
+}
+async function renameProjFinKey(env, tid, oldKey, newKey) {
+  if (!oldKey || !newKey || oldKey === newKey) return false;
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[oldKey]) return false;
+  fin[newKey] = fin[oldKey];
+  delete fin[oldKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
+async function deleteProjFinKey(env, tid, costingKey) {
+  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
+  if (!fin[costingKey]) return false;
+  delete fin[costingKey];
+  await cfgSet(env, tid, "proj_fin", fin);
+  return true;
+}
+async function cfgGet(env, tid, name, fallback) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {
+  }
+  return fallback;
+}
+async function cfgSet(env, tid, name, value) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
+}
+function normName(s) {
+  return String(s || "").toLowerCase().replace(/[’'`"]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function slugNum(name) {
+  const s = normName(name).replace(/ /g, "-").slice(0, 40);
+  return s || "site-" + Math.abs(hashCode(String(name)));
+}
+function hashCode(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = h * 31 + s.charCodeAt(i) | 0;
+  }
+  return h;
+}
+function londonDate3(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  } catch {
+    return String(iso).slice(0, 10);
+  }
+}
+function lazyCloseAt(startedIso, date) {
+  const cut = new Date(startedIso);
+  cut.setHours(cut.getHours() + 1);
+  const evening = /* @__PURE__ */ new Date(date + "T18:00:00Z");
+  return (cut > evening ? cut : evening).toISOString();
+}
+function mergeIntervals(ivs) {
+  const s = ivs.slice().sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const iv of s) {
+    if (out.length && iv[0] <= out[out.length - 1][1]) out[out.length - 1][1] = Math.max(out[out.length - 1][1], iv[1]);
+    else out.push(iv.slice());
+  }
+  return out;
+}
+function rangeOf(q) {
+  const today = londonDate3((/* @__PURE__ */ new Date()).toISOString());
+  let from = q.get("from") || "", to = q.get("to") || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) to = today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+    const d = /* @__PURE__ */ new Date(to + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 27);
+    from = d.toISOString().slice(0, 10);
+  }
+  return { from, to };
+}
+function mondayOf4(dateStr) {
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function spanMins(start, finish) {
+  const m = (s) => {
+    const x = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+    return x ? +x[1] * 60 + +x[2] : null;
+  };
+  const a = m(start), b = m(finish);
+  if (a == null || b == null) return null;
+  return b >= a ? b - a : b + 1440 - a;
+}
+function fmtMins(m) {
+  return Math.floor(m / 60) + "h " + m % 60 + "m";
+}
+async function hmacB64u(secret, body) {
+  const enc3 = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc3.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(body));
+  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function timingSafeEq(a, b) {
+  a = String(a);
+  b = String(b);
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
 // src/routes/fleet.js
 function jr3(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -15286,6 +17469,14 @@ async function ensureScoresTable(env) {
   )`).run();
   try {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_dscores_user ON driver_scores(tenant_id,username,week_start)").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN rank INTEGER").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE driver_scores ADD COLUMN total INTEGER").run();
   } catch {
   }
 }
@@ -15478,7 +17669,7 @@ function galleryPhotoUrl(env, origin, key) {
   if (String(key).startsWith("vancheck/")) return origin + "/asset-image?key=" + encodeURIComponent(key);
   return signedFileUrl(env, origin, "/fleet/vehicle-photo", key);
 }
-async function handle21(request, env, ctx, url, sess) {
+async function handle22(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -15544,9 +17735,17 @@ async function handle21(request, env, ctx, url, sess) {
       return jr3({ ok: true, count: row && row.n || 0, latest: row && row.latest || "" }, headers);
     }
     const { results } = await env.DB.prepare(
-      "SELECT week_start, week_end, reg, score, sent_at FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
+      "SELECT week_start, week_end, reg, score, sent_at, rank, total FROM driver_scores WHERE tenant_id=? AND username=? ORDER BY week_start DESC"
     ).bind(tid, me).all();
-    const scores = (results || []).map((r) => ({ weekStart: r.week_start, weekEnd: r.week_end || "", reg: r.reg || "", score: r.score, sentAt: r.sent_at || "" }));
+    const scores = (results || []).map((r) => ({
+      weekStart: r.week_start,
+      weekEnd: r.week_end || "",
+      reg: r.reg || "",
+      score: r.score,
+      sentAt: r.sent_at || "",
+      rank: r.rank || null,
+      total: r.total || null
+    }));
     return jr3({ ok: true, scores }, headers);
   }
   if (!sess) return jr3({ error: "Not authenticated" }, headers, 401);
@@ -15588,17 +17787,33 @@ async function handle21(request, env, ctx, url, sess) {
       }
     }
     const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
+    const status = String(form.get("status") || "draft") === "approved" ? "approved" : "draft";
     await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
       customMetadata: {
         title: String(form.get("title") || "Fleet report").slice(0, 160),
         weekStart,
         weekEnd,
+        status,
         by: sess.user.username,
         at: (/* @__PURE__ */ new Date()).toISOString()
       }
     });
-    return jr3({ ok: true, key }, headers, 201);
+    return jr3({ ok: true, key, status }, headers, 201);
+  }
+  if (sub === "/report-approve" && method === "POST") {
+    const b = await readJson4(request);
+    const key = String(b.key || "");
+    const status = String(b.status || "approved") === "draft" ? "draft" : "approved";
+    if (!key || !key.startsWith(prefix(tid))) return jr3({ error: "Bad key" }, headers, 400);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return jr3({ error: "Not found" }, headers, 404);
+    const m = obj.customMetadata || {};
+    await env.JOB_FILES.put(key, obj.body, {
+      httpMetadata: obj.httpMetadata,
+      customMetadata: { ...m, status, approvedBy: status === "approved" ? sess.user.username : "", approvedAt: status === "approved" ? (/* @__PURE__ */ new Date()).toISOString() : "" }
+    });
+    return jr3({ ok: true, status }, headers);
   }
   if (sub === "/reports" && method === "GET") {
     const listed = await env.JOB_FILES.list({ prefix: prefix(tid), include: ["customMetadata"] });
@@ -15613,6 +17828,10 @@ async function handle21(request, env, ctx, url, sess) {
         by: m.by || "",
         at: m.at || (o.uploaded ? new Date(o.uploaded).toISOString() : ""),
         size: o.size,
+        status: m.status || "approved",
+        // legacy rows (no status metadata) treated as approved
+        approvedBy: m.approvedBy || "",
+        approvedAt: m.approvedAt || "",
         url: await signedFileUrl(env, url.origin, "/fleet/report", o.key)
       });
     }
@@ -15691,7 +17910,7 @@ async function handle21(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -15704,8 +17923,12 @@ async function handle21(request, env, ctx, url, sess) {
       appCfg(DEFECTCLR_KEY(tid)),
       // defects marked resolved by an admin
       appCfg(VCACK_KEY(tid)),
-      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()
+      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
+      // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
+      // and can't re-request until it's done). Fails soft if the table is absent.
+      env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] }))
     ]);
+    const pendVc = new Set((pendVcRes.results || []).map((r) => dn(r.reg)));
     const defects = await vanCheckDefects(env, tid, defResolved);
     const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
@@ -15777,6 +18000,8 @@ async function handle21(request, env, ctx, url, sess) {
         // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
         // card status bar: ok | ack | due
+        vanCheckRequested: pendVc.has(dn(v.reg)),
+        // a one-off check is pending — hide the Request button
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0
@@ -16506,21 +18731,42 @@ async function handle21(request, env, ctx, url, sess) {
     const by = sess && sess.user && sess.user.username || "";
     const rangeLabel = weekEnd && weekEnd !== weekStart ? `${weekStart} \u2192 ${weekEnd}` : weekStart;
     let sent = 0;
+    const SCORE_MIN = 70;
+    const medal = (r) => r === 1 ? "\u{1F3C6}" : r === 2 ? "\u{1F948}" : r === 3 ? "\u{1F949}" : "";
+    const rankLabel = (r, tot) => {
+      if (!r || !tot) return "";
+      const suf = (n) => {
+        const s = n % 100;
+        return s >= 11 && s <= 13 ? "th" : ["th", "st", "nd", "rd", "th", "th", "th", "th", "th", "th"][n % 10];
+      };
+      return `${r}${suf(r)} of ${tot}`;
+    };
     for (const s of list) {
       const username = String(s.username || "").trim();
       const score = s.score == null ? null : Math.max(0, Math.min(100, Math.round(Number(s.score))));
       if (!username || score == null || !isFinite(score)) continue;
       const reg = String(s.reg || "").trim();
+      const rank = s.rank != null && isFinite(Number(s.rank)) ? Math.max(1, Math.round(Number(s.rank))) : null;
+      const total = s.total != null && isFinite(Number(s.total)) ? Math.max(1, Math.round(Number(s.total))) : null;
       await env.DB.prepare(
-        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at)
-         VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO driver_scores (tenant_id, username, week_start, week_end, reg, score, sent_by, sent_at, rank, total)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(tenant_id, username, week_start) DO UPDATE SET
-           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score, sent_by=excluded.sent_by, sent_at=excluded.sent_at`
-      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at).run();
+           week_end=excluded.week_end, reg=excluded.reg, score=excluded.score,
+           sent_by=excluded.sent_by, sent_at=excluded.sent_at,
+           rank=excluded.rank, total=excluded.total`
+      ).bind(tid, username, weekStart, weekEnd, reg, score, by, at, rank, total).run();
       sent++;
+      let m = medal(rank);
+      let title;
+      if (!rank || !total) title = "\u{1F690} Your van driving score";
+      else if (rank === 1) title = "\u{1F3C6} You topped the fleet!";
+      else if (rank === total && total > 1) title = `\u{1F690} ${rankLabel(rank, total)} in the fleet \u2014 last place`;
+      else title = `${m ? m + " " : "\u{1F690} "}${rankLabel(rank, total)} in the fleet`;
+      const nudge = score < SCORE_MIN ? " This is not an acceptable driving standard and must be improved." : rank === 1 ? " Great work \u2014 keep it up!" : "";
       if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
-        title: "\u{1F690} Your van driving score",
-        body: `Your driving score for ${rangeLabel} is ${score}/100. Tap to see your history.`,
+        title,
+        body: `Your driving score for ${rangeLabel} is ${score}/100.${nudge} Tap to see your history.`,
         url: "/my-van-scores.html",
         tag: "van-score"
       }).catch(() => {
@@ -16886,7 +19132,417 @@ async function handle21(request, env, ctx, url, sess) {
       return jr3({ ok: true }, headers);
     }
   }
+  if (sub === "/tracker-geocode" && method === "POST") {
+    const b = await readJson4(request);
+    const texts = Array.isArray(b.texts) ? b.texts.slice(0, 80) : [];
+    if (!texts.length) return jr3({ ok: true, results: [] }, headers);
+    const key = env.GOOGLE_MAPS_KEY || "";
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      for (const r of results || []) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const lat = Number(d.lat), lon = Number(d.lon ?? d.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        sites.push({
+          num: r.site_number,
+          name: r.site_name,
+          postcode: r.postcode || "",
+          lat,
+          lon,
+          isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || ""))
+        });
+      }
+    } catch {
+    }
+    const R = 6371e3, toR = (d) => d * Math.PI / 180;
+    const dist = (a, bb) => {
+      const dLat = toR(bb.lat - a.lat), dLon = toR(bb.lon - a.lon);
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(bb.lat)) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.asin(Math.sqrt(s));
+    };
+    const nearest = (lat, lon) => {
+      let best = null, bestD = 801;
+      for (const s of sites) {
+        const d = dist({ lat, lon }, s);
+        if (d < bestD) {
+          best = s;
+          bestD = d;
+        }
+      }
+      if (best && !best.isProject) {
+        for (const s of sites) {
+          if (!s.isProject) continue;
+          const d = dist({ lat, lon }, s);
+          if (d <= bestD + 150) {
+            best = s;
+            bestD = d;
+            break;
+          }
+        }
+      }
+      return best ? { num: best.num, name: best.name, distanceM: Math.round(bestD) } : null;
+    };
+    const out = [];
+    for (const t of texts) {
+      const text = String(t || "").trim();
+      if (!text) {
+        out.push({ text: t, lat: null, lon: null, siteNumber: null });
+        continue;
+      }
+      let lat = null, lon = null, source = "";
+      if (key) {
+        try {
+          const gr = await fetch("https://maps.googleapis.com/maps/api/geocode/json?address=" + encodeURIComponent(text + ", UK") + "&region=uk&key=" + encodeURIComponent(key));
+          const gj = await gr.json();
+          const first = gj && Array.isArray(gj.results) && gj.results[0];
+          if (first && first.geometry && first.geometry.location) {
+            lat = Number(first.geometry.location.lat);
+            lon = Number(first.geometry.location.lng);
+            source = "google";
+          }
+        } catch {
+        }
+      }
+      if (!Number.isFinite(lat)) {
+        const pc = String(text).toUpperCase().match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+        if (pc) {
+          try {
+            const pr = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(pc[0]));
+            const pj = pr.ok ? await pr.json() : null;
+            if (pj && pj.result) {
+              lat = Number(pj.result.latitude);
+              lon = Number(pj.result.longitude);
+              source = "postcodes.io";
+            }
+          } catch {
+          }
+        }
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        out.push({ text: t, lat: null, lon: null, siteNumber: null, source: "" });
+        continue;
+      }
+      const near = nearest(lat, lon);
+      out.push({ text: t, lat, lon, source, siteNumber: near ? near.num : null, siteName: near ? near.name : null, distanceM: near ? near.distanceM : null });
+    }
+    return jr3({ ok: true, results: out }, headers);
+  }
+  if (sub === "/tracker-ai-resolve" && method === "POST") {
+    const b = await readJson4(request);
+    const unmatched = Array.isArray(b.unmatched) ? b.unmatched.slice(0, 40) : [];
+    const poolDays = Array.isArray(b.poolDays) ? b.poolDays.slice(0, 40) : [];
+    if (!unmatched.length && !poolDays.length) return jr3({ ok: true, applied: { aliases: 0, poolDrivers: 0 }, unresolved: { unmatched: [], poolDays: [] } }, headers);
+    let sites = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND (active=1 OR active IS NULL)"
+      ).bind(tid).all();
+      sites = (results || []).map((r) => {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const addr = [d.address1, d.street, d.town, d.county].filter(Boolean).join(", ");
+        return { num: r.site_number, name: r.site_name, postcode: r.postcode || "", client: r.client || "", address: addr, isProject: r.client === "projects" || /^p\d/i.test(String(r.site_number || "")) };
+      }).filter((s) => s.num || s.name);
+    } catch {
+    }
+    let drivers = [];
+    try {
+      const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='Active' OR status='')").bind(tid).all();
+      drivers = (results || []).map((u) => {
+        let p = {};
+        try {
+          p = u.profile ? JSON.parse(u.profile) : {};
+        } catch {
+        }
+        const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || u.username;
+        return { username: u.username, name, homePostcode: p.homePostcode || "", staffType: p.staffType || "" };
+      }).filter((d) => d.staffType === "field" || d.homePostcode);
+    } catch {
+    }
+    const key = env.ANTHROPIC_API_KEY;
+    if (!key) return jr3({ ok: false, error: "ANTHROPIC_API_KEY not set" }, headers, 200);
+    const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+    const schema = {
+      type: "object",
+      properties: {
+        siteAliases: {
+          type: "array",
+          description: "One entry per unmatched trip text you can confidently map to a portal site. Skip anything you're not sure about.",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "The tracker 'to' text exactly as given." },
+              siteNumber: { type: "string", description: "The site number you're pinning it to." },
+              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.9 will be applied. Prefer to omit rather than guess." },
+              reason: { type: "string" }
+            },
+            required: ["text", "siteNumber", "confidence"]
+          }
+        },
+        poolDrivers: {
+          type: "array",
+          description: "One entry per pool-van day you can confidently attribute to a driver, by matching the first trip's origin (or last trip's destination) to a driver's home postcode / area.",
+          items: {
+            type: "object",
+            properties: {
+              vanKey: { type: "string", description: "The van|date key exactly as given." },
+              username: { type: "string", description: "The driver's portal username." },
+              confidence: { type: "number", description: "0..1 \u2014 only entries >= 0.9 will be applied. Prefer to omit rather than guess." },
+              reason: { type: "string" }
+            },
+            required: ["vanKey", "username", "confidence"]
+          }
+        }
+      },
+      required: ["siteAliases", "poolDrivers"]
+    };
+    const system = [
+      "You are helping match van tracker text to a UK field-service company's portal.",
+      "ACCURACY OVER RECALL \u2014 a wrong pin is much worse than no pin. When several sites plausibly fit, DO NOT GUESS: omit.",
+      "Only return an entry with confidence >= 0.9. Below that, LEAVE IT OUT.",
+      "Rules for siteAliases:",
+      " (a) An EXACT full-postcode match in the trip text against a site's postcode is the ONLY signal strong enough to auto-attribute alone (confidence 0.95+).",
+      " (b) Address-line match (specific STREET NAME 12+ chars) with a project site is strong (0.9). With a NON-PROJECT site sharing the same town it's weak \u2014 skip.",
+      " (c) A TOWN name alone (e.g. 'Whiteley', 'Titchfield', 'Sarisbury Green', 'Verwood') is NEVER enough \u2014 many sites share a town. Never pin on town alone.",
+      " (d) Prefer PROJECT sites (isProject prefix P) over other clients when the tracker text is close to project territory \u2014 engineers spend weeks on a project, so a project match is usually correct.",
+      " (e) NEVER pick a Southern Co-op, Chapplins, ELS, Cobra, Wenzel's site unless the tracker text unambiguously names it (site number OR full site name).",
+      "Rules for poolDrivers:",
+      " Match the trip origin/destination to a driver's home postcode area (e.g. 'Whiteley, PO15 7LJ' matches homePostcode PO15 7LJ or the same PO15 area). Only if a single driver's home is a clear match.",
+      "When unsure \u2014 output empty."
+    ].join(" ");
+    const compactSites = sites.slice(0, 400).map((s) => (s.isProject ? "P" : "S") + " " + s.num + " | " + s.name + (s.postcode ? " | " + s.postcode : "") + (s.address ? " | " + s.address : ""));
+    const compactDrivers = drivers.slice(0, 120).map((d) => d.username + " | " + d.name + (d.homePostcode ? " | " + d.homePostcode : ""));
+    const compactUnmatched = unmatched.map((u) => "TEXT: " + (u.text || "") + "  (" + (u.occurrences || 0) + " stops, " + (u.totalMins || 0) + " min total)");
+    const compactPool = poolDays.map((p) => "VAN " + p.van + " | DATE " + p.date + " | first from: " + (p.firstFrom || "?") + " | last to: " + (p.lastTo || "?"));
+    const userContent = "SITES (prefix P=project, S=other):\n" + compactSites.join("\n") + "\n\nDRIVERS (username | name | homePostcode):\n" + compactDrivers.join("\n") + "\n\n" + (compactUnmatched.length ? "UNMATCHED TRIP TEXTS TO PLACE:\n" + compactUnmatched.join("\n") + "\n\n" : "") + (compactPool.length ? "POOL-VAN DAYS TO ATTRIBUTE TO A DRIVER:\n" + compactPool.join("\n") + "\n" : "") + "Return your matches via the resolve_tracker tool.";
+    let resp;
+    try {
+      resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model,
+          max_tokens: 3e3,
+          system,
+          tools: [{ name: "resolve_tracker", description: "Return confident matches.", input_schema: schema }],
+          tool_choice: { type: "tool", name: "resolve_tracker" },
+          messages: [{ role: "user", content: userContent }]
+        })
+      });
+    } catch (e) {
+      return jr3({ ok: false, error: "AI unreachable: " + e.message }, headers, 200);
+    }
+    if (!resp.ok) {
+      let detail = "";
+      try {
+        const j = await resp.json();
+        detail = j?.error?.message || "";
+      } catch {
+      }
+      return jr3({ ok: false, error: "AI error " + resp.status + (detail ? " (" + detail + ")" : "") }, headers, 200);
+    }
+    let payload;
+    try {
+      payload = await resp.json();
+    } catch {
+      return jr3({ ok: false, error: "AI reply unreadable" }, headers, 200);
+    }
+    const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === "resolve_tracker") : null;
+    const out = block && block.input || { siteAliases: [], poolDrivers: [] };
+    const validNums = new Set(sites.map((s) => String(s.num)));
+    let appliedAliases = 0;
+    if (Array.isArray(out.siteAliases)) {
+      const cur = await cfgReadWrap(env, tid, "site_aliases", {});
+      const norm = (s) => String(s || "").toLowerCase().replace(/['’`]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      for (const a of out.siteAliases) {
+        if (!a || !a.text || !a.siteNumber) continue;
+        if (Number(a.confidence) < 0.9) continue;
+        if (!validNums.has(String(a.siteNumber))) continue;
+        const site = sites.find((s) => String(s.num) === String(a.siteNumber));
+        cur[norm(a.text)] = { client: site && site.client || "", siteNumber: String(a.siteNumber), label: String(a.text).slice(0, 200), aiConfidence: a.confidence, aiReason: a.reason || "" };
+        appliedAliases++;
+      }
+      await cfgWriteWrap(env, tid, "site_aliases", cur);
+    }
+    const validUsers = new Set(drivers.map((d) => String(d.username)));
+    let appliedPool = 0;
+    if (Array.isArray(out.poolDrivers)) {
+      const cur = await cfgReadWrap(env, tid, "fleet:poolalloc", {});
+      for (const p of out.poolDrivers) {
+        if (!p || !p.vanKey || !p.username) continue;
+        if (Number(p.confidence) < 0.9) continue;
+        if (!validUsers.has(String(p.username))) continue;
+        cur[p.vanKey] = p.username;
+        appliedPool++;
+      }
+      await cfgWriteWrap(env, tid, "fleet:poolalloc", cur);
+    }
+    const okTexts = new Set((out.siteAliases || []).filter((a) => Number(a.confidence) >= 0.9).map((a) => a.text));
+    const okPool = new Set((out.poolDrivers || []).filter((p) => Number(p.confidence) >= 0.9).map((p) => p.vanKey));
+    return jr3({
+      ok: true,
+      applied: { aliases: appliedAliases, poolDrivers: appliedPool },
+      unresolved: {
+        unmatched: unmatched.filter((u) => !okTexts.has(u.text)),
+        poolDays: poolDays.filter((p) => !okPool.has(p.van + "|" + p.date))
+      }
+    }, headers);
+  }
+  if (sub === "/tracker-reconcile" && method === "POST") {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT)`).run();
+    try {
+      await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run();
+    } catch {
+    }
+    try {
+      await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
+    } catch {
+    }
+    const b = await readJson4(request);
+    const rows = Array.isArray(b.rows) ? b.rows : [];
+    const dryRun = !!b.dryRun;
+    if (!rows.length) return jr3({ ok: true, wrote: 0, skipped: 0, skippedReason: "empty", dryRun, preview: [] }, headers);
+    const dates = new Set(rows.map((r) => String(r.date || "").slice(0, 10)).filter(Boolean));
+    const users = new Set(rows.map((r) => String(r.username || "").trim().toLowerCase()).filter(Boolean));
+    const slCover = /* @__PURE__ */ new Set();
+    if (env.SITELOG_DB && dates.size) {
+      try {
+        const from = [...dates].sort()[0], to = [...dates].sort().reverse()[0];
+        const { results } = await env.SITELOG_DB.prepare(
+          "SELECT portal_username, site_code, site_name, check_in_at, check_out_at FROM visits WHERE date(check_in_at) BETWEEN date(?) AND date(?)"
+        ).bind(from, to).all().catch(() => ({ results: [] }));
+        for (const v of results || []) {
+          const u = String(v.portal_username || "").trim().toLowerCase();
+          if (!users.has(u)) continue;
+          const d = String(v.check_in_at || "").slice(0, 10);
+          const key = u + "::" + normSite(v.site_code || v.site_name || "") + "::" + d;
+          slCover.add(key);
+        }
+      } catch {
+      }
+    }
+    const rates = {};
+    try {
+      const cfg = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind("engts:cfg:" + tid).first();
+      const parsed = cfg && cfg.value ? JSON.parse(cfg.value) : { byUser: {} };
+      const byUser = parsed.byUser || {};
+      const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+      for (const u of results || []) {
+        let profile = {};
+        try {
+          profile = u.profile ? JSON.parse(u.profile) : {};
+        } catch {
+        }
+        const mine = byUser[u.username] || {};
+        const rate = Number(mine.rate) || Number(profile.hourlyRate) || null;
+        if (rate) rates[u.username] = rate;
+      }
+    } catch {
+    }
+    if (!dryRun) {
+      for (const d of dates) {
+        for (const u of users) {
+          try {
+            await env.DB.prepare(
+              "DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id LIKE ? AND date(started_at)=date(?)"
+            ).bind(tid, u, "tracker:%", d).run();
+          } catch {
+          }
+        }
+      }
+    }
+    const bucket = /* @__PURE__ */ new Map();
+    let wrote = 0, skippedSL = 0;
+    let seq = 0;
+    for (const r of rows) {
+      const username = String(r.username || "").trim();
+      const date = String(r.date || "").slice(0, 10);
+      if (!username || !date || !r.startedAt || !r.endedAt) continue;
+      const kind = r.kind === "travel" ? "travel" : "onsite";
+      const siteName = String(r.siteName || "").trim();
+      const siteKey = normSite(r.siteCode || siteName);
+      const mins = Math.max(0, Math.round((Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 6e4));
+      if (!mins) continue;
+      let skipped = false;
+      if (kind === "onsite" && siteKey) {
+        const key = username.toLowerCase() + "::" + siteKey + "::" + date;
+        if (slCover.has(key)) {
+          skippedSL++;
+          skipped = true;
+        }
+      }
+      const bKey = username + "|" + siteKey + "|" + date;
+      let b2 = bucket.get(bKey);
+      if (!b2) {
+        b2 = { username, siteName, siteKey, postcode: String(r.postcode || ""), date, onsiteMins: 0, travelMins: 0, skippedOnsiteMins: 0 };
+        bucket.set(bKey, b2);
+      }
+      if (kind === "onsite") {
+        if (skipped) b2.skippedOnsiteMins += mins;
+        else b2.onsiteMins += mins;
+      } else b2.travelMins += mins;
+      if (skipped || dryRun) continue;
+      seq++;
+      const jobId = "tracker:" + username + ":" + date + ":" + (siteKey || "unknown") + ":" + kind + ":" + seq;
+      try {
+        await env.DB.prepare(
+          "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind) VALUES (?,?,?,?,?,?,?,?,?)"
+        ).bind(tid, username, jobId, "van tracker", siteName, String(r.postcode || "").toUpperCase(), r.startedAt, r.endedAt, kind).run();
+        wrote++;
+      } catch {
+      }
+    }
+    const preview = Array.from(bucket.values()).map((b2) => {
+      const rate = rates[b2.username] || 0;
+      const hoursCosted = (b2.onsiteMins + b2.travelMins) / 60;
+      const cost = Math.round(hoursCosted * rate * 100) / 100;
+      return {
+        username: b2.username,
+        siteName: b2.siteName,
+        siteKey: b2.siteKey,
+        postcode: b2.postcode,
+        date: b2.date,
+        onsiteMins: b2.onsiteMins,
+        travelMins: b2.travelMins,
+        skippedOnsiteMins: b2.skippedOnsiteMins,
+        rate,
+        cost
+      };
+    }).sort((a, b2) => (a.username + a.date + a.siteName).localeCompare(b2.username + b2.date + b2.siteName));
+    return jr3({ ok: true, wrote, skippedSitelog: skippedSL, dryRun, preview }, headers);
+  }
   return jr3({ error: "Not found: " + sub }, headers, 404);
+}
+function normSite(s) {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return /^\d+$/.test(t) ? String(Number(t)) : t.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+async function cfgReadWrap(env, tid, name, fallback) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {
+  }
+  return fallback;
+}
+async function cfgWriteWrap(env, tid, name, value) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
 }
 async function ensureVehTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicles (
@@ -16902,8 +19558,10 @@ async function ensureVehTable(env) {
     "warn_miles INTEGER",
     "specs TEXT",
     // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
-    "finance TEXT"
+    "finance TEXT",
     // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
+    "pool INTEGER DEFAULT 0"
+    // shared/pool vehicle (e.g. tippers) — any engineer may raise a PO against it
   ];
   for (const c of cols) {
     try {
@@ -17336,7 +19994,7 @@ async function seedAssignments(env, tid) {
 
 // src/routes/messages.js
 var READY2 = false;
-async function ensure2(env) {
+async function ensure3(env) {
   if (READY2) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17471,14 +20129,14 @@ async function groupThreads(env, tid, me) {
   }
   return out;
 }
-async function handle22(request, env, ctx, url, sess) {
+async function handle23(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/messages(?=\/|$)/, "") || "/";
-  await ensure2(env);
+  await ensure3(env);
   if (sub === "/unread" && method === "GET") {
     const r = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0 AND COALESCE(deleted,0)=0"
@@ -17670,7 +20328,7 @@ async function handle22(request, env, ctx, url, sess) {
 
 // src/routes/memos.js
 var READY3 = false;
-async function ensure3(env) {
+async function ensure4(env) {
   if (READY3) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS memos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17743,7 +20401,7 @@ async function recipientUsers(env, tid, memo) {
   const want = new Set(set);
   return all.filter((u) => want.has(lc2(u.username)));
 }
-function fmtWhen(iso) {
+function fmtWhen2(iso) {
   try {
     const d = new Date(iso);
     const day = d.getUTCDate(), mon = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.getUTCMonth()];
@@ -17847,7 +20505,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   }
   doc.text(L, y, "Signed: " + signerName, { size: 11, bold: true });
   y += 16;
-  doc.text(L, y, "Date: " + fmtWhen(signedAtISO), { size: 11 });
+  doc.text(L, y, "Date: " + fmtWhen2(signedAtISO), { size: 11 });
   y += 16;
   if (opts.ip) {
     doc.text(L, y, "IP address: " + opts.ip, { size: 11 });
@@ -17856,14 +20514,14 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   doc.text(L, y, "Signed electronically via the Mostlane Portal.", { size: 8.5, grey: true });
   return doc.bytes();
 }
-async function handle23(request, env, ctx, url, sess) {
+async function handle24(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   if (!sess) return jr5({ error: "Not authenticated" }, headers, 401);
   const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/memos(?=\/|$)/, "") || "/";
-  await ensure3(env);
+  await ensure4(env);
   const needFull = async () => {
     if (!await isFull2(env, tid, me)) {
       return jr5({ error: "Admins only" }, headers, 403);
@@ -18047,1533 +20705,6 @@ async function handle23(request, env, ctx, url, sess) {
     return jr5({ ok: true, signed_at: at }, headers);
   }
   return jr5({ error: "Not found: " + sub }, headers, 404);
-}
-
-// src/routes/costing.js
-async function sitelogAdminFetch(env, pathQuery, ms) {
-  const secret = env.SITELOG_ADMIN_SECRET;
-  const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
-  if (env.SITELOG_DB) {
-    try {
-      const res = await handle9(new Request(target, { headers: { "x-admin-secret": secret || "" } }), env);
-      if (res && res.ok) return res;
-    } catch (e) {
-    }
-  }
-  return fetchWithTimeout(target, { headers: { "x-admin-secret": secret } }, ms || 8e3);
-}
-var UNALLOC_MIN = 15;
-var CLAIM_GAP_MIN = 30;
-var MAX_SEG_HOURS = 14;
-var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
-async function handle24(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const method = request.method;
-  const q = url.searchParams;
-  if (path === "/ledger/scan" && method === "POST") return scanIntake(request, env);
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const tid = sess.tenantId;
-  const me = sess.user.username;
-  const perms = await permissionsFor(env, tid, me);
-  const admin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.TimesheetAdmin === "Yes";
-  await ensure4(env);
-  if (path === "/sites/register" && method === "GET") {
-    const reg = await loadRegister(env, tid);
-    return json({ ok: true, sites: reg.list, aliases: reg.aliases, ignored: reg.ignored }, {}, env, request);
-  }
-  if (path.startsWith("/sites/register/") && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    if (path === "/sites/register/update") {
-      const client = String(b.client || "").toLowerCase().trim();
-      const num2 = String(b.siteNumber || "").trim();
-      if (!client || !num2) return error("client and siteNumber required", 400, env, request);
-      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num2).first();
-      if (!row) return error("Site not found", 404, env, request);
-      let data = {};
-      try {
-        data = JSON.parse(row.data || "{}");
-      } catch {
-      }
-      if (b.archived !== void 0) data.archived = !!b.archived;
-      if (b.name) data.siteName = String(b.name).trim();
-      if (b.postcode !== void 0) data.postcode = String(b.postcode || "").toUpperCase().trim();
-      const ll = parseLatLngPair(b.lat, b.lng);
-      if (ll) {
-        data.lat = ll.lat;
-        data.lng = ll.lng;
-      }
-      await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
-          postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
-        WHERE tenant_id=? AND client=? AND site_number=?`).bind(
-        b.archived !== void 0 ? b.archived ? 1 : 0 : data.archived ? 1 : 0,
-        b.name ? String(b.name).trim() : null,
-        b.postcode !== void 0 ? String(b.postcode || "").toUpperCase().trim() : null,
-        JSON.stringify(data),
-        tid,
-        client,
-        num2
-      ).run();
-      let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
-      return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
-    }
-    if (path === "/sites/register/add") {
-      const name = String(b.name || "").trim();
-      if (!name) return error("name required", 400, env, request);
-      const client = String(b.client || "general").toLowerCase().trim() || "general";
-      const num2 = slugNum(name);
-      const ll = parseLatLngPair(b.lat, b.lng);
-      const data = {
-        client,
-        siteNumber: num2,
-        siteName: name,
-        postcode: String(b.postcode || "").toUpperCase().trim(),
-        addedVia: "register"
-      };
-      if (ll) {
-        data.lat = ll.lat;
-        data.lng = ll.lng;
-      }
-      await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
-        VALUES (?,?,?,?,?,1,0,?,datetime('now'))
-        ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
-          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
-      let pushed = false;
-      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
-      return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
-    }
-    if (path === "/sites/register/merge") {
-      const alias = normName(b.alias);
-      if (!alias) return error("alias required", 400, env, request);
-      const aliases = await cfgGet(env, tid, "site_aliases", {});
-      aliases[alias] = { client: String(b.client || "").toLowerCase(), siteNumber: String(b.siteNumber || ""), label: String(b.alias || "").trim() };
-      await cfgSet(env, tid, "site_aliases", aliases);
-      return json({ ok: true }, {}, env, request);
-    }
-    if (path === "/sites/register/unmerge") {
-      const aliases = await cfgGet(env, tid, "site_aliases", {});
-      delete aliases[normName(b.alias)];
-      await cfgSet(env, tid, "site_aliases", aliases);
-      return json({ ok: true }, {}, env, request);
-    }
-    if (path === "/sites/register/ignore") {
-      const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
-      const k = normName(b.name);
-      if (!k) return error("name required", 400, env, request);
-      if (b.undo) delete ignored[k];
-      else ignored[k] = String(b.name || "").trim();
-      await cfgSet(env, tid, "site_reg_ignore", ignored);
-      return json({ ok: true }, {}, env, request);
-    }
-    if (path === "/sites/register/push-candidates") {
-      const names = Array.isArray(b.names) ? b.names.slice(0, 2e3) : [];
-      const source = String(b.source || "external").slice(0, 30);
-      const ext = await cfgGet(env, tid, "site_reg_ext", {});
-      for (const n of names) {
-        const k = normName(n);
-        if (!k) continue;
-        const cur = ext[k] || { name: String(n).trim(), sources: [] };
-        if (!cur.sources.includes(source)) cur.sources.push(source);
-        ext[k] = cur;
-      }
-      await cfgSet(env, tid, "site_reg_ext", ext);
-      return json({ ok: true, stored: Object.keys(ext).length }, {}, env, request);
-    }
-  }
-  if (path === "/sites/register/candidates" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const reg = await loadRegister(env, tid);
-    const ignored = reg.ignored;
-    const found = {};
-    const add = (name, source) => {
-      const k = normName(name);
-      if (!k || k.length < 3) return;
-      if (reg.byNorm[k] || ignored[k]) return;
-      const cur = found[k] || (found[k] = { name: String(name).trim(), sources: [], count: 0 });
-      cur.count++;
-      if (!cur.sources.includes(source)) cur.sources.push(source);
-    };
-    try {
-      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
-      for (const r of results || []) {
-        try {
-          const j = JSON.parse(r.data || "{}");
-          if (j.siteName) add(j.siteName, "jobs");
-        } catch {
-        }
-      }
-    } catch {
-    }
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT DISTINCT site FROM job_time_segments WHERE tenant_id=? AND site IS NOT NULL AND site!=''"
-      ).bind(tid).all();
-      for (const r of results || []) add(r.site, "time-capture");
-    } catch {
-    }
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT DISTINCT site FROM sitelog_scans WHERE tenant_id=? AND site IS NOT NULL AND site!=''"
-      ).bind(tid).all();
-      for (const r of results || []) add(r.site, "sitelog");
-    } catch {
-    }
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT data FROM eng_timesheets WHERE tenant_id=? ORDER BY week DESC LIMIT 260"
-      ).bind(tid).all();
-      for (const r of results || []) {
-        try {
-          const days = JSON.parse(r.data || "{}").days || {};
-          for (const d of Object.values(days))
-            for (const m of Array.isArray(d.mileage) ? d.mileage : [])
-              if (m && m.site) add(m.site, "timesheets");
-        } catch {
-        }
-      }
-    } catch {
-    }
-    try {
-      for (const n of await poOrderSiteNames(env)) add(n, "po");
-    } catch {
-    }
-    try {
-      const ext = await cfgGet(env, tid, "site_reg_ext", {});
-      for (const [k, v] of Object.entries(ext)) {
-        if (reg.byNorm[k] || ignored[k]) continue;
-        const cur = found[k] || (found[k] = { name: v.name, sources: [], count: 0 });
-        cur.count = Math.max(cur.count, 1);
-        for (const s of v.sources || []) if (!cur.sources.includes(s)) cur.sources.push(s);
-      }
-    } catch {
-    }
-    const candidates = Object.values(found).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 500);
-    return json({ ok: true, candidates }, {}, env, request);
-  }
-  if (path === "/ledger/day" && method === "GET") {
-    const user = q.get("user") || me;
-    if (user !== me && !admin) return error("Forbidden", 403, env, request);
-    const date = q.get("date") || londonDate3((/* @__PURE__ */ new Date()).toISOString());
-    const reg = await loadRegister(env, tid);
-    const day = await buildDay(env, tid, user, date, reg);
-    return json({ ok: true, ...day }, {}, env, request);
-  }
-  if (path === "/ledger/scans" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM sitelog_scans WHERE tenant_id=? ORDER BY at DESC LIMIT 200"
-    ).bind(tid).all();
-    return json({ ok: true, scans: results || [] }, {}, env, request);
-  }
-  if (path === "/costing/reconcile-sitelog" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
-    return json(r, {}, env, request);
-  }
-  if (path === "/costing/prefs" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const prefs = await cfgGet(env, tid, "costing_prefs", { pinned: [], hidden: [], order: [] });
-    return json({ ok: true, prefs }, {}, env, request);
-  }
-  if (path === "/costing/prefs" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const arr = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 2e3) : [];
-    const prefs = { pinned: arr(b.pinned), hidden: arr(b.hidden), order: arr(b.order) };
-    await cfgSet(env, tid, "costing_prefs", prefs);
-    return json({ ok: true, prefs }, {}, env, request);
-  }
-  if (path === "/costing/job-pos" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const jobId = q.get("jobId") || q.get("job") || "";
-    if (!jobId) return error("jobId required", 400, env, request);
-    const rows = await jobPoRows(env, jobId);
-    let total = 0, unpriced = 0, materials = 0, subcontractor = 0;
-    const pos = rows.map((r) => {
-      const v = r.cost_ex_vat != null && r.cost_ex_vat !== "" ? Number(r.cost_ex_vat) : null;
-      const priced = v != null && isFinite(v);
-      if (priced) {
-        total += v;
-        if (String(r.cost_category || "").toLowerCase() === "subcontractor") subcontractor += v;
-        else materials += v;
-      } else unpriced++;
-      return {
-        supplier: r.supplier || "",
-        category: r.cost_category || "",
-        trade: r.trade || "",
-        cost: priced ? Math.round(v * 100) / 100 : null,
-        incident: r.incident_no || r.job_ref || "",
-        by: r.engineer_name || "",
-        date: r.d || ""
-      };
-    });
-    const round = (n) => Math.round(n * 100) / 100;
-    return json({
-      ok: true,
-      jobId,
-      poBound: !!env.PO_DB,
-      count: pos.length,
-      total: round(total),
-      materials: round(materials),
-      subcontractor: round(subcontractor),
-      unpriced,
-      pos
-    }, {}, env, request);
-  }
-  if (path === "/costing/eng-aliases" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    return json({ ok: true, aliases: await cfgGet(env, tid, "eng_aliases", {}) }, {}, env, request);
-  }
-  if (path === "/costing/po-engineers" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const out = [];
-    if (env.PO_DB) {
-      try {
-        const { results } = await env.PO_DB.prepare(
-          "SELECT engineer_name AS name, COUNT(*) AS n FROM po_log WHERE (deleted IS NULL OR deleted=0) AND engineer_name IS NOT NULL AND TRIM(engineer_name)!='' GROUP BY engineer_name ORDER BY n DESC"
-        ).all();
-        for (const r of results || []) out.push({ name: r.name, count: r.n });
-      } catch {
-      }
-    }
-    return json({ ok: true, engineers: out, poBound: !!env.PO_DB }, {}, env, request);
-  }
-  if (path === "/costing/eng-alias" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const alias = normName(b.alias), user = String(b.user || "").trim();
-    if (!alias || !user) return error("alias and user required", 400, env, request);
-    const aliases = await cfgGet(env, tid, "eng_aliases", {});
-    aliases[alias] = user;
-    await cfgSet(env, tid, "eng_aliases", aliases);
-    return json({ ok: true, aliases }, {}, env, request);
-  }
-  if (path === "/costing/eng-alias/delete" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const aliases = await cfgGet(env, tid, "eng_aliases", {});
-    delete aliases[normName(b.alias)];
-    await cfgSet(env, tid, "eng_aliases", aliases);
-    return json({ ok: true, aliases }, {}, env, request);
-  }
-  if (path === "/costing/fin" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const key = String(b.key || "").trim();
-    if (!key) return error("key required", 400, env, request);
-    const cur = await writeProjFin(env, tid, key, { value: b.value, planned: b.planned, name: b.name });
-    return json({ ok: true, fin: cur }, {}, env, request);
-  }
-  if (path === "/costing/fin/valuation" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const key = String(b.key || "").trim();
-    const amount = Number(b.amount);
-    if (!key || !Number.isFinite(amount)) return error("key and amount required", 400, env, request);
-    const fin = await cfgGet(env, tid, "proj_fin", {});
-    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
-    cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
-    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate3((/* @__PURE__ */ new Date()).toISOString());
-    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200), final: !!b.final });
-    fin[key] = cur;
-    await cfgSet(env, tid, "proj_fin", fin);
-    return json({ ok: true, fin: cur }, {}, env, request);
-  }
-  if (path === "/costing/fin/valuation/delete" && method === "POST") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const key = String(b.key || "").trim(), id = String(b.id || "");
-    const fin = await cfgGet(env, tid, "proj_fin", {});
-    const cur = fin[key];
-    if (cur && Array.isArray(cur.valuations)) {
-      cur.valuations = cur.valuations.filter((v) => v.id !== id);
-      await cfgSet(env, tid, "proj_fin", fin);
-    }
-    return json({ ok: true, fin: cur || null }, {}, env, request);
-  }
-  if (path === "/costing/summary" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const { from, to } = rangeOf(q);
-    const reg = await loadRegister(env, tid);
-    const rates = await ratesMap(env, tid);
-    const days = await reconcileRange(env, tid, from, to, reg);
-    const eAlias = await cfgGet(env, tid, "eng_aliases", {});
-    const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
-    const projFin = await cfgGet(env, tid, "proj_fin", {});
-    const bySite = {};
-    const siteKeyOf2 = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
-    const siteFor = (name, resolved) => {
-      const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
-      return bySite[key] || (bySite[key] = {
-        site: resolved ? resolved.name : name || "(no site)",
-        client: resolved ? resolved.client : "",
-        archived: !!(resolved && resolved.archived),
-        unmatched: !resolved,
-        travelMins: 0,
-        onsiteMins: 0,
-        visitMins: 0,
-        cost: 0,
-        costPartial: false,
-        poTotal: 0,
-        poUnpriced: 0,
-        jobs: {},
-        engineers: {},
-        labD: {},
-        poD: {},
-        suppliers: {}
-        // per-site: labour-by-day, PO-by-day, spend-by-supplier
-      });
-    };
-    const engFor = (s, name) => {
-      let key = Object.keys(s.engineers).find((k) => normName(k) === normName(name)) || name || "(unknown)";
-      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [], src: null, visits: 0, days: /* @__PURE__ */ new Set() });
-    };
-    const addSrc = (eng, src) => {
-      eng.src = !eng.src ? src : eng.src === src ? src : "mixed";
-    };
-    const addDay = (map, day, v) => {
-      const k = String(day || "").slice(0, 10);
-      if (!k) return;
-      map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
-    };
-    const slRate = {};
-    const seededProjects = {};
-    try {
-      const { results: projRows } = await env.DB.prepare(
-        "SELECT id, number, name, status, data FROM projects WHERE tenant_id=? AND (status IS NULL OR status IN ('live','complete'))"
-      ).bind(tid).all();
-      for (const p of projRows || []) {
-        const name = String(p.name || "").trim();
-        if (!name) continue;
-        const resolved = resolveSite(reg, name);
-        const s = siteFor(name, resolved);
-        const sKey = siteKeyOf2(resolved, name);
-        seededProjects[sKey] = { id: p.id, number: p.number };
-      }
-    } catch {
-    }
-    const slSites = await fetchSitelogCosting(env, from, to);
-    const slCovered = /* @__PURE__ */ new Set();
-    if (slSites) {
-      for (const slSite of slSites) {
-        const resolved = resolveSiteCode(reg, slSite.siteCode);
-        const s = siteFor(resolved ? resolved.name : slSite.siteCode || "(no site)", resolved);
-        const sKey = siteKeyOf2(resolved, slSite.siteCode);
-        for (const p of slSite.people || []) {
-          if (!p.costedVisits) continue;
-          const portalUser = (p.portalUsername || "").trim();
-          const isEmployee = !!portalUser;
-          const who = canonEng(isEmployee ? portalUser : p.name || "(unknown)");
-          slCovered.add(sKey + "::" + normName(who));
-          const workMins = Math.round((p.workH || 0) * 60);
-          const travMins = Math.round((p.travelH || 0) * 60);
-          s.visitMins += workMins;
-          s.travelMins += travMins;
-          const eng = engFor(s, who);
-          eng.mins += workMins + travMins;
-          eng.visits += (p.costedVisits || 0) + (p.openCount || 0);
-          addSrc(eng, "sitelog");
-          const r = isEmployee ? rates[who] || rates[portalUser] : null;
-          let cost = null;
-          if (r && r.rateType === "hour" && r.rate) {
-            const fuel = r.fuelPerMile != null ? (p.miles || 0) * r.fuelPerMile : p.fuelCost || 0;
-            cost = ((p.workH || 0) + (p.travelH || 0)) * r.rate + fuel;
-          } else {
-            cost = p.total != null ? Number(p.total) : null;
-          }
-          if (cost != null && isFinite(cost)) {
-            cost = Math.round(cost * 100) / 100;
-            eng.cost = Math.round(((eng.cost || 0) + cost) * 100) / 100;
-            s.cost = Math.round((s.cost + cost) * 100) / 100;
-            const hrs = (p.workH || 0) > 0 ? p.workH : (p.workH || 0) + (p.travelH || 0);
-            if (hrs > 0) slRate[sKey + "::" + normName(who)] = { cost, hrs };
-          } else {
-            s.costPartial = true;
-          }
-        }
-      }
-    }
-    for (const d of days) {
-      for (const e of d.entries) {
-        const s = siteFor(e.site, e.resolved);
-        const sKey = siteKeyOf2(e.resolved, e.site);
-        const cu = canonEng(e.user);
-        if (slCovered.has(sKey + "::" + normName(cu))) continue;
-        const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
-        s[bucket] += e.mins;
-        if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
-        const eng = engFor(s, cu);
-        eng.mins += e.mins;
-        eng.days.add(d.date);
-        addSrc(eng, "sla");
-        const r = rates[cu];
-        if (r && r.rateType === "hour" && r.rate) {
-          eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * r.rate) * 100) / 100;
-          s.cost = Math.round((s.cost + e.mins / 60 * r.rate) * 100) / 100;
-          addDay(s.labD, d.date, e.mins / 60 * r.rate);
-        } else if (r && r.rateType === "day") {
-          s.costPartial = true;
-        } else {
-          s.costPartial = true;
-        }
-      }
-    }
-    for (const p of await poRows(env, from, to)) {
-      const resolved = resolveSite(reg, p.site);
-      const s = siteFor(p.site, resolved);
-      const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
-      if (val != null && isFinite(val)) {
-        s.poTotal = Math.round((s.poTotal + val) * 100) / 100;
-        addDay(s.poD, p.d || to, val);
-      } else s.poUnpriced++;
-      const eng = engFor(s, canonEng(p.engineer_name || "(unknown)"));
-      if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
-      eng.pos = eng.pos || [];
-      eng.pos.push({
-        supplier: p.supplier || "",
-        cost: val != null && isFinite(val) ? val : null,
-        incident: p.incident_no || "",
-        date: p.d || "",
-        category: p.cost_category || ""
-      });
-      const supName = (p.supplier || "").trim() || "(no supplier)";
-      const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
-      sup.count++;
-      if (val != null && isFinite(val)) sup.total = Math.round((sup.total + val) * 100) / 100;
-      else sup.unpriced++;
-    }
-    if (slSites && Object.keys(slRate).length) {
-      const visits = await fetchSitelogVisits(env, from, to);
-      for (const v of visits || []) {
-        if (!v.check_in_at || !v.check_out_at) continue;
-        const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
-        const resolved = resolveSiteCode(reg, v.site_code);
-        const sKey = siteKeyOf2(resolved, v.site_code);
-        const rt = slRate[sKey + "::" + normName(who)];
-        if (!rt) continue;
-        const site = bySite[sKey];
-        if (!site) continue;
-        const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 36e5);
-        if (hrs > 0) addDay(site.labD, londonDate3(v.check_in_at), hrs * (rt.cost / rt.hrs));
-      }
-    }
-    try {
-      const projKeyById = {};
-      for (const [k, m] of Object.entries(seededProjects)) projKeyById[m.id] = k;
-      const projIds = Object.keys(projKeyById);
-      if (projIds.length) {
-        for (const pid of projIds) {
-          const { results } = await env.DB.prepare(
-            "SELECT kind, username, hours, amount, supplier, description, date FROM project_costs WHERE tenant_id=? AND project_id=?"
-          ).bind(tid, pid).all();
-          const sKey = projKeyById[pid];
-          const s = bySite[sKey];
-          if (!s) continue;
-          for (const r of results || []) {
-            const amt = Number(r.amount) || 0;
-            if (r.kind === "labour") {
-              s.cost = Math.round((s.cost + amt) * 100) / 100;
-              s.manualLabour = Math.round(((s.manualLabour || 0) + amt) * 100) / 100;
-              addDay(s.labD, r.date, amt);
-              const who = canonEng(r.username || "(manual)");
-              const eng = engFor(s, who);
-              eng.cost = Math.round(((eng.cost || 0) + amt) * 100) / 100;
-              const mins = r.hours ? Math.round(Number(r.hours) * 60) : 0;
-              if (mins) {
-                s.onsiteMins += mins;
-                eng.mins += mins;
-                if (!eng.days) eng.days = /* @__PURE__ */ new Set();
-                eng.days.add(r.date);
-              }
-              addSrc(eng, "sla");
-            } else {
-              s.poTotal = Math.round((s.poTotal + amt) * 100) / 100;
-              s.manualMaterials = Math.round(((s.manualMaterials || 0) + amt) * 100) / 100;
-              addDay(s.poD, r.date, amt);
-              const supName = (r.supplier || "").trim() || "Manual entry";
-              const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
-              sup.count++;
-              sup.total = Math.round((sup.total + amt) * 100) / 100;
-            }
-          }
-        }
-      }
-    } catch {
-    }
-    let sites = Object.entries(bySite).map(([key, s]) => {
-      const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
-      return {
-        ...s,
-        key,
-        // stable per-site id the front-end pins/hides/orders against
-        project: seededProjects[key] || null,
-        // { id, number } when this site IS a portal project
-        manualLabour: s.manualLabour || 0,
-        manualMaterials: s.manualMaterials || 0,
-        totalMins: s.travelMins + s.onsiteMins + s.visitMins,
-        laborCost,
-        poTotal,
-        poUnpriced: s.poUnpriced || 0,
-        grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
-        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100, mergeDayMaps(s.labD, s.poD)),
-        jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
-        engineers: Object.entries(s.engineers).map(([u, v]) => ({
-          user: u,
-          mins: v.mins || 0,
-          cost: v.cost,
-          poCost: v.poCost || 0,
-          src: v.src || null,
-          visits: (v.visits || 0) + (v.days ? v.days.size : 0),
-          // on-site visits/days
-          pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
-        })).sort((a, b) => (b.cost || 0) + (b.poCost || 0) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
-        // Per-site trend (labour + materials over its own active span) + supplier spend.
-        series: buildSiteSeries(s.labD, s.poD),
-        suppliers: Object.values(s.suppliers).sort((a, b) => b.total - a.total || b.count - a.count)
-      };
-    }).sort((a, b) => b.grandTotal - a.grandTotal || b.totalMins - a.totalMins);
-    const only = normName(q.get("site") || "");
-    if (only) sites = sites.filter((s) => normName(s.site) === only);
-    return json({ ok: true, from, to, sites, sitelog: slSites != null, sitelogReason: slSites != null ? "" : _slDiag }, {}, env, request);
-  }
-  if (path === "/exceptions" && method === "GET") {
-    if (!admin) return error("Forbidden", 403, env, request);
-    const { from, to } = rangeOf(q);
-    const reg = await loadRegister(env, tid);
-    const days = await reconcileRange(env, tid, from, to, reg);
-    const ex = [];
-    for (const d of days) {
-      for (const e of d.entries) {
-        if (e.flags.includes("auto-closed"))
-          ex.push({
-            date: d.date,
-            user: d.user,
-            type: "auto-closed",
-            site: e.site,
-            detail: `${e.jobRef || e.site || "segment"} was never finished \u2014 closed automatically (${fmtMins(e.mins)} recorded)`
-          });
-        if (e.flags.includes("mismatch"))
-          ex.push({
-            date: d.date,
-            user: d.user,
-            type: "site-mismatch",
-            site: e.site,
-            detail: `SiteLog scan at "${e.scanSite}" while working job ${e.jobRef || "?"} at "${e.site}"`
-          });
-        if (e.resolved && e.resolved.archived)
-          ex.push({
-            date: d.date,
-            user: d.user,
-            type: "archived-site",
-            site: e.resolved.name,
-            detail: `${fmtMins(e.mins)} recorded against ARCHIVED site "${e.resolved.name}"${e.jobRef ? " (job " + e.jobRef + ")" : ""}`
-          });
-        if (!e.resolved && e.site)
-          ex.push({
-            date: d.date,
-            user: d.user,
-            type: "unmatched-site",
-            site: e.site,
-            detail: `"${e.site}" isn't in the site register (${fmtMins(e.mins)}) \u2014 add or merge it`
-          });
-      }
-      if (d.unallocMins > UNALLOC_MIN)
-        ex.push({
-          date: d.date,
-          user: d.user,
-          type: "unallocated",
-          detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead`
-        });
-    }
-    for (const p of await poRows(env, from, to)) {
-      const resolved = resolveSite(reg, p.site);
-      const money2 = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? "\xA3" + Number(p.cost_ex_vat).toFixed(2) : "unpriced";
-      if (resolved && resolved.archived)
-        ex.push({
-          date: p.d || to,
-          user: p.engineer_name || "",
-          type: "archived-site",
-          site: resolved.name,
-          detail: `PO (${money2}, ${p.supplier || "supplier"}) raised against ARCHIVED site "${resolved.name}"`
-        });
-      else if (!resolved && p.site)
-        ex.push({
-          date: p.d || to,
-          user: p.engineer_name || "",
-          type: "unmatched-site",
-          site: p.site,
-          detail: `PO (${money2}, ${p.supplier || "supplier"}) on "${p.site}" \u2014 not in the site register; add or merge it`
-        });
-    }
-    const slSites = await fetchSitelogCosting(env, from, to);
-    for (const slSite of slSites || []) {
-      const resolved = resolveSiteCode(reg, slSite.siteCode);
-      const hrs = (slSite.workH || 0) + (slSite.travelH || 0);
-      if (resolved && resolved.archived)
-        ex.push({
-          date: to,
-          user: "",
-          type: "archived-site",
-          site: resolved.name,
-          detail: `SiteLog labour (${hrs.toFixed(1)}h) recorded against ARCHIVED site "${resolved.name}"`
-        });
-      else if (!resolved && slSite.siteCode)
-        ex.push({
-          date: to,
-          user: "",
-          type: "unmatched-site",
-          site: String(slSite.siteCode),
-          detail: `SiteLog labour (${hrs.toFixed(1)}h) at store "${slSite.siteCode}" \u2014 not matched to the site register; add or merge it`
-        });
-    }
-    try {
-      const capByKey = {};
-      for (const d of days) capByKey[d.user + "|" + d.date] = d.entries.reduce((a, e) => a + e.mins, 0);
-      const { results } = await env.DB.prepare(
-        "SELECT username, week, data FROM eng_timesheets WHERE tenant_id=? AND week>=? AND week<=?"
-      ).bind(tid, mondayOf4(from), to).all();
-      for (const r of results || []) {
-        let daysObj = {};
-        try {
-          daysObj = JSON.parse(r.data || "{}").days || {};
-        } catch {
-        }
-        for (const [date, d] of Object.entries(daysObj)) {
-          if (date < from || date > to || !d || !d.start || !d.finish) continue;
-          const span = spanMins(d.start, d.finish);
-          if (span == null) continue;
-          const captured = capByKey[r.username + "|" + date] || 0;
-          const diff = span - captured;
-          if (Math.abs(diff) > CLAIM_GAP_MIN && captured > 0)
-            ex.push({
-              date,
-              user: r.username,
-              type: diff > 0 ? "claimed-over-captured" : "captured-over-claimed",
-              detail: `Timesheet says ${fmtMins(span)}, system captured ${fmtMins(captured)} (${diff > 0 ? "+" : ""}${fmtMins(Math.abs(diff))} difference)`
-            });
-        }
-      }
-    } catch {
-    }
-    ex.sort((a, b) => b.date.localeCompare(a.date) || a.user.localeCompare(b.user));
-    return json({ ok: true, from, to, exceptions: ex.slice(0, 500) }, {}, env, request);
-  }
-  return error("Unknown costing route", 404, env, request);
-}
-async function scanIntake(request, env) {
-  try {
-    const raw = await request.text();
-    const sig = request.headers.get("x-portal-sig") || "";
-    if (!env.PORTAL_BRIDGE_SECRET) return new Response(JSON.stringify({ ok: false, error: "bridge secret unset" }), { status: 500, headers: { "Content-Type": "application/json" } });
-    const want = await hmacB64u(env.PORTAL_BRIDGE_SECRET, raw);
-    if (!timingSafeEq(sig, want)) return new Response(JSON.stringify({ ok: false, error: "bad signature" }), { status: 403, headers: { "Content-Type": "application/json" } });
-    const b = JSON.parse(raw || "{}");
-    const username = String(b.username || "").trim();
-    const site = String(b.site || b.siteName || "").trim();
-    const dir = b.direction === "out" ? "out" : "in";
-    if (!username || !site) return new Response(JSON.stringify({ ok: false, error: "username and site required" }), { status: 400, headers: { "Content-Type": "application/json" } });
-    await ensure4(env);
-    await env.DB.prepare(
-      "INSERT INTO sitelog_scans (tenant_id, username, site, direction, at, source) VALUES (?,?,?,?,?,?)"
-    ).bind(
-      Number(b.tenantId) || 1,
-      username,
-      site,
-      dir,
-      b.at ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
-      "sitelog"
-    ).run();
-    return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } });
-  } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } });
-  }
-}
-async function buildDay(env, tid, user, date, reg) {
-  const entries = [];
-  const dayStart = Date.parse(date + "T00:00:00Z") - 2 * 36e5;
-  const dayEnd = dayStart + 30 * 36e5;
-  const segs = [];
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at"
-    ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
-    for (const s of results || []) if (londonDate3(s.started_at) === date) segs.push(s);
-  } catch {
-  }
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-  const today = londonDate3(nowIso);
-  for (const s of segs) {
-    let end = s.ended_at, flags = [];
-    if (s.auto_closed) flags.push("auto-closed");
-    if (!end) {
-      if (date < today) {
-        end = lazyCloseAt(s.started_at, date);
-        flags.push("auto-closed");
-      } else {
-        end = nowIso;
-        flags.push("open");
-      }
-    }
-    if (Date.parse(end) - Date.parse(s.started_at) > MAX_SEG_MS2) {
-      end = lazyCloseAt(s.started_at, date);
-      if (!flags.includes("auto-closed")) flags.push("auto-closed");
-    }
-    const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 6e4));
-    if (!mins) continue;
-    entries.push({
-      user,
-      src: "job",
-      kind: s.kind === "travel" ? "travel" : "onsite",
-      site: s.site || "",
-      jobRef: s.job_ref || s.job_id,
-      start: s.started_at,
-      end,
-      mins,
-      flags,
-      resolved: resolveSite(reg, s.site)
-    });
-  }
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at"
-    ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
-    let scans = (results || []).filter((s) => londonDate3(s.at) === date);
-    if (!scans.length && env.SITELOG_DB) {
-      const from = new Date(dayStart).toISOString().slice(0, 10);
-      const to = new Date(dayEnd).toISOString().slice(0, 10);
-      try {
-        const visits2 = await fetchSitelogVisits(env, from, to);
-        const nameLike = jcNameLike;
-        for (const v of visits2 || []) {
-          const who = String(v.portal_username || "").trim() || nameLike(v);
-          if (String(who).toLowerCase() !== String(user).toLowerCase()) continue;
-          if (v.check_in_at && londonDate3(v.check_in_at) === date) {
-            scans.push({ at: v.check_in_at, direction: "in", site: v.site_code || v.site_name || "" });
-          }
-          if (v.check_out_at && londonDate3(v.check_out_at) === date) {
-            scans.push({ at: v.check_out_at, direction: "out", site: v.site_code || v.site_name || "" });
-          }
-        }
-        scans.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-      } catch {
-      }
-    }
-    const open = {};
-    const visits = [];
-    for (const s of scans) {
-      const k = normName(s.site);
-      if (s.direction === "in") {
-        if (!open[k]) open[k] = { at: s.at, site: s.site };
-      } else if (open[k]) {
-        visits.push({ site: open[k].site, start: open[k].at, end: s.at, flags: [] });
-        delete open[k];
-      }
-    }
-    for (const k of Object.keys(open)) {
-      const v = open[k];
-      visits.push({ site: v.site, start: v.at, end: lazyCloseAt(v.at, date), flags: ["auto-closed"] });
-    }
-    const jobIv = entries.map((e) => [Date.parse(e.start), Date.parse(e.end), e]);
-    for (const v of visits) {
-      let ivs = [[Date.parse(v.start), Date.parse(v.end)]];
-      const vNorm = normName(v.site);
-      for (const [js, je, e] of jobIv) {
-        const next = [];
-        for (const [vs, ve] of ivs) {
-          if (je <= vs || js >= ve) {
-            next.push([vs, ve]);
-            continue;
-          }
-          if (normName(e.site) !== vNorm && !e.flags.includes("mismatch")) {
-            e.flags.push("mismatch");
-            e.scanSite = v.site;
-          }
-          if (vs < js) next.push([vs, js]);
-          if (ve > je) next.push([je, ve]);
-        }
-        ivs = next;
-      }
-      for (const [vs, ve] of ivs) {
-        const mins = Math.round((ve - vs) / 6e4);
-        if (mins < 3) continue;
-        entries.push({
-          user,
-          src: "sitelog",
-          kind: "onsite",
-          site: v.site,
-          jobRef: "",
-          start: new Date(vs).toISOString(),
-          end: new Date(ve).toISOString(),
-          mins,
-          flags: v.flags.slice(),
-          resolved: resolveSite(reg, v.site)
-        });
-      }
-    }
-  } catch {
-  }
-  let shift = null, unallocMins = 0;
-  try {
-    shift = await env.DB.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, user, date).first();
-  } catch {
-  }
-  if (shift && shift.clock_on_at) {
-    const on = Date.parse(shift.clock_on_at);
-    const off = shift.clock_off_at ? Date.parse(shift.clock_off_at) : date < today ? Date.parse(lazyCloseAt(shift.clock_on_at, date)) : Date.now();
-    let covered = mergeIntervals(entries.map((e) => [Math.max(on, Date.parse(e.start)), Math.min(off, Date.parse(e.end))]).filter(([a, b]) => b > a));
-    const total = Math.max(0, off - on);
-    const cov = covered.reduce((a, [s, e]) => a + (e - s), 0);
-    unallocMins = Math.max(0, Math.round((total - cov) / 6e4));
-  }
-  entries.sort((a, b) => a.start.localeCompare(b.start));
-  return {
-    user,
-    date,
-    entries,
-    unallocMins,
-    shift: shift ? { on: shift.clock_on_at || "", off: shift.clock_off_at || "" } : null,
-    totals: {
-      travelMins: entries.filter((e) => e.kind === "travel").reduce((a, e) => a + e.mins, 0),
-      onsiteMins: entries.filter((e) => e.kind !== "travel" && e.src === "job").reduce((a, e) => a + e.mins, 0),
-      visitMins: entries.filter((e) => e.src === "sitelog").reduce((a, e) => a + e.mins, 0),
-      unallocMins
-    }
-  };
-}
-async function reconcileRange(env, tid, from, to, reg) {
-  const users = /* @__PURE__ */ new Set();
-  const dates = {};
-  const seen = (u, d) => {
-    users.add(u);
-    (dates[u] = dates[u] || /* @__PURE__ */ new Set()).add(d);
-  };
-  const lo = from + "T00:00:00Z", hi = to + "T23:59:59Z";
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT username, started_at FROM job_time_segments WHERE tenant_id=? AND started_at>=? AND started_at<=?"
-    ).bind(tid, lo, hi).all();
-    for (const r of results || []) {
-      const d = londonDate3(r.started_at);
-      if (d >= from && d <= to) seen(r.username, d);
-    }
-  } catch {
-  }
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT username, at FROM sitelog_scans WHERE tenant_id=? AND at>=? AND at<=?"
-    ).bind(tid, lo, hi).all();
-    for (const r of results || []) {
-      const d = londonDate3(r.at);
-      if (d >= from && d <= to) seen(r.username, d);
-    }
-  } catch {
-  }
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT username, date FROM shifts WHERE tenant_id=? AND date>=? AND date<=?"
-    ).bind(tid, from, to).all();
-    for (const r of results || []) seen(r.username, r.date);
-  } catch {
-  }
-  const out = [];
-  for (const u of users) for (const d of dates[u]) out.push(await buildDay(env, tid, u, d, reg));
-  return out;
-}
-async function loadRegister(env, tid) {
-  const list = [];
-  const byNorm = {};
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT client, site_number, site_name, postcode, active, archived, job_number, data FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
-    ).bind(tid).all();
-    for (const r of results || []) {
-      let d = {};
-      try {
-        d = JSON.parse(r.data || "{}");
-      } catch {
-      }
-      const lat = Number(d.lat), lng = Number(d.lng ?? d.lon);
-      const entry = {
-        client: r.client,
-        siteNumber: r.site_number,
-        name: r.site_name || "Site " + r.site_number,
-        postcode: (r.postcode || "").replace(/\*+$/, ""),
-        active: r.active !== 0,
-        archived: !!r.archived,
-        jobNumber: r.job_number || "",
-        lat: Number.isFinite(lat) ? lat : null,
-        lng: Number.isFinite(lng) ? lng : null,
-        norm: normName(r.site_name || r.site_number)
-      };
-      list.push(entry);
-      if (entry.norm && !byNorm[entry.norm]) byNorm[entry.norm] = entry;
-    }
-  } catch {
-  }
-  const aliases = await cfgGet(env, tid, "site_aliases", {});
-  for (const [norm, tgt] of Object.entries(aliases)) {
-    const target = list.find((s) => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
-    if (target && !byNorm[norm]) byNorm[norm] = target;
-  }
-  const byCode = {};
-  for (const e of list) {
-    for (const code of [String(e.siteNumber || ""), digitsOf2(e.name), digitsOf2(e.siteNumber)]) {
-      if (code && !byCode[code]) byCode[code] = e;
-    }
-  }
-  const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
-  return { list, byNorm, byCode, aliases, ignored };
-}
-function resolveSite(reg, name) {
-  const k = normName(name);
-  return k && reg.byNorm[k] || null;
-}
-function resolveSiteCode(reg, code) {
-  const c = String(code || "").trim();
-  if (!c) return null;
-  const d = digitsOf2(c);
-  return d && reg.byCode && reg.byCode[d] || reg.byCode && reg.byCode[c] || resolveSite(reg, c) || null;
-}
-function digitsOf2(s) {
-  return String(s || "").replace(/\D+/g, "");
-}
-function parseLatLngPair(latIn, lngIn) {
-  const lat = Number(latIn), lng = Number(lngIn);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-  if (lat === 0 && lng === 0) return null;
-  return { lat, lng };
-}
-async function pushSiteToSiteLog(env, name, lat, lng, client) {
-  try {
-    if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
-    const target = (env.SITELOG_API || "https://api.site-log.co.uk") + "/bulk-add-sites";
-    const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
-    const init = {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
-      body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
-    };
-    let res;
-    if (env.SITELOG_DB) {
-      try {
-        res = await handle9(new Request(target, init), env);
-      } catch (e) {
-        res = null;
-      }
-      if (!res || !res.ok) res = await fetch(target, init);
-    } else {
-      res = await fetch(target, init);
-    }
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-var _slDiag = "";
-async function fetchWithTimeout(url, opts, ms) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await fetch(url, { ...opts, signal: ctrl.signal });
-  } finally {
-    clearTimeout(t);
-  }
-}
-async function fetchSitelogCosting(env, from, to) {
-  _slDiag = "";
-  const secret = env.SITELOG_ADMIN_SECRET;
-  if (!secret) {
-    _slDiag = "secret-unset";
-    return null;
-  }
-  const pathQuery = "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await sitelogAdminFetch(env, pathQuery, 8e3);
-      if (!res.ok) {
-        _slDiag = "http-" + res.status;
-        continue;
-      }
-      const j = await res.json();
-      if (j && j.ok && Array.isArray(j.sites)) {
-        _slDiag = "";
-        return j.sites;
-      }
-      _slDiag = "bad-response";
-      return null;
-    } catch (e) {
-      _slDiag = e && e.name === "AbortError" ? "timeout" : "unreachable";
-    }
-  }
-  return null;
-}
-async function fetchSitelogVisits(env, from, to) {
-  const secret = env.SITELOG_ADMIN_SECRET;
-  if (!secret) return null;
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  let before = null, got = false;
-  try {
-    for (let page = 0; page < 30; page++) {
-      let pq = "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
-      if (before) pq += "&before=" + encodeURIComponent(before);
-      const res = await sitelogAdminFetch(env, pq, 8e3);
-      if (!res.ok) return got ? out : null;
-      const j = await res.json();
-      const rows = Array.isArray(j.visits) ? j.visits : [];
-      got = true;
-      if (!rows.length) break;
-      let added = 0, oldest = null;
-      for (const r of rows) {
-        const id = r.visit_id != null ? r.visit_id : r.person_id + "|" + r.check_in_at;
-        if (!seen.has(id)) {
-          seen.add(id);
-          out.push(r);
-          added++;
-        }
-        if (oldest == null || r.check_in_at && r.check_in_at < oldest) oldest = r.check_in_at;
-      }
-      if (rows.length < 500 || !oldest || added === 0) break;
-      before = oldest;
-    }
-    return out;
-  } catch {
-    return got ? out : null;
-  }
-}
-function jcNameLike(v) {
-  return ((v.first_name || "") + " " + (v.last_name || "")).trim() || "(unknown)";
-}
-function mergeDayMaps(a, b) {
-  const out = {};
-  for (const [d, v] of Object.entries(a || {})) out[d] = (out[d] || 0) + v;
-  for (const [d, v] of Object.entries(b || {})) out[d] = (out[d] || 0) + v;
-  return out;
-}
-function computeFin(f, cost, costByDay) {
-  if (!f || !(Number(f.value) > 0) && !(f.valuations && f.valuations.length) && !(Number(f.planned) > 0)) return null;
-  const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
-  const value = r(f.value);
-  const planned = Math.max(0, Math.round(Number(f.planned) || 0));
-  const valuations = (Array.isArray(f.valuations) ? f.valuations : []).map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const costDays = Object.keys(costByDay || {}).sort();
-  const cumCostUpTo = (date) => {
-    let c = 0;
-    for (const d of costDays) {
-      if (d <= date) c += costByDay[d];
-      else break;
-    }
-    return c;
-  };
-  let prevCumCost = 0, runVal = 0;
-  for (const v of valuations) {
-    runVal += v.amount;
-    const cumCost = cumCostUpTo(v.date);
-    const costPortion = Math.max(0, r(cumCost - prevCumCost));
-    v.costAtTime = costPortion;
-    v.profitAtTime = r(v.amount - costPortion);
-    v.profitToDate = r(runVal - cumCost);
-    prevCumCost = cumCost;
-  }
-  const costSinceLastVal = valuations.length ? Math.max(0, r(cost - prevCumCost)) : r(cost);
-  const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
-  const remainingValue = r(value - valued);
-  const remainingVals = Math.max(0, planned - valuations.length);
-  const position = r(valued - cost);
-  const marginPct = value > 0 ? r((value - cost) / value * 100) : null;
-  const breakEven = Math.max(0, r(cost - valued));
-  const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
-  let suggestedNext = Math.max(breakEven, evenShare);
-  suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
-  const RET = 0.05, FINAL_RET = 0.025;
-  const retBase = value > 0 ? value : valued;
-  const isFinal = valuations.some((v) => v.final);
-  const retentionRate = isFinal ? FINAL_RET : RET;
-  const retentionHeld = r(retentionRate * (isFinal ? retBase : valued));
-  const cashReceived = r(valued - retentionHeld);
-  const nextIsFinal = !isFinal && remainingValue > 5e-3 && remainingVals <= 1;
-  const retentionIfFinal = r(FINAL_RET * retBase);
-  const retentionCurrent = r(RET * valued);
-  return {
-    value,
-    planned,
-    valuations,
-    valued,
-    cost: r(cost),
-    position,
-    marginPct,
-    remainingValue,
-    remainingVals,
-    breakEven: r(breakEven),
-    evenShare: r(evenShare),
-    suggestedNext,
-    overCommitted: breakEven > remainingValue + 5e-3,
-    positionAfterSuggested: r(valued + suggestedNext - cost),
-    retentionRate: retentionRate * 100,
-    retentionHeld,
-    cashReceived,
-    isFinal,
-    nextIsFinal,
-    retentionIfFinal,
-    retentionCurrent,
-    costSinceLastVal
-  };
-}
-function buildSiteSeries(labD, poD) {
-  const days = Object.keys(labD).concat(Object.keys(poD)).filter(Boolean).sort();
-  if (!days.length) return [];
-  const min = days[0], max = days[days.length - 1];
-  const span = Math.max(1, Math.round((Date.parse(max + "T12:00:00Z") - Date.parse(min + "T12:00:00Z")) / 864e5) + 1);
-  const mode = span <= 45 ? "day" : span <= 186 ? "week" : "month";
-  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf4(d) : d.slice(0, 7);
-  const labB = {}, poB = {};
-  const roll = (src, dst) => {
-    for (const [d, v] of Object.entries(src)) {
-      const k = bk(d);
-      dst[k] = Math.round(((dst[k] || 0) + v) * 100) / 100;
-    }
-  };
-  roll(labD, labB);
-  roll(poD, poB);
-  return buildSeriesBuckets(min, max, mode, labB, poB);
-}
-function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
-  const keys = [];
-  if (mode === "day") {
-    let d = /* @__PURE__ */ new Date(from + "T12:00:00Z");
-    const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
-    while (d <= end) {
-      keys.push(d.toISOString().slice(0, 10));
-      d.setUTCDate(d.getUTCDate() + 1);
-    }
-  } else if (mode === "week") {
-    let d = /* @__PURE__ */ new Date(mondayOf4(from) + "T12:00:00Z");
-    const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
-    while (d <= end) {
-      keys.push(d.toISOString().slice(0, 10));
-      d.setUTCDate(d.getUTCDate() + 7);
-    }
-  } else {
-    let d = /* @__PURE__ */ new Date(from.slice(0, 7) + "-01T12:00:00Z");
-    const end = /* @__PURE__ */ new Date(to.slice(0, 7) + "-01T12:00:00Z");
-    while (d <= end) {
-      keys.push(d.toISOString().slice(0, 7));
-      d.setUTCMonth(d.getUTCMonth() + 1);
-    }
-  }
-  return keys.map((k) => {
-    const labour = Math.round((labourByB[k] || 0) * 100) / 100;
-    const po = Math.round((poByB[k] || 0) * 100) / 100;
-    return { label: k, mode, labour, po, total: Math.round((labour + po) * 100) / 100 };
-  });
-}
-async function reconcileSitelogSessions(env, tid, opts) {
-  const o = opts || {};
-  if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
-  await ensure4(env);
-  const now = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
-  const to = londonDate3(now.toISOString());
-  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
-  const from = londonDate3(fromD.toISOString());
-  const visits = await fetchSitelogVisits(env, from, to);
-  if (!visits) return { ok: false, reason: "SiteLog unreachable" };
-  const reg = await loadRegister(env, tid);
-  let closed = 0, created = 0, skipped = 0;
-  for (const v of visits) {
-    const user = String(v.portal_username || "").trim();
-    if (!user) {
-      skipped++;
-      continue;
-    }
-    if (!v.check_in_at || !v.check_out_at) {
-      skipped++;
-      continue;
-    }
-    const inMs = Date.parse(v.check_in_at), outMs = Date.parse(v.check_out_at);
-    if (!(outMs > inMs)) {
-      skipped++;
-      continue;
-    }
-    const resolved = resolveSiteCode(reg, v.site_code);
-    const siteName = resolved ? resolved.name : v.provided_site_name || String(v.site_code || "").trim();
-    const dayKey = londonDate3(v.check_out_at);
-    const dayStartMs = Date.parse(dayKey + "T00:00:00Z") - 2 * 36e5;
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT id, started_at FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NULL"
-      ).bind(tid, user).all();
-      for (const seg of results || []) {
-        const sMs = Date.parse(seg.started_at);
-        if (sMs <= outMs && sMs >= dayStartMs) {
-          await env.DB.prepare(
-            "UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?"
-          ).bind(new Date(outMs).toISOString(), seg.id, tid).run();
-          closed++;
-        }
-      }
-    } catch {
-    }
-    const vid = "sl:" + (v.visit_id != null ? v.visit_id : user + "|" + v.check_in_at);
-    let exists = false, overlaps = false;
-    try {
-      const dup = await env.DB.prepare(
-        "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND sitelog_visit_id=? LIMIT 1"
-      ).bind(tid, vid).first();
-      exists = !!dup;
-    } catch {
-    }
-    if (!exists) {
-      try {
-        const { results } = await env.DB.prepare(
-          "SELECT started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<=? AND sitelog_visit_id IS NULL"
-        ).bind(tid, user, new Date(dayStartMs).toISOString(), new Date(outMs + 36e5).toISOString()).all();
-        for (const seg of results || []) {
-          const sMs = Date.parse(seg.started_at), eMs = seg.ended_at ? Date.parse(seg.ended_at) : outMs;
-          if (eMs > inMs && sMs < outMs) {
-            overlaps = true;
-            break;
-          }
-        }
-      } catch {
-      }
-      if (!overlaps) {
-        try {
-          await env.DB.prepare(
-            "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, sitelog_visit_id) VALUES (?,?,?,?,?,?,?,?,?,?)"
-          ).bind(
-            tid,
-            user,
-            vid,
-            "",
-            siteName,
-            resolved ? resolved.postcode : "",
-            new Date(inMs).toISOString(),
-            new Date(outMs).toISOString(),
-            "onsite",
-            vid
-          ).run();
-          created++;
-        } catch {
-        }
-      } else {
-        skipped++;
-      }
-    }
-  }
-  return { ok: true, from, to, closed, created, skipped, visits: visits.length };
-}
-async function poRows(env, from, to) {
-  if (!env.PO_DB) return [];
-  try {
-    const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, trade, substr(issued_at,1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
-    ).bind(from, to).all();
-    return results || [];
-  } catch {
-    return [];
-  }
-}
-async function jobPoRows(env, jobId) {
-  if (!env.PO_DB || !jobId) return [];
-  try {
-    const { results } = await env.PO_DB.prepare(
-      "SELECT engineer_name, supplier, site, cost_ex_vat, cost_category, trade, incident_no, job_ref, substr(COALESCE(issued_at,cost_entered_at),1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND job_id=? ORDER BY issued_at"
-    ).bind(String(jobId)).all();
-    return results || [];
-  } catch {
-    return [];
-  }
-}
-async function ratesMap(env, tid) {
-  const out = {};
-  let cfg = { byUser: {} };
-  try {
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`engts:cfg:${tid}`).first();
-    if (row && row.value) cfg = Object.assign(cfg, JSON.parse(row.value));
-  } catch {
-  }
-  try {
-    const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
-    const num2 = (v) => {
-      const n = parseFloat(v);
-      return isFinite(n) && n > 0 ? n : null;
-    };
-    const defs = cfg.defaults || {};
-    const defPence = num2(defs.pencePerMile);
-    for (const u of results || []) {
-      let profile = {};
-      try {
-        profile = u.profile ? JSON.parse(u.profile) : {};
-      } catch {
-      }
-      const mine = cfg.byUser && cfg.byUser[u.username] || {};
-      const rateType = mine.rateType === "day" ? "day" : "hour";
-      const rate = num2(mine.rate) ?? (rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate);
-      const pence = num2(mine.pencePerMile) ?? defPence;
-      const fuelPerMile = pence != null ? pence / 100 : null;
-      out[u.username] = { rate, rateType, fuelPerMile };
-    }
-  } catch {
-  }
-  return out;
-}
-async function ensure4(env) {
-  try {
-    await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
-  } catch {
-  }
-  try {
-    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
-      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
-      started_at TEXT NOT NULL, ended_at TEXT)`).run();
-  } catch {
-  }
-  try {
-    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run();
-  } catch {
-  }
-  try {
-    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
-  } catch {
-  }
-  try {
-    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN sitelog_visit_id TEXT").run();
-  } catch {
-  }
-  try {
-    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS sitelog_scans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
-      username TEXT NOT NULL, site TEXT NOT NULL, direction TEXT NOT NULL,
-      at TEXT NOT NULL, source TEXT)`).run();
-  } catch {
-  }
-}
-async function writeProjFin(env, tid, costingKey, { value, planned, name } = {}) {
-  if (!costingKey) return null;
-  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
-  const cur = fin[costingKey] || { value: 0, planned: 0, valuations: [] };
-  if (value !== void 0) cur.value = value === null ? 0 : Math.max(0, Number(value) || 0);
-  if (planned !== void 0) cur.planned = Math.max(0, Math.round(Number(planned) || 0));
-  if (name !== void 0) cur.name = String(name || "").slice(0, 120);
-  if (!Array.isArray(cur.valuations)) cur.valuations = [];
-  if ((!cur.value || cur.value === 0) && !cur.valuations.length && !cur.planned) {
-    delete fin[costingKey];
-  } else {
-    fin[costingKey] = cur;
-  }
-  await cfgSet(env, tid, "proj_fin", fin);
-  return fin[costingKey] || null;
-}
-async function renameProjFinKey(env, tid, oldKey, newKey) {
-  if (!oldKey || !newKey || oldKey === newKey) return false;
-  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
-  if (!fin[oldKey]) return false;
-  fin[newKey] = fin[oldKey];
-  delete fin[oldKey];
-  await cfgSet(env, tid, "proj_fin", fin);
-  return true;
-}
-async function deleteProjFinKey(env, tid, costingKey) {
-  const fin = await cfgGet(env, tid, "proj_fin", {}) || {};
-  if (!fin[costingKey]) return false;
-  delete fin[costingKey];
-  await cfgSet(env, tid, "proj_fin", fin);
-  return true;
-}
-async function cfgGet(env, tid, name, fallback) {
-  try {
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
-    if (row && row.value) return JSON.parse(row.value);
-  } catch {
-  }
-  return fallback;
-}
-async function cfgSet(env, tid, name, value) {
-  await env.DB.prepare(
-    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
-}
-function normName(s) {
-  return String(s || "").toLowerCase().replace(/[’'`"]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-}
-function slugNum(name) {
-  const s = normName(name).replace(/ /g, "-").slice(0, 40);
-  return s || "site-" + Math.abs(hashCode(String(name)));
-}
-function hashCode(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = h * 31 + s.charCodeAt(i) | 0;
-  }
-  return h;
-}
-function londonDate3(iso) {
-  try {
-    return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-  } catch {
-    return String(iso).slice(0, 10);
-  }
-}
-function lazyCloseAt(startedIso, date) {
-  const cut = new Date(startedIso);
-  cut.setHours(cut.getHours() + 1);
-  const evening = /* @__PURE__ */ new Date(date + "T18:00:00Z");
-  return (cut > evening ? cut : evening).toISOString();
-}
-function mergeIntervals(ivs) {
-  const s = ivs.slice().sort((a, b) => a[0] - b[0]);
-  const out = [];
-  for (const iv of s) {
-    if (out.length && iv[0] <= out[out.length - 1][1]) out[out.length - 1][1] = Math.max(out[out.length - 1][1], iv[1]);
-    else out.push(iv.slice());
-  }
-  return out;
-}
-function rangeOf(q) {
-  const today = londonDate3((/* @__PURE__ */ new Date()).toISOString());
-  let from = q.get("from") || "", to = q.get("to") || "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) to = today;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {
-    const d = /* @__PURE__ */ new Date(to + "T12:00:00Z");
-    d.setUTCDate(d.getUTCDate() - 27);
-    from = d.toISOString().slice(0, 10);
-  }
-  return { from, to };
-}
-function mondayOf4(dateStr) {
-  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  const dow = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
-}
-function spanMins(start, finish) {
-  const m = (s) => {
-    const x = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
-    return x ? +x[1] * 60 + +x[2] : null;
-  };
-  const a = m(start), b = m(finish);
-  if (a == null || b == null) return null;
-  return b >= a ? b - a : b + 1440 - a;
-}
-function fmtMins(m) {
-  return Math.floor(m / 60) + "h " + m % 60 + "m";
-}
-async function hmacB64u(secret, body) {
-  const enc3 = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc3.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(body));
-  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-function timingSafeEq(a, b) {
-  a = String(a);
-  b = String(b);
-  if (a.length !== b.length) return false;
-  let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return r === 0;
 }
 
 // src/routes/compliance.js
@@ -20802,17 +21933,48 @@ async function getVehicles(env) {
     const where = [];
     if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
     if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
-    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")} FROM vehicles` + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
+    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles` + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
     const rows = await db.prepare(sql).all();
     return (rows.results || []).filter((r) => r.reg && String(r.reg).trim()).map((r) => {
       const reg = String(r.reg).trim().toUpperCase();
       const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
-      return { reg, make: r.make || null, model: r.model || null, desc, label: desc ? `${reg} \u2014 ${desc}` : reg };
+      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} \u2014 ${desc}` : reg };
     });
   } catch (e) {
     console.error("PO vehicle lookup failed:", e.message);
     return [];
   }
+}
+async function liveProjectNames(env) {
+  const db = env.DB;
+  if (!db) return [];
+  try {
+    const rows = await db.prepare(
+      `SELECT name FROM projects WHERE tenant_id IN ('1.0','1',1) AND (status='live' OR status IS NULL) ORDER BY name`
+    ).all();
+    return (rows.results || []).map((r) => String(r.name || "").trim()).filter(Boolean);
+  } catch (e) {
+    console.error("PO live-project lookup failed:", e.message);
+    return [];
+  }
+}
+async function isLiveProjectSite(env, name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  return (await liveProjectNames(env)).some((p) => p.toLowerCase() === n);
+}
+async function getRaiseOptions(env, username) {
+  const projects = (await liveProjectNames(env)).map((name) => ({ name }));
+  let mineReg = "";
+  try {
+    const u = await env.DB.prepare(
+      `SELECT vehicle_assigned FROM users WHERE tenant_id IN ('1.0','1',1) AND lower(username)=lower(?)`
+    ).bind(String(username || "")).first();
+    mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
+  } catch (e) {
+  }
+  const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg })).filter((v) => v.mine || v.pool);
+  return { projects, vehicles };
 }
 async function handle27(request, env, ctx, url, sess) {
   const db = env.PO_DB;
@@ -20842,6 +22004,7 @@ async function handle27(request, env, ctx, url, sess) {
     if (path === "/api/engineers" && method === "GET") return jr7(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr7(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr7(await getVehicles(env));
+    if (path === "/api/raise-options" && method === "GET") return jr7(await getRaiseOptions(env, sess.user.username));
     if (path === "/api/closures" && method === "GET") return jr7(await getClosures(db));
     if (path === "/api/jobs/search" && method === "GET") return jr7(await searchJobs(db, q));
     if (path === "/api/pos" && method === "POST") {
@@ -20856,7 +22019,7 @@ async function handle27(request, env, ctx, url, sess) {
         b.engineer_name = userName(sess);
         b.cost_category = "materials";
       }
-      const res = await issuePO(db, b);
+      const res = await issuePO(db, b, env);
       return jr7(res, res.error ? 400 : 200);
     }
     if (path === "/api/my-pos" && method === "GET") {
@@ -20887,6 +22050,8 @@ async function handle27(request, env, ctx, url, sess) {
     if (path.startsWith("/api/subcontractors/") && method === "DELETE") return jr7(await deleteSubcontractor(db, path.split("/").pop()));
     if (path === "/api/trades" && method === "POST") return jr7(await addTrade(db, await bodyOf()));
     if (path.startsWith("/api/trades/") && method === "DELETE") return jr7(await deleteTrade(db, path.split("/").pop()));
+    if (path === "/api/sites/usage" && method === "GET") return jr7(await siteUsage(db));
+    if (path === "/api/sites/merge" && method === "POST") return jr7(await mergeSites(db, await bodyOf()));
     if (path === "/api/sites" && method === "POST") return jr7(await addSite(db, await bodyOf()));
     if (path.startsWith("/api/sites/") && method === "DELETE") return jr7(await deleteSite(db, path.split("/").pop()));
     if (path === "/api/closures" && method === "POST") return jr7(await addClosure(db, await bodyOf()));
@@ -21000,6 +22165,29 @@ async function deleteSite(db, id) {
   await db.prepare(`UPDATE sites SET active = 0 WHERE id = ?`).bind(id).run();
   return { success: true };
 }
+async function siteUsage(db) {
+  const known = new Set((await db.prepare(`SELECT LOWER(name) AS n FROM sites WHERE active = 1`).all()).results.map((r) => r.n));
+  const rows = (await db.prepare(
+    `SELECT site AS name, COUNT(*) AS pos FROM po_log
+       WHERE site IS NOT NULL AND TRIM(site) <> '' GROUP BY site ORDER BY LOWER(site)`
+  ).all()).results;
+  const seen = new Set(rows.map((r) => String(r.name).toLowerCase()));
+  const empties = (await db.prepare(`SELECT name FROM sites WHERE active = 1 ORDER BY name`).all()).results.filter((r) => !seen.has(String(r.name).toLowerCase())).map((r) => ({ name: r.name, pos: 0 }));
+  return rows.concat(empties).map((r) => ({ name: r.name, pos: r.pos, known: known.has(String(r.name).toLowerCase()) })).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+async function mergeSites(db, body) {
+  const into = (body && body.into || "").trim();
+  const from = Array.isArray(body && body.from) ? body.from.map((s) => String(s || "").trim()).filter(Boolean) : [];
+  if (!into) return { error: "Pick the site to merge into" };
+  const sources = from.filter((s) => s.toLowerCase() !== into.toLowerCase());
+  if (!sources.length) return { error: "Pick at least one different site to merge in" };
+  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(into).run();
+  const ph = sources.map(() => "?").join(",");
+  const upd = await db.prepare(`UPDATE po_log SET site = ? WHERE site IN (${ph})`).bind(into, ...sources).run();
+  const moved = upd && upd.meta && upd.meta.changes || 0;
+  await db.prepare(`UPDATE sites SET active = 0 WHERE name IN (${ph})`).bind(...sources).run();
+  return { success: true, into, merged: sources.length, posMoved: moved };
+}
 async function searchJobs(db, params) {
   const q = (params.get("q") || "").trim();
   if (q.length < 2) return [];
@@ -21069,6 +22257,10 @@ async function getPOs(db, params) {
     query += ` AND (CAST(po_number AS TEXT) LIKE ? OR LOWER(engineer_name) LIKE ? OR LOWER(site) LIKE ? OR LOWER(incident_no) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(description) LIKE ? OR LOWER(flag_reason) LIKE ? OR LOWER(credit_note) LIKE ?)`;
     binds.push(term, term, term, term, term, term, term, term);
   }
+  if (params.get("job_id")) {
+    query += ` AND job_id = ?`;
+    binds.push(params.get("job_id"));
+  }
   query += ` ORDER BY po_number DESC LIMIT 1000`;
   return (await db.prepare(query).bind(...binds).all()).results;
 }
@@ -21132,7 +22324,7 @@ async function nextPoNumber(db) {
   `).bind(PO_START, PO_START, PO_START).first();
   return row.next;
 }
-async function issuePO(db, body) {
+async function issuePO(db, body, env) {
   const status = await getSystemStatus(db);
   if (status.mode === "disabled") return { error: status.message };
   if (status.mode === "office_hours" && body.source !== "office") return { error: status.message };
@@ -21156,6 +22348,13 @@ async function issuePO(db, body) {
     if (!body.description || !body.description.trim()) return { error: "Description is required" };
     const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
     if (!supplierCheck) return { error: "Supplier must be picked from the list" };
+    const hasVehicle = body.vehicle_reg && String(body.vehicle_reg).trim();
+    const hasJob = body.job_id && String(body.job_id).trim();
+    if (hasSite && !hasVehicle && !hasJob) {
+      if (!(env && await isLiveProjectSite(env, body.site.trim()))) {
+        return { error: "Engineers can only raise POs against a live project or your vehicle. For a reactive job, use \u201CRaise PO for this job\u201D inside the job card." };
+      }
+    }
   }
   const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
   let poNumber;
@@ -21351,7 +22550,7 @@ function slugify(name) {
 }
 
 // src/routes/cctv.js
-var CFG_KEY2 = "cctv:sites";
+var CFG_KEY3 = "cctv:sites";
 var ALLOWED_PORTS = /* @__PURE__ */ new Set([80, 443, 8080, 8880, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]);
 var VENDOR_PATH = {
   hik: "/ISAPI/Streaming/channels/{ch}/picture",
@@ -21362,8 +22561,21 @@ var VENDOR_PATH = {
 function defaultCh(vendor, i) {
   return vendor === "dahua" ? String(i) : String(i * 100 + 1);
 }
+async function cameraSnapshotUrl(env, origin, siteId, cameraId) {
+  try {
+    const db = tenantDB(env, 1);
+    const sites = await loadSites(db);
+    const site = (sites || []).find((s) => String(s.id) === String(siteId));
+    if (!site) return null;
+    const cam = (site.cameras || []).find((c) => String(c.id) === String(cameraId)) || (site.cameras || [])[0];
+    if (!cam) return null;
+    return await signedFileUrl(env, origin, "/cctv/snapshot", `${site.id}:${cam.ch}`, 24 * 3600);
+  } catch {
+    return null;
+  }
+}
 async function loadSites(db) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY2).first();
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY3).first();
   let sites = [];
   try {
     sites = row ? JSON.parse(row.value) : [];
@@ -21374,7 +22586,7 @@ async function loadSites(db) {
 async function saveSites(db, sites) {
   await db.prepare(
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(db.tenantId, CFG_KEY2, JSON.stringify(sites)).run();
+  ).bind(db.tenantId, CFG_KEY3, JSON.stringify(sites)).run();
 }
 function newId(prefix2) {
   return prefix2 + Math.abs(Date.now() ^ Math.floor(Math.random() * 1e9)).toString(36);
@@ -23303,18 +24515,29 @@ async function applySiteLogRules(env, siteName, rules, visitorRules) {
     return false;
   }
 }
+function normLinks(links) {
+  const l = Object.assign({ programmeId: "", ramsIds: [], cppRef: "", costingKey: "" }, links || {});
+  if (!Array.isArray(l.ramsIds)) l.ramsIds = [];
+  l.docFiles = l.docFiles && typeof l.docFiles === "object" && !Array.isArray(l.docFiles) ? l.docFiles : {};
+  if (Array.isArray(l.cppFiles) && l.cppFiles.length) {
+    l.docFiles.cpp = [.../* @__PURE__ */ new Set([...l.docFiles.cpp || [], ...l.cppFiles])];
+  }
+  return l;
+}
 function computeTodo(p, data, fileCount) {
   const req = data.required || {};
-  const links = data.links || {};
+  const links = normLinks(data.links);
+  const df = links.docFiles || {};
   const done = data.doneOverride || {};
   const fin = data.contractValue != null && Number(data.contractValue) > 0;
+  const nf = (k) => Array.isArray(df[k]) && df[k].length > 0;
   const out = [];
   for (const dt of DOC_TYPES) {
     if (!bool(req[dt.key])) continue;
     let auto = false;
-    if (dt.key === "programme") auto = !!links.programmeId;
-    else if (dt.key === "rams") auto = Array.isArray(links.ramsIds) && links.ramsIds.length > 0;
-    else if (dt.key === "cpp") auto = !!links.cppRef;
+    if (dt.key === "programme") auto = !!links.programmeId || nf("programme");
+    else if (dt.key === "rams") auto = links.ramsIds.length > 0 || nf("rams");
+    else if (dt.key === "cpp") auto = !!links.cppRef || nf("cpp");
     else if (dt.key === "valuations") auto = fin;
     else if (dt.key === "projectDocs") auto = fileCount > 0;
     const isDone = done[dt.key] === true || auto;
@@ -23342,7 +24565,7 @@ function projectView(row, data, fileCount) {
     required: data.required || {},
     sitelog: data.sitelog || { rules: "", visitorRules: "", companies: [] },
     contractValue: data.contractValue ?? null,
-    links: data.links || {},
+    links: normLinks(data.links),
     costingKey: data.links && data.links.costingKey || normName2(row.name),
     visibleTo: Array.isArray(data.visibleTo) ? data.visibleTo : [],
     todo: computeTodo(row, data, fileCount)
@@ -23451,7 +24674,7 @@ async function handle31(request, env, ctx, url, sess) {
       required,
       sitelog: { rules: String(b.sitelog && b.sitelog.rules || ""), visitorRules: String(b.sitelog && b.sitelog.visitorRules || ""), companies },
       contractValue,
-      links: { programmeId: "", ramsIds: [], cppRef: "", costingKey },
+      links: { programmeId: "", ramsIds: [], cppRef: "", docFiles: {}, costingKey },
       visibleTo: sanitiseVisible(b.visibleTo),
       doneOverride: {}
     };
@@ -23572,16 +24795,23 @@ async function handle31(request, env, ctx, url, sess) {
     const row = await getRow(String(b.id || ""));
     if (!row) return error("Project not found", 404, env, request);
     const data = parse2(row);
-    data.links = data.links || { ramsIds: [] };
+    data.links = normLinks(data.links);
     const kind = String(b.kind || ""), value = String(b.value || "").trim();
+    const docKey = kind.startsWith("cpp-file") ? "cpp" : String(b.docKey || "").trim();
     if (kind === "programme") data.links.programmeId = value;
     else if (kind === "cpp") data.links.cppRef = value;
     else if (kind === "rams") {
-      data.links.ramsIds = Array.isArray(data.links.ramsIds) ? data.links.ramsIds : [];
       if (value && !data.links.ramsIds.includes(value)) data.links.ramsIds.push(value);
     } else if (kind === "rams-remove") {
-      data.links.ramsIds = (data.links.ramsIds || []).filter((x) => x !== value);
+      data.links.ramsIds = data.links.ramsIds.filter((x) => x !== value);
+    } else if (kind === "doc-file" || kind === "cpp-file") {
+      if (!docKey) return error("Missing docKey", 400, env, request);
+      data.links.docFiles[docKey] = Array.isArray(data.links.docFiles[docKey]) ? data.links.docFiles[docKey] : [];
+      if (value && !data.links.docFiles[docKey].includes(value)) data.links.docFiles[docKey].push(value);
+    } else if (kind === "doc-file-remove" || kind === "cpp-file-remove") {
+      if (docKey && Array.isArray(data.links.docFiles[docKey])) data.links.docFiles[docKey] = data.links.docFiles[docKey].filter((x) => x !== value);
     } else return error("Unknown link kind", 400, env, request);
+    delete data.links.cppFiles;
     await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, row.id).run();
     return json({ ok: true, links: data.links }, {}, env, request);
   }
@@ -23674,6 +24904,23 @@ async function handle31(request, env, ctx, url, sess) {
     } catch {
     }
     await db.prepare("DELETE FROM project_files WHERE tenant_id=? AND id=?").bind(db.tenantId, f.id).run();
+    try {
+      const prow = await getRow(String(f.project_id || ""));
+      if (prow) {
+        const pdata = parse2(prow);
+        pdata.links = normLinks(pdata.links);
+        let changed = false;
+        for (const k of Object.keys(pdata.links.docFiles)) {
+          if (Array.isArray(pdata.links.docFiles[k]) && pdata.links.docFiles[k].includes(f.id)) {
+            pdata.links.docFiles[k] = pdata.links.docFiles[k].filter((x) => x !== f.id);
+            changed = true;
+          }
+        }
+        delete pdata.links.cppFiles;
+        if (changed) await db.prepare("UPDATE projects SET data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(pdata), (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, prow.id).run();
+      }
+    } catch {
+    }
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/project/create-job" && method === "POST") {
@@ -23726,6 +24973,100 @@ async function handle31(request, env, ctx, url, sess) {
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
     return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+  if (path === "/project/create-day-series" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
+    if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
+    const days = Array.isArray(b.days) ? b.days.map((d) => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes })).filter((d) => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    if (!days.length) return error("No days given", 400, env, request);
+    if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
+    const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;
+    const seriesId = "SER-" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 12) : Math.abs(Date.parse(days[0].scheduledAt)).toString(36) + engineers[0]);
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {
+    }
+    let siteData = {};
+    try {
+      if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
+    } catch {
+    }
+    const base = {
+      description,
+      projectId: row.id,
+      seriesId,
+      siteCode: row.number,
+      siteName: row.name,
+      storeType: "projects",
+      address: siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ") || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: siteRow && siteRow.postcode || data.postcode || "",
+      lat: data.lat != null ? data.lat : siteData.lat != null ? siteData.lat : void 0,
+      lon: data.lon != null ? data.lon : siteData.lng != null ? siteData.lng : siteData.lon != null ? siteData.lon : void 0,
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : void 0,
+      assignedEngineers: engineers,
+      requiresRA: b.requiresRA === true,
+      requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true,
+      requiresNote: b.requiresNote === true,
+      changedBy: me
+    };
+    const ids = [];
+    for (const d of days) {
+      const payload = {
+        ...base,
+        scheduledAt: new Date(d.scheduledAt).toISOString(),
+        durationMinutes: d.durationMinutes ? Math.max(15, Number(d.durationMinutes)) : void 0,
+        release: { mode: "dayBefore", hour: releaseHour }
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      ids.push(job.id);
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+      }));
+    }
+    return json({ ok: true, seriesId, count: ids.length, ids }, {}, env, request);
+  }
+  if (path === "/project/series" && method === "GET") {
+    const pid = url.searchParams.get("id") || "";
+    const row = await getRow(pid);
+    if (!row || !canSeeProject(parse2(row), me, canManage2)) return error("Project not found", 404, env, request);
+    const jobs = (await listJobs(env, tenantId)).filter((j) => j.seriesId && j.projectId === row.id);
+    const byId = {};
+    for (const j of jobs) {
+      const s = byId[j.seriesId] || (byId[j.seriesId] = { seriesId: j.seriesId, engineers: [], releaseHour: j.release && j.release.hour != null ? j.release.hour : 17, days: [] });
+      if (!s.engineers.length) s.engineers = Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+      s.days.push({
+        id: j.id,
+        scheduledAt: j.scheduledAt || null,
+        scheduledEnd: j.scheduledEnd || null,
+        status: j.status || "Pending",
+        released: !!j.releaseNotified,
+        skipped: !!j.seriesSkipped
+      });
+    }
+    const series = Object.values(byId).map((s) => {
+      s.days.sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+      s.pendingDays = s.days.filter((d) => !d.released && !d.skipped).length;
+      s.description = (jobs.find((j) => j.seriesId === s.seriesId) || {}).description || "";
+      return s;
+    }).sort((a, b) => String(a.days[0]?.scheduledAt).localeCompare(String(b.days[0]?.scheduledAt)));
+    return json({ ok: true, series, canManage: canManage2 }, {}, env, request);
+  }
+  if (path === "/project/series/stop" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const res = await stopSeries(env, tenantId, String(b.seriesId || ""));
+    return json({ ok: true, ...res }, {}, env, request);
   }
   if (path === "/project/visits" && method === "GET") {
     const row = await getRow(url.searchParams.get("id") || "");
@@ -24376,6 +25717,982 @@ async function handle32(request, env, ctx, url, sess) {
   return json3({ error: "Not found" }, 404, env, request);
 }
 
+// src/routes/tuya.js
+var CFG_KEY4 = "tuya:config";
+var TOK_KEY = "tuya:token";
+var WATCH_KEY = "tuya:gatewatch";
+var REGION_BASE = {
+  eu: "https://openapi.tuyaeu.com",
+  us: "https://openapi.tuyaus.com",
+  cn: "https://openapi.tuyacn.com",
+  in: "https://openapi.tuyain.com"
+};
+function baseFor(cfg) {
+  return REGION_BASE[cfg && cfg.region || "eu"] || REGION_BASE.eu;
+}
+async function loadCfg(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY4).first();
+  let cfg = {};
+  try {
+    cfg = row ? JSON.parse(row.value) : {};
+  } catch {
+  }
+  return cfg && typeof cfg === "object" ? cfg : {};
+}
+async function saveCfg2(db, cfg) {
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, CFG_KEY4, JSON.stringify(cfg)).run();
+}
+async function loadKV(db, key) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+  try {
+    return row ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function saveKV(db, key, obj) {
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
+}
+async function sha256Hex2(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str || ""));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function hmacSha256Hex(secret, msg) {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+async function signRequest(accessId, secret, accessToken, method, path, bodyStr, t) {
+  const contentHash = await sha256Hex2(bodyStr || "");
+  const stringToSign = method.toUpperCase() + "\n" + contentHash + "\n\n" + path;
+  const signStr = accessId + (accessToken || "") + t + stringToSign;
+  return hmacSha256Hex(secret, signStr);
+}
+async function getToken(env, db, cfg) {
+  const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
+  if (!accessId || !secret) throw new Error("Tuya not configured (add TUYA_ACCESS_ID / TUYA_ACCESS_SECRET secrets)");
+  const cached = await loadKV(db, TOK_KEY);
+  const now = Date.now();
+  if (cached && cached.access_token && cached.region === (cfg.region || "eu") && cached.expireAt - 6e4 > now) {
+    return cached.access_token;
+  }
+  const base = baseFor(cfg);
+  const path = "/v1.0/token?grant_type=1";
+  const t = String(now);
+  const sign = await signRequest(accessId, secret, "", "GET", path, "", t);
+  const resp = await fetch(base + path, {
+    method: "GET",
+    headers: { client_id: accessId, sign, t, sign_method: "HMAC-SHA256", "Content-Type": "application/json" }
+  });
+  const jr7 = await resp.json().catch(() => ({}));
+  if (!jr7.success || !jr7.result || !jr7.result.access_token) {
+    throw new Error("Tuya token failed: " + (jr7.msg || jr7.code || resp.status));
+  }
+  const token = jr7.result.access_token;
+  const expireSecs = Number(jr7.result.expire_time || 7200);
+  await saveKV(db, TOK_KEY, { access_token: token, expireAt: now + expireSecs * 1e3, region: cfg.region || "eu" });
+  return token;
+}
+async function api(env, db, cfg, method, path, body) {
+  const accessId = env.TUYA_ACCESS_ID, secret = env.TUYA_ACCESS_SECRET;
+  const token = await getToken(env, db, cfg);
+  const base = baseFor(cfg);
+  const bodyStr = body != null ? JSON.stringify(body) : "";
+  const t = String(Date.now());
+  const sign = await signRequest(accessId, secret, token, method, path, bodyStr, t);
+  const resp = await fetch(base + path, {
+    method: method.toUpperCase(),
+    headers: { client_id: accessId, access_token: token, sign, t, sign_method: "HMAC-SHA256", "Content-Type": "application/json" },
+    body: bodyStr || void 0
+  });
+  return resp.json().catch(() => ({ success: false, msg: "bad response " + resp.status }));
+}
+async function deviceStatus(env, db, cfg, deviceId) {
+  const jr7 = await api(env, db, cfg, "GET", `/v1.0/devices/${encodeURIComponent(deviceId)}/status`);
+  if (!jr7.success) throw new Error(jr7.msg || "device status failed");
+  return Array.isArray(jr7.result) ? jr7.result : [];
+}
+var STATE_KEY = "tuya:gatestate";
+async function getGateState(db) {
+  const s = await loadKV(db, STATE_KEY);
+  return s && typeof s === "object" ? { open: !!s.open, at: s.at || null, by: s.by || null, device: s.device || null } : { open: false, at: null, by: null, device: null };
+}
+async function setGateState(db, open, by, device, at) {
+  await saveKV(db, STATE_KEY, { open: !!open, at: at || (/* @__PURE__ */ new Date()).toISOString(), by: by || null, device: device || null });
+}
+async function pulseGate(env, db, cfg) {
+  const code = cfg.openCode || "switch_1";
+  const value = cfg.openValue === void 0 ? true : cfg.openValue;
+  const jr7 = await api(env, db, cfg, "POST", `/v1.0/devices/${encodeURIComponent(cfg.gateDeviceId)}/commands`, { commands: [{ code, value }] });
+  return { jr: jr7, sent: { code, value } };
+}
+async function logGate(db, entry) {
+  const log = await loadKV(db, "tuya:openlog") || [];
+  log.unshift(entry);
+  await saveKV(db, "tuya:openlog", log.slice(0, 100));
+}
+function londonNow() {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(/* @__PURE__ */ new Date());
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value;
+  const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: wd[get("weekday")] ?? 0, mins: (parseInt(get("hour"), 10) || 0) * 60 + (parseInt(get("minute"), 10) || 0) };
+}
+function toMin2(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ""));
+  return m ? +m[1] * 60 + +m[2] : null;
+}
+function haversineM(a, b) {
+  const rad = (x) => x * Math.PI / 180, R = 6371e3;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+var DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var normU = (u) => String(u || "").toLowerCase().trim();
+function userWindows(cfg, username) {
+  const bu = cfg.access && cfg.access.byUser || {};
+  const w = bu[normU(username)];
+  return w && Array.isArray(w.windows) ? w.windows : [];
+}
+function accessAllowedForUser(cfg, username, now) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return true;
+  for (const w of windows) {
+    const days = Array.isArray(w.days) ? w.days.map(Number) : [];
+    if (days.length && !days.includes(now.dow)) continue;
+    const from = toMin2(w.from), to = toMin2(w.to);
+    if (from == null || to == null) continue;
+    if (from <= to) {
+      if (now.mins >= from && now.mins <= to) return true;
+    } else {
+      if (now.mins >= from || now.mins <= to) return true;
+    }
+  }
+  return false;
+}
+function accessSummaryForUser(cfg, username) {
+  const windows = userWindows(cfg, username);
+  if (!windows.length) return "";
+  return windows.map((w) => {
+    const days = Array.isArray(w.days) && w.days.length ? w.days.map((d) => DOW_LABEL[d] || "?").join(",") : "every day";
+    return `${days} ${w.from}\u2013${w.to}`;
+  }).join("; ");
+}
+function sanitiseWindows(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((w) => ({
+    days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter((d) => d >= 0 && d <= 6))] : [],
+    from: toMin2(w.from) != null ? w.from : "00:00",
+    to: toMin2(w.to) != null ? w.to : "23:59"
+  })).slice(0, 14);
+}
+async function handle33(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  const isFull4 = perms.FullAccess === "Yes";
+  const geoExempt = isFull4 || perms.YardGateAnywhere === "Yes";
+  const canGate = isFull4 || perms.YardGate === "Yes";
+  const db = tenantDB(env, sess.tenantId);
+  if (path === "/tuya/config" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    return json4({ ok: true, config: cfg, hasSecrets: !!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET) });
+  }
+  if (path === "/tuya/config" && method === "POST") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const cfg = await loadCfg(db);
+    const set = (k, v, dflt) => {
+      if (v !== void 0) cfg[k] = v;
+      else if (cfg[k] === void 0 && dflt !== void 0) cfg[k] = dflt;
+    };
+    if (typeof b.region === "string") cfg.region = b.region.trim().toLowerCase();
+    set("gateDeviceId", b.gateDeviceId != null ? String(b.gateDeviceId).trim() : void 0, "");
+    set("openCode", b.openCode != null ? String(b.openCode).trim() : void 0, "switch_1");
+    if (b.openValue !== void 0) cfg.openValue = b.openValue;
+    else if (cfg.openValue === void 0) cfg.openValue = true;
+    set("closeCode", b.closeCode != null ? String(b.closeCode).trim() : void 0, void 0);
+    if (b.closeValue !== void 0) cfg.closeValue = b.closeValue;
+    set("stateDeviceId", b.stateDeviceId != null ? String(b.stateDeviceId).trim() : void 0, "");
+    set("stateCode", b.stateCode != null ? String(b.stateCode).trim() : void 0, "");
+    if (b.stateOpenValue !== void 0) cfg.stateOpenValue = b.stateOpenValue;
+    if (b.thresholdMins !== void 0) cfg.thresholdMins = Math.max(1, parseInt(b.thresholdMins, 10) || 10);
+    else if (cfg.thresholdMins === void 0) cfg.thresholdMins = 10;
+    if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
+    else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
+    if (b.accessUser !== void 0 || Array.isArray(b.accessUsers)) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const win = sanitiseWindows(b.accessWindows || []);
+      const targets = Array.isArray(b.accessUsers) ? b.accessUsers : [b.accessUser];
+      for (const t of targets) {
+        const key = normU(t);
+        if (!key) continue;
+        if (win.length) cfg.access.byUser[key] = { windows: win };
+        else delete cfg.access.byUser[key];
+      }
+    }
+    if (b.accessRemove !== void 0) {
+      if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
+      const rm = Array.isArray(b.accessRemove) ? b.accessRemove : [b.accessRemove];
+      for (const u of rm) delete cfg.access.byUser[normU(u)];
+    }
+    if (b.snapshotUrl !== void 0) cfg.snapshotUrl = String(b.snapshotUrl || "").trim().slice(0, 500);
+    if (b.cameraSiteId !== void 0) cfg.cameraSiteId = String(b.cameraSiteId || "").trim();
+    if (b.cameraId !== void 0) cfg.cameraId = String(b.cameraId || "").trim();
+    if (b.geo !== void 0) {
+      const g = b.geo || {};
+      if (g.clear) delete cfg.geo;
+      else {
+        const lat = Number(g.lat), lng = Number(g.lng), r = Math.max(20, parseInt(g.radiusM, 10) || 150);
+        if (isFinite(lat) && isFinite(lng)) cfg.geo = { lat, lng, radiusM: r };
+      }
+    }
+    if (!cfg.region) cfg.region = "eu";
+    await saveCfg2(db, cfg);
+    return json4({ ok: true, config: cfg });
+  }
+  if (path === "/tuya/device-status" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const deviceId = (url.searchParams.get("deviceId") || "").trim();
+    if (!deviceId) return json4({ ok: false, error: "Pass ?deviceId=" }, 400);
+    const cfg = await loadCfg(db);
+    try {
+      const status = await deviceStatus(env, db, cfg, deviceId);
+      let info = null;
+      try {
+        const jr7 = await api(env, db, cfg, "GET", `/v1.0/devices/${encodeURIComponent(deviceId)}`);
+        if (jr7.success && jr7.result) info = { name: jr7.result.name, online: jr7.result.online, category: jr7.result.category, product_name: jr7.result.product_name };
+      } catch {
+      }
+      return json4({ ok: true, deviceId, info, status });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  if (path === "/tuya/devices" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    try {
+      const jr7 = await api(env, db, cfg, "GET", "/v1.0/users/devices");
+      const list = jr7.success && Array.isArray(jr7.result) ? jr7.result.map((d) => ({ id: d.id, name: d.name, online: d.online, category: d.category })) : [];
+      return json4({ ok: true, devices: list, raw: jr7.success ? void 0 : jr7.msg });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  if ((path === "/tuya/gate/open" || path === "/tuya/gate/close") && method === "POST") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const wantOpen = path === "/tuya/gate/open";
+    const cfg = await loadCfg(db);
+    if (!cfg.gateDeviceId) return json4({ ok: false, error: "Gate not set up yet." }, 400);
+    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
+    const user = sess.user && sess.user.username || "?";
+    const body = await request.json().catch(() => ({}));
+    if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow())) {
+      const s = accessSummaryForUser(cfg, user);
+      return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
+    }
+    if (!geoExempt && cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng)) {
+      const lat = Number(body.lat), lng = Number(body.lng);
+      if (!isFinite(lat) || !isFinite(lng)) {
+        return json4({ ok: false, denied: "location", error: "Turn on location to operate the gate \u2014 you must be at the yard." }, 403);
+      }
+      const dist = haversineM({ lat: cfg.geo.lat, lng: cfg.geo.lng }, { lat, lng });
+      if (dist > cfg.geo.radiusM) {
+        return json4({ ok: false, denied: "location", error: `You must be at the yard to operate the gate (you're about ${Math.round(dist)} m away).` }, 403);
+      }
+    }
+    const st = await getGateState(db);
+    if (st.open === wantOpen) {
+      return json4({ ok: true, open: st.open, already: true, note: `Gate is already ${wantOpen ? "open" : "closed"}.` });
+    }
+    try {
+      const { jr: jr7, sent } = await pulseGate(env, db, cfg);
+      if (!jr7.success) return json4({ ok: false, error: jr7.msg || "Tuya rejected the command" }, 502);
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      await setGateState(db, wantOpen, user, cfg.gateDeviceId, nowIso);
+      await logGate(db, { user, action: wantOpen ? "open" : "close", device: cfg.gateDeviceId, at: nowIso });
+      if (wantOpen) await saveKV(db, "tuya:lastopen", { user, at: nowIso });
+      return json4({ ok: true, open: wantOpen, by: user, sent });
+    } catch (e) {
+      return json4({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+  }
+  if (path === "/tuya/gate/set-state" && method === "POST") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const open = !!b.open;
+    const user = sess.user && sess.user.username || "?";
+    const cfg = await loadCfg(db);
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    await setGateState(db, open, user, cfg.gateDeviceId, nowIso);
+    await logGate(db, { user, action: open ? "mark-open" : "mark-closed", device: cfg.gateDeviceId, at: nowIso });
+    return json4({ ok: true, open });
+  }
+  if (path === "/tuya/gate/state" && method === "GET") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    const configured = !!cfg.gateDeviceId;
+    const st = await getGateState(db);
+    const open = !!st.open, since = st.at || null;
+    const mins = open && since ? Math.round((Date.now() - Date.parse(since)) / 6e4) : 0;
+    const me = sess.user && sess.user.username || "";
+    const geoOn = !!(cfg.geo && isFinite(cfg.geo.lat) && isFinite(cfg.geo.lng));
+    return json4({
+      ok: true,
+      configured,
+      watched: configured,
+      tracked: true,
+      open,
+      since,
+      mins,
+      openedBy: open ? st.by || null : null,
+      access: accessSummaryForUser(cfg, me),
+      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow()),
+      // Geofence: whether THIS caller must prove they're at the yard to operate.
+      needLocation: !geoExempt && geoOn,
+      geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false }
+    });
+  }
+  if (path === "/tuya/gate/snapshot-url" && method === "GET") {
+    if (!canGate) return json4({ ok: false, error: "Forbidden" }, 403);
+    const cfg = await loadCfg(db);
+    if (cfg.cameraSiteId && cfg.cameraId) {
+      const u = await cameraSnapshotUrl(env, url.origin, cfg.cameraSiteId, cfg.cameraId);
+      if (u) return json4({ ok: true, url: u, source: "cctv" });
+    }
+    if (cfg.snapshotUrl) return json4({ ok: true, url: cfg.snapshotUrl, source: "url" });
+    return json4({ ok: true, url: "" });
+  }
+  if (path === "/tuya/gate/log" && method === "GET") {
+    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    const log = await loadKV(db, "tuya:openlog") || [];
+    return json4({ ok: true, log: log.slice(0, 100) });
+  }
+  return json4({ ok: false, error: "Not found: " + path }, 404);
+}
+async function checkGateLeftOpen(env, tenantId) {
+  try {
+    if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return;
+    const db = tenantDB(env, tenantId);
+    const cfg = await loadCfg(db);
+    if (!cfg.gateDeviceId) return;
+    const st = await getGateState(db);
+    const open = !!st.open;
+    const watch = await loadKV(db, WATCH_KEY) || {};
+    const now = Date.now();
+    if (!open) {
+      if (watch.open) await saveKV(db, WATCH_KEY, { open: false, since: null, lastAlertAt: null });
+      return;
+    }
+    const since = st.at || watch.since || new Date(now).toISOString();
+    const openedBy = st.by || watch.openedBy || null;
+    const openMins = Math.round((now - Date.parse(since)) / 6e4);
+    const threshold = Math.max(1, parseInt(cfg.thresholdMins, 10) || 10);
+    const repeat = Math.max(5, parseInt(cfg.repeatMins, 10) || 30);
+    const lastAlertAt = watch.lastAlertAt ? Date.parse(watch.lastAlertAt) : 0;
+    let newLastAlert = watch.lastAlertAt || null;
+    if (openMins >= threshold && (!lastAlertAt || now - lastAlertAt >= repeat * 6e4)) {
+      const who = openedBy ? `${openedBy} opened the yard gate and it's still open` : `The yard gate has been open (opened without the portal \u2014 check emergency access)`;
+      await sendToPermission(env, tenantId, ["FullAccess", "YardGate"], {
+        title: "\u26A0\uFE0F Yard gate left open",
+        body: `${who} \u2014 ${openMins} min.`,
+        url: "/yard-gate.html",
+        tag: "yardgate-open"
+      }).catch(() => {
+      });
+      newLastAlert = new Date(now).toISOString();
+    }
+    await saveKV(db, WATCH_KEY, { open: true, since, openedBy, lastAlertAt: newLastAlert });
+  } catch (e) {
+    console.error("checkGateLeftOpen:", e && e.message);
+  }
+}
+
+// src/routes/fra.js
+var KEY2 = (tid) => `fra:followup:${tid}`;
+var VALID = /* @__PURE__ */ new Set(["quote_needed", "quote_submitted", "nfa", ""]);
+async function loadMap(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, KEY2(db.tenantId)).first();
+  let m = {};
+  try {
+    m = row ? JSON.parse(row.value) : {};
+  } catch {
+  }
+  return m && typeof m === "object" ? m : {};
+}
+async function saveMap(db, m) {
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
+}
+async function handle34(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const q = url.searchParams;
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (path === "/fra/quote" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("frafollowup/")) return json4({ error: "Bad key" }, 400);
+    if (!sess) sess = await requireSession(env, request);
+    if (!sess && !await verifyFileSig(env, key, q)) return new Response("Link expired or invalid", { status: 403, headers: cors });
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers: cors });
+    return new Response(obj.body, { status: 200, headers: {
+      ...cors,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+  const db = tenantDB(env, sess.tenantId);
+  if (path === "/fra/followup" && method === "GET") {
+    const m = await loadMap(db);
+    const out = {};
+    for (const [id, e] of Object.entries(m)) {
+      out[id] = { ...e };
+      if (e && e.quoteKey) out[id].quoteUrl = await signedFileUrl(env, url.origin, "/fra/quote", e.quoteKey, 24 * 3600);
+    }
+    return json4({ ok: true, map: out });
+  }
+  if (path === "/fra/followup" && method === "POST") {
+    const ct = request.headers.get("Content-Type") || "";
+    let id = "", status = "", file = null;
+    if (ct.includes("multipart/form-data")) {
+      const form = await request.formData();
+      id = String(form.get("id") || "").trim();
+      status = String(form.get("status") || "").trim();
+      const f = form.get("file");
+      if (f && typeof f === "object" && f.size) file = f;
+    } else {
+      const b = await request.json().catch(() => ({}));
+      id = String(b.id || "").trim();
+      status = String(b.status || "").trim();
+    }
+    if (!id) return json4({ ok: false, error: "Missing job id" }, 400);
+    if (!VALID.has(status)) return json4({ ok: false, error: "Invalid status" }, 400);
+    const m = await loadMap(db);
+    const entry = m[id] || {};
+    entry.status = status;
+    entry.by = sess.user && sess.user.username || "?";
+    entry.at = (/* @__PURE__ */ new Date()).toISOString();
+    if (file) {
+      const safe = String(file.name || "quote").replace(/[^\w.\- ]+/g, "_").slice(0, 80);
+      const key = `frafollowup/${sess.tenantId}/${id}/${Date.now()}-${safe}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "application/octet-stream" } });
+      if (entry.quoteKey && entry.quoteKey !== key) {
+        try {
+          await env.JOB_FILES.delete(entry.quoteKey);
+        } catch {
+        }
+      }
+      entry.quoteKey = key;
+      entry.quoteName = safe;
+    }
+    if (!status && !entry.quoteKey) {
+      delete m[id];
+    } else m[id] = entry;
+    await saveMap(db, m);
+    const resp = { ...entry };
+    if (entry.quoteKey) resp.quoteUrl = await signedFileUrl(env, url.origin, "/fra/quote", entry.quoteKey, 24 * 3600);
+    return json4({ ok: true, id, entry: resp });
+  }
+  if (path === "/fra/followup/clear-quote" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "").trim();
+    if (!id) return json4({ ok: false, error: "Missing job id" }, 400);
+    const m = await loadMap(db);
+    const entry = m[id];
+    if (entry && entry.quoteKey) {
+      try {
+        await env.JOB_FILES.delete(entry.quoteKey);
+      } catch {
+      }
+      delete entry.quoteKey;
+      delete entry.quoteName;
+    }
+    if (entry && !entry.status) delete m[id];
+    else if (entry) m[id] = entry;
+    await saveMap(db, m);
+    return json4({ ok: true, id });
+  }
+  return json4({ ok: false, error: "Not found: " + path }, 404);
+}
+
+// src/routes/workever.js
+var MAP_KEY = "workever:statusmap";
+var LASTRUN_KEY = "workever:lastrun";
+var OPEN_PORTAL = /* @__PURE__ */ new Set(["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order"]);
+var DEFAULT_MAP = {
+  "closed jobs": { portal: "Closed Jobs", done: true },
+  "completed": { portal: "Complete", done: true },
+  "sc compliance complete": { portal: "Complete", done: true },
+  "fbc complete": { portal: "Complete", done: true },
+  "invoiced": { portal: "Invoiced", done: true },
+  "scheduled": { portal: "Scheduled", done: false },
+  "pending": { portal: "Pending", done: false },
+  "in progress": { portal: "In Progress", done: false },
+  "on hold": { portal: "On Hold", done: false },
+  "travelling": { portal: "Travelling", done: false },
+  "to quote - office": { portal: "Quote", done: false },
+  "chaplins": { portal: "Pending", done: false },
+  "fra 2026": { portal: "FRA Works", done: false }
+};
+async function ensureLog(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS workever_sync_log (
+    tenant_id TEXT, run_id TEXT, at TEXT, action TEXT, mos TEXT, ref TEXT,
+    portal_id TEXT, from_status TEXT, to_status TEXT, note TEXT)`).run();
+}
+async function loadMap2(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, MAP_KEY).first();
+  let m = null;
+  try {
+    m = row ? JSON.parse(row.value) : null;
+  } catch {
+  }
+  return m && typeof m === "object" ? m : { ...DEFAULT_MAP };
+}
+async function saveMap2(db, m) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, MAP_KEY, JSON.stringify(m)).run();
+}
+async function loadKV2(db, key) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+  try {
+    return row ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function saveKV2(db, key, obj) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
+}
+function leadRef(s) {
+  const m = String(s || "").match(/^\s*(\d+(?:\/\d+)?)/);
+  return m ? m[1] : "";
+}
+function normStatus(s) {
+  return String(s || "").trim().toLowerCase();
+}
+function mapStatus(map, name) {
+  const hit = map[normStatus(name)];
+  if (hit && hit.portal) return { portal: hit.portal, done: !!hit.done };
+  const done = /complete|closed|done|invoic|finish/i.test(name || "");
+  return { portal: done ? "Complete" : "Pending", done };
+}
+async function handle35(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+  const db = tenantDB(env, sess.tenantId);
+  const tid = sess.tenantId;
+  await ensureLog(db);
+  if (path === "/sla/workever/config" && method === "GET") {
+    return json4({ ok: true, map: await loadMap2(db), lastrun: await loadKV2(db, LASTRUN_KEY) });
+  }
+  if (path === "/sla/workever/config" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.map || typeof b.map !== "object") return json4({ ok: false, error: "map required" }, 400);
+    await saveMap2(db, b.map);
+    return json4({ ok: true, map: b.map });
+  }
+  if (path === "/sla/workever/log" && method === "GET") {
+    const limit = Math.min(2e3, parseInt(url.searchParams.get("limit"), 10) || 500);
+    const runId = url.searchParams.get("runId");
+    const q = runId ? db.prepare("SELECT * FROM workever_sync_log WHERE tenant_id=? AND run_id=? ORDER BY at DESC LIMIT ?").bind(tid, runId, limit) : db.prepare("SELECT * FROM workever_sync_log WHERE tenant_id=? ORDER BY at DESC LIMIT ?").bind(tid, limit);
+    const { results } = await q.all();
+    return json4({ ok: true, log: results || [], lastrun: await loadKV2(db, LASTRUN_KEY) });
+  }
+  if (path === "/sla/workever/reset" && method === "POST") {
+    await db.prepare("DELETE FROM workever_sync_log WHERE tenant_id=?").bind(tid).run();
+    await saveKV2(db, LASTRUN_KEY, null);
+    return json4({ ok: true });
+  }
+  if (path === "/sla/workever/enrich" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const items = Array.isArray(b.items) ? b.items : [];
+    let n = 0;
+    for (const it of items) {
+      const mos = String(it.mos || "").trim();
+      const desc = String(it.description || "").trim();
+      if (!mos || !desc) continue;
+      const row = await db.prepare("SELECT data, search FROM sla_jobs_archive WHERE tenant_id=? AND id=?").bind(tid, mos).first();
+      if (!row) continue;
+      let data = {};
+      try {
+        data = row.data ? JSON.parse(row.data) : {};
+      } catch {
+      }
+      data.description = desc;
+      const search = ((row.search || "") + " " + desc).toLowerCase().slice(0, 4e3);
+      await db.prepare("UPDATE sla_jobs_archive SET data=?, search=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), search, tid, mos).run();
+      n++;
+    }
+    return json4({ ok: true, enriched: n });
+  }
+  if (path === "/sla/workever/job-files" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "").trim();
+    const files = Array.isArray(b.files) ? b.files : [];
+    if (!jobId || !files.length) return json4({ ok: true, imported: 0, skipped: 0, failed: 0 });
+    let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null;
+    for (const f of files) {
+      try {
+        if (!f || !f.url) {
+          failed++;
+          continue;
+        }
+        const safe = String(f.id || f.name || "").replace(/[^\w.\-]+/g, "_").slice(0, 90) || "f" + seq++;
+        const extRaw = (String(f.name || "").split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const ext = extRaw || ((f.type || "").split("/").pop() || "jpg");
+        const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png` : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}` : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
+        if (f.kind === "signature" && !sigKey) sigKey = key;
+        if (await env.JOB_FILES.head(key)) {
+          skipped++;
+          continue;
+        }
+        const resp = await fetch(f.url);
+        if (!resp.ok || !resp.body) {
+          failed++;
+          continue;
+        }
+        const cm = f.kind === "photo" ? { stage: "After", source: "workever" } : { source: "workever" };
+        await env.JOB_FILES.put(key, resp.body, { httpMetadata: { contentType: f.type || resp.headers.get("Content-Type") || "application/octet-stream" }, customMetadata: cm });
+        imported++;
+      } catch (e) {
+        failed++;
+      }
+    }
+    if (sigKey) {
+      try {
+        const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+        if (row) {
+          let d = {};
+          try {
+            d = row.data ? JSON.parse(row.data) : {};
+          } catch {
+          }
+          if (!d.signature || !d.signature.fileKey) {
+            d.signature = { signedBy: "Customer (Workever)", signedAt: (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
+            await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, jobId).run();
+          }
+        }
+      } catch {
+      }
+    }
+    return json4({ ok: true, imported, skipped, failed });
+  }
+  if (path === "/sla/workever/job-history" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const history = (Array.isArray(b.history) ? b.history : []).filter((h) => h && h.status && h.at).map((h) => ({ status: String(h.status), at: String(h.at), by: String(h.by || "Workever") }));
+    const completedAt = b.completedAt && /^\d{4}-\d{2}-\d{2}/.test(String(b.completedAt)) ? String(b.completedAt) : null;
+    const dedupSort = (arr) => {
+      const seen = /* @__PURE__ */ new Set(), out = [];
+      for (const h of arr) {
+        const k = h.status + "|" + h.at;
+        if (!seen.has(k)) {
+          seen.add(k);
+          out.push(h);
+        }
+      }
+      return out.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+    };
+    if (b.target === "live" && b.jobId) {
+      const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, b.jobId).first();
+      if (!row) return json4({ ok: false });
+      let d = {};
+      try {
+        d = row.data ? JSON.parse(row.data) : {};
+      } catch {
+      }
+      const kept = (Array.isArray(d.statusHistory) ? d.statusHistory : []).filter((h) => h && h.src !== "sync-pending" && h.by !== "Workever sync");
+      d.statusHistory = dedupSort(kept.concat(history));
+      if (completedAt) d.closedAt = completedAt;
+      if (completedAt) await db.prepare("UPDATE sla_jobs SET data=?, closed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.jobId).run();
+      else await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.jobId).run();
+      return json4({ ok: true });
+    }
+    if (b.target === "archive" && b.mos) {
+      const row = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND id=?").bind(tid, b.mos).first();
+      if (!row) return json4({ ok: false });
+      let d = {};
+      try {
+        d = row.data ? JSON.parse(row.data) : {};
+      } catch {
+      }
+      d.statusHistory = dedupSort(history);
+      if (completedAt) await db.prepare("UPDATE sla_jobs_archive SET data=?, completed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.mos).run();
+      else await db.prepare("UPDATE sla_jobs_archive SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.mos).run();
+      return json4({ ok: true });
+    }
+    return json4({ ok: false, error: "bad target" });
+  }
+  if (path === "/sla/workever/ingest" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const runId = String(b.runId || "run");
+    const jobs = Array.isArray(b.jobs) ? b.jobs : [];
+    if (!jobs.length) return json4({ ok: true, counts: {}, needPhotos: [], needDetail: [] });
+    const map = await loadMap2(db);
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
+    const liveByRef = {};
+    for (const r of liveRows) {
+      const k = leadRef(r.id) || leadRef(r.helpdesk_ref);
+      if (k && !liveByRef[k]) liveByRef[k] = r;
+    }
+    const mosList = jobs.map((j) => String(j.mos || "").trim()).filter(Boolean);
+    const archById = {};
+    for (let i = 0; i < mosList.length; i += 90) {
+      const chunk = mosList.slice(i, i + 90);
+      const ph = chunk.map(() => "?").join(",");
+      const { results } = await db.prepare(`SELECT id, status FROM sla_jobs_archive WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunk).all();
+      for (const r of results || []) archById[r.id] = r.status;
+    }
+    const counts = { updatedLive: 0, importedArchive: 0, updatedArchive: 0, skipped: 0, errors: 0 };
+    const needPhotos = [], needDetail = [], logRows = [];
+    const addLog = (action, j, from, to, note, portalId) => logRows.push([tid, runId, nowIso, action, j.mos || "", leadRef(j.name), portalId || "", from || "", to || "", note || ""]);
+    for (const j of jobs) {
+      try {
+        const mos = String(j.mos || "").trim();
+        const m = mapStatus(map, j.status);
+        const ref = leadRef(j.name);
+        const live = ref ? liveByRef[ref] : null;
+        if (live) {
+          if (m.done && OPEN_PORTAL.has(live.status)) {
+            const cur = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, live.id).first();
+            let data2 = {};
+            try {
+              data2 = cur && cur.data ? JSON.parse(cur.data) : {};
+            } catch {
+            }
+            data2.status = m.portal;
+            data2.closedAt = data2.closedAt || nowIso;
+            if (!Array.isArray(data2.statusHistory)) data2.statusHistory = [];
+            data2.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync", src: "sync-pending" });
+            data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
+            await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso, nowIso, JSON.stringify(data2), tid, live.id).run();
+            counts.updatedLive++;
+            addLog("update-live", j, live.status, m.portal, j.name, live.id);
+            needPhotos.push({ mos, uuid: j.uuid || "", target: "live", portalId: live.id });
+            live.status = m.portal;
+          } else {
+            counts.skipped++;
+          }
+          continue;
+        }
+        if (mos && archById[mos] !== void 0) {
+          if (archById[mos] !== m.portal) {
+            await db.prepare("UPDATE sla_jobs_archive SET status=? WHERE tenant_id=? AND id=?").bind(m.portal, tid, mos).run();
+            counts.updatedArchive++;
+            addLog("update-archive", j, archById[mos], m.portal, j.name);
+            archById[mos] = m.portal;
+          } else {
+            counts.skipped++;
+          }
+          continue;
+        }
+        if (!mos) {
+          counts.errors++;
+          addLog("error", j, "", "", "no MOS identifier");
+          continue;
+        }
+        const siteName = String(j.siteName || j.customerName || "").trim();
+        const data = {
+          source: "workever",
+          mos,
+          uuid: j.uuid || "",
+          name: j.name || "",
+          description: "",
+          cost: j.cost || 0,
+          priority: j.priority || "",
+          customerName: j.customerName || "",
+          address: j.address || {},
+          workeverStatus: j.status || "",
+          syncedAt: nowIso,
+          runId
+        };
+        const search = `${mos} ${j.name || ""} ${siteName} ${j.postcode || ""} ${j.customerName || ""}`.toLowerCase().slice(0, 4e3);
+        await db.prepare(`INSERT INTO sla_jobs_archive
+          (tenant_id, id, ref, status, assigned_to, site_name, postcode, created_at, completed_at, search, data, site_code)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET status=excluded.status`).bind(tid, mos, mos, m.portal, j.assignedLabel || "", siteName, j.postcode || "", null, null, search, JSON.stringify(data), String(j.siteCode || "")).run();
+        counts.importedArchive++;
+        addLog("import-archive", j, "", m.portal, j.name);
+        needDetail.push(mos);
+        needPhotos.push({ mos, uuid: j.uuid || "", target: "archive" });
+      } catch (e) {
+        counts.errors++;
+        addLog("error", j, "", "", String(e && e.message || e));
+      }
+    }
+    for (let i = 0; i < logRows.length; i += 9) {
+      const chunk = logRows.slice(i, i + 9);
+      const values = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
+      await db.prepare(`INSERT INTO workever_sync_log
+        (tenant_id, run_id, at, action, mos, ref, portal_id, from_status, to_status, note) VALUES ${values}`).bind(...chunk.flat()).run();
+    }
+    ctx?.waitUntil?.(db.prepare(
+      "DELETE FROM workever_sync_log WHERE tenant_id=? AND rowid NOT IN (SELECT rowid FROM workever_sync_log WHERE tenant_id=? ORDER BY at DESC LIMIT 8000)"
+    ).bind(tid, tid).run().catch(() => {
+    }));
+    const prev = await loadKV2(db, LASTRUN_KEY) || {};
+    const acc = prev.runId === runId && prev.counts ? prev.counts : { updatedLive: 0, importedArchive: 0, updatedArchive: 0, skipped: 0, errors: 0 };
+    for (const k of Object.keys(counts)) acc[k] = (acc[k] || 0) + counts[k];
+    await saveKV2(db, LASTRUN_KEY, { runId, startedAt: prev.runId === runId ? prev.startedAt : nowIso, updatedAt: nowIso, counts: acc });
+    return json4({ ok: true, counts, needPhotos, needDetail });
+  }
+  return json4({ ok: false, error: "Not found: " + path }, 404);
+}
+
+// src/routes/statuscomms.js
+async function jobById(env, tid, id) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return row && row.data ? JSON.parse(row.data) : null;
+  } catch {
+    return null;
+  }
+}
+async function requireCommsAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
+    return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle36(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
+  if (path === "/comms/status-emails" && method === "GET") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    return json({ ok: true, cfg: await getStatusEmailConfig(env, tid), defs: STATUS_DEFS }, {}, env, request);
+  }
+  if (path === "/comms/status-emails" && method === "POST") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    const b = await request.json().catch(() => ({}));
+    const saved = await saveStatusEmailConfig(env, tid, b || {});
+    return json({ ok: true, cfg: saved }, {}, env, request);
+  }
+  if (path === "/comms/status-emails/preview" && method === "POST") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    const b = await request.json().catch(() => ({}));
+    const cfg = await getStatusEmailConfig(env, tid);
+    const statusKey = b.status || "Scheduled";
+    const tpl = { ...cfg.statuses[statusKey] || defaultConfig().statuses.Scheduled, companyTel: cfg.companyTel };
+    const statusDef = STATUS_DEFS.find((s) => s.key === statusKey) || { key: statusKey };
+    const job = b.jobId && await jobById(env, tid, b.jobId) || {
+      id: "PREVIEW",
+      helpdeskRef: "0331 Camberley, Frimley Road",
+      siteName: "Camberley, Frimley Road",
+      address: "19 Frimley Road, Camberley",
+      postcode: "GU15 3EN",
+      status: statusKey,
+      scheduledAt: new Date(Date.now() + 2 * 864e5).toISOString(),
+      description: "Sample job"
+    };
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const out = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
+    return json({ ok: true, subject: out.subject, html: out.html }, {}, env, request);
+  }
+  if (path === "/comms/reschedule-requests" && method === "GET") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    await ensureReschedTable(env);
+    const status = url.searchParams.get("status") || "open";
+    const db = tenantDB(env, tid);
+    const q = status === "all" ? db.prepare("SELECT * FROM job_reschedule_requests WHERE tenant_id=? ORDER BY created_at DESC LIMIT 200").bind(tid) : db.prepare("SELECT * FROM job_reschedule_requests WHERE tenant_id=? AND status=? ORDER BY created_at DESC LIMIT 200").bind(tid, status);
+    const { results } = await q.all();
+    const requests = (results || []).map((r) => ({ ...r, suggestions: safeArr(r.suggestions) }));
+    return json({ ok: true, requests }, {}, env, request);
+  }
+  if (path === "/comms/reschedule-requests/resolve" && method === "POST") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    await ensureReschedTable(env);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("id required", 400, env, request);
+    await tenantDB(env, tid).prepare(
+      "UPDATE job_reschedule_requests SET status='resolved', resolved_at=?, resolved_by=? WHERE tenant_id=? AND id=?"
+    ).bind((/* @__PURE__ */ new Date()).toISOString(), g.sess.user.username, tid, b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/customer/job" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const { jobId, exp, sig } = b;
+    if (!jobId || !await verifyResched(env, jobId, exp, sig))
+      return error("This link has expired or is invalid.", 403, env, request);
+    const job = await jobById(env, tid, jobId);
+    if (!job) return error("Job not found.", 404, env, request);
+    const cfg = await getStatusEmailConfig(env, tid);
+    return json({
+      ok: true,
+      job: {
+        reference: job.helpdeskRef || job.reference || "",
+        siteName: job.siteName || "",
+        address: [job.address, job.postcode].filter(Boolean).join(", "),
+        scheduledAt: job.scheduledAt || "",
+        status: job.status || ""
+      },
+      company: { name: "Mostlane", tel: cfg.companyTel || "", replyTo: cfg.replyTo || "" }
+    }, {}, env, request);
+  }
+  if (path === "/customer/reschedule" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const { jobId, exp, sig } = b;
+    if (!jobId || !await verifyResched(env, jobId, exp, sig))
+      return error("This link has expired or is invalid.", 403, env, request);
+    const job = await jobById(env, tid, jobId);
+    if (!job) return error("Job not found.", 404, env, request);
+    await ensureReschedTable(env);
+    const note = String(b.note || "").slice(0, 2e3);
+    const suggestions = Array.isArray(b.suggestions) ? b.suggestions.slice(0, 6).map((s) => String(s).slice(0, 120)) : [];
+    if (!note && !suggestions.length) return error("Please add a note or a suggested time.", 400, env, request);
+    const id = crypto.randomUUID();
+    const ip = request.headers.get("CF-Connecting-IP") || "";
+    const ref = job.helpdeskRef || job.reference || jobId;
+    const siteName = job.siteName || "";
+    await tenantDB(env, tid).prepare(
+      `INSERT INTO job_reschedule_requests (id,tenant_id,job_id,job_ref,site_name,note,suggestions,created_at,status,ip)
+       VALUES (?,?,?,?,?,?,?,?, 'open', ?)`
+    ).bind(id, tid, jobId, ref, siteName, note, JSON.stringify(suggestions), (/* @__PURE__ */ new Date()).toISOString(), ip).run();
+    ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "Customer wants to rearrange",
+      body: `${siteName || ref}: ${note ? note.slice(0, 80) : "suggested new times"}`,
+      url: `/job-view.html?jobId=${encodeURIComponent(jobId)}`,
+      tag: `resched:${id}`,
+      actionable: true
+    }).catch(() => {
+    }));
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Not found: " + path, 404, env, request);
+}
+function safeArr(s) {
+  try {
+    const a = JSON.parse(s);
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -24395,19 +26712,21 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle6],
   ["*", "/upload-asset-thumb", handle6],
   ["*", "/delete-asset-image", handle6],
+  ["*", "/sla/workever", handle35],
+  // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle8],
   ["*", "/stats", handle18],
   ["*", "/staff", handle19],
   // staff personal + company documents
   ["*", "/privacy", handle20],
   // GDPR data export + erasure
-  ["*", "/fleet", handle21],
+  ["*", "/fleet", handle22],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/messages", handle22],
+  ["*", "/messages", handle23],
   // office ↔ engineer messages (Inbox)
-  ["*", "/memos", handle23],
+  ["*", "/memos", handle24],
   // company memos (draft/send/sign)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
@@ -24421,13 +26740,13 @@ var ROUTES = [
   ["*", "/import-sites", handle10],
   ["*", "/sites", handle10],
   // /sites/street-images (bulk imagery)
-  ["*", "/sites/register", handle24],
+  ["*", "/sites/register", handle21],
   // master site register (longest prefix wins over /sites)
-  ["*", "/ledger", handle24],
+  ["*", "/ledger", handle21],
   // labour ledger (reconciled time)
-  ["*", "/costing", handle24],
+  ["*", "/costing", handle21],
   // per-site labour cost roll-up
-  ["*", "/exceptions", handle24],
+  ["*", "/exceptions", handle21],
   // needs-a-human-eye list
   ["*", "/compliance", handle25],
   // Southern Co-op compliance certs (R2 + D1)
@@ -24468,8 +26787,16 @@ var ROUTES = [
   // Projects: list (longest prefix wins over /project)
   ["*", "/project", handle31],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle32]
+  ["*", "/health/", handle32],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
+  ["*", "/comms", handle36],
+  // customer status-email config + reschedule inbox (admin)
+  ["*", "/customer", handle36],
+  // public: customer reschedule flow (token-verified)
+  ["*", "/tuya", handle33],
+  // yard gate: Tuya Cloud open command + gate-open state
+  ["*", "/fra", handle34]
+  // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
 ];
@@ -24554,11 +26881,17 @@ var worker = {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
+    ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {
       ctx.waitUntil(remindPendingHolds(env, 1).catch((e) => console.error("scheduled hold reminder:", e)));
     }
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() < 5) {
-      ctx.waitUntil(runIntegrityChecks(env, 1).catch((e) => console.error("scheduled integrity sweep:", e)));
+      {
+        const d = /* @__PURE__ */ new Date();
+        if (d.getUTCDay() === 0 && d.getUTCHours() === 3) {
+          ctx.waitUntil(runIntegrityChecks(env, 1).catch((e) => console.error("scheduled integrity sweep:", e)));
+        }
+      }
       ctx.waitUntil(remindDailyApprovals(env).catch((e) => console.error("scheduled daily approvals:", e)));
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
@@ -24773,7 +27106,12 @@ var PUBLIC_ROUTES = [
   ["POST", "/prog/shared/export"],
   // client PDF download — token+code verified in-handler
   // Project documents streamed for the in-app viewer / new tab — signed URL, verified in-handler.
-  ["GET", "/project/doc"]
+  ["GET", "/project/doc"],
+  // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
+  ["GET", "/fra/quote"],
+  // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
+  ["POST", "/customer/job"],
+  ["POST", "/customer/reschedule"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
