@@ -14281,9 +14281,16 @@ async function handle17(request, env, ctx, url, sess) {
     if (!reg) return error("No vehicle given.", 400, env, request);
     const norm = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
     const { results: urows } = await db.prepare("SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(db.tenantId).all();
-    const driver = (urows || []).find((u) => norm(u.vehicle_assigned) === norm(reg));
-    if (!driver) return error("No active driver is assigned to " + reg + ". Assign the van to a driver first.", 400, env, request);
-    const un = driver.username;
+    let un;
+    if (b.username) {
+      const chosen = (urows || []).find((u) => String(u.username).toLowerCase() === String(b.username).toLowerCase());
+      if (!chosen) return error("That engineer wasn't found.", 400, env, request);
+      un = chosen.username;
+    } else {
+      const driver = (urows || []).find((u) => norm(u.vehicle_assigned) === norm(reg));
+      if (!driver) return error("No active driver is assigned to " + reg + " \u2014 pick an engineer to request the check from.", 400, env, request);
+      un = driver.username;
+    }
     const dueAt = b.dueAt && Number.isFinite(Date.parse(b.dueAt)) ? new Date(b.dueAt).toISOString() : deadlineFor(mondayOf3(londonDate2()), await getSettings(db));
     const snooze = b.snooze === false ? 0 : 1;
     const s = await getSettings(db);
@@ -14353,6 +14360,12 @@ async function handle17(request, env, ctx, url, sess) {
     const dueAt = deadlineFor(week, s);
     await ensureCustomTable(db);
     const { results: customChecks } = await db.prepare("SELECT id, name, sent_at FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
+    let poolVehicles = [];
+    try {
+      const { results: pv } = await env.DB.prepare("SELECT reg, make, model FROM vehicles WHERE (active IS NULL OR active=1) AND pool=1 AND (tenant_id=1 OR tenant_id='1')").all();
+      poolVehicles = (pv || []).map((v) => ({ reg: v.reg, desc: [v.make, v.model].filter(Boolean).join(" ").trim() }));
+    } catch {
+    }
     return json({
       ok: true,
       week,
@@ -14362,8 +14375,10 @@ async function handle17(request, env, ctx, url, sess) {
       equipment: s.equipment || [],
       photoSlots: s.photoSlots,
       myCheck: shapeCheck(mine),
-      customChecks: customChecks || []
+      customChecks: customChecks || [],
       // one-off custom checks the office has sent me
+      poolVehicles
+      // shared tippers the driver may also check
     }, {}, env, request);
   }
   if (path === "/vancheck/submit" && method === "POST") {
@@ -14375,9 +14390,14 @@ async function handle17(request, env, ctx, url, sess) {
       customRow = await db.prepare("SELECT * FROM custom_van_checks WHERE tenant_id=? AND id=? AND username=?").bind(db.tenantId, customId, me).first();
       if (!customRow) return error("Custom check not found.", 404, env, request);
     }
-    const week = customId ? customId : mondayOf3(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
+    let week = customId ? customId : mondayOf3(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
     const vehicle = String(b.vehicle || sess.user.vehicle_assigned || "").trim();
     if (!vehicle) return error("No vehicle \u2014 enter the reg or ask the office to allocate one to you.", 400, env, request);
+    const assignedVan = String(sess.user.vehicle_assigned || "").trim();
+    const normR = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
+    if (!customId && assignedVan && normR(vehicle) !== normR(assignedVan)) {
+      week = "pool:" + week + ":" + normR(vehicle);
+    }
     const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
     if (!customId && !Object.keys(answers).length) return error("Complete the checklist first.", 400, env, request);
     const defectNotes = b.defectNotes && typeof b.defectNotes === "object" ? b.defectNotes : {};
@@ -14478,7 +14498,11 @@ async function handle17(request, env, ctx, url, sess) {
     }
     const dueAt = deadlineFor(week, s);
     const globallyPaused = isGloballyPaused(await getRules(env, tenantId));
-    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused }, {}, env, request);
+    await ensureCustomTable(db);
+    const nm = await nameMap(env, db.tenantId);
+    const { results: cpRows } = await db.prepare("SELECT username, reg FROM custom_van_checks WHERE tenant_id=? AND status='pending'").bind(db.tenantId).all();
+    const customPending = (cpRows || []).map((c) => ({ username: c.username, name: nm[c.username] || c.username, reg: c.reg || "" }));
+    return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows, globallyPaused, customPending }, {}, env, request);
   }
   if (path === "/vancheck/matrix" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
