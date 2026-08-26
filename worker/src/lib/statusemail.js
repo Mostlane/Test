@@ -166,7 +166,7 @@ function esc(s) {
 }
 
 // Build the branded HTML + plain-text bodies for one status email.
-export function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
+export function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const v = vars(job);
   const subject = fill(tpl.subject, v) || `Update on your job ${v["{job_ref}"]}`;
   const intro = fill(tpl.intro, v);
@@ -182,12 +182,25 @@ export function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
   if (statusDef && statusDef.key === "Scheduled") addRow("Scheduled for", v["{scheduled}"]);
   addRow("Status", v["{status}"]);
 
-  const rescheduleBlock = rescheduleUrl ? `
-    <tr><td style="padding:24px 0 4px">
-      <div style="font-size:14px;color:${ink};margin-bottom:12px">Does this time not suit you?</div>
-      <a href="${esc(rescheduleUrl)}" style="display:inline-block;background:${navy};color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:8px">Let us know a better time</a>
-      <div style="font-size:12px;color:${grey};margin-top:10px">Tap the button to send us a note or suggest alternative times — no login needed.</div>
-    </td></tr>` : "";
+  // Job description block (shown when the job has one).
+  const descBlock = v["{description}"] ? `
+        <tr><td style="padding:6px 28px 0">
+          <div style="font-size:12px;color:${grey};font-weight:700;letter-spacing:.03em;margin-bottom:4px">JOB DETAILS</div>
+          <div style="font-size:14px;color:${ink};line-height:1.55">${esc(v["{description}"])}</div>
+        </td></tr>` : "";
+
+  // Timing / cancellation-charge notice (in place of the reschedule button for
+  // now). Shown on scheduling emails when a contact email is set and the
+  // per-status "reschedule/notice" toggle is on.
+  const showNotice = (tpl.reschedule !== false) && statusDef && statusDef.reschedule && contactEmail;
+  const noticeBlock = showNotice ? `
+        <tr><td style="padding:18px 28px 0">
+          <div style="background:#fff8e6;border:1px solid #f0d8a0;border-radius:10px;padding:14px 16px;font-size:13px;color:${ink};line-height:1.55">
+            <strong>Please note:</strong> if this time is not convenient, please email
+            <a href="mailto:${esc(contactEmail)}" style="color:${navy};font-weight:700;text-decoration:none">${esc(contactEmail)}</a>
+            as soon as possible so we can rearrange — otherwise a cancellation charge may apply.
+          </div>
+        </td></tr>` : "";
 
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f5f8;font-family:Segoe UI,Arial,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
@@ -203,7 +216,8 @@ export function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
         <tr><td style="padding:8px 28px 0">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line};border-bottom:1px solid ${line};margin:12px 0">${rows.join("")}</table>
         </td></tr>
-        ${rescheduleBlock ? `<tr><td style="padding:0 28px">${rescheduleBlock}</td></tr>` : ""}
+        ${descBlock}
+        ${noticeBlock}
         <tr><td style="padding:24px 28px 28px">
           <div style="font-size:13px;color:${grey};line-height:1.5">
             Kind regards,<br><strong style="color:${ink}">Mostlane</strong><br>
@@ -221,8 +235,9 @@ export function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
     v["{site_name}"] ? `Site: ${v["{site_name}"]}` : "",
     v["{site_address}"] ? `Address: ${v["{site_address}"]}` : "",
     (statusDef && statusDef.key === "Scheduled" && v["{scheduled}"]) ? `Scheduled for: ${v["{scheduled}"]}` : "",
-    `Status: ${v["{status}"]}`, "",
-    rescheduleUrl ? `Does this time not suit? Let us know here: ${rescheduleUrl}` : "",
+    `Status: ${v["{status}"]}`,
+    v["{description}"] ? `\nJob details: ${v["{description}"]}` : "",
+    showNotice ? `\nPlease note: if this time is not convenient, email ${contactEmail} as soon as possible so we can rearrange — otherwise a cancellation charge may apply.` : "",
     "", "Kind regards, Mostlane",
   ].filter(Boolean);
 
@@ -277,9 +292,8 @@ export async function onStatusTransition(env, tid, job, prevStatus, newStatus) {
     if (!to) return;                       // no email on file → silently skip
     const statusDef = STATUS_DEFS.find(s => s.key === newStatus) || { key: newStatus };
     tpl.companyTel = cfg.companyTel;
-    let rescheduleUrl = "";
-    if (tpl.reschedule && statusDef.reschedule) rescheduleUrl = await reschedURL(env, job.id);
-    const { subject, html, text } = renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl });
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const { subject, html, text } = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
     await sendEmail(env, { to, subject, html, text, replyTo: cfg.replyTo });
   } catch { /* never break a status change over an email */ }
 }

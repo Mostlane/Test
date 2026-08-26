@@ -57,7 +57,7 @@
 <div class="wrap" id="app" style="display:none">
   <div class="card">
     <h2>How it works</h2>
-    <p class="muted">When a job's status changes, the portal can automatically email the customer a branded update. Scheduling emails include a "this time doesn't suit" button so they can suggest a better time — their replies appear below. Emails go to the <b>site contact's email, or the customer's</b> if the site has none.</p>
+    <p class="muted">When a job's status changes, the portal can automatically email the customer a branded update including the job details. Scheduling emails carry a notice asking them to email <b>enquiries@mostlane.com</b> as soon as possible if the time isn't convenient, to avoid a cancellation charge. Emails go to the <b>site contact's email, or the customer's</b> if the site has none.</p>
   </div>
 
   <div class="card">
@@ -154,7 +154,7 @@ function renderStatuses(){
         <input type="text" class="stSubj" value="${esc(t.subject||"")}">
         <div class="fieldlabel">Message</div>
         <textarea class="stIntro">${esc(t.intro||"")}</textarea>
-        ${def.reschedule?`<div class="row" style="margin-top:10px"><label class="sw"><input type="checkbox" class="stResched" ${t.reschedule!==false?"checked":""}><span class="sl"></span></label><label>Include the "this time doesn't suit" button</label></div>`:""}
+        ${def.reschedule?`<div class="row" style="margin-top:10px"><label class="sw"><input type="checkbox" class="stResched" ${t.reschedule!==false?"checked":""}><span class="sl"></span></label><label>Include the cancellation-charge notice (asks them to email us to rearrange)</label></div>`:""}
       </div>`;
     el.querySelector(".stOn").addEventListener("change",e=>{ t.on=e.target.checked; el.className="status "+(t.on?"on":"off"); syncFromDom(); });
     el.querySelector(".stSubj").addEventListener("input",e=>{ t.subject=e.target.value; });

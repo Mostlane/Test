@@ -64,9 +64,8 @@ export async function handle(request, env, ctx, url, sess) {
       address: "19 Frimley Road, Camberley", postcode: "GU15 3EN", status: statusKey,
       scheduledAt: new Date(Date.now() + 2 * 86400000).toISOString(), description: "Sample job",
     };
-    let rescheduleUrl = "";
-    if (tpl.reschedule && statusDef.reschedule) rescheduleUrl = await reschedURL(env, job.id === "PREVIEW" ? "PREVIEW" : job.id);
-    const out = renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl });
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const out = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
     return json({ ok: true, subject: out.subject, html: out.html }, {}, env, request);
   }
 

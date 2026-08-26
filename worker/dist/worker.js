@@ -5265,7 +5265,7 @@ function fill(str, v) {
 function esc2(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
+function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const v = vars(job);
   const subject = fill(tpl.subject, v) || `Update on your job ${v["{job_ref}"]}`;
   const intro = fill(tpl.intro, v);
@@ -5281,12 +5281,20 @@ function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
   addRow("Address", v["{site_address}"]);
   if (statusDef && statusDef.key === "Scheduled") addRow("Scheduled for", v["{scheduled}"]);
   addRow("Status", v["{status}"]);
-  const rescheduleBlock = rescheduleUrl ? `
-    <tr><td style="padding:24px 0 4px">
-      <div style="font-size:14px;color:${ink};margin-bottom:12px">Does this time not suit you?</div>
-      <a href="${esc2(rescheduleUrl)}" style="display:inline-block;background:${navy};color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:8px">Let us know a better time</a>
-      <div style="font-size:12px;color:${grey};margin-top:10px">Tap the button to send us a note or suggest alternative times \u2014 no login needed.</div>
-    </td></tr>` : "";
+  const descBlock = v["{description}"] ? `
+        <tr><td style="padding:6px 28px 0">
+          <div style="font-size:12px;color:${grey};font-weight:700;letter-spacing:.03em;margin-bottom:4px">JOB DETAILS</div>
+          <div style="font-size:14px;color:${ink};line-height:1.55">${esc2(v["{description}"])}</div>
+        </td></tr>` : "";
+  const showNotice = tpl.reschedule !== false && statusDef && statusDef.reschedule && contactEmail;
+  const noticeBlock = showNotice ? `
+        <tr><td style="padding:18px 28px 0">
+          <div style="background:#fff8e6;border:1px solid #f0d8a0;border-radius:10px;padding:14px 16px;font-size:13px;color:${ink};line-height:1.55">
+            <strong>Please note:</strong> if this time is not convenient, please email
+            <a href="mailto:${esc2(contactEmail)}" style="color:${navy};font-weight:700;text-decoration:none">${esc2(contactEmail)}</a>
+            as soon as possible so we can rearrange \u2014 otherwise a cancellation charge may apply.
+          </div>
+        </td></tr>` : "";
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f5f8;font-family:Segoe UI,Arial,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
     <tr><td align="center">
@@ -5301,7 +5309,8 @@ function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
         <tr><td style="padding:8px 28px 0">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line};border-bottom:1px solid ${line};margin:12px 0">${rows.join("")}</table>
         </td></tr>
-        ${rescheduleBlock ? `<tr><td style="padding:0 28px">${rescheduleBlock}</td></tr>` : ""}
+        ${descBlock}
+        ${noticeBlock}
         <tr><td style="padding:24px 28px 28px">
           <div style="font-size:13px;color:${grey};line-height:1.5">
             Kind regards,<br><strong style="color:${ink}">Mostlane</strong><br>
@@ -5322,8 +5331,10 @@ function renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl }) {
     v["{site_address}"] ? `Address: ${v["{site_address}"]}` : "",
     statusDef && statusDef.key === "Scheduled" && v["{scheduled}"] ? `Scheduled for: ${v["{scheduled}"]}` : "",
     `Status: ${v["{status}"]}`,
-    "",
-    rescheduleUrl ? `Does this time not suit? Let us know here: ${rescheduleUrl}` : "",
+    v["{description}"] ? `
+Job details: ${v["{description}"]}` : "",
+    showNotice ? `
+Please note: if this time is not convenient, email ${contactEmail} as soon as possible so we can rearrange \u2014 otherwise a cancellation charge may apply.` : "",
     "",
     "Kind regards, Mostlane"
   ].filter(Boolean);
@@ -5337,15 +5348,6 @@ async function hmacHex2(secret, msg) {
 }
 function signSecret(env) {
   return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
-}
-async function reschedURL(env, jobId, ttlSec = 60 * 60 * 24 * 30) {
-  const base = appBase(env);
-  const secret = signSecret(env);
-  const key = "resched:" + jobId;
-  if (!secret) return `${base}/job-reschedule.html?jobId=${encodeURIComponent(jobId)}`;
-  const exp = Math.floor(Date.now() / 1e3) + ttlSec;
-  const sig = await hmacHex2(secret, key + "|" + exp);
-  return `${base}/job-reschedule.html?jobId=${encodeURIComponent(jobId)}&exp=${exp}&sig=${sig}`;
 }
 async function verifyResched(env, jobId, exp, sig) {
   const secret = signSecret(env);
@@ -5370,9 +5372,8 @@ async function onStatusTransition(env, tid, job, prevStatus, newStatus) {
     if (!to) return;
     const statusDef = STATUS_DEFS.find((s) => s.key === newStatus) || { key: newStatus };
     tpl.companyTel = cfg.companyTel;
-    let rescheduleUrl = "";
-    if (tpl.reschedule && statusDef.reschedule) rescheduleUrl = await reschedURL(env, job.id);
-    const { subject, html, text } = renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl });
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const { subject, html, text } = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
     await sendEmail(env, { to, subject, html, text, replyTo: cfg.replyTo });
   } catch {
   }
@@ -26430,9 +26431,8 @@ async function handle36(request, env, ctx, url, sess) {
       scheduledAt: new Date(Date.now() + 2 * 864e5).toISOString(),
       description: "Sample job"
     };
-    let rescheduleUrl = "";
-    if (tpl.reschedule && statusDef.reschedule) rescheduleUrl = await reschedURL(env, job.id === "PREVIEW" ? "PREVIEW" : job.id);
-    const out = renderStatusEmail({ env, job, tpl, statusDef, rescheduleUrl });
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const out = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
     return json({ ok: true, subject: out.subject, html: out.html }, {}, env, request);
   }
   if (path === "/comms/reschedule-requests" && method === "GET") {
