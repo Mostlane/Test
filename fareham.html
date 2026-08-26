@@ -1696,7 +1696,7 @@ function openLocationModal(code){
   setTimeout(()=>{
     try{
       map = L.map(modal.querySelector('#lm_map')).setView([lat!=null?lat:50.852, lng!=null?lng:-1.179], (lat!=null?15:12));
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19, attribution:'© OpenStreetMap, © CARTO' }).addTo(map);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap contributors' }).addTo(map);
       function setPin(la,ln){ lat=la; lng=ln; modal.querySelector('#lm_ll').textContent = la.toFixed(5)+', '+ln.toFixed(5); if(marker) marker.setLatLng([la,ln]); else { marker = L.marker([la,ln], {draggable:canEdit}).addTo(map); if(canEdit) marker.on('dragend', ()=>{ const p=marker.getLatLng(); setPin(p.lat,p.lng); }); } }
       if(lat!=null && lng!=null) setPin(lat,lng);
       if(canEdit) map.on('click', (e)=> setPin(e.latlng.lat, e.latlng.lng));
