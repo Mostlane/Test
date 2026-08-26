@@ -1079,18 +1079,19 @@ async function catAdd(){
   if(!name){ $("catStatusText").textContent = "Enter a name first."; return; }
   const lc = name.toLowerCase();
   if(BASE_STATUSES.some(s => s[0].toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" is already a built-in status.`; return; }
-  if(catWork.some(c => c.name.toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" already exists.`; return; }
-  catWork.push({ name, colour: $("catNewColour").value || "#64748b", done: $("catNewDone").checked });
-  $("catNewName").value = "";
-  $("catNewColour").value = "#0ea5e9";
-  $("catNewDone").checked = false;
-  renderCatList();
-  // Save immediately so the category persists AND gets its board chip right away —
-  // no separate "Save changes" step to forget. (Save changes still applies edits.)
+  const colour = $("catNewColour").value || "#0ea5e9";
+  const done = $("catNewDone").checked;
   $("catStatusText").textContent = "Saving…";
   try{
-    const res = await authFetch("/sla/categories", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ categories: catWork }) });
+    // Re-read the LIVE saved list (never trust local state — the modal may have
+    // been reopened/reset), append the new category, and save the full list.
+    await loadCategories();
+    const cats = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour, done: !!c.done }));
+    if(cats.some(c => c.name.toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" already exists.`; return; }
+    cats.push({ name, colour, done });
+    const res = await authFetch("/sla/categories", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ categories: cats }) });
     if(!res.ok) throw new Error("HTTP " + res.status);
+    $("catNewName").value = ""; $("catNewColour").value = "#0ea5e9"; $("catNewDone").checked = false;
     await loadCategories();
     catWork = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour, done: !!c.done }));
     renderCatList();
