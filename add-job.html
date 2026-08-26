@@ -243,6 +243,19 @@
         </div>
       </div>
 
+      <!-- Visibility / drip-feed: when the engineer first sees this job -->
+      <div class="field-group">
+        <label for="releaseMode">When the engineer sees this <span class="hint">(drip-feed / hide until a time)</span></label>
+        <select id="releaseMode" name="releaseMode">
+          <option value="now">Straight away</option>
+          <option value="dayBefore">5pm the evening before the scheduled day</option>
+          <option value="at">At a set date &amp; time</option>
+          <option value="afterPrev">After their previous job that day is done</option>
+        </select>
+        <input type="datetime-local" id="releaseAt" name="releaseAt" style="display:none;margin-top:6px;">
+        <div class="hint">The office always sees it in the scheduler; the engineer (and their assignment alert) only get it once it's released.</div>
+      </div>
+
       <!-- Expected duration (drives the scheduler's route/day prediction) -->
       <div class="field-group">
         <label for="expectedDuration">Expected duration <span class="hint">(time on site)</span></label>
@@ -351,6 +364,15 @@ function toIsoOrNull(value){
   const d = new Date(value);
   if(isNaN(d)) return null;
   return d.toISOString();
+}
+// Visibility ("release"): null = visible now, else the chosen drip-feed mode.
+function buildRelease(){
+  var mode = ($("releaseMode") && $("releaseMode").value) || "now";
+  if(mode === "now") return null;
+  if(mode === "at"){ var at = toIsoOrNull($("releaseAt").value); return at ? { mode:"at", at:at } : null; }
+  if(mode === "dayBefore") return { mode:"dayBefore" };
+  if(mode === "afterPrev") return { mode:"afterPrev" };
+  return null;
 }
 
 
@@ -594,6 +616,7 @@ async function handleSubmit(evt){
     requiresPhoto: $("firestopping").checked ? false : $("reqPhoto").checked,
     requiresNote: $("firestopping").checked ? false : $("reqNote").checked,
     firestopping: $("firestopping").checked,
+    release: buildRelease(),
     originator: getLoggedInUser() || undefined
   };
 
@@ -649,6 +672,10 @@ async function init(){
   $("reqNote").addEventListener("change", function(){ reqTouched = true; });
   // Firestopping jobs complete via the RIA form, so the standard requirements
   // don't apply — dim them when firestopping is ticked.
+  // Visibility: reveal the datetime picker only for "At a set time".
+  (function(){
+    var rm = $("releaseMode"); if(rm){ rm.addEventListener("change", function(){ $("releaseAt").style.display = rm.value==="at" ? "block" : "none"; }); }
+  })();
   $("firestopping").addEventListener("change", function(){
     var on = this.checked;
     var g = $("reqGroup");
