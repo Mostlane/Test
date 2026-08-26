@@ -33,6 +33,32 @@
     .art .body img.shot.wide { max-width:100%; }
     .tip { background:#f0f6ff; border:1px solid #cfe0f5; border-radius:9px; padding:9px 12px; font-size:13px; margin:10px 0 0; }
 
+    /* Getting-started walkthrough */
+    .gs { background:linear-gradient(180deg,#f4f9ff,#eaf3ff); border:1px solid #cfe0f5; border-radius:16px; padding:16px 16px 6px; margin-bottom:18px; box-shadow:0 3px 14px rgba(6,24,54,.07); }
+    .gs.alldone { background:linear-gradient(180deg,#f1fbf5,#e7f7ee); border-color:#bfe6cd; }
+    .gs h2 { margin:0 0 2px; font-size:17px; color:#003366; }
+    .gs .sub { margin:0 0 12px; font-size:13px; color:#3a4a5c; line-height:1.5; }
+    .gs .prog { height:8px; background:#dbe7f5; border-radius:6px; overflow:hidden; margin:0 0 6px; }
+    .gs .prog > i { display:block; height:100%; background:#1A4F8F; border-radius:6px; transition:width .25s; }
+    .gs ol { list-style:none; margin:0; padding:0; }
+    .gs li { display:flex; gap:12px; align-items:flex-start; padding:11px 0; border-top:1px solid #dce8f6; }
+    .gs li:first-child { border-top:none; }
+    .gs .tick { flex:none; width:26px; height:26px; border-radius:50%; border:2px solid #9fb9d8; background:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; color:#1A4F8F; margin-top:1px; padding:0; }
+    .gs li.done .tick { background:#1A4F8F; border-color:#1A4F8F; color:#fff; }
+    .gs .txt { flex:1; }
+    .gs .txt .t { font-size:14.5px; font-weight:600; color:#16202e; }
+    .gs li.done .txt .t { text-decoration:line-through; color:#8091a3; }
+    .gs .txt .d { font-size:13px; color:#4a5a6c; margin-top:2px; line-height:1.55; }
+    .gs .txt .d b { color:#003366; }
+    .gs .go { display:inline-block; margin-top:7px; font-size:13px; font-weight:600; color:#1A4F8F; background:none; border:none; padding:0; cursor:pointer; text-decoration:none; font-family:inherit; }
+    .gs .go:hover { text-decoration:underline; }
+    .gs .foot { display:flex; justify-content:space-between; align-items:center; padding:8px 0 4px; }
+    .gs .foot .hide { font-size:13px; color:#667085; background:none; border:none; cursor:pointer; font-family:inherit; }
+    .gs .foot .hide:hover { color:#334155; text-decoration:underline; }
+    .gsmini { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:11px 14px; margin-bottom:16px; display:flex; align-items:center; gap:8px; font-size:14px; color:#003366; cursor:pointer; box-shadow:0 2px 8px rgba(6,24,54,.05); }
+    .gsmini:hover { border-color:#cfe0f5; }
+    .gsmini b { font-weight:700; }
+
     .lightbox { display:none; position:fixed; inset:0; z-index:999; background:rgba(0,0,0,.9); justify-content:center; align-items:center; cursor:zoom-out; }
     .lightbox img { max-width:94%; max-height:92%; border-radius:10px; }
     #noneMsg { background:#fff; border:1px dashed #ccd5dd; border-radius:12px; padding:16px; color:#667085; font-size:14px; display:none; }
@@ -46,6 +72,7 @@
 
   <div class="wrap">
     <p class="muted" style="margin:0 0 12px;">Step-by-step guides for your portal. You only see guides for the areas you can use — if a section you need is missing, ask the office to check your permissions.</p>
+    <div id="gsWrap"></div>
     <input class="search" id="search" placeholder="Search the guides… e.g. transfer, holiday, password">
     <div id="list"><p class="muted">Loading your guides…</p></div>
     <div id="noneMsg">No guides match your search.</div>
@@ -454,6 +481,104 @@
       ]},
     ];
 
+    // ══════════════════════════════════════════════════════════════════
+    //  "Getting started" walkthrough — a short, ordered, role-aware path
+    //  pinned to the top for new users. Ticks + hidden-state are per-device
+    //  (localStorage); no backend. Each step opens its guide or the real page.
+    // ══════════════════════════════════════════════════════════════════
+    const WALK = [
+      // Everyone
+      { id:"login", icon:"🔑", title:"You're signed in", role:"any", perms:"always",
+        text:"Your login lasts <b>90 days</b> on this device — you won't be typing your password every day.", guide:"Log in" },
+      { id:"around", icon:"🧭", title:"Find your way around", role:"any", perms:"always",
+        text:"The <b>menu</b> is home. On a phone you tap the tiles; on a computer you use the list down the left — everything opens from there.", guide:"Find your way around" },
+      { id:"password", icon:"🔒", title:"Set your own password", role:"any", perms:"always",
+        text:"Swap the temporary password the office gave you for one only you know.", guide:"Change your password" },
+      { id:"notify", icon:"🔴", title:"Know when something needs you", role:"any", perms:"always",
+        text:"A <b>red bubble</b> means something's waiting. The <b>🔔 bell</b> keeps the full list so nothing gets lost.", guide:"What the red bubbles mean" },
+      { id:"refresh", icon:"🔄", title:"If a page looks out of date", role:"any", perms:"always",
+        text:"Pull the page <b>down</b> to refresh on a phone, or tap the <b>🔄</b> button on a computer — it fetches the very latest version.", guide:"Find your way around" },
+      { id:"personalise", icon:"🎨", title:"Make it yours (optional)", role:"any", perms:["ThemeColour","ThemeBackground"],
+        text:"Pick your colour and background — it only changes what <b>you</b> see, and it follows you onto any device.", guide:"Personalise your portal" },
+      // Field engineers
+      { id:"day", icon:"▶️", title:"Start your working day", role:"field", perms:["SLA","SLAAdmin"],
+        text:"Open <b>SLA</b> and tap <b>▶ Start my day</b>. A timer runs while you're on; tap <b>■ End my day</b> when you finish.", page:"route.html?stay=1" },
+      { id:"jobs", icon:"🧰", title:"Work through your jobs", role:"field", perms:["SLA","SLAAdmin"],
+        text:"Open a job and move it <b>Travelling → In Progress → Complete</b>. Add your photos, a note and the customer's signature to finish it.", page:"engineer-jobs.html" },
+      { id:"vancheck", icon:"🚐", title:"Do your weekly van check", role:"field", perms:"always",
+        text:"When you're reminded, open <b>Van Check</b>, walk round the van and answer each item — it only takes a minute.", page:"van-check.html" },
+      { id:"po", icon:"🧾", title:"Raise a PO for materials", role:"field", perms:["PurchaseOrders"],
+        text:"Do it from the <b>job card</b> (\"Raise PO for this job\") so it ties to the right job for costing.", page:"po.html" },
+      { id:"ftimesheet", icon:"⏱️", title:"Fill your timesheet", role:"field", perms:["EngTimesheet"],
+        text:"Your hours and jobs fill in from your day automatically — check them over, and it <b>saves as you go</b>.", page:"engineer-timesheet.html" },
+      // Office / admin
+      { id:"board", icon:"📋", title:"Get to know the job board", role:"office", perms:["SLA","SLAAdmin"],
+        text:"The <b>SLA board</b> is every job. <b>Click a job's status</b> to change it, or <b>✏️ Edit</b> to set engineers, dates and site.", page:"sla-main.html?reset=1" },
+      { id:"scheduler", icon:"🗓️", title:"Plan the diary", role:"office", perms:["SLA","SLAAdmin"],
+        text:"The <b>Scheduler</b> drags jobs onto each engineer's day and can even auto-build an efficient route for them.", page:"sla-scheduler.html" },
+      { id:"hub", icon:"🏠", title:"Your home dashboard", role:"office", perms:"always",
+        text:"On a computer, your home page shows an <b>at-a-glance dashboard</b> of what needs attention across the areas you look after.", page:"main.html" },
+      { id:"holidays", icon:"✅", title:"Approve time off", role:"office", perms:["HolidayAdmin"],
+        text:"Requests land in <b>Holiday admin</b> — approve or reject, and see the wall chart of who's off.", guide:"Approve or reject requests" },
+      { id:"users", icon:"👥", title:"Add people &amp; set access", role:"office", perms:["Users","FullAccess"],
+        text:"In <b>Users Admin</b> you add staff and tick exactly what each person can see and do.", page:"users-admin.html" },
+    ];
+
+    function esc(s){ return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+    function gsArr(){ try { const v = JSON.parse(localStorage.getItem("mlGsDone") || "[]"); return Array.isArray(v) ? v : []; } catch(e){ return []; } }
+    let GS_DONE = gsArr();
+    let GS_HIDDEN = localStorage.getItem("mlGsHidden") === "1";
+    function gsSave(){ try { localStorage.setItem("mlGsDone", JSON.stringify(GS_DONE)); } catch(e){} }
+
+    function walkOK(s, perms){
+      const office = perms.StaffType === "office" || String(perms.FullAccess) === "Yes";
+      const role = s.role || "any";
+      if (role === "field" && office) return false;
+      if (role === "office" && !office) return false;
+      if (!s.perms || s.perms === "always") return true;
+      if (String(perms.FullAccess) === "Yes") return true;
+      return s.perms.some(k => String(perms[k]) === "Yes");
+    }
+
+    function renderGS(perms){
+      const wrap = g("gsWrap"); if (!wrap) return;
+      const steps = WALK.filter(s => walkOK(s, perms));
+      if (!steps.length) { wrap.innerHTML = ""; return; }
+      GS_DONE = GS_DONE.filter(id => steps.some(s => s.id === id)); // prune stale
+      const doneN = steps.filter(s => GS_DONE.includes(s.id)).length;
+      const pct = Math.round(doneN / steps.length * 100);
+      if (GS_HIDDEN) {
+        wrap.innerHTML = `<div class="gsmini" id="gsShow">👋 <b>Getting started</b> — ${doneN} of ${steps.length} done · tap to reopen</div>`;
+        return;
+      }
+      const allDone = doneN === steps.length;
+      wrap.innerHTML = `<div class="gs${allDone ? " alldone" : ""}">
+        <h2>👋 Getting started</h2>
+        <p class="sub">${allDone
+          ? "You've been through the basics — nice one. You can hide this now; it's always here if you need it."
+          : "New to the portal? Work down this short list and tick each off as you go. You only see steps for the areas you use."}</p>
+        <div class="prog"><i style="width:${pct}%"></i></div>
+        <ol>${steps.map(s => {
+          const done = GS_DONE.includes(s.id);
+          const go = s.guide ? `<button class="go" data-guide="${esc(s.guide)}">Show me how →</button>`
+                   : s.page  ? `<a class="go" href="${s.page}">Open it →</a>` : "";
+          return `<li class="${done ? "done" : ""}" data-step="${s.id}">
+            <button class="tick" title="Mark done">${done ? "✓" : ""}</button>
+            <div class="txt"><div class="t">${s.icon} ${s.title}</div><div class="d">${s.text}</div>${go}</div>
+          </li>`;
+        }).join("")}</ol>
+        <div class="foot"><button class="hide" id="gsHide">${allDone ? "✓ Hide getting started" : "Hide this"}</button><span class="muted">${doneN}/${steps.length}</span></div>
+      </div>`;
+    }
+
+    function openGuide(title){
+      g("search").value = ""; render(PERMS);
+      requestAnimationFrame(() => {
+        const h = [...document.querySelectorAll(".art > .head")].find(x => x.textContent.includes(title));
+        if (h) { const art = h.parentElement; art.classList.add("open"); art.scrollIntoView({ behavior:"smooth", block:"center" }); }
+      });
+    }
+
     // ── Permission gate: FullAccess sees all; otherwise any-of. ──
     function allowed(a, perms) {
       if (a.perms === "always") return true;
@@ -489,17 +614,28 @@
     // Instant paint from cached permissions, then refresh from the server.
     let PERMS = {};
     try { PERMS = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
-    render(PERMS);
+    render(PERMS); renderGS(PERMS);
     (async () => {
       try {
         const r = await fetch(window.MOSTLANE_API + "/auth/me", { headers: { "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") } });
         const d = await r.json();
-        if (d && d.ok && d.user && JSON.stringify(d.user) !== JSON.stringify(PERMS)) { PERMS = d.user; render(PERMS); }
+        if (d && d.ok && d.user && JSON.stringify(d.user) !== JSON.stringify(PERMS)) { PERMS = d.user; render(PERMS); renderGS(PERMS); }
       } catch (e) {}
     })();
 
     g("search").addEventListener("input", () => render(PERMS));
     document.addEventListener("click", e => {
+      // Getting-started interactions
+      const tick = e.target.closest(".gs .tick");
+      if (tick) {
+        const id = tick.closest("[data-step]").dataset.step;
+        if (GS_DONE.includes(id)) GS_DONE = GS_DONE.filter(x => x !== id); else GS_DONE.push(id);
+        gsSave(); renderGS(PERMS); return;
+      }
+      const goG = e.target.closest(".gs .go[data-guide]");
+      if (goG) { openGuide(goG.dataset.guide); return; }
+      if (e.target.closest("#gsHide")) { GS_HIDDEN = true; try { localStorage.setItem("mlGsHidden","1"); } catch(_){} renderGS(PERMS); return; }
+      if (e.target.closest("#gsShow")) { GS_HIDDEN = false; try { localStorage.removeItem("mlGsHidden"); } catch(_){} renderGS(PERMS); return; }
       const head = e.target.closest(".art > .head");
       if (head) { head.parentElement.classList.toggle("open"); return; }
       const img = e.target.closest("img.shot");
