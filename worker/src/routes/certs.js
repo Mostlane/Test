@@ -32,6 +32,14 @@ const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
 
 const DEFAULT_CONFIG = {
+  // Default client used to seed a NEW cert when the previous cert didn't supply one
+  // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
+  // wins over this, and it's never applied over a value the office has typed.
+  client: {
+    name: "The Southern Co-op",
+    address: "1000 Lakeside, Portsmouth",
+    postcode: "PO6 3FE",
+  },
   contractor: {
     tradingTitle: "Mostlane",
     address: "Unit 5A Segensworth Road, Segensworth Business Centre",
@@ -65,6 +73,7 @@ async function getConfig(env, tid) {
   let c = null; try { c = row ? JSON.parse(row.value) : null; } catch {}
   if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   return {
+    client: { ...DEFAULT_CONFIG.client, ...(c.client || {}) },
     contractor: { ...DEFAULT_CONFIG.contractor, ...(c.contractor || {}) },
     em: { ...DEFAULT_CONFIG.em, ...(c.em || {}) },
     pat: { ...DEFAULT_CONFIG.pat, ...(c.pat || {}) },
@@ -299,6 +308,7 @@ export async function handle(request, env, ctx, url, sess) {
       const b = await request.json().catch(() => ({}));
       const cur = await getConfig(env, tid);
       const next = {
+        client: { ...cur.client, ...(b.client || {}) },
         contractor: { ...cur.contractor, ...(b.contractor || {}) },
         em: { ...cur.em, ...(b.em || {}) },
         pat: { ...cur.pat, ...(b.pat || {}) },
@@ -345,7 +355,7 @@ export async function handle(request, env, ctx, url, sess) {
       id: null, type, status: "draft", jobId, siteCode: code, certNumber: "",
       // Client: transfer from the previous cert; NEVER invented. Blank until the
       // office fills it once (then it chains forward on every future cert).
-      client: (h && h.client) ? h.client : { name: "", address: "", postcode: "" },
+      client: (h && h.client) ? h.client : (config.client || { name: "", address: "", postcode: "" }),
       // Installation: previous cert → else the REAL portal site record.
       installation: (h && h.installation) ? h.installation : {
         name: (job && job.siteName) || (siteRow && siteRow.site_name) || "",

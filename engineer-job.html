@@ -10,7 +10,7 @@
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=22"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=7"></script>
+  <script src="cert-form.js?v=8"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -564,32 +564,36 @@
         onComplete: function(){ toast("Certificate sent to the office for review"); setTimeout(function(){ location.href=backTo; }, 1300); } });
       return;
     }
-    // Combined EM + PAT job → two certificates (tabs) + one shared finish action.
+    // Combined EM + PAT job → two certificate tabs. Each certificate is completed
+    // INDEPENDENTLY (finish one before the other, in any order); the JOB only
+    // completes once BOTH have been submitted for review.
+    var done={em:false,pat:false};
     var h='<div style="display:flex;gap:8px;margin-bottom:8px" id="certTabs">'
-      +'<button class="btn line sm" data-t="em">💡 EM certificate</button>'
-      +'<button class="btn line sm" data-t="pat">🔌 PAT certificate</button></div>'
-      +'<div id="certPane_em"></div><div id="certPane_pat" style="display:none"></div>'
-      +'<div style="text-align:center;margin-top:12px"><button class="btn wide" id="certFinish" style="background:#0a7d33">✅ Complete &amp; submit both</button>'
-      +'<div class="hint" style="margin-top:4px">Fill and sign both certificates, then finish.</div></div>';
+      +'<button class="btn line sm" data-t="em">💡 EM</button>'
+      +'<button class="btn line sm" data-t="pat">🔌 PAT</button></div>'
+      +'<div class="hint" id="certHint" style="margin-bottom:8px">Complete each certificate — you can finish one before the other. The job finishes once both are done.</div>'
+      +'<div id="certPane_em"></div><div id="certPane_pat" style="display:none"></div>';
     host.innerHTML=h;
-    types.forEach(function(t){
-      certInstances[t]=window.MLCert.mount($("certPane_"+t), { jobId:jobId, type:t, mode:"engineer", api:api, token:token, hideComplete:true });
-    });
+    function tabLabel(t){ return (t==="em"?"💡 EM":"🔌 PAT")+(done[t]?" ✓":""); }
+    function markTabs(){ [].forEach.call($("certTabs").children,function(b){ b.textContent=tabLabel(b.dataset.t); b.classList.toggle("done", done[b.dataset.t]); }); }
     function showTab(t){ ["em","pat"].forEach(function(x){ $("certPane_"+x).style.display=(x===t)?"":"none"; });
       [].forEach.call($("certTabs").children,function(b){ b.classList.toggle("on",b.dataset.t===t); }); }
     [].forEach.call($("certTabs").children,function(b){ b.onclick=function(){ showTab(b.dataset.t); }; });
-    showTab("em");
-    $("certFinish").onclick=async function(){
-      var btn=this; btn.disabled=true; var old=btn.textContent; btn.textContent="Submitting…";
-      try{
-        var okEm=await certInstances.em.submit(false);
-        if(!okEm){ showTab("em"); btn.disabled=false; btn.textContent=old; return; }
-        var okPat=await certInstances.pat.submit(false);
-        if(!okPat){ showTab("pat"); btn.disabled=false; btn.textContent=old; return; }
-        await patchJob({status:"Complete"});
-        toast("Both certificates sent to the office"); setTimeout(function(){ location.href=backTo; }, 1300);
-      }catch(e){ btn.disabled=false; btn.textContent=old; toast("Couldn't submit — try again"); }
-    };
+    function afterOne(t){
+      done[t]=true; markTabs();
+      if(done.em && done.pat){ toast("Both certificates submitted — job complete"); setTimeout(function(){ location.href=backTo; }, 1400); }
+      else { var other=(t==="em")?"pat":"em"; var oL=(other==="em")?"EM":"PAT";
+        toast((t==="em"?"EM":"PAT")+" submitted — now complete the "+oL);
+        $("certHint").textContent="✓ "+(t==="em"?"EM":"PAT")+" submitted. Now complete the "+oL+" certificate — the job finishes once both are done.";
+        showTab(other); }
+    }
+    ["em","pat"].forEach(function(t){
+      certInstances[t]=window.MLCert.mount($("certPane_"+t), { jobId:jobId, type:t, mode:"engineer", api:api, token:token,
+        // Only patch the JOB to Complete once BOTH certs are in.
+        patchComplete: function(){ done[t]=true; return (done.em && done.pat) ? patchJob({status:"Complete"}) : Promise.resolve(); },
+        onComplete: function(){ afterOne(t); } });
+    });
+    showTab("em"); markTabs();
   }
   var fsMounted=false;
   function mountFirestop(){
