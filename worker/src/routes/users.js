@@ -249,7 +249,9 @@ export async function handle(request, env, ctx, url, sess) {
     // New account with an email → send a welcome / "set your password" link so
     // onboarding needs no manual credential hand-off.
     let welcomeEmailed = false;
-    if (isNewUser && b.Email) {
+    // SuppressWelcome lets the guided add-user wizard skip the email (e.g. when
+    // the admin set a password themselves). Default is to send it.
+    if (isNewUser && b.Email && !b.SuppressWelcome) {
       const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
       const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = welcomeEmail({

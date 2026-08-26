@@ -632,12 +632,28 @@
       return { label: "Field", cls: "lvl-field" };
     }
 
+    // What's still to set up for a user (drives the wizard's finish checklist AND
+    // a badge on the list). High-impact, feature-breaking gaps only: a pay rate
+    // (field or self-employed — needed for pay + job costing), a linked vehicle
+    // and a home postcode (field — van checks + route optimiser).
+    function setupGaps(u) {
+      const p = u.Profile || {};
+      const field = (u.StaffType || p.staffType || "field") === "field";
+      const selfEmp = /self/i.test(u.EmploymentType || "");
+      const m = [];
+      if ((field || selfEmp) && !(p.hourlyRate || p.dayRate)) m.push("pay rate");
+      if (field && !u.VehicleAssigned) m.push("vehicle");
+      if (field && !p.homePostcode) m.push("home postcode");
+      return m;
+    }
     function userRow(u) {
       const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
       const lv = levelOf(u);
+      const gaps = setupGaps(u);
+      const gapBadge = gaps.length ? ` <span class="lvl" style="background:#fbf0e0;color:#b45309;" title="Still to set up: ${esc(gaps.join(", "))}">⚠ ${gaps.length} to set up</span>` : "";
       return `<div class="urow" data-user="${esc(u.Username)}">
         <span class="grip" title="Drag to reorder">⠿</span>
-        <div class="ucell uname" data-label="User"><b>${esc(name)}</b> <span class="lvl ${lv.cls}">${lv.label}</span><div class="muted">${esc(u.Username)}</div></div>
+        <div class="ucell uname" data-label="User"><b>${esc(name)}</b> <span class="lvl ${lv.cls}">${lv.label}</span>${gapBadge}<div class="muted">${esc(u.Username)}</div></div>
         <div class="ucell" data-label="Email">${esc(u.Email || "—")}</div>
         <div class="ucell" data-label="Type">${esc(u.EmploymentType || "—")}</div>
         <div class="ucell" data-label="Status"><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></div>
@@ -814,7 +830,7 @@
     }
     function closeEditor() { g("overlay").classList.remove("open"); }
 
-    g("addBtn").onclick = () => openEditor(null);
+    g("addBtn").onclick = () => wizOpen();
     g("cancelBtn").onclick = closeEditor;
 
     g("listWrap").addEventListener("click", async (e) => {
@@ -876,6 +892,227 @@
         closeEditor(); await loadUsers();
       } catch (e) { msg.className = "msg err"; msg.textContent = "Network error."; }
     };
+
+    /* ═══════════════════ Guided new-user wizard ═══════════════════
+       A short, branching set of questions so a new person is fully wired up at
+       setup. Reuses the SAME POST /users save as the tabbed editor. Role presets
+       (below) pre-tick permissions; the key setup fields can be skipped but are
+       flagged as outstanding (on the finish screen + the list badge). */
+    const WIZ_PERMS = PERMISSIONS.filter(p => p !== "FullAccess").concat(["OfficeClock"]);
+    // Presets derived from the real permission spread of current staff.
+    const ROLE_PRESETS = {
+      field:   { label: "Field engineer", sub: "On the tools — jobs, POs, van, timesheet", staffType: "field",
+                 perms: ["SLA","PurchaseOrders","Assets","Holiday","MyDocuments","Projects","ThemeColour","ThemeBackground","YardGate"] },
+      office:  { label: "Office", sub: "Office staff — POs, holidays, assets, vehicles", staffType: "office",
+                 perms: ["PurchaseOrders","Holiday","Assets","Vehicles","AssetAdmin","OfficeClock","ThemeColour","ThemeBackground"] },
+      manager: { label: "Office manager / admin", sub: "Runs areas for everyone (scheduler, holidays, timesheets…)", staffType: "office",
+                 perms: ["PurchaseOrders","Holiday","Assets","AssetAdmin","Vehicles","OfficeClock","SLA","SLAAdmin","HolidayAdmin","TimesheetAdmin","OfficeTimesheet","Projects","ProjectsAdmin","Compliance","Sites","AddSite","MyDocuments","ThemeColour","ThemeBackground","DeviceAdmin"] },
+      full:    { label: "Full access", sub: "Owner / director — sees and does everything", staffType: "office", fullAccess: true, perms: [] }
+    };
+    let W = null;
+    function applyRole(role) {
+      const pr = ROLE_PRESETS[role];
+      W.role = role; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
+      W.perms = new Set(pr.perms);
+      // A self-employed field engineer also needs their timesheet/invoice area.
+      if (/self/i.test(W.employment) && pr.staffType === "field") W.perms.add("EngTimesheet");
+    }
+    function wizSteps() {
+      const s = [{ id: "who", t: "Who are they?" }, { id: "role", t: "Role & access level" }, { id: "access", t: "Access" }];
+      if (W.staffType === "field") s.push({ id: "field", t: "Vehicle & location" });
+      s.push({ id: "pay", t: "Pay" }, { id: "finish", t: "Password & finish" });
+      return s;
+    }
+    function ensureWizDom() {
+      if (g("wizOverlay")) return;
+      const ov = document.createElement("div");
+      ov.id = "wizOverlay";
+      ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2147483100;display:none;align-items:flex-start;justify-content:center;padding:14px;padding-top:calc(env(safe-area-inset-top,0px) + 14px);overflow:auto;";
+      ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:640px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden;">
+        <div style="background:#003366;color:#fff;padding:14px 18px;display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;"><div style="font-weight:800;font-size:17px;" id="wizTitle">Add a new user</div>
+            <div style="font-size:12.5px;opacity:.85;" id="wizStepLabel"></div></div>
+          <button type="button" id="wizX" style="background:transparent;border:0;color:#fff;font-size:20px;cursor:pointer;width:auto;">✕</button>
+        </div>
+        <div id="wizDots" style="display:flex;gap:5px;padding:10px 18px 0;"></div>
+        <div id="wizBody" style="padding:16px 18px;max-height:66vh;overflow:auto;"></div>
+        <div style="display:flex;gap:8px;align-items:center;padding:12px 18px;border-top:1px solid #e2e8f0;">
+          <button type="button" class="btn" id="wizBack" style="width:auto;">‹ Back</button>
+          <div id="wizMsg" style="flex:1;font-size:13px;color:#b91c1c;"></div>
+          <button type="button" class="btn" id="wizNext" style="width:auto;background:#003366;color:#fff;">Next ›</button>
+        </div>
+      </div>`;
+      document.body.appendChild(ov);
+      g("wizX").onclick = wizClose;
+      ov.addEventListener("click", e => { if (e.target === ov) wizClose(); });
+      g("wizBack").onclick = () => { if (wizCollect()) { if (W.step > 0) { W.step--; wizRender(); } } };
+      g("wizNext").onclick = wizNextClick;
+    }
+    function wizOpen() {
+      W = { step: 0, role: "field", employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
+      applyRole("field");
+      ensureWizDom(); wizRender();
+      g("wizOverlay").style.display = "flex";
+    }
+    function wizClose() { const o = g("wizOverlay"); if (o) o.style.display = "none"; }
+    const wizInput = (label, id, val, type, ph) =>
+      `<label style="display:block;margin:10px 0 3px;font-weight:600;font-size:13.5px;">${label}</label>
+       <input id="wiz_${id}" type="${type||"text"}" value="${esc(val||"")}" placeholder="${esc(ph||"")}" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">`;
+    function wizRender() {
+      const steps = wizSteps(), st = steps[W.step];
+      g("wizStepLabel").textContent = `Step ${W.step + 1} of ${steps.length} — ${st.t}`;
+      g("wizDots").innerHTML = steps.map((s, i) =>
+        `<div style="flex:1;height:5px;border-radius:3px;background:${i <= W.step ? "#003366" : "#e2e8f0"};"></div>`).join("");
+      g("wizMsg").textContent = "";
+      g("wizBack").style.visibility = W.step === 0 ? "hidden" : "visible";
+      g("wizNext").textContent = st.id === "finish" ? "✓ Create user" : "Next ›";
+      const d = W.d; const b = g("wizBody");
+      if (st.id === "who") {
+        b.innerHTML = wizInput("First name", "first", d.first) + wizInput("Last name", "last", d.last)
+          + wizInput("Username (how they log in)", "username", d.username || [d.first, d.last].filter(Boolean).join(" "), "text", "e.g. Jack Smith")
+          + wizInput("Email (for the welcome / set-password link)", "email", d.email, "email")
+          + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Phone", "phone", d.phone)}</div><div style="flex:1;">${wizInput("Job title", "jobTitle", d.jobTitle)}</div></div>`
+          + wizInput("Start date", "startDate", d.startDate, "date");
+      } else if (st.id === "role") {
+        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role — it sets sensible permissions you can fine-tune on the next step.</div>`
+          + Object.entries(ROLE_PRESETS).map(([k, pr]) =>
+            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === k ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
+               <input type="radio" name="wizRole" value="${k}" ${W.role === k ? "checked" : ""} style="width:auto;margin-top:3px;">
+               <div><div style="font-weight:700;">${esc(pr.label)}</div><div style="font-size:12.5px;color:#64748b;">${esc(pr.sub)}</div></div></label>`).join("")
+          + `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
+             <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
+               <option${W.employment === "Employed" ? " selected" : ""}>Employed</option>
+               <option${/self/i.test(W.employment) ? " selected" : ""}>Self Employed</option></select>
+             <div style="font-size:12px;color:#64748b;margin-top:4px;">Self-employed people get their invoice/timesheet area automatically.</div>`;
+        b.querySelectorAll('input[name="wizRole"]').forEach(r => r.onclick = () => { W.employment = g("wiz_employment").value; applyRole(r.value); wizRender(); });
+      } else if (st.id === "access") {
+        if (W.full) {
+          b.innerHTML = `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:14px;font-size:14px;">
+            <b>Full access</b> — this person will see and do everything in the portal. No individual permissions to pick.</div>`;
+        } else {
+          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(ROLE_PRESETS[W.role].label)}</b>. Tick or untick anything.</div>`
+            + PERM_GROUPS.map(gp => {
+              const rows = gp.perms.filter(p => WIZ_PERMS.includes(p) || p === "OfficeClock");
+              if (!rows.length) return "";
+              return `<div style="margin:10px 0 4px;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;">${esc(gp.title)}</div>`
+                + rows.map(p => `<label style="display:flex;gap:9px;align-items:center;padding:5px 0;font-size:14px;cursor:pointer;">
+                    <input type="checkbox" class="wizPerm" value="${p}" ${W.perms.has(p) ? "checked" : ""} style="width:auto;"> ${esc(PERM_LABELS[p] || p)}</label>`).join("");
+            }).join("")
+            + (W.staffType === "office" ? `<div style="margin:14px 0 4px;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;">🏠 Responsible for (home dashboard)</div>
+                <div style="font-size:12.5px;color:#64748b;margin-bottom:4px;">Optional — leave all unticked and they'll see every area they can access.</div>
+                ${["vehicles","sla","holidays","equipment","compliance","purchaseorders","timesheets","messages"].map(a =>
+                  `<label style="display:inline-flex;gap:6px;align-items:center;margin:0 12px 6px 0;font-size:13.5px;"><input type="checkbox" class="wizArea" value="${a}" ${W.areas.has(a) ? "checked" : ""} style="width:auto;"> ${a}</label>`).join("")}` : "");
+        }
+      } else if (st.id === "field") {
+        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:6px;">These wire the engineer into van checks, fuel/MPG and route planning. You can skip any and finish them later — they'll show as outstanding.</div>`
+          + wizInput("Linked vehicle (registration)", "vehicle", d.vehicle, "text", "e.g. HN73 VFL")
+          + wizInput("Home postcode (for route planning)", "homePostcode", d.homePostcode, "text", "e.g. PO15 5RQ")
+          + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Fuel card number", "fuelCard", d.fuelCard)}</div><div style="flex:1;">${wizInput("Pence per mile", "pencePerMile", d.pencePerMile, "number", "45")}</div></div>`;
+      } else if (st.id === "pay") {
+        const need = W.staffType === "field" || /self/i.test(W.employment);
+        b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:6px;">${need ? "A pay rate is used for timesheets <b>and</b> job costing — without it their on-site time can't be costed." : "Optional for office staff."} You can skip and add it later.</div>`
+          + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Hourly rate (£)", "hourlyRate", d.hourlyRate, "number", "e.g. 18")}</div><div style="flex:1;">${wizInput("Day rate (£)", "dayRate", d.dayRate, "number")}</div></div>`
+          + `<div style="display:flex;gap:10px;"><div style="flex:1;">${wizInput("Overtime rate (£)", "overtimeRate", d.overtimeRate, "number")}</div><div style="flex:1;">${wizInput("Travel / mileage rate (£)", "travelRate", d.travelRate, "number")}</div></div>`;
+      } else if (st.id === "finish") {
+        const gaps = wizGaps();
+        b.innerHTML = wizInput("Set a password now (optional)", "password", d.password, "password", "Leave blank to email a set-up link")
+          + `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13.5px;"><input type="checkbox" id="wiz_welcome" ${W.sendWelcome ? "checked" : ""} style="width:auto;"> Send a welcome email with a “set your password” link</label>`
+          + `<div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;">
+               <div style="font-weight:700;margin-bottom:6px;">Review</div>
+               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(ROLE_PRESETS[W.role].label)}</b> · ${esc(W.employment)}</div>
+               <div style="font-size:13px;color:#475569;margin-top:2px;">${W.full ? "Full access" : (W.perms.size + " permission" + (W.perms.size === 1 ? "" : "s"))}</div>
+             </div>`
+          + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:12px 14px;">
+               <div style="font-weight:700;color:#b45309;margin-bottom:4px;">⚠ Still to set up (you can do these later)</div>
+               <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#7c4a12;">${gaps.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : `<div style="margin-top:10px;color:#0a7d33;font-size:13.5px;">✓ Everything's filled in.</div>`)
+          + `<div style="margin-top:10px;font-size:12.5px;color:#64748b;">After creating, two things are always manual: ask them to <b>open SiteLog once</b> from the portal tile to link their timesheet${W.staffType === "office" ? ", and <b>add them to the Office group chat</b>" : ""}.</div>`;
+      }
+    }
+    function wizCollect() {
+      const steps = wizSteps(), st = steps[W.step], d = W.d;
+      const v = id => { const el = g("wiz_" + id); return el ? el.value.trim() : undefined; };
+      if (st.id === "who") { ["first","last","username","email","phone","jobTitle","startDate"].forEach(k => d[k] = v(k)); }
+      else if (st.id === "role") { W.employment = g("wiz_employment").value; applyRole(W.role); }
+      else if (st.id === "access") {
+        if (!W.full) {
+          // Update only the perms shown as checkboxes; preserve any preset perm
+          // that isn't rendered here (e.g. OfficeClock, which has no group row).
+          const shown = new Set([...document.querySelectorAll(".wizPerm")].map(c => c.value));
+          const checked = [...document.querySelectorAll(".wizPerm:checked")].map(c => c.value);
+          W.perms = new Set([...W.perms].filter(p => !shown.has(p)).concat(checked));
+          W.areas = new Set([...document.querySelectorAll(".wizArea:checked")].map(c => c.value));
+        }
+      } else if (st.id === "field") { ["vehicle","homePostcode","fuelCard","pencePerMile"].forEach(k => d[k] = v(k)); }
+      else if (st.id === "pay") { ["hourlyRate","dayRate","overtimeRate","travelRate"].forEach(k => d[k] = v(k)); }
+      else if (st.id === "finish") { d.password = (g("wiz_password") || {}).value || ""; W.sendWelcome = g("wiz_welcome").checked; }
+      return true;
+    }
+    function wizGaps() {
+      const d = W.d, field = W.staffType === "field", self = /self/i.test(W.employment), m = [];
+      if ((field || self) && !(d.hourlyRate || d.dayRate)) m.push("Pay rate");
+      if (field && !d.vehicle) m.push("Linked vehicle");
+      if (field && !d.homePostcode) m.push("Home postcode");
+      if (field && !d.fuelCard) m.push("Fuel card");
+      return m;
+    }
+    function wizNextClick() {
+      if (!wizCollect()) return;
+      const steps = wizSteps(), st = steps[W.step];
+      if (st.id === "who") {
+        if (!W.d.username) { g("wizMsg").textContent = "A username is required."; return; }
+      }
+      if (st.id === "finish") { wizCreate(); return; }
+      W.step++; wizRender();
+    }
+    async function wizCreate() {
+      const d = W.d, msg = g("wizMsg"); msg.style.color = "#b91c1c"; msg.textContent = "Creating…";
+      if (d.password) { const bad = pwProblem(d.password); if (bad) { msg.textContent = bad; return; } }
+      const profile = { staffType: W.staffType, areas: [...W.areas] };
+      const pmap = { phone: d.phone, jobTitle: d.jobTitle, startDate: d.startDate, homePostcode: d.homePostcode,
+        hourlyRate: d.hourlyRate, overtimeRate: d.overtimeRate, dayRate: d.dayRate, travelRate: d.travelRate,
+        fuelCard: d.fuelCard, pencePerMile: d.pencePerMile };
+      Object.entries(pmap).forEach(([k, val]) => { if (val) profile[k] = val; });
+      const body = {
+        Username: d.username, FirstName: d.first || "", LastName: d.last || "", Email: d.email || "",
+        VehicleAssigned: d.vehicle || "", EmploymentType: W.employment, Status: "Active",
+        Profile: profile, FullAccess: W.full ? "Yes" : "No"
+      };
+      // Every permission key as Yes/No (matches the tabbed editor's contract).
+      WIZ_PERMS.forEach(p => { body[p] = W.perms.has(p) ? "Yes" : "No"; });
+      body.StoryMode = "No";
+      if (d.password) { body.Password = d.password; body.ForceChange = true; }
+      // Only send the welcome email if asked AND they gave an email.
+      if (!W.sendWelcome) body.SuppressWelcome = true;
+      try {
+        const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
+        const r = await res.json();
+        if (!res.ok || !r.ok) { msg.textContent = r.error || "Create failed."; return; }
+        await loadUsers();
+        wizFinishScreen(body, r);
+      } catch (e) { msg.textContent = "Network error."; }
+    }
+    function wizFinishScreen(body, r) {
+      const name = [body.FirstName, body.LastName].filter(Boolean).join(" ") || body.Username;
+      const gaps = wizGaps();
+      g("wizStepLabel").textContent = "Done";
+      g("wizDots").innerHTML = "";
+      g("wizBack").style.display = "none";
+      const next = g("wizNext"); next.textContent = "Done"; next.onclick = () => { wizClose(); next.onclick = wizNextClick; next.textContent = "Next ›"; g("wizBack").style.display = ""; };
+      g("wizMsg").textContent = "";
+      const emailLine = body.Email
+        ? (r.welcomeEmailed ? `A welcome email with a set-your-password link was sent to ${esc(body.Email)}.` : (body.Password ? "Password set — they can log in now." : "⚠ No welcome email went out (email isn't configured) — set a password with “Reset PW”."))
+        : (body.Password ? "Password set — they can log in now." : "⚠ No email given and no password set — use “Reset PW” to give them one.");
+      g("wizBody").innerHTML = `<div style="text-align:center;padding:6px 0 12px;"><div style="font-size:40px;">🎉</div>
+          <div style="font-weight:800;font-size:18px;margin-top:4px;">${esc(name)} created</div>
+          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(ROLE_PRESETS[W.role].label)}</div></div>
+        <div style="font-size:13.5px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:11px 14px;">${emailLine}</div>`
+        + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:11px 14px;">
+             <div style="font-weight:700;color:#b45309;">Still to set up</div>
+             <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#7c4a12;">${gaps.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+             <div style="font-size:12.5px;color:#7c4a12;margin-top:6px;">Open ${esc(name)} in the list (Edit) to fill these in — they show a “to set up” badge until done.</div></div>` : "")
+        + `<div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:11px 14px;font-size:13px;color:#1e40af;">
+             <b>Two manual steps:</b> ask ${esc(name)} to open <b>SiteLog</b> once from the portal tile (links their timesheet)${W.staffType === "office" ? "; and add them to the <b>Office group chat</b>" : ""}.</div>`;
+    }
 
     // ── Devices ──
     async function loadDevices(username) {

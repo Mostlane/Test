@@ -698,7 +698,7 @@ async function handle2(request, env, ctx, url, sess) {
       }
     }
     let welcomeEmailed = false;
-    if (isNewUser && b.Email) {
+    if (isNewUser && b.Email && !b.SuppressWelcome) {
       const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
       const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = welcomeEmail({
