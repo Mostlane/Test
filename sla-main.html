@@ -701,7 +701,11 @@ function render(){
     let ref = "";
     if (/^\d/.test(rawRef)) ref = esc(rawRef);
     else if (/^\d/.test(idStr) && !UUID.test(idStr)) ref = esc(idStr);
-    else if (rawRef && !UUID.test(rawRef) && rawRef.length <= 24) ref = esc(rawRef);
+    // Any real (non-UUID) reference shows — including a long site-name ref on a
+    // project job (e.g. "Lake Road Surgery Verwood"). Only a job with NO real ref
+    // at all (a raw UUID / blank) falls back to the "Open" link. (An earlier 24-
+    // char cap collapsed longer project names to "Open".)
+    else if (rawRef && !UUID.test(rawRef)) ref = esc(rawRef);
     const name = esc((window.mlJobName && window.mlJobName(j)) || j.siteName || j.siteCode || "");
     const colour = STATUS_COLOUR[j.status] || "#9ca3af";
     const sched = fmtSched(j);
