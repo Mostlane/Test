@@ -135,6 +135,8 @@ export async function handle(request, env, ctx, url, sess) {
     if (path.startsWith("/api/subcontractors/") && method === "DELETE") return jr(await deleteSubcontractor(db, path.split("/").pop()));
     if (path === "/api/trades" && method === "POST") return jr(await addTrade(db, await bodyOf()));
     if (path.startsWith("/api/trades/") && method === "DELETE") return jr(await deleteTrade(db, path.split("/").pop()));
+    if (path === "/api/sites/usage" && method === "GET") return jr(await siteUsage(db));
+    if (path === "/api/sites/merge" && method === "POST") return jr(await mergeSites(db, await bodyOf()));
     if (path === "/api/sites" && method === "POST") return jr(await addSite(db, await bodyOf()));
     if (path.startsWith("/api/sites/") && method === "DELETE") return jr(await deleteSite(db, path.split("/").pop()));
     if (path === "/api/closures" && method === "POST") return jr(await addClosure(db, await bodyOf()));
@@ -307,6 +309,47 @@ async function deleteSite(db, id) {
   return { success: true };
 }
 
+// Every site NAME that actually appears on a PO, with how many POs use it and
+// whether it's a known (active) site — so the merge tool can surface the
+// free-text / duplicate names that need collapsing, not just the tidy list.
+async function siteUsage(db) {
+  const known = new Set((await db.prepare(`SELECT LOWER(name) AS n FROM sites WHERE active = 1`).all()).results.map(r => r.n));
+  const rows = (await db.prepare(
+    `SELECT site AS name, COUNT(*) AS pos FROM po_log
+       WHERE site IS NOT NULL AND TRIM(site) <> '' GROUP BY site ORDER BY LOWER(site)`
+  ).all()).results;
+  // Also include known sites that carry NO POs yet (so a duplicate can be merged
+  // INTO a clean site that just hasn't been used).
+  const seen = new Set(rows.map(r => String(r.name).toLowerCase()));
+  const empties = (await db.prepare(`SELECT name FROM sites WHERE active = 1 ORDER BY name`).all()).results
+    .filter(r => !seen.has(String(r.name).toLowerCase()))
+    .map(r => ({ name: r.name, pos: 0 }));
+  return rows.concat(empties)
+    .map(r => ({ name: r.name, pos: r.pos, known: known.has(String(r.name).toLowerCase()) }))
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
+// Collapse several duplicate site names onto one canonical name: rewrite every
+// PO's `site` to the target (so job costing rolls up onto ONE site) and retire
+// the merged-away source sites from the pickable list. The target becomes a
+// known active site so it's always pickable afterwards.
+async function mergeSites(db, body) {
+  const into = (body && body.into || "").trim();
+  const from = Array.isArray(body && body.from) ? body.from.map(s => String(s || "").trim()).filter(Boolean) : [];
+  if (!into) return { error: "Pick the site to merge into" };
+  const sources = from.filter(s => s.toLowerCase() !== into.toLowerCase());
+  if (!sources.length) return { error: "Pick at least one different site to merge in" };
+  // Make sure the target exists as a known active site.
+  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(into).run();
+  const ph = sources.map(() => "?").join(",");
+  // Repoint every PO on a source name to the target.
+  const upd = await db.prepare(`UPDATE po_log SET site = ? WHERE site IN (${ph})`).bind(into, ...sources).run();
+  const moved = (upd && upd.meta && upd.meta.changes) || 0;
+  // Retire the merged-away sites so they can't be picked again.
+  await db.prepare(`UPDATE sites SET active = 0 WHERE name IN (${ph})`).bind(...sources).run();
+  return { success: true, into, merged: sources.length, posMoved: moved };
+}
+
 async function searchJobs(db, params) {
   const q = (params.get("q") || "").trim();
   if (q.length < 2) return [];
@@ -477,6 +520,13 @@ async function issuePO(db, body) {
     if (!body.description || !body.description.trim()) return { error: "Description is required" };
     const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
     if (!supplierCheck) return { error: "Supplier must be picked from the list" };
+    // Engineers may only raise against a KNOWN site (or a company vehicle) — never
+    // a new/free-text site name, so job costing stays clean. A vehicle-tagged PO
+    // carries vehicle_reg and its site box is just a readable label, so skip it.
+    if (hasSite && !(body.vehicle_reg && body.vehicle_reg.trim())) {
+      const siteCheck = await db.prepare(`SELECT 1 FROM sites WHERE name = ? AND active = 1`).bind(body.site.trim()).first();
+      if (!siteCheck) return { error: "Site must be chosen from the known-sites list. Ask the office to add a new site first." };
+    }
   }
   const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
   let poNumber;
