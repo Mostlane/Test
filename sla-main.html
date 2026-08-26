@@ -103,6 +103,14 @@
     .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;font-size:16px;}
     .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex:0 0 auto;}
     .statusline{display:flex;align-items:center;font-size:14px;color:#4b5563;margin-top:4px;}
+    .statuspick{display:inline-flex;align-items:center;gap:6px;cursor:pointer;border-radius:6px;padding:1px 6px;margin:-1px -6px;}
+    .statuspick:hover{background:#eef2f7;}
+    .statuspick .caret{color:#94a3b8;font-size:10px;}
+    .status-menu{position:absolute;z-index:3000;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.18);padding:6px;min-width:190px;max-height:340px;overflow:auto;}
+    .status-menu .sm-item{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;text-align:left;padding:8px 10px;border-radius:8px;font:inherit;font-size:14px;cursor:pointer;color:#1f2937;}
+    .status-menu .sm-item:hover{background:#eef4ff;}
+    .status-menu .sm-item.cur{font-weight:700;background:#f1f5f9;}
+    .status-menu .sm-item .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;margin:0;}
     .muted{color:var(--muted);}
     .small{font-size:13px;}
     .nowrap{white-space:nowrap;}
@@ -721,7 +729,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}</div>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}</div>
       </td>
       <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
       <td>
@@ -754,7 +762,7 @@ function render(){
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
-        <span class="dot" style="background:${colour}"></span>${esc(j.status)}
+        <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
       </div>
       <div class="mjob-meta">${sched ? "🗓 " + sched : ""} ${engNames ? "· 👤 " + esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</div>
@@ -1263,7 +1271,73 @@ function onAction(e){
     if(job) window.MLJobEdit.open(job, { onSaved: () => loadJobs() });
   }
   else if(a === "sheet") openPdfModal(id);
+  else if(a === "status") openStatusMenu(id, btn);
   else if(a === "view") location.href = "job-view.html?jobId=" + encodeURIComponent(id) + "&back=sla-main.html";
+}
+
+/* ============ inline status change (click the status on a job) ============ */
+let statusMenuEl = null;
+function closeStatusMenu(){
+  if(statusMenuEl){ statusMenuEl.remove(); statusMenuEl = null; }
+  document.removeEventListener("click", statusMenuOutside, true);
+  document.removeEventListener("keydown", statusMenuEsc, true);
+}
+function statusMenuOutside(e){ if(statusMenuEl && !statusMenuEl.contains(e.target)) closeStatusMenu(); }
+function statusMenuEsc(e){ if(e.key === "Escape") closeStatusMenu(); }
+function openStatusMenu(id, anchor){
+  closeStatusMenu();
+  const job = allJobs.find(j => j.id === id);
+  if(!job) return;
+  const project = isProjectJob(job);
+  /* project jobs use the slim set; everyone else the full status list */
+  let list = STATUSES.slice();
+  if(project){
+    const slim = ["Scheduled","Travelling","In Progress","Complete"];
+    list = STATUSES.filter(([s]) => slim.includes(s) || s === job.status);
+  }
+  /* put Complete first (the common tap), then the rest in their normal order */
+  list.sort((x,y) => (y[0]==="Complete") - (x[0]==="Complete"));
+  const menu = document.createElement("div");
+  menu.className = "status-menu";
+  menu.innerHTML = list.map(([s,c]) =>
+    `<button class="sm-item${s===job.status?" cur":""}" data-s="${esc(s)}"><span class="dot" style="background:${c}"></span>${esc(s)}${s===job.status?" ✓":""}</button>`
+  ).join("");
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  const w = menu.offsetWidth || 200;
+  menu.style.left = Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - w - 8)) + "px";
+  menu.style.top = (r.bottom + window.scrollY + 4) + "px";
+  menu.addEventListener("click", ev => {
+    const b = ev.target.closest(".sm-item"); if(!b) return;
+    const s = b.dataset.s; closeStatusMenu();
+    if(s !== job.status) changeJobStatus(id, s);
+  });
+  statusMenuEl = menu;
+  setTimeout(() => {
+    document.addEventListener("click", statusMenuOutside, true);
+    document.addEventListener("keydown", statusMenuEsc, true);
+  }, 0);
+}
+async function changeJobStatus(id, status){
+  const job = allJobs.find(j => j.id === id); if(!job) return;
+  const prev = job.status;
+  job.status = status;            // optimistic
+  render();
+  try{
+    const res = await authFetch("/sla/jobs/" + encodeURIComponent(id), {
+      method:"PATCH", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ status, changedBy: getCurrentUser() })
+    });
+    if(!res.ok){
+      let msg = "HTTP " + res.status;
+      try{ const e = await res.json(); if(e && (e.error||e.message)) msg = e.error||e.message; }catch(_){}
+      throw new Error(msg);
+    }
+    await loadJobs();             // refresh counts + true server state
+  }catch(err){
+    job.status = prev; render();
+    alert("Couldn't change status: " + err.message);
+  }
 }
 
 function init(){
