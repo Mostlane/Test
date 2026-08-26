@@ -29,7 +29,10 @@
     const id = String(job.id || "");
     const ref = String(job.helpdeskRef || "").trim();
     // Job/ticket number: id prefix "<num>-…", else the number that leads the ref.
-    let m = id.match(/^([A-Za-z]?\d+(?:\/\d+)?)-/);
+    // NEVER off a raw UUID id — a segment like "d7356541-…" (hex) would otherwise
+    // be misread as a ticket number and stuck in front of a manual job's site.
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let m = UUID.test(id) ? null : id.match(/^([A-Za-z]?\d+(?:\/\d+)?)-/);
     let num = m ? m[1] : ((ref.match(/^([A-Za-z]?\d+(?:\/\d+)?)\b/) || [])[1] || "");
     // Drop a leading "<num> - " / "<num>, " that's baked into a string.
     const stripNum = s => String(s || "").replace(/^\s*[A-Za-z]?\d+(?:\/\d+)?\s*[-–,]\s*/, "").trim();
