@@ -1331,8 +1331,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       // first, so this runs after loadCategories resolves.
       try{
         const panel = new URLSearchParams(location.search).get("panel");
-        if(panel === "categories") openCatModal();
-        else if(panel === "sheet") openSheetCfg();
+        if(panel === "categories" || panel === "sheet"){
+          if(panel === "categories") openCatModal(); else openSheetCfg();
+          // Strip the param so a refresh doesn't keep re-opening the modal.
+          try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+        }
       }catch(e){}
     });
   }
