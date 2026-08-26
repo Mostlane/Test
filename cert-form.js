@@ -73,7 +73,7 @@
   .mlc .save{font-size:12.5px;color:#0a7d33;font-weight:600;}.mlc .save.err{color:#b00020;}
   .mlc .pill{display:inline-block;background:#eef4fb;color:#003468;border-radius:999px;padding:3px 10px;font:600 12px inherit;}
   .mlc .banner{background:#fff7e6;border:1px solid #f2d98a;border-radius:8px;padding:8px 10px;font-size:13px;color:#7a5b00;margin:6px 0;}
-  .mlc .mlc-listhead{position:sticky;top:0;z-index:4;background:#fff;padding:9px 4px;margin:-4px -4px 8px;border-bottom:2px solid #eef2f6;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:#003468;}
+  .mlc .mlc-listhead{background:#fff;padding:9px 4px;margin:-4px -4px 8px;border-bottom:2px solid #eef2f6;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:#003468;}
   .mlc .mlc-listhead .cnt{margin-left:auto;font-size:13px;}
   .mlc .mlc-listhead .cnt .ok{color:#0a7d33;font-weight:700;}
   .mlc .mlc-listhead .cnt .bad{color:#b00020;font-weight:700;cursor:pointer;text-decoration:underline;}
@@ -84,7 +84,6 @@
   .mlc details.mlc-fold>summary::after{content:"▾";margin-left:auto;color:#94a3b8;font-weight:400;}
   .mlc details.mlc-fold[open]>summary::after{content:"▴";}
   .mlc details.mlc-fold .cc-body{padding:0 12px 12px;}
-  .mlc .cc.sticky-actions{position:sticky;bottom:0;z-index:6;box-shadow:0 -3px 12px rgba(10,30,60,.10);border:1px solid #d7e0ea;}
   .mlc .setall{border:1px solid #cdd8e3;border-radius:10px;padding:10px;margin-top:8px;background:#f8fafc;}
   .mlc .setall .sr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #eef2f6;}
   .mlc .setall .sr:first-of-type{border-top:none;}
@@ -187,8 +186,10 @@
       }
       h += '</div>';
 
-      // Actions (sticky at the bottom so Complete is always reachable on a long list)
-      h += '<div class="cc' + (mode === "engineer" && editable && !opts.hideComplete ? ' sticky-actions' : '') + '"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+      // Actions — a normal card at the end. (No position:sticky here: on iOS a
+      // sticky/fixed bottom bar makes the fixed "Viewing as" return bar drift up
+      // mid-scroll — see the CLAUDE.md iOS bottom-bar quirk.)
+      h += '<div class="cc"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
       if (mode === "engineer" && editable && !opts.hideComplete) h += '<button class="btn green" id="mlcComplete">✅ Complete &amp; submit</button>';
       h += '<button class="btn ghost sm" id="mlcPdf">⬇ Preview PDF</button>';
       h += '<span class="save" id="mlcSave"></span></div>';
