@@ -72,7 +72,19 @@
   .mlc .muted{color:#6b7a90;font-size:12.5px;}
   .mlc .save{font-size:12.5px;color:#0a7d33;font-weight:600;}.mlc .save.err{color:#b00020;}
   .mlc .pill{display:inline-block;background:#eef4fb;color:#003468;border-radius:999px;padding:3px 10px;font:600 12px inherit;}
-  .mlc .banner{background:#fff7e6;border:1px solid #f2d98a;border-radius:8px;padding:8px 10px;font-size:13px;color:#7a5b00;margin:6px 0;}`;
+  .mlc .banner{background:#fff7e6;border:1px solid #f2d98a;border-radius:8px;padding:8px 10px;font-size:13px;color:#7a5b00;margin:6px 0;}
+  .mlc .mlc-listhead{position:sticky;top:0;z-index:4;background:#fff;padding:9px 4px;margin:-4px -4px 8px;border-bottom:2px solid #eef2f6;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:#003468;}
+  .mlc .mlc-listhead .cnt{margin-left:auto;font-size:13px;}
+  .mlc .mlc-listhead .cnt .ok{color:#0a7d33;font-weight:700;}
+  .mlc .mlc-listhead .cnt .bad{color:#b00020;font-weight:700;cursor:pointer;text-decoration:underline;}
+  .mlc .mlrow.fail{border-color:#e6a1a1;border-left:4px solid #b00020;background:#fdf3f3;}
+  .mlc details.mlc-fold{background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin:10px 0;}
+  .mlc details.mlc-fold>summary{list-style:none;cursor:pointer;padding:12px;font-weight:700;font-size:14px;color:#003468;display:flex;align-items:center;gap:8px;}
+  .mlc details.mlc-fold>summary::-webkit-details-marker{display:none;}
+  .mlc details.mlc-fold>summary::after{content:"▾";margin-left:auto;color:#94a3b8;font-weight:400;}
+  .mlc details.mlc-fold[open]>summary::after{content:"▴";}
+  .mlc details.mlc-fold .cc-body{padding:0 12px 12px;}
+  .mlc .cc.sticky-actions{position:sticky;bottom:0;z-index:6;box-shadow:0 -3px 12px rgba(10,30,60,.10);border:1px solid #d7e0ea;}`;
 
   function shrinkSig(canvas) {
     // flatten onto white so it embeds as a baseline JPEG (PDF embeds JPEG)
@@ -119,32 +131,29 @@
       else if (rec._seeded && mode === "engineer") h += '<div class="banner">No previous certificate found for this site — nothing was carried forward. Add each ' + (type === "pat" ? "appliance" : "light") + ' below.</div>';
       h += '</div>';
 
-      // Client + installation
-      h += '<div class="cc"><h4>Client &amp; installation</h4><div class="row2">';
-      h += block("Client", "client");
-      h += block("Installation address", "installation");
-      h += '</div></div>';
-
-      // Extent + comments
-      h += '<div class="cc"><h4>Details</h4>'
-        + '<label>Extent &amp; limitations</label><textarea data-f="extent" ' + ro() + '>' + esc(rec.extent || "") + '</textarea>'
-        + '<label>Additional comments</label><textarea data-f="comments" ' + ro() + ' style="min-height:70px">' + esc(rec.comments || "") + '</textarea></div>';
-
-      // Results — mobile-first cards (location prominent, tappable result toggles)
-      h += '<div class="cc"><h4>' + (type === "pat" ? "Appliances tested" : "Emergency lighting tests") + ' <span class="muted">(' + rec.rows.length + ')</span></h4>';
+      // ── ITEM LIST FIRST — the active part on site. Sticky header keeps the
+      // count + a live fail tally visible while scrolling a long list.
+      h += '<div class="cc"><div class="mlc-listhead" id="mlcListHead">'
+        + (type === "pat" ? "🔌 Appliances tested" : "💡 Emergency lighting tests")
+        + ' <span class="cnt" id="mlcCnt"></span></div>';
       h += '<div class="mlrows" id="mlcRows"></div>';
       if (editable) h += '<div class="toolbar"><button class="btn ghost sm" data-act="add">＋ Add ' + (type === "pat" ? "appliance" : "light") + '</button><button class="btn ghost sm" data-act="add5">＋ Add 5</button>'
         + '<button class="btn ghost sm" data-act="allpass">✔ Mark all Pass</button>'
         + '<button class="btn ghost sm" data-act="pull">↻ Pull last certificate</button></div>';
       h += '</div>';
 
-      // Contractor
-      h += '<div class="cc"><h4>Contractor &amp; engineer</h4><div class="row2">'
+      // ── Header details — collapsed by default (prefilled, rarely edited on site)
+      h += '<details class="mlc-fold"><summary>Client &amp; installation</summary><div class="cc-body"><div class="row2">'
+        + block("Client", "client") + block("Installation address", "installation") + '</div></div></details>';
+      h += '<details class="mlc-fold"><summary>Extent &amp; comments</summary><div class="cc-body">'
+        + '<label>Extent &amp; limitations</label><textarea data-f="extent" ' + ro() + '>' + esc(rec.extent || "") + '</textarea>'
+        + '<label>Additional comments</label><textarea data-f="comments" ' + ro() + ' style="min-height:70px">' + esc(rec.comments || "") + '</textarea></div></details>';
+      h += '<details class="mlc-fold"><summary>Contractor &amp; engineer</summary><div class="cc-body"><div class="row2">'
         + '<div><label>Trading title</label><input type="text" data-c="tradingTitle" value="' + esc(rec.contractor.tradingTitle || "") + '" ' + ro() + '></div>'
         + '<div><label>Engineer name</label><input type="text" data-c="name" value="' + esc(rec.contractor.name || "") + '" ' + ro() + '></div>'
         + '<div><label>Position</label><input type="text" data-c="position" value="' + esc(rec.contractor.position || "Engineer") + '" ' + ro() + '></div>'
         + '<div><label>Date</label><input type="text" data-c="date" value="' + esc(rec.contractor.date || "") + '" placeholder="dd/mm/yyyy or yyyy-mm-dd" ' + ro() + '></div>'
-        + '</div></div>';
+        + '</div></div></details>';
 
       // Signature (engineer captures; office sees status)
       h += '<div class="cc"><h4>Signature</h4>';
@@ -157,8 +166,8 @@
       }
       h += '</div>';
 
-      // Actions
-      h += '<div class="cc"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+      // Actions (sticky at the bottom so Complete is always reachable on a long list)
+      h += '<div class="cc' + (mode === "engineer" && editable && !opts.hideComplete ? ' sticky-actions' : '') + '"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
       if (mode === "engineer" && editable && !opts.hideComplete) h += '<button class="btn green" id="mlcComplete">✅ Complete &amp; submit</button>';
       h += '<button class="btn ghost sm" id="mlcPdf">⬇ Preview PDF</button>';
       h += '<span class="save" id="mlcSave"></span></div>';
@@ -182,11 +191,24 @@
 
     const titleCols = cols.filter(c => c.role === "title" || c.role === "subtitle");
     const fieldCols = cols.filter(c => c.role === "toggle" || c.role === "input");
+    const isFail = r => type === "pat"
+      ? (/fail/i.test(r.result || "") || /fail/i.test(r.visual || ""))
+      : (/fail/i.test(r.normal || "") || /fail/i.test(r.led || "") || /fail/i.test(r.emergency || ""));
+    // Live count + fail tally in the sticky list header; the fail chip jumps to
+    // the first failed item so nothing gets missed in a long list.
+    function updateListHead() {
+      const el = container.querySelector("#mlcCnt"); if (!el) return;
+      const n = rec.rows.length, fails = rec.rows.filter(isFail).length;
+      el.innerHTML = n + " item" + (n === 1 ? "" : "s") + " · "
+        + (fails ? '<span class="bad" data-jump="1">⚠ ' + fails + " failed</span>" : '<span class="ok">✓ all pass</span>');
+      const j = el.querySelector("[data-jump]");
+      if (j) j.onclick = () => { const f = container.querySelector(".mlrow.fail"); if (f) f.scrollIntoView({ behavior: "smooth", block: "center" }); };
+    }
     function renderRows() {
       const tb = container.querySelector("#mlcRows"); if (!tb) return;
       let h = "";
       rec.rows.forEach((r, i) => {
-        h += '<div class="mlrow" data-i="' + i + '"><div class="mlrow-top"><span class="mlrow-n">' + String(i + 1).padStart(2, "0") + '</span><div class="mlrow-title">';
+        h += '<div class="mlrow' + (isFail(r) ? " fail" : "") + '" data-i="' + i + '"><div class="mlrow-top"><span class="mlrow-n">' + String(i + 1).padStart(2, "0") + '</span><div class="mlrow-title">';
         titleCols.forEach(c => { h += titleInput(c, r[c.key], i); });
         h += '</div>' + (editable ? '<button class="del" data-del="' + i + '">✕</button>' : '') + '</div>';
         h += '<div class="mlrow-fields">';
@@ -194,6 +216,7 @@
         h += '</div></div>';
       });
       tb.innerHTML = h;
+      updateListHead();
     }
     function titleInput(c, v, i) {
       const big = c.role === "title";
@@ -263,6 +286,8 @@
         tg.querySelectorAll("button").forEach(b => b.className = "");
         const opt = btn.dataset.v; const cls = /^pass$/i.test(opt) ? "pass" : /^fail$/i.test(opt) ? "fail" : (opt === "I" || opt === "II" || tg.querySelectorAll("button").length === 2) ? "one" : "na";
         btn.className = "on " + cls;
+        const rowEl = tg.closest(".mlrow"); if (rowEl) rowEl.classList.toggle("fail", isFail(rec.rows[i]));
+        updateListHead();
         queueSave();
       }));
       container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); wire(); queueSave(); }));
