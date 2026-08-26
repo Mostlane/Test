@@ -24,6 +24,7 @@ import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
 import { buildZip } from "../lib/zip.js";
 import { logoBytes } from "../lib/logo.js";
+import { pdfExtractText, certNumberFromText } from "../lib/pdftext.js";
 import { onStatusTransition } from "../lib/statusemail.js";
 
 export async function handle(request, env, ctx, url, sess) {
@@ -4028,60 +4029,8 @@ function emSetFromKey(r2key) {
 // Read the EM certificate number STRAIGHT FROM THE PDF CONTENT (authoritative).
 // The filename is only a proxy — some certs were filed under the wrong store or
 // carry no number at all — so where the filename disagrees with the store code
-// we open the certificate itself. Tysoft EasyCert prints the number in the page
-// footer ("…Copyright Tysoft 2025. 0014-25 Page: 1 of 2" and "…Ref: 0014-25 -
-// Page: 2 of 2"); the "Certificate Number:" form field is often left blank, so
-// the footer/Ref is the reliable anchor. Pure WebCrypto/DecompressionStream — no
-// PDF library. Only the FlateDecode text streams matter (images fail to inflate
-// and are skipped).
-function emLatin1(u8) {
-  let s = ""; const CH = 8192;
-  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
-  return s;
-}
-async function emInflate(u8) {
-  for (const fmt of ["deflate", "deflate-raw"]) {
-    try {
-      const stream = new Response(u8).body.pipeThrough(new DecompressionStream(fmt));
-      const buf = await new Response(stream).arrayBuffer();
-      const out = new Uint8Array(buf);
-      if (out.length) return out;
-    } catch {}
-  }
-  return null;
-}
-async function emPdfText(bytes) {
-  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const s = emLatin1(u8);
-  const out = [];
-  const re = /stream\r?\n/g; let m;
-  while ((m = re.exec(s))) {
-    const start = m.index + m[0].length;
-    const end = s.indexOf("endstream", start);
-    if (end < 0) break;
-    let raw = u8.subarray(start, end);
-    let e = raw.length; while (e > 0 && (raw[e - 1] === 10 || raw[e - 1] === 13)) e--;  // trim trailing CR/LF
-    raw = raw.slice(0, e);
-    const dec = await emInflate(raw);
-    const ds = emLatin1(dec || raw);
-    const toks = ds.match(/\((?:[^()\\]|\\.)*\)/g);
-    if (toks) for (const t of toks) {
-      const v = t.slice(1, -1).replace(/\\([()\\])/g, "$1");
-      if (v.trim()) out.push(v);
-    }
-    re.lastIndex = end + 9;
-  }
-  return out.join(" ").replace(/\s+/g, " ");
-}
-function emNumberFromText(txt) {
-  if (!txt) return null;
-  const m =
-    txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) ||
-    txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) ||
-    txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) ||
-    txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
-  return m ? { set: m[1], year: Number(m[3]) } : null;
-}
+// we open the certificate itself (pdfExtractText + certNumberFromText live in
+// lib/pdftext.js — pure WebCrypto/DecompressionStream, no PDF library).
 async function emSetFromPdf(env, r2key) {
   try {
     if (!env.JOB_FILES) return null;
@@ -4089,7 +4038,7 @@ async function emSetFromPdf(env, r2key) {
     if (!obj) return null;
     const buf = await obj.arrayBuffer();
     if (!buf || buf.byteLength > 4 * 1024 * 1024) return null;   // guard huge files
-    return emNumberFromText(await emPdfText(buf));
+    return certNumberFromText(await pdfExtractText(buf));
   } catch { return null; }
 }
 async function getEmSets(env, tid) {

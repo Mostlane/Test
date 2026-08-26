@@ -2096,12 +2096,12 @@ async function handle3(request, env, ctx, url, sess) {
     } catch {
     }
     p.deviceUnlimited = !!unlimited;
-    let cap = parseInt(allowedDevices, 10);
-    if (!Number.isFinite(cap) || cap < 1) cap = 1;
-    if (cap > 5) cap = 5;
-    p.allowedDevices = cap;
+    let cap2 = parseInt(allowedDevices, 10);
+    if (!Number.isFinite(cap2) || cap2 < 1) cap2 = 1;
+    if (cap2 > 5) cap2 = 5;
+    p.allowedDevices = cap2;
     await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(p), db.tenantId, username).run();
-    return json({ ok: true, allowedDevices: cap, unlimited: !!unlimited }, {}, env, request);
+    return json({ ok: true, allowedDevices: cap2, unlimited: !!unlimited }, {}, env, request);
   }
   if (path === "/device/reset" && request.method === "POST") {
     const gate = await requireDeviceAdmin(env, request);
@@ -3998,10 +3998,10 @@ async function poBlobList(env, m) {
 async function poSiteRows(env, term, limit) {
   const m = await poDiscover(env);
   if (!m) return [];
-  const cap = Math.max(1, Math.min(30, limit));
+  const cap2 = Math.max(1, Math.min(30, limit));
   const like = "%" + String(term || "").replace(/[%_]/g, "") + "%";
-  const T = String(term || "").toLowerCase();
-  const matches = (s) => !T || s.name.toLowerCase().includes(T) || s.pc.toLowerCase().includes(T) || (s.job || "").toLowerCase().includes(T);
+  const T2 = String(term || "").toLowerCase();
+  const matches = (s) => !T2 || s.name.toLowerCase().includes(T2) || s.pc.toLowerCase().includes(T2) || (s.job || "").toLowerCase().includes(T2);
   try {
     const safe = m.table.replace(/"/g, "");
     if (m.mode === "cols") {
@@ -4012,7 +4012,7 @@ async function poSiteRows(env, term, limit) {
       if (m.pcCol) where.push(`"${m.pcCol}" LIKE ?1`);
       if (m.jobCol) where.push(`CAST("${m.jobCol}" AS TEXT) LIKE ?1`);
       const { results } = await env.PO_DB.prepare(
-        `SELECT ${cols.join(", ")} FROM "${safe}" WHERE ${where.join(" OR ")} LIMIT ${cap}`
+        `SELECT ${cols.join(", ")} FROM "${safe}" WHERE ${where.join(" OR ")} LIMIT ${cap2}`
       ).bind(like).all();
       return (results || []).map((r) => ({ name: String(r.name || ""), pc: String(r.pc || ""), job: r.job != null ? String(r.job) : null })).filter((s) => s.name);
     }
@@ -4031,14 +4031,14 @@ async function poSiteRows(env, term, limit) {
         const s = poShape(v);
         if (s && matches(s)) {
           out.push(s);
-          if (out.length >= cap) break;
+          if (out.length >= cap2) break;
         }
       }
       return out;
     }
     if (m.mode === "blob") {
       const list = await poBlobList(env, m);
-      return list.filter(matches).slice(0, cap);
+      return list.filter(matches).slice(0, cap2);
     }
   } catch {
   }
@@ -4446,10 +4446,10 @@ async function handle7(request, env, ctx, url, sess) {
       if (sites.length >= 25) break;
     }
     try {
-      const T = term.toLowerCase();
+      const T2 = term.toLowerCase();
       for (const n of await poOrderSiteNames(env)) {
         if (sites.length >= 25) break;
-        if (T && !n.toLowerCase().includes(T)) continue;
+        if (T2 && !n.toLowerCase().includes(T2)) continue;
         if (seen.has(n.trim().toLowerCase())) continue;
         seen.add(n.trim().toLowerCase());
         sites.push({ name: n, code: "", postcode: "", source: "po-order" });
@@ -4555,10 +4555,10 @@ async function handle7(request, env, ctx, url, sess) {
       errs.poSites = String(e && e.message || e);
     }
     try {
-      const T2 = term.toLowerCase();
+      const T22 = term.toLowerCase();
       for (const n of await poOrderSiteNames(env)) {
         if (po.length >= 8) break;
-        if (!n.toLowerCase().includes(T2)) continue;
+        if (!n.toLowerCase().includes(T22)) continue;
         const ref = nameRef(n);
         if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
@@ -4573,10 +4573,10 @@ async function handle7(request, env, ctx, url, sess) {
       if (jobs.length >= 10) break;
       jobs.push(j);
     }
-    const T = term.toLowerCase();
+    const T2 = term.toLowerCase();
     jobs.sort((a, b) => {
-      const pa = String(a.ref).toLowerCase().startsWith(T) ? 0 : 1;
-      const pb = String(b.ref).toLowerCase().startsWith(T) ? 0 : 1;
+      const pa = String(a.ref).toLowerCase().startsWith(T2) ? 0 : 1;
+      const pb = String(b.ref).toLowerCase().startsWith(T2) ? 0 : 1;
       return pa - pb;
     });
     const out = jobs.slice(0, 10);
@@ -4972,8 +4972,8 @@ function buildFirestopPdf(record, meta = {}) {
       y = M;
     }
   };
-  const label = (x, yy, s) => doc.text(x, yy, s, { size: 7.5, bold: true, color: GREY });
-  const val = (x, yy, s, opt = {}) => doc.text(x, yy, s || "\u2014", Object.assign({ size: 9.5 }, opt));
+  const label = (x, yy2, s) => doc.text(x, yy2, s, { size: 7.5, bold: true, color: GREY });
+  const val = (x, yy2, s, opt = {}) => doc.text(x, yy2, s || "\u2014", Object.assign({ size: 9.5 }, opt));
   if (meta.logo) {
     try {
       const d = jpegInfo(meta.logo);
@@ -5210,6 +5210,56 @@ function logoBytes() {
   const a = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
   return a;
+}
+
+// src/lib/pdftext.js
+function latin1(u82) {
+  let s = "";
+  const CH = 8192;
+  for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
+  return s;
+}
+async function inflate(u82) {
+  for (const fmt of ["deflate", "deflate-raw"]) {
+    try {
+      const stream = new Response(u82).body.pipeThrough(new DecompressionStream(fmt));
+      const buf = await new Response(stream).arrayBuffer();
+      const out = new Uint8Array(buf);
+      if (out.length) return out;
+    } catch {
+    }
+  }
+  return null;
+}
+async function pdfExtractText(bytes) {
+  const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const s = latin1(u82);
+  const out = [];
+  const re = /stream\r?\n/g;
+  let m;
+  while (m = re.exec(s)) {
+    const start = m.index + m[0].length;
+    const end = s.indexOf("endstream", start);
+    if (end < 0) break;
+    let raw = u82.subarray(start, end);
+    let e = raw.length;
+    while (e > 0 && (raw[e - 1] === 10 || raw[e - 1] === 13)) e--;
+    raw = raw.slice(0, e);
+    const dec = await inflate(raw);
+    const ds = latin1(dec || raw);
+    const toks = ds.match(/\((?:[^()\\]|\\.)*\)/g);
+    if (toks) for (const t of toks) {
+      const v = t.slice(1, -1).replace(/\\([()\\])/g, "$1");
+      if (v.trim()) out.push(v);
+    }
+    re.lastIndex = end + 9;
+  }
+  return out.join(" ").replace(/\s+/g, " ");
+}
+function certNumberFromText(txt) {
+  if (!txt) return null;
+  const m = txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) || txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
+  return m ? { set: m[1], year: Number(m[3]) } : null;
 }
 
 // src/lib/statusemail.js
@@ -5579,8 +5629,8 @@ async function handle8(request, env, ctx, url, sess) {
   if (subpath === "/infer-work-area" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const b = await readJson2(request);
-    const cap = await aiCapCheck(env, tenantId);
-    if (cap.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
+    const cap2 = await aiCapCheck(env, tenantId);
+    if (cap2.capped) return jsonResponse({ ok: false, capped: true, error: `Daily AI limit reached (${cap2.cap}). Pick the work area manually, or raise the limit in the scheduler AI-usage panel.` }, headers, 200);
     const r = await inferWorkArea(env, tenantId, b.description || "");
     if (r.ok && (r.areaId || r.name)) ctx?.waitUntil(bumpAiUsage(env, tenantId, "infer-work-area"));
     return jsonResponse(r, headers);
@@ -8377,11 +8427,11 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   }
   if (jobs.length < 2) return { ok: false, error: "Need at least two locatable jobs on this day to optimise a route.", warnings };
   const pts = [home.coord, ...jobs.map((j) => j.coord)];
-  const M3 = await driveMatrix(env, pts);
-  const baseSeq = solveRoute(M3.mins);
+  const M4 = await driveMatrix(env, pts);
+  const baseSeq = solveRoute(M4.mins);
   let order = baseSeq, aiUsed = false, aiReason = "";
   if (useAI && env.ANTHROPIC_API_KEY) {
-    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M3.mins, dayStart, notes, baseSeq });
+    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M4.mins, dayStart, notes, baseSeq });
     if (ai.ok) {
       const seq = ai.order.map(Number).filter((nn) => nn >= 1 && nn <= jobs.length);
       const uniq = [...new Set(seq)];
@@ -8400,7 +8450,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const legs = [];
   let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0;
   for (const p of order) {
-    const dMin = M3.mins[cur][p], dMi = M3.miles[cur][p];
+    const dMin = M4.mins[cur][p], dMi = M4.miles[cur][p];
     driveMins += dMin;
     driveMiles += dMi;
     const arrival = t + dMin;
@@ -8410,7 +8460,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     t = arrival + j.durationMin;
     cur = p;
   }
-  const homeMin = M3.mins[cur][0], homeMi = M3.miles[cur][0];
+  const homeMin = M4.mins[cur][0], homeMi = M4.miles[cur][0];
   driveMins += homeMin;
   driveMiles += homeMi;
   let lunch = null;
@@ -8430,7 +8480,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     dayStart,
     aiUsed,
     aiReason,
-    matrixSource: M3.source,
+    matrixSource: M4.source,
     home: { postcode: home.postcode },
     legs,
     lunch,
@@ -8443,7 +8493,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       dayLengthMins: Math.round(endOffset),
       homeDriveMins: homeMin,
       homeDriveMiles: Math.round(homeMi * 10) / 10,
-      source: M3.source
+      source: M4.source
     },
     warnings
   };
@@ -8452,7 +8502,7 @@ async function autoScheduleDay(env, tenantId, body) {
   const dayStart = /^\d{1,2}:\d{2}$/.test(body.dayStart || "") ? body.dayStart : "08:00";
   const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
   const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 540));
-  const cap = Math.max(120, dayMinutes - lunch);
+  const cap2 = Math.max(120, dayMinutes - lunch);
   const warnings = [];
   const skills = await getEngSkills(env, tenantId);
   const dur = await estimateJobDurations(env, tenantId);
@@ -8540,23 +8590,23 @@ async function autoScheduleDay(env, tenantId, body) {
   }
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
   const NE = engs.length;
-  let M3;
-  if (pts.length <= 90) M3 = await roadMatrix(pts);
+  let M4;
+  if (pts.length <= 90) M4 = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
-    M3 = { mins, source: "estimate" };
+    M4 = { mins, source: "estimate" };
   }
   const pE = (i) => i, pJ = (k) => NE + k;
   const FERRY = 90, REMOTE = 75;
   const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
-  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M3.mins[i][k2] += FERRY;
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M4.mins[i][k2] += FERRY;
   const insertCost = (ei, k) => {
     const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
     let bDelta = Infinity, bPos = 1;
     for (let pos = 1; pos < route.length; pos++) {
       const a = route[pos - 1], b = route[pos];
-      const delta = M3.mins[a][p] + M3.mins[p][b] - M3.mins[a][b];
+      const delta = M4.mins[a][p] + M4.mins[p][b] - M4.mins[a][b];
       if (delta < bDelta) {
         bDelta = delta;
         bPos = pos;
@@ -8564,7 +8614,7 @@ async function autoScheduleDay(env, tenantId, body) {
     }
     return { pos: bPos, delta: bDelta };
   };
-  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M3.mins[pE(ei)][pJ(k)]));
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M4.mins[pE(ei)][pJ(k)]));
   const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
   const unassigned = [], handled = /* @__PURE__ */ new Set();
   const remoteByArea = {};
@@ -8574,13 +8624,13 @@ async function autoScheduleDay(env, tenantId, body) {
     const ks = remoteByArea[area];
     let bestE = -1, bestCost = Infinity;
     engs.forEach((_, ei) => {
-      const c = Math.min(...ks.map((k) => M3.mins[pE(ei)][pJ(k)]));
+      const c = Math.min(...ks.map((k) => M4.mins[pE(ei)][pJ(k)]));
       if (c < bestCost) {
         bestCost = c;
         bestE = ei;
       }
     });
-    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M3.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M4.mins[pE(bestE)][pJ(k)])) : Infinity;
     const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
     const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
     if (!justified) {
@@ -8594,7 +8644,7 @@ async function autoScheduleDay(env, tenantId, body) {
     for (const k of ks) {
       handled.add(k);
       const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
-      if (newLoad <= cap) {
+      if (newLoad <= cap2) {
         e.seq.splice(ins.pos - 1, 0, k);
         e.load = newLoad;
       } else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full \u2014 this one won't fit today` });
@@ -8607,7 +8657,7 @@ async function autoScheduleDay(env, tenantId, body) {
     engs.forEach((e, ei) => {
       const ins = insertCost(ei, k);
       const newLoad = e.load + ins.delta + j.durationMin;
-      if (newLoad > cap) return;
+      if (newLoad > cap2) return;
       const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
       const sameArea = j.area && e.seq.some((x) => jobs[x].area === j.area);
       let eff = ins.delta;
@@ -8626,13 +8676,13 @@ async function autoScheduleDay(env, tenantId, body) {
   const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
   const plan = engs.map((e, ei) => {
     const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
-    const subCost = sub.map((a) => sub.map((b) => M3.mins[a][b]));
+    const subCost = sub.map((a) => sub.map((b) => M4.mins[a][b]));
     const solved = solveRoute(subCost);
     const orderedK = solved.map((si) => e.seq[si - 1]);
     const legs = [];
     let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
     for (const k of orderedK) {
-      const p = pJ(k), dMin = M3.mins[cur][p];
+      const p = pJ(k), dMin = M4.mins[cur][p];
       drive += dMin;
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) {
@@ -8646,12 +8696,12 @@ async function autoScheduleDay(env, tenantId, body) {
       t = arrival + j.durationMin;
       cur = p;
     }
-    const homeMin = orderedK.length ? M3.mins[cur][pE(ei)] : 0;
+    const homeMin = orderedK.length ? M4.mins[cur][pE(ei)] : 0;
     drive += homeMin;
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
-  let matrixSource = M3.source;
-  if (M3.source !== "osrm" && plan.length) {
+  let matrixSource = M4.source;
+  if (M4.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
     let allReal = true;
@@ -8721,7 +8771,7 @@ async function autoScheduleDay(env, tenantId, body) {
     const es = Object.entries(byName);
     if (es.length < 2) continue;
     const totalJobs = es.reduce((s, [, n]) => s + n, 0);
-    const reason = (areaSite[area] || 0) > cap * 0.7 ? `${totalJobs} jobs there \u2014 more than one engineer can fit in a ${hmm(cap)} working day, so it's shared to keep everyone finishing on time` : `both were already passing ${area} on efficient routes \u2014 drag a job across if you'd rather one engineer owned the whole area`;
+    const reason = (areaSite[area] || 0) > cap2 * 0.7 ? `${totalJobs} jobs there \u2014 more than one engineer can fit in a ${hmm(cap2)} working day, so it's shared to keep everyone finishing on time` : `both were already passing ${area} on efficient routes \u2014 drag a job across if you'd rather one engineer owned the whole area`;
     overlaps.push({ area, engineers: es.map(([name, count]) => ({ name, count })), reason });
   }
   overlaps.sort((a, b) => b.engineers.reduce((s, e) => s + e.count, 0) - a.engineers.reduce((s, e) => s + e.count, 0));
@@ -8920,11 +8970,11 @@ function archiveSiteCode(job) {
   const m = c.match(/^(\d{4})(?=$|\D)/);
   return m ? String(Number(m[1])) : "";
 }
-async function backfillArchiveSites(env, tenantId, cap = 500) {
+async function backfillArchiveSites(env, tenantId, cap2 = 500) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare(
     "SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND (site_code IS NULL OR site_code='') LIMIT ?"
-  ).bind(tenantId, cap).all();
+  ).bind(tenantId, cap2).all();
   const rows = results || [];
   const stmts = rows.map((r) => {
     let code = "-";
@@ -9251,54 +9301,6 @@ function emSetFromKey(r2key) {
   const m = n.match(/(\d{3,5})[-.](?:DEC)?(\d{2})[A-Za-z]?(?:_\d+)?_?\.pdf$/i);
   return m ? { set: m[1], year: Number(m[2]) } : null;
 }
-function emLatin1(u82) {
-  let s = "";
-  const CH = 8192;
-  for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
-  return s;
-}
-async function emInflate(u82) {
-  for (const fmt of ["deflate", "deflate-raw"]) {
-    try {
-      const stream = new Response(u82).body.pipeThrough(new DecompressionStream(fmt));
-      const buf = await new Response(stream).arrayBuffer();
-      const out = new Uint8Array(buf);
-      if (out.length) return out;
-    } catch {
-    }
-  }
-  return null;
-}
-async function emPdfText(bytes) {
-  const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const s = emLatin1(u82);
-  const out = [];
-  const re = /stream\r?\n/g;
-  let m;
-  while (m = re.exec(s)) {
-    const start = m.index + m[0].length;
-    const end = s.indexOf("endstream", start);
-    if (end < 0) break;
-    let raw = u82.subarray(start, end);
-    let e = raw.length;
-    while (e > 0 && (raw[e - 1] === 10 || raw[e - 1] === 13)) e--;
-    raw = raw.slice(0, e);
-    const dec = await emInflate(raw);
-    const ds = emLatin1(dec || raw);
-    const toks = ds.match(/\((?:[^()\\]|\\.)*\)/g);
-    if (toks) for (const t of toks) {
-      const v = t.slice(1, -1).replace(/\\([()\\])/g, "$1");
-      if (v.trim()) out.push(v);
-    }
-    re.lastIndex = end + 9;
-  }
-  return out.join(" ").replace(/\s+/g, " ");
-}
-function emNumberFromText(txt) {
-  if (!txt) return null;
-  const m = txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) || txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
-  return m ? { set: m[1], year: Number(m[3]) } : null;
-}
 async function emSetFromPdf(env, r2key) {
   try {
     if (!env.JOB_FILES) return null;
@@ -9306,7 +9308,7 @@ async function emSetFromPdf(env, r2key) {
     if (!obj) return null;
     const buf = await obj.arrayBuffer();
     if (!buf || buf.byteLength > 4 * 1024 * 1024) return null;
-    return emNumberFromText(await emPdfText(buf));
+    return certNumberFromText(await pdfExtractText(buf));
   } catch {
     return null;
   }
@@ -9682,10 +9684,10 @@ async function aiUsageToday(env, tenantId) {
   }
 }
 async function aiCapCheck(env, tenantId) {
-  const cap = await aiCapLimit(env, tenantId);
-  if (!cap) return { capped: false, cap: 0 };
+  const cap2 = await aiCapLimit(env, tenantId);
+  if (!cap2) return { capped: false, cap: 0 };
   const today = await aiUsageToday(env, tenantId);
-  return { capped: today >= cap, cap, today };
+  return { capped: today >= cap2, cap: cap2, today };
 }
 async function getAiUsage(env, tenantId) {
   const db = tenantDB(env, tenantId);
@@ -15780,7 +15782,7 @@ async function handle18(request, env, ctx, url, sess) {
   const iso30 = new Date(now - 30 * 864e5).toISOString();
   const naive7 = iso7.replace("T", " ").slice(0, 19);
   const year = (/* @__PURE__ */ new Date()).getFullYear();
-  const T = db.tenantId;
+  const T2 = db.tenantId;
   const first = (sql, ...b) => db.prepare(sql).bind(...b).first();
   const all = (sql, ...b) => db.prepare(sql).bind(...b).all().then((r) => r.results || []);
   const [
@@ -15806,27 +15808,27 @@ async function handle18(request, env, ctx, url, sess) {
     auditTotal,
     rowCounts
   ] = await Promise.all([
-    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T),
-    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T),
-    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T, isoMonthStart),
-    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T),
-    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T),
-    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T),
-    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T),
-    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T, naive7),
-    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T),
-    all("SELECT data FROM assets WHERE tenant_id = ?", T),
-    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T),
-    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T),
-    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T),
-    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T),
-    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T, year),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T, iso7),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T, iso30),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T, iso7),
-    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T, iso30),
-    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T),
-    tableRowCounts(db, T)
+    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T2),
+    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T2),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T2, isoMonthStart),
+    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T2),
+    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T2),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T2),
+    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T2),
+    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T2, naive7),
+    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T2),
+    all("SELECT data FROM assets WHERE tenant_id = ?", T2),
+    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T2),
+    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T2),
+    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T2),
+    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T2),
+    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T2, year),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T2, iso7),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T2, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T2, iso7),
+    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T2, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T2),
+    tableRowCounts(db, T2)
   ]);
   let assetValue = 0;
   for (const r of assetRows) {
@@ -15874,7 +15876,7 @@ async function handle18(request, env, ctx, url, sess) {
     database: rowCounts
   }, 200, env, request);
 }
-async function tableRowCounts(db, T) {
+async function tableRowCounts(db, T2) {
   const tables = [
     "users",
     "sla_jobs",
@@ -15893,7 +15895,7 @@ async function tableRowCounts(db, T) {
   const out = [];
   let total = 0;
   for (const t of tables) {
-    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T).first();
+    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T2).first();
     const n = row && row.n || 0;
     total += n;
     out.push({ table: t, rows: n });
@@ -19003,8 +19005,8 @@ async function handle22(request, env, ctx, url, sess) {
     }
     if (sub === "/fuel/entries" && method === "GET") {
       await ensureFuelTable(env);
-      const card = q.get("card") || "";
-      const rows = card ? (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? AND card=? ORDER BY date DESC, id DESC").bind(tid, card).all()).results : (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? ORDER BY date DESC, id DESC").bind(tid).all()).results;
+      const card2 = q.get("card") || "";
+      const rows = card2 ? (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? AND card=? ORDER BY date DESC, id DESC").bind(tid, card2).all()).results : (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? ORDER BY date DESC, id DESC").bind(tid).all()).results;
       const { byCard } = await fuelCardMap(env, tid);
       const entries = (rows || []).map((r) => ({
         id: r.id,
@@ -19022,22 +19024,22 @@ async function handle22(request, env, ctx, url, sess) {
     if (sub === "/fuel/entry" && method === "POST") {
       await ensureFuelTable(env);
       const b = await readJson4(request);
-      const card = String(b.card || "").trim();
-      if (!card) return jr3({ error: "card required" }, headers, 400);
+      const card2 = String(b.card || "").trim();
+      if (!card2) return jr3({ error: "card required" }, headers, 400);
       const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date : "";
       if (!date) return jr3({ error: "valid date required" }, headers, 400);
       const litres = Math.round((Number(b.litres) || 0) * 100) / 100;
       const cost = Math.round((Number(b.cost) || 0) * 100) / 100;
       const note = String(b.note || "").slice(0, 200);
       const { byCard } = await fuelCardMap(env, tid);
-      const username = (byCard[card] || {}).username || "";
+      const username = (byCard[card2] || {}).username || "";
       const id = parseInt(String(b.id || ""), 10);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       if (id && !isNaN(id)) {
-        await env.DB.prepare("UPDATE fuel_entries SET card=?,username=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(card, username, date, litres, cost, note, tid, id).run();
+        await env.DB.prepare("UPDATE fuel_entries SET card=?,username=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(card2, username, date, litres, cost, note, tid, id).run();
         return jr3({ ok: true, id }, headers);
       }
-      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)").bind(tid, card, username, date, litres, cost, note, sess.user.username, now).run();
+      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)").bind(tid, card2, username, date, litres, cost, note, sess.user.username, now).run();
       return jr3({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
     }
     if (sub === "/fuel/entry-delete" && method === "POST") {
@@ -19067,29 +19069,29 @@ async function handle22(request, env, ctx, url, sess) {
         const litres = Math.round((Number(e.litres) || 0) * 100) / 100;
         const cost = Math.round((Number(e.cost) || 0) * 100) / 100;
         const ref = String(e.ref || "").trim().slice(0, 80);
-        const card = String(e.card || "").trim().slice(0, 40);
+        const card2 = String(e.card || "").trim().slice(0, 40);
         const note = String(e.note || "").slice(0, 200);
         if (ref) {
           const ex = await env.DB.prepare("SELECT id FROM fuel_entries WHERE tenant_id=? AND ref=?").bind(tid, ref).first();
           if (ex && ex.id) {
-            await env.DB.prepare("UPDATE fuel_entries SET reg=?,card=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(reg, card, date, litres, cost, note, tid, ex.id).run();
+            await env.DB.prepare("UPDATE fuel_entries SET reg=?,card=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(reg, card2, date, litres, cost, note, tid, ex.id).run();
             updated++;
             continue;
           }
         }
-        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
+        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card2, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
         created++;
       }
       return jr3({ ok: true, created, updated, skipped, total: entries.length }, headers);
     }
     if (sub === "/fuel/stats" && method === "GET") {
       await ensureFuelTable(env);
-      const card = q.get("card") || "";
+      const card2 = q.get("card") || "";
       const { byCard, cards } = await fuelCardMap(env, tid);
       const fuelV = await fuelByVehicle(env, tid);
       const odoV = await odoByVehicle(env, tid);
       const mpg = await mpgByVehicle(env, tid);
-      const rows = (card ? (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=? AND card=?").bind(tid, card).all()).results : (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=?").bind(tid).all()).results) || [];
+      const rows = (card2 ? (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=? AND card=?").bind(tid, card2).all()).results : (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=?").bind(tid).all()).results) || [];
       let spend = 0, litres = 0, first = "", last = "";
       for (const r of rows) {
         spend += Number(r.cost) || 0;
@@ -19098,11 +19100,11 @@ async function handle22(request, env, ctx, url, sess) {
         if (r.date && (!last || r.date > last)) last = r.date;
       }
       const regsInScope = /* @__PURE__ */ new Set();
-      if (card) {
-        const u = (byCard[card] || {}).username;
+      if (card2) {
+        const u = (byCard[card2] || {}).username;
         const ivs = await assignmentIntervals(env, tid);
         for (const e of rows) {
-          const rg = regForUserOnDate(ivs, u, e.date) || (byCard[card] || {}).vehicle;
+          const rg = regForUserOnDate(ivs, u, e.date) || (byCard[card2] || {}).vehicle;
           if (rg) regsInScope.add(dnReg(rg));
         }
       } else {
@@ -19135,7 +19137,7 @@ async function handle22(request, env, ctx, url, sess) {
       });
       return jr3({
         ok: true,
-        card,
+        card: card2,
         money: money2,
         overall: { spend: Math.round(spend * 100) / 100, litres: Math.round(litres * 10) / 10, miles, mpg: overallMpg, first, last, spanDays: Math.round(spanDays), spanWeeks, entries: rows.length },
         periods,
@@ -20180,11 +20182,11 @@ async function fuelCardMap(env, tid) {
         p = u.profile ? JSON.parse(u.profile) : {};
       } catch {
       }
-      const card = String(p.fuelCard || "").trim();
-      if (!card) continue;
+      const card2 = String(p.fuelCard || "").trim();
+      if (!card2) continue;
       const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
-      byCard[card] = { username: u.username, name, vehicle: u.vehicle_assigned || "" };
-      cards.push({ card, username: u.username, name, vehicle: u.vehicle_assigned || "", active: u.status === "Active" });
+      byCard[card2] = { username: u.username, name, vehicle: u.vehicle_assigned || "" };
+      cards.push({ card: card2, username: u.username, name, vehicle: u.vehicle_assigned || "", active: u.status === "Active" });
     }
   } catch {
   }
@@ -21433,6 +21435,27 @@ function jr6(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
 var safeName3 = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
+async function fileCertificatePdf(env, tid, { scheme = "coop", code, type, bytes, filename, docDate, bump = true, source = null, label = null }) {
+  const sc = String(scheme || "coop");
+  const cd = pad4(code);
+  const ty = canonType(type);
+  if (!cd || !bytes) throw new Error("code and bytes required");
+  const year = docDate ? String(docDate).slice(0, 4) : null;
+  const fn = safeName3(filename || ty + ".pdf");
+  const key = `compliance/${sc}/${cd}/${ty}/${year || "_"}/${Date.now()}-${fn}`;
+  await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+  const at = (/* @__PURE__ */ new Date()).toISOString();
+  const res = await env.DB.prepare(
+    "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+  ).bind(tid, sc, cd, ty, year, key, fn, label, bytes.length || bytes.byteLength || null, docDate || null, source, at).run();
+  if (bump && docDate) {
+    try {
+      await bumpDue(env, tid, sc, cd, ty, docDate);
+    } catch {
+    }
+  }
+  return { id: res.meta ? res.meta.last_row_id : null, key };
+}
 var pad4 = (v) => {
   const s = String(v ?? "");
   if (/[a-z]/i.test(s)) return "";
@@ -23541,7 +23564,7 @@ function mondayOf5(ymd2) {
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
 function occurrence(task, now) {
   const today = lonYMD(now);
-  const [Y, M3] = today.split("-").map(Number);
+  const [Y, M4] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
   const pad = (n) => String(n).padStart(2, "0");
@@ -23562,7 +23585,7 @@ function occurrence(task, now) {
       break;
     }
     case "quarterly": {
-      const q = Math.floor((M3 - 1) / 3), qMonth = q * 3 + 1;
+      const q = Math.floor((M4 - 1) / 3), qMonth = q * 3 + 1;
       periodKey = "Q:" + Y + "-" + (q + 1);
       startYMD = `${Y}-${pad(qMonth)}-01`;
       dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
@@ -23830,6 +23853,711 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
   return { ran: true, tenants: out };
 }
 
+// src/routes/certs.js
+init_http();
+init_auth();
+
+// src/lib/certpdf.js
+var NAVY = [0, 0.204, 0.408];
+var INK = [0.13, 0.15, 0.18];
+var MUTE = [0.42, 0.46, 0.52];
+var LINE2 = [0.8, 0.84, 0.88];
+var STRIPE = [0.955, 0.968, 0.98];
+var HEADFILL = [0.9, 0.93, 0.96];
+var PAGE_W3 = 595;
+var PAGE_H3 = 842;
+var M2 = 40;
+var CONTENT_W2 = PAGE_W3 - M2 * 2;
+var COLS = {
+  em: [
+    { key: "no", label: "No.", w: 0.06, align: "c" },
+    { key: "normal", label: "Lamp Normal", w: 0.15, align: "c" },
+    { key: "led", label: "LED Visible", w: 0.14, align: "c" },
+    { key: "emergency", label: "Lamp Emergency", w: 0.16, align: "c" },
+    { key: "battery", label: "Battery (min)", w: 0.13, align: "c" },
+    { key: "comments", label: "Comments", w: 0.36, align: "l" }
+  ],
+  pat: [
+    { key: "no", label: "No.", w: 0.05, align: "c" },
+    { key: "appliance", label: "Appliance", w: 0.22, align: "l" },
+    { key: "location", label: "Location", w: 0.16, align: "l" },
+    { key: "cls", label: "Class", w: 0.07, align: "c" },
+    { key: "visual", label: "Visual", w: 0.09, align: "c" },
+    { key: "earth", label: "Earth (ohm)", w: 0.09, align: "c" },
+    { key: "insulation", label: "Insul. (Mohm)", w: 0.1, align: "c" },
+    { key: "result", label: "Result", w: 0.09, align: "c" },
+    { key: "comments", label: "Comments", w: 0.13, align: "l" }
+  ]
+};
+var TITLES = {
+  em: "EMERGENCY LIGHTING TEST CERTIFICATE",
+  pat: "PORTABLE APPLIANCE TEST CERTIFICATE"
+};
+var S = (v) => toWinAnsi(String(v == null ? "" : v));
+function fit(str, size, maxW) {
+  str = S(str);
+  if (textWidth(str, size) <= maxW) return str;
+  let s = str;
+  while (s.length > 1 && textWidth(s + "\u2026", size) > maxW) s = s.slice(0, -1);
+  return s + "\u2026";
+}
+function wrap3(str, size, maxW, maxLines) {
+  str = S(str);
+  const words = str.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (textWidth(t, size) <= maxW) {
+      cur = t;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    cur = w;
+    while (textWidth(cur, size) > maxW && cur.length > 1) {
+      let c = cur;
+      while (c.length > 1 && textWidth(c, size) > maxW) c = c.slice(0, -1);
+      lines.push(c);
+      cur = cur.slice(c.length);
+    }
+    if (maxLines && lines.length >= maxLines) break;
+  }
+  if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
+  if (maxLines && lines.length > maxLines) {
+    lines.length = maxLines;
+    lines[maxLines - 1] = fit(lines[maxLines - 1], size, maxW - textWidth("\u2026", size));
+  }
+  return lines.length ? lines : [""];
+}
+function headerBand(doc, rec, meta, pageNo, pageCount) {
+  const bandH = 74;
+  doc.rect(0, 0, PAGE_W3, bandH, { fill: NAVY });
+  if (meta.logo) {
+    try {
+      const d = jpegInfo(meta.logo);
+      const h = 34;
+      doc.image(meta.logo, M2, 20, h * (d.w / d.h), h);
+    } catch {
+    }
+  }
+  const title = TITLES[rec.type] || "TEST CERTIFICATE";
+  doc.text(PAGE_W3 - M2, 34, title, { size: 13, bold: true, alignRight: true, color: [1, 1, 1] });
+  const sub = [rec.certNumber ? "Certificate No. " + rec.certNumber : "", rec.status === "draft" ? "DRAFT" : ""].filter(Boolean).join("   \xB7   ");
+  if (sub) doc.text(PAGE_W3 - M2, 52, sub, { size: 9.5, alignRight: true, color: [0.82, 0.88, 0.95] });
+  return bandH;
+}
+function card(doc, x, yTop, w, title, lines) {
+  const padX = 10, titleH = 16, lineH = 12;
+  const body = lines.filter((l) => l != null);
+  const h = titleH + 6 + body.length * lineH + 8;
+  doc.rect(x, yTop, w, h, { fill: [1, 1, 1], stroke: LINE2, lw: 0.7 });
+  doc.rect(x, yTop, w, titleH, { fill: HEADFILL });
+  doc.text(x + padX, yTop + 11.5, S(title), { size: 8, bold: true, color: NAVY });
+  let y = yTop + titleH + 12;
+  for (const l of body) {
+    doc.text(x + padX, y, fit(l.t != null ? l.t : l, l.bold ? 9 : 8.5, w - padX * 2), { size: l.bold ? 9 : 8.5, bold: !!l.bold, color: l.mute ? MUTE : INK });
+    y += lineH;
+  }
+  return h;
+}
+function footer(doc, pageNo, pageCount, rec) {
+  const y = PAGE_H3 - 26;
+  doc.hr(M2, y - 8, PAGE_W3 - M2, { grey: true });
+  const note = rec.type === "em" ? "Tested to BS 5266-1:2016. Generated by the Mostlane Portal." : "In-service inspection & testing to IET Code of Practice. Generated by the Mostlane Portal.";
+  doc.text(M2, y, note, { size: 7.5, color: MUTE });
+  doc.text(PAGE_W3 - M2, y, `Page ${pageNo} of ${pageCount}`, { size: 7.5, alignRight: true, color: MUTE });
+}
+var ROW_H = 15;
+var HEAD_H = 18;
+function buildCertPdf(record, meta = {}) {
+  const rec = record || {};
+  const type = rec.type === "pat" ? "pat" : "em";
+  rec.type = type;
+  const cols = COLS[type];
+  const rows = Array.isArray(rec.rows) ? rec.rows : [];
+  let cx = M2;
+  const layout = cols.map((c) => {
+    const w = CONTENT_W2 * c.w;
+    const o = { ...c, x: cx, ww: w };
+    cx += w;
+    return o;
+  });
+  const laterTop = 74 + 14;
+  const page1TableTop = laterTop + introHeight(rec) + 10;
+  const bottomLimit = PAGE_H3 - 46;
+  const page1Capacity = Math.max(0, Math.floor((bottomLimit - page1TableTop - HEAD_H) / ROW_H));
+  const laterCapacity = Math.max(1, Math.floor((bottomLimit - laterTop - HEAD_H) / ROW_H));
+  const pages = [];
+  pages.push({ rows: rows.slice(0, page1Capacity), start: 0, tableTop: page1TableTop, intro: true });
+  let i = page1Capacity;
+  while (i < rows.length) {
+    pages.push({ rows: rows.slice(i, i + laterCapacity), start: i, tableTop: laterTop, intro: false });
+    i += laterCapacity;
+  }
+  const last = pages[pages.length - 1];
+  const lastTableBottom = last.tableTop + HEAD_H + last.rows.length * ROW_H;
+  const sigOwnPage = lastTableBottom + 130 > PAGE_H3 - 40;
+  const totalPages = pages.length + (sigOwnPage ? 1 : 0);
+  const doc = new PdfDoc(PAGE_W3, PAGE_H3);
+  pages.forEach((pg, idx) => {
+    if (idx > 0) doc.newPage(PAGE_W3, PAGE_H3);
+    headerBand(doc, rec, meta, idx + 1, totalPages);
+    if (pg.intro) drawIntro(doc, rec);
+    else doc.text(M2, laterTop - 2, (TITLES[type] || "") + " \u2014 continued", { size: 8, color: MUTE });
+    drawTable(doc, layout, pg.rows, pg.start, pg.tableTop);
+    footer(doc, idx + 1, totalPages, rec);
+  });
+  let sigY;
+  if (sigOwnPage) {
+    doc.newPage(PAGE_W3, PAGE_H3);
+    headerBand(doc, rec, meta, totalPages, totalPages);
+    footer(doc, totalPages, totalPages, rec);
+    sigY = laterTop + 14;
+  } else {
+    sigY = lastTableBottom + 22;
+  }
+  drawDeclaration(doc, rec, meta, sigY);
+  return doc.bytes();
+}
+function introHeight(rec) {
+  const cl = rec.client || {}, inst = rec.installation || {};
+  const clLines = 1 + addrLines(cl).length;
+  const inLines = 1 + addrLines(inst).length;
+  const cardsH = 16 + 6 + Math.max(clLines, inLines) * 12 + 8;
+  const conH = 40;
+  const extentH = 14 + wrap3(rec.extent || "", 8.5, CONTENT_W2 - 20, 3).length * 11 + 6;
+  const commentsH = rec.comments ? 14 + wrap3(rec.comments, 8, CONTENT_W2 - 20, 6).length * 10.5 + 6 : 0;
+  return cardsH + 10 + conH + 10 + extentH + (commentsH ? 8 + commentsH : 0);
+}
+function addrLines(o) {
+  o = o || {};
+  const out = [];
+  if (o.name) out.push({ t: o.name, bold: true });
+  (o.address || "").split(/\s*,\s*/).filter(Boolean).forEach((a) => out.push({ t: a }));
+  if (o.postcode) out.push({ t: o.postcode });
+  return out.length ? out : [{ t: "\u2014", mute: true }];
+}
+function drawIntro(doc, rec) {
+  const top = 74 + 14;
+  const colW = (CONTENT_W2 - 12) / 2;
+  const cl = rec.client || {}, inst = rec.installation || {}, con = rec.contractor || {};
+  const h1 = card(doc, M2, top, colW, "Client", addrLines(cl));
+  const h2 = card(doc, M2 + colW + 12, top, colW, "Installation address", addrLines(inst));
+  let y = top + Math.max(h1, h2) + 10;
+  const conLines = [
+    { t: con.tradingTitle || "Mostlane", bold: true },
+    { t: [con.address, con.postcode].filter(Boolean).join(", ") || "" },
+    { t: [con.name ? "Tested by " + con.name : "", con.position].filter(Boolean).join(" \xB7 ") },
+    { t: [con.telephone ? "Tel " + con.telephone : "", con.regNumber ? "Reg " + con.regNumber : "", con.date ? "Date " + con.date : ""].filter(Boolean).join("   \xB7   ") }
+  ].filter((l) => l.t);
+  const conH = 16 + 6 + conLines.length * 12 + 8;
+  doc.rect(M2, y, CONTENT_W2, conH, { fill: [1, 1, 1], stroke: LINE2, lw: 0.7 });
+  doc.rect(M2, y, CONTENT_W2, 16, { fill: HEADFILL });
+  doc.text(M2 + 10, y + 11.5, "Contractor", { size: 8, bold: true, color: NAVY });
+  let cy = y + 28;
+  for (const l of conLines) {
+    doc.text(M2 + 10, cy, fit(l.t, l.bold ? 9 : 8.5, CONTENT_W2 - 20), { size: l.bold ? 9 : 8.5, bold: !!l.bold, color: INK });
+    cy += 12;
+  }
+  y += conH + 10;
+  doc.text(M2, y, "Extent & limitations of the inspection and testing", { size: 8, bold: true, color: NAVY });
+  y += 12;
+  for (const ln of wrap3(rec.extent || "\u2014", 8.5, CONTENT_W2, 3)) {
+    doc.text(M2, y, ln, { size: 8.5, color: INK });
+    y += 11;
+  }
+  y += 6;
+  if (rec.comments) {
+    doc.text(M2, y, "Additional comments", { size: 8, bold: true, color: NAVY });
+    y += 12;
+    for (const ln of wrap3(rec.comments, 8, CONTENT_W2, 6)) {
+      doc.text(M2, y, ln, { size: 8, color: MUTE });
+      y += 10.5;
+    }
+  }
+}
+function drawTable(doc, layout, rows, startIndex, top) {
+  doc.rect(M2, top, CONTENT_W2, HEAD_H, { fill: NAVY });
+  for (const c of layout) {
+    const tx = c.align === "c" ? c.x + c.ww / 2 - textWidth(S(c.label), 8) / 2 : c.x + 6;
+    doc.text(tx, top + 12.5, S(c.label), { size: 8, bold: true, color: [1, 1, 1] });
+  }
+  let y = top + HEAD_H;
+  rows.forEach((r, k) => {
+    if ((startIndex + k) % 2 === 1) doc.rect(M2, y, CONTENT_W2, ROW_H, { fill: STRIPE });
+    for (const c of layout) {
+      let v = r[c.key];
+      if (c.key === "no") v = r.no != null ? r.no : startIndex + k + 1;
+      const size = 8;
+      const txt = fit(v == null ? "" : v, size, c.ww - 10);
+      const tx = c.align === "c" ? c.x + c.ww / 2 - textWidth(txt, size) / 2 : c.x + 6;
+      const isFail = c.key === "result" && /fail/i.test(String(v || ""));
+      doc.text(tx, y + 10.5, txt, { size, color: isFail ? [0.75, 0.1, 0.1] : INK, bold: isFail });
+    }
+    y += ROW_H;
+  });
+  doc.rect(M2, top, CONTENT_W2, HEAD_H + rows.length * ROW_H, { stroke: LINE2, lw: 0.7 });
+  for (const c of layout) if (c.x > M2) doc.line(c.x, top, c.x, top + HEAD_H + rows.length * ROW_H, { stroke: LINE2, lw: 0.5 });
+}
+function drawDeclaration(doc, rec, meta, y) {
+  const con = rec.contractor || {};
+  doc.hr(M2, y, PAGE_W3 - M2, { grey: true });
+  y += 14;
+  doc.text(M2, y, "Declaration", { size: 9, bold: true, color: NAVY });
+  y += 13;
+  const decl = rec.declaration || (rec.type === "em" ? "I certify that the emergency lighting installation identified above has been inspected and tested to BS 5266-1:2016 and the results are as recorded." : "I certify that the portable appliances identified above have been inspected and tested and the results are as recorded.");
+  for (const ln of wrap3(decl, 8.5, CONTENT_W2, 4)) {
+    doc.text(M2, y, ln, { size: 8.5, color: INK });
+    y += 11;
+  }
+  y += 10;
+  if (meta.signature) {
+    try {
+      const d = jpegInfo(meta.signature);
+      const h = 34;
+      doc.image(meta.signature, M2, y, Math.min(160, h * (d.w / d.h)), h);
+    } catch {
+    }
+  }
+  doc.line(M2, y + 40, M2 + 180, y + 40, { stroke: LINE2, lw: 0.6 });
+  doc.text(M2, y + 51, S([con.name, con.position].filter(Boolean).join("  \xB7  ") || "Engineer"), { size: 8.5, color: INK });
+  doc.text(M2, y + 62, "Signature & date: " + S(con.date || ""), { size: 7.5, color: MUTE });
+}
+
+// src/routes/certs.js
+init_push();
+var T = (t) => t === "pat" ? "pat" : "em";
+var DEFAULT_CONFIG2 = {
+  contractor: {
+    tradingTitle: "Mostlane",
+    address: "Unit 5A Segensworth Road, Segensworth Business Centre",
+    postcode: "PO15 5RQ",
+    regNumber: "",
+    telephone: "02380262000"
+  },
+  em: {
+    extent: "Annual emergency light testing - Full 3 hour drain test.",
+    comments: "Store advised that a full duration test involving discharging the batteries has been completed, so the emergency lighting system will not be fully functional until the batteries have had time to recharge (this can take up to 24 hours). We suggest occupants are warned to be extra vigilant, and torches are available, until the system has recharged. Regular Interval Testing: BS 5266-1:2016 recommends functional operation is checked on all luminaires at least every month.",
+    declaration: "I certify that the emergency lighting installation identified above has been inspected and tested to BS 5266-1:2016 and the results are as recorded."
+  },
+  pat: {
+    extent: "In-service inspection and testing of portable electrical appliances.",
+    comments: "",
+    declaration: "I certify that the portable appliances identified above have been inspected and tested in accordance with the IET Code of Practice for In-service Inspection and Testing of Electrical Equipment, and the results are as recorded."
+  }
+};
+async function ensureTables4(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
+    id TEXT PRIMARY KEY, tenant_id TEXT, type TEXT, status TEXT,
+    job_id TEXT, site_code TEXT, cert_number TEXT,
+    data TEXT, engineer TEXT,
+    created_at TEXT, updated_at TEXT, submitted_at TEXT,
+    finalised_at TEXT, finalised_by TEXT, r2_final_key TEXT)`).run();
+}
+async function getConfig3(env, tid) {
+  const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
+  let c = null;
+  try {
+    c = row ? JSON.parse(row.value) : null;
+  } catch {
+  }
+  if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG2));
+  return {
+    contractor: { ...DEFAULT_CONFIG2.contractor, ...c.contractor || {} },
+    em: { ...DEFAULT_CONFIG2.em, ...c.em || {} },
+    pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} }
+  };
+}
+async function saveConfig(env, tid, c) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:config:" + tid, JSON.stringify(c)).run();
+}
+var yy = () => String((/* @__PURE__ */ new Date()).getFullYear()).slice(-2);
+function dataUrlToBytes(u) {
+  const s = String(u || "");
+  const i = s.indexOf(",");
+  if (!/^data:image\//i.test(s) || i < 0) return null;
+  try {
+    const bin = atob(s.slice(i + 1));
+    const out = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+    return out;
+  } catch {
+    return null;
+  }
+}
+async function getJob2(env, tid, id) {
+  try {
+    const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return row ? JSON.parse(row.data) : null;
+  } catch {
+    return null;
+  }
+}
+function padCode(v) {
+  const d = String(v ?? "").replace(/\D/g, "");
+  return d ? d.padStart(4, "0") : "";
+}
+function parseEmRows(txt) {
+  if (!txt) return [];
+  const rows = [];
+  const re = /\b(\d{1,3})\s+(Pass|Fail|N\/?A)\s+(Pass|Fail|N\/?A)\s+(Pass|Fail|N\/?A)\s+(\d{1,4})\s+(.*?)(?=\s+\d{1,3}\s+(?:Pass|Fail|N\/?A)\s+(?:Pass|Fail|N\/?A)\b|\s+www\.|\s+Tysoft|\s+EMERGENCY LIGHTING|$)/gi;
+  let m;
+  while (m = re.exec(txt)) {
+    rows.push({ no: Number(m[1]), normal: cap(m[2]), led: cap(m[3]), emergency: cap(m[4]), battery: m[5], comments: (m[6] || "").trim().slice(0, 80) });
+    if (rows.length > 400) break;
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const r of rows) {
+    if (seen.has(r.no)) continue;
+    seen.add(r.no);
+    out.push(r);
+  }
+  out.sort((a, b) => a.no - b.no);
+  return out;
+}
+function parsePatRows(txt) {
+  if (!txt) return [];
+  const rows = [];
+  const re = /\b(\d{1,3})\s+(.{2,60}?)\s+(Pass|Fail)\b/gi;
+  let m;
+  const seen = /* @__PURE__ */ new Set();
+  while (m = re.exec(txt)) {
+    const no = Number(m[1]);
+    if (seen.has(no)) continue;
+    seen.add(no);
+    rows.push({ no, appliance: (m[2] || "").trim().slice(0, 60), location: "", cls: "", visual: "", earth: "", insulation: "", result: cap(m[3]), comments: "" });
+    if (rows.length > 400) break;
+  }
+  rows.sort((a, b) => a.no - b.no);
+  return rows;
+}
+var cap = (s) => {
+  s = String(s || "");
+  return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
+};
+async function latestCertR2Key(env, tid, code, type) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT r2_key FROM compliance_files WHERE tenant_id=? AND code=? AND type=? ORDER BY COALESCE(doc_date,uploaded_at) DESC LIMIT 1"
+    ).bind(tid, padCode(code), type).first();
+    return row ? row.r2_key : null;
+  } catch {
+    return null;
+  }
+}
+async function prefillRows(env, tid, code, type) {
+  const key = await latestCertR2Key(env, tid, code, type);
+  if (!key || !env.JOB_FILES) return { rows: [], from: null };
+  try {
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return { rows: [], from: null };
+    const buf = await obj.arrayBuffer();
+    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null };
+    const txt = await pdfExtractText(buf);
+    const rows = type === "pat" ? parsePatRows(txt) : parseEmRows(txt);
+    return { rows, from: key.split("/").pop() };
+  } catch {
+    return { rows: [], from: null };
+  }
+}
+async function emSetFor(env, tid, code) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
+    const m = row ? JSON.parse(row.value) : {};
+    const c4 = padCode(code);
+    return m[c4] || m[String(Number(c4))] || c4;
+  } catch {
+    return padCode(code);
+  }
+}
+async function nextPatNumber(env, tid) {
+  let maxN = 0;
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:patseq:" + tid).first();
+    if (row) maxN = Number(row.value) || 0;
+  } catch {
+  }
+  try {
+    const rows = (await env.DB.prepare("SELECT r2_key FROM compliance_files WHERE tenant_id=? AND type='pat'").all()).results || [];
+    for (const r of rows) {
+      const name = String(r.r2_key || "").split("/").pop() || "";
+      const m = name.match(/(\d{3,5})[-.](?:DEC)?\d{2}[A-Za-z]?_?\.pdf$/i);
+      if (m) maxN = Math.max(maxN, Number(m[1]) || 0);
+    }
+  } catch {
+  }
+  return maxN + 1;
+}
+async function suggestNumber(env, tid, code, type) {
+  if (type === "pat") {
+    const n = await nextPatNumber(env, tid);
+    return String(n).padStart(4, "0") + "-" + yy();
+  }
+  return await emSetFor(env, tid, code) + "-" + yy();
+}
+function shapeRow(cert) {
+  let d = {};
+  try {
+    d = JSON.parse(cert.data) || {};
+  } catch {
+  }
+  return {
+    id: cert.id,
+    type: cert.type,
+    status: cert.status,
+    jobId: cert.job_id,
+    siteCode: cert.site_code,
+    certNumber: cert.cert_number,
+    engineer: cert.engineer,
+    createdAt: cert.created_at,
+    updatedAt: cert.updated_at,
+    submittedAt: cert.submitted_at,
+    finalisedAt: cert.finalised_at,
+    finalisedBy: cert.finalised_by,
+    ...d
+  };
+}
+async function handle30(request, env, ctx, url, sess) {
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/certs(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  await ensureTables4(env);
+  const perms = await permissionsFor(env, tid, me);
+  const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
+  const loadCert = async (id) => env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, id).first();
+  if (sub === "/config") {
+    if (method === "GET") return json({ ok: true, config: await getConfig3(env, tid) }, {}, env, request);
+    if (method === "POST") {
+      if (!isOffice) return error("Office access required", 403, env, request);
+      const b = await request.json().catch(() => ({}));
+      const cur = await getConfig3(env, tid);
+      const next = {
+        contractor: { ...cur.contractor, ...b.contractor || {} },
+        em: { ...cur.em, ...b.em || {} },
+        pat: { ...cur.pat, ...b.pat || {} }
+      };
+      await saveConfig(env, tid, next);
+      return json({ ok: true, config: next }, {}, env, request);
+    }
+  }
+  if (sub === "/number" && method === "GET") {
+    return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type"))) }, {}, env, request);
+  }
+  if (sub === "/for-job" && method === "GET") {
+    const jobId = String(q.get("jobId") || "");
+    const type = T(q.get("type"));
+    if (!jobId) return error("jobId required", 400, env, request);
+    const existing = await env.DB.prepare(
+      "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
+    ).bind(tid, jobId, type).first();
+    const config = await getConfig3(env, tid);
+    if (existing) return json({ ok: true, record: shapeRow(existing), config, seeded: false }, {}, env, request);
+    const job = await getJob2(env, tid, jobId);
+    const code = job ? job.siteCode || "" : "";
+    const siteRow = code ? await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
+    let siteData = {};
+    try {
+      siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {};
+    } catch {
+    }
+    const pre = await prefillRows(env, tid, code, type);
+    const record = {
+      id: null,
+      type,
+      status: "draft",
+      jobId,
+      siteCode: code,
+      certNumber: "",
+      client: { name: "The Southern Co-op", address: "", postcode: "" },
+      installation: {
+        name: job && job.siteName || siteRow && siteRow.site_name || "",
+        address: job && job.address || (siteData.address || ""),
+        postcode: job && job.postcode || siteRow && siteRow.postcode || ""
+      },
+      extent: config[type].extent,
+      comments: config[type].comments,
+      declaration: config[type].declaration,
+      contractor: { ...config.contractor, name: "", position: "Engineer", date: "" },
+      rows: pre.rows,
+      signature: ""
+    };
+    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length }, {}, env, request);
+  }
+  if (sub === "/save" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const type = T(b.type);
+    let id = b.id ? String(b.id) : "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let existing = id ? await loadCert(id) : null;
+    if (existing && !isOffice && existing.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (existing && existing.status === "final" && !isOffice) return error("This certificate is finalised", 409, env, request);
+    const data = {
+      client: b.client || {},
+      installation: b.installation || {},
+      extent: b.extent || "",
+      comments: b.comments || "",
+      declaration: b.declaration || "",
+      contractor: b.contractor || {},
+      rows: Array.isArray(b.rows) ? b.rows.slice(0, 500) : [],
+      signature: typeof b.signature === "string" ? b.signature.slice(0, 4e5) : existing ? void 0 : ""
+    };
+    if (data.signature === void 0) {
+      try {
+        const d = existing ? JSON.parse(existing.data) : {};
+        data.signature = d.signature || "";
+      } catch {
+        data.signature = "";
+      }
+    }
+    if (!existing) {
+      id = "CERT-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      await env.DB.prepare(
+        "INSERT INTO certificates (id, tenant_id, type, status, job_id, site_code, cert_number, data, engineer, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+      ).bind(id, tid, type, "draft", b.jobId ? String(b.jobId) : null, b.siteCode ? padCode(b.siteCode) : "", "", JSON.stringify(data), me, now, now).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE certificates SET type=?, site_code=?, data=?, updated_at=? WHERE tenant_id=? AND id=?"
+      ).bind(type, b.siteCode ? padCode(b.siteCode) : existing.site_code, JSON.stringify(data), now, tid, id).run();
+    }
+    return json({ ok: true, id }, {}, env, request);
+  }
+  if (sub === "/submit" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const cert = await loadCert(String(b.id || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
+    ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+      title: (cert.type === "pat" ? "PAT" : "EM") + " certificate ready to review",
+      body: `${me} submitted a certificate for review.`,
+      url: "/cert-review.html",
+      tag: "cert-review:" + cert.id
+    }, me).catch(() => {
+    }));
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/pdf" && method === "GET") {
+    const cert = await loadCert(String(q.get("id") || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    const rec = shapeRow(cert);
+    const sig = dataUrlToBytes(rec.signature);
+    let logo = null;
+    try {
+      logo = logoBytes();
+    } catch {
+    }
+    const bytes = buildCertPdf(rec, { logo, signature: sig });
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${rec.certNumber || cert.id}.pdf"`, "Cache-Control": "no-store" } });
+  }
+  if (sub === "/one" && method === "GET") {
+    const cert = await loadCert(String(q.get("id") || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    return json({ ok: true, record: shapeRow(cert), config: await getConfig3(env, tid) }, {}, env, request);
+  }
+  if (sub === "/review" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const rows = (await env.DB.prepare(
+      "SELECT * FROM certificates WHERE tenant_id=? AND status IN ('draft','review') ORDER BY COALESCE(submitted_at,updated_at) DESC LIMIT 300"
+    ).bind(tid).all()).results || [];
+    return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+  }
+  if (sub === "/list" && method === "GET") {
+    const code = padCode(q.get("code")), type = T(q.get("type"));
+    const rows = (await env.DB.prepare(
+      "SELECT * FROM certificates WHERE tenant_id=? AND site_code=? AND type=? ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 100"
+    ).bind(tid, code, type).all()).results || [];
+    return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
+  }
+  if (sub === "/finalise" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const cert = await loadCert(String(b.id || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow(cert);
+    const code = padCode(cert.site_code || rec.siteCode);
+    if (!code) return error("This certificate has no store code \u2014 set the site first.", 400, env, request);
+    const number = String(b.certNumber || cert.cert_number || await suggestNumber(env, tid, code, cert.type)).trim();
+    const docDate = String(b.docDate || rec.contractor && rec.contractor.date || "").trim() || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    rec.certNumber = number;
+    rec.status = "final";
+    const sig = dataUrlToBytes(rec.signature);
+    let logo = null;
+    try {
+      logo = logoBytes();
+    } catch {
+    }
+    const bytes = buildCertPdf(rec, { logo, signature: sig });
+    const filed = await fileCertificatePdf(env, tid, {
+      scheme: "coop",
+      code,
+      type: cert.type,
+      bytes,
+      filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
+      docDate: /^\d{4}-\d{2}-\d{2}/.test(docDate) ? docDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+      bump: true,
+      source: "cert:" + cert.id,
+      label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
+    });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (cert.type === "pat") {
+      const n = Number(String(number).replace(/\D/g, "").slice(0, 5));
+      if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "cert:patseq:" + tid, String(n)).run();
+    }
+    await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, me, now, tid, cert.id).run();
+    if (cert.engineer && cert.engineer !== me) ctx?.waitUntil?.(sendToUser(env, tid, cert.engineer, { title: "Certificate issued", body: `Your ${cert.type === "pat" ? "PAT" : "EM"} certificate ${number} has been reviewed and filed.`, url: "/eicr-portal.html", tag: "cert-final:" + cert.id }).catch(() => {
+    }));
+    return json({ ok: true, number, key: filed.key }, {}, env, request);
+  }
+  if (sub === "/upload" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return error("multipart required", 400, env, request);
+    }
+    const cert = await loadCert(String(form.get("id") || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const file = form.get("file");
+    if (!file || typeof file === "string") return error("file required", 400, env, request);
+    const code = padCode(cert.site_code);
+    if (!code) return error("This certificate has no store code.", 400, env, request);
+    const number = String(form.get("certNumber") || cert.cert_number || await suggestNumber(env, tid, code, cert.type)).trim();
+    const docDate = String(form.get("docDate") || "").trim() || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const filed = await fileCertificatePdf(env, tid, {
+      scheme: "coop",
+      code,
+      type: cert.type,
+      bytes: buf,
+      filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
+      docDate,
+      bump: true,
+      source: "cert:" + cert.id,
+      label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
+    });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?").bind(number, filed.key, now, me, now, tid, cert.id).run();
+    return json({ ok: true, number, key: filed.key }, {}, env, request);
+  }
+  if (sub === "/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const cert = await loadCert(String(b.id || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    if (cert.status === "final") return error("A finalised certificate can't be deleted here.", 409, env, request);
+    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND id=?").bind(tid, cert.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Not found: " + url.pathname, 404, env, request);
+}
+
 // src/routes/programmes.js
 init_http();
 init_auth();
@@ -23849,13 +24577,13 @@ var LOGO_W = 76;
 var LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
 var PW = 842;
 var PH = 595;
-var M2 = 26;
-var ROW_H = 14.5;
+var M3 = 26;
+var ROW_H2 = 14.5;
 var LINE_H = 10;
 var ROW_PAD = 4.5;
 var MAX_NAME_LINES = 5;
 var HDR_H = 22;
-var COLS = [
+var COLS2 = [
   // left columns; "Works" width is dynamic
   { key: "name", label: "Works", w: 168 },
   { key: "contractor", label: "Contractor", w: 62 },
@@ -23863,17 +24591,17 @@ var COLS = [
   { key: "end", label: "End", w: 36 },
   { key: "days", label: "Days", w: 26 }
 ];
-var LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
-var GRID_X = M2 + LEFT_W;
-var GRID_W = PW - M2 - GRID_X;
+var LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
+var GRID_X = M3 + LEFT_W;
+var GRID_W = PW - M3 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
-  COLS[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
-  LEFT_W = COLS.reduce((a, c) => a + c.w, 0);
-  GRID_X = M2 + LEFT_W;
-  GRID_W = PW - M2 - GRID_X;
+  COLS2[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
+  LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
+  GRID_X = M3 + LEFT_W;
+  GRID_W = PW - M3 - GRID_X;
 }
 var MIN_DAY_W = 6.5;
 var DAY = 864e5;
@@ -23960,8 +24688,8 @@ function buildProgrammePdf(data, meta = {}) {
     _c: byC[t.contractor] || null
   }));
   for (const t of tasks) {
-    t._lines = wrapLines(t.name || "", COLS[0].w - 6, 8.5, MAX_NAME_LINES);
-    t._h = Math.max(ROW_H, t._lines.length * LINE_H + ROW_PAD);
+    t._lines = wrapLines(t.name || "", COLS2[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._h = Math.max(ROW_H2, t._lines.length * LINE_H + ROW_PAD);
   }
   const starts = tasks.map((t) => t._start).filter(Boolean).sort((a, b) => a - b);
   const anchor = starts.length ? starts[Math.floor(starts.length / 2)] : /* @__PURE__ */ new Date();
@@ -23986,7 +24714,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const bodyH = PH - M2 - headerBlockH - HDR_H - footerH - M2;
+  const bodyH = PH - M3 - headerBlockH - HDR_H - footerH - M3;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -24009,12 +24737,12 @@ function buildProgrammePdf(data, meta = {}) {
     }
     if (cur.length) pages.push({ win, rows: cur });
   }
-  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H))) });
+  if (!pages.length) pages.push({ win: windows[0], rows: tasks.slice(0, Math.max(1, Math.floor(bodyH / ROW_H2))) });
   const doc = new PdfDoc(PW, PH);
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
-  let lastGridBot = M2 + 100;
+  let lastGridBot = M3 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
@@ -24023,39 +24751,39 @@ function buildProgrammePdf(data, meta = {}) {
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
-      let tx = M2;
+      let tx = M3;
       if (LOGO_BYTES) {
         try {
-          doc.image(LOGO_BYTES, M2, M2 - 2, LOGO_W, LOGO_H);
-          tx = M2 + LOGO_W + 12;
+          doc.image(LOGO_BYTES, M3, M3 - 2, LOGO_W, LOGO_H);
+          tx = M3 + LOGO_W + 12;
         } catch (e) {
         }
       }
-      let y = M2 + 14;
+      let y = M3 + 14;
       doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
       const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
-      doc.text(PW - M2, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
+      doc.text(PW - M3, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
       if (subBits) {
         doc.text(tx, y, subBits, { size: 9, grey: true });
       }
-      doc.text(PW - M2, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
+      doc.text(PW - M3, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
       const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays2(winStart, win.days - 1))})` : "";
-      if (rangeLbl) doc.text(PW - M2, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      if (rangeLbl) doc.text(PW - M3, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
-      const legendRightL1 = PW - M2 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M2, line = 0, dropped = 0;
+      const legendRightL1 = PW - M3 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M3, line = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M2;
+        const right = line === 0 ? legendRightL1 : PW - M3;
         if (lx + w > right) {
           if (line === 0) {
             line = 1;
-            lx = M2;
+            lx = M3;
           } else {
             dropped++;
             continue;
@@ -24067,12 +24795,12 @@ function buildProgrammePdf(data, meta = {}) {
         lx += w;
       }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
-      y = M2 + headerBlockH;
+      y = M3 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
-      doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
-      let cx = M2;
-      for (const col of COLS) {
+      doc.rect(M3, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
+      let cx = M3;
+      for (const col of COLS2) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
       }
@@ -24095,21 +24823,21 @@ function buildProgrammePdf(data, meta = {}) {
         if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
         if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
       }
-      doc.line(M2, gridTop, M2 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
-      doc.line(M2, gridTop + HDR_H, M2 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M3, gridTop, M3 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M3, gridTop + HDR_H, M3 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
       let ry = gridTop + HDR_H;
       rows.forEach((t) => {
         const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M2 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M3 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M2 + COLS[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M2 + COLS[0].w + 12, ry + 10.5, fitText(t._c.name, COLS[1].w - 16, 8), { size: 8 });
+          doc.rect(M3 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M3 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M2 + COLS[0].w + COLS[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M2 + COLS[0].w + COLS[1].w + COLS[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
-        doc.text(M2 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M2, ry + rh, M2 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        if (t._start) doc.text(M3 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M3 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        doc.text(M3 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
+        doc.line(M3, ry + rh, M3 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
@@ -24121,7 +24849,7 @@ function buildProgrammePdf(data, meta = {}) {
             const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + rh / 2;
             doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
           } else {
-            const bh = ROW_H - 5;
+            const bh = ROW_H2 - 5;
             const barTop = ry + (rh - bh) / 2;
             let i = 0;
             while (i < marked.length) {
@@ -24136,20 +24864,20 @@ function buildProgrammePdf(data, meta = {}) {
         }
         ry += rh;
       });
-      doc.rect(M2, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M3, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
       lastGridBot = gridBot;
-      const fy = PH - M2 + 6;
+      const fy = PH - M3 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
-      doc.text(M2, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
-      doc.text(PW - M2, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
+      doc.text(M3, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
+      doc.text(PW - M3, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
     }
   }
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
     const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
-    const PAD = 10, LH = 12, contentW = PW - 2 * M2 - 2 * PAD;
+    const PAD = 10, LH = 12, contentW = PW - 2 * M3 - 2 * PAD;
     const notesLines = notes ? wrapLines(notes, contentW, 10, 0) : [];
     const plainW = plain.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
     const discW = disc.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
@@ -24162,15 +24890,15 @@ function buildProgrammePdf(data, meta = {}) {
     }
     const boxH = 2 * PAD + adv;
     let boxTop, ownPage = false;
-    if (lastGridBot + 14 + boxH <= PH - M2) {
+    if (lastGridBot + 14 + boxH <= PH - M3) {
       boxTop = lastGridBot + 14;
     } else {
       doc.newPage(PW, PH);
-      boxTop = M2 + 14;
+      boxTop = M3 + 14;
       ownPage = true;
     }
-    doc.roundRect(M2, boxTop, PW - 2 * M2, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
-    const x0 = M2 + PAD;
+    doc.roundRect(M3, boxTop, PW - 2 * M3, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M3 + PAD;
     let ny = boxTop + PAD + 10;
     const para = (lines, x) => {
       for (const ln of lines) {
@@ -24197,14 +24925,14 @@ function buildProgrammePdf(data, meta = {}) {
         para(w, x0 + 12);
       }
     }
-    if (ownPage) doc.text(M2, PH - M2 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    if (ownPage) doc.text(M3, PH - M3 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }
 
 // src/routes/programmes.js
 var MAX_DATA_BYTES = 400 * 1024;
-async function ensureTables4(env) {
+async function ensureTables5(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_programmes (
     id TEXT PRIMARY KEY, tenant_id TEXT, title TEXT, client TEXT, site TEXT,
     data TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, archived INTEGER DEFAULT 0)`).run();
@@ -24354,14 +25082,14 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle30(request, env, ctx, url) {
+async function handle31(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const tenantId = await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
-  await ensureTables4(env);
+  await ensureTables5(env);
   if (method === "POST" && pathname === "/prog/shared/open") {
     const b = await request.json().catch(() => ({}));
     const g = await getShare(db, b.token);
@@ -24954,7 +25682,7 @@ function normName2(s) {
 function bool(v) {
   return v === true || v === 1 || v === "1" || v === "true";
 }
-async function ensureTables5(env) {
+async function ensureTables6(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY, tenant_id TEXT, number TEXT, name TEXT,
     site_client TEXT, site_number TEXT, status TEXT DEFAULT 'live',
@@ -25124,7 +25852,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -25148,7 +25876,7 @@ async function handle31(request, env, ctx, url, sess) {
   const canView = perms.FullAccess === "Yes" || perms.Projects === "Yes" || perms.ProjectsAdmin === "Yes";
   const canManage2 = perms.FullAccess === "Yes" || perms.ProjectsAdmin === "Yes";
   if (!canView) return error("Forbidden", 403, env, request);
-  await ensureTables5(env);
+  await ensureTables6(env);
   const fileCountFor = async (pid) => {
     const r = await db.prepare("SELECT COUNT(*) AS n FROM project_files WHERE tenant_id=? AND project_id=?").bind(db.tenantId, pid).first();
     return r ? Number(r.n) || 0 : 0;
@@ -26173,7 +26901,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle32(request, env, ctx, url, sess) {
+async function handle33(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -26425,7 +27153,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -26671,7 +27399,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -26858,7 +27586,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -27176,7 +27904,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -27315,7 +28043,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle6],
   ["*", "/upload-asset-thumb", handle6],
   ["*", "/delete-asset-image", handle6],
-  ["*", "/sla/workever", handle35],
+  ["*", "/sla/workever", handle36],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle8],
   ["*", "/stats", handle18],
@@ -27384,21 +28112,23 @@ var ROUTES = [
   // CCTV Wall: DVR site config + snapshot proxy
   ["*", "/tasks", handle29],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/prog", handle30],
+  ["*", "/certs", handle30],
+  // portal-native EM/PAT certificates (draft → office review → file to compliance)
+  ["*", "/prog", handle31],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle31],
+  ["*", "/projects", handle32],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle31],
+  ["*", "/project", handle32],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle32],
+  ["*", "/health/", handle33],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle36],
+  ["*", "/comms", handle37],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle36],
+  ["*", "/customer", handle37],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle33],
+  ["*", "/tuya", handle34],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/fra", handle34]
+  ["*", "/fra", handle35]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
