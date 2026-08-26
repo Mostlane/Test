@@ -25862,6 +25862,40 @@ async function handle35(request, env, ctx, url, sess) {
     }
     return json4({ ok: true, enriched: n });
   }
+  if (path === "/sla/workever/job-files" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "").trim();
+    const files = Array.isArray(b.files) ? b.files : [];
+    if (!jobId || !files.length) return json4({ ok: true, imported: 0, skipped: 0, failed: 0 });
+    let imported = 0, skipped = 0, failed = 0, seq = 0;
+    for (const f of files) {
+      try {
+        if (!f || !f.url) {
+          failed++;
+          continue;
+        }
+        const safe = String(f.id || f.name || "").replace(/[^\w.\-]+/g, "_").slice(0, 90) || "f" + seq++;
+        const extRaw = (String(f.name || "").split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const ext = extRaw || ((f.type || "").split("/").pop() || "jpg");
+        const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png` : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}` : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
+        if (await env.JOB_FILES.head(key)) {
+          skipped++;
+          continue;
+        }
+        const resp = await fetch(f.url);
+        if (!resp.ok || !resp.body) {
+          failed++;
+          continue;
+        }
+        const cm = f.kind === "photo" ? { stage: "After", source: "workever" } : { source: "workever" };
+        await env.JOB_FILES.put(key, resp.body, { httpMetadata: { contentType: f.type || resp.headers.get("Content-Type") || "application/octet-stream" }, customMetadata: cm });
+        imported++;
+      } catch (e) {
+        failed++;
+      }
+    }
+    return json4({ ok: true, imported, skipped, failed });
+  }
   if (path === "/sla/workever/ingest" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const runId = String(b.runId || "run");

@@ -161,6 +161,35 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, enriched: n });
   }
 
+  // Import Workever files onto a LIVE portal job (jobs/<id>/…) so they show on
+  // the job card + site — NOT the archive store (a live job has no archive row).
+  // Idempotent via R2 head; streams each public S3 URL straight into R2.
+  if (path === "/sla/workever/job-files" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const jobId = String(b.jobId || "").trim();
+    const files = Array.isArray(b.files) ? b.files : [];
+    if (!jobId || !files.length) return json({ ok: true, imported: 0, skipped: 0, failed: 0 });
+    let imported = 0, skipped = 0, failed = 0, seq = 0;
+    for (const f of files) {
+      try {
+        if (!f || !f.url) { failed++; continue; }
+        const safe = (String(f.id || f.name || "").replace(/[^\w.\-]+/g, "_").slice(0, 90)) || ("f" + (seq++));
+        const extRaw = (String(f.name || "").split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const ext = extRaw || ((f.type || "").split("/").pop() || "jpg");
+        const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png`
+          : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}`
+          : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
+        if (await env.JOB_FILES.head(key)) { skipped++; continue; }
+        const resp = await fetch(f.url);
+        if (!resp.ok || !resp.body) { failed++; continue; }
+        const cm = f.kind === "photo" ? { stage: "After", source: "workever" } : { source: "workever" };
+        await env.JOB_FILES.put(key, resp.body, { httpMetadata: { contentType: f.type || resp.headers.get("Content-Type") || "application/octet-stream" }, customMetadata: cm });
+        imported++;
+      } catch (e) { failed++; }
+    }
+    return json({ ok: true, imported, skipped, failed });
+  }
+
   if (path === "/sla/workever/ingest" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const runId = String(b.runId || "run");

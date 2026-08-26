@@ -435,18 +435,21 @@ function buildRunner(){
   const flush=async()=>{ if(!batch.length)return; const res=await post("/sla/workever/ingest",{runId:RUN,jobs:batch});
     if(res&&res.counts) for(const k in T) if(k!=="files") T[k]+=res.counts[k]||0;
     if(res&&res.needDetail&&res.needDetail.length){ const items=[]; for(const mos of res.needDetail){ const jid=batchU[mos]; if(!jid)continue; const d=await wg("/api/v1/jobs/"+jid); if(d&&d.description) items.push({mos,description:d.description}); } if(items.length) await post("/sla/workever/enrich",{items}); }
-    if(res&&res.needPhotos&&res.needPhotos.length){ let fb=[];
-      // Import a batch of files. A job that HAS files but they fail to store is a
-      // genuine failure → retry once, then ABORT the whole run (kept resumable).
-      // A job with no files sends nothing, so it can never trip this.
-      const sf=async()=>{ if(!fb.length) return; const files=fb; fb=[];
-        let pr=null; try{ pr=await post("/sla/archive/photos/import",{files}); }catch(e){ pr={failed:files.length}; }
-        if(pr && pr.failed>0){ let pr2=null; try{ pr2=await post("/sla/archive/photos/import",{files}); }catch(e){ pr2={failed:files.length}; }
-          if(pr2 && pr2.failed>0){ ABORT={reason:"file transfer failed", failed:pr2.failed, mos:[...new Set(files.map(f=>f.mos))].slice(0,10), sample:files.filter(f=>f).slice(0,3).map(f=>f.name)}; if(pr2.imported) T.files+=pr2.imported; return; }
-          if(pr2) T.files+=pr2.imported||0;
-        } else if(pr) T.files+=pr.imported||0;
-      };
-      for(const np of res.needPhotos){ if(ABORT) break; if(!np.uuid) continue; const files=await harvestPhotos(np); for(const f of files){ fb.push(f); if(fb.length>=15){ await sf(); if(ABORT) break; } } if(ABORT) break; } if(!ABORT) await sf(); }
+    if(res&&res.needPhotos&&res.needPhotos.length){
+      // Import files. A job that HAS files but they fail to store is a genuine
+      // failure → retry once, then ABORT the whole run (kept resumable). A job
+      // with nothing to transfer sends nothing, so it can never trip this.
+      // LIVE jobs → the live job's own folder (visible on the card); others →
+      // the archive store.
+      const impf=async(ep,payload,cnt,mosArr,names)=>{ let pr=null; try{ pr=await post(ep,payload); }catch(e){ pr={failed:cnt}; }
+        if(pr&&pr.failed>0){ let pr2=null; try{ pr2=await post(ep,payload); }catch(e){ pr2={failed:cnt}; }
+          if(pr2&&pr2.failed>0){ ABORT={reason:"file transfer failed", failed:pr2.failed, mos:mosArr.slice(0,10), sample:(names||[]).slice(0,3)}; if(pr2.imported)T.files+=pr2.imported; return; }
+          if(pr2)T.files+=pr2.imported||0; } else if(pr)T.files+=pr.imported||0; };
+      let archFb=[]; const flushArch=async()=>{ if(!archFb.length)return; const files=archFb; archFb=[]; await impf("/sla/archive/photos/import",{files},files.length,[...new Set(files.map(f=>f.mos))],files.map(f=>f.name)); };
+      for(const np of res.needPhotos){ if(ABORT)break; if(!np.uuid) continue; const files=await harvestPhotos(np);
+        if(np.target==="live"&&np.portalId){ if(files.length){ await impf("/sla/workever/job-files",{jobId:np.portalId,files},files.length,[np.mos],files.map(f=>f.name)); if(ABORT)break; } }
+        else { for(const f of files){ archFb.push(f); if(archFb.length>=15){ await flushArch(); if(ABORT)break; } } if(ABORT)break; } }
+      if(!ABORT) await flushArch(); }
     batch=[]; batchU={}; };
   let start=Number(localStorage.mlSyncPage||1);
   for(let pg=start; pg<=pages; pg++){
@@ -505,18 +508,28 @@ function buildTestRunner(target){
   const ing = await post("/sla/workever/ingest",{runId:RUN, jobs:[job]});
   console.log("  ingest →", ing.counts);
   if(ing.needDetail&&ing.needDetail.length&&job.description) await post("/sla/workever/enrich",{items:[{mos:job.mos,description:job.description}]});
+  const np=(ing.needPhotos&&ing.needPhotos[0])||null;
   const files=[], seen={}; for(const f of all){ const url=f&&f.links&&f.links.file; if(!url||seen[f.id])continue; seen[f.id]=1; const base=decodeURIComponent(String(url).split("/").pop().split("?")[0]); files.push({id:job.mos+":"+base, mos:job.mos, name:f.fileName||"", url, type:f.documentType||"", bytes:f.documentLength||0, kind:kindOf(f)}); }
-  let imp={imported:0,skipped:0,failed:0}; if(files.length){ imp=(await post("/sla/archive/photos/import",{files}))||imp; }
-  console.log("  file import →", imp);
-  // Verify portal side
-  const pf = await pget("/sla/archive/files?mos="+encodeURIComponent(job.mos));
-  const P={photo:0,signature:0,document:0}; for(const f of ((pf&&pf.files)||[])){ P[f.kind]=(P[f.kind]||0)+1; }
-  console.log("%cPortal now holds: photos="+P.photo+" signatures="+P.signature+" docs="+P.document,"font-weight:bold");
+  let imp={imported:0,skipped:0,failed:0}, tgt="(none — job already up to date, portal keeps its own)";
+  if(files.length && np){
+    if(np.target==="live"&&np.portalId){ tgt="live job "+np.portalId; imp=(await post("/sla/workever/job-files",{jobId:np.portalId,files}))||imp; }
+    else { tgt="archive"; imp=(await post("/sla/archive/photos/import",{files}))||imp; }
+  }
+  console.log("  file import ("+tgt+") →", imp);
+  // Verify portal side (the right store for where the job landed)
+  const P={photo:0,signature:0,document:0};
+  if(np&&np.target==="live"&&np.portalId){ const jf=await pget("/sla/jobs/"+np.portalId+"/files"); P.photo=((jf&&jf.files)||[]).length; }
+  else { const pf=await pget("/sla/archive/files?mos="+encodeURIComponent(job.mos)); for(const f of ((pf&&pf.files)||[])){ P[f.kind]=(P[f.kind]||0)+1; } }
+  console.log("%cPortal now holds: photos="+P.photo+(np&&np.target==="live"?" (+signature/docs on the job)":" signatures="+P.signature+" docs="+P.document),"font-weight:bold");
   // Judge — fail only if Workever HAD something that didn't arrive
   const problems=[];
   if((ing.counts.updatedLive+ing.counts.importedArchive+ing.counts.updatedArchive+ing.counts.skipped)===0) problems.push("job wasn't matched or updated");
-  for(const k of ["photo","signature","document"]){ if(W[k]>0 && P[k]<W[k]) problems.push(k+": Workever had "+W[k]+", portal has "+P[k]); }
   if(imp.failed>0) problems.push(imp.failed+" file(s) failed to store");
+  const totalW=W.photo+W.signature+W.document;
+  if(np && totalW>0 && (imp.imported+imp.skipped) < totalW) problems.push("only "+(imp.imported+imp.skipped)+"/"+totalW+" files stored");
+  if(np && np.target!=="live"){ for(const k of ["photo","signature","document"]){ if(W[k]>0 && P[k]<W[k]) problems.push(k+": Workever had "+W[k]+", portal has "+P[k]); } }
+  else if(np){ if(W.photo>0 && P.photo<W.photo) problems.push("photos: Workever had "+W.photo+", job now has "+P.photo); }
+  if(!np && totalW>0) console.log("%cNote: job was already current in the portal, so its Workever files were NOT re-imported (the portal keeps its own).","color:#a60");
   const pass = problems.length===0;
   console.log(pass?"%c✅ PASS — everything Workever holds is now in the portal":"%c❌ FAIL","color:"+(pass?"#0a0":"#c00")+";font-weight:bold;font-size:15px", pass?"":problems);
   alert((pass?"✅ TEST PASSED":"❌ TEST FAILED")+"\\n\\nJob "+job.mos+" — "+job.name+"\\nWorkever status: "+job.status+"\\n\\nWorkever had:   notes "+(job.description?"yes":"no")+" · photos "+W.photo+" · signatures "+W.signature+" · docs "+W.document+"\\nPortal now has: photos "+P.photo+" · signatures "+P.signature+" · docs "+P.document+"\\nJob action: "+JSON.stringify(ing.counts)+(pass?"":"\\n\\nProblems:\\n- "+problems.join("\\n- ")));
