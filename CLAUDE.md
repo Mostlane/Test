@@ -3676,6 +3676,28 @@ files to this public repo.
   offset (verified with scratchpad `repro-bar.cjs`) — it's an iOS-only quirk. Modern
   iOS handles a plain `position:fixed;bottom:0` bar correctly, so the fix is to
   REMOVE the transform. Do not re-add translateZ(0) to any fixed bar.
+- **Back navigation is a breadcrumb trail, NEVER `history.back()` mixed with
+  `location.href` pushes (Aug 2026).** The reported "revolving cycle" — SLA board →
+  job card → Back bounced sla-main⇄job-view forever — came from MIXING the two
+  navigation styles: portal-config's `.ml-back` handler used `history.back()` (a
+  POP) while job-view.html's own `#backBtn` returned to its parent via
+  `location.href = dest` (a PUSH). A push-then-pop ping-pongs between the two pages
+  and can never terminate. The cure is ONE deterministic mechanism for every back
+  button: **portal-config `window.mlBack(fallback)` + a per-tab sessionStorage
+  breadcrumb `mlNavTrail`.** On each page load the trail records `path+search`;
+  returning to a page already in the trail **COLLAPSES** it back to that entry
+  instead of growing it, so a cycle is structurally impossible. `mlBack` navigates
+  to the trail's previous entry (the genuine last page), else the button's own href
+  (cold start / wiped session). The `.ml-back` click handler calls `mlBack(theHref)`;
+  the two custom job-card back buttons (**job-view.html `#backBtn`**,
+  **engineer-job.html `#backBtn`**) call `mlBack(dest/backTo)` too — none of them
+  push their parent any more. **Rule: never implement a back button as
+  `location.href="parent"`, and never use `history.back()` for portal back — always
+  `window.mlBack(fallbackHref)`.** (Forward/home/completion redirects using
+  `location.href` are fine — the rule is about BACK affordances only.) Verified with
+  scratchpad `backsim.cjs` (reported loop, multi-parent round trip, same-job
+  excursion collapse, cold start — all resolve, none loop). portal-config bumped to
+  `?v=19` across all pages so the fix reaches phones; SW cache `mostlane-v83`.
 - **API fetches bypass the service worker** (sw.js skips workers.dev /
   cross-origin), so they have NO timeout of their own. A page that hides its
   UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a

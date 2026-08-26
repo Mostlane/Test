@@ -309,27 +309,53 @@
     }
   } catch (e) {}
 
-  // ── Back buttons go BACK ONE PAGE ───────────────────────────────────────────
-  // Every standard back button (.ml-back) should return to the PREVIOUS page the
-  // user was actually on — not a fixed parent. We intercept the click and use the
-  // browser history when we arrived from within the portal; otherwise (direct
-  // load, PWA cold-start, or an external referrer) we fall back to the button's
-  // own href so the user is never stranded. One handler covers every page.
-  (function backOnePage() {
-    function fromPortal() {
-      try { return !!document.referrer && new URL(document.referrer).origin === location.origin; }
-      catch (e) { return false; }
-    }
+  // ── Back buttons: breadcrumb trail (loop-proof) ─────────────────────────────
+  // Back must return to the page the user was ACTUALLY on before this one, and it
+  // must never trap them in a revolving cycle. We do NOT use history.back(): the
+  // portal mixes pop-navigation (history.back) with push-navigation
+  // (location.href="parent") across pages, and mixing the two ping-pongs
+  // parent⇄child forever (the reported SLA job-card loop). Instead we keep our own
+  // per-tab trail in sessionStorage. Returning to a page ALREADY in the trail
+  // COLLAPSES the trail back to it rather than growing it, so a cycle is
+  // structurally impossible. window.mlBack(fallback) is the one way to go back;
+  // the .ml-back handler and the pages' own custom back buttons all call it.
+  (function mlNavBack() {
+    var KEY = "mlNavTrail";
+    function read() { try { return JSON.parse(sessionStorage.getItem(KEY) || "[]") || []; } catch (e) { return []; } }
+    function write(a) { try { sessionStorage.setItem(KEY, JSON.stringify(a.slice(-60))); } catch (e) {} }
+    // Record this page in the trail (runs on every load; no DOM needed).
+    try {
+      var here = location.pathname + location.search;
+      var trail = read();
+      if (trail[trail.length - 1] === here) {
+        // reload of the same page — leave the trail unchanged
+      } else if (trail[trail.length - 2] === here) {
+        trail.pop();                    // stepped back to the previous page → collapse
+      } else {
+        var idx = trail.lastIndexOf(here);
+        if (idx >= 0) trail = trail.slice(0, idx + 1);  // jumped to an earlier page → collapse to it
+        else trail.push(here);          // genuinely new page → extend
+      }
+      write(trail);
+    } catch (e) {}
+    // The single "go back" entry point. `fallback` is used on a cold start (fresh
+    // PWA launch / wiped sessionStorage) where we have no trail to walk.
+    window.mlBack = function (fallback) {
+      var t = read();
+      var prev = t.length >= 2 ? t[t.length - 2] : "";
+      var dest = prev || fallback || "/main.html";
+      location.href = dest;
+    };
     document.addEventListener("click", function (e) {
       // Leave modifier / middle clicks (open-in-new-tab) alone.
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       var a = e.target && e.target.closest ? e.target.closest(".ml-back") : null;
       if (!a) return;
-      if (window.history.length > 1 && fromPortal()) {
-        e.preventDefault();
-        window.history.back();
-      }
-      // else: fall through — the href navigates to the sensible parent.
+      e.preventDefault();
+      // The button's own href is the sensible parent — use it as the cold-start
+      // fallback so the user is never stranded when there's no trail.
+      var href = a.getAttribute("href") || "";
+      window.mlBack(href && href !== "#" ? href : "");
     }, true);
   })();
 
