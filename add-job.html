@@ -728,7 +728,7 @@ async function init(){
         var d = await fetch(API_BASE + "/emsets", { method:"POST" }).then(function(x){return x.json();});
         if(d && d.ok){ EM_SETS = {}; // refetch the fresh map
           var g = await fetch(API_BASE + "/emsets").then(function(x){return x.json();}); if(g&&g.ok) EM_SETS = g.sets||{};
-          h.textContent = "✓ Loaded " + d.count + " EM cert numbers" + (d.mismatches&&d.mismatches.length ? " · " + d.mismatches.length + " differ from the store code (review: " + d.mismatches.slice(0,6).map(function(m){return m.code+"→"+m.set;}).join(", ") + (d.mismatches.length>6?"…":"") + ")" : "");
+          h.textContent = "✓ Loaded " + d.count + " EM cert numbers" + (d.pdfReads ? " (read " + d.pdfReads + " certificate" + (d.pdfReads===1?"":"s") + ")" : "") + (d.mismatches&&d.mismatches.length ? " · " + d.mismatches.length + " differ from the store code (review: " + d.mismatches.slice(0,6).map(function(m){return m.code+"→"+m.set;}).join(", ") + (d.mismatches.length>6?"…":"") + ")" : "");
           if((em&&em.checked)||(pat&&pat.checked)) applyTestType();
         } else { h.textContent = (d&&d.error) || "Couldn't refresh — SLA admin only."; }
       }catch(e){ h.textContent = "Couldn't refresh EM numbers."; }
