@@ -126,7 +126,9 @@ function parsePatRowsTokens(toks) {
   if (!toks || !toks.length) return [];
   const isDate = s => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
   const isStatus = s => /^(Pass|Fail|Skip)$/i.test(s);
-  const isId = s => /^[A-Za-z]{1,5}\d{2,}$/.test(s);   // AP00001, APP001…
+  // Appliance ID: a letter-prefixed tag (AP00001) OR a 4+ digit number (00001).
+  // 4+ digits keeps it clear of the 1–3 digit retest-period column ("12").
+  const isId = s => /^[A-Za-z]{1,5}\d{1,}$/.test(s) || /^\d{4,}$/.test(s);
   const isInt = s => /^\d{1,3}$/.test(s);
   const rows = [];
   for (let i = 0; i < toks.length - 3; i++) {
@@ -139,8 +141,8 @@ function parsePatRowsTokens(toks) {
     const middle = toks.slice(i + 2, end - 2);   // Description, Location, [Serial]
     rows.push({
       no: rows.length + 1,
-      appliance: String(middle[0] || "").slice(0, 60),
-      location: String(middle[1] || "").slice(0, 60),
+      appliance: String(middle[0] || "").trim().slice(0, 60),
+      location: String(middle[1] || "").trim().slice(0, 60),
       cls: "", visual: "", earth: "", insulation: "", result: "", comments: "",
     });
     i = end;
