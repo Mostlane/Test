@@ -521,18 +521,34 @@ function buildTestRunner(target){
   if(np&&np.target==="live"&&np.portalId){ const jf=await pget("/sla/jobs/"+np.portalId+"/files"); P.photo=((jf&&jf.files)||[]).length; }
   else { const pf=await pget("/sla/archive/files?mos="+encodeURIComponent(job.mos)); for(const f of ((pf&&pf.files)||[])){ P[f.kind]=(P[f.kind]||0)+1; } }
   console.log("%cPortal now holds: photos="+P.photo+(np&&np.target==="live"?" (+signature/docs on the job)":" signatures="+P.signature+" docs="+P.document),"font-weight:bold");
-  // Judge — fail only if Workever HAD something that didn't arrive
-  const problems=[];
-  if((ing.counts.updatedLive+ing.counts.importedArchive+ing.counts.updatedArchive+ing.counts.skipped)===0) problems.push("job wasn't matched or updated");
-  if(imp.failed>0) problems.push(imp.failed+" file(s) failed to store");
+  // Plain tick-by-tick report — no code, no JSON. ✅ done · ❌ failed · ➖ nothing to do.
   const totalW=W.photo+W.signature+W.document;
-  if(np && totalW>0 && (imp.imported+imp.skipped) < totalW) problems.push("only "+(imp.imported+imp.skipped)+"/"+totalW+" files stored");
-  if(np && np.target!=="live"){ for(const k of ["photo","signature","document"]){ if(W[k]>0 && P[k]<W[k]) problems.push(k+": Workever had "+W[k]+", portal has "+P[k]); } }
-  else if(np){ if(W.photo>0 && P.photo<W.photo) problems.push("photos: Workever had "+W.photo+", job now has "+P.photo); }
-  if(!np && totalW>0) console.log("%cNote: job was already current in the portal, so its Workever files were NOT re-imported (the portal keeps its own).","color:#a60");
-  const pass = problems.length===0;
-  console.log(pass?"%c✅ PASS — everything Workever holds is now in the portal":"%c❌ FAIL","color:"+(pass?"#0a0":"#c00")+";font-weight:bold;font-size:15px", pass?"":problems);
-  alert((pass?"✅ TEST PASSED":"❌ TEST FAILED")+"\\n\\nJob "+job.mos+" — "+job.name+"\\nWorkever status: "+job.status+"\\n\\nWorkever had:   notes "+(job.description?"yes":"no")+" · photos "+W.photo+" · signatures "+W.signature+" · docs "+W.document+"\\nPortal now has: photos "+P.photo+" · signatures "+P.signature+" · docs "+P.document+"\\nJob action: "+JSON.stringify(ing.counts)+(pass?"":"\\n\\nProblems:\\n- "+problems.join("\\n- ")));
+  const liveT = np && np.target==="live";
+  const filesOk = np ? (imp.failed===0 && (imp.imported+imp.skipped)>=totalW) : true;
+  const L=[]; let fail=false;
+  const c=ing.counts;
+  if(c.updatedLive) L.push("✅ Job updated in the portal (was Pending → now marked done)");
+  else if(c.importedArchive) L.push("✅ Imported into the Job Archive");
+  else if(c.updatedArchive) L.push("✅ Status updated in the Job Archive");
+  else if(c.skipped) L.push("➖ Already up to date in the portal — left untouched");
+  else { L.push("❌ Job was NOT matched or updated"); fail=true; }
+  if(!job.description) L.push("➖ Notes: none in Workever");
+  else if(!np) L.push("➖ Notes: already in the portal");
+  else L.push("✅ Notes transferred");
+  const rep=(label,w,pc,verifiable)=>{
+    if(w===0){ L.push("➖ "+label+": none in Workever"); return; }
+    if(!np){ L.push("➖ "+label+" ("+w+"): job already current, portal kept its own"); return; }
+    if(verifiable){ const ok=pc>=w; L.push((ok?"✅":"❌")+" "+label+": "+pc+" of "+w+" now in the portal"); if(!ok)fail=true; }
+    else { L.push((filesOk?"✅":"❌")+" "+label+": "+w+" transferred"); if(!filesOk)fail=true; }
+  };
+  rep("Photos", W.photo, P.photo, true);
+  rep("Signature", W.signature, P.signature, !liveT);
+  rep("Documents", W.document, P.document, !liveT);
+  if(np && totalW>0){ if(imp.failed>0){ L.push("❌ "+imp.failed+" file(s) failed to store"); fail=true; } else L.push("✅ No file transfers failed"); }
+  const overall = fail ? "❌ FAIL" : "✅ PASS";
+  console.log("%c"+overall+"  —  "+job.mos+"  ("+job.name+")","color:"+(fail?"#c00":"#0a0")+";font-weight:bold;font-size:16px");
+  L.forEach(l=>console.log("   "+l));
+  alert("TEST "+overall+"\\n\\nJob "+job.mos+" — "+job.name+"\\nWorkever status: "+job.status+"\\n\\n"+L.join("\\n"));
 })();`;
 }
 document.getElementById("wkTestBtn").addEventListener("click", async ()=>{
