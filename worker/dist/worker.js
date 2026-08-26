@@ -6961,7 +6961,7 @@ async function handle8(request, env, ctx, url, sess) {
           if (missing.length)
             return jsonResponse({ error: `Can't set ${target} yet \u2014 still needs ${humanList(missing)}.`, missing, needs: target }, headers, 422);
         }
-        if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress")) {
+        if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress") && !(before && (before.emTest || before.pat))) {
           const blocker = await findBlockingJob(env, tenantId, sess.user.username, id);
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first \u2014 ${blocker.why}.`, blockingJob: blocker }, headers, 409);
@@ -7445,6 +7445,7 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some((a) => normId(a) === uNorm)) continue;
+    if (j.emTest || j.pat) continue;
     const st = effStatus(j, uNorm);
     if (j.raBlock && j.raBlock.state === "open")
       return { id: j.id, ref: j.helpdeskRef || j.id, kind: "safety", why: "it's flagged 'can't proceed safely' \u2014 waiting for the office" };
@@ -24237,6 +24238,14 @@ function buildCertPdf(record, meta = {}) {
 init_push();
 var T = (t) => t === "pat" ? "pat" : "em";
 var DEFAULT_CONFIG2 = {
+  // Default client used to seed a NEW cert when the previous cert didn't supply one
+  // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
+  // wins over this, and it's never applied over a value the office has typed.
+  client: {
+    name: "The Southern Co-op",
+    address: "1000 Lakeside, Portsmouth",
+    postcode: "PO6 3FE"
+  },
   contractor: {
     tradingTitle: "Mostlane",
     address: "Unit 5A Segensworth Road, Segensworth Business Centre",
@@ -24272,6 +24281,7 @@ async function getConfig3(env, tid) {
   }
   if (!c || typeof c !== "object") return JSON.parse(JSON.stringify(DEFAULT_CONFIG2));
   return {
+    client: { ...DEFAULT_CONFIG2.client, ...c.client || {} },
     contractor: { ...DEFAULT_CONFIG2.contractor, ...c.contractor || {} },
     em: { ...DEFAULT_CONFIG2.em, ...c.em || {} },
     pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} }
@@ -24518,6 +24528,7 @@ async function handle30(request, env, ctx, url, sess) {
       const b = await request.json().catch(() => ({}));
       const cur = await getConfig3(env, tid);
       const next = {
+        client: { ...cur.client, ...b.client || {} },
         contractor: { ...cur.contractor, ...b.contractor || {} },
         em: { ...cur.em, ...b.em || {} },
         pat: { ...cur.pat, ...b.pat || {} }
@@ -24567,7 +24578,7 @@ async function handle30(request, env, ctx, url, sess) {
       certNumber: "",
       // Client: transfer from the previous cert; NEVER invented. Blank until the
       // office fills it once (then it chains forward on every future cert).
-      client: h && h.client ? h.client : { name: "", address: "", postcode: "" },
+      client: h && h.client ? h.client : config.client || { name: "", address: "", postcode: "" },
       // Installation: previous cert → else the REAL portal site record.
       installation: h && h.installation ? h.installation : {
         name: job && job.siteName || siteRow && siteRow.site_name || "",

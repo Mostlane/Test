@@ -42,7 +42,9 @@
   .mlc .cc{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin:10px 0;}
   .mlc h4{margin:0 0 8px;font-size:14px;color:#003468;letter-spacing:.01em;}
   .mlc label{display:block;font-size:11.5px;font-weight:600;color:#4a5568;margin:7px 0 3px;}
-  .mlc input[type=text],.mlc input[type=number],.mlc textarea{width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:15px;font-family:inherit;box-sizing:border-box;background:#fff;}
+  .mlc input[type=text],.mlc input[type=number],.mlc textarea{width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:15px;font-family:inherit;box-sizing:border-box;background:#fff !important;color:#0f2438 !important;-webkit-text-fill-color:#0f2438;}
+  .mlc .err{outline:2px solid #b00020;border-color:#b00020 !important;}
+  .mlc .mlrow.err-row{border-left:4px solid #b00020;background:#fff5f5;}
   .mlc textarea{min-height:44px;}
   .mlc .row2{display:flex;gap:8px;flex-wrap:wrap;}.mlc .row2>div{flex:1 1 150px;}
   .mlc .btn{background:#003468;color:#fff;border:none;border-radius:9px;padding:10px 14px;font:600 14px inherit;cursor:pointer;}
@@ -301,23 +303,23 @@
     // Row-level handlers — re-bound every time the rows re-render (renderRows
     // calls this), so the toolbar/header handlers in wire() bind exactly once.
     function wireRows() {
-      container.querySelectorAll("[data-cell]").forEach(el => el.addEventListener("input", () => { const i = +el.dataset.i; rec.rows[i] = rec.rows[i] || {}; rec.rows[i][el.dataset.cell] = el.value; queueSave(); }));
+      container.querySelectorAll("[data-cell]").forEach(el => el.addEventListener("input", () => { const i = +el.dataset.i; rec.rows[i] = rec.rows[i] || {}; rec.rows[i][el.dataset.cell] = el.value; const rw = el.closest(".mlrow"); if (rw) rw.classList.remove("err-row"); queueSave(); }));
       container.querySelectorAll("[data-tg] button").forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-tg]"); const i = +tg.dataset.i; const key = tg.dataset.tg;
         rec.rows[i] = rec.rows[i] || {}; rec.rows[i][key] = btn.dataset.v;
         tg.querySelectorAll("button").forEach(b => b.className = "");
         const opt = btn.dataset.v; const cls = /^pass$/i.test(opt) ? "pass" : /^fail$/i.test(opt) ? "fail" : (opt === "I" || opt === "II" || tg.querySelectorAll("button").length === 2) ? "one" : "na";
         btn.className = "on " + cls;
-        const rowEl = tg.closest(".mlrow"); if (rowEl) rowEl.classList.toggle("fail", isFail(rec.rows[i]));
+        const rowEl = tg.closest(".mlrow"); if (rowEl) { rowEl.classList.toggle("fail", isFail(rec.rows[i])); rowEl.classList.remove("err-row"); }
         updateListHead();
         queueSave();
       }));
       container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); queueSave(); }));
     }
     function wire() {
-      container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; queueSave(); }));
-      container.querySelectorAll("[data-b]").forEach(el => el.addEventListener("input", () => { const [k, f] = el.dataset.b.split("."); (rec[k] = rec[k] || {})[f] = el.value; queueSave(); }));
-      container.querySelectorAll("[data-c]").forEach(el => el.addEventListener("input", () => { rec.contractor[el.dataset.c] = el.value; queueSave(); }));
+      container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; el.classList.remove("err"); queueSave(); }));
+      container.querySelectorAll("[data-b]").forEach(el => el.addEventListener("input", () => { const [k, f] = el.dataset.b.split("."); (rec[k] = rec[k] || {})[f] = el.value; el.classList.remove("err"); queueSave(); }));
+      container.querySelectorAll("[data-c]").forEach(el => el.addEventListener("input", () => { rec.contractor[el.dataset.c] = el.value; el.classList.remove("err"); queueSave(); }));
       const tb = container.querySelector('[data-act="add"]'); if (tb) tb.addEventListener("click", () => { addRows(1); });
       const t5 = container.querySelector('[data-act="add5"]'); if (t5) t5.addEventListener("click", () => { addRows(5); });
       const ap = container.querySelector('[data-act="allpass"]'); if (ap) ap.addEventListener("click", allPass);
@@ -381,12 +383,48 @@
     }
 
     // Validate + save + submit for office review (NO job patch). Returns true on
-    // success. `silent` skips the alerts (used by the combined-job orchestrator).
+    // Strict pre-submit validation: every required field must be filled. Missing
+    // fields are highlighted red, their section is expanded, and the view scrolls
+    // to the first one. Returns { ok, missing:[labels], firstEl }.
+    function validate() {
+      container.querySelectorAll(".err").forEach(e => e.classList.remove("err"));
+      container.querySelectorAll(".err-row").forEach(e => e.classList.remove("err-row"));
+      const missing = []; let firstEl = null;
+      const need = (sel, label) => {
+        const el = container.querySelector(sel); if (!el) return;
+        if (!String(el.value || "").trim()) { el.classList.add("err"); missing.push(label); if (!firstEl) firstEl = el; }
+      };
+      need('[data-b="client.name"]', "Client name");
+      need('[data-b="client.address"]', "Client address");
+      need('[data-b="client.postcode"]', "Client postcode");
+      need('[data-b="installation.name"]', "Installation name");
+      need('[data-b="installation.postcode"]', "Installation postcode");
+      need('[data-f="extent"]', "Extent & limitations");
+      need('[data-c="name"]', "Engineer name");
+      need('[data-c="date"]', "Certificate date");
+      let badRows = 0;
+      if (!rec.rows.length) missing.push("at least one " + (type === "pat" ? "appliance" : "light"));
+      rec.rows.forEach((r, i) => {
+        let bad = false;
+        if (type === "em") { if (!r.normal || !r.led || !r.emergency || r.battery == null || String(r.battery).trim() === "") bad = true; }
+        else { if (!String(r.appliance || "").trim() || !r.visual || !r.result) bad = true; }
+        if (bad) { badRows++; const rowEl = container.querySelector('.mlrow[data-i="' + i + '"]'); if (rowEl) { rowEl.classList.add("err-row"); if (!firstEl) firstEl = rowEl; } }
+      });
+      if (badRows) missing.push(badRows + (type === "pat" ? " appliance" : " item") + (badRows === 1 ? "" : "s") + " not fully filled in");
+      if (!rec.signature) { missing.push("signature"); const sc = container.querySelector("#mlcSig"); if (sc && !firstEl) firstEl = sc; }
+      // expand any collapsed section that holds a flagged field so it's visible
+      container.querySelectorAll("details.mlc-fold").forEach(d => { if (d.querySelector(".err")) d.open = true; });
+      return { ok: missing.length === 0, missing, firstEl };
+    }
+    // Validate → save → submit for office review. `silent` skips the alert (the
+    // combined-job orchestrator handles messaging), but validation still gates.
     async function submit(silent) {
-      if (!rec.rows.length) { if (!silent) alert("Add at least one test row before completing."); return false; }
-      const incomplete = rec.rows.some(r => type === "em" ? (!r.normal || !r.led || !r.emergency) : (!r.result));
-      if (incomplete && !silent && !confirm("Some rows have no result set. Complete anyway?")) return false;
-      if (!rec.signature) { if (!silent) alert("Please sign the certificate before completing."); return false; }
+      const v = validate();
+      if (!v.ok) {
+        if (v.firstEl) setTimeout(() => v.firstEl.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+        if (!silent) alert("Please complete before submitting:\n\n• " + v.missing.join("\n• "));
+        return false;
+      }
       await doSave();
       if (!rec.id) return false;
       try { await authFetch("/certs/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }); rec.status = "review"; return true; }

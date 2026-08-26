@@ -1570,7 +1570,9 @@ export async function handle(request, env, ctx, url, sess) {
 
         // Cross-job guard: you can't start the next job until your current one
         // is at a valid end point (Complete, or Quote / approved On Hold).
-        if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress")) {
+        // Cross-job guard — but EM/PAT jobs are exempt (they're meant to overlap):
+        // starting one is never blocked, and one mid-drain-down never blocks others.
+        if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress") && !(before && (before.emTest || before.pat))) {
           const blocker = await findBlockingJob(env, tenantId, sess.user.username, id);
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first — ${blocker.why}.`, blockingJob: blocker }, headers, 409);
@@ -2101,6 +2103,10 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some(a => normId(a) === uNorm)) continue;
+    // EM/PAT jobs are DESIGNED to overlap — an emergency-light job sits idle for a
+    // ~3h battery drain-down and a PAT runs alongside, so one in progress must never
+    // block the engineer starting another job.
+    if (j.emTest || j.pat) continue;
     // On a shared job, judge THIS engineer's own status — a co-worker being mid-job
     // must never block them.
     const st = effStatus(j, uNorm);

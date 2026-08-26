@@ -2129,9 +2129,30 @@ it straight onto the compliance chart (rolling the next-due date).
   DRAFT/submitted certificates (`status <> 'final'`) but NEVER a finalised one (it's
   filed on the compliance chart; its PDF stays). Draft/review certs hold no separate
   R2 files (inline signature, on-demand PDF), so deleting the DB rows is a full clean-up.
+- **Completion validation (cert-form.js `validate()`):** an engineer can't submit a
+  cert until every required field is filled — client (name/addr/postcode),
+  installation (name/postcode), extent, engineer name + date, ≥1 fully-filled item
+  (EM: normal/led/emergency + battery; PAT: appliance name + visual + result), and a
+  signature. Missing fields are highlighted red, their collapsed section is expanded,
+  and the view scrolls to the first one; the red clears as each is fixed.
+- **Default client** in `cert:config` = **The Southern Co-op, 1000 Lakeside,
+  Portsmouth, PO6 3FE** (office-editable). Used to SEED a new cert's client ONLY when
+  the previous cert didn't supply one — the previous cert always wins, and it never
+  overwrites a typed value. (Non-Co-op EM/PAT would need the office to change it.)
+- **Combined EM+PAT job (engineer-job.html):** two tabs, each certificate completed
+  INDEPENDENTLY (finish one before the other, any order) — each has its own "Complete
+  & submit". The JOB only patches to Complete once BOTH certs are submitted
+  (patchComplete gates on `done.em && done.pat`); the tab gets a ✓ and the hint nudges
+  to the other.
+- **EM/PAT jobs OVERLAP (sla.js findBlockingJob + the Travelling/In-Progress guard):**
+  exempt from the cross-job "finish one before starting another" block — an EM job
+  sits idle for its ~3h drain-down so a PAT/another job runs alongside. Both ways:
+  starting an emTest/pat job is never blocked, and an emTest/pat job in progress never
+  blocks others.
+- **Text colour:** cert-form inputs/textareas force `color:#0f2438 !important` (a
+  personalised theme was rendering the extent/comments text near-white).
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
-  navy). **TODO/next:** verify PAT column mapping against a real PAT cert (only EM was
-  sampled); optional hub widget for the pending-review count; Help guide.
+  navy). **TODO/next:** optional hub widget for the pending-review count; Help guide.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
