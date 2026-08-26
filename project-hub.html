@@ -308,6 +308,21 @@
             <div style="flex:1 1 200px;"><label style="font-size:13px;font-weight:600;">Start</label><input type="datetime-local" id="jvStart"></div>
             <div style="flex:0 0 140px;"><label style="font-size:13px;font-weight:600;">Duration (mins)</label><input type="number" id="jvDur" placeholder="60" min="15" step="15"></div>
           </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;font-weight:600;cursor:pointer;"><input type="checkbox" id="jvMulti" style="width:auto;"> 📆 Send as multiple days (drip-fed)</label>
+          <div id="jvMultiPanel" class="hide" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:#f8fafc;">
+            <p class="muted" style="font-size:12px;margin:0 0 8px;">Each day is hidden from the engineer until the reveal time the evening before — you see them all in the scheduler. A day auto-skips if they already have another job that day.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <div style="flex:1 1 120px;"><label style="font-size:12.5px;font-weight:600;">First day</label><input type="date" id="jvFirst"></div>
+              <div style="flex:0 0 90px;"><label style="font-size:12.5px;font-weight:600;">How many days</label><input type="number" id="jvDays" value="5" min="1" max="60" step="1"></div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+              <div style="flex:1 1 90px;"><label style="font-size:12.5px;font-weight:600;">Start each day</label><input type="time" id="jvDayStart" value="08:00"></div>
+              <div style="flex:1 1 90px;"><label style="font-size:12.5px;font-weight:600;">Finish each day</label><input type="time" id="jvDayEnd" value="16:00"></div>
+              <div style="flex:1 1 90px;"><label style="font-size:12.5px;font-weight:600;">Reveal at (day before)</label><input type="time" id="jvReveal" value="17:00"></div>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;cursor:pointer;"><input type="checkbox" id="jvWeekends" style="width:auto;"> Include weekends</label>
+            <p class="muted" id="jvPreview" style="font-size:12px;margin:8px 0 0;"></p>
+          </div>
           <label style="font-size:13px;font-weight:600;display:block;margin-top:10px;">Assign to (tick one or more)</label>
           <input type="search" id="jvSearch" placeholder="Filter engineers…" style="margin-bottom:4px;">
           <div id="jvEngs" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:14px;"><p class="muted" style="margin:6px;">Loading engineers…</p></div>
@@ -316,6 +331,7 @@
         </div>` : ""}
         <h3 style="margin:2px 0 6px;font-size:14.5px;">Project jobs</h3>
         <div id="jvJobs"><p class="muted">Loading…</p></div>
+        <div id="jvSeries"></div>
         <h3 style="margin:14px 0 6px;font-size:14.5px;">${CAN ? "Site visits — everyone" : "My site visits"}</h3>
         <div id="jvVisits"></div>
         <div id="jvPerUser"></div>`;
@@ -331,6 +347,7 @@
       catch { document.getElementById("jvJobs").innerHTML = `<p class="muted">Couldn't load — try again.</p>`; return; }
       if (!d || !d.ok) { document.getElementById("jvJobs").innerHTML = `<p class="muted">${esc((d && d.error) || "Couldn't load")}</p>`; return; }
       renderProjJobs(d.jobs || []);
+      renderSeries();
       renderVisits(d.visits || []);
       if (CAN) renderPerUser(d.perUser || []);
     }
@@ -471,8 +488,49 @@
         if (c.checked) JV_PICK.add(c.dataset.jveng); else JV_PICK.delete(c.dataset.jveng);
       });
       btn.onclick = createProjectJob;
+      const multi = document.getElementById("jvMulti");
+      if (multi) {
+        const panel = document.getElementById("jvMultiPanel");
+        const upd = () => { panel.classList.toggle("hide", !multi.checked); document.getElementById("jvDur").disabled = multi.checked; renderDayPreview(); };
+        multi.addEventListener("change", upd);
+        ["jvFirst","jvDays","jvDayStart","jvDayEnd","jvWeekends"].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener("input", renderDayPreview); });
+      }
+    }
+    // Compute the drip-feed days client-side (browser = London time), skipping
+    // weekends unless included. Matches how the SLA scheduler builds times.
+    function buildSeriesDays() {
+      const n = Math.max(1, Math.min(60, Number(document.getElementById("jvDays").value) || 1));
+      const firstStr = document.getElementById("jvFirst").value;
+      const first = firstStr ? new Date(firstStr + "T00:00:00") : (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0); return d; })();
+      const [sh, sm] = (document.getElementById("jvDayStart").value || "08:00").split(":").map(Number);
+      const [fh, fm] = (document.getElementById("jvDayEnd").value || "16:00").split(":").map(Number);
+      const wk = document.getElementById("jvWeekends").checked;
+      const out = []; const cur = new Date(first);
+      let guard = 0;
+      while (out.length < n && guard++ < 400) {
+        const dow = cur.getDay();
+        if (wk || (dow !== 0 && dow !== 6)) {
+          const s = new Date(cur); s.setHours(sh, sm, 0, 0);
+          const f = new Date(cur); f.setHours(fh, fm, 0, 0);
+          let dur = Math.round((f - s) / 60000); if (dur <= 0) dur += 24 * 60;
+          out.push({ scheduledAt: s.toISOString(), durationMinutes: dur });
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      return out;
+    }
+    function renderDayPreview() {
+      const el = document.getElementById("jvPreview"); if (!el) return;
+      try {
+        const days = buildSeriesDays();
+        if (!days.length) { el.textContent = ""; return; }
+        const f = iso => new Date(iso).toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" });
+        el.textContent = days.length + " day" + (days.length===1?"":"s") + ": " + f(days[0].scheduledAt) + " → " + f(days[days.length-1].scheduledAt);
+      } catch { el.textContent = ""; }
     }
     async function createProjectJob() {
+      const multi = document.getElementById("jvMulti") && document.getElementById("jvMulti").checked;
+      if (multi) return createProjectSeries();
       const desc = document.getElementById("jvDesc").value.trim();
       const msg = document.getElementById("jvMsg");
       if (!desc) { msg.textContent = "Say what the job is."; msg.className = "msg err"; return; }
@@ -488,6 +546,63 @@
         JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
         loadJobsVisits();
       } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    }
+    async function createProjectSeries() {
+      const desc = document.getElementById("jvDesc").value.trim();
+      const msg = document.getElementById("jvMsg");
+      if (!desc) { msg.textContent = "Say what the job is."; msg.className = "msg err"; return; }
+      const engineers = Array.from(JV_PICK);
+      if (!engineers.length) { msg.textContent = "Pick at least one engineer."; msg.className = "msg err"; return; }
+      const days = buildSeriesDays();
+      if (!days.length) { msg.textContent = "Set the days."; msg.className = "msg err"; return; }
+      const [rh] = (document.getElementById("jvReveal").value || "17:00").split(":").map(Number);
+      msg.textContent = "Creating " + days.length + " days…"; msg.className = "msg";
+      try {
+        const r = await authFetch("/project/create-day-series", { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ id: PID, description: desc, engineers, days, releaseHour: rh }) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Couldn't create");
+        msg.textContent = "Created ✓ " + r.count + " days drip-fed"; msg.className = "msg ok";
+        document.getElementById("jvDesc").value = "";
+        document.getElementById("jvMulti").checked = false; document.getElementById("jvMultiPanel").classList.add("hide"); document.getElementById("jvDur").disabled = false;
+        JV_PICK = new Set(); renderEngList(document.getElementById("jvSearch").value);
+        loadJobsVisits();
+      } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    }
+    // Active drip series for this project, each with a Stop button.
+    async function renderSeries() {
+      const el = document.getElementById("jvSeries"); if (!el) return;
+      let d; try { d = await authFetch("/project/series?id=" + encodeURIComponent(PID)).then(r => r.json()); } catch { el.innerHTML = ""; return; }
+      const series = (d && d.series) || [];
+      if (!series.length) { el.innerHTML = ""; return; }
+      const fday = iso => iso ? new Date(iso).toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"short" }) : "—";
+      el.innerHTML = `<h3 style="margin:14px 0 6px;font-size:14.5px;">📆 Drip-fed multi-day runs</h3>` + series.map(s => {
+        const engs = (s.engineers || []).map(niceName).join(", ");
+        const done = s.days.filter(x => x.released && !x.skipped).length, skip = s.days.filter(x => x.skipped).length, pend = s.pendingDays;
+        const rows = s.days.map(x => {
+          const tag = x.skipped ? '<span class="badge" style="background:#fef3c7;color:#92400e;">skipped</span>'
+            : x.released ? '<span class="badge" style="background:#e6f6ec;color:#065f46;">visible</span>'
+            : '<span class="badge" style="background:#eef2f7;color:#475569;">hidden</span>';
+          return `<div class="frow" style="font-size:12.5px;"><span style="flex:1;">${fday(x.scheduledAt)}</span>${tag}</div>`;
+        }).join("");
+        return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <b style="flex:1;font-size:13.5px;">${esc(s.description || "Project run")} · ${esc(engs)}</b>
+            ${CAN && pend ? `<button class="btn" data-stopseries="${esc(s.seriesId)}" style="background:#fee2e2;color:#991b1b;padding:5px 10px;font-size:12.5px;">■ Stop drip (${pend} to come)</button>` : (pend ? "" : '<span class="muted" style="font-size:12px;">finished</span>')}
+          </div>
+          <p class="muted" style="font-size:12px;margin:6px 0;">${done} visible · ${pend} hidden${skip ? " · " + skip + " skipped" : ""}</p>
+          <div style="max-height:150px;overflow:auto;">${rows}</div>
+        </div>`;
+      }).join("");
+      el.querySelectorAll("[data-stopseries]").forEach(b => b.onclick = () => stopSeries(b.dataset.stopseries));
+    }
+    async function stopSeries(seriesId) {
+      const ok = window.MLUI ? await MLUI.confirm("Stop this drip-feed? The days the engineer hasn't seen yet are removed; days already visible stay.", { title:"Stop drip-feed", okLabel:"Stop", danger:true }) : confirm("Stop this drip-feed?");
+      if (!ok) return;
+      try {
+        const r = await authFetch("/project/series/stop", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, seriesId }) }).then(r => r.json());
+        if (window.MLUI && MLUI.toast) MLUI.toast("Removed " + ((r && r.removed) || 0) + " upcoming days");
+        loadJobsVisits();
+      } catch (e) { alert("Couldn't stop: " + e.message); }
     }
     function wireVisibility() {
       const box = document.getElementById("visPeople");

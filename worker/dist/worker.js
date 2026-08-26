@@ -5146,6 +5146,16 @@ async function handle8(request, env, ctx, url, sess) {
     }
     return jsonResponse({ ok: true, bytes }, headers);
   }
+  if (subpath === "/series-clash" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const date = searchParams.get("date") || "";
+    const excludeId = searchParams.get("excludeId") || "";
+    if (!engineer || !date) return jsonResponse({ clash: null }, headers);
+    const eid = normId(engineer);
+    const all = await listJobs(env, tenantId);
+    const hit = all.find((j) => j.seriesId && !j.seriesSkipped && j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && assignedList(j).some((a) => normId(a) === eid));
+    return jsonResponse({ clash: hit ? { id: hit.id, description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
+  }
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
@@ -6948,13 +6958,14 @@ function londonInstant(y, mo, d, h, mi) {
   const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
   return guess - londonOffsetMs(guess);
 }
-function londonFivePmDayBefore(schedISO) {
+function londonHourDayBefore(schedISO, hour) {
   const s = Date.parse(schedISO);
   if (!Number.isFinite(s)) return null;
   const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(s)).split("-").map(Number);
   const prev = new Date(Date.UTC(y, m - 1, d));
   prev.setUTCDate(prev.getUTCDate() - 1);
-  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), 17, 0);
+  const h = Number.isFinite(Number(hour)) ? Math.max(0, Math.min(23, Number(hour))) : 17;
+  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), h, 0);
 }
 function releaseInstant(job) {
   const r = job && job.release;
@@ -6963,8 +6974,15 @@ function releaseInstant(job) {
     const t = Date.parse(r.at);
     return Number.isFinite(t) ? t : null;
   }
-  if (r.mode === "dayBefore") return job.scheduledAt ? londonFivePmDayBefore(job.scheduledAt) : null;
+  if (r.mode === "dayBefore") return job.scheduledAt ? londonHourDayBefore(job.scheduledAt, r.hour) : null;
   return null;
+}
+function engineerHasOtherJobThatDay(job, allJobs) {
+  if (!job || !job.scheduledAt || !job.seriesId) return false;
+  const day = new Date(job.scheduledAt).toISOString().slice(0, 10);
+  const engs = new Set(assignedList(job).map(normId));
+  if (!engs.size) return false;
+  return (allJobs || []).some((o) => o.id !== job.id && o.seriesId !== job.seriesId && !o.seriesSkipped && String(o.status || "").toLowerCase() !== "cancelled" && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day && assignedList(o).some((a) => engs.has(normId(a))));
 }
 var RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function jobIsFinished(job) {
@@ -6981,6 +6999,8 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
 function releaseVisibleNow(job, allJobs) {
+  if (job && job.seriesSkipped) return false;
+  if (job && job.seriesId && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
   const r = job && job.release;
   if (!r || !r.mode || r.mode === "now") return true;
   if (r.mode === "at" || r.mode === "dayBefore") {
@@ -7039,6 +7059,22 @@ async function pushJobToEngineers(env, tid, job, engineerIds) {
     });
   }
 }
+async function stopSeries(env, tenantId, seriesId) {
+  if (!seriesId) return { removed: 0, total: 0 };
+  const db = tenantDB(env, tenantId);
+  const jobs = await listJobs(env, tenantId);
+  const inSeries = jobs.filter((j) => j.seriesId === seriesId);
+  const kill = inSeries.filter((j) => !j.releaseNotified && !j.seriesSkipped);
+  let removed = 0;
+  for (const j of kill) {
+    try {
+      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, j.id).run();
+      removed++;
+    } catch {
+    }
+  }
+  return { removed, total: inSeries.length };
+}
 async function reconcileRelease(env, tid, job, allJobs) {
   if (!job || job.releaseNotified) return false;
   const engs = assignedList(job);
@@ -7052,9 +7088,18 @@ async function reconcileRelease(env, tid, job, allJobs) {
 async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
-    if (j.releaseNotified || !assignedList(j).length) continue;
+    if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
     const r = j.release;
     if (!r || !r.mode || r.mode === "now") continue;
+    if (j.seriesId && engineerHasOtherJobThatDay(j, jobs)) {
+      const t = releaseInstant(j);
+      if (t == null || t <= Date.now()) {
+        j.seriesSkipped = true;
+        await saveJob(env, tid, j).catch(() => {
+        });
+      }
+      continue;
+    }
     await reconcileRelease(env, tid, j, jobs).catch(() => {
     });
   }
@@ -7246,8 +7291,12 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     workArea: body.workArea !== void 0 ? String(body.workArea || "") || null : existing?.workArea ?? null,
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
-    release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0 } : void 0 : existing?.release,
+    release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0, hour: body.release.hour != null ? Number(body.release.hour) : void 0 } : void 0 : existing?.release,
     releaseNotified: body.release !== void 0 && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null) ? false : existing?.releaseNotified || false,
+    // Project multi-day drip "series": seriesId links the days; seriesSkipped
+    // permanently drops a day (clash safeguard). Both preserved across re-saves.
+    seriesId: body.seriesId !== void 0 ? String(body.seriesId || "") || null : existing?.seriesId ?? null,
+    seriesSkipped: body.seriesSkipped !== void 0 ? !!body.seriesSkipped : existing?.seriesSkipped || false,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -7287,7 +7336,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.release !== void 0) {
     const prev = job.release ? JSON.stringify(job.release) : "";
     if (!patch.release || !patch.release.mode || patch.release.mode === "now") job.release = void 0;
-    else job.release = { mode: patch.release.mode, at: patch.release.at || void 0 };
+    else job.release = { mode: patch.release.mode, at: patch.release.at || void 0, hour: patch.release.hour != null ? Number(patch.release.hour) : void 0 };
     if ((job.release ? JSON.stringify(job.release) : "") !== prev) job.releaseNotified = false;
   }
   if (patch.scheduledAt !== void 0) {
@@ -7318,6 +7367,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
+  if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
+  if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -8509,9 +8560,11 @@ function decorateJobWithLiveSla(job) {
   const target = Date.parse(job.targetAt);
   const state = job.status === "Closed Jobs" || job.status === "Complete" ? "OK" : Date.now() > target ? "BREACHED" : "OK";
   let releaseView;
-  if (job.release && job.release.mode && job.release.mode !== "now") {
+  if (job.seriesSkipped) {
+    releaseView = { mode: "skipped", at: null, label: "Skipped \u2014 engineer had another job that day", series: true };
+  } else if (job.release && job.release.mode && job.release.mode !== "now") {
     const t = releaseInstant(job);
-    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job) };
+    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job), series: !!job.seriesId };
   }
   return { ...job, releaseView, sla: { state, now: (/* @__PURE__ */ new Date()).toISOString() } };
 }
@@ -24430,6 +24483,100 @@ async function handle31(request, env, ctx, url, sess) {
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
     return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+  if (path === "/project/create-day-series" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse2(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map((s) => String(s || "").trim()).filter(Boolean) : [];
+    if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
+    const days = Array.isArray(b.days) ? b.days.map((d) => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes })).filter((d) => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    if (!days.length) return error("No days given", 400, env, request);
+    if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
+    const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;
+    const seriesId = "SER-" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 12) : Math.abs(Date.parse(days[0].scheduledAt)).toString(36) + engineers[0]);
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {
+    }
+    let siteData = {};
+    try {
+      if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data);
+    } catch {
+    }
+    const base = {
+      description,
+      projectId: row.id,
+      seriesId,
+      siteCode: row.number,
+      siteName: row.name,
+      storeType: "projects",
+      address: siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ") || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: siteRow && siteRow.postcode || data.postcode || "",
+      lat: data.lat != null ? data.lat : siteData.lat != null ? siteData.lat : void 0,
+      lon: data.lon != null ? data.lon : siteData.lng != null ? siteData.lng : siteData.lon != null ? siteData.lon : void 0,
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : void 0,
+      assignedEngineers: engineers,
+      requiresRA: b.requiresRA === true,
+      requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true,
+      requiresNote: b.requiresNote === true,
+      changedBy: me
+    };
+    const ids = [];
+    for (const d of days) {
+      const payload = {
+        ...base,
+        scheduledAt: new Date(d.scheduledAt).toISOString(),
+        durationMinutes: d.durationMinutes ? Math.max(15, Number(d.durationMinutes)) : void 0,
+        release: { mode: "dayBefore", hour: releaseHour }
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      ids.push(job.id);
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+      }));
+    }
+    return json({ ok: true, seriesId, count: ids.length, ids }, {}, env, request);
+  }
+  if (path === "/project/series" && method === "GET") {
+    const pid = url.searchParams.get("id") || "";
+    const row = await getRow(pid);
+    if (!row || !canSeeProject(parse2(row), me, canManage2)) return error("Project not found", 404, env, request);
+    const jobs = (await listJobs(env, tenantId)).filter((j) => j.seriesId && j.projectId === row.id);
+    const byId = {};
+    for (const j of jobs) {
+      const s = byId[j.seriesId] || (byId[j.seriesId] = { seriesId: j.seriesId, engineers: [], releaseHour: j.release && j.release.hour != null ? j.release.hour : 17, days: [] });
+      if (!s.engineers.length) s.engineers = Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+      s.days.push({
+        id: j.id,
+        scheduledAt: j.scheduledAt || null,
+        scheduledEnd: j.scheduledEnd || null,
+        status: j.status || "Pending",
+        released: !!j.releaseNotified,
+        skipped: !!j.seriesSkipped
+      });
+    }
+    const series = Object.values(byId).map((s) => {
+      s.days.sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+      s.pendingDays = s.days.filter((d) => !d.released && !d.skipped).length;
+      s.description = (jobs.find((j) => j.seriesId === s.seriesId) || {}).description || "";
+      return s;
+    }).sort((a, b) => String(a.days[0]?.scheduledAt).localeCompare(String(b.days[0]?.scheduledAt)));
+    return json({ ok: true, series, canManage: canManage2 }, {}, env, request);
+  }
+  if (path === "/project/series/stop" && method === "POST") {
+    if (!canManage2) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const res = await stopSeries(env, tenantId, String(b.seriesId || ""));
+    return json({ ok: true, ...res }, {}, env, request);
   }
   if (path === "/project/visits" && method === "GET") {
     const row = await getRow(url.searchParams.get("id") || "");
