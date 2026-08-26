@@ -2049,6 +2049,73 @@ day-before / at a set time / afterPrev → `job.release`) — previously missing
 **TODO (next):** scheduler cross-over optimiser — an EM job is 45 min active +
 ~2 h idle (drain-down) + 15 min light check; when two EM sites are close, recommend
 interleaving them (do site B during A's wait, loop back to check A's lights).
+- **EM cert number now read from the PDF CONTENT (authoritative), Aug 2026:** the
+  "set number" is the number printed on the certificate, and the FILENAME is only a
+  proxy — several stored EM certs sit in the wrong store folder, carry a set number
+  that differs from folder code AND filename prefix, or (Gatwick DT `9697`) have no
+  number in the filename at all. So `rebuildEmSets` (POST /sla/emsets) opens the
+  certificate itself wherever the filename number is missing or disagrees with the
+  store code, and reads the footer (`Tysoft EasyCert … Ref: NNNN-YY / NNNN-YY Page:
+  1 of 2`) via **`lib/pdftext.js`** (`pdfExtractText`/`certNumberFromText` — pure
+  DecompressionStream, no PDF library; the trailing CR/LF before `endstream` MUST be
+  trimmed or inflate fails). Fast path unchanged: filename number === store code →
+  no PDF read (~90%). Response carries `pdfReads` + per-mismatch `source`
+  (filename|certificate); Add Job's 🔄 Refresh shows "read N certificates".
+
+## Portal-native EM/PAT certificates (routes/certs.js + lib/certpdf.js + cert-form.js + cert-review.html — Aug 2026)
+The portal now PRODUCES its own EM (Emergency Lighting) and PAT (Portable Appliance)
+certificates — no Tysoft, no import. Modelled on the Firestopping RIA. Flow:
+**engineer fills the certificate on the job (it looks final to them), signs, and
+completes → saved as a DRAFT for OFFICE REVIEW**, where the office edits every field
+then **Finalise**s: the portal assigns the number, draws the Mostlane PDF and files
+it straight onto the compliance chart (rolling the next-due date).
+- **lib/certpdf.js** `buildCertPdf(record, meta{logo,signature})` — one A4 builder for
+  both types (column spec per type): navy header band + logo, paired Client /
+  Installation cards, contractor strip, extent + comments, paginated striped results
+  table (EM: No·Normal·LED·Emergency·Battery·Comments; PAT: No·Appliance·Location·
+  Class·Visual·Earth·Insulation·Result·Comments — labels ASCII-safe, no Ω glyph), and
+  a signed declaration. Vector-drawn on lib/pdf.js (never a screenshot); page count
+  incl. a possible sig-only page computed up front so footers are right.
+- **routes/certs.js** (mounted `/certs`): table **certificates** (self-migrating;
+  id/type/status draft|review|final/job_id/site_code/cert_number/data JSON/engineer/
+  timestamps/r2_final_key). Config app_config `cert:config:<tid>` = contractor block +
+  per-type extent/comments/declaration defaults (Mostlane seeded). Endpoints:
+  **GET /certs/for-job?jobId=&type=** (load existing or SEED from the job's site +
+  config + prefill), **POST /certs/save** (upsert draft; engineer owns their draft,
+  office any), **POST /certs/submit** (engineer → status review + push the office
+  queue), **GET /certs/pdf?id=** (render), **GET /certs/one?id=**, **GET /certs/review**
+  (office queue, Compliance|SLAAdmin|FullAccess), **GET /certs/list?code=&type=**,
+  **GET /certs/number?code=&type=** (suggested next), **POST /certs/finalise**
+  {id,certNumber?,docDate?} (issue → `compliance.js fileCertificatePdf()` files the PDF
+  + bumps due; notifies the engineer), **POST /certs/upload** (office files a
+  replacement PDF instead of generating), **POST /certs/delete**, config GET/POST.
+  Signature stored as a data-URL JPEG inside data JSON (embedded in the PDF).
+- **Numbering:** EM = the store's EM set number (from `sla:emsets`) + `-YY`; PAT =
+  rolling sequence (max historical +1, tracked in `cert:patseq:<tid>`) + `-YY`. Both
+  office-overridable at finalise.
+- **Prefill (the clever bit):** `/certs/for-job` reads the site's most recent stored
+  EM/PAT cert PDF (pdfExtractText) and carries the **luminaire/appliance LIST** forward
+  (`parseEmRows`/`parsePatRows`) so a monthly re-test is a re-confirm not a retype;
+  client/installation come from the portal site, contractor + boilerplate from config.
+- **Filing:** `compliance.js` exports **`fileCertificatePdf(env,tid,{scheme,code,type,
+  bytes,filename,docDate,bump,source,label})`** — the exact R2 put + compliance_files
+  insert + bumpDue path the manual upload uses, so a finalised cert lands on the chart
+  exactly like a dropped file (scheme `coop`, source `cert:<id>`).
+- **Front-end:** **cert-form.js** = shared `window.MLCert.mount(el,{jobId,type,mode:
+  engineer|office,api,token,certId?,patchComplete,onComplete,hideComplete})` — header
+  fields, add/remove rows with Pass/Fail/N-A tap toggles + "✔ All Pass", signature pad,
+  autosave, ⬇ Preview PDF, engineer "✅ Complete & submit". **engineer-job.html** mounts
+  it for EM/PAT jobs (`job.emTest||job.pat`, like firestop — status grid trimmed to
+  Travelling/In Progress, standard photo/note/sig replaced); a **combined EM+PAT job
+  shows two tabs + one "Complete & submit both"** (each is its own cert row per type).
+  `completionMissing` returns [] for EM/PAT jobs (the cert is the completion).
+  **cert-review.html** (📄 Certificates button on sla-main, Compliance|SLAAdmin|
+  FullAccess) = the office queue: open a submitted/draft cert → edit in MLCert office
+  mode → set number + date → **🏁 Finalise & file to compliance** (or ⬆ upload a
+  replacement, or 🗑 delete). Engineer is pushed when the cert is issued.
+- Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
+  navy). **TODO/next:** verify PAT column mapping against a real PAT cert (only EM was
+  sampled); optional hub widget for the pending-review count; Help guide.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

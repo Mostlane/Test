@@ -215,6 +215,27 @@ async function bumpDue(env, tid, scheme, code, type, dateStr) {
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 const safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_").slice(0, 120);
+
+// File a certificate PDF onto the compliance chart — the exact R2 + DB + bumpDue
+// path the manual /compliance/file upload uses, exposed so the portal-native
+// certificate module (routes/certs.js) can finalise a cert into the same place.
+// Returns { id, key }. type is canonicalised; code is padded like a store code.
+export async function fileCertificatePdf(env, tid, { scheme = "coop", code, type, bytes, filename, docDate, bump = true, source = null, label = null }) {
+  const sc = String(scheme || "coop");
+  const cd = pad4(code);
+  const ty = canonType(type);
+  if (!cd || !bytes) throw new Error("code and bytes required");
+  const year = docDate ? String(docDate).slice(0, 4) : null;
+  const fn = safeName(filename || (ty + ".pdf"));
+  const key = `compliance/${sc}/${cd}/${ty}/${year || "_"}/${Date.now()}-${fn}`;
+  await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+  const at = new Date().toISOString();
+  const res = await env.DB.prepare(
+    "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+  ).bind(tid, sc, cd, ty, year, key, fn, label, bytes.length || bytes.byteLength || null, docDate || null, source, at).run();
+  if (bump && docDate) { try { await bumpDue(env, tid, sc, cd, ty, docDate); } catch {} }
+  return { id: res.meta ? res.meta.last_row_id : null, key };
+}
 // A store's compliance code is a numeric store number (4-digit, zero-padded).
 // A code carrying a LETTER (e.g. a project "P0002") is NOT a Co-op store — return
 // "" so it never resolves onto a real store's certs (stripping the letter would
