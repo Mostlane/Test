@@ -606,9 +606,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   **Per-engineer FALLBACK jobs — "at least a job for tomorrow" (Aug 2026):** so an
   engineer always knows where they're heading next day. Config in app_config
   **`sla:fallbacks:<tid>`** = `{enabled, startHour, byEngineer:{<normId>:{siteName,
-  postcode,description,durationMinutes,active}}}` via **GET/POST /sla/fallbacks**
-  (SLA admin); managed on **sla-scheduler.html → 🛟 Fallbacks** (master enable +
-  start time + a row per FIELD engineer). Cron **`sla.sweepFallbacks`** (every
+  postcode,description,durationMinutes,active, projectId,projectName,projectNumber}}}`
+  via **GET/POST /sla/fallbacks** (SLA admin; GET also returns live `projects`);
+  managed on **sla-scheduler.html → 🛟 Fallbacks** (master enable + start time + a
+  row per FIELD engineer). **A fallback can be a LIVE PROJECT** (per-row picker) —
+  the assigned job is stamped with `projectId` + the project's Pxxxx site
+  (address/postcode/coords) so it costs + shows like a project job; or a generic
+  site+task (falls back to generic if the project is no longer live). Cron
+  **`sla.sweepFallbacks`** (every
   5-min tick, self-gates on Europe/London): **warns** the office (owner +
   FullAccess/SLAAdmin push) at **15:30 & 18:00** about field engineers with no job
   for the **next working day**, and at **19:00 auto-assigns** each still-empty
