@@ -463,16 +463,21 @@
       // currently the van-score banner. It's fixed, so without reserving space
       // it simply covered the first row of the page (Jamie saw the Van Check /
       // Holiday tiles sliced in half). Whatever sets it must clear it again.
+      // padding-top is !important: portal-config runs as a head script and
+      // injects this BEFORE a page's own <style> is parsed, so a page that
+      // resets `html{padding:0}` (e.g. po-office) would otherwise zero the inset
+      // and its header/back button would sit UNDER the fixed cap. !important
+      // keeps the cap's inset winning regardless of a page's own html padding.
       "html{ box-sizing:border-box; min-height:100vh;"
-      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)); }"
+      + "  padding-top:calc(env(safe-area-inset-top, 0px) + var(--ml-topbar, 0px)) !important; }"
       // `vh` is measured against the FULL screen and ignores the padding above,
       // so a page with `body{min-height:100vh}` (route.html and friends) ends up
       // exactly one inset too tall — the blank strip again. Re-base it. Pages
       // with no min-height simply gain a full-height body, which is harmless
       // and makes short pages fill the screen rather than half-paint it.
       + "body{ min-height:calc(100vh - env(safe-area-inset-top, 0px) - var(--ml-topbar, 0px)); }"
-      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px);"
-      + "  padding-right:env(safe-area-inset-right, 0px); } }"
+      + "@media (orientation:landscape){ html{ padding-left:env(safe-area-inset-left, 0px) !important;"
+      + "  padding-right:env(safe-area-inset-right, 0px) !important; } }"
       + "#mlStatusCap{ position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px);"
       + "  background:#003468; z-index:2147483000; pointer-events:none; }"
 ;
