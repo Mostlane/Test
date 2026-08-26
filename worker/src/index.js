@@ -54,6 +54,7 @@ import * as health from "./routes/health.js";      // DONE  (self-monitoring wat
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
 import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
 import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reconcile portal jobs/archive to Workever, browser-driven)
+import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -119,6 +120,8 @@ const ROUTES = [
   ["*", "/projects",   projects.handle],   // Projects: list (longest prefix wins over /project)
   ["*", "/project",    projects.handle],   // Projects: create/get/update/link/todo/docs
   ["*", "/health/",    health.handle],     // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
+  ["*", "/comms",      statuscomms.handle], // customer status-email config + reschedule inbox (admin)
+  ["*", "/customer",   statuscomms.handle], // public: customer reschedule flow (token-verified)
   ["*", "/tuya",       tuya.handle],        // yard gate: Tuya Cloud open command + gate-open state
   ["*", "/fra",        fra.handle],          // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
@@ -453,6 +456,9 @@ const PUBLIC_ROUTES = [
   ["GET", "/project/doc"],
   // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
   ["GET", "/fra/quote"],
+  // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
+  ["POST", "/customer/job"],
+  ["POST", "/customer/reschedule"],
 ];
 
 function isPublic(method, pathname) {
