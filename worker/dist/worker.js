@@ -7611,6 +7611,16 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
   const priority = isProjJob ? "" : body.priority || existing?.priority || "Priority 4";
   const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
+  let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
+  const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
+  if (!siteNameResolved && siteCodeVal) {
+    try {
+      const srow = await tenantDB(env, tenantId).prepare("SELECT site_name FROM sites WHERE site_number=? LIMIT 1").bind(siteCodeVal).first();
+      const nm = srow && String(srow.site_name || "").trim();
+      if (nm && nm !== siteCodeVal) siteNameResolved = nm;
+    } catch {
+    }
+  }
   const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
@@ -7637,9 +7647,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     if (idIsNumSite && !/^\d/.test(String(helpdeskRef))) {
       helpdeskRef = id;
     } else if (!helpdeskRef || UUID_RE.test(String(helpdeskRef)) || helpdeskRef === id && !idIsNumSite) {
-      const siteNm = String(body.siteName || existing?.siteName || "").trim();
-      const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
-      helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
+      helpdeskRef = siteNameResolved || siteCodeVal || id;
     }
   }
   const job = {
@@ -7657,7 +7665,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // carried so the siteCode filter works
     // Full site details captured at creation — shown to engineers (address,
     // phone, directions) without a lookup. Previously these were dropped.
-    siteName: body.siteName || existing?.siteName || "",
+    siteName: siteNameResolved || "",
     address: body.address || existing?.address || "",
     telephone: body.telephone || existing?.telephone || "",
     postcode: body.postcode || existing?.postcode || "",
@@ -7786,7 +7794,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       job.helpdeskRef = idStr;
     } else if (!ref || uuidRe.test(ref) || ref === idStr && !idIsNumSite) {
       const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
-      const healed = jobIsProject(job) ? siteCd || siteNm : siteNm || siteCd;
+      const healed = siteNm || siteCd;
       if (healed) job.helpdeskRef = healed;
     }
   }
@@ -26281,6 +26289,32 @@ function leadRef(s) {
 function normStatus(s) {
   return String(s || "").trim().toLowerCase();
 }
+function normNm(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+function splitNames(s) {
+  return String(s || "").split(/[,;/]|(?: and )/i).map((x) => x.trim()).filter(Boolean);
+}
+async function loadUserMap(db, tid) {
+  const rows = (await db.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all()).results || [];
+  const map = {};
+  for (const u of rows) {
+    if (!u.username) continue;
+    map[normNm(u.username)] = u.username;
+    const full = normNm((u.first_name || "") + " " + (u.last_name || ""));
+    if (full) map[full] = u.username;
+  }
+  return map;
+}
+function matchEngineers(map, label) {
+  if (!label || /^\s*(not allocated|unallocated|unassigned)\s*$/i.test(label)) return [];
+  const out = [];
+  for (const p of splitNames(label)) {
+    const u = map[normNm(p)];
+    if (u && !out.includes(u)) out.push(u);
+  }
+  return out;
+}
 function mapStatus(map, name) {
   const hit = map[normStatus(name)];
   if (hit && hit.portal) return { portal: hit.portal, done: !!hit.done };
@@ -26409,6 +26443,13 @@ async function handle35(request, env, ctx, url, sess) {
       }
       return out.sort((x, y) => String(x.at).localeCompare(String(y.at)));
     };
+    const matchEngList = async (names) => {
+      if (!Array.isArray(names) || !names.length) return [];
+      const um = await loadUserMap(db, tid);
+      const out = [];
+      for (const nm of names) for (const u of matchEngineers(um, nm)) if (!out.includes(u)) out.push(u);
+      return out;
+    };
     if (b.target === "live" && b.jobId) {
       const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, b.jobId).first();
       if (!row) return json4({ ok: false });
@@ -26419,6 +26460,10 @@ async function handle35(request, env, ctx, url, sess) {
       }
       const kept = (Array.isArray(d.statusHistory) ? d.statusHistory : []).filter((h) => h && h.src !== "sync-pending" && h.by !== "Workever sync");
       d.statusHistory = dedupSort(kept.concat(history));
+      if (!(Array.isArray(d.assignedEngineers) && d.assignedEngineers.filter(Boolean).length)) {
+        const eng = await matchEngList(b.engineers);
+        if (eng.length) d.assignedEngineers = eng;
+      }
       if (completedAt) d.closedAt = completedAt;
       if (completedAt) await db.prepare("UPDATE sla_jobs SET data=?, closed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.jobId).run();
       else await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.jobId).run();
@@ -26433,6 +26478,10 @@ async function handle35(request, env, ctx, url, sess) {
       } catch {
       }
       d.statusHistory = dedupSort(history);
+      if (!(Array.isArray(d.assignedEngineers) && d.assignedEngineers.filter(Boolean).length)) {
+        const eng = await matchEngList(b.engineers);
+        if (eng.length) d.assignedEngineers = eng;
+      }
       if (completedAt) await db.prepare("UPDATE sla_jobs_archive SET data=?, completed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.mos).run();
       else await db.prepare("UPDATE sla_jobs_archive SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.mos).run();
       return json4({ ok: true });
@@ -26445,6 +26494,7 @@ async function handle35(request, env, ctx, url, sess) {
     const jobs = Array.isArray(b.jobs) ? b.jobs : [];
     if (!jobs.length) return json4({ ok: true, counts: {}, needPhotos: [], needDetail: [] });
     const map = await loadMap2(db);
+    const userMap = await loadUserMap(db, tid);
     const nowIso = (/* @__PURE__ */ new Date()).toISOString();
     const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
     const liveByRef = {};
@@ -26482,6 +26532,10 @@ async function handle35(request, env, ctx, url, sess) {
             if (!Array.isArray(data2.statusHistory)) data2.statusHistory = [];
             data2.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync", src: "sync-pending" });
             data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
+            const engs = matchEngineers(userMap, j.assignedLabel);
+            if (engs.length && !(Array.isArray(data2.assignedEngineers) && data2.assignedEngineers.filter(Boolean).length)) {
+              data2.assignedEngineers = engs;
+            }
             await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso, nowIso, JSON.stringify(data2), tid, live.id).run();
             counts.updatedLive++;
             addLog("update-live", j, live.status, m.portal, j.name, live.id);
@@ -26509,6 +26563,7 @@ async function handle35(request, env, ctx, url, sess) {
           continue;
         }
         const siteName = String(j.siteName || j.customerName || "").trim();
+        const engsA = matchEngineers(userMap, j.assignedLabel);
         const data = {
           source: "workever",
           mos,
@@ -26521,13 +26576,16 @@ async function handle35(request, env, ctx, url, sess) {
           address: j.address || {},
           workeverStatus: j.status || "",
           syncedAt: nowIso,
-          runId
+          runId,
+          assignedEngineers: engsA,
+          assignedLabel: j.assignedLabel || ""
         };
-        const search = `${mos} ${j.name || ""} ${siteName} ${j.postcode || ""} ${j.customerName || ""}`.toLowerCase().slice(0, 4e3);
+        const assignedTo = engsA.length ? engsA.join(", ") : j.assignedLabel && !/not allocated/i.test(j.assignedLabel) ? j.assignedLabel : "";
+        const search = `${mos} ${j.name || ""} ${siteName} ${j.postcode || ""} ${j.customerName || ""} ${engsA.join(" ")}`.toLowerCase().slice(0, 4e3);
         await db.prepare(`INSERT INTO sla_jobs_archive
           (tenant_id, id, ref, status, assigned_to, site_name, postcode, created_at, completed_at, search, data, site_code)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET status=excluded.status`).bind(tid, mos, mos, m.portal, j.assignedLabel || "", siteName, j.postcode || "", null, null, search, JSON.stringify(data), String(j.siteCode || "")).run();
+          ON CONFLICT(id) DO UPDATE SET status=excluded.status`).bind(tid, mos, mos, m.portal, assignedTo, siteName, j.postcode || "", null, null, search, JSON.stringify(data), String(j.siteCode || "")).run();
         counts.importedArchive++;
         addLog("import-archive", j, "", m.portal, j.name);
         needDetail.push(mos);
