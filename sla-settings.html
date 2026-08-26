@@ -417,7 +417,7 @@ function buildRunner(){
   console.log("%clearned "+Object.keys(sName).length+" statuses","color:#0a0");
   const first=await wg("/api/v1/jobs-list?page=1&size=50"); pages=first?first.totalPages:0;
   const T={updatedLive:0,importedArchive:0,updatedArchive:0,skipped:0,errors:0,files:0};
-  let batch=[], batchU={}, ABORT=null;
+  let batch=[], batchU={}, ABORT=null, INGEST_FAIL=0;
   // Harvest a job's documents (photos/signatures/PDFs) and hand the public S3
   // URLs to the portal's importer (idempotent — files already in R2 are skipped).
   const harvestPhotos=async(np)=>{
@@ -432,7 +432,8 @@ function buildRunner(){
     }
     return out;
   };
-  const flush=async()=>{ if(!batch.length)return; const res=await post("/sla/workever/ingest",{runId:RUN,jobs:batch});
+  const flush=async()=>{ if(!batch.length)return; let res=null; try{ res=await post("/sla/workever/ingest",{runId:RUN,jobs:batch}); }catch(e){ res=null; }
+    if(!res || !res.counts){ INGEST_FAIL++; if(INGEST_FAIL>=3){ ABORT={reason:"the portal rejected the sync (server error) "+((res&&res.error)?("— "+res.error):"— check the red 500 lines above"), mos:[], sample:[]}; } batch=[]; batchU={}; return; } else INGEST_FAIL=0;
     if(res&&res.counts) for(const k in T) if(k!=="files") T[k]+=res.counts[k]||0;
     if(res&&res.needDetail&&res.needDetail.length){ const items=[]; for(const mos of res.needDetail){ const jid=batchU[mos]; if(!jid)continue; const d=await wg("/api/v1/jobs/"+jid); if(d&&d.description) items.push({mos,description:d.description}); } if(items.length) await post("/sla/workever/enrich",{items}); }
     if(res&&res.needPhotos&&res.needPhotos.length){
