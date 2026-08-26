@@ -21473,6 +21473,8 @@ async function handle27(request, env, ctx, url, sess) {
     if (path.startsWith("/api/subcontractors/") && method === "DELETE") return jr7(await deleteSubcontractor(db, path.split("/").pop()));
     if (path === "/api/trades" && method === "POST") return jr7(await addTrade(db, await bodyOf()));
     if (path.startsWith("/api/trades/") && method === "DELETE") return jr7(await deleteTrade(db, path.split("/").pop()));
+    if (path === "/api/sites/usage" && method === "GET") return jr7(await siteUsage(db));
+    if (path === "/api/sites/merge" && method === "POST") return jr7(await mergeSites(db, await bodyOf()));
     if (path === "/api/sites" && method === "POST") return jr7(await addSite(db, await bodyOf()));
     if (path.startsWith("/api/sites/") && method === "DELETE") return jr7(await deleteSite(db, path.split("/").pop()));
     if (path === "/api/closures" && method === "POST") return jr7(await addClosure(db, await bodyOf()));
@@ -21585,6 +21587,29 @@ async function addSite(db, body) {
 async function deleteSite(db, id) {
   await db.prepare(`UPDATE sites SET active = 0 WHERE id = ?`).bind(id).run();
   return { success: true };
+}
+async function siteUsage(db) {
+  const known = new Set((await db.prepare(`SELECT LOWER(name) AS n FROM sites WHERE active = 1`).all()).results.map((r) => r.n));
+  const rows = (await db.prepare(
+    `SELECT site AS name, COUNT(*) AS pos FROM po_log
+       WHERE site IS NOT NULL AND TRIM(site) <> '' GROUP BY site ORDER BY LOWER(site)`
+  ).all()).results;
+  const seen = new Set(rows.map((r) => String(r.name).toLowerCase()));
+  const empties = (await db.prepare(`SELECT name FROM sites WHERE active = 1 ORDER BY name`).all()).results.filter((r) => !seen.has(String(r.name).toLowerCase())).map((r) => ({ name: r.name, pos: 0 }));
+  return rows.concat(empties).map((r) => ({ name: r.name, pos: r.pos, known: known.has(String(r.name).toLowerCase()) })).sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+async function mergeSites(db, body) {
+  const into = (body && body.into || "").trim();
+  const from = Array.isArray(body && body.from) ? body.from.map((s) => String(s || "").trim()).filter(Boolean) : [];
+  if (!into) return { error: "Pick the site to merge into" };
+  const sources = from.filter((s) => s.toLowerCase() !== into.toLowerCase());
+  if (!sources.length) return { error: "Pick at least one different site to merge in" };
+  await db.prepare(`INSERT INTO sites (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET active = 1`).bind(into).run();
+  const ph = sources.map(() => "?").join(",");
+  const upd = await db.prepare(`UPDATE po_log SET site = ? WHERE site IN (${ph})`).bind(into, ...sources).run();
+  const moved = upd && upd.meta && upd.meta.changes || 0;
+  await db.prepare(`UPDATE sites SET active = 0 WHERE name IN (${ph})`).bind(...sources).run();
+  return { success: true, into, merged: sources.length, posMoved: moved };
 }
 async function searchJobs(db, params) {
   const q = (params.get("q") || "").trim();
@@ -21746,6 +21771,10 @@ async function issuePO(db, body) {
     if (!body.description || !body.description.trim()) return { error: "Description is required" };
     const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
     if (!supplierCheck) return { error: "Supplier must be picked from the list" };
+    if (hasSite && !(body.vehicle_reg && body.vehicle_reg.trim())) {
+      const siteCheck = await db.prepare(`SELECT 1 FROM sites WHERE name = ? AND active = 1`).bind(body.site.trim()).first();
+      if (!siteCheck) return { error: "Site must be chosen from the known-sites list. Ask the office to add a new site first." };
+    }
   }
   const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
   let poNumber;

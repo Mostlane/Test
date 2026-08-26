@@ -226,11 +226,25 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
     </div>
     <div id="tab-sites" class="tab-pane" style="display:none">
       <div class="card"><h2>Sites</h2>
-        <p class="muted" style="margin-bottom:12px">Master sites list. Engineers can type free-text on the form, but POs with unmatched sites get flagged for office review. Add new sites here as they come up.</p>
+        <p class="muted" style="margin-bottom:12px">Master sites list. Engineers can <strong>only</strong> raise POs against these known sites — add new ones here as they come up.</p>
         <div id="site-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
       <div class="card"><h3>Add Site</h3>
         <div class="row"><input id="new-site-name" type="text" placeholder="Site name" style="flex:1;min-width:180px"><button class="small" onclick="addSite()">Add</button></div>
+      </div>
+      <div class="card"><h2>Merge duplicate sites</h2>
+        <p class="muted" style="margin-bottom:12px">The same place saved under a few different names splits its job costing. Tick the duplicates, pick the one correct site to keep, and merge — every PO moves onto the kept site and the duplicates are retired. <span class="muted">⚠ marks a name that isn't in the master list.</span></p>
+        <div class="row" style="margin-bottom:10px">
+          <input id="merge-filter" type="text" placeholder="Filter site names…" oninput="renderMerge()" style="flex:1;min-width:180px">
+          <button class="small ghost" onclick="loadMerge()">↻ Refresh</button>
+        </div>
+        <div id="merge-list" style="max-height:340px;overflow:auto;border:1px solid #e3e7ee;border-radius:10px;padding:6px"></div>
+        <div class="row" style="margin-top:12px;align-items:center;flex-wrap:wrap">
+          <label class="muted" style="font-size:13px">Keep this site:</label>
+          <select id="merge-into" style="flex:1;min-width:200px"></select>
+          <button class="small" onclick="doMerge()">Merge ticked → kept site</button>
+        </div>
+        <div id="merge-msg" class="muted" style="margin-top:8px;font-size:13px"></div>
       </div>
     </div>
     <div id="tab-closures" class="tab-pane" style="display:none">
@@ -281,6 +295,7 @@ async function init() {
     safe(loadSubcontractors, 'loadSubcontractors'),
     safe(loadTrades, 'loadTrades'),
     safe(loadSites, 'loadSites'),
+    safe(loadMerge, 'loadMerge'),
     safe(loadClosures, 'loadClosures'),
     safe(loadStatus, 'loadStatus')
   ]);
@@ -422,7 +437,7 @@ async function addTrade() {
 async function removeTrade(id) { await authFetch('/po/api/trades/' + id, { method: 'DELETE' }); loadTrades(); }
 async function loadSites() {
   const sites = await authFetch('/po/api/sites').then(r => r.json());
-  if (!sites.length) { document.getElementById('site-list').innerHTML = '<div class="empty" style="padding:20px;width:100%">No sites added yet. Add the ones you use most often — engineers can still type free-text for one-offs.</div>'; return; }
+  if (!sites.length) { document.getElementById('site-list').innerHTML = '<div class="empty" style="padding:20px;width:100%">No sites added yet. Add the ones engineers raise POs against — they can only pick from this list.</div>'; return; }
   document.getElementById('site-list').innerHTML = sites.map(s => `<div class="chip">${escapeHtml(s.name)} <button onclick='removeSite(${s.id})' title="Remove">✕</button></div>`).join('');
 }
 async function addSite() {
@@ -432,6 +447,56 @@ async function addSite() {
   document.getElementById('new-site-name').value = ''; loadSites();
 }
 async function removeSite(id) { await authFetch('/po/api/sites/' + id, { method: 'DELETE' }); loadSites(); }
+
+// ── Merge duplicate sites ──
+let MERGE_USAGE = [];
+async function loadMerge() {
+  try { MERGE_USAGE = await authFetch('/po/api/sites/usage').then(r => r.json()) || []; }
+  catch (e) { MERGE_USAGE = []; }
+  if (!Array.isArray(MERGE_USAGE)) MERGE_USAGE = [];
+  renderMerge();
+}
+function renderMerge() {
+  const q = (document.getElementById('merge-filter').value || '').trim().toLowerCase();
+  const list = document.getElementById('merge-list');
+  const rows = MERGE_USAGE.filter(r => !q || r.name.toLowerCase().includes(q));
+  if (!rows.length) { list.innerHTML = '<div class="empty" style="padding:16px">No site names yet.</div>'; }
+  else {
+    list.innerHTML = rows.map(r => {
+      const id = 'mg_' + btoa(unescape(encodeURIComponent(r.name))).replace(/[^a-zA-Z0-9]/g, '');
+      const warn = r.known ? '' : ' <span title="Not in the master sites list" style="color:#c0392b">⚠</span>';
+      return `<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-bottom:1px solid #f0f2f6;font-size:14px;cursor:pointer">
+        <input type="checkbox" class="mg-chk" value="${escapeAttr(r.name)}">
+        <span style="flex:1">${escapeHtml(r.name)}${warn}</span>
+        <span class="muted" style="font-size:12px">${r.pos} PO${r.pos===1?'':'s'}</span></label>`;
+    }).join('');
+  }
+  // The "keep" dropdown: prefer known sites, alphabetical.
+  const sel = document.getElementById('merge-into');
+  const prev = sel.value;
+  const opts = MERGE_USAGE.slice().sort((a,b) => (b.known-a.known) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  sel.innerHTML = '<option value="">— pick the site to keep —</option>' +
+    opts.map(r => `<option value="${escapeAttr(r.name)}">${escapeHtml(r.name)}${r.known?'':' (⚠ not in list)'}</option>`).join('');
+  if (prev) sel.value = prev;
+}
+async function doMerge() {
+  const into = document.getElementById('merge-into').value;
+  const from = Array.from(document.querySelectorAll('.mg-chk:checked')).map(c => c.value);
+  const msg = document.getElementById('merge-msg');
+  if (!into) { msg.textContent = 'Pick the site to keep first.'; return; }
+  const sources = from.filter(n => n.toLowerCase() !== into.toLowerCase());
+  if (!sources.length) { msg.textContent = 'Tick at least one different site to merge in.'; return; }
+  const ok = window.MLUI ? await MLUI.confirm('Merge ' + sources.length + ' site name' + (sources.length===1?'':'s') + ' into “' + into + '”? Every PO on those names moves onto the kept site.', {title:'Merge sites', okLabel:'Merge', danger:true}) : confirm('Merge ' + sources.length + ' site(s) into ' + into + '?');
+  if (!ok) return;
+  msg.textContent = 'Merging…';
+  try {
+    const res = await authFetch('/po/api/sites/merge', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ into, from: sources }) }).then(r => r.json());
+    if (res.error) { msg.textContent = res.error; return; }
+    msg.textContent = `Merged ${res.merged} site${res.merged===1?'':'s'} into “${res.into}” · ${res.posMoved} PO${res.posMoved===1?'':'s'} moved.`;
+    await Promise.all([loadSites(), loadMerge()]);
+  } catch (e) { msg.textContent = 'Error: ' + e.message; }
+}
+function escapeAttr(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 async function loadClosures() {
   const cls = await authFetch('/po/api/closures').then(r => r.json());
   if (!cls.length) { document.getElementById('clo-tbody').innerHTML = '<tr><td colspan="3"><div class="empty">No closures added</div></td></tr>'; return; }

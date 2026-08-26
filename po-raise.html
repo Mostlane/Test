@@ -293,7 +293,7 @@ function filterSites() {
     v.reg.toLowerCase().replace(/\s+/g, '').includes(norm) || (v.desc || '').toLowerCase().includes(q)
   ).slice(0, 6);
   if (!sites.length && !vehicles.length) {
-    dd.innerHTML = '<div class="ac-empty">No match — your entry will be saved as a new site for review</div>';
+    dd.innerHTML = '<div class="ac-empty">No match — sites must be picked from the list. Ask the office to add a new site first.</div>';
     dd.style.display = 'block';
     return;
   }
@@ -369,6 +369,12 @@ async function submitPO(btn) {
   if (!description) { alert('Description is required'); return; }
   const valid = SUPPLIERS.some(s => s.name === supplier);
   if (!valid) { alert('Please pick a supplier from the dropdown list'); return; }
+  // A site must be one of the known sites (or a company vehicle) — no free-text
+  // new sites, so job costing stays on one clean site name.
+  const vehicleReg = (document.getElementById('vehicle_reg') || {}).value || '';
+  if (site && !vehicleReg && !SITES.some(s => s.name === site)) {
+    alert('Site must be picked from the known-sites list. Ask the office to add a new site first.'); return;
+  }
   submittingEngineerPO = true;
   if (btn) { btn.disabled = true; btn.textContent = 'Issuing...'; }
   try {
