@@ -206,8 +206,8 @@ export function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line}">
-        <tr><td style="background:${navy};padding:20px 28px">
-          <img src="${esc(logo)}" alt="Mostlane" height="34" style="height:34px;display:block;border:0" />
+        <tr><td align="center" style="background:${navy};padding:26px 28px">
+          <img src="${esc(logo)}" alt="Mostlane" height="56" style="height:56px;display:block;border:0;margin:0 auto" />
         </td></tr>
         <tr><td style="padding:28px 28px 8px">
           <div style="font-size:20px;font-weight:700;color:${ink};margin-bottom:8px">${esc(fill(tpl.subject, v))}</div>
