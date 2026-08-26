@@ -84,7 +84,12 @@
   .mlc details.mlc-fold>summary::after{content:"▾";margin-left:auto;color:#94a3b8;font-weight:400;}
   .mlc details.mlc-fold[open]>summary::after{content:"▴";}
   .mlc details.mlc-fold .cc-body{padding:0 12px 12px;}
-  .mlc .cc.sticky-actions{position:sticky;bottom:0;z-index:6;box-shadow:0 -3px 12px rgba(10,30,60,.10);border:1px solid #d7e0ea;}`;
+  .mlc .cc.sticky-actions{position:sticky;bottom:0;z-index:6;box-shadow:0 -3px 12px rgba(10,30,60,.10);border:1px solid #d7e0ea;}
+  .mlc .setall{border:1px solid #cdd8e3;border-radius:10px;padding:10px;margin-top:8px;background:#f8fafc;}
+  .mlc .setall .sr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #eef2f6;}
+  .mlc .setall .sr:first-of-type{border-top:none;}
+  .mlc .setall .sr .lb{min-width:82px;font-weight:700;font-size:12px;color:#475569;}
+  .mlc .setall select,.mlc .setall input{padding:6px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;font-family:inherit;}`;
 
   function shrinkSig(canvas) {
     // flatten onto white so it embeds as a baseline JPEG (PDF embeds JPEG)
@@ -137,9 +142,25 @@
         + (type === "pat" ? "🔌 Appliances tested" : "💡 Emergency lighting tests")
         + ' <span class="cnt" id="mlcCnt"></span></div>';
       h += '<div class="mlrows" id="mlcRows"></div>';
-      if (editable) h += '<div class="toolbar"><button class="btn ghost sm" data-act="add">＋ Add ' + (type === "pat" ? "appliance" : "light") + '</button><button class="btn ghost sm" data-act="add5">＋ Add 5</button>'
-        + '<button class="btn ghost sm" data-act="allpass">✔ Mark all Pass</button>'
-        + '<button class="btn ghost sm" data-act="pull">↻ Pull last certificate</button></div>';
+      if (editable) {
+        h += '<div class="toolbar"><button class="btn ghost sm" data-act="add">＋ Add ' + (type === "pat" ? "appliance" : "light") + '</button><button class="btn ghost sm" data-act="add5">＋ Add 5</button>'
+          + '<button class="btn ghost sm" data-act="allpass">✔ All Pass</button>'
+          + '<button class="btn ghost sm" data-act="setall">⚙ Set all…</button>'
+          + '<button class="btn ghost sm" data-act="pull">↻ Pull last</button></div>';
+        // Bulk-set panel — apply one value to every item (all Class II, all Pass…)
+        h += '<div class="setall" id="mlcSetAll" style="display:none"><div class="muted" style="margin-bottom:4px">Apply to every item:</div>';
+        cols.filter(c => c.role === "toggle").forEach(c => {
+          h += '<div class="sr"><span class="lb">' + esc(c.label) + '</span>'
+            + c.toggle.map(o => '<button class="btn ghost sm" data-bulk="' + c.key + '|' + esc(o) + '">' + esc(o) + '</button>').join("") + '</div>';
+        });
+        const inputCols = cols.filter(c => c.role === "input");
+        if (inputCols.length) {
+          h += '<div class="sr"><span class="lb">Value</span><select id="mlcBulkField">'
+            + inputCols.map(c => '<option value="' + c.key + '">' + esc(c.label) + '</option>').join("")
+            + '</select><input type="text" id="mlcBulkVal" placeholder="set to…" style="width:90px"><button class="btn ghost sm" data-act="bulkinput">Set all</button></div>';
+        }
+        h += '</div>';
+      }
       h += '</div>';
 
       // ── Header details — collapsed by default (prefilled, rarely edited on site)
@@ -216,6 +237,7 @@
         h += '</div></div>';
       });
       tb.innerHTML = h;
+      wireRows();
       updateListHead();
     }
     function titleInput(c, v, i) {
@@ -275,10 +297,9 @@
       } catch (e) { setSave("Save failed", true); }
     }
 
-    function wire() {
-      container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; queueSave(); }));
-      container.querySelectorAll("[data-b]").forEach(el => el.addEventListener("input", () => { const [k, f] = el.dataset.b.split("."); (rec[k] = rec[k] || {})[f] = el.value; queueSave(); }));
-      container.querySelectorAll("[data-c]").forEach(el => el.addEventListener("input", () => { rec.contractor[el.dataset.c] = el.value; queueSave(); }));
+    // Row-level handlers — re-bound every time the rows re-render (renderRows
+    // calls this), so the toolbar/header handlers in wire() bind exactly once.
+    function wireRows() {
       container.querySelectorAll("[data-cell]").forEach(el => el.addEventListener("input", () => { const i = +el.dataset.i; rec.rows[i] = rec.rows[i] || {}; rec.rows[i][el.dataset.cell] = el.value; queueSave(); }));
       container.querySelectorAll("[data-tg] button").forEach(btn => btn.addEventListener("click", () => {
         const tg = btn.closest("[data-tg]"); const i = +tg.dataset.i; const key = tg.dataset.tg;
@@ -290,10 +311,18 @@
         updateListHead();
         queueSave();
       }));
-      container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); wire(); queueSave(); }));
+      container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); queueSave(); }));
+    }
+    function wire() {
+      container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; queueSave(); }));
+      container.querySelectorAll("[data-b]").forEach(el => el.addEventListener("input", () => { const [k, f] = el.dataset.b.split("."); (rec[k] = rec[k] || {})[f] = el.value; queueSave(); }));
+      container.querySelectorAll("[data-c]").forEach(el => el.addEventListener("input", () => { rec.contractor[el.dataset.c] = el.value; queueSave(); }));
       const tb = container.querySelector('[data-act="add"]'); if (tb) tb.addEventListener("click", () => { addRows(1); });
       const t5 = container.querySelector('[data-act="add5"]'); if (t5) t5.addEventListener("click", () => { addRows(5); });
       const ap = container.querySelector('[data-act="allpass"]'); if (ap) ap.addEventListener("click", allPass);
+      const sa = container.querySelector('[data-act="setall"]'); if (sa) sa.addEventListener("click", () => { const p = container.querySelector("#mlcSetAll"); if (p) p.style.display = p.style.display === "none" ? "block" : "none"; });
+      container.querySelectorAll("[data-bulk]").forEach(btn => btn.addEventListener("click", () => { const [k, v] = btn.dataset.bulk.split("|"); bulkSet(k, v); }));
+      const bi = container.querySelector('[data-act="bulkinput"]'); if (bi) bi.addEventListener("click", () => { const f = container.querySelector("#mlcBulkField").value; const v = container.querySelector("#mlcBulkVal").value.trim(); if (f) bulkSet(f, v); });
       const pl = container.querySelector('[data-act="pull"]'); if (pl) pl.addEventListener("click", pullPrevious);
       const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
       const pdf = container.querySelector("#mlcPdf"); if (pdf) pdf.addEventListener("click", async () => {
@@ -316,11 +345,18 @@
     function addRows(n) {
       const def = type === "em" ? { normal: "Pass", led: "Pass", emergency: "Pass", battery: 180, comments: "" } : { appliance: "", location: "", cls: "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: "" };
       for (let k = 0; k < n; k++) rec.rows.push({ ...def });
-      renderRows(); wire(); queueSave();
+      renderRows(); queueSave();
     }
     function allPass() {
       rec.rows.forEach(r => { if (type === "em") { r.normal = "Pass"; r.led = "Pass"; r.emergency = "Pass"; if (!r.battery) r.battery = 180; } else { r.visual = "Pass"; r.result = "Pass"; } });
-      renderRows(); wire(); queueSave();
+      renderRows(); queueSave();
+    }
+    // Bulk-set ONE field on every row (e.g. all Class II, all Visual Pass, all
+    // battery 180). One place, no clutter — the "⚙ Set all…" panel.
+    function bulkSet(key, val) {
+      if (!key) return;
+      rec.rows.forEach(r => { r[key] = val; });
+      renderRows(); queueSave();
     }
     // Re-pull the previous certificate's items (+ blank header fields) on demand —
     // for a draft made before the reader existed, or to refresh from the last cert.
