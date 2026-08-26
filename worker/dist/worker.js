@@ -5263,7 +5263,17 @@ async function handle8(request, env, ctx, url, sess) {
   if (subpath === "/fallbacks") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-    if (method === "GET") return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId) }, headers);
+    if (method === "GET") {
+      let projects = [];
+      try {
+        const { results } = await tenantDB(env, tenantId).prepare(
+          "SELECT id, number, name FROM projects WHERE tenant_id IN ('1.0','1',1) AND status='live' ORDER BY name"
+        ).all();
+        projects = (results || []).map((p) => ({ id: p.id, number: p.number, name: p.name }));
+      } catch {
+      }
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects }, headers);
+    }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
   }
   if (subpath === "/categories") {
@@ -8842,13 +8852,19 @@ async function setFallbacks(env, tenantId, body) {
     const e = src[k] || {};
     const description = String(e.description || "").trim();
     const siteName = String(e.siteName || "").trim();
-    if (!description && !siteName) continue;
+    const projectId = String(e.projectId || "").trim();
+    if (!description && !siteName && !projectId) continue;
     out.byEngineer[normId(k)] = {
       siteName,
       postcode: String(e.postcode || "").trim(),
       description,
       durationMinutes: Math.max(15, Math.min(600, Number(e.durationMinutes) || 480)),
-      active: e.active === false ? false : true
+      active: e.active === false ? false : true,
+      // Optional: default the engineer onto a LIVE PROJECT (the job is stamped
+      // with the project + its site). projectName/Number are cached for the UI.
+      projectId: String(e.projectId || "").trim() || null,
+      projectName: String(e.projectName || "").trim() || null,
+      projectNumber: String(e.projectNumber || "").trim() || null
     };
   }
   const db = tenantDB(env, tenantId);
@@ -8933,23 +8949,72 @@ async function sweepFallbacks(env, tid = 1) {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
-      if (!fb || fb.active === false || !fb.description && !fb.siteName) continue;
-      const payload = {
-        description: fb.description || "Fallback \u2014 " + (fb.siteName || "standby"),
-        siteName: fb.siteName || "",
-        siteCode: "",
-        postcode: fb.postcode || "",
-        assignedEngineers: [u.username],
-        scheduledAt,
-        durationMinutes: fb.durationMinutes || 480,
-        release: { mode: "dayBefore", hour: 17 },
-        fallback: true,
-        requiresRA: false,
-        requiresSignature: false,
-        requiresPhoto: false,
-        requiresNote: false,
-        changedBy: "auto-fallback"
-      };
+      if (!fb || fb.active === false || !fb.description && !fb.siteName && !fb.projectId) continue;
+      let payload = null;
+      if (fb.projectId) {
+        try {
+          const proj = await db.prepare("SELECT id, number, name, data FROM projects WHERE id=? AND status='live'").bind(fb.projectId).first();
+          if (proj) {
+            let pdata = {};
+            try {
+              pdata = JSON.parse(proj.data || "{}");
+            } catch {
+            }
+            let siteRow = null;
+            try {
+              siteRow = await env.DB.prepare("SELECT site_number, site_name, postcode, data FROM sites WHERE client='projects' AND site_number=?").bind(proj.number).first();
+            } catch {
+            }
+            let sdata = {};
+            try {
+              if (siteRow && siteRow.data) sdata = JSON.parse(siteRow.data);
+            } catch {
+            }
+            payload = {
+              description: fb.description || "Fallback \u2014 " + proj.name,
+              projectId: proj.id,
+              siteCode: proj.number,
+              siteName: proj.name,
+              storeType: "projects",
+              address: siteRow && [sdata.address1, sdata.town, sdata.county, siteRow.postcode].filter(Boolean).join(", ") || "",
+              postcode: siteRow && siteRow.postcode || pdata.postcode || fb.postcode || "",
+              lat: pdata.lat != null ? pdata.lat : sdata.lat != null ? sdata.lat : void 0,
+              lon: pdata.lon != null ? pdata.lon : sdata.lng != null ? sdata.lng : sdata.lon != null ? sdata.lon : void 0,
+              assignedEngineers: [u.username],
+              scheduledAt,
+              durationMinutes: fb.durationMinutes || 480,
+              release: { mode: "dayBefore", hour: 17 },
+              fallback: true,
+              requiresRA: false,
+              requiresSignature: false,
+              requiresPhoto: false,
+              requiresNote: false,
+              changedBy: "auto-fallback"
+            };
+          }
+        } catch (e) {
+          console.error("fallback project lookup failed:", e && e.message);
+        }
+      }
+      if (!payload) {
+        if (!fb.description && !fb.siteName) continue;
+        payload = {
+          description: fb.description || "Fallback \u2014 " + (fb.siteName || "standby"),
+          siteName: fb.siteName || "",
+          siteCode: "",
+          postcode: fb.postcode || "",
+          assignedEngineers: [u.username],
+          scheduledAt,
+          durationMinutes: fb.durationMinutes || 480,
+          release: { mode: "dayBefore", hour: 17 },
+          fallback: true,
+          requiresRA: false,
+          requiresSignature: false,
+          requiresPhoto: false,
+          requiresNote: false,
+          changedBy: "auto-fallback"
+        };
+      }
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {
