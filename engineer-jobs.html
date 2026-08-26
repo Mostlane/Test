@@ -867,7 +867,7 @@ async function openDayMap(){
   }
   if(!dayMap){
     dayMap = L.map("dayMap");
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { maxZoom:20, subdomains:"abcd", attribution:"© OpenStreetMap © CARTO" }).addTo(dayMap);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:20, subdomains:"abcd", attribution:"© OpenStreetMap contributors" }).addTo(dayMap);
     dayMapLayer = L.layerGroup().addTo(dayMap);
   }
   // Fetch ALL my jobs once (no date filter), then pin whichever range is selected.

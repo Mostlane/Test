@@ -96,6 +96,16 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ jobs }, headers);
   }
 
+  // Per-engineer FALLBACK jobs — the auto "at least a job for tomorrow" safety
+  // net. A cron warns the office (15:30 & 18:00) and, at 19:00, assigns each
+  // still-empty field engineer their configured fallback for the next working day.
+  if (subpath === "/fallbacks") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (method === "GET") return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId) }, headers);
+    if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson(request)) }, headers);
+  }
+
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
@@ -2208,21 +2218,25 @@ function releaseInstant(job) {
   if (r.mode === "dayBefore") return job.scheduledAt ? londonHourDayBefore(job.scheduledAt, r.hour) : null;
   return null;
 }
-// A project multi-day "series" job is auto-SKIPPED (dropped) if the engineer
-// picked up another job that same day — the safeguard so a forgotten drip day
-// never double-books. Any other active, non-cancelled job for the same engineer
-// on the same day (outside this series) counts as the clash.
+// An AUTO-generated job — a project multi-day "series" day OR a fallback day — is
+// auto-SKIPPED (dropped) if the engineer picked up another REAL job that same day,
+// so it never double-books. For a series job, its own same-series siblings don't
+// count; for a fallback, other fallbacks don't count — anything else that day does.
 function engineerHasOtherJobThatDay(job, allJobs) {
-  if (!job || !job.scheduledAt || !job.seriesId) return false;
+  if (!job || !job.scheduledAt) return false;
+  const isSeries = !!job.seriesId, isFallback = !!job.fallback;
+  if (!isSeries && !isFallback) return false;   // only auto jobs get auto-dropped
   const day = new Date(job.scheduledAt).toISOString().slice(0, 10);
   const engs = new Set(assignedList(job).map(normId));
   if (!engs.size) return false;
   return (allJobs || []).some(o => o.id !== job.id
-    && o.seriesId !== job.seriesId
     && !o.seriesSkipped
     && String(o.status || "").toLowerCase() !== "cancelled"
     && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day
-    && assignedList(o).some(a => engs.has(normId(a))));
+    && assignedList(o).some(a => engs.has(normId(a)))
+    // Don't let an auto job be dropped by another job of its OWN auto set.
+    && !(isSeries && o.seriesId === job.seriesId)
+    && !(isFallback && o.fallback));
 }
 const RELEASE_DONE = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function jobIsFinished(job) { return RELEASE_DONE.has(String(job.status || "").toLowerCase()); }
@@ -2243,9 +2257,9 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
 }
 // Is the job visible to its engineers right now? (allJobs only needed for afterPrev)
 function releaseVisibleNow(job, allJobs) {
-  if (job && job.seriesSkipped) return false;   // dropped project day — never shown
-  // A project series day yields to any other job the engineer has that day.
-  if (job && job.seriesId && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
+  if (job && job.seriesSkipped) return false;   // dropped project day / fallback — never shown
+  // A project series day OR a fallback day yields to any other job that day.
+  if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
   const r = job && job.release;
   if (!r || !r.mode || r.mode === "now") return true;
   if (r.mode === "at" || r.mode === "dayBefore") { const t = releaseInstant(job); return t == null || t <= Date.now(); }
@@ -2343,10 +2357,10 @@ export async function sweepJobReleases(env, tid = 1) {
   for (const j of jobs) {
     if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
     const r = j.release; if (!r || !r.mode || r.mode === "now") continue;
-    // Project-series safeguard: when a drip day's release time has arrived but
-    // the engineer already has another job that day, permanently DROP it (skip)
-    // rather than announcing it — so a forgotten day never double-books.
-    if (j.seriesId && engineerHasOtherJobThatDay(j, jobs)) {
+    // Series / fallback safeguard: when a drip/fallback day's release time has
+    // arrived but the engineer already has another job that day, permanently DROP
+    // it (skip) rather than announcing it — so it never double-books.
+    if ((j.seriesId || j.fallback) && engineerHasOtherJobThatDay(j, jobs)) {
       const t = releaseInstant(j);
       if (t == null || t <= Date.now()) {
         j.seriesSkipped = true;
@@ -2617,6 +2631,8 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // permanently drops a day (clash safeguard). Both preserved across re-saves.
     seriesId: body.seriesId !== undefined ? (String(body.seriesId || "") || null) : (existing?.seriesId ?? null),
     seriesSkipped: body.seriesSkipped !== undefined ? !!body.seriesSkipped : (existing?.seriesSkipped || false),
+    // Auto-assigned fallback "at least a job for tomorrow" day (cron). Preserved.
+    fallback: body.fallback !== undefined ? !!body.fallback : (existing?.fallback || false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -2700,6 +2716,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== undefined) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== undefined) job.seriesSkipped = !!patch.seriesSkipped;
+  if (patch.fallback !== undefined) job.fallback = !!patch.fallback;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
@@ -3972,6 +3989,128 @@ const DEFAULT_WORK_AREAS = [
   "Electrical", "Plumbing", "Fabric / Building", "Firestopping", "Fire alarms",
   "Heating / HVAC", "Joinery / Carpentry", "Decorating", "General maintenance",
 ].map(name => ({ id: areaSlug(name), name, colour: "#64748b" }));
+
+// ── Per-engineer fallback jobs (config + the daily cron that assigns them) ──
+const FALLBACK_KEY = tid => "sla:fallbacks:" + tid;
+async function getFallbacks(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, FALLBACK_KEY(tenantId)).first();
+  let c; try { c = row ? JSON.parse(row.value) : null; } catch { c = null; }
+  if (!c || typeof c !== "object") c = {};
+  return { enabled: !!c.enabled, startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
+    byEngineer: (c.byEngineer && typeof c.byEngineer === "object") ? c.byEngineer : {} };
+}
+async function setFallbacks(env, tenantId, body) {
+  const cur = await getFallbacks(env, tenantId);
+  const out = { enabled: body.enabled !== undefined ? !!body.enabled : cur.enabled,
+    startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
+    byEngineer: {} };
+  const src = (body.byEngineer && typeof body.byEngineer === "object") ? body.byEngineer : cur.byEngineer;
+  for (const k of Object.keys(src || {})) {
+    const e = src[k] || {};
+    const description = String(e.description || "").trim();
+    const siteName = String(e.siteName || "").trim();
+    if (!description && !siteName) continue;   // empty row → drop it
+    out.byEngineer[normId(k)] = {
+      siteName, postcode: String(e.postcode || "").trim(), description,
+      durationMinutes: Math.max(15, Math.min(600, Number(e.durationMinutes) || 480)),
+      active: e.active === false ? false : true,
+    };
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, FALLBACK_KEY(tenantId), JSON.stringify(out)).run();
+  return out;
+}
+// Current Europe/London wall-clock parts.
+function londonNow() {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date()).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
+  const dowMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: dowMap[p.weekday], hour: Number(p.hour === "24" ? 0 : p.hour), minute: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
+}
+// The next WORKING day (Mon–Fri) strictly after `dateStr` (YYYY-MM-DD, London).
+function nextWorkingDay(dateStr) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+// London-local ISO instant for a date + hour (minute 0).
+function londonAtHour(dateStr, hour) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(londonInstant(y, m, d, hour, 0)).toISOString();
+}
+// Cron: warn the office (15:30 & 18:00) about field engineers with no job for the
+// next working day, and at 19:00 assign each still-empty engineer their fallback.
+// Runs every 5-min tick; self-gates on London time, deduped per slot per day.
+export async function sweepFallbacks(env, tid = 1) {
+  const cfg = await getFallbacks(env, tid);
+  if (!cfg.enabled) return;
+  const now = londonNow();
+  if (now.dow === 0 || now.dow === 6) return;          // Sat/Sun: nothing (Fri covered Mon)
+  // Which slot are we in? Match a 5-min tick window on the half/hour.
+  let slot = null;
+  if (now.hour === 15 && now.minute >= 30 && now.minute < 35) slot = "warn1";
+  else if (now.hour === 18 && now.minute < 5) slot = "warn2";
+  else if (now.hour === 19 && now.minute < 5) slot = "assign";
+  if (!slot) return;
+  const target = nextWorkingDay(now.date);             // the day we're checking
+  const db = tenantDB(env, tid);
+  // Dedup: one run per slot per target day.
+  const dedupKey = "sla:fallbackswept:" + tid;
+  let swept = {}; try { const r = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, dedupKey).first(); if (r) swept = JSON.parse(r.value) || {}; } catch {}
+  const stamp = slot + ":" + target;
+  if (swept[stamp]) return;
+
+  // Field engineers (staffType lives in the profile JSON, default "field").
+  const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+  const fieldUsers = (users || []).filter(u => { let st = "field"; try { st = (JSON.parse(u.profile || "{}").staffType) || "field"; } catch {} return st !== "office"; });
+  const jobs = await listJobs(env, tid);
+  const hasJobThatDay = (uname) => jobs.some(j => j.scheduledAt && !j.seriesSkipped
+    && String(j.status || "").toLowerCase() !== "cancelled"
+    && new Date(j.scheduledAt).toISOString().slice(0, 10) === target
+    && assignedList(j).some(a => normId(a) === normId(uname)));
+  // Skip anyone on approved leave that day.
+  let leave = {};
+  try { const { approvedLeaveInRange } = await import("./holidays.js"); leave = await approvedLeaveInRange(env, tid, target, target); } catch {}
+  const onLeave = (uname) => { const m = leave[uname] || leave[normId(uname)]; return !!(m && m[target]); };
+
+  const empties = fieldUsers.filter(u => !hasJobThatDay(u.username) && !onLeave(u.username));
+
+  if (slot === "warn1" || slot === "warn2") {
+    if (empties.length) {
+      const names = empties.map(u => (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username);
+      const dayTxt = new Date(target + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
+      const body = names.join(", ") + " — no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
+      const owner = env.OWNER_USERNAME || "";
+      const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
+      if (owner) await sendToUser(env, tid, owner, payload).catch(() => {});
+      await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], payload, owner || "").catch(() => {});
+    }
+  } else if (slot === "assign") {
+    const scheduledAt = londonAtHour(target, cfg.startHour || 8);
+    for (const u of empties) {
+      const fb = cfg.byEngineer[normId(u.username)];
+      if (!fb || fb.active === false || (!fb.description && !fb.siteName)) continue;
+      const payload = {
+        description: fb.description || ("Fallback — " + (fb.siteName || "standby")),
+        siteName: fb.siteName || "", siteCode: "", postcode: fb.postcode || "",
+        assignedEngineers: [u.username],
+        scheduledAt, durationMinutes: fb.durationMinutes || 480,
+        release: { mode: "dayBefore", hour: 17 }, fallback: true,
+        requiresRA: false, requiresSignature: false, requiresPhoto: false, requiresNote: false,
+        changedBy: "auto-fallback",
+      };
+      try {
+        const job = await createOrUpdateJobFromPayload(env, tid, payload);
+        await reconcileRelease(env, tid, job).catch(() => {});
+      } catch (e) { console.error("fallback assign failed for", u.username, e && e.message); }
+    }
+  }
+  swept[stamp] = true;
+  // Keep the dedup map small — only today's + target's stamps matter.
+  const keep = {}; for (const k of Object.keys(swept)) if (k.endsWith(target)) keep[k] = true;
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, dedupKey, JSON.stringify(keep)).run();
+}
 
 async function getWorkAreas(env, tenantId) {
   const db = tenantDB(env, tenantId);
