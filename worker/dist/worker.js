@@ -6230,6 +6230,87 @@ async function handle8(request, env, ctx, url, sess) {
       }
       return jsonResponse({ files }, headers);
     }
+    if (parts[2] === "audit-photo" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+      }
+      const file = form.get("file");
+      const itemId = String(form.get("itemId") || searchParams.get("itemId") || "");
+      const stage = String(form.get("stage") || searchParams.get("stage") || "done") === "ref" ? "ref" : "done";
+      if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const item = (job.auditItems || []).find((it) => it && it.id === itemId);
+      if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
+      const fn = `${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const key = `jobs/${id}/audit/${itemId}/${fn}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try {
+          await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+        } catch {
+        }
+      }
+      if (stage === "ref") {
+        item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
+        item.refPhotos.push(key);
+      } else {
+        item.donePhoto = key;
+        item.done = true;
+        item.doneAt = (/* @__PURE__ */ new Date()).toISOString();
+        item.doneBy = sess.user && sess.user.username || "";
+      }
+      job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, job);
+      const remaining = (job.auditItems || []).filter((it) => !(it.done && it.donePhoto)).length;
+      return jsonResponse({
+        ok: true,
+        itemId,
+        stage,
+        key,
+        url: r2Url(env, key),
+        thumb: r2Url(env, key + ".thumb"),
+        done: !!item.done,
+        remaining
+      }, headers, 201);
+    }
+    if (parts[2] === "audit-item" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson2(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const item = (job.auditItems || []).find((it) => it && it.id === String(b.itemId || ""));
+      if (!item) return jsonResponse({ error: "Unknown audit item" }, headers, 404);
+      if (b.undo) {
+        if (item.donePhoto) {
+          try {
+            await env.JOB_FILES.delete(item.donePhoto);
+            await env.JOB_FILES.delete(item.donePhoto + ".thumb");
+          } catch {
+          }
+        }
+        item.done = false;
+        item.donePhoto = null;
+        item.doneAt = null;
+        item.doneBy = null;
+      }
+      if (b.removeRef) {
+        item.refPhotos = (item.refPhotos || []).filter((k) => k !== b.removeRef);
+        try {
+          await env.JOB_FILES.delete(b.removeRef);
+          await env.JOB_FILES.delete(b.removeRef + ".thumb");
+        } catch {
+        }
+      }
+      job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, job);
+      return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
+    }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -6376,6 +6457,7 @@ async function handle8(request, env, ctx, url, sess) {
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
+      if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);
       return jsonResponse(d, headers);
     }
     if (method === "DELETE" && !parts[2]) {
@@ -6818,8 +6900,42 @@ function firestopMissing(job) {
   if (!rec.signatureKey) miss.push("the signed declaration");
   return miss;
 }
+function isAuditJob(job) {
+  return !!(job && Array.isArray(job.auditItems) && job.auditItems.length);
+}
+function auditMissing(job) {
+  const items = job && job.auditItems || [];
+  const outstanding = items.filter((it) => !(it && it.done && it.donePhoto));
+  if (!outstanding.length) return [];
+  return [`a completion photo on ${outstanding.length} of ${items.length} audit item${items.length === 1 ? "" : "s"}`];
+}
+function normAuditItems(input, existing) {
+  if (!Array.isArray(input)) return existing?.auditItems;
+  const prev = {};
+  for (const it of existing?.auditItems || []) if (it && it.id) prev[it.id] = it;
+  const out = [];
+  for (const raw of input) {
+    if (!raw) continue;
+    const text = String(raw.text || raw.title || "").trim();
+    if (!text && !(raw.id && prev[raw.id])) continue;
+    const id = String(raw.id || "") || crypto.randomUUID();
+    const was = prev[id] || {};
+    out.push({
+      id,
+      text: (text || was.text || "").slice(0, 2e3),
+      refPhotos: Array.isArray(raw.refPhotos) ? raw.refPhotos.filter(Boolean).slice(0, 12) : Array.isArray(was.refPhotos) ? was.refPhotos : [],
+      done: !!was.done,
+      donePhoto: was.donePhoto || null,
+      doneAt: was.doneAt || null,
+      doneBy: was.doneBy || null
+    });
+    if (out.length >= 200) break;
+  }
+  return out;
+}
 function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
+  if (isAuditJob(job)) return auditMissing(job);
   if (job && job.investigateOnly) return [];
   const miss = [];
   if (noteRequiredFor(job) && String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
@@ -7245,10 +7361,12 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     }
   }
   const durationMinutes = Number.isFinite(Number(body.durationMinutes)) ? Math.max(15, Math.round(Number(body.durationMinutes))) : existing?.durationMinutes ?? null;
-  const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : !isProjJob;
-  const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : !isProjJob;
-  const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : !isProjJob;
-  const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : !isProjJob;
+  const isAudit = Array.isArray(body.auditItems) ? body.auditItems.length > 0 : isAuditJob(existing);
+  const gateDefault = !isProjJob && !isAudit;
+  const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : gateDefault;
+  const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : gateDefault;
+  const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : gateDefault;
+  const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : gateDefault;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let helpdeskRef = body.reference || existing?.helpdeskRef || id;
   if (!body.reference) {
@@ -7292,6 +7410,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the standard completion (photo/note/signature). Preserved across re-saves.
     firestopping: body.firestopping !== void 0 ? !!body.firestopping : existing?.firestopping || false,
     firestop: existing?.firestop,
+    // Site-audit checklist: ONE job, many items, each item needing a completion
+    // photo in the field. Text edits preserve completed items (matched by id).
+    auditItems: normAuditItems(body.auditItems, existing),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
@@ -7379,6 +7500,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresPhoto !== void 0) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
+  if (patch.auditItems !== void 0) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
@@ -8920,6 +9042,15 @@ Which single area id best fits this work?`;
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+function decorateAuditItems(env, items) {
+  if (!Array.isArray(items)) return items;
+  const ph = (k) => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") });
+  return items.map((it) => ({
+    ...it,
+    refPhotoUrls: (it.refPhotos || []).map(ph),
+    donePhotoUrl: it.donePhoto ? ph(it.donePhoto) : null
+  }));
 }
 async function fileUrl(env, url, key) {
   return signedFileUrl(env, url.origin, "/sla/site/doc", key);
