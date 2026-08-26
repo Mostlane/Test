@@ -165,3 +165,7 @@
   Cache-Control: no-cache
 /firestop-form.js
   Cache-Control: no-cache
+/cert-review.html
+  Cache-Control: no-cache
+/cert-form.js
+  Cache-Control: no-cache

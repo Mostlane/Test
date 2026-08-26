@@ -7366,6 +7366,7 @@ function normAuditItems(input, existing) {
 }
 function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
+  if (job && (job.emTest || job.pat)) return [];
   if (isAuditJob(job)) return auditMissing(job);
   if (job && job.investigateOnly) return [];
   const miss = [];

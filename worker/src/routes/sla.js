@@ -2028,6 +2028,9 @@ function completionMissing(job, patch, afterPhotoCount) {
   // Firestopping jobs are completed by the RIA record (seals + photos +
   // signed declaration), NOT the standard note/photo/signature.
   if (job && job.firestopping) return firestopMissing(job);
+  // EM / PAT jobs are completed by the portal certificate (filled + signed on the
+  // job, then submitted for office review) — not the standard note/photo/signature.
+  if (job && (job.emTest || job.pat)) return [];
   // Site-audit jobs complete when every checklist item has its completion photo.
   if (isAuditJob(job)) return auditMissing(job);
   // Investigate-only jobs have relaxed gates — Connor sets Quote/Complete freely.

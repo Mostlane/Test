@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Certificate Review</title>
+  <script src="/portal-config.js?v=18"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <script src="cert-form.js?v=1"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:920px;margin:14px auto 90px;padding:0 12px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+    .btn.green{background:var(--ok);} .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;} .btn.red{background:var(--bad);}
+    .muted{color:#6b7a90;font-size:13px;}
+    .item{display:flex;align-items:center;gap:10px;padding:11px 4px;border-top:1px solid #eef2f6;cursor:pointer;}
+    .item:first-child{border-top:none;}
+    .item .em{font-size:20px;width:26px;text-align:center;}
+    .item .m{flex:1;min-width:0;}
+    .item .m .t{font-weight:600;font-size:14.5px;}
+    .item .m .s{font-size:12.5px;color:#6b7a90;}
+    .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700;}
+    .badge.review{background:#fff3cd;color:#7a5b00;} .badge.draft{background:#e8eef5;color:#3a536e;}
+    .finbar{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:8px;}
+    .finbar label{display:block;font-size:12px;font-weight:600;color:#4a5568;margin-bottom:3px;}
+    .finbar input{padding:9px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;}
+    .msg{font-size:13px;margin-top:8px;} .msg.ok{color:var(--ok);} .msg.err{color:var(--bad);}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
+    <h1>📄 Certificate review</h1>
+  </header>
+  <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const authFetch = (p, o={}) => { o.headers = Object.assign({ "Authorization":"Bearer "+localStorage.getItem("mostlaneToken") }, o.headers||{}); return fetch((p.startsWith("http")?p:API+p), o); };
+    const fmt = t => { try { return new Date(t).toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); } catch { return t||""; } };
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r=>r.json());
+        if (!me.ok || !(me.user.FullAccess==="Yes"||me.user.SLAAdmin==="Yes"||me.user.Compliance==="Yes")) { alert("This page needs SLA Admin, Compliance or Full Access."); location.href="/main.html"; return; }
+      } catch { location.href="/main.html"; return; }
+      loadList();
+    })();
+
+    async function loadList() {
+      g("wrap").innerHTML = '<p class="muted" style="padding:20px;">Loading certificates…</p>';
+      let certs = [];
+      try { const d = await authFetch("/certs/review").then(r=>r.json()); certs = (d && d.certs) || []; }
+      catch { g("wrap").innerHTML = '<p class="msg err" style="padding:20px;">Couldn\'t load the review queue.</p>'; return; }
+      if (!certs.length) { g("wrap").innerHTML = '<div class="card"><p class="muted">Nothing waiting for review. Certificates engineers complete on EM/PAT jobs land here.</p></div>'; return; }
+      let h = '<div class="card"><div class="muted" style="margin-bottom:6px">'+certs.length+' certificate'+(certs.length===1?"":"s")+' — tap to review, edit and issue.</div>';
+      certs.forEach(c => {
+        const em = c.type==="pat" ? "🔌" : "💡";
+        const site = (c.installation && c.installation.name) || c.siteCode || "—";
+        h += '<div class="item" data-id="'+esc(c.id)+'"><div class="em">'+em+'</div><div class="m">'
+          + '<div class="t">'+esc(site)+' <span class="muted">· '+(c.type==="pat"?"PAT":"EM")+'</span></div>'
+          + '<div class="s">'+esc(c.engineer||"")+' · '+fmt(c.submittedAt||c.updatedAt)+' · '+(c.rows?c.rows.length:0)+' item'+((c.rows&&c.rows.length===1)?"":"s")+'</div></div>'
+          + '<span class="badge '+(c.status==="review"?"review":"draft")+'">'+(c.status==="review"?"Ready":"Draft")+'</span></div>';
+      });
+      h += '</div>';
+      g("wrap").innerHTML = h;
+      [].forEach.call(document.querySelectorAll(".item"), el => el.onclick = () => openCert(el.dataset.id));
+    }
+
+    async function openCert(id) {
+      let cert = null;
+      try { const d = await authFetch("/certs/one?id="+encodeURIComponent(id)).then(r=>r.json()); cert = d && d.record; } catch {}
+      if (!cert) { alert("Couldn't open that certificate."); return; }
+      let suggestion = cert.certNumber || "";
+      try { const n = await authFetch("/certs/number?code="+encodeURIComponent(cert.siteCode||"")+"&type="+cert.type).then(r=>r.json()); if (n && n.number && !suggestion) suggestion = n.number; } catch {}
+      const today = new Date().toISOString().slice(0,10);
+      g("wrap").innerHTML =
+        '<div style="margin-bottom:10px"><button class="btn ghost sm" id="backList">‹ All certificates</button></div>'
+        + '<div class="card"><div id="certHost"></div></div>'
+        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">Issue this certificate</h2>'
+        + '<div class="finbar">'
+        + '<div><label>Certificate number</label><input type="text" id="finNum" value="'+esc(suggestion)+'" style="width:150px"></div>'
+        + '<div><label>Certificate date</label><input type="text" id="finDate" value="'+esc(cert.contractor && cert.contractor.date ? cert.contractor.date : today)+'" placeholder="yyyy-mm-dd" style="width:150px"></div>'
+        + '<button class="btn green" id="finBtn">🏁 Finalise &amp; file to compliance</button>'
+        + '<button class="btn ghost sm" id="upBtn">⬆ Upload replacement PDF</button>'
+        + '<button class="btn red sm" id="delBtn">🗑 Delete</button>'
+        + '<input type="file" id="upFile" accept="application/pdf" style="display:none">'
+        + '</div><div class="msg" id="finMsg"></div>'
+        + '<div class="muted" style="margin-top:8px">Finalising draws the Mostlane PDF, files it under this store on the compliance chart and rolls the next-due date.</div></div>';
+      g("backList").onclick = loadList;
+      window.MLCert.mount(g("certHost"), { certId: id, type: cert.type, mode: "office", api: API, token: localStorage.getItem("mostlaneToken") });
+
+      g("finBtn").onclick = async function(){
+        const num = g("finNum").value.trim(); if (!num) { setMsg("Enter a certificate number.", true); return; }
+        this.disabled = true; setMsg("Finalising…");
+        try {
+          const d = await authFetch("/certs/finalise", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, certNumber:num, docDate:g("finDate").value.trim() }) }).then(r=>r.json());
+          if (d && d.ok) { setMsg("Issued as "+d.number+" and filed to compliance ✓"); setTimeout(loadList, 1100); }
+          else { setMsg((d && d.error) || "Couldn't finalise.", true); this.disabled = false; }
+        } catch { setMsg("Couldn't finalise.", true); this.disabled = false; }
+      };
+      g("upBtn").onclick = () => g("upFile").click();
+      g("upFile").onchange = async function(){
+        const f = this.files[0]; if (!f) return;
+        setMsg("Uploading…");
+        const fd = new FormData(); fd.append("id", id); fd.append("file", f); fd.append("certNumber", g("finNum").value.trim()); fd.append("docDate", g("finDate").value.trim());
+        try {
+          const d = await authFetch("/certs/upload", { method:"POST", body: fd }).then(r=>r.json());
+          if (d && d.ok) { setMsg("Uploaded as "+d.number+" and filed ✓"); setTimeout(loadList, 1100); }
+          else setMsg((d && d.error) || "Upload failed.", true);
+        } catch { setMsg("Upload failed.", true); }
+      };
+      g("delBtn").onclick = async function(){
+        const ok = window.MLUI ? await MLUI.confirm("Delete this draft certificate? This can't be undone.", {danger:true, okLabel:"Delete"}) : confirm("Delete this draft certificate?");
+        if (!ok) return;
+        try { const d = await authFetch("/certs/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r=>r.json()); if (d && d.ok) loadList(); else setMsg((d&&d.error)||"Couldn't delete.", true); } catch { setMsg("Couldn't delete.", true); }
+      };
+    }
+    function setMsg(t, err){ const m = g("finMsg"); if (m) { m.textContent = t; m.className = "msg" + (err?" err":" ok"); } }
+  </script>
+</body>
+</html>

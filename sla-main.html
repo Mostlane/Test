@@ -234,6 +234,7 @@
         <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
         <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
+        <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
       </div>
     </header>
@@ -248,6 +249,10 @@
           document.getElementById("archiveLink").style.display = "";
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
+        }
+        // Certificate review queue — office roles that can issue EM/PAT certs.
+        if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance)) {
+          var crl = document.getElementById("certReviewLink"); if (crl) crl.style.display = "";
         }
         var isField = (function(){
           if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();

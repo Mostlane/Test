@@ -10,6 +10,7 @@
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=22"></script>
   <script src="firestop-form.js?v=1"></script>
+  <script src="cert-form.js?v=1"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -349,8 +350,9 @@
       h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
     }
     var fs = !!(job && job.firestopping);
+    var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
-    if(!fs && !au){
+    if(!fs && !au && !cert){
       h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
       h+='<div class="seg" id="seg">'+["Before","During","After"].map(function(s){return '<button class="'+(s===stage?"on":"")+'" data-s="'+s+'">'+s+'</button>';}).join("")+'</div>';
       h+='<div class="hint">Pick when the photo was taken, then add it.</div>';
@@ -362,11 +364,15 @@
         +'<span id="hqStatus" style="font-size:12px;color:#8a97a6;"></span></div>';
       h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
     }
-    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
+    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au||cert)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     if(fs){
       // Firestopping jobs complete via the RIA form (per-seal photos + products +
       // a signed declaration) — the shared component handles it + the download.
       h+='<div class="card"><div id="firestopHost"></div></div>';
+    } else if(cert){
+      // EM / PAT jobs complete via the portal certificate (filled + signed, then
+      // submitted for office review) — the shared component handles it.
+      h+='<div class="card"><div id="certHost"></div></div>';
     } else if(au){
       // Site-audit job: a checklist — each item needs one completion photo.
       h+='<div class="card"><div class="sec-h"><span class="t">Audit checklist</span><span class="t" id="auditCount"></span></div><div id="auditList"></div><input type="file" id="auditFile" accept="image/*" capture="environment" style="display:none"></div>';
@@ -424,6 +430,8 @@
     // Firestopping jobs are completed via the RIA panel, not the status grid —
     // leave only the "start work" statuses here.
     if(job && job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
+    // EM / PAT jobs complete via the certificate panel — only the start-work statuses here.
+    if(job && (job.emTest || job.pat) && !job.firestopping) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress"; });
     // Site-audit jobs: slim set — Travelling · In Progress · Complete (Complete is
     // gated on every checklist item having its photo).
     if(jobIsAudit()) list = STATUSES.filter(function(s){ return s.n==="Travelling" || s.n==="In Progress" || s.n==="Complete"; });
@@ -540,6 +548,47 @@
     fillPoButton(); setupOfficeEdit();
     drawStatus(); drawTimeline(); applyLock();
     if(fs) mountFirestop();
+    if(cert) mountCert();
+  }
+  var certMounted=false, certInstances={};
+  function mountCert(){
+    var host=$("certHost"); if(!host || certMounted || !window.MLCert) return;
+    certMounted=true;
+    var api=(window.MOSTLANE_API || MOSTLANE_API), token=localStorage.getItem("mostlaneToken");
+    var both = !!(job.emTest && job.pat);
+    var types = both ? ["em","pat"] : [(job.pat && !job.emTest) ? "pat" : "em"];
+    if(!both){
+      window.MLCert.mount(host, { jobId:jobId, type:types[0], mode:"engineer", api:api, token:token,
+        patchComplete: function(){ return patchJob({status:"Complete"}); },
+        onComplete: function(){ toast("Certificate sent to the office for review"); setTimeout(function(){ location.href=backTo; }, 1300); } });
+      return;
+    }
+    // Combined EM + PAT job → two certificates (tabs) + one shared finish action.
+    var h='<div style="display:flex;gap:8px;margin-bottom:8px" id="certTabs">'
+      +'<button class="btn line sm" data-t="em">💡 EM certificate</button>'
+      +'<button class="btn line sm" data-t="pat">🔌 PAT certificate</button></div>'
+      +'<div id="certPane_em"></div><div id="certPane_pat" style="display:none"></div>'
+      +'<div style="text-align:center;margin-top:12px"><button class="btn wide" id="certFinish" style="background:#0a7d33">✅ Complete &amp; submit both</button>'
+      +'<div class="hint" style="margin-top:4px">Fill and sign both certificates, then finish.</div></div>';
+    host.innerHTML=h;
+    types.forEach(function(t){
+      certInstances[t]=window.MLCert.mount($("certPane_"+t), { jobId:jobId, type:t, mode:"engineer", api:api, token:token, hideComplete:true });
+    });
+    function showTab(t){ ["em","pat"].forEach(function(x){ $("certPane_"+x).style.display=(x===t)?"":"none"; });
+      [].forEach.call($("certTabs").children,function(b){ b.classList.toggle("on",b.dataset.t===t); }); }
+    [].forEach.call($("certTabs").children,function(b){ b.onclick=function(){ showTab(b.dataset.t); }; });
+    showTab("em");
+    $("certFinish").onclick=async function(){
+      var btn=this; btn.disabled=true; var old=btn.textContent; btn.textContent="Submitting…";
+      try{
+        var okEm=await certInstances.em.submit(false);
+        if(!okEm){ showTab("em"); btn.disabled=false; btn.textContent=old; return; }
+        var okPat=await certInstances.pat.submit(false);
+        if(!okPat){ showTab("pat"); btn.disabled=false; btn.textContent=old; return; }
+        await patchJob({status:"Complete"});
+        toast("Both certificates sent to the office"); setTimeout(function(){ location.href=backTo; }, 1300);
+      }catch(e){ btn.disabled=false; btn.textContent=old; toast("Couldn't submit — try again"); }
+    };
   }
   var fsMounted=false;
   function mountFirestop(){
