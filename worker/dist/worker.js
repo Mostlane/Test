@@ -19006,8 +19006,8 @@ async function handle22(request, env, ctx, url, sess) {
     }
     if (sub === "/fuel/entries" && method === "GET") {
       await ensureFuelTable(env);
-      const card2 = q.get("card") || "";
-      const rows = card2 ? (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? AND card=? ORDER BY date DESC, id DESC").bind(tid, card2).all()).results : (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? ORDER BY date DESC, id DESC").bind(tid).all()).results;
+      const card = q.get("card") || "";
+      const rows = card ? (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? AND card=? ORDER BY date DESC, id DESC").bind(tid, card).all()).results : (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? ORDER BY date DESC, id DESC").bind(tid).all()).results;
       const { byCard } = await fuelCardMap(env, tid);
       const entries = (rows || []).map((r) => ({
         id: r.id,
@@ -19025,22 +19025,22 @@ async function handle22(request, env, ctx, url, sess) {
     if (sub === "/fuel/entry" && method === "POST") {
       await ensureFuelTable(env);
       const b = await readJson4(request);
-      const card2 = String(b.card || "").trim();
-      if (!card2) return jr3({ error: "card required" }, headers, 400);
+      const card = String(b.card || "").trim();
+      if (!card) return jr3({ error: "card required" }, headers, 400);
       const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date : "";
       if (!date) return jr3({ error: "valid date required" }, headers, 400);
       const litres = Math.round((Number(b.litres) || 0) * 100) / 100;
       const cost = Math.round((Number(b.cost) || 0) * 100) / 100;
       const note = String(b.note || "").slice(0, 200);
       const { byCard } = await fuelCardMap(env, tid);
-      const username = (byCard[card2] || {}).username || "";
+      const username = (byCard[card] || {}).username || "";
       const id = parseInt(String(b.id || ""), 10);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       if (id && !isNaN(id)) {
-        await env.DB.prepare("UPDATE fuel_entries SET card=?,username=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(card2, username, date, litres, cost, note, tid, id).run();
+        await env.DB.prepare("UPDATE fuel_entries SET card=?,username=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(card, username, date, litres, cost, note, tid, id).run();
         return jr3({ ok: true, id }, headers);
       }
-      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)").bind(tid, card2, username, date, litres, cost, note, sess.user.username, now).run();
+      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)").bind(tid, card, username, date, litres, cost, note, sess.user.username, now).run();
       return jr3({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
     }
     if (sub === "/fuel/entry-delete" && method === "POST") {
@@ -19070,29 +19070,29 @@ async function handle22(request, env, ctx, url, sess) {
         const litres = Math.round((Number(e.litres) || 0) * 100) / 100;
         const cost = Math.round((Number(e.cost) || 0) * 100) / 100;
         const ref = String(e.ref || "").trim().slice(0, 80);
-        const card2 = String(e.card || "").trim().slice(0, 40);
+        const card = String(e.card || "").trim().slice(0, 40);
         const note = String(e.note || "").slice(0, 200);
         if (ref) {
           const ex = await env.DB.prepare("SELECT id FROM fuel_entries WHERE tenant_id=? AND ref=?").bind(tid, ref).first();
           if (ex && ex.id) {
-            await env.DB.prepare("UPDATE fuel_entries SET reg=?,card=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(reg, card2, date, litres, cost, note, tid, ex.id).run();
+            await env.DB.prepare("UPDATE fuel_entries SET reg=?,card=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?").bind(reg, card, date, litres, cost, note, tid, ex.id).run();
             updated++;
             continue;
           }
         }
-        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card2, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
+        await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,reg,ref,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(tid, card, "", reg, ref, date, litres, cost, note, sess.user.username, now).run();
         created++;
       }
       return jr3({ ok: true, created, updated, skipped, total: entries.length }, headers);
     }
     if (sub === "/fuel/stats" && method === "GET") {
       await ensureFuelTable(env);
-      const card2 = q.get("card") || "";
+      const card = q.get("card") || "";
       const { byCard, cards } = await fuelCardMap(env, tid);
       const fuelV = await fuelByVehicle(env, tid);
       const odoV = await odoByVehicle(env, tid);
       const mpg = await mpgByVehicle(env, tid);
-      const rows = (card2 ? (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=? AND card=?").bind(tid, card2).all()).results : (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=?").bind(tid).all()).results) || [];
+      const rows = (card ? (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=? AND card=?").bind(tid, card).all()).results : (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=?").bind(tid).all()).results) || [];
       let spend = 0, litres = 0, first = "", last = "";
       for (const r of rows) {
         spend += Number(r.cost) || 0;
@@ -19101,11 +19101,11 @@ async function handle22(request, env, ctx, url, sess) {
         if (r.date && (!last || r.date > last)) last = r.date;
       }
       const regsInScope = /* @__PURE__ */ new Set();
-      if (card2) {
-        const u = (byCard[card2] || {}).username;
+      if (card) {
+        const u = (byCard[card] || {}).username;
         const ivs = await assignmentIntervals(env, tid);
         for (const e of rows) {
-          const rg = regForUserOnDate(ivs, u, e.date) || (byCard[card2] || {}).vehicle;
+          const rg = regForUserOnDate(ivs, u, e.date) || (byCard[card] || {}).vehicle;
           if (rg) regsInScope.add(dnReg(rg));
         }
       } else {
@@ -19138,7 +19138,7 @@ async function handle22(request, env, ctx, url, sess) {
       });
       return jr3({
         ok: true,
-        card: card2,
+        card,
         money: money2,
         overall: { spend: Math.round(spend * 100) / 100, litres: Math.round(litres * 10) / 10, miles, mpg: overallMpg, first, last, spanDays: Math.round(spanDays), spanWeeks, entries: rows.length },
         periods,
@@ -20183,11 +20183,11 @@ async function fuelCardMap(env, tid) {
         p = u.profile ? JSON.parse(u.profile) : {};
       } catch {
       }
-      const card2 = String(p.fuelCard || "").trim();
-      if (!card2) continue;
+      const card = String(p.fuelCard || "").trim();
+      if (!card) continue;
       const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
-      byCard[card2] = { username: u.username, name, vehicle: u.vehicle_assigned || "" };
-      cards.push({ card: card2, username: u.username, name, vehicle: u.vehicle_assigned || "", active: u.status === "Active" });
+      byCard[card] = { username: u.username, name, vehicle: u.vehicle_assigned || "" };
+      cards.push({ card, username: u.username, name, vehicle: u.vehicle_assigned || "", active: u.status === "Active" });
     }
   } catch {
   }
@@ -20938,7 +20938,7 @@ function wrap2(str, size, maxW) {
 }
 function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   const doc = new PdfDoc();
-  const L = 56, R = 539, W2 = R - L;
+  const L = 56, R = 539, W3 = R - L;
   let y = 44;
   try {
     const lw = 150, lh = lw * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
@@ -20953,7 +20953,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label, val) => {
     doc.text(L, y, label, { size: 11, bold: true });
-    for (const ln of wrap2(val || "", 11, W2 - 70)) {
+    for (const ln of wrap2(val || "", 11, W3 - 70)) {
       doc.text(L + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -20972,7 +20972,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap2(para, 11, W2)) {
+    for (const ln of wrap2(para, 11, W3)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -20991,7 +20991,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap2("I confirm that I have read and understood the content of this memo.", 11, W2)) {
+  for (const ln of wrap2("I confirm that I have read and understood the content of this memo.", 11, W3)) {
     doc.text(L, y, ln, { size: 11 });
     y += 16;
   }
@@ -23859,42 +23859,49 @@ init_http();
 init_auth();
 
 // src/lib/certpdf.js
-var NAVY = [0, 0.204, 0.408];
-var INK = [0.13, 0.15, 0.18];
-var MUTE = [0.42, 0.46, 0.52];
-var LINE2 = [0.8, 0.84, 0.88];
-var STRIPE = [0.955, 0.968, 0.98];
-var HEADFILL = [0.9, 0.93, 0.96];
-var PAGE_W3 = 595;
-var PAGE_H3 = 842;
+var W2 = 595;
+var H = 842;
 var M2 = 40;
-var CONTENT_W2 = PAGE_W3 - M2 * 2;
+var CW = W2 - M2 * 2;
+var NAVY = [0, 0.204, 0.408];
+var NAVY_D = [0, 0.145, 0.29];
+var INK = [0.1, 0.13, 0.18];
+var MUTE = [0.46, 0.51, 0.58];
+var FAINT = [0.62, 0.66, 0.72];
+var BG = [0.953, 0.965, 0.977];
+var CARD = [1, 1, 1];
+var BORDER = [0.886, 0.906, 0.933];
+var HAIR = [0.92, 0.935, 0.955];
+var ZEBRA = [0.972, 0.98, 0.99];
+var ACCENT = [0.04, 0.42, 0.52];
+var GREEN = [0.09, 0.63, 0.29];
+var RED = [0.83, 0.16, 0.16];
+var GREY2 = [0.6, 0.64, 0.7];
+var HEADSUB = [0.78, 0.85, 0.93];
+var S = (v) => toWinAnsi(String(v == null ? "" : v));
+var okColor = (v) => /fail/i.test(v) ? RED : /(n\/?a|^—$|^$)/i.test(String(v || "").trim()) ? GREY2 : GREEN;
 var COLS = {
   em: [
-    { key: "no", label: "No.", w: 0.06, align: "c" },
-    { key: "normal", label: "Lamp Normal", w: 0.15, align: "c" },
-    { key: "led", label: "LED Visible", w: 0.14, align: "c" },
-    { key: "emergency", label: "Lamp Emergency", w: 0.16, align: "c" },
-    { key: "battery", label: "Battery (min)", w: 0.13, align: "c" },
-    { key: "comments", label: "Comments", w: 0.36, align: "l" }
+    { key: "no", label: "#", w: 0.06, align: "c", kind: "no" },
+    { key: "comments", label: "Luminaire / location", w: 0.4, align: "l", kind: "text" },
+    { key: "normal", label: "Normal", w: 0.13, align: "c", kind: "dot" },
+    { key: "led", label: "LED", w: 0.12, align: "c", kind: "dot" },
+    { key: "emergency", label: "Emergency", w: 0.15, align: "c", kind: "dot" },
+    { key: "battery", label: "Batt", w: 0.14, align: "r", kind: "num" }
   ],
   pat: [
-    { key: "no", label: "No.", w: 0.05, align: "c" },
-    { key: "appliance", label: "Appliance", w: 0.22, align: "l" },
-    { key: "location", label: "Location", w: 0.16, align: "l" },
-    { key: "cls", label: "Class", w: 0.07, align: "c" },
-    { key: "visual", label: "Visual", w: 0.09, align: "c" },
-    { key: "earth", label: "Earth (ohm)", w: 0.09, align: "c" },
-    { key: "insulation", label: "Insul. (Mohm)", w: 0.1, align: "c" },
-    { key: "result", label: "Result", w: 0.09, align: "c" },
-    { key: "comments", label: "Comments", w: 0.13, align: "l" }
+    { key: "no", label: "#", w: 0.05, align: "c", kind: "no" },
+    { key: "appliance", label: "Appliance", w: 0.21, align: "l", kind: "text" },
+    { key: "location", label: "Location", w: 0.15, align: "l", kind: "text" },
+    { key: "cls", label: "Class", w: 0.07, align: "c", kind: "text" },
+    { key: "visual", label: "Visual", w: 0.09, align: "c", kind: "dot" },
+    { key: "earth", label: "Earth", w: 0.09, align: "c", kind: "text" },
+    { key: "insulation", label: "Insul.", w: 0.1, align: "c", kind: "text" },
+    { key: "result", label: "Result", w: 0.11, align: "c", kind: "pill" },
+    { key: "comments", label: "Comments", w: 0.13, align: "l", kind: "text" }
   ]
 };
-var TITLES = {
-  em: "EMERGENCY LIGHTING TEST CERTIFICATE",
-  pat: "PORTABLE APPLIANCE TEST CERTIFICATE"
-};
-var S = (v) => toWinAnsi(String(v == null ? "" : v));
+var TITLES = { em: "Emergency Lighting Test", pat: "Portable Appliance Test" };
 function fit(str, size, maxW) {
   str = S(str);
   if (textWidth(str, size) <= maxW) return str;
@@ -23903,8 +23910,7 @@ function fit(str, size, maxW) {
   return s + "\u2026";
 }
 function wrap3(str, size, maxW, maxLines) {
-  str = S(str);
-  const words = str.split(/\s+/).filter(Boolean);
+  const words = S(str).split(/\s+/).filter(Boolean);
   const lines = [];
   let cur = "";
   for (const w of words) {
@@ -23915,214 +23921,282 @@ function wrap3(str, size, maxW, maxLines) {
     }
     if (cur) lines.push(cur);
     cur = w;
-    while (textWidth(cur, size) > maxW && cur.length > 1) {
-      let c = cur;
-      while (c.length > 1 && textWidth(c, size) > maxW) c = c.slice(0, -1);
-      lines.push(c);
-      cur = cur.slice(c.length);
-    }
     if (maxLines && lines.length >= maxLines) break;
   }
   if (cur && (!maxLines || lines.length < maxLines)) lines.push(cur);
   if (maxLines && lines.length > maxLines) {
     lines.length = maxLines;
-    lines[maxLines - 1] = fit(lines[maxLines - 1], size, maxW - textWidth("\u2026", size));
+    lines[maxLines - 1] = fit(lines[maxLines - 1], size, maxW);
   }
   return lines.length ? lines : [""];
 }
-function headerBand(doc, rec, meta, pageNo, pageCount) {
-  const bandH = 74;
-  doc.rect(0, 0, PAGE_W3, bandH, { fill: NAVY });
-  if (meta.logo) {
-    try {
-      const d = jpegInfo(meta.logo);
-      const h = 34;
-      doc.image(meta.logo, M2, 20, h * (d.w / d.h), h);
-    } catch {
-    }
+function tracked(doc, x, y, str, { size = 6.5, color = MUTE, track = 1.3, alignRight = false, bold = true } = {}) {
+  const chars = [...S(str).toUpperCase()];
+  const total = chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
+  let cx = alignRight ? x - total : x;
+  for (const c of chars) {
+    doc.text(cx, y, c, { size, bold, color });
+    cx += textWidth(c, size) + track;
   }
-  const title = TITLES[rec.type] || "TEST CERTIFICATE";
-  doc.text(PAGE_W3 - M2, 34, title, { size: 13, bold: true, alignRight: true, color: [1, 1, 1] });
-  const sub = [rec.certNumber ? "Certificate No. " + rec.certNumber : "", rec.status === "draft" ? "DRAFT" : ""].filter(Boolean).join("   \xB7   ");
-  if (sub) doc.text(PAGE_W3 - M2, 52, sub, { size: 9.5, alignRight: true, color: [0.82, 0.88, 0.95] });
-  return bandH;
+  return total;
 }
-function card(doc, x, yTop, w, title, lines) {
-  const padX = 10, titleH = 16, lineH = 12;
-  const body = lines.filter((l) => l != null);
-  const h = titleH + 6 + body.length * lineH + 8;
-  doc.rect(x, yTop, w, h, { fill: [1, 1, 1], stroke: LINE2, lw: 0.7 });
-  doc.rect(x, yTop, w, titleH, { fill: HEADFILL });
-  doc.text(x + padX, yTop + 11.5, S(title), { size: 8, bold: true, color: NAVY });
-  let y = yTop + titleH + 12;
-  for (const l of body) {
-    doc.text(x + padX, y, fit(l.t != null ? l.t : l, l.bold ? 9 : 8.5, w - padX * 2), { size: l.bold ? 9 : 8.5, bold: !!l.bold, color: l.mute ? MUTE : INK });
-    y += lineH;
-  }
-  return h;
+function dot(doc, cx, cy, r, color) {
+  doc.roundRect(cx - r, cy - r, r * 2, r * 2, r, { fill: color });
 }
-function footer(doc, pageNo, pageCount, rec) {
-  const y = PAGE_H3 - 26;
-  doc.hr(M2, y - 8, PAGE_W3 - M2, { grey: true });
-  const note = rec.type === "em" ? "Tested to BS 5266-1:2016. Generated by the Mostlane Portal." : "In-service inspection & testing to IET Code of Practice. Generated by the Mostlane Portal.";
-  doc.text(M2, y, note, { size: 7.5, color: MUTE });
-  doc.text(PAGE_W3 - M2, y, `Page ${pageNo} of ${pageCount}`, { size: 7.5, alignRight: true, color: MUTE });
+function pill(doc, x, yTop, label, { fill: fill2, textColor = [1, 1, 1], size = 7, padX = 7, h = 13 } = {}) {
+  const w = textWidth(S(label), size) + padX * 2;
+  doc.roundRect(x, yTop, w, h, h / 2, { fill: fill2 });
+  doc.text(x + padX, yTop + h - 4, S(label), { size, bold: true, color: textColor });
+  return w;
 }
-var ROW_H = 15;
-var HEAD_H = 18;
-function buildCertPdf(record, meta = {}) {
-  const rec = record || {};
-  const type = rec.type === "pat" ? "pat" : "em";
-  rec.type = type;
-  const cols = COLS[type];
-  const rows = Array.isArray(rec.rows) ? rec.rows : [];
-  let cx = M2;
-  const layout = cols.map((c) => {
-    const w = CONTENT_W2 * c.w;
-    const o = { ...c, x: cx, ww: w };
-    cx += w;
-    return o;
-  });
-  const laterTop = 74 + 14;
-  const page1TableTop = laterTop + introHeight(rec) + 10;
-  const bottomLimit = PAGE_H3 - 46;
-  const page1Capacity = Math.max(0, Math.floor((bottomLimit - page1TableTop - HEAD_H) / ROW_H));
-  const laterCapacity = Math.max(1, Math.floor((bottomLimit - laterTop - HEAD_H) / ROW_H));
-  const pages = [];
-  pages.push({ rows: rows.slice(0, page1Capacity), start: 0, tableTop: page1TableTop, intro: true });
-  let i = page1Capacity;
-  while (i < rows.length) {
-    pages.push({ rows: rows.slice(i, i + laterCapacity), start: i, tableTop: laterTop, intro: false });
-    i += laterCapacity;
-  }
-  const last = pages[pages.length - 1];
-  const lastTableBottom = last.tableTop + HEAD_H + last.rows.length * ROW_H;
-  const sigOwnPage = lastTableBottom + 130 > PAGE_H3 - 40;
-  const totalPages = pages.length + (sigOwnPage ? 1 : 0);
-  const doc = new PdfDoc(PAGE_W3, PAGE_H3);
-  pages.forEach((pg, idx) => {
-    if (idx > 0) doc.newPage(PAGE_W3, PAGE_H3);
-    headerBand(doc, rec, meta, idx + 1, totalPages);
-    if (pg.intro) drawIntro(doc, rec);
-    else doc.text(M2, laterTop - 2, (TITLES[type] || "") + " \u2014 continued", { size: 8, color: MUTE });
-    drawTable(doc, layout, pg.rows, pg.start, pg.tableTop);
-    footer(doc, idx + 1, totalPages, rec);
-  });
-  let sigY;
-  if (sigOwnPage) {
-    doc.newPage(PAGE_W3, PAGE_H3);
-    headerBand(doc, rec, meta, totalPages, totalPages);
-    footer(doc, totalPages, totalPages, rec);
-    sigY = laterTop + 14;
-  } else {
-    sigY = lastTableBottom + 22;
-  }
-  drawDeclaration(doc, rec, meta, sigY);
-  return doc.bytes();
+function pillC(doc, cx, yTop, label, opt) {
+  const w = textWidth(S(label), opt.size || 7) + (opt.padX || 7) * 2;
+  return pill(doc, cx - w / 2, yTop, label, opt);
 }
-function introHeight(rec) {
-  const cl = rec.client || {}, inst = rec.installation || {};
-  const clLines = 1 + addrLines(cl).length;
-  const inLines = 1 + addrLines(inst).length;
-  const cardsH = 16 + 6 + Math.max(clLines, inLines) * 12 + 8;
-  const conH = 40;
-  const extentH = 14 + wrap3(rec.extent || "", 8.5, CONTENT_W2 - 20, 3).length * 11 + 6;
-  const commentsH = rec.comments ? 14 + wrap3(rec.comments, 8, CONTENT_W2 - 20, 6).length * 10.5 + 6 : 0;
-  return cardsH + 10 + conH + 10 + extentH + (commentsH ? 8 + commentsH : 0);
+function cardBox(doc, x, y, w, h, r = 12, fill2 = CARD) {
+  doc.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, r + 0.8, { fill: BORDER });
+  doc.roundRect(x, y, w, h, r, { fill: fill2 });
 }
 function addrLines(o) {
   o = o || {};
   const out = [];
-  if (o.name) out.push({ t: o.name, bold: true });
-  (o.address || "").split(/\s*,\s*/).filter(Boolean).forEach((a) => out.push({ t: a }));
-  if (o.postcode) out.push({ t: o.postcode });
-  return out.length ? out : [{ t: "\u2014", mute: true }];
+  (o.address ? String(o.address).split(/\s*,\s*/).filter(Boolean) : []).forEach((a) => out.push(a));
+  if (o.postcode) out.push(String(o.postcode));
+  return out.length ? out : ["\u2014"];
 }
-function drawIntro(doc, rec) {
-  const top = 74 + 14;
-  const colW = (CONTENT_W2 - 12) / 2;
-  const cl = rec.client || {}, inst = rec.installation || {}, con = rec.contractor || {};
-  const h1 = card(doc, M2, top, colW, "Client", addrLines(cl));
-  const h2 = card(doc, M2 + colW + 12, top, colW, "Installation address", addrLines(inst));
-  let y = top + Math.max(h1, h2) + 10;
-  const conLines = [
-    { t: con.tradingTitle || "Mostlane", bold: true },
-    { t: [con.address, con.postcode].filter(Boolean).join(", ") || "" },
-    { t: [con.name ? "Tested by " + con.name : "", con.position].filter(Boolean).join(" \xB7 ") },
-    { t: [con.telephone ? "Tel " + con.telephone : "", con.regNumber ? "Reg " + con.regNumber : "", con.date ? "Date " + con.date : ""].filter(Boolean).join("   \xB7   ") }
-  ].filter((l) => l.t);
-  const conH = 16 + 6 + conLines.length * 12 + 8;
-  doc.rect(M2, y, CONTENT_W2, conH, { fill: [1, 1, 1], stroke: LINE2, lw: 0.7 });
-  doc.rect(M2, y, CONTENT_W2, 16, { fill: HEADFILL });
-  doc.text(M2 + 10, y + 11.5, "Contractor", { size: 8, bold: true, color: NAVY });
-  let cy = y + 28;
-  for (const l of conLines) {
-    doc.text(M2 + 10, cy, fit(l.t, l.bold ? 9 : 8.5, CONTENT_W2 - 20), { size: l.bold ? 9 : 8.5, bold: !!l.bold, color: INK });
-    cy += 12;
-  }
-  y += conH + 10;
-  doc.text(M2, y, "Extent & limitations of the inspection and testing", { size: 8, bold: true, color: NAVY });
-  y += 12;
-  for (const ln of wrap3(rec.extent || "\u2014", 8.5, CONTENT_W2, 3)) {
-    doc.text(M2, y, ln, { size: 8.5, color: INK });
-    y += 11;
-  }
-  y += 6;
-  if (rec.comments) {
-    doc.text(M2, y, "Additional comments", { size: 8, bold: true, color: NAVY });
-    y += 12;
-    for (const ln of wrap3(rec.comments, 8, CONTENT_W2, 6)) {
-      doc.text(M2, y, ln, { size: 8, color: MUTE });
-      y += 10.5;
+function statusOf(rec) {
+  const rows = rec.rows || [];
+  let fails = 0;
+  for (const r of rows) {
+    if (rec.type === "pat") {
+      if (/fail/i.test(r.result || "") || /fail/i.test(r.visual || "")) fails++;
+    } else {
+      if (/fail/i.test(r.normal || "") || /fail/i.test(r.led || "") || /fail/i.test(r.emergency || "")) fails++;
     }
   }
+  return fails ? { label: fails + (fails === 1 ? " ITEM FAILED" : " ITEMS FAILED"), color: RED } : { label: "ALL PASS", color: GREEN };
 }
-function drawTable(doc, layout, rows, startIndex, top) {
-  doc.rect(M2, top, CONTENT_W2, HEAD_H, { fill: NAVY });
-  for (const c of layout) {
-    const tx = c.align === "c" ? c.x + c.ww / 2 - textWidth(S(c.label), 8) / 2 : c.x + 6;
-    doc.text(tx, top + 12.5, S(c.label), { size: 8, bold: true, color: [1, 1, 1] });
-  }
-  let y = top + HEAD_H;
-  rows.forEach((r, k) => {
-    if ((startIndex + k) % 2 === 1) doc.rect(M2, y, CONTENT_W2, ROW_H, { fill: STRIPE });
-    for (const c of layout) {
-      let v = r[c.key];
-      if (c.key === "no") v = r.no != null ? r.no : startIndex + k + 1;
-      const size = 8;
-      const txt = fit(v == null ? "" : v, size, c.ww - 10);
-      const tx = c.align === "c" ? c.x + c.ww / 2 - textWidth(txt, size) / 2 : c.x + 6;
-      const isFail = c.key === "result" && /fail/i.test(String(v || ""));
-      doc.text(tx, y + 10.5, txt, { size, color: isFail ? [0.75, 0.1, 0.1] : INK, bold: isFail });
-    }
-    y += ROW_H;
-  });
-  doc.rect(M2, top, CONTENT_W2, HEAD_H + rows.length * ROW_H, { stroke: LINE2, lw: 0.7 });
-  for (const c of layout) if (c.x > M2) doc.line(c.x, top, c.x, top + HEAD_H + rows.length * ROW_H, { stroke: LINE2, lw: 0.5 });
+var HEADER_H = 96;
+var GAP = 14;
+var ROW_H = 19;
+var THEAD_H = 22;
+var CARD_PAD = 14;
+function infoCardH(o) {
+  return CARD_PAD + 14 + 14 + addrLines(o).length * 12 + 6;
 }
-function drawDeclaration(doc, rec, meta, y) {
-  const con = rec.contractor || {};
-  doc.hr(M2, y, PAGE_W3 - M2, { grey: true });
-  y += 14;
-  doc.text(M2, y, "Declaration", { size: 9, bold: true, color: NAVY });
-  y += 13;
-  const decl = rec.declaration || (rec.type === "em" ? "I certify that the emergency lighting installation identified above has been inspected and tested to BS 5266-1:2016 and the results are as recorded." : "I certify that the portable appliances identified above have been inspected and tested and the results are as recorded.");
-  for (const ln of wrap3(decl, 8.5, CONTENT_W2, 4)) {
-    doc.text(M2, y, ln, { size: 8.5, color: INK });
-    y += 11;
-  }
-  y += 10;
-  if (meta.signature) {
+function detailsH(rec) {
+  let h = CARD_PAD + 14 + wrap3(rec.extent || "\u2014", 9, CW - 28, 3).length * 12;
+  if (rec.comments) h += 10 + 12 + wrap3(rec.comments, 8, CW - 28, 5).length * 10.5;
+  return h + CARD_PAD;
+}
+function pageBg(doc) {
+  doc.rect(0, 0, W2, H, { fill: BG });
+}
+function headerFull(doc, rec, meta) {
+  const y = 30, h = HEADER_H;
+  cardBox(doc, M2, y, CW, h, 14, NAVY);
+  doc.roundRect(M2, y, CW, 5, 2.5, { fill: NAVY_D });
+  if (meta.logo) {
     try {
-      const d = jpegInfo(meta.signature);
-      const h = 34;
-      doc.image(meta.signature, M2, y, Math.min(160, h * (d.w / d.h)), h);
+      const g = jpegInfo(meta.logo);
+      const hh = 26;
+      doc.image(meta.logo, M2 + 20, y + 20, hh * (g.w / g.h), hh);
     } catch {
     }
   }
-  doc.line(M2, y + 40, M2 + 180, y + 40, { stroke: LINE2, lw: 0.6 });
-  doc.text(M2, y + 51, S([con.name, con.position].filter(Boolean).join("  \xB7  ") || "Engineer"), { size: 8.5, color: INK });
-  doc.text(M2, y + 62, "Signature & date: " + S(con.date || ""), { size: 7.5, color: MUTE });
+  const st = statusOf(rec);
+  pill(doc, M2 + 20, y + 58, st.label, { fill: st.color, size: 7 });
+  tracked(doc, W2 - M2 - 20, y + 26, TITLES[rec.type] + " Certificate", { size: 7.5, color: HEADSUB, track: 1.5, alignRight: true });
+  doc.text(W2 - M2 - 20, y + 50, rec.certNumber ? "No. " + S(rec.certNumber) : "Draft \u2014 number on issue", { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  const dt = rec.contractor && rec.contractor.date ? rec.contractor.date : "";
+  if (dt) doc.text(W2 - M2 - 20, y + 68, "Tested " + S(dt), { size: 9, color: HEADSUB, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W2 - M2 - 20, y + 84, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  return y + h;
+}
+function headerSlim(doc, rec, meta) {
+  const y = 30, h = 40;
+  cardBox(doc, M2, y, CW, h, 12, NAVY);
+  if (meta.logo) {
+    try {
+      const g = jpegInfo(meta.logo);
+      const hh = 18;
+      doc.image(meta.logo, M2 + 16, y + 11, hh * (g.w / g.h), hh);
+    } catch {
+    }
+  }
+  tracked(doc, W2 - M2 - 16, y + 17, TITLES[rec.type] + " \u2014 continued", { size: 7, color: HEADSUB, alignRight: true });
+  if (rec.certNumber) doc.text(W2 - M2 - 16, y + 31, "No. " + S(rec.certNumber), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+  return y + h;
+}
+function infoCard(doc, x, y, w, label, o) {
+  const h = infoCardH(o);
+  cardBox(doc, x, y, w, h);
+  tracked(doc, x + CARD_PAD, y + 18, label, { size: 6.5, color: ACCENT });
+  doc.text(x + CARD_PAD, y + 34, fit(o && o.name || "\u2014", 10.5, w - CARD_PAD * 2), { size: 10.5, bold: true, color: INK });
+  let yy2 = y + 48;
+  addrLines(o).forEach((a) => {
+    doc.text(x + CARD_PAD, yy2, fit(a, 8.5, w - CARD_PAD * 2), { size: 8.5, color: MUTE });
+    yy2 += 12;
+  });
+  return h;
+}
+function detailsCard(doc, y, rec) {
+  const h = detailsH(rec);
+  cardBox(doc, M2, y, CW, h);
+  tracked(doc, M2 + CARD_PAD, y + 18, "Extent & limitations", { size: 6.5, color: ACCENT });
+  let yy2 = y + 32;
+  wrap3(rec.extent || "\u2014", 9, CW - 28, 3).forEach((l) => {
+    doc.text(M2 + CARD_PAD, yy2, l, { size: 9, color: INK });
+    yy2 += 12;
+  });
+  if (rec.comments) {
+    yy2 += 8;
+    tracked(doc, M2 + CARD_PAD, yy2, "Additional comments", { size: 6.5, color: ACCENT });
+    yy2 += 13;
+    wrap3(rec.comments, 8, CW - 28, 5).forEach((l) => {
+      doc.text(M2 + CARD_PAD, yy2, l, { size: 8, color: MUTE });
+      yy2 += 10.5;
+    });
+  }
+  return h;
+}
+function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
+  const bodyH = rows.length * ROW_H;
+  const h = 20 + THEAD_H + bodyH + 12;
+  cardBox(doc, M2, y, CW, h);
+  tracked(doc, M2 + CARD_PAD, y + 18, titleType === "pat" ? "Appliances tested" : "Emergency lighting tests", { size: 6.5, color: ACCENT });
+  if (count != null) doc.text(W2 - M2 - CARD_PAD, y + 18, String(count) + (titleType === "pat" ? " appliances" : " luminaires"), { size: 7.5, color: FAINT, alignRight: true });
+  const x0 = M2 + CARD_PAD, tw = CW - CARD_PAD * 2;
+  let cx = x0;
+  const cols = layout.map((c) => {
+    const ww = tw * c.w;
+    const o = { ...c, x: cx, ww };
+    cx += ww;
+    return o;
+  });
+  const headY = y + 26 + THEAD_H - 8;
+  cols.forEach((c) => {
+    const lw = trackedWidth(c.label, 6, 0.8);
+    let lx = c.x;
+    if (c.align === "c") lx = c.x + c.ww / 2 - lw / 2;
+    else if (c.align === "r") lx = c.x + c.ww - lw;
+    tracked(doc, lx, headY, c.label, { size: 6, color: MUTE, track: 0.8 });
+  });
+  let ry = y + 26 + THEAD_H;
+  doc.line(x0, ry - 4, x0 + tw, ry - 4, { stroke: HAIR, lw: 0.8 });
+  rows.forEach((r, i) => {
+    if ((startIndex + i) % 2 === 1) doc.rect(x0 - 4, ry, tw + 8, ROW_H, { fill: ZEBRA });
+    const midY = ry + ROW_H / 2, txtY = ry + 12.5;
+    cols.forEach((c) => {
+      if (c.kind === "no") {
+        const v2 = String(startIndex + i + 1).padStart(2, "0");
+        doc.text(c.x + c.ww / 2 - textWidth(v2, 8) / 2, txtY, v2, { size: 8, bold: true, color: FAINT });
+        return;
+      }
+      if (c.kind === "dot") {
+        dot(doc, c.x + c.ww / 2, midY, 3.1, okColor(r[c.key]));
+        return;
+      }
+      if (c.kind === "pill") {
+        const v2 = r[c.key] || "";
+        if (v2) pillC(doc, c.x + c.ww / 2, ry + (ROW_H - 12) / 2, /fail/i.test(v2) ? "FAIL" : "PASS", { fill: okColor(v2), size: 6.5, padX: 6, h: 12 });
+        return;
+      }
+      const v = r[c.key] == null ? "" : r[c.key];
+      const s = fit(v, 8, c.ww - 8);
+      const tx = c.align === "r" ? c.x + c.ww - textWidth(s, 8) : c.x + 2;
+      doc.text(tx, txtY, s, { size: 8, color: c.key === "comments" ? MUTE : INK });
+    });
+    ry += ROW_H;
+  });
+  return h;
+}
+function trackedWidth(str, size, track) {
+  const chars = [...S(str).toUpperCase()];
+  return chars.reduce((w, c) => w + textWidth(c, size) + track, -track);
+}
+function signatureCard(doc, y, rec, meta) {
+  const con = rec.contractor || {};
+  const declLines = wrap3(rec.declaration || (rec.type === "em" ? "I certify that the emergency lighting installation identified above has been inspected and tested to BS 5266-1:2016 and the results are as recorded." : "I certify that the portable appliances identified above have been inspected and tested in accordance with the IET Code of Practice, and the results are as recorded."), 8.5, CW - 200, 3);
+  const h = Math.max(96, CARD_PAD + 14 + declLines.length * 11 + 58);
+  cardBox(doc, M2, y, CW, h);
+  tracked(doc, M2 + CARD_PAD, y + 18, "Declaration", { size: 6.5, color: ACCENT });
+  let yy2 = y + 32;
+  declLines.forEach((l) => {
+    doc.text(M2 + CARD_PAD, yy2, l, { size: 8.5, color: MUTE });
+    yy2 += 11;
+  });
+  const sigX = W2 - M2 - 190;
+  if (meta.signature) {
+    try {
+      const g = jpegInfo(meta.signature);
+      const hh = 34;
+      doc.image(meta.signature, sigX, y + 20, Math.min(170, hh * (g.w / g.h)), hh);
+    } catch {
+    }
+  }
+  doc.line(sigX, y + 60, sigX + 170, y + 60, { stroke: BORDER, lw: 0.7 });
+  doc.text(sigX, y + 72, S([con.name, con.position].filter(Boolean).join("  \xB7  ") || "Engineer"), { size: 9, bold: true, color: INK });
+  doc.text(sigX, y + 84, S(con.date ? "Signed " + con.date : ""), { size: 7.5, color: MUTE });
+  doc.text(M2 + CARD_PAD, y + h - 12, S([con.tradingTitle || "Mostlane", con.address, con.postcode].filter(Boolean).join(" \xB7 ")), { size: 7.5, color: FAINT });
+  return h;
+}
+function footer(doc, rec, pageNo, pageCount) {
+  const note = rec.type === "em" ? "Tested to BS 5266-1:2016." : "Tested to the IET Code of Practice for In-service Inspection & Testing.";
+  doc.text(M2, H - 22, note + "  Generated by the Mostlane Portal.", { size: 7, color: FAINT });
+  doc.text(W2 - M2, H - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT, alignRight: true });
+}
+function buildCertPdf(record, meta = {}) {
+  const rec = record || {};
+  rec.type = rec.type === "pat" ? "pat" : "em";
+  rec.rows = Array.isArray(rec.rows) ? rec.rows : [];
+  const layout = COLS[rec.type];
+  const cl = rec.client || {}, inst = rec.installation || {};
+  const infoH = Math.max(infoCardH(cl), infoCardH(inst));
+  const introBottom = 30 + HEADER_H + GAP + infoH + GAP + detailsH(rec) + GAP;
+  const bottomLimit = H - 40;
+  const cap2 = (top, extraForTable) => Math.max(0, Math.floor((bottomLimit - top - (20 + THEAD_H + 12)) / ROW_H));
+  const page1Cap = cap2(introBottom);
+  const slimTop = 30 + 40 + GAP;
+  const laterCap = cap2(slimTop);
+  const pages = [];
+  pages.push({ start: 0, rows: rec.rows.slice(0, page1Cap), intro: true, tableTop: introBottom });
+  let i = page1Cap;
+  while (i < rec.rows.length) {
+    pages.push({ start: i, rows: rec.rows.slice(i, i + laterCap), intro: false, tableTop: slimTop });
+    i += laterCap;
+  }
+  const last = pages[pages.length - 1];
+  const lastBottom = last.tableTop + 20 + THEAD_H + last.rows.length * ROW_H + 12;
+  const sigOwnPage = lastBottom + GAP + 96 > H - 40;
+  const totalPages = pages.length + (sigOwnPage ? 1 : 0);
+  const doc = new PdfDoc(W2, H);
+  pages.forEach((pg, idx) => {
+    if (idx > 0) doc.newPage(W2, H);
+    pageBg(doc);
+    if (pg.intro) {
+      headerFull(doc, rec, meta);
+      const iy = 30 + HEADER_H + GAP;
+      const colW = (CW - GAP) / 2;
+      infoCard(doc, M2, iy, colW, "Client", cl);
+      infoCard(doc, M2 + colW + GAP, iy, colW, "Installation address", inst);
+      detailsCard(doc, iy + infoH + GAP, rec);
+    } else {
+      headerSlim(doc, rec, meta);
+    }
+    resultsCard(doc, layout, pg.rows, pg.start, pg.tableTop, rec.type, pg.intro ? rec.rows.length : null);
+    footer(doc, rec, idx + 1, totalPages);
+  });
+  let sigY;
+  if (sigOwnPage) {
+    doc.newPage(W2, H);
+    pageBg(doc);
+    headerSlim(doc, rec, meta);
+    footer(doc, rec, totalPages, totalPages);
+    sigY = slimTop;
+  } else sigY = lastBottom + GAP;
+  signatureCard(doc, sigY, rec, meta);
+  return doc.bytes();
 }
 
 // src/routes/certs.js
