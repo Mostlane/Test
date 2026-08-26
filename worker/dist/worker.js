@@ -25947,7 +25947,7 @@ async function handle35(request, env, ctx, url, sess) {
     const jobId = String(b.jobId || "").trim();
     const files = Array.isArray(b.files) ? b.files : [];
     if (!jobId || !files.length) return json4({ ok: true, imported: 0, skipped: 0, failed: 0 });
-    let imported = 0, skipped = 0, failed = 0, seq = 0;
+    let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null;
     for (const f of files) {
       try {
         if (!f || !f.url) {
@@ -25958,6 +25958,7 @@ async function handle35(request, env, ctx, url, sess) {
         const extRaw = (String(f.name || "").split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
         const ext = extRaw || ((f.type || "").split("/").pop() || "jpg");
         const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png` : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}` : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
+        if (f.kind === "signature" && !sigKey) sigKey = key;
         if (await env.JOB_FILES.head(key)) {
           skipped++;
           continue;
@@ -25972,6 +25973,23 @@ async function handle35(request, env, ctx, url, sess) {
         imported++;
       } catch (e) {
         failed++;
+      }
+    }
+    if (sigKey) {
+      try {
+        const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+        if (row) {
+          let d = {};
+          try {
+            d = row.data ? JSON.parse(row.data) : {};
+          } catch {
+          }
+          if (!d.signature || !d.signature.fileKey) {
+            d.signature = { signedBy: "Customer (Workever)", signedAt: (/* @__PURE__ */ new Date()).toISOString(), fileKey: sigKey };
+            await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, jobId).run();
+          }
+        }
+      } catch {
       }
     }
     return json4({ ok: true, imported, skipped, failed });
@@ -26014,6 +26032,10 @@ async function handle35(request, env, ctx, url, sess) {
               data2 = cur && cur.data ? JSON.parse(cur.data) : {};
             } catch {
             }
+            data2.status = m.portal;
+            data2.closedAt = data2.closedAt || nowIso;
+            if (!Array.isArray(data2.statusHistory)) data2.statusHistory = [];
+            data2.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync" });
             data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
             await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso, nowIso, JSON.stringify(data2), tid, live.id).run();
             counts.updatedLive++;
