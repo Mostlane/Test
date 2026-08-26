@@ -206,8 +206,9 @@ export async function handle(request, env, ctx, url, sess) {
     // Preload existing archive statuses for this batch's MOS numbers.
     const mosList = jobs.map(j => String(j.mos || "").trim()).filter(Boolean);
     const archById = {};
-    for (let i = 0; i < mosList.length; i += 100) {
-      const chunk = mosList.slice(i, i + 100);
+    // D1 caps bound parameters at 100 per statement; 1 (tid) + 90 ids = 91.
+    for (let i = 0; i < mosList.length; i += 90) {
+      const chunk = mosList.slice(i, i + 90);
       const ph = chunk.map(() => "?").join(",");
       const { results } = await db.prepare(`SELECT id, status FROM sla_jobs_archive WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunk).all();
       for (const r of results || []) archById[r.id] = r.status;
@@ -281,9 +282,10 @@ export async function handle(request, env, ctx, url, sess) {
       }
     }
 
-    // Write the log in chunks.
-    for (let i = 0; i < logRows.length; i += 50) {
-      const chunk = logRows.slice(i, i + 50);
+    // Write the log in chunks. Each row binds 10 columns and D1 caps parameters
+    // at 100 per statement, so at most 9 rows (90 vars) per insert.
+    for (let i = 0; i < logRows.length; i += 9) {
+      const chunk = logRows.slice(i, i + 9);
       const values = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
       await db.prepare(`INSERT INTO workever_sync_log
         (tenant_id, run_id, at, action, mos, ref, portal_id, from_status, to_status, note) VALUES ${values}`)

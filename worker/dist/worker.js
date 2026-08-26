@@ -25911,8 +25911,8 @@ async function handle35(request, env, ctx, url, sess) {
     }
     const mosList = jobs.map((j) => String(j.mos || "").trim()).filter(Boolean);
     const archById = {};
-    for (let i = 0; i < mosList.length; i += 100) {
-      const chunk = mosList.slice(i, i + 100);
+    for (let i = 0; i < mosList.length; i += 90) {
+      const chunk = mosList.slice(i, i + 90);
       const ph = chunk.map(() => "?").join(",");
       const { results } = await db.prepare(`SELECT id, status FROM sla_jobs_archive WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunk).all();
       for (const r of results || []) archById[r.id] = r.status;
@@ -25990,8 +25990,8 @@ async function handle35(request, env, ctx, url, sess) {
         addLog("error", j, "", "", String(e && e.message || e));
       }
     }
-    for (let i = 0; i < logRows.length; i += 50) {
-      const chunk = logRows.slice(i, i + 50);
+    for (let i = 0; i < logRows.length; i += 9) {
+      const chunk = logRows.slice(i, i + 9);
       const values = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
       await db.prepare(`INSERT INTO workever_sync_log
         (tenant_id, run_id, at, action, mos, ref, portal_id, from_status, to_status, note) VALUES ${values}`).bind(...chunk.flat()).run();
