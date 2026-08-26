@@ -167,32 +167,49 @@ async function latestCertR2Key(env, tid, code, type) {
     return row ? row.r2_key : null;
   } catch { return null; }
 }
-async function prefillRows(env, tid, code, type) {
+// Read EVERYTHING carryable from the previous certificate. NOTHING is ever
+// invented: a field either transfers from the previous cert (or, for the site
+// address, the real portal site record) or is left blank for the office to fill.
+async function prefillFromPrevious(env, tid, code, type) {
   const c4 = padCode(code);
-  // 1) Prefer the most recent PORTAL certificate (structured rows — clean, no
-  //    PDF parsing, and it chains forward year on year).
+  // 1) Prefer the most recent PORTAL certificate — structured, so the WHOLE
+  //    header (client/installation/extent/comments/contractor) + the item list
+  //    transfer cleanly, and it chains forward year on year.
   try {
     const prev = await env.DB.prepare(
       "SELECT data FROM certificates WHERE tenant_id=? AND site_code=? AND type=? AND status='final' ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 1"
     ).bind(tid, c4, type).first();
     if (prev) {
       let d = {}; try { d = JSON.parse(prev.data) || {}; } catch {}
-      if (Array.isArray(d.rows) && d.rows.length) return { rows: carryRows(d.rows, type), from: "last certificate", source: "portal" };
+      if (Array.isArray(d.rows) && d.rows.length) {
+        const con = d.contractor || {};
+        return {
+          rows: carryRows(d.rows, type), from: "last certificate", source: "portal",
+          header: {
+            client: d.client || null, installation: d.installation || null,
+            extent: d.extent || "", comments: d.comments || "",
+            contractor: { tradingTitle: con.tradingTitle || "", address: con.address || "", postcode: con.postcode || "", regNumber: con.regNumber || "", telephone: con.telephone || "" },
+          },
+        };
+      }
     }
   } catch {}
   // 2) Fall back to the previous (legacy Tysoft) cert PDF on the compliance chart.
+  //    The ITEM ROWS parse reliably (each cell is its own token). The header
+  //    fields are NOT reliably delimited in legacy text, so we DO NOT guess them
+  //    — they come from the real site record / are left blank (header: null).
   const key = await latestCertR2Key(env, tid, c4, type);
-  if (!key || !env.JOB_FILES) return { rows: [], from: null };
+  if (!key || !env.JOB_FILES) return { rows: [], from: null, header: null };
   try {
     const obj = await env.JOB_FILES.get(key);
-    if (!obj) return { rows: [], from: null };
+    if (!obj) return { rows: [], from: null, header: null };
     const buf = await obj.arrayBuffer();
-    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null };
+    if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null };
     const parsed = type === "pat"
       ? parsePatRowsTokens(await pdfExtractTokens(buf))   // token-accurate (Tysoft EasyPAT)
       : parseEmRows(await pdfExtractText(buf));
-    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf" };
-  } catch { return { rows: [], from: null }; }
+    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null };
+  } catch { return { rows: [], from: null, header: null }; }
 }
 
 // EM number = the store's EM set number (from sla:emsets) + "-YY". PAT number =
@@ -288,23 +305,30 @@ export async function handle(request, env, ctx, url, sess) {
     const code = job ? (job.siteCode || "") : "";
     const siteRow = code ? await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
     let siteData = {}; try { siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {}; } catch {}
-    const pre = await prefillRows(env, tid, code, type);
+    const pre = await prefillFromPrevious(env, tid, code, type);
+    const h = pre.header;
     const record = {
       id: null, type, status: "draft", jobId, siteCode: code, certNumber: "",
-      client: { name: "The Southern Co-op", address: "", postcode: "" },
-      installation: {
+      // Client: transfer from the previous cert; NEVER invented. Blank until the
+      // office fills it once (then it chains forward on every future cert).
+      client: (h && h.client) ? h.client : { name: "", address: "", postcode: "" },
+      // Installation: previous cert → else the REAL portal site record.
+      installation: (h && h.installation) ? h.installation : {
         name: (job && job.siteName) || (siteRow && siteRow.site_name) || "",
         address: (job && job.address) || (siteData.address || ""),
         postcode: (job && job.postcode) || (siteRow && siteRow.postcode) || "",
       },
-      extent: config[type].extent,
-      comments: config[type].comments,
+      // Extent/comments: previous cert if present, else our standard template.
+      extent: (h && h.extent) || config[type].extent,
+      comments: (h && h.comments != null && h.comments !== "") ? h.comments : config[type].comments,
       declaration: config[type].declaration,
-      contractor: { ...config.contractor, name: "", position: "Engineer", date: "" },
+      // Contractor = Mostlane's own details (config), refined by the previous
+      // cert's trading block; engineer name/date always blank (per-visit).
+      contractor: { ...config.contractor, ...((h && h.contractor) || {}), name: "", position: "Engineer", date: "" },
       rows: pre.rows,
       signature: "",
     };
-    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length }, {}, env, request);
+    return json({ ok: true, record, config, seeded: true, prefilledFrom: pre.from, prefilledRows: pre.rows.length, prefillSource: pre.source || null }, {}, env, request);
   }
 
   // ── Save (upsert) a draft ────────────────────────────────────────────────────
