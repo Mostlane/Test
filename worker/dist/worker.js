@@ -24554,7 +24554,7 @@ async function handle30(request, env, ctx, url, sess) {
     } catch {
     }
     const bytes = buildCertPdf(rec, { logo, signature: sig });
-    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${rec.certNumber || cert.id}.pdf"`, "Cache-Control": "no-store" } });
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${rec.certNumber || cert.id}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
   }
   if (sub === "/one" && method === "GET") {
     const cert = await loadCert(String(q.get("id") || ""));
