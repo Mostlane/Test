@@ -1071,6 +1071,27 @@ const MAP = window.ML_PERM_MAP || {
               text: d.missing.join(", ") + " — deadline has passed."
             });
           }
+          // Ad-hoc van checks REQUESTED for a specific vehicle (the vehicle-card
+          // button). Each carries its own deadline + whether the driver may snooze.
+          (d.customChecks || []).forEach(function (c) {
+            dot("Vehicles", 1);
+            var dueMs = c.dueAt ? new Date(c.dueAt).getTime() : 0;
+            var dueTxt = c.dueAt ? new Date(c.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) : "";
+            var note = {
+              n: 1, icon: "🚐", href: "van-check.html?custom=" + encodeURIComponent(c.id),
+              title: c.overdue ? "Van check OVERDUE" + (c.reg ? " — " + c.reg : "") : "Van check requested" + (c.reg ? " — " + c.reg : ""),
+              text: (c.overdue ? "It was due by " + dueTxt + " — do it now." : (dueTxt ? "Complete the van check by " + dueTxt + "." : "Complete the requested van check."))
+            };
+            if (c.snooze) {
+              // Snoozeable up to 2h before the deadline (like the weekly check).
+              note.timeGated = true;
+              note.snoozeUntil = (dueMs && !c.overdue) ? (dueMs - 2 * 3600 * 1000) : 0;
+              note.dueMs = dueMs;
+            } else {
+              note.maxSnooze = 0;   // no snooze allowed — enforced immediately
+            }
+            notes.push(note);
+          });
         }).catch(function () {}));
 
       // Van handover: a newly-assigned driver must complete a full handover

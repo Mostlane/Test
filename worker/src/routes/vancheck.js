@@ -186,6 +186,10 @@ async function ensureCustomTable(db) {
       id TEXT PRIMARY KEY, tenant_id TEXT, username TEXT, reg TEXT, tpl_id TEXT, name TEXT,
       items TEXT, status TEXT, sent_by TEXT, sent_at TEXT, submitted_at TEXT)`).run();
   } catch {}
+  // due_at = chosen deadline; snooze = 1 if the driver may snooze the reminder.
+  for (const c of ["due_at TEXT", "snooze INTEGER DEFAULT 1"]) {
+    try { await db.prepare(`ALTER TABLE custom_van_checks ADD COLUMN ${c}`).run(); } catch {}
+  }
 }
 async function nameMap(env, tid) {
   const out = {};
@@ -403,6 +407,35 @@ export async function handle(request, env, ctx, url, sess) {
     }
     return json({ ok: true, created }, {}, env, request);
   }
+  // Request a (standard) van check for ONE vehicle's assigned driver — the button
+  // on the vehicle card. Uses the normal checklist/equipment/photo slots, with a
+  // chosen deadline and whether the driver may snooze the reminder.
+  if (path === "/vancheck/request" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    await ensureCustomTable(db);
+    const b = await request.json().catch(() => ({}));
+    const reg = String(b.reg || "").trim();
+    if (!reg) return error("No vehicle given.", 400, env, request);
+    const norm = r => String(r || "").toUpperCase().replace(/\s+/g, "");
+    // Find the driver this van is assigned to.
+    const { results: urows } = await db.prepare("SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(db.tenantId).all();
+    const driver = (urows || []).find(u => norm(u.vehicle_assigned) === norm(reg));
+    if (!driver) return error("No active driver is assigned to " + reg + ". Assign the van to a driver first.", 400, env, request);
+    const un = driver.username;
+    const dueAt = (b.dueAt && Number.isFinite(Date.parse(b.dueAt))) ? new Date(b.dueAt).toISOString() : deadlineFor(mondayOf(londonDate()), await getSettings(db));
+    const snooze = b.snooze === false ? 0 : 1;
+    const s = await getSettings(db);
+    const items = JSON.stringify({ checklist: s.checklist || [], equipment: s.equipment || [], photoSlots: s.photoSlots || [] });
+    const id = "cvc-" + crypto.randomUUID().slice(0, 12);
+    const now = new Date().toISOString();
+    await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at,due_at,snooze) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(id, db.tenantId, un, reg, "", "Van check — " + reg, items, "pending", me, now, dueAt, snooze).run();
+    if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
+      title: "Van check requested", body: `Please complete the van check for ${reg}.`,
+      url: "/van-check.html?custom=" + id, tag: "custom-vancheck", actionable: true
+    }));
+    return json({ ok: true, id, driver: un, reg, dueAt, snooze: !!snooze }, {}, env, request);
+  }
   // Admin dashboard: every sent custom check + who's done.
   if (path === "/vancheck/custom-status" && method === "GET") {
     if (!(await canViewAll())) return error("Forbidden", 403, env, request);
@@ -437,7 +470,7 @@ export async function handle(request, env, ctx, url, sess) {
     return json({
       ok: true, custom: true, customId: row.id, name: row.name, status: row.status,
       week: row.id, vehicle: row.reg || sess.user.vehicle_assigned || "",
-      deadline: { dueAt: new Date(Date.now() + 7 * 86400000).toISOString(), overdue: false },
+      deadline: { dueAt: row.due_at || new Date(Date.now() + 7 * 86400000).toISOString(), overdue: row.due_at ? Date.now() > Date.parse(row.due_at) : false },
       checklist: it.checklist || [], equipment: it.equipment || [], photoSlots: it.photoSlots || [],
       myCheck: row.status === "done" ? { source: "portal", vehicle: row.reg || "", defectCount: 0, safeToDrive: true } : null,
     }, {}, env, request);
@@ -851,9 +884,14 @@ export async function handle(request, env, ctx, url, sess) {
         .map(u => (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username);
     }
     await ensureCustomTable(db);
-    const cp = await db.prepare("SELECT COUNT(*) AS n FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending'").bind(db.tenantId, me).first();
-    const customPending = cp ? Number(cp.n) || 0 : 0;
-    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending }, {}, env, request);
+    const { results: crows } = await db.prepare("SELECT id, name, reg, due_at, snooze FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
+    const customChecks = (crows || []).map(r => ({
+      id: r.id, name: r.name || "Van check", reg: r.reg || "",
+      dueAt: r.due_at || null,
+      overdue: r.due_at ? Date.now() > Date.parse(r.due_at) : false,
+      snooze: r.snooze == null ? true : !!Number(r.snooze),
+    }));
+    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
   }
 
   return error("Unknown van-check route", 404, env, request);
