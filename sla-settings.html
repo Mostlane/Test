@@ -218,7 +218,16 @@
       <div id="wkMap" class="muted">Loading…</div>
       <div style="margin-top:8px"><button class="btn primary" id="wkSaveMap">Save mapping</button> <span id="wkMapMsg" class="muted"></span></div>
 
-      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">2 · Run the sync</div>
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">2 · Test one job first (recommended)</div>
+      <p class="muted" style="margin-top:2px">Enter the <b>MOS number</b> (or job id) of a job you know is <b>done in Workever but still Pending here</b>. It syncs just that one job and reports whether its notes, signature and photos all arrived — a clear ❌ if anything Workever holds fails to transfer. Paste the runner into the Workever console like the full run.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="wkTestMos" placeholder="e.g. MOS24356" style="flex:1;min-width:160px;padding:9px 10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit">
+        <button class="btn primary" id="wkTestBtn">📋 Copy test runner</button>
+      </div>
+      <span id="wkTestMsg" class="muted"></span>
+      <textarea id="wkTestRunner" readonly style="width:100%;height:60px;margin-top:8px;font-family:monospace;font-size:11px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;display:none"></textarea>
+
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">3 · Run the full sync</div>
       <ol class="muted" style="margin:0 0 8px 18px;padding:0;line-height:1.7">
         <li>Open <b>mostlane.workever.app</b> in another tab and make sure you're logged in.</li>
         <li>Press the button below to copy the runner, then in that Workever tab open the console (F12 → Console), paste, and press Enter.</li>
@@ -228,7 +237,7 @@
       <span id="wkCopyMsg" class="muted"></span>
       <textarea id="wkRunner" readonly style="width:100%;height:70px;margin-top:8px;font-family:monospace;font-size:11px;border:1px solid #cbd5e1;border-radius:8px;padding:8px;display:none"></textarea>
 
-      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">3 · What changed</div>
+      <div style="font-weight:700;color:var(--ml-blue);font-size:14px;margin:18px 0 6px">4 · What changed</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="wkLoad">Refresh change log</button><button class="btn secondary" id="wkReset" title="Clear the log to start a fresh run count">Clear log</button></div>
       <div id="wkSummary" class="muted" style="margin-top:8px"></div>
       <div id="wkLog" style="margin-top:8px;max-height:340px;overflow:auto"></div>
@@ -408,7 +417,7 @@ function buildRunner(){
   console.log("%clearned "+Object.keys(sName).length+" statuses","color:#0a0");
   const first=await wg("/api/v1/jobs-list?page=1&size=50"); pages=first?first.totalPages:0;
   const T={updatedLive:0,importedArchive:0,updatedArchive:0,skipped:0,errors:0,files:0};
-  let batch=[], batchU={};
+  let batch=[], batchU={}, ABORT=null;
   // Harvest a job's documents (photos/signatures/PDFs) and hand the public S3
   // URLs to the portal's importer (idempotent — files already in R2 are skipped).
   const harvestPhotos=async(np)=>{
@@ -426,18 +435,34 @@ function buildRunner(){
   const flush=async()=>{ if(!batch.length)return; const res=await post("/sla/workever/ingest",{runId:RUN,jobs:batch});
     if(res&&res.counts) for(const k in T) if(k!=="files") T[k]+=res.counts[k]||0;
     if(res&&res.needDetail&&res.needDetail.length){ const items=[]; for(const mos of res.needDetail){ const jid=batchU[mos]; if(!jid)continue; const d=await wg("/api/v1/jobs/"+jid); if(d&&d.description) items.push({mos,description:d.description}); } if(items.length) await post("/sla/workever/enrich",{items}); }
-    if(res&&res.needPhotos&&res.needPhotos.length){ let fb=[]; const sf=async()=>{ if(fb.length){ try{ const pr=await post("/sla/archive/photos/import",{files:fb}); if(pr&&pr.imported) T.files+=pr.imported; }catch(e){} fb=[]; } };
-      for(const np of res.needPhotos){ if(!np.uuid) continue; const files=await harvestPhotos(np); for(const f of files){ fb.push(f); if(fb.length>=15) await sf(); } } await sf(); }
+    if(res&&res.needPhotos&&res.needPhotos.length){ let fb=[];
+      // Import a batch of files. A job that HAS files but they fail to store is a
+      // genuine failure → retry once, then ABORT the whole run (kept resumable).
+      // A job with no files sends nothing, so it can never trip this.
+      const sf=async()=>{ if(!fb.length) return; const files=fb; fb=[];
+        let pr=null; try{ pr=await post("/sla/archive/photos/import",{files}); }catch(e){ pr={failed:files.length}; }
+        if(pr && pr.failed>0){ let pr2=null; try{ pr2=await post("/sla/archive/photos/import",{files}); }catch(e){ pr2={failed:files.length}; }
+          if(pr2 && pr2.failed>0){ ABORT={reason:"file transfer failed", failed:pr2.failed, mos:[...new Set(files.map(f=>f.mos))].slice(0,10), sample:files.filter(f=>f).slice(0,3).map(f=>f.name)}; if(pr2.imported) T.files+=pr2.imported; return; }
+          if(pr2) T.files+=pr2.imported||0;
+        } else if(pr) T.files+=pr.imported||0;
+      };
+      for(const np of res.needPhotos){ if(ABORT) break; if(!np.uuid) continue; const files=await harvestPhotos(np); for(const f of files){ fb.push(f); if(fb.length>=15){ await sf(); if(ABORT) break; } } if(ABORT) break; } if(!ABORT) await sf(); }
     batch=[]; batchU={}; };
   let start=Number(localStorage.mlSyncPage||1);
   for(let pg=start; pg<=pages; pg++){
     const j=await wg("/api/v1/jobs-list?page="+pg+"&size=50"); if(!j) continue;
     for(const it of (j.items||[])){ batchU[it.identifier]=it.id; batch.push({ mos:it.identifier, uuid:it.id, name:it.name, status:sName[it.jobStatusId]||"", cost:it.totalCosts||0, priority:it.priority||"", siteCode:it.locationNameJob||"", siteName:it.customerName||"", postcode:it.postalJob||"", customerName:it.customerName||"", address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel||"" }); }
-    if(batch.length>=150) await flush();
+    if(batch.length>=150){ await flush(); if(ABORT) break; }
     localStorage.mlSyncPage=pg+1;
     if(pg%10===0) console.log("%cpage "+pg+"/"+pages+"  live+"+T.updatedLive+" new+"+T.importedArchive+" arch+"+T.updatedArchive+" files+"+T.files+" skip+"+T.skipped+" err+"+T.errors,"color:#06c");
   }
-  await flush();
+  if(!ABORT) await flush();
+  if(ABORT){
+    // Leave the resume marker in place so re-running picks up where it stopped.
+    console.log("%c⛔ STOPPED — a transfer failed","color:#c00;font-weight:bold",ABORT,T);
+    alert("⛔ Sync STOPPED — a job's files failed to transfer.\\n\\nReason: "+ABORT.reason+"\\nAffected MOS: "+ABORT.mos.join(", ")+"\\nExample file(s): "+(ABORT.sample||[]).join(", ")+"\\n\\nNothing was lost — progress is saved. Fix the issue (or just try again) and re-run to resume from here.\\n\\nDone so far — Live: "+T.updatedLive+"  New: "+T.importedArchive+"  Files: "+T.files);
+    return;
+  }
   delete localStorage.mlSyncPage; delete localStorage.mlSyncRun;
   console.log("%c✅ Sync complete","color:#0a0;font-weight:bold",T);
   alert("Workever sync complete!\\n\\nLive jobs updated: "+T.updatedLive+"\\nNew jobs archived: "+T.importedArchive+"\\nArchive updated: "+T.updatedArchive+"\\nPhotos/docs brought in: "+T.files+"\\nSkipped (already current): "+T.skipped+"\\nErrors: "+T.errors+"\\n\\nOpen SLA Settings → Sync with Workever → Refresh change log to review.");
@@ -446,6 +471,62 @@ function buildRunner(){
 document.getElementById("wkCopy").addEventListener("click", async ()=>{
   const msg = document.getElementById("wkCopyMsg"); const ta = document.getElementById("wkRunner");
   const code = buildRunner(); ta.value = code; ta.style.display = "block";
+  try{ await navigator.clipboard.writeText(code); msg.textContent = "Copied ✓ — paste into the Workever console"; }
+  catch{ ta.select(); msg.textContent = "Select-all + copy the box below"; }
+});
+
+// Single-job test runner — syncs one job and verifies notes/signature/photos landed.
+function buildTestRunner(target){
+  const token = pTok(), api = PAPI;
+  return `/* Mostlane → Workever SINGLE-JOB TEST for ${target}. Paste into the mostlane.workever.app console. */
+(async () => {
+  const API=${JSON.stringify(api)}, TOKEN=${JSON.stringify(token)}, TARGET=${JSON.stringify(target)};
+  const wg = async u => { try{ const r=await fetch(u,{credentials:"include",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}}); return r.ok?r.json():null; }catch{ return null; } };
+  const post = (p,b) => fetch(API+p,{method:"POST",headers:{Authorization:"Bearer "+TOKEN,"Content-Type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json());
+  const pget = p => fetch(API+p,{headers:{Authorization:"Bearer "+TOKEN}}).then(r=>r.json());
+  const isUuid = /^[0-9a-f]{8}-/.test(TARGET);
+  let job=null;
+  if(isUuid){ const d=await wg("/api/v1/jobs/"+TARGET); if(d) job={uuid:TARGET, mos:d.identifier, name:d.name, description:d.description, status:d.jobStatus&&d.jobStatus.name, cost:d.totalAmount, siteName:d.customer&&d.customer.name, siteCode:d.site&&d.site.name, postcode:d.site&&d.site.address&&d.site.address.postalCode}; }
+  else { console.log("Searching Workever for "+TARGET+"…"); let pg=1,pages=1;
+    do{ const j=await wg("/api/v1/jobs-list?page="+pg+"&size=50"); if(!j)break; pages=j.totalPages;
+      const it=(j.items||[]).find(x=>String(x.identifier).toUpperCase()===TARGET.toUpperCase());
+      if(it){ const d=await wg("/api/v1/jobs/"+it.id); job={uuid:it.id, mos:it.identifier, name:it.name, description:d&&d.description, status:d&&d.jobStatus&&d.jobStatus.name, cost:it.totalCosts, siteCode:it.locationNameJob, siteName:it.customerName, postcode:it.postalJob, customerName:it.customerName, address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel}; break; }
+      pg++; }while(pg<=pages&&pg<=300);
+  }
+  if(!job){ alert("Job "+TARGET+" not found in Workever. Open the job and use its id from the URL instead."); return; }
+  // What Workever holds
+  let all=[],page=1,g=0; while(g++<12){ const d=await wg("/documents/"+job.uuid+"/job/photos"+(page>1?"?page="+page:"")); if(!d||!d.files||!d.files.length)break; all=all.concat(d.files); const pc=d.pagesCount||0; if(page>=pc)break; page++; }
+  const kindOf=f=>{ const t=(f.documentType||"").toLowerCase(), nm=((f.fileName||"")+" "+(f.description||"")).toLowerCase(); return /sign/.test(nm)?"signature":(t.indexOf("image/")===0?"photo":"document"); };
+  const W={photo:0,signature:0,document:0}; for(const f of all){ if(f&&f.links&&f.links.file) W[kindOf(f)]++; }
+  console.log("%cWorkever job "+job.mos+" — "+job.name,"font-weight:bold;font-size:13px");
+  console.log("  status="+job.status+"  notes="+(job.description?("yes ("+job.description.length+" chars)"):"no")+"  photos="+W.photo+"  signatures="+W.signature+"  docs="+W.document);
+  // Sync just this job
+  const RUN="wk-test-"+Date.now();
+  const ing = await post("/sla/workever/ingest",{runId:RUN, jobs:[job]});
+  console.log("  ingest →", ing.counts);
+  if(ing.needDetail&&ing.needDetail.length&&job.description) await post("/sla/workever/enrich",{items:[{mos:job.mos,description:job.description}]});
+  const files=[], seen={}; for(const f of all){ const url=f&&f.links&&f.links.file; if(!url||seen[f.id])continue; seen[f.id]=1; const base=decodeURIComponent(String(url).split("/").pop().split("?")[0]); files.push({id:job.mos+":"+base, mos:job.mos, name:f.fileName||"", url, type:f.documentType||"", bytes:f.documentLength||0, kind:kindOf(f)}); }
+  let imp={imported:0,skipped:0,failed:0}; if(files.length){ imp=(await post("/sla/archive/photos/import",{files}))||imp; }
+  console.log("  file import →", imp);
+  // Verify portal side
+  const pf = await pget("/sla/archive/files?mos="+encodeURIComponent(job.mos));
+  const P={photo:0,signature:0,document:0}; for(const f of ((pf&&pf.files)||[])){ P[f.kind]=(P[f.kind]||0)+1; }
+  console.log("%cPortal now holds: photos="+P.photo+" signatures="+P.signature+" docs="+P.document,"font-weight:bold");
+  // Judge — fail only if Workever HAD something that didn't arrive
+  const problems=[];
+  if((ing.counts.updatedLive+ing.counts.importedArchive+ing.counts.updatedArchive+ing.counts.skipped)===0) problems.push("job wasn't matched or updated");
+  for(const k of ["photo","signature","document"]){ if(W[k]>0 && P[k]<W[k]) problems.push(k+": Workever had "+W[k]+", portal has "+P[k]); }
+  if(imp.failed>0) problems.push(imp.failed+" file(s) failed to store");
+  const pass = problems.length===0;
+  console.log(pass?"%c✅ PASS — everything Workever holds is now in the portal":"%c❌ FAIL","color:"+(pass?"#0a0":"#c00")+";font-weight:bold;font-size:15px", pass?"":problems);
+  alert((pass?"✅ TEST PASSED":"❌ TEST FAILED")+"\\n\\nJob "+job.mos+" — "+job.name+"\\nWorkever status: "+job.status+"\\n\\nWorkever had:   notes "+(job.description?"yes":"no")+" · photos "+W.photo+" · signatures "+W.signature+" · docs "+W.document+"\\nPortal now has: photos "+P.photo+" · signatures "+P.signature+" · docs "+P.document+"\\nJob action: "+JSON.stringify(ing.counts)+(pass?"":"\\n\\nProblems:\\n- "+problems.join("\\n- ")));
+})();`;
+}
+document.getElementById("wkTestBtn").addEventListener("click", async ()=>{
+  const msg = document.getElementById("wkTestMsg"), ta = document.getElementById("wkTestRunner");
+  const mos = (document.getElementById("wkTestMos").value||"").trim();
+  if(!mos){ msg.textContent = "Enter a MOS number or job id first."; return; }
+  const code = buildTestRunner(mos); ta.value = code; ta.style.display = "block";
   try{ await navigator.clipboard.writeText(code); msg.textContent = "Copied ✓ — paste into the Workever console"; }
   catch{ ta.select(); msg.textContent = "Select-all + copy the box below"; }
 });
