@@ -25952,7 +25952,7 @@ async function handle35(request, env, ctx, url, sess) {
     const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
     const liveByRef = {};
     for (const r of liveRows) {
-      const k = leadRef(r.helpdesk_ref);
+      const k = leadRef(r.id) || leadRef(r.helpdesk_ref);
       if (k && !liveByRef[k]) liveByRef[k] = r;
     }
     const mosList = jobs.map((j) => String(j.mos || "").trim()).filter(Boolean);

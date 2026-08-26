@@ -199,9 +199,12 @@ export async function handle(request, env, ctx, url, sess) {
     const nowIso = new Date().toISOString();
 
     // Preload all live jobs, keyed by Concerto number (there are only ~200).
+    // The Concerto number lives in the job ID ("27869-Cowes, Mill Hill Road") —
+    // NOT always in helpdesk_ref (which can be just the site name, and is shared
+    // by every job at that site). So key on leadRef(id) first, ref as fallback.
     const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
     const liveByRef = {};
-    for (const r of liveRows) { const k = leadRef(r.helpdesk_ref); if (k && !liveByRef[k]) liveByRef[k] = r; }
+    for (const r of liveRows) { const k = leadRef(r.id) || leadRef(r.helpdesk_ref); if (k && !liveByRef[k]) liveByRef[k] = r; }
 
     // Preload existing archive statuses for this batch's MOS numbers.
     const mosList = jobs.map(j => String(j.mos || "").trim()).filter(Boolean);
