@@ -24,7 +24,7 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { buildCertPdf } from "../lib/certpdf.js";
 import { logoBytes } from "../lib/logo.js";
-import { pdfExtractText, pdfExtractTokens } from "../lib/pdftext.js";
+import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
 
@@ -98,47 +98,71 @@ async function getJob(env, tid, id) {
 function padCode(v) { const d = String(v ?? "").replace(/\D/g, ""); return d ? d.padStart(4, "0") : ""; }
 
 // ── Prefill the luminaire/appliance list from the site's most recent cert ─────
-// The valuable carry-forward is the ROW LIST (each luminaire's position/comment),
-// so a monthly re-test is a re-confirm not a retype. Client/installation come
-// from the portal site; contractor + boilerplate from config.
-function parseEmRows(txt) {
-  if (!txt) return [];
-  // rows look like: "12 Pass Pass Pass 180 600x600"  (No. | Normal | LED | Emergency | Battery | Comments)
+// Both parsers are TOKEN-BASED and LANDMARK-ANCHORED so they cope with format
+// variation across Tysoft (and similar) templates — different appliance-ID styles
+// (AP00001 / 00001 / 1), single- OR multi-word descriptions/locations, an
+// optional serial-number column, Pass/Fail/Skip or P/F/S status, and dates with
+// / . or - separators. Each cell is its own PDF text token, which is what makes
+// the anchoring reliable. The valuable carry-forward is the ITEM LIST (each
+// item's position/description + location) — results default to Pass on carry, so
+// only the identity + location need reading. Nothing is invented: an unreadable
+// (e.g. scanned) cert yields [] and the office/engineer is told none was found.
+const cap = s => { s = String(s || "").trim(); return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s; };
+const CERT_PF = s => /^(pass|fail|n\/?a|na|p|f)$/i.test(String(s).trim());
+const CERT_DATE = s => /^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}$/.test(String(s).trim());
+const CERT_STATUS = s => /^(pass|fail|skip|p|f|s)$/i.test(String(s).trim());
+const CERT_STOP = /^(www\.|tysoft|report printed|key:|page:|ref:|emergency lighting|appliance details|site:|no\.$|lamp$|battery|comments$|status$|total appliances|installation|certificate|the southern)/i;
+
+// EM: rows are  No · Normal · LED · Emergency · Battery · Comments(location).
+// Anchor = a small row-number token immediately followed by a Pass/Fail token.
+function parseEmRowsTokens(toks) {
+  if (!toks || !toks.length) return [];
   const rows = [];
-  const re = /\b(\d{1,3})\s+(Pass|Fail|N\/?A)\s+(Pass|Fail|N\/?A)\s+(Pass|Fail|N\/?A)\s+(\d{1,4})\s+(.*?)(?=\s+\d{1,3}\s+(?:Pass|Fail|N\/?A)\s+(?:Pass|Fail|N\/?A)\b|\s+www\.|\s+Tysoft|\s+EMERGENCY LIGHTING|$)/gi;
-  let m;
-  while ((m = re.exec(txt))) {
-    rows.push({ no: Number(m[1]), normal: cap(m[2]), led: cap(m[3]), emergency: cap(m[4]), battery: m[5], comments: (m[6] || "").trim().slice(0, 80) });
-    if (rows.length > 400) break;
+  for (let i = 0; i < toks.length - 2; i++) {
+    if (!/^\d{1,3}$/.test(String(toks[i]).trim())) continue;
+    if (!CERT_PF(toks[i + 1])) continue;                    // row-number → a result
+    let j = i + 1; const states = [];
+    while (j < toks.length && CERT_PF(toks[j]) && states.length < 6) { states.push(cap(toks[j])); j++; }
+    let battery = ""; if (j < toks.length && /^\d{1,4}$/.test(String(toks[j]).trim())) { battery = String(toks[j]).trim(); j++; }
+    const parts = [];                                       // comment/location = words up to the next row / a footer
+    while (j < toks.length && parts.length < 8) {
+      const tk = String(toks[j]).trim();
+      if (/^\d{1,3}$/.test(tk) && CERT_PF(toks[j + 1])) break;
+      if (CERT_STOP.test(tk)) break;
+      parts.push(tk); j++;
+    }
+    rows.push({
+      no: rows.length + 1, normal: states[0] || "", led: states[1] || "",
+      emergency: states[2] || states[states.length - 1] || "",
+      battery: battery || 180, comments: parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 80),
+    });
+    i = j - 1;
+    if (rows.length > 600) break;
   }
-  // de-dupe by No. (page footers can repeat) keeping first
-  const seen = new Set(); const out = [];
-  for (const r of rows) { if (seen.has(r.no)) continue; seen.add(r.no); out.push(r); }
-  out.sort((a, b) => a.no - b.no);
-  return out;
+  return rows;
 }
-// Tysoft EasyPAT rows — each cell is a single PDF text token, so parse by token:
-//   Appliance ID · Test Date · Description · Location · [Serial] · Retest Period ·
-//   Retest Date · Status.  Anchored on an ID token followed by a date, ending at
-//   "<int> <date> <Pass|Fail|Skip>". Description = first middle token, Location =
-//   second (Serial, if present, is the third and is ignored).
+// PAT: rows are  Appliance ID · Test Date · Description · Location · [Serial] ·
+// [Retest Period] · Retest Date · Status.  Anchor = an ID-ish token followed by a
+// date, whose 3rd token is NOT a status (that guard rejects the period→retest
+// date→status tail so it can't be mistaken for a row start). End = a Status
+// preceded by a date (the retest date); the words between the test date and the
+// retest date are Description (first) and Location (second).
 function parsePatRowsTokens(toks) {
   if (!toks || !toks.length) return [];
-  const isDate = s => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
-  const isStatus = s => /^(Pass|Fail|Skip)$/i.test(s);
-  // Appliance ID: a letter-prefixed tag (AP00001) OR a 4+ digit number (00001).
-  // 4+ digits keeps it clear of the 1–3 digit retest-period column ("12").
-  const isId = s => /^[A-Za-z]{1,5}\d{1,}$/.test(s) || /^\d{4,}$/.test(s);
-  const isInt = s => /^\d{1,3}$/.test(s);
   const rows = [];
   for (let i = 0; i < toks.length - 3; i++) {
-    if (!(isId(toks[i]) && isDate(toks[i + 1]))) continue;
+    const id = String(toks[i]).trim();
+    if (id.length < 1 || id.length > 18 || /\s/.test(id)) continue;   // an ID cell, not free text
+    if (CERT_DATE(id) || CERT_STATUS(id)) continue;
+    if (!CERT_DATE(toks[i + 1])) continue;                            // test date
+    if (CERT_STATUS(toks[i + 2])) continue;                           // reject the period/retest-date/status tail
     let end = -1;
-    for (let k = i + 3; k <= i + 9 && k < toks.length; k++) {
-      if (isStatus(toks[k]) && isDate(toks[k - 1]) && isInt(toks[k - 2])) { end = k; break; }
+    for (let k = i + 3; k <= i + 12 && k < toks.length; k++) {
+      if (CERT_STATUS(toks[k]) && CERT_DATE(toks[k - 1])) { end = k; break; }
     }
     if (end < 0) continue;
-    const middle = toks.slice(i + 2, end - 2);   // Description, Location, [Serial]
+    const middle = toks.slice(i + 2, end - 1);   // Description, Location, [Serial], [Period]
+    if (!middle.length) continue;
     rows.push({
       no: rows.length + 1,
       appliance: String(middle[0] || "").trim().slice(0, 60),
@@ -150,7 +174,6 @@ function parsePatRowsTokens(toks) {
   }
   return rows;
 }
-const cap = s => { s = String(s || ""); return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s; };
 
 // Carry an item list forward for a NEW visit: keep each item's IDENTITY
 // (position/description/appliance/location/class) and default every result to
@@ -207,9 +230,8 @@ async function prefillFromPrevious(env, tid, code, type) {
     if (!obj) return { rows: [], from: null, header: null };
     const buf = await obj.arrayBuffer();
     if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null };
-    const parsed = type === "pat"
-      ? parsePatRowsTokens(await pdfExtractTokens(buf))   // token-accurate (Tysoft EasyPAT)
-      : parseEmRows(await pdfExtractText(buf));
+    const toks = await pdfExtractTokens(buf);            // both parsers are token-based + format-flexible
+    const parsed = type === "pat" ? parsePatRowsTokens(toks) : parseEmRowsTokens(toks);
     return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null };
   } catch { return { rows: [], from: null, header: null }; }
 }

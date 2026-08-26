@@ -24316,43 +24316,71 @@ function padCode(v) {
   const d = String(v ?? "").replace(/\D/g, "");
   return d ? d.padStart(4, "0") : "";
 }
-function parseEmRows(txt) {
-  if (!txt) return [];
+var cap = (s) => {
+  s = String(s || "").trim();
+  return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
+};
+var CERT_PF = (s) => /^(pass|fail|n\/?a|na|p|f)$/i.test(String(s).trim());
+var CERT_DATE = (s) => /^\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}$/.test(String(s).trim());
+var CERT_STATUS = (s) => /^(pass|fail|skip|p|f|s)$/i.test(String(s).trim());
+var CERT_STOP = /^(www\.|tysoft|report printed|key:|page:|ref:|emergency lighting|appliance details|site:|no\.$|lamp$|battery|comments$|status$|total appliances|installation|certificate|the southern)/i;
+function parseEmRowsTokens(toks) {
+  if (!toks || !toks.length) return [];
   const rows = [];
-  const re = /\b(\d{1,3})\s+(Pass|Fail|N\/?A)\s+(Pass|Fail|N\/?A)\s+(Pass|Fail|N\/?A)\s+(\d{1,4})\s+(.*?)(?=\s+\d{1,3}\s+(?:Pass|Fail|N\/?A)\s+(?:Pass|Fail|N\/?A)\b|\s+www\.|\s+Tysoft|\s+EMERGENCY LIGHTING|$)/gi;
-  let m;
-  while (m = re.exec(txt)) {
-    rows.push({ no: Number(m[1]), normal: cap(m[2]), led: cap(m[3]), emergency: cap(m[4]), battery: m[5], comments: (m[6] || "").trim().slice(0, 80) });
-    if (rows.length > 400) break;
+  for (let i = 0; i < toks.length - 2; i++) {
+    if (!/^\d{1,3}$/.test(String(toks[i]).trim())) continue;
+    if (!CERT_PF(toks[i + 1])) continue;
+    let j = i + 1;
+    const states = [];
+    while (j < toks.length && CERT_PF(toks[j]) && states.length < 6) {
+      states.push(cap(toks[j]));
+      j++;
+    }
+    let battery = "";
+    if (j < toks.length && /^\d{1,4}$/.test(String(toks[j]).trim())) {
+      battery = String(toks[j]).trim();
+      j++;
+    }
+    const parts = [];
+    while (j < toks.length && parts.length < 8) {
+      const tk = String(toks[j]).trim();
+      if (/^\d{1,3}$/.test(tk) && CERT_PF(toks[j + 1])) break;
+      if (CERT_STOP.test(tk)) break;
+      parts.push(tk);
+      j++;
+    }
+    rows.push({
+      no: rows.length + 1,
+      normal: states[0] || "",
+      led: states[1] || "",
+      emergency: states[2] || states[states.length - 1] || "",
+      battery: battery || 180,
+      comments: parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 80)
+    });
+    i = j - 1;
+    if (rows.length > 600) break;
   }
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const r of rows) {
-    if (seen.has(r.no)) continue;
-    seen.add(r.no);
-    out.push(r);
-  }
-  out.sort((a, b) => a.no - b.no);
-  return out;
+  return rows;
 }
 function parsePatRowsTokens(toks) {
   if (!toks || !toks.length) return [];
-  const isDate = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
-  const isStatus = (s) => /^(Pass|Fail|Skip)$/i.test(s);
-  const isId = (s) => /^[A-Za-z]{1,5}\d{1,}$/.test(s) || /^\d{4,}$/.test(s);
-  const isInt = (s) => /^\d{1,3}$/.test(s);
   const rows = [];
   for (let i = 0; i < toks.length - 3; i++) {
-    if (!(isId(toks[i]) && isDate(toks[i + 1]))) continue;
+    const id = String(toks[i]).trim();
+    if (id.length < 1 || id.length > 18 || /\s/.test(id)) continue;
+    if (CERT_DATE(id) || CERT_STATUS(id)) continue;
+    if (!CERT_DATE(toks[i + 1])) continue;
+    if (CERT_STATUS(toks[i + 2])) continue;
     let end = -1;
-    for (let k = i + 3; k <= i + 9 && k < toks.length; k++) {
-      if (isStatus(toks[k]) && isDate(toks[k - 1]) && isInt(toks[k - 2])) {
+    for (let k = i + 3; k <= i + 12 && k < toks.length; k++) {
+      if (CERT_STATUS(toks[k]) && CERT_DATE(toks[k - 1])) {
         end = k;
         break;
       }
     }
     if (end < 0) continue;
-    const middle = toks.slice(i + 2, end - 2);
+    const middle = toks.slice(i + 2, end - 1);
+    if (!middle.length) continue;
     rows.push({
       no: rows.length + 1,
       appliance: String(middle[0] || "").trim().slice(0, 60),
@@ -24369,10 +24397,6 @@ function parsePatRowsTokens(toks) {
   }
   return rows;
 }
-var cap = (s) => {
-  s = String(s || "");
-  return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
-};
 function carryRows(rows, type) {
   return (rows || []).map((r, i) => type === "pat" ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: r.comments || "" } : { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 });
 }
@@ -24423,7 +24447,8 @@ async function prefillFromPrevious(env, tid, code, type) {
     if (!obj) return { rows: [], from: null, header: null };
     const buf = await obj.arrayBuffer();
     if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null, header: null };
-    const parsed = type === "pat" ? parsePatRowsTokens(await pdfExtractTokens(buf)) : parseEmRows(await pdfExtractText(buf));
+    const toks = await pdfExtractTokens(buf);
+    const parsed = type === "pat" ? parsePatRowsTokens(toks) : parseEmRowsTokens(toks);
     return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf", header: null };
   } catch {
     return { rows: [], from: null, header: null };
