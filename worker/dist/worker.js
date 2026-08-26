@@ -5256,6 +5256,31 @@ async function pdfExtractText(bytes) {
   }
   return out.join(" ").replace(/\s+/g, " ");
 }
+async function pdfExtractTokens(bytes) {
+  const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const s = latin1(u82);
+  const out = [];
+  const re = /stream\r?\n/g;
+  let m;
+  while (m = re.exec(s)) {
+    const start = m.index + m[0].length;
+    const end = s.indexOf("endstream", start);
+    if (end < 0) break;
+    let raw = u82.subarray(start, end);
+    let e = raw.length;
+    while (e > 0 && (raw[e - 1] === 10 || raw[e - 1] === 13)) e--;
+    raw = raw.slice(0, e);
+    const dec = await inflate(raw);
+    const ds = latin1(dec || raw);
+    const toks = ds.match(/\((?:[^()\\]|\\.)*\)/g);
+    if (toks) for (const t of toks) {
+      const v = t.slice(1, -1).replace(/\\([()\\])/g, "$1");
+      if (v.trim()) out.push(v);
+    }
+    re.lastIndex = end + 9;
+  }
+  return out;
+}
 function certNumberFromText(txt) {
   if (!txt) return null;
   const m = txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) || txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
@@ -24300,20 +24325,38 @@ function parseEmRows(txt) {
   out.sort((a, b) => a.no - b.no);
   return out;
 }
-function parsePatRows(txt) {
-  if (!txt) return [];
+function parsePatRowsTokens(toks) {
+  if (!toks || !toks.length) return [];
+  const isDate = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+  const isStatus = (s) => /^(Pass|Fail|Skip)$/i.test(s);
+  const isId = (s) => /^[A-Za-z]{1,5}\d{2,}$/.test(s);
+  const isInt = (s) => /^\d{1,3}$/.test(s);
   const rows = [];
-  const re = /\b(\d{1,3})\s+(.{2,60}?)\s+(Pass|Fail)\b/gi;
-  let m;
-  const seen = /* @__PURE__ */ new Set();
-  while (m = re.exec(txt)) {
-    const no = Number(m[1]);
-    if (seen.has(no)) continue;
-    seen.add(no);
-    rows.push({ no, appliance: (m[2] || "").trim().slice(0, 60), location: "", cls: "", visual: "", earth: "", insulation: "", result: cap(m[3]), comments: "" });
-    if (rows.length > 400) break;
+  for (let i = 0; i < toks.length - 3; i++) {
+    if (!(isId(toks[i]) && isDate(toks[i + 1]))) continue;
+    let end = -1;
+    for (let k = i + 3; k <= i + 9 && k < toks.length; k++) {
+      if (isStatus(toks[k]) && isDate(toks[k - 1]) && isInt(toks[k - 2])) {
+        end = k;
+        break;
+      }
+    }
+    if (end < 0) continue;
+    const middle = toks.slice(i + 2, end - 2);
+    rows.push({
+      no: rows.length + 1,
+      appliance: String(middle[0] || "").slice(0, 60),
+      location: String(middle[1] || "").slice(0, 60),
+      cls: "",
+      visual: "",
+      earth: "",
+      insulation: "",
+      result: "",
+      comments: ""
+    });
+    i = end;
+    if (rows.length > 600) break;
   }
-  rows.sort((a, b) => a.no - b.no);
   return rows;
 }
 var cap = (s) => {
@@ -24356,8 +24399,7 @@ async function prefillRows(env, tid, code, type) {
     if (!obj) return { rows: [], from: null };
     const buf = await obj.arrayBuffer();
     if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null };
-    const txt = await pdfExtractText(buf);
-    const parsed = type === "pat" ? parsePatRows(txt) : parseEmRows(txt);
+    const parsed = type === "pat" ? parsePatRowsTokens(await pdfExtractTokens(buf)) : parseEmRows(await pdfExtractText(buf));
     return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf" };
   } catch {
     return { rows: [], from: null };

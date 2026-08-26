@@ -24,7 +24,7 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { buildCertPdf } from "../lib/certpdf.js";
 import { logoBytes } from "../lib/logo.js";
-import { pdfExtractText } from "../lib/pdftext.js";
+import { pdfExtractText, pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
 
@@ -117,18 +117,35 @@ function parseEmRows(txt) {
   out.sort((a, b) => a.no - b.no);
   return out;
 }
-function parsePatRows(txt) {
-  if (!txt) return [];
-  // PAT layouts vary; best-effort — capture "<no> <desc…> … <Pass|Fail>".
+// Tysoft EasyPAT rows — each cell is a single PDF text token, so parse by token:
+//   Appliance ID · Test Date · Description · Location · [Serial] · Retest Period ·
+//   Retest Date · Status.  Anchored on an ID token followed by a date, ending at
+//   "<int> <date> <Pass|Fail|Skip>". Description = first middle token, Location =
+//   second (Serial, if present, is the third and is ignored).
+function parsePatRowsTokens(toks) {
+  if (!toks || !toks.length) return [];
+  const isDate = s => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+  const isStatus = s => /^(Pass|Fail|Skip)$/i.test(s);
+  const isId = s => /^[A-Za-z]{1,5}\d{2,}$/.test(s);   // AP00001, APP001…
+  const isInt = s => /^\d{1,3}$/.test(s);
   const rows = [];
-  const re = /\b(\d{1,3})\s+(.{2,60}?)\s+(Pass|Fail)\b/gi;
-  let m; const seen = new Set();
-  while ((m = re.exec(txt))) {
-    const no = Number(m[1]); if (seen.has(no)) continue; seen.add(no);
-    rows.push({ no, appliance: (m[2] || "").trim().slice(0, 60), location: "", cls: "", visual: "", earth: "", insulation: "", result: cap(m[3]), comments: "" });
-    if (rows.length > 400) break;
+  for (let i = 0; i < toks.length - 3; i++) {
+    if (!(isId(toks[i]) && isDate(toks[i + 1]))) continue;
+    let end = -1;
+    for (let k = i + 3; k <= i + 9 && k < toks.length; k++) {
+      if (isStatus(toks[k]) && isDate(toks[k - 1]) && isInt(toks[k - 2])) { end = k; break; }
+    }
+    if (end < 0) continue;
+    const middle = toks.slice(i + 2, end - 2);   // Description, Location, [Serial]
+    rows.push({
+      no: rows.length + 1,
+      appliance: String(middle[0] || "").slice(0, 60),
+      location: String(middle[1] || "").slice(0, 60),
+      cls: "", visual: "", earth: "", insulation: "", result: "", comments: "",
+    });
+    i = end;
+    if (rows.length > 600) break;
   }
-  rows.sort((a, b) => a.no - b.no);
   return rows;
 }
 const cap = s => { s = String(s || ""); return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s; };
@@ -171,8 +188,9 @@ async function prefillRows(env, tid, code, type) {
     if (!obj) return { rows: [], from: null };
     const buf = await obj.arrayBuffer();
     if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null };
-    const txt = await pdfExtractText(buf);
-    const parsed = type === "pat" ? parsePatRows(txt) : parseEmRows(txt);
+    const parsed = type === "pat"
+      ? parsePatRowsTokens(await pdfExtractTokens(buf))   // token-accurate (Tysoft EasyPAT)
+      : parseEmRows(await pdfExtractText(buf));
     return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf" };
   } catch { return { rows: [], from: null }; }
 }

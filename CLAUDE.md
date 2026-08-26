@@ -2097,11 +2097,15 @@ it straight onto the compliance chart (rolling the next-due date).
   seeds a new cert's item list from the PREVIOUS visit so it's a re-confirm, not a
   retype. It reads the site's most recent **FINALISED portal certificate's structured
   rows** first (clean, and it chains forward year on year), and only falls back to
-  **PDF-parsing the legacy Tysoft cert** (`pdfExtractText` + `parseEmRows`/`parsePatRows`)
-  when there's no portal cert yet. `carryRows()` keeps each item's IDENTITY (luminaire
-  position/description, appliance/location/class) but **BLANKS the results + measurements**
-  so the engineer actively re-confirms every one on site (All-Pass button + per-row
-  toggles). NB our own PDF renders results as dots (no "Pass" text), so the structured-
+  **PDF-parsing the legacy Tysoft cert** when there's no portal cert yet — EM via
+  `parseEmRows` (flattened text), **PAT via `parsePatRowsTokens`** (Tysoft EasyPAT
+  lays each cell as its own PDF text token, so rows parse token-accurately: ID ·
+  date · **Description** · **Location** · [serial] · period · retest date · status —
+  validated 74/74 appliances with correct location). `carryRows()` keeps each item's
+  IDENTITY (luminaire position/description, appliance/**location**/class) and defaults
+  every result to **Pass** (engineer taps any that failed); measurements are blanked.
+  The results are mobile-first tappable cards (location is the card title), not a
+  wide table. NB our own PDF renders results as dots (no "Pass" text), so the structured-
   first read is what makes prefill work on portal-generated certs. Client/installation
   come from the portal site, contractor + boilerplate from config.
 - **Filing:** `compliance.js` exports **`fileCertificatePdf(env,tid,{scheme,code,type,
