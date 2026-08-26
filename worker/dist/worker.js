@@ -25556,7 +25556,7 @@ async function handle34(request, env, ctx, url, sess) {
 // src/routes/workever.js
 var MAP_KEY = "workever:statusmap";
 var LASTRUN_KEY = "workever:lastrun";
-var DONE_PORTAL = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced"]);
+var OPEN_PORTAL = /* @__PURE__ */ new Set(["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order"]);
 var DEFAULT_MAP = {
   "closed jobs": { portal: "Closed Jobs", done: true },
   "completed": { portal: "Complete", done: true },
@@ -25699,7 +25699,7 @@ async function handle35(request, env, ctx, url, sess) {
         const ref = leadRef(j.name);
         const live = ref ? liveByRef[ref] : null;
         if (live) {
-          if (m.done && !DONE_PORTAL.has(live.status)) {
+          if (m.done && OPEN_PORTAL.has(live.status)) {
             const cur = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, live.id).first();
             let data2 = {};
             try {

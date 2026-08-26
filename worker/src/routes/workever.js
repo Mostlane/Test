@@ -38,9 +38,12 @@ import { tenantDB } from "../lib/tenantdb.js";
 const MAP_KEY = "workever:statusmap";
 const LASTRUN_KEY = "workever:lastrun";
 
-// Portal statuses that already count as finished — a live job in one of these
-// is left alone (the sync never re-opens a job).
-const DONE_PORTAL = new Set(["Complete", "Closed Jobs", "Invoiced"]);
+// The sync only ever ADVANCES a live job that is still in a built-in OPEN state.
+// Anything else the portal has set — Complete/Closed/Invoiced/Cancelled OR any
+// custom category (e.g. "FRA Complete") — is the portal's own record and is left
+// untouched, so a job you completed IN THE PORTAL is never overwritten. This is
+// deliberately a whitelist, not "not-done", so unknown/custom statuses are safe.
+const OPEN_PORTAL = new Set(["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order"]);
 
 // Default Workever→portal mapping (keys are lower-cased + trimmed at match time).
 // Built from the live status vocabulary. `done:true` means "finished in Workever".
@@ -193,9 +196,10 @@ export async function handle(request, env, ctx, url, sess) {
         const ref = leadRef(j.name);
         const live = ref ? liveByRef[ref] : null;
 
-        // 1) LIVE match — only ever move a live job FORWARD to done.
+        // 1) LIVE match — only ever advance a job that's still in an OPEN state,
+        // so a job already completed/categorised in the portal is never touched.
         if (live) {
-          if (m.done && !DONE_PORTAL.has(live.status)) {
+          if (m.done && OPEN_PORTAL.has(live.status)) {
             const cur = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, live.id).first();
             let data = {}; try { data = cur && cur.data ? JSON.parse(cur.data) : {}; } catch {}
             data.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
