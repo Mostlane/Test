@@ -1848,36 +1848,50 @@ $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCard
 
 // ── Fallback jobs config ──────────────────────────────────────────────────
 function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
+let FB_PROJECTS = [];
 async function openFallbacks(){
   $("fbBackdrop").style.display = "flex"; $("fbMsg").textContent = "Loading…";
   let cfg = { enabled:false, startHour:8, byEngineer:{} };
-  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok) cfg = d.config || cfg; } catch(e){}
+  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok){ cfg = d.config || cfg; FB_PROJECTS = d.projects || []; } } catch(e){}
   $("fbEnabled").checked = !!cfg.enabled;
   $("fbStart").value = String(cfg.startHour!=null?cfg.startHour:8).padStart(2,"0") + ":00";
   const fields = (engineers||[]).filter(isFieldEng);
+  const projOpts = function(sel){ return '<option value="">— Generic (site + task below) —</option>'
+    + FB_PROJECTS.map(function(p){ return '<option value="'+escapeHtml(p.id)+'" '+(p.id===sel?"selected":"")+'>📁 '+escapeHtml((p.number?p.number+" · ":"")+p.name)+'</option>'; }).join(''); };
   $("fbRows").innerHTML = fields.map(function(e){
     const fb = (cfg.byEngineer||{})[fbNorm(e.username)] || {};
     return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">'
       + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">'+escapeHtml(e.name)+'</b>'
       + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label></div>'
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+      + '<div style="margin-bottom:6px;"><select class="fb-proj" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;">'+projOpts(fb.projectId||"")+'</select></div>'
+      + '<div class="fb-generic" style="'+(fb.projectId?"display:none;":"")+'"><div style="display:flex;gap:8px;flex-wrap:wrap;">'
       + '<input class="fb-site" placeholder="Site / where to head (e.g. Yard)" value="'+escapeHtml(fb.siteName||"")+'" style="flex:2 1 180px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
-      + '<input class="fb-pc" placeholder="Postcode" value="'+escapeHtml(fb.postcode||"")+'" style="flex:1 1 90px;padding:8px;border:1px solid var(--border);border-radius:8px;"></div>'
+      + '<input class="fb-pc" placeholder="Postcode" value="'+escapeHtml(fb.postcode||"")+'" style="flex:1 1 90px;padding:8px;border:1px solid var(--border);border-radius:8px;"></div></div>'
       + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">'
-      + '<input class="fb-desc" placeholder="What to do (e.g. Standby / report to yard)" value="'+escapeHtml(fb.description||"")+'" style="flex:2 1 220px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
+      + '<input class="fb-desc" placeholder="Task note (optional for a project)" value="'+escapeHtml(fb.description||"")+'" style="flex:2 1 220px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
       + '<input class="fb-dur" type="number" min="15" step="15" value="'+(fb.durationMinutes||480)+'" title="Minutes on site" style="flex:0 0 80px;padding:8px;border:1px solid var(--border);border-radius:8px;"><span style="align-self:center;font-size:12px;color:#5b6b78;">mins</span></div>'
       + '</div>';
   }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
   $("fbMsg").textContent = "";
 }
+// Hide the generic site fields when a project is chosen (the project provides them).
+$("fbRows").addEventListener("change", function(e){
+  const sel = e.target.closest(".fb-proj"); if(!sel) return;
+  const row = sel.closest(".fb-row"); if(!row) return;
+  const g = row.querySelector(".fb-generic"); if(g) g.style.display = sel.value ? "none" : "";
+});
 async function saveFallbacks(){
   const byEngineer = {};
   document.querySelectorAll("#fbRows .fb-row").forEach(function(row){
+    const projSel = row.querySelector(".fb-proj");
+    const projectId = projSel ? projSel.value : "";
+    const proj = projectId ? FB_PROJECTS.find(function(p){ return p.id===projectId; }) : null;
     const siteName = row.querySelector(".fb-site").value.trim();
     const description = row.querySelector(".fb-desc").value.trim();
-    if(!siteName && !description) return;
+    if(!projectId && !siteName && !description) return;
     byEngineer[row.dataset.user] = { siteName, postcode: row.querySelector(".fb-pc").value.trim(), description,
-      durationMinutes: Number(row.querySelector(".fb-dur").value)||480, active: row.querySelector(".fb-active").checked };
+      durationMinutes: Number(row.querySelector(".fb-dur").value)||480, active: row.querySelector(".fb-active").checked,
+      projectId: projectId||null, projectName: proj?proj.name:null, projectNumber: proj?proj.number:null };
   });
   const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
   $("fbMsg").textContent = "Saving…";
