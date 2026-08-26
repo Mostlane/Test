@@ -24311,6 +24311,9 @@ var cap = (s) => {
   s = String(s || "");
   return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
 };
+function carryRows(rows, type) {
+  return (rows || []).map((r, i) => type === "pat" ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "", visual: "", earth: "", insulation: "", result: "", comments: r.comments || "" } : { no: i + 1, comments: r.comments || "", normal: "", led: "", emergency: "", battery: r.battery || 180 });
+}
 async function latestCertR2Key(env, tid, code, type) {
   try {
     const row = await env.DB.prepare(
@@ -24322,7 +24325,22 @@ async function latestCertR2Key(env, tid, code, type) {
   }
 }
 async function prefillRows(env, tid, code, type) {
-  const key = await latestCertR2Key(env, tid, code, type);
+  const c4 = padCode(code);
+  try {
+    const prev = await env.DB.prepare(
+      "SELECT data FROM certificates WHERE tenant_id=? AND site_code=? AND type=? AND status='final' ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 1"
+    ).bind(tid, c4, type).first();
+    if (prev) {
+      let d = {};
+      try {
+        d = JSON.parse(prev.data) || {};
+      } catch {
+      }
+      if (Array.isArray(d.rows) && d.rows.length) return { rows: carryRows(d.rows, type), from: "last certificate", source: "portal" };
+    }
+  } catch {
+  }
+  const key = await latestCertR2Key(env, tid, c4, type);
   if (!key || !env.JOB_FILES) return { rows: [], from: null };
   try {
     const obj = await env.JOB_FILES.get(key);
@@ -24330,8 +24348,8 @@ async function prefillRows(env, tid, code, type) {
     const buf = await obj.arrayBuffer();
     if (buf.byteLength > 6 * 1024 * 1024) return { rows: [], from: null };
     const txt = await pdfExtractText(buf);
-    const rows = type === "pat" ? parsePatRows(txt) : parseEmRows(txt);
-    return { rows, from: key.split("/").pop() };
+    const parsed = type === "pat" ? parsePatRows(txt) : parseEmRows(txt);
+    return { rows: carryRows(parsed, type), from: key.split("/").pop(), source: "pdf" };
   } catch {
     return { rows: [], from: null };
   }
