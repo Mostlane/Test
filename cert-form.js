@@ -99,6 +99,7 @@
       if (!d || !d.ok) throw new Error(d && d.error || "load failed");
       rec = d.record || {};
       rec._prefilledRows = d.prefilledRows || 0;
+      rec._seeded = !!d.seeded;
     } catch (e) { container.innerHTML = '<p class="muted" style="padding:8px">Couldn\'t load the certificate.</p>'; return; }
 
     rec.type = type;
@@ -115,6 +116,7 @@
         + '<h4 style="margin:0">' + esc(titleType) + ' certificate</h4>'
         + '<span class="pill">' + esc(rec.certNumber || "No. assigned on issue") + (rec.status === "review" ? " · in review" : rec.status === "final" ? " · issued" : " · draft") + '</span></div>';
       if (rec._prefilledRows) h += '<div class="banner">↩ ' + rec._prefilledRows + ' item' + (rec._prefilledRows === 1 ? "" : "s") + ' carried forward from the last certificate — marked Pass, tap any to change.</div>';
+      else if (rec._seeded && mode === "engineer") h += '<div class="banner">No previous certificate found for this site — nothing was carried forward. Add each ' + (type === "pat" ? "appliance" : "light") + ' below.</div>';
       h += '</div>';
 
       // Client + installation
