@@ -312,11 +312,13 @@ function renderOptions(showAll) {
     html += hdr('Live projects');
     html += projects.map(p => '<div class="ac-item" onmousedown="pickSite(\'' + escapeJsAttr(p.name) + '\')">📁 ' + (q ? highlight(p.name, q) : escapeHtml(p.name)) + '</div>').join('');
   }
-  const mine = vehicles.filter(v => v.mine), others = vehicles.filter(v => !v.mine);
+  // Your assigned van first, then shared/pool vehicles (e.g. the tippers).
+  const mine = vehicles.filter(v => v.mine);
+  const shared = vehicles.filter(v => !v.mine && v.pool);
   const vRow = v => '<div class="ac-item" onmousedown="pickVehicle(\'' + escapeJsAttr(v.reg) + '\',\'' + escapeJsAttr(v.desc || '') + '\')">🚐 '
     + (q ? highlight(v.reg, q) : escapeHtml(v.reg)) + (v.desc ? ' <span class="muted">— ' + escapeHtml(v.desc) + '</span>' : '') + '</div>';
   if (mine.length) { html += hdr('Your vehicle'); html += mine.map(vRow).join(''); }
-  if (others.length) { html += hdr(mine.length ? 'Other vehicles' : 'Vehicles'); html += others.map(vRow).join(''); }
+  if (shared.length) { html += hdr('Shared vehicles'); html += shared.map(vRow).join(''); }
   dd.innerHTML = html;
   dd.style.display = 'block';
 }

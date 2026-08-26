@@ -41,13 +41,13 @@ async function getVehicles(env) {
     const where = [];
     if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
     if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
-    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")} FROM vehicles`
+    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles`
       + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
     const rows = await db.prepare(sql).all();
     return (rows.results || []).filter(r => r.reg && String(r.reg).trim()).map(r => {
       const reg = String(r.reg).trim().toUpperCase();
       const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
-      return { reg, make: r.make || null, model: r.model || null, desc, label: desc ? `${reg} — ${desc}` : reg };
+      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} — ${desc}` : reg };
     });
   } catch (e) { console.error("PO vehicle lookup failed:", e.message); return []; }
 }
@@ -84,7 +84,10 @@ async function getRaiseOptions(env, username) {
     ).bind(String(username || "")).first();
     mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
   } catch (e) { /* no assigned van */ }
-  const vehicles = (await getVehicles(env)).map(v => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg }));
+  // Engineers pick ONLY their assigned van + shared/pool vehicles (e.g. tippers).
+  const vehicles = (await getVehicles(env))
+    .map(v => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg }))
+    .filter(v => v.mine || v.pool);
   return { projects, vehicles };
 }
 

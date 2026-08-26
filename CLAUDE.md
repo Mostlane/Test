@@ -3049,9 +3049,11 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      which opens po-raise.html with `#mlpo=` carrying the job's `job_id` (+ site +
      ref) so the PO ties to the job for costing. Enforced client-side
      (po-raise.html: options come from **GET /po/api/raise-options** = live
-     projects + vehicles with the caller's assigned van flagged `mine`; the picker
+     projects + **only the engineer's assigned van + shared/pool vehicles** (a
+     `vehicles.pool` flag, self-migrating in fleet.js — e.g. the tippers any
+     engineer may raise against; getRaiseOptions filters `v.mine || v.pool`); the picker
      has a type-ahead AND a **▾ All** browse-all dropdown grouped Live projects /
-     Your vehicle / Other vehicles; the incident field is hidden on a fresh open
+     Your vehicle / Shared vehicles; the incident field is hidden on a fresh open
      and only revealed read-only when prefilled from a job link; `submitPO` allows
      only a project, a vehicle, or a `job_id`-carrying reactive PO) AND server-side
      (po.js `issuePO` engineer branch: allow if `vehicle_reg` OR `job_id` present,
