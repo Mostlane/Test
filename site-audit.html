@@ -56,9 +56,10 @@
     <div class="card">
       <h2>Start an audit</h2>
       <div class="drop" id="dropZone">
-        📄 <b>Drag a Site Audit Pro report here</b> to build the job automatically
-        <div class="muted" style="margin-top:4px;">PDF or spreadsheet — importer is being set up to match your report format. For now, build the audit below.</div>
+        📄 <b>Drag a Site Audit Pro PDF here</b> (or tap) to build the audit automatically
+        <div class="muted" id="dropHint" style="margin-top:4px;">It reads each issue's text and photo and fills the checklist below — then pick the site &amp; engineer and create.</div>
       </div>
+      <input type="file" id="reportPick" accept="application/pdf,.pdf" style="display:none;">
     </div>
 
     <!-- Site + job basics -->
@@ -182,20 +183,37 @@ async function loadSites(){
   }catch{ allSites=[]; }
 }
 let pickedSite=null;
+// Read the NAME first (that's what the office recognises); postcode next; the
+// site code demoted to a faint suffix rather than leading the row.
+function siteLabel(s){
+  const main=[s.name||("Site "+(s.code||"?")), s.postcode].filter(Boolean).join(" — ");
+  return s.code ? main+"   ·   "+s.code : main;
+}
+// Show sites sorted A→Z by name. Empty query = the WHOLE list (browse all);
+// typing filters across name / code / postcode / address. Options carry the
+// site's index (not its code) so blank-coded sites can't collide.
+function renderSiteOptions(q){
+  const sel=$("siteSelect");
+  let list=allSites.map((s,idx)=>({s,idx}));
+  const ql=(q||"").trim().toLowerCase();
+  if(ql) list=list.filter(o=>((o.s.name+" "+o.s.code+" "+o.s.postcode+" "+(o.s.address||"")).toLowerCase().includes(ql)));
+  list.sort((a,b)=>String(a.s.name||"").localeCompare(String(b.s.name||""), undefined, {sensitivity:"base"}));
+  sel.innerHTML="";
+  list.slice(0,800).forEach(o=>{ const op=document.createElement("option"); op.value=String(o.idx); op.textContent=siteLabel(o.s); sel.appendChild(op); });
+  sel.size=Math.min(12,Math.max(2,Math.min(list.length,12)));
+  sel.style.display=list.length?"block":"none";
+  return list.length;
+}
 function wireSiteSearch(){
   const input=$("siteSearch"), sel=$("siteSelect");
-  input.addEventListener("input",()=>{
-    const q=input.value.trim().toLowerCase();
-    if(!q){ sel.style.display="none"; return; }
-    const hits=allSites.filter(s=>((s.code+" "+s.name+" "+s.postcode).toLowerCase().includes(q))).slice(0,20);
-    sel.innerHTML="";
-    hits.forEach(s=>{ const o=document.createElement("option"); o.value=s.code; o.textContent=(s.code?s.code+" ":"")+s.name+(s.postcode?" ("+s.postcode+")":""); sel.appendChild(o); });
-    sel.size=Math.min(8,Math.max(2,hits.length)); sel.style.display=hits.length?"block":"none";
-  });
+  input.placeholder="Tap to see every site, or type to filter…";
+  // Tapping the box (with nothing chosen) opens the full list to browse.
+  input.addEventListener("focus",()=>{ if(!pickedSite) renderSiteOptions(input.value); });
+  input.addEventListener("input",()=>{ pickedSite=null; $("sitePicked").textContent=""; renderSiteOptions(input.value); });
   sel.addEventListener("change",()=>{
-    pickedSite=allSites.find(s=>s.code===sel.value)||null;
-    if(pickedSite){ input.value=(pickedSite.code?pickedSite.code+" ":"")+pickedSite.name; sel.style.display="none";
-      $("sitePicked").textContent="✓ "+[pickedSite.address,pickedSite.postcode].filter(Boolean).join(", "); }
+    const s=allSites[+sel.value]; if(!s) return;
+    pickedSite=s; input.value=s.name||""; sel.style.display="none";
+    $("sitePicked").textContent="✓ "+[s.address,s.postcode,s.code?("code "+s.code):""].filter(Boolean).join(" · ");
   });
 }
 
@@ -256,6 +274,108 @@ async function createJob(){
   }
 }
 
+/* ---- import a Site Audit Pro PDF ----
+   Reads the PDF with PDF.js: parses each "Issue N" + its description, and crops
+   that issue's photo out of the rendered page (matched to the issue by vertical
+   position). Fills the builder for review — the office still picks the portal
+   site + engineer before creating. Falls back to text-only if a photo can't be
+   cropped, and never hard-fails: worst case it says "build it manually". */
+const PDFJS_BASE = "https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/";
+const PDFJS_FONTS = "https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/";
+function loadPdfjs(){
+  return new Promise((resolve,reject)=>{
+    if(window.pdfjsLib) return resolve(window.pdfjsLib);
+    const s=document.createElement("script"); s.src=PDFJS_BASE+"pdf.min.js";
+    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS_BASE+"pdf.worker.min.js"; }catch(e){} resolve(window.pdfjsLib); };
+    s.onerror=()=>reject(new Error("pdf.js failed to load"));
+    document.head.appendChild(s);
+  });
+}
+function setDrop(html){ var d=$("dropHint"); if(d) d.innerHTML=html; }
+function mmul(A,B){ return [A[0]*B[0]+A[2]*B[1], A[1]*B[0]+A[3]*B[1], A[0]*B[2]+A[2]*B[3], A[1]*B[2]+A[3]*B[3], A[0]*B[4]+A[2]*B[5]+A[4], A[1]*B[4]+A[3]*B[5]+A[5]]; }
+function mapply(M,x,y){ return [M[0]*x+M[2]*y+M[4], M[1]*x+M[3]*y+M[5]]; }
+function cropCanvas(src, rx, ry, rw, rh, maxDim, q){
+  rx=Math.max(0,Math.floor(rx)); ry=Math.max(0,Math.floor(ry));
+  rw=Math.min(src.width-rx, Math.ceil(rw)); rh=Math.min(src.height-ry, Math.ceil(rh));
+  if(rw<=2||rh<=2) return Promise.resolve(null);
+  var s=Math.min(1, maxDim/Math.max(rw,rh));
+  var w=Math.max(1,Math.round(rw*s)), h=Math.max(1,Math.round(rh*s));
+  var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+  cv.getContext("2d").drawImage(src, rx,ry,rw,rh, 0,0,w,h);
+  return new Promise(res=>cv.toBlob(b=>res(b),"image/jpeg",q||0.72));
+}
+function matchSite(title){
+  if(!title || !allSites.length) return;
+  var q=String(title).toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+  if(q.length<3) return;
+  var hit=allSites.find(s=>{ var n=(s.name||"").toLowerCase(); return n.length>2 && (n.includes(q)||q.includes(n)); });
+  if(hit){ pickedSite=hit; $("siteSearch").value=hit.name||"";
+    $("sitePicked").textContent="✓ "+[hit.address,hit.postcode,hit.code?("code "+hit.code):""].filter(Boolean).join(" · ")+" — matched from the report; change it if wrong"; }
+}
+async function importReport(file){
+  if(!/\.pdf$/i.test(file.name||"") && file.type!=="application/pdf"){ setDrop("That's not a PDF — drop a Site Audit Pro PDF export."); return; }
+  setDrop("Reading report…");
+  var pdfjsLib;
+  try{ pdfjsLib=await loadPdfjs(); }catch(e){ setDrop("Couldn't load the PDF reader — check your connection and try again."); return; }
+  try{
+    var buf=await file.arrayBuffer();
+    var doc=await pdfjsLib.getDocument({ data:new Uint8Array(buf), standardFontDataUrl:PDFJS_FONTS }).promise;
+    var tsRe=/^\d{1,2}:\d{2}\s+\d{1,2}\/\d{1,2}\/\d{2,4}$/, pageRe=/^Page\s+\d+\s+of\s+\d+$/i, issRe=/^Issue\s+(\d+)$/i;
+    var coverTitle="", coverSub="", newItems=[];
+    for(var p=1;p<=doc.numPages;p++){
+      setDrop("Reading page "+p+" of "+doc.numPages+"…");
+      var page=await doc.getPage(p);
+      var vp=page.getViewport({scale:3});
+      var cv=document.createElement("canvas"); cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+      await page.render({ canvasContext:cv.getContext("2d"), viewport:vp }).promise;
+      var tc=await page.getTextContent();
+      if(p===1){ var ss=tc.items.map(i=>(i.str||"").trim()).filter(Boolean); coverTitle=ss[0]||""; coverSub=ss[1]||""; continue; }
+      // Issues (linear reading order) + the y of each "Issue N" label.
+      var issuesOnPage=[], cur=null;
+      tc.items.forEach(function(it){
+        var s=(it.str||"").trim(); if(!s) return;
+        if(tsRe.test(s)||pageRe.test(s)){ cur=null; return; }
+        var mm=s.match(issRe);
+        if(mm){ cur={num:+mm[1], parts:[], y:it.transform[5]}; issuesOnPage.push(cur); return; }
+        if(cur) cur.parts.push(s);
+      });
+      // Images with device-space bbox (track the CTM through the operator list).
+      var ops=await page.getOperatorList();
+      var ctm=[1,0,0,1,0,0], stack=[], crops=[];
+      for(var i=0;i<ops.fnArray.length;i++){
+        var fn=ops.fnArray[i], a=ops.argsArray[i];
+        if(fn===pdfjsLib.OPS.save) stack.push(ctm.slice());
+        else if(fn===pdfjsLib.OPS.restore) ctm=stack.pop()||[1,0,0,1,0,0];
+        else if(fn===pdfjsLib.OPS.transform) ctm=mmul(ctm,a);
+        else if(fn===pdfjsLib.OPS.paintImageXObject){
+          var uc=[[0,0],[1,0],[0,1],[1,1]].map(function(u){ return mapply(ctm,u[0],u[1]); });
+          var dev=uc.map(function(c){ return vp.convertToViewportPoint(c[0],c[1]); });
+          var xs=dev.map(d=>d[0]), ys=dev.map(d=>d[1]);
+          var rx=Math.min.apply(null,xs), ry=Math.min.apply(null,ys), rw=Math.max.apply(null,xs)-rx, rh=Math.max.apply(null,ys)-ry;
+          var uy=Math.max.apply(null,uc.map(c=>c[1]));
+          if(rw>40 && rh>40) crops.push({uy:uy, rx:rx, ry:ry, rw:rw, rh:rh});   // drop tiny icons/logos
+        }
+      }
+      issuesOnPage.sort((a,b)=>b.y-a.y);   // top of page first
+      crops.sort((a,b)=>b.uy-a.uy);
+      for(var k=0;k<issuesOnPage.length;k++){
+        var iss=issuesOnPage[k], text=iss.parts.join(" ").replace(/\s+/g," ").trim();
+        var cr=crops[k], full=null, thumb=null, preview=null;
+        if(cr){ try{ full=await cropCanvas(cv,cr.rx,cr.ry,cr.rw,cr.rh,1600,0.72); thumb=await cropCanvas(cv,cr.rx,cr.ry,cr.rw,cr.rh,420,0.7); if(thumb) preview=URL.createObjectURL(thumb); }catch(e){} }
+        if(!text && !full) continue;   // skip a truly empty issue (e.g. a blank last one)
+        newItems.push({ text:text||("Issue "+iss.num), full:full, thumb:thumb, preview:preview });
+      }
+    }
+    if(!newItems.length){ setDrop("Couldn't find any issues in that PDF. It may be a different format — build the audit manually below, or send the file over."); return; }
+    items=newItems; renderItems();
+    var t=[coverTitle,coverSub].filter(Boolean).join(" — "); if(t) $("auditTitle").value=t;
+    matchSite(coverTitle);
+    var photoN=newItems.filter(it=>it.full).length;
+    setDrop("✓ Imported <b>"+newItems.length+"</b> item"+(newItems.length===1?"":"s")+(photoN?(" with "+photoN+" photo"+(photoN===1?"":"s")):"")+" from “"+esc(coverTitle||file.name)+"”. Review below, pick the site &amp; engineer, then create the job.");
+    try{ window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }catch(e){}
+  }catch(err){ setDrop("Couldn't read that PDF — "+esc(err.message||"unknown error")+". You can still build the audit manually below."); }
+}
+
 /* ---- init ---- */
 (async function init(){
   if(!hasSLAAdmin()){ $("gateMsg").style.display="block"; $("gateMsg").textContent="Site audits are for SLA admins. Redirecting…"; setTimeout(()=>location.replace("engineer-jobs.html"),1200); return; }
@@ -266,11 +386,13 @@ async function createJob(){
   $("createBtn").addEventListener("click",createJob);
   $("clearBtn").addEventListener("click",()=>{ items=[]; addItem(""); $("statusText").textContent=""; });
   $("anotherBtn").addEventListener("click",()=>location.reload());
-  // Dropzone is a visual placeholder until the importer is wired to a sample report.
+  // Drag-and-drop OR tap to import a Site Audit Pro PDF.
   const dz=$("dropZone");
   ["dragover","dragenter"].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.add("hot"); }));
-  ["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.remove("hot"); }));
-  dz.addEventListener("drop",()=>{ $("statusText").className=""; $("statusText").textContent="📄 Report import is being set up for your Site Audit Pro format — build the audit below for now."; });
+  ["dragleave"].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.remove("hot"); }));
+  dz.addEventListener("drop",e=>{ e.preventDefault(); dz.classList.remove("hot"); var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) importReport(f); });
+  dz.addEventListener("click",()=>$("reportPick").click());
+  $("reportPick").addEventListener("change",e=>{ var f=e.target.files&&e.target.files[0]; e.target.value=""; if(f) importReport(f); });
   await Promise.all([loadSites(), loadEngineers()]);
 })();
 </script>

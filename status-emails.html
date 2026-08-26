@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Customer status emails · Mostlane</title>
+<link rel="stylesheet" href="/portal.css?v=1">
+<script src="/portal-config.js?v=18"></script>
+<style>
+  body{font-family:"Segoe UI",Arial,sans-serif;background:#f3f5f8;color:#1f2937;margin:0}
+  header.page{background:#003468;color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px}
+  header.page h1{font-size:18px;margin:0;font-weight:700}
+  .wrap{max-width:920px;margin:0 auto;padding:18px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:16px;margin:0 0 12px}
+  .row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  label{font-size:13px;font-weight:600}
+  input[type=text],select,textarea{width:100%;padding:9px 11px;border:1px solid #cfd6df;border-radius:8px;font:inherit}
+  textarea{min-height:70px;resize:vertical}
+  .fieldlabel{font-size:12px;color:#6b7280;margin:10px 0 4px;font-weight:600}
+  .sw{position:relative;display:inline-block;width:44px;height:26px;flex:none}
+  .sw input{opacity:0;width:0;height:0}
+  .sl{position:absolute;inset:0;background:#cbd5e1;border-radius:26px;transition:.2s;cursor:pointer}
+  .sl:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+  .sw input:checked + .sl{background:#0a7d33}
+  .sw input:checked + .sl:before{transform:translateX(18px)}
+  .status{border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fafbfc}
+  .status.on{background:#fff;border-color:#cfe0d3}
+  .status .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .status .top .name{font-weight:700;font-size:15px}
+  .status .body{margin-top:12px}
+  .status.off .body{display:none}
+  .grid2{display:grid;grid-template-columns:1fr 340px;gap:16px}
+  @media(max-width:800px){.grid2{grid-template-columns:1fr}}
+  .btn{background:#003468;color:#fff;border:0;border-radius:9px;padding:11px 18px;font-weight:700;font-size:14px;cursor:pointer}
+  .btn.grey{background:#e7ebf0;color:#1f2937}
+  .btn.sm{padding:7px 12px;font-size:13px}
+  .vars{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .vars button{background:#eef2f7;border:1px solid #dbe3ec;border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;color:#003468;font-weight:600}
+  .pv{border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;height:640px}
+  .pv iframe{width:100%;height:100%;border:0}
+  .muted{color:#6b7280;font-size:13px}
+  .req{border:1px solid #f0d8ae;background:#fffdf6;border-radius:9px;padding:12px;margin-bottom:10px}
+  .req .r1{font-weight:700}
+  .req .sg{font-size:13px;color:#374151;margin-top:4px}
+  .savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:12px 18px;display:flex;gap:10px;align-items:center;justify-content:flex-end}
+  #savedMsg{color:#0a7d33;font-weight:600;font-size:13px}
+  .forbidden{padding:40px;text-align:center;color:#6b7280}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html" title="Back">‹ Back</a>
+  <h1>Customer status emails</h1>
+</header>
+
+<div class="wrap" id="app" style="display:none">
+  <div class="card">
+    <h2>How it works</h2>
+    <p class="muted">When a job's status changes, the portal can automatically email the customer a branded update including the job details. Scheduling emails carry a notice asking them to email <b>enquiries@mostlane.com</b> as soon as possible if the time isn't convenient, to avoid a cancellation charge. Emails go to the <b>site contact's email, or the customer's</b> if the site has none.</p>
+  </div>
+
+  <div class="card">
+    <h2>Global settings</h2>
+    <div class="row">
+      <label class="sw"><input type="checkbox" id="gEnabled"><span class="sl"></span></label>
+      <div><label for="gEnabled">Send automatic customer emails</label><div class="muted">Master switch. When off, nothing is sent.</div></div>
+    </div>
+    <div class="fieldlabel">Send to</div>
+    <select id="gRule">
+      <option value="siteThenCustomer">Site contact (if available), otherwise Customer</option>
+      <option value="siteOnly">Site contact only</option>
+    </select>
+    <div class="grid2" style="margin-top:12px">
+      <div><div class="fieldlabel">Reply-to address</div><input type="text" id="gReply" placeholder="enquiries@mostlane.com"></div>
+      <div><div class="fieldlabel">Company phone (shown in the email)</div><input type="text" id="gTel" placeholder="023 8026 2000"></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <h2>Status emails</h2>
+        <div id="statuses"></div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Live preview</h2>
+        <div class="row"><select id="pvStatus" style="flex:1"></select><button class="btn grey sm" id="pvRefresh">Refresh</button></div>
+        <div class="pv"><iframe id="pvFrame" title="preview"></iframe></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Reschedule requests from customers</h2>
+    <div id="reqs"><p class="muted">Loading…</p></div>
+  </div>
+</div>
+
+<div class="savebar" id="savebar" style="display:none">
+  <span id="savedMsg"></span>
+  <button class="btn" id="saveBtn">Save changes</button>
+</div>
+
+<div class="forbidden" id="forbidden" style="display:none">You need Full Access or SLA Admin to manage customer emails.</div>
+
+<script>
+const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+function token(){ try{ return localStorage.getItem("mostlaneToken")||""; }catch(e){ return ""; } }
+async function api(path, opts={}){
+  const o = Object.assign({headers:{}}, opts);
+  o.headers = Object.assign({"Authorization":"Bearer "+token()}, o.headers||{});
+  if(o.body && !o.headers["Content-Type"]) o.headers["Content-Type"]="application/json";
+  const r = await fetch(API+path, o);
+  return r;
+}
+const $ = id=>document.getElementById(id);
+const esc = s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let CFG=null, DEFS=[];
+
+const VARS = ["{job_ref}","{site_name}","{site_address}","{scheduled}","{status}","{description}"];
+let lastFocused=null;
+document.addEventListener("focusin",e=>{ if(e.target.matches("input[type=text],textarea")) lastFocused=e.target; });
+
+async function boot(){
+  const r = await api("/comms/status-emails");
+  if(r.status===401 || r.status===403){ $("forbidden").style.display="block"; return; }
+  const d = await r.json();
+  CFG = d.cfg; DEFS = d.defs||[];
+  $("app").style.display="block"; $("savebar").style.display="flex";
+  renderGlobal(); renderStatuses(); populatePvStatus(); refreshPreview(); loadReqs();
+}
+function renderGlobal(){
+  $("gEnabled").checked = !!CFG.enabled;
+  $("gRule").value = CFG.recipientRule||"siteThenCustomer";
+  $("gReply").value = CFG.reply || CFG.replyTo || "";
+  $("gTel").value = CFG.companyTel||"";
+}
+function renderStatuses(){
+  const box = $("statuses"); box.innerHTML="";
+  DEFS.forEach(def=>{
+    const t = CFG.statuses[def.key] || {on:false,subject:"",intro:""};
+    const el = document.createElement("div");
+    el.className = "status " + (t.on?"on":"off");
+    el.innerHTML = `
+      <div class="top">
+        <div class="name">${esc(def.label)}</div>
+        <label class="sw"><input type="checkbox" data-k="${def.key}" class="stOn" ${t.on?"checked":""}><span class="sl"></span></label>
+      </div>
+      <div class="body">
+        <div class="fieldlabel">Subject line</div>
+        <input type="text" class="stSubj" value="${esc(t.subject||"")}">
+        <div class="fieldlabel">Message</div>
+        <textarea class="stIntro">${esc(t.intro||"")}</textarea>
+        ${def.reschedule?`<div class="row" style="margin-top:10px"><label class="sw"><input type="checkbox" class="stResched" ${t.reschedule!==false?"checked":""}><span class="sl"></span></label><label>Include the cancellation-charge notice (asks them to email us to rearrange)</label></div>`:""}
+      </div>`;
+    el.querySelector(".stOn").addEventListener("change",e=>{ t.on=e.target.checked; el.className="status "+(t.on?"on":"off"); syncFromDom(); });
+    el.querySelector(".stSubj").addEventListener("input",e=>{ t.subject=e.target.value; });
+    el.querySelector(".stIntro").addEventListener("input",e=>{ t.intro=e.target.value; });
+    const rs = el.querySelector(".stResched"); if(rs) rs.addEventListener("change",e=>{ t.reschedule=e.target.checked; });
+    CFG.statuses[def.key]=t;
+    box.appendChild(el);
+  });
+  // variable palette
+  const vb = document.createElement("div"); vb.innerHTML =
+    `<div class="fieldlabel">Insert a variable (click into a field first)</div><div class="vars">`+
+    VARS.map(v=>`<button type="button" data-v="${v}">${v}</button>`).join("")+`</div>`;
+  box.appendChild(vb);
+  vb.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
+    if(!lastFocused) return;
+    const v=b.dataset.v, s=lastFocused.selectionStart||lastFocused.value.length;
+    lastFocused.value = lastFocused.value.slice(0,s)+v+lastFocused.value.slice(lastFocused.selectionEnd||s);
+    lastFocused.dispatchEvent(new Event("input"));
+    lastFocused.focus();
+  }));
+}
+function syncFromDom(){ /* toggles already mutate CFG live */ }
+function populatePvStatus(){
+  const sel=$("pvStatus"); sel.innerHTML = DEFS.map(d=>`<option value="${d.key}">${esc(d.label)}</option>`).join("");
+}
+async function refreshPreview(){
+  const status = $("pvStatus").value || "Scheduled";
+  // push current field values into CFG first
+  collectGlobal();
+  const r = await api("/comms/status-emails/preview",{method:"POST",body:JSON.stringify({status})});
+  const d = await r.json().catch(()=>({}));
+  if(d && d.html){ $("pvFrame").srcdoc = d.html; }
+}
+function collectGlobal(){
+  CFG.enabled = $("gEnabled").checked;
+  CFG.recipientRule = $("gRule").value;
+  CFG.replyTo = $("gReply").value.trim();
+  CFG.companyTel = $("gTel").value.trim();
+}
+$("pvRefresh").addEventListener("click",refreshPreview);
+$("pvStatus").addEventListener("change",refreshPreview);
+$("gEnabled").addEventListener("change",()=>{});
+
+$("saveBtn").addEventListener("click", async ()=>{
+  collectGlobal();
+  $("saveBtn").disabled=true; $("savedMsg").textContent="Saving…";
+  const r = await api("/comms/status-emails",{method:"POST",body:JSON.stringify(CFG)});
+  $("saveBtn").disabled=false;
+  if(r.ok){ $("savedMsg").textContent="Saved ✓"; setTimeout(()=>$("savedMsg").textContent="",2500); refreshPreview(); }
+  else { $("savedMsg").textContent="Save failed"; }
+});
+
+async function loadReqs(){
+  const r = await api("/comms/reschedule-requests?status=open");
+  const d = await r.json().catch(()=>({requests:[]}));
+  const box=$("reqs");
+  const list = d.requests||[];
+  if(!list.length){ box.innerHTML='<p class="muted">No open reschedule requests. 🎉</p>'; return; }
+  box.innerHTML = list.map(q=>{
+    const sg = (q.suggestions||[]).length? `<div class="sg"><b>Suggested:</b> ${q.suggestions.map(esc).join(" · ")}</div>`:"";
+    const when = q.created_at ? new Date(q.created_at).toLocaleString("en-GB") : "";
+    return `<div class="req">
+      <div class="r1">${esc(q.site_name||q.job_ref||"")} <span class="muted" style="font-weight:400">— ${esc(when)}</span></div>
+      ${q.note?`<div class="sg">${esc(q.note)}</div>`:""}
+      ${sg}
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <a class="btn grey sm" href="/job-view.html?jobId=${encodeURIComponent(q.job_id)}">Open job</a>
+        <button class="btn sm" data-id="${esc(q.id)}">Mark handled</button>
+      </div></div>`;
+  }).join("");
+  box.querySelectorAll("button[data-id]").forEach(b=>b.addEventListener("click", async ()=>{
+    b.disabled=true;
+    await api("/comms/reschedule-requests/resolve",{method:"POST",body:JSON.stringify({id:b.dataset.id})});
+    loadReqs();
+  }));
+}
+
+boot();
+</script>
+</body>
+</html>

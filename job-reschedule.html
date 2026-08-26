@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rearrange your appointment · Mostlane</title>
+<style>
+  :root{ --navy:#003468; --ink:#1f2937; --grey:#6b7280; --line:#e5e7eb; --bg:#f3f5f8; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--ink);
+       padding:env(safe-area-inset-top,0) 0 40px}
+  .wrap{max-width:560px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:16px}
+  .head{background:var(--navy);padding:18px 22px;display:flex;align-items:center;gap:10px}
+  .head img{height:30px;display:block}
+  .head span{color:#fff;font-weight:700;font-size:17px}
+  .pad{padding:22px}
+  h1{font-size:20px;margin:0 0 6px}
+  .sub{color:var(--grey);font-size:14px;line-height:1.5;margin:0 0 4px}
+  .facts{border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:16px 0;padding:6px 0}
+  .facts .r{display:flex;padding:6px 0;font-size:14px}
+  .facts .r .k{color:var(--grey);width:40%}
+  .facts .r .v{font-weight:600}
+  label{display:block;font-size:13px;font-weight:600;margin:16px 0 6px}
+  textarea,input,select{width:100%;padding:11px 12px;border:1px solid #cfd6df;border-radius:9px;font:inherit;background:#fff}
+  textarea{min-height:90px;resize:vertical}
+  .slot{display:grid;grid-template-columns:1fr 130px;gap:8px;margin-bottom:8px}
+  .btn{display:inline-block;width:100%;background:var(--navy);color:#fff;border:0;border-radius:10px;
+       padding:14px;font-size:16px;font-weight:700;cursor:pointer;margin-top:20px}
+  .btn:disabled{opacity:.55}
+  .muted{font-size:12px;color:var(--grey);margin-top:8px}
+  .ok{text-align:center;padding:30px 22px}
+  .ok .tick{width:56px;height:56px;border-radius:50%;background:#e7f6ec;color:#0a7d33;font-size:30px;
+            display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+  .err{background:#fdecea;color:#b3261e;border:1px solid #f5c6c2;border-radius:9px;padding:12px;font-size:14px;margin-top:12px}
+  .hide{display:none}
+  .addslot{background:none;border:1px dashed #b9c2cd;color:var(--navy);border-radius:9px;padding:9px;width:100%;
+           font-weight:600;cursor:pointer;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="head"><img src="/mostlane-logo.jpg" alt="Mostlane" onerror="this.style.display='none'"><span>Mostlane</span></div>
+
+    <div id="loading" class="pad"><p class="sub">Loading your appointment…</p></div>
+
+    <div id="form" class="pad hide">
+      <h1>Does this time not suit?</h1>
+      <p class="sub">Let us know and we'll rearrange. Leave a note and, if you can, suggest a couple of times that work better for you.</p>
+      <div class="facts" id="facts"></div>
+
+      <label for="note">Your message</label>
+      <textarea id="note" placeholder="e.g. That day doesn't work — we're closed for a refit. Any morning the following week would be better."></textarea>
+
+      <label>Suggested times that suit you <span style="font-weight:400;color:var(--grey)">(optional)</span></label>
+      <div id="slots">
+        <div class="slot"><input type="date" class="sd"><select class="st"><option value="">Any time</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
+      </div>
+      <button type="button" class="addslot" id="addSlot">＋ Add another time</button>
+
+      <button class="btn" id="send">Send to Mostlane</button>
+      <p class="muted">This goes straight to our scheduling team, who'll be in touch to confirm a new time.</p>
+      <div id="err" class="err hide"></div>
+    </div>
+
+    <div id="done" class="ok hide">
+      <div class="tick">✓</div>
+      <h1>Thank you</h1>
+      <p class="sub">Your message has been sent to our scheduling team. We'll be in touch to confirm a new time.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "https://mostlane-api.jamie-def.workers.dev";
+const qs = new URLSearchParams(location.search);
+const jobId = qs.get("jobId"), exp = qs.get("exp"), sig = qs.get("sig");
+const $ = id => document.getElementById(id);
+
+function fmtWhen(iso){
+  if(!iso) return "";
+  const d = new Date(iso); if(isNaN(d)) return "";
+  try{ return d.toLocaleString("en-GB",{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return iso; }
+}
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function load(){
+  if(!jobId){ fail("This link is missing information. Please use the button in your email."); return; }
+  try{
+    const r = await fetch(API+"/customer/job",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jobId,exp,sig})});
+    const d = await r.json();
+    if(!r.ok || !d.ok){ fail(d.error||"This link has expired or is invalid."); return; }
+    const j = d.job;
+    const rows = [];
+    if(j.reference) rows.push(["Reference",j.reference]);
+    if(j.siteName) rows.push(["Site",j.siteName]);
+    if(j.address) rows.push(["Address",j.address]);
+    if(j.scheduledAt) rows.push(["Currently booked for",fmtWhen(j.scheduledAt)]);
+    $("facts").innerHTML = rows.map(([k,v])=>`<div class="r"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+    $("loading").classList.add("hide"); $("form").classList.remove("hide");
+  }catch(e){ fail("Sorry, we couldn't load your appointment. Please try again later."); }
+}
+function fail(msg){ $("loading").innerHTML = `<div class="err">${esc(msg)}</div>`; }
+
+$("addSlot").addEventListener("click",()=>{
+  if(document.querySelectorAll(".slot").length>=5) return;
+  const div=document.createElement("div"); div.className="slot";
+  div.innerHTML='<input type="date" class="sd"><select class="st"><option value="">Any time</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select>';
+  $("slots").appendChild(div);
+});
+
+$("send").addEventListener("click", async ()=>{
+  const note = $("note").value.trim();
+  const suggestions = [];
+  document.querySelectorAll(".slot").forEach(s=>{
+    const d = s.querySelector(".sd").value, t = s.querySelector(".st").value;
+    if(d){
+      const nice = new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+      suggestions.push(nice + (t?" — "+t:" — Any time"));
+    }
+  });
+  if(!note && !suggestions.length){ showErr("Please add a note or suggest at least one time."); return; }
+  $("send").disabled = true; $("send").textContent = "Sending…"; $("err").classList.add("hide");
+  try{
+    const r = await fetch(API+"/customer/reschedule",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jobId,exp,sig,note,suggestions})});
+    const d = await r.json();
+    if(!r.ok || !d.ok){ showErr(d.error||"Something went wrong. Please try again."); $("send").disabled=false; $("send").textContent="Send to Mostlane"; return; }
+    $("form").classList.add("hide"); $("done").classList.remove("hide");
+  }catch(e){ showErr("Network error — please try again."); $("send").disabled=false; $("send").textContent="Send to Mostlane"; }
+});
+function showErr(m){ const e=$("err"); e.textContent=m; e.classList.remove("hide"); }
+
+load();
+</script>
+</body>
+</html>

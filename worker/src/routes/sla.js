@@ -24,6 +24,7 @@ import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
 import { buildZip } from "../lib/zip.js";
 import { logoBytes } from "../lib/logo.js";
+import { onStatusTransition } from "../lib/statusemail.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -1141,7 +1142,7 @@ export async function handle(request, env, ctx, url, sess) {
       changedBy: body.changedBy || "scheduler"
     };
     const before = await getJob(env, tenantId, id);
-    const updated = await patchJob(env, tenantId, id, patch);
+    const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
     if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
@@ -1558,7 +1559,7 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
 
-      const updated = await patchJob(env, tenantId, id, body);
+      const updated = await patchJob(env, tenantId, id, body, ctx);
       // Release-aware notify: announce a gated job when it first becomes visible;
       // only push "newly added engineer" for an already-announced job.
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
@@ -2619,7 +2620,7 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   return job;
 }
 
-async function patchJob(env, tenantId, id, patch) {
+async function patchJob(env, tenantId, id, patch, ctx) {
   const job = await getJob(env, tenantId, id);
   if (!job) return null;
   const now = new Date().toISOString();
@@ -2776,6 +2777,11 @@ async function patchJob(env, tenantId, id, patch) {
 
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
+  // Customer status-change email (branded; Scheduled carries the reschedule
+  // button). Fire-and-forget — never blocks or breaks the status change.
+  if (job.status !== prevStatus && ctx && ctx.waitUntil) {
+    try { ctx.waitUntil(onStatusTransition(env, tenantId, job, prevStatus, job.status)); } catch {}
+  }
   return job;
 }
 
