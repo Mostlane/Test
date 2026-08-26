@@ -452,17 +452,22 @@ function buildRunner(){
         else { for(const f of files){ archFb.push(f); if(archFb.length>=15){ await flushArch(); if(ABORT)break; } } if(ABORT)break; } }
       if(!ABORT) await flushArch(); }
     batch=[]; batchU={}; };
+  // Fetch pages in parallel WINDOWS (Workever caps a page at ~15 jobs, so 1514
+  // pages sequentially is slow) — grab WIN pages at once, ingest the window,
+  // then advance the resume marker (only after the batch is SAVED, so a failure
+  // re-processes rather than skips).
   let start=Number(localStorage.mlSyncPage||1);
-  for(let pg=start; pg<=pages; pg++){
-    const j=await wg("/api/v1/jobs-list?page="+pg+"&size=50"); if(!j) continue;
-    for(const it of (j.items||[])){ batchU[it.identifier]=it.id; batch.push({ mos:it.identifier, uuid:it.id, name:it.name, status:sName[it.jobStatusId]||"", cost:it.totalCosts||0, priority:it.priority||"", siteCode:it.locationNameJob||"", siteName:it.customerName||"", postcode:it.postalJob||"", customerName:it.customerName||"", address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel||"" }); }
-    // Only advance the resume marker once a batch has actually been SAVED, so a
-    // failure (or a stop mid-batch) re-processes those pages next time rather
-    // than skipping them. Re-processing is idempotent (already-current = skip).
-    if(batch.length>=150){ await flush(); if(ABORT) break; localStorage.mlSyncPage=pg+1; }
-    if(pg%10===0) console.log("%cpage "+pg+"/"+pages+"  live+"+T.updatedLive+" new+"+T.importedArchive+" arch+"+T.updatedArchive+" files+"+T.files+" skip+"+T.skipped+" err+"+T.errors,"color:#06c");
+  const WIN=6;
+  for(let pg=start; pg<=pages && !ABORT; pg+=WIN){
+    const nums=[]; for(let k=0;k<WIN && (pg+k)<=pages;k++) nums.push(pg+k);
+    const results=await Promise.all(nums.map(n=>wg("/api/v1/jobs-list?page="+n+"&size=50")));
+    for(const j of results){ if(!j) continue; for(const it of (j.items||[])){ batchU[it.identifier]=it.id; batch.push({ mos:it.identifier, uuid:it.id, name:it.name, status:sName[it.jobStatusId]||"", cost:it.totalCosts||0, priority:it.priority||"", siteCode:it.locationNameJob||"", siteName:it.customerName||"", postcode:it.postalJob||"", customerName:it.customerName||"", address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel||"" }); } }
+    await flush(); if(ABORT) break;
+    const done=Math.min(pages, pg+nums.length-1);
+    localStorage.mlSyncPage=done+1;
+    console.log("%cpage "+done+"/"+pages+"  live+"+T.updatedLive+" new+"+T.importedArchive+" arch+"+T.updatedArchive+" files+"+T.files+" skip+"+T.skipped+" err+"+T.errors,"color:#06c");
   }
-  if(!ABORT){ await flush(); if(!ABORT) localStorage.mlSyncPage=pages+1; }
+  if(!ABORT) localStorage.mlSyncPage=pages+1;
   if(ABORT){
     // Leave the resume marker in place so re-running picks up where it stopped.
     console.log("%c⛔ STOPPED — a transfer failed","color:#c00;font-weight:bold",ABORT,T);
