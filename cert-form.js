@@ -19,21 +19,21 @@
 
   const COLS = {
     em: [
-      { key: "normal", label: "Normal", toggle: ["Pass", "Fail", "N/A"] },
-      { key: "led", label: "LED", toggle: ["Pass", "Fail", "N/A"] },
-      { key: "emergency", label: "Emergency", toggle: ["Pass", "Fail", "N/A"] },
-      { key: "battery", label: "Batt (min)", num: true, def: 180, w: 66 },
-      { key: "comments", label: "Comments / location", text: true, grow: true },
+      { key: "comments", label: "Location / description", role: "title" },
+      { key: "normal", label: "Normal", role: "toggle", toggle: ["Pass", "Fail", "N/A"] },
+      { key: "led", label: "LED", role: "toggle", toggle: ["Pass", "Fail", "N/A"] },
+      { key: "emergency", label: "Emergency", role: "toggle", toggle: ["Pass", "Fail", "N/A"] },
+      { key: "battery", label: "Battery (min)", role: "input", num: true, def: 180 },
     ],
     pat: [
-      { key: "appliance", label: "Appliance", text: true, w: 130 },
-      { key: "location", label: "Location", text: true, w: 100 },
-      { key: "cls", label: "Class", toggle: ["I", "II", "—"] },
-      { key: "visual", label: "Visual", toggle: ["Pass", "Fail"] },
-      { key: "earth", label: "Earth Ω", text: true, w: 62 },
-      { key: "insulation", label: "Insul MΩ", text: true, w: 62 },
-      { key: "result", label: "Result", toggle: ["Pass", "Fail"] },
-      { key: "comments", label: "Comments", text: true, grow: true },
+      { key: "appliance", label: "Appliance", role: "title" },
+      { key: "location", label: "Location", role: "subtitle" },
+      { key: "cls", label: "Class", role: "toggle", toggle: ["I", "II", "—"] },
+      { key: "visual", label: "Visual", role: "toggle", toggle: ["Pass", "Fail"] },
+      { key: "earth", label: "Earth (Ω)", role: "input" },
+      { key: "insulation", label: "Insulation (MΩ)", role: "input" },
+      { key: "result", label: "Result", role: "toggle", toggle: ["Pass", "Fail"] },
+      { key: "comments", label: "Comments", role: "input" },
     ],
   };
 
@@ -49,14 +49,20 @@
   .mlc .btn.ghost{background:#fff;color:#003468;border:1px solid #cdd8e3;}
   .mlc .btn.green{background:#0a7d33;}.mlc .btn.grey{background:#5b6b7b;}.mlc .btn.red{background:#b00020;}
   .mlc .btn.sm{padding:7px 11px;font-size:13px;}
-  .mlc .tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e2e8f0;border-radius:10px;}
-  .mlc table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px;}
-  .mlc th{background:#f2f6fa;color:#003468;font-size:11px;text-transform:uppercase;letter-spacing:.02em;padding:7px 6px;text-align:left;position:sticky;top:0;}
-  .mlc td{padding:4px 6px;border-top:1px solid #eef2f6;vertical-align:middle;}
-  .mlc td.no{font-weight:700;color:#64748b;text-align:center;width:34px;}
-  .mlc td input{padding:6px;font-size:14px;}
-  .mlc .tg{display:inline-flex;border:1px solid #cdd8e3;border-radius:8px;overflow:hidden;}
-  .mlc .tg button{border:none;background:#fff;padding:6px 9px;font:600 12px inherit;cursor:pointer;color:#475569;min-width:34px;}
+  .mlc .mlrows{display:flex;flex-direction:column;gap:8px;}
+  .mlc .mlrow{border:1px solid #e6ebf1;border-radius:11px;padding:9px 10px;background:#fff;}
+  .mlc .mlrow-top{display:flex;align-items:flex-start;gap:8px;}
+  .mlc .mlrow-n{font-weight:700;color:#8b97a6;font-size:12px;min-width:22px;text-align:center;padding-top:9px;}
+  .mlc .mlrow-title{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .mlc .ti-big{font-size:15px;font-weight:600;padding:8px 9px;}
+  .mlc .ti-sub{font-size:13px;padding:6px 9px;color:#475569;}
+  .mlc .mlrow-fields{display:flex;flex-wrap:wrap;gap:12px;margin-top:9px;align-items:flex-end;}
+  .mlc .mlf{display:flex;flex-direction:column;gap:4px;}
+  .mlc .mlf label{margin:0;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#7a8595;font-weight:700;}
+  .mlc .mlf input{width:84px;padding:8px;font-size:15px;}
+  .mlc .tg{display:inline-flex;border:1px solid #cdd8e3;border-radius:9px;overflow:hidden;}
+  .mlc .tg button{border:none;background:#fff;padding:9px 13px;font:600 14px inherit;cursor:pointer;color:#475569;min-width:46px;}
+  .mlc .tg button:not(:first-child){border-left:1px solid #e2e8f0;}
   .mlc .tg button.on{color:#fff;}
   .mlc .tg button.on.pass{background:#0a7d33;}.mlc .tg button.on.fail{background:#b00020;}.mlc .tg button.on.na{background:#94a3b8;}
   .mlc .tg button.on.one{background:#003468;}
@@ -108,7 +114,7 @@
       h += '<div class="cc"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
         + '<h4 style="margin:0">' + esc(titleType) + ' certificate</h4>'
         + '<span class="pill">' + esc(rec.certNumber || "No. assigned on issue") + (rec.status === "review" ? " · in review" : rec.status === "final" ? " · issued" : " · draft") + '</span></div>';
-      if (rec._prefilledRows) h += '<div class="banner">↩ ' + rec._prefilledRows + ' item' + (rec._prefilledRows === 1 ? "" : "s") + ' carried forward from the last certificate — check each result.</div>';
+      if (rec._prefilledRows) h += '<div class="banner">↩ ' + rec._prefilledRows + ' item' + (rec._prefilledRows === 1 ? "" : "s") + ' carried forward from the last certificate — marked Pass, tap any to change.</div>';
       h += '</div>';
 
       // Client + installation
@@ -122,11 +128,11 @@
         + '<label>Extent &amp; limitations</label><textarea data-f="extent" ' + ro() + '>' + esc(rec.extent || "") + '</textarea>'
         + '<label>Additional comments</label><textarea data-f="comments" ' + ro() + ' style="min-height:70px">' + esc(rec.comments || "") + '</textarea></div>';
 
-      // Results table
+      // Results — mobile-first cards (location prominent, tappable result toggles)
       h += '<div class="cc"><h4>' + (type === "pat" ? "Appliances tested" : "Emergency lighting tests") + ' <span class="muted">(' + rec.rows.length + ')</span></h4>';
-      h += '<div class="tbl"><table><thead><tr><th>#</th>' + cols.map(c => '<th>' + esc(c.label) + '</th>').join("") + (editable ? '<th></th>' : '') + '</tr></thead><tbody id="mlcRows"></tbody></table></div>';
-      if (editable) h += '<div class="toolbar"><button class="btn ghost sm" data-act="add">＋ Add row</button><button class="btn ghost sm" data-act="add5">＋ Add 5</button>'
-        + (type === "em" ? '<button class="btn ghost sm" data-act="allpass">✔ All Pass</button>' : '<button class="btn ghost sm" data-act="allpass">✔ All Pass</button>') + '</div>';
+      h += '<div class="mlrows" id="mlcRows"></div>';
+      if (editable) h += '<div class="toolbar"><button class="btn ghost sm" data-act="add">＋ Add ' + (type === "pat" ? "appliance" : "light") + '</button><button class="btn ghost sm" data-act="add5">＋ Add 5</button>'
+        + '<button class="btn ghost sm" data-act="allpass">✔ Mark all Pass</button></div>';
       h += '</div>';
 
       // Contractor
@@ -171,23 +177,30 @@
         + '<input type="text" data-b="' + k + '.postcode" value="' + esc(o.postcode || "") + '" placeholder="Postcode" ' + ro() + '></div>';
     }
 
+    const titleCols = cols.filter(c => c.role === "title" || c.role === "subtitle");
+    const fieldCols = cols.filter(c => c.role === "toggle" || c.role === "input");
     function renderRows() {
       const tb = container.querySelector("#mlcRows"); if (!tb) return;
       let h = "";
       rec.rows.forEach((r, i) => {
-        h += '<tr data-i="' + i + '"><td class="no">' + (i + 1) + '</td>';
-        cols.forEach(c => {
-          h += '<td>' + cellHtml(c, r[c.key], i) + '</td>';
-        });
-        if (editable) h += '<td><button class="del" data-del="' + i + '">✕</button></td>';
-        h += '</tr>';
+        h += '<div class="mlrow" data-i="' + i + '"><div class="mlrow-top"><span class="mlrow-n">' + String(i + 1).padStart(2, "0") + '</span><div class="mlrow-title">';
+        titleCols.forEach(c => { h += titleInput(c, r[c.key], i); });
+        h += '</div>' + (editable ? '<button class="del" data-del="' + i + '">✕</button>' : '') + '</div>';
+        h += '<div class="mlrow-fields">';
+        fieldCols.forEach(c => { h += '<div class="mlf"><label>' + esc(c.label) + '</label>' + cellHtml(c, r[c.key], i) + '</div>'; });
+        h += '</div></div>';
       });
       tb.innerHTML = h;
     }
+    function titleInput(c, v, i) {
+      const big = c.role === "title";
+      if (!editable) return '<div class="' + (big ? "ti-big" : "ti-sub") + '" style="border:none;padding:2px 0">' + esc(v || (big ? "—" : "")) + '</div>';
+      return '<input type="text" class="' + (big ? "ti-big" : "ti-sub") + '" data-cell="' + c.key + '" data-i="' + i + '" value="' + esc(v == null ? "" : v) + '" placeholder="' + esc(c.label) + '">';
+    }
     function cellHtml(c, v, i) {
       if (!editable) {
-        if (c.toggle) return esc(v || "");
-        return esc(v == null ? "" : v);
+        if (c.toggle) return '<div style="padding-top:3px">' + esc(v || "—") + '</div>';
+        return '<div style="padding-top:3px">' + esc(v == null || v === "" ? "—" : v) + '</div>';
       }
       if (c.toggle) {
         return '<div class="tg" data-tg="' + c.key + '" data-i="' + i + '">' + c.toggle.map(opt => {
@@ -196,9 +209,8 @@
           return '<button type="button" class="' + (on ? "on " + cls : "") + '" data-v="' + esc(opt) + '">' + esc(opt) + '</button>';
         }).join("") + '</div>';
       }
-      const style = c.grow ? "min-width:150px" : (c.w ? "width:" + c.w + "px" : "");
-      if (c.num) return '<input type="number" inputmode="numeric" data-cell="' + c.key + '" data-i="' + i + '" value="' + esc(v == null ? (c.def != null ? c.def : "") : v) + '" style="' + style + '">';
-      return '<input type="text" data-cell="' + c.key + '" data-i="' + i + '" value="' + esc(v == null ? "" : v) + '" style="' + style + '">';
+      if (c.num) return '<input type="number" inputmode="numeric" data-cell="' + c.key + '" data-i="' + i + '" value="' + esc(v == null ? (c.def != null ? c.def : "") : v) + '">';
+      return '<input type="text" data-cell="' + c.key + '" data-i="' + i + '" value="' + esc(v == null ? "" : v) + '">';
     }
 
     let sigCtx = null, sigCanvas = null;
@@ -255,11 +267,25 @@
       const t5 = container.querySelector('[data-act="add5"]'); if (t5) t5.addEventListener("click", () => { addRows(5); });
       const ap = container.querySelector('[data-act="allpass"]'); if (ap) ap.addEventListener("click", allPass);
       const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
-      const pdf = container.querySelector("#mlcPdf"); if (pdf) pdf.addEventListener("click", async () => { if (!rec.id) { await doSave(); } if (rec.id) window.open(api + "/certs/pdf?id=" + encodeURIComponent(rec.id) + "&t=" + Date.now(), "_blank"); });
+      const pdf = container.querySelector("#mlcPdf"); if (pdf) pdf.addEventListener("click", async () => {
+        // Open the tab synchronously (keeps the user gesture), then stream the PDF
+        // in WITH the bearer token — /certs/pdf is session-gated, so a plain
+        // window.open (no header) returns "Not authenticated".
+        const w = window.open("", "_blank");
+        try {
+          if (!rec.id) await doSave();
+          if (!rec.id) { if (w) w.close(); return; }
+          const r = await authFetch("/certs/pdf?id=" + encodeURIComponent(rec.id) + "&t=" + Date.now());
+          if (!r.ok) throw new Error("pdf");
+          const u = URL.createObjectURL(await r.blob());
+          if (w) w.location.href = u; else window.location.href = u;
+          setTimeout(() => URL.revokeObjectURL(u), 60000);
+        } catch (e) { if (w) w.close(); alert("Couldn't open the PDF — please try again."); }
+      });
       const cm = container.querySelector("#mlcComplete"); if (cm) cm.addEventListener("click", complete);
     }
     function addRows(n) {
-      const def = type === "em" ? { normal: "", led: "", emergency: "", battery: 180, comments: "" } : { appliance: "", location: "", cls: "", visual: "", earth: "", insulation: "", result: "", comments: "" };
+      const def = type === "em" ? { normal: "Pass", led: "Pass", emergency: "Pass", battery: 180, comments: "" } : { appliance: "", location: "", cls: "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: "" };
       for (let k = 0; k < n; k++) rec.rows.push({ ...def });
       renderRows(); wire(); queueSave();
     }

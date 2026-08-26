@@ -24321,7 +24321,7 @@ var cap = (s) => {
   return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s;
 };
 function carryRows(rows, type) {
-  return (rows || []).map((r, i) => type === "pat" ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "", visual: "", earth: "", insulation: "", result: "", comments: r.comments || "" } : { no: i + 1, comments: r.comments || "", normal: "", led: "", emergency: "", battery: r.battery || 180 });
+  return (rows || []).map((r, i) => type === "pat" ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: r.comments || "" } : { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 });
 }
 async function latestCertR2Key(env, tid, code, type) {
   try {

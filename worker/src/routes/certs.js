@@ -134,12 +134,13 @@ function parsePatRows(txt) {
 const cap = s => { s = String(s || ""); return s ? s[0].toUpperCase() + s.slice(1).toLowerCase().replace("n/a", "N/A") : s; };
 
 // Carry an item list forward for a NEW visit: keep each item's IDENTITY
-// (position/description/appliance/location/class) but BLANK the test results and
-// measurements so the engineer actively re-confirms every one on site.
+// (position/description/appliance/location/class) and default every result to
+// Pass — the engineer just taps any that failed. Measurements (earth/insulation)
+// are blanked so they're re-read on site.
 function carryRows(rows, type) {
   return (rows || []).map((r, i) => type === "pat"
-    ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "", visual: "", earth: "", insulation: "", result: "", comments: r.comments || "" }
-    : { no: i + 1, comments: r.comments || "", normal: "", led: "", emergency: "", battery: r.battery || 180 });
+    ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: r.comments || "" }
+    : { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 });
 }
 async function latestCertR2Key(env, tid, code, type) {
   try {
