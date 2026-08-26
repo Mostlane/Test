@@ -193,19 +193,21 @@ async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
   ).bind(token, username, tenantId, expires).run();
   return token;
 }
-async function sendEmail(env, { to, subject, html, text }) {
+async function sendEmail(env, { to, subject, html, text, replyTo }) {
   if (!to) return { ok: false, skipped: true, reason: "no recipient" };
   const body = text || stripHtml(html);
   if (env.RESEND_API_KEY) {
     const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
     try {
+      const payload = { from, to, subject, html, text: body };
+      if (replyTo) payload.reply_to = replyTo;
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${env.RESEND_API_KEY}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ from, to, subject, html, text: body })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
@@ -3337,18 +3339,18 @@ var PdfDoc = class {
     const y = this._page.h - yTop - h;
     r = Math.max(0, Math.min(r, w / 2, h / 2));
     const k = 0.5523 * r;
-    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
     const f = (n) => n.toFixed(2);
-    const op = `q ${fill} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
+    const op = `q ${fill2} rg ${f(x + r)} ${f(y)} m ${f(x + w - r)} ${f(y)} l ${f(x + w - r + k)} ${f(y)} ${f(x + w)} ${f(y + r - k)} ${f(x + w)} ${f(y + r)} c ${f(x + w)} ${f(y + h - r)} l ${f(x + w)} ${f(y + h - r + k)} ${f(x + w - r + k)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)} c ${f(x + r)} ${f(y + h)} l ${f(x + r - k)} ${f(y + h)} ${f(x)} ${f(y + h - r + k)} ${f(x)} ${f(y + h - r)} c ${f(x)} ${f(y + r)} l ${f(x)} ${f(y + r - k)} ${f(x + r - k)} ${f(y)} ${f(x + r)} ${f(y)} c h f Q`;
     this._ops.push(op);
     return this;
   }
   // Filled polygon — points as [[x, yTop], …]. Used for milestone diamonds.
   poly(points, opt = {}) {
     if (!points.length) return this;
-    const fill = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
+    const fill2 = (opt.fill || [0, 0, 0]).map((n) => n.toFixed(3)).join(" ");
     const pts = points.map(([x, yT]) => [x, this._page.h - yT]);
-    let op = `q ${fill} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
+    let op = `q ${fill2} rg ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} m `;
     for (let i = 1; i < pts.length; i++) op += `${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} l `;
     this._ops.push(op + "h f Q");
     return this;
@@ -5116,6 +5118,267 @@ function logoBytes() {
   return a;
 }
 
+// src/lib/statusemail.js
+var CFG_KEY2 = "sla_status_emails";
+var STATUS_DEFS = [
+  { key: "Scheduled", label: "Scheduled", reschedule: true, defaultOn: true },
+  { key: "Travelling", label: "On our way / Travelling", reschedule: false, defaultOn: true },
+  { key: "In Progress", label: "Job started", reschedule: false, defaultOn: false },
+  { key: "Complete", label: "Completed", reschedule: false, defaultOn: false },
+  { key: "On Hold", label: "On Hold / Delayed", reschedule: false, defaultOn: false }
+];
+function defaultTemplates() {
+  return {
+    Scheduled: {
+      on: true,
+      subject: "Your job {job_ref} at {site_name} has been booked in",
+      intro: "Good news \u2014 your job has been scheduled. The details are below. The time is approximate; you'll get another email when our engineer is on the way.",
+      reschedule: true
+    },
+    Travelling: {
+      on: true,
+      subject: "We're on our way to {site_name}",
+      intro: "Just to let you know, a Mostlane engineer is now on their way to complete your job.",
+      reschedule: false
+    },
+    "In Progress": {
+      on: false,
+      subject: "Work has started at {site_name}",
+      intro: "Our engineer has arrived on site and started work on your job.",
+      reschedule: false
+    },
+    Complete: {
+      on: false,
+      subject: "Job {job_ref} at {site_name} is complete",
+      intro: "Your job has now been completed. Thank you for choosing Mostlane.",
+      reschedule: false
+    },
+    "On Hold": {
+      on: false,
+      subject: "Update on your job {job_ref} at {site_name}",
+      intro: "Your job has been placed on hold. We'll be in touch shortly with an update.",
+      reschedule: false
+    }
+  };
+}
+function defaultConfig() {
+  return {
+    enabled: false,
+    // global master OFF until the office turns it on
+    recipientRule: "siteThenCustomer",
+    fromName: "Mostlane",
+    replyTo: "enquiries@mostlane.com",
+    companyTel: "023 8026 2000",
+    statuses: defaultTemplates()
+  };
+}
+function tdb(env) {
+  return env.DB;
+}
+async function getStatusEmailConfig(env, tid) {
+  try {
+    const row = await tdb(env).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, CFG_KEY2).first();
+    if (row && row.value) {
+      const cfg = JSON.parse(row.value);
+      const base = defaultConfig();
+      return { ...base, ...cfg, statuses: { ...base.statuses, ...cfg.statuses || {} } };
+    }
+  } catch {
+  }
+  return defaultConfig();
+}
+async function saveStatusEmailConfig(env, tid, cfg) {
+  const clean = { ...defaultConfig(), ...cfg };
+  await tdb(env).prepare(
+    "INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, CFG_KEY2, JSON.stringify(clean)).run();
+  return clean;
+}
+async function ensureReschedTable(env) {
+  await tdb(env).prepare(`CREATE TABLE IF NOT EXISTS job_reschedule_requests (
+    id TEXT PRIMARY KEY, tenant_id TEXT, job_id TEXT, job_ref TEXT, site_name TEXT,
+    note TEXT, suggestions TEXT, created_at TEXT, status TEXT DEFAULT 'open',
+    resolved_at TEXT, resolved_by TEXT, ip TEXT
+  )`).run();
+}
+async function resolveRecipient(env, tid, job, cfg) {
+  const rule = cfg && cfg.recipientRule || "siteThenCustomer";
+  const emailOf = (s) => {
+    const e = String(s || "").trim();
+    return /\S+@\S+\.\S+/.test(e) ? e : "";
+  };
+  let siteEmail = "";
+  const code = String(job.siteCode || "").trim();
+  const name = String(job.siteName || "").trim();
+  if (code || name) {
+    try {
+      const row = await tdb(env).prepare(
+        `SELECT data FROM sites WHERE tenant_id=? AND (site_number=? OR lower(site_name)=lower(?)) LIMIT 1`
+      ).bind(tid, code, name).first();
+      if (row && row.data) {
+        try {
+          siteEmail = emailOf(JSON.parse(row.data).email);
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+  const custEmail = emailOf(job.customerEmail || job.contactEmail || job.customer && job.customer.email);
+  if (rule === "siteOnly") return siteEmail;
+  return siteEmail || custEmail;
+}
+function fmtWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  try {
+    return d.toLocaleString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/London"
+    });
+  } catch {
+    return d.toISOString();
+  }
+}
+function vars(job) {
+  return {
+    "{job_ref}": String(job.helpdeskRef || job.reference || job.id || "").trim(),
+    "{job_name}": String(job.helpdeskRef || job.siteName || "").trim(),
+    "{site_name}": String(job.siteName || "").trim(),
+    "{site_address}": [job.address, job.postcode].filter(Boolean).join(", "),
+    "{status}": String(job.status || "").trim(),
+    "{scheduled}": fmtWhen(job.scheduledAt),
+    "{description}": String(job.description || "").trim()
+  };
+}
+function fill(str, v) {
+  let out = String(str || "");
+  for (const [k, val] of Object.entries(v)) out = out.split(k).join(val || "");
+  return out;
+}
+function esc2(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
+  const v = vars(job);
+  const subject = fill(tpl.subject, v) || `Update on your job ${v["{job_ref}"]}`;
+  const intro = fill(tpl.intro, v);
+  const base = appBase(env);
+  const logo = `${base}/mostlane-logo.jpg`;
+  const navy = "#003468", ink = "#1f2937", grey = "#6b7280", line = "#e5e7eb";
+  const rows = [];
+  const addRow = (k, val) => {
+    if (val) rows.push(`<tr><td style="padding:6px 0;color:${grey};font-size:13px;width:38%;vertical-align:top">${esc2(k)}</td><td style="padding:6px 0;color:${ink};font-size:14px;font-weight:600">${esc2(val)}</td></tr>`);
+  };
+  addRow("Reference", v["{job_ref}"]);
+  addRow("Site", v["{site_name}"]);
+  addRow("Address", v["{site_address}"]);
+  if (statusDef && statusDef.key === "Scheduled") addRow("Scheduled for", v["{scheduled}"]);
+  addRow("Status", v["{status}"]);
+  const descBlock = v["{description}"] ? `
+        <tr><td style="padding:6px 28px 0">
+          <div style="font-size:12px;color:${grey};font-weight:700;letter-spacing:.03em;margin-bottom:4px">JOB DETAILS</div>
+          <div style="font-size:14px;color:${ink};line-height:1.55">${esc2(v["{description}"])}</div>
+        </td></tr>` : "";
+  const showNotice = tpl.reschedule !== false && statusDef && statusDef.reschedule && contactEmail;
+  const noticeBlock = showNotice ? `
+        <tr><td style="padding:18px 28px 0">
+          <div style="background:#fff8e6;border:1px solid #f0d8a0;border-radius:10px;padding:14px 16px;font-size:13px;color:${ink};line-height:1.55">
+            <strong>Please note:</strong> If this time is not convenient, please email
+            <a href="mailto:${esc2(contactEmail)}" style="color:${navy};font-weight:700;text-decoration:none">${esc2(contactEmail)}</a>
+            as soon as possible so we can rearrange \u2014 otherwise a cancellation charge may apply.
+          </div>
+        </td></tr>` : "";
+  const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f3f5f8;font-family:Segoe UI,Arial,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line}">
+        <tr><td align="center" style="background:${navy};padding:30px 28px">
+          <img src="${esc2(logo)}" alt="Mostlane" height="72" style="height:72px;display:block;border:0;margin:0 auto" />
+        </td></tr>
+        <tr><td style="padding:28px 28px 8px">
+          <div style="font-size:20px;font-weight:700;color:${ink};margin-bottom:8px">${esc2(fill(tpl.subject, v))}</div>
+          <div style="font-size:15px;color:${ink};line-height:1.5">${esc2(intro)}</div>
+        </td></tr>
+        <tr><td style="padding:8px 28px 0">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${line};border-bottom:1px solid ${line};margin:12px 0">${rows.join("")}</table>
+        </td></tr>
+        ${descBlock}
+        ${noticeBlock}
+        <tr><td style="padding:24px 28px 28px">
+          <div style="font-size:13px;color:${grey};line-height:1.5">
+            Kind regards,<br><strong style="color:${ink}">Mostlane</strong><br>
+            ${esc2(tpl && tpl.companyTel || "")}
+          </div>
+        </td></tr>
+      </table>
+      <div style="max-width:560px;margin:14px auto 0;font-size:11px;color:#9aa4b2;text-align:center">This is an automated message about your job. Please do not reply directly \u2014 contact us on the number above.</div>
+    </td></tr>
+  </table></body></html>`;
+  const textLines = [
+    fill(tpl.subject, v),
+    "",
+    intro,
+    "",
+    v["{job_ref}"] ? `Reference: ${v["{job_ref}"]}` : "",
+    v["{site_name}"] ? `Site: ${v["{site_name}"]}` : "",
+    v["{site_address}"] ? `Address: ${v["{site_address}"]}` : "",
+    statusDef && statusDef.key === "Scheduled" && v["{scheduled}"] ? `Scheduled for: ${v["{scheduled}"]}` : "",
+    `Status: ${v["{status}"]}`,
+    v["{description}"] ? `
+Job details: ${v["{description}"]}` : "",
+    showNotice ? `
+Please note: If this time is not convenient, please email ${contactEmail} as soon as possible so we can rearrange \u2014 otherwise a cancellation charge may apply.` : "",
+    "",
+    "Kind regards, Mostlane"
+  ].filter(Boolean);
+  return { subject, html, text: textLines.join("\n") };
+}
+async function hmacHex2(secret, msg) {
+  const enc3 = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc3.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(msg));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function signSecret(env) {
+  return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
+}
+async function verifyResched(env, jobId, exp, sig) {
+  const secret = signSecret(env);
+  if (!secret) return true;
+  const e = parseInt(exp || "0", 10);
+  if (!e || !sig) return false;
+  if (Math.floor(Date.now() / 1e3) > e) return false;
+  const good = await hmacHex2(secret, "resched:" + jobId + "|" + e);
+  if (good.length !== String(sig).length) return false;
+  let diff = 0;
+  for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ String(sig).charCodeAt(i);
+  return diff === 0;
+}
+async function onStatusTransition(env, tid, job, prevStatus, newStatus) {
+  try {
+    if (!newStatus || prevStatus === newStatus) return;
+    const cfg = await getStatusEmailConfig(env, tid);
+    if (!cfg.enabled) return;
+    const tpl = cfg.statuses && cfg.statuses[newStatus];
+    if (!tpl || !tpl.on) return;
+    const to = await resolveRecipient(env, tid, job, cfg);
+    if (!to) return;
+    const statusDef = STATUS_DEFS.find((s) => s.key === newStatus) || { key: newStatus };
+    tpl.companyTel = cfg.companyTel;
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const { subject, html, text } = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
+    await sendEmail(env, { to, subject, html, text, replyTo: cfg.replyTo });
+  } catch {
+  }
+}
+
 // src/routes/sla.js
 async function handle8(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -6138,7 +6401,7 @@ async function handle8(request, env, ctx, url, sess) {
       changedBy: body.changedBy || "scheduler"
     };
     const before = await getJob(env, tenantId, id);
-    const updated = await patchJob(env, tenantId, id, patch);
+    const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
     }));
     if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
@@ -6516,7 +6779,7 @@ async function handle8(request, env, ctx, url, sess) {
           body.hold.approval = isAdmin ? { state: "approved", requestedBy: sess.user.username, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString(), auto: true } : { state: "pending", requestedBy: sess.user.username, requestedAt: (/* @__PURE__ */ new Date()).toISOString() };
         }
       }
-      const updated = await patchJob(env, tenantId, id, body);
+      const updated = await patchJob(env, tenantId, id, body, ctx);
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
       }));
       if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
@@ -7458,7 +7721,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   await saveJob(env, tenantId, job);
   return job;
 }
-async function patchJob(env, tenantId, id, patch) {
+async function patchJob(env, tenantId, id, patch, ctx) {
   const job = await getJob(env, tenantId, id);
   if (!job) return null;
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -7584,6 +7847,12 @@ async function patchJob(env, tenantId, id, patch) {
   }
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
+  if (job.status !== prevStatus && ctx && ctx.waitUntil) {
+    try {
+      ctx.waitUntil(onStatusTransition(env, tenantId, job, prevStatus, job.status));
+    } catch {
+    }
+  }
   return job;
 }
 function digitsOf(s) {
@@ -20140,7 +20409,7 @@ async function recipientUsers(env, tid, memo) {
   const want = new Set(set);
   return all.filter((u) => want.has(lc2(u.username)));
 }
-function fmtWhen(iso) {
+function fmtWhen2(iso) {
   try {
     const d = new Date(iso);
     const day = d.getUTCDate(), mon = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][d.getUTCMonth()];
@@ -20244,7 +20513,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   }
   doc.text(L, y, "Signed: " + signerName, { size: 11, bold: true });
   y += 16;
-  doc.text(L, y, "Date: " + fmtWhen(signedAtISO), { size: 11 });
+  doc.text(L, y, "Date: " + fmtWhen2(signedAtISO), { size: 11 });
   y += 16;
   if (opts.ip) {
     doc.text(L, y, "IP address: " + opts.ip, { size: 11 });
@@ -22289,7 +22558,7 @@ function slugify(name) {
 }
 
 // src/routes/cctv.js
-var CFG_KEY2 = "cctv:sites";
+var CFG_KEY3 = "cctv:sites";
 var ALLOWED_PORTS = /* @__PURE__ */ new Set([80, 443, 8080, 8880, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]);
 var VENDOR_PATH = {
   hik: "/ISAPI/Streaming/channels/{ch}/picture",
@@ -22314,7 +22583,7 @@ async function cameraSnapshotUrl(env, origin, siteId, cameraId) {
   }
 }
 async function loadSites(db) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY2).first();
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY3).first();
   let sites = [];
   try {
     sites = row ? JSON.parse(row.value) : [];
@@ -22325,7 +22594,7 @@ async function loadSites(db) {
 async function saveSites(db, sites) {
   await db.prepare(
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(db.tenantId, CFG_KEY2, JSON.stringify(sites)).run();
+  ).bind(db.tenantId, CFG_KEY3, JSON.stringify(sites)).run();
 }
 function newId(prefix2) {
   return prefix2 + Math.abs(Date.now() ^ Math.floor(Math.random() * 1e9)).toString(36);
@@ -25457,7 +25726,7 @@ async function handle32(request, env, ctx, url, sess) {
 }
 
 // src/routes/tuya.js
-var CFG_KEY3 = "tuya:config";
+var CFG_KEY4 = "tuya:config";
 var TOK_KEY = "tuya:token";
 var WATCH_KEY = "tuya:gatewatch";
 var REGION_BASE = {
@@ -25470,7 +25739,7 @@ function baseFor(cfg) {
   return REGION_BASE[cfg && cfg.region || "eu"] || REGION_BASE.eu;
 }
 async function loadCfg(db) {
-  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY3).first();
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, CFG_KEY4).first();
   let cfg = {};
   try {
     cfg = row ? JSON.parse(row.value) : {};
@@ -25479,7 +25748,7 @@ async function loadCfg(db) {
   return cfg && typeof cfg === "object" ? cfg : {};
 }
 async function saveCfg2(db, cfg) {
-  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, CFG_KEY3, JSON.stringify(cfg)).run();
+  await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, CFG_KEY4, JSON.stringify(cfg)).run();
 }
 async function loadKV(db, key) {
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
@@ -26020,6 +26289,32 @@ function leadRef(s) {
 function normStatus(s) {
   return String(s || "").trim().toLowerCase();
 }
+function normNm(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+function splitNames(s) {
+  return String(s || "").split(/[,;/]|(?: and )/i).map((x) => x.trim()).filter(Boolean);
+}
+async function loadUserMap(db, tid) {
+  const rows = (await db.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all()).results || [];
+  const map = {};
+  for (const u of rows) {
+    if (!u.username) continue;
+    map[normNm(u.username)] = u.username;
+    const full = normNm((u.first_name || "") + " " + (u.last_name || ""));
+    if (full) map[full] = u.username;
+  }
+  return map;
+}
+function matchEngineers(map, label) {
+  if (!label || /^\s*(not allocated|unallocated|unassigned)\s*$/i.test(label)) return [];
+  const out = [];
+  for (const p of splitNames(label)) {
+    const u = map[normNm(p)];
+    if (u && !out.includes(u)) out.push(u);
+  }
+  return out;
+}
 function mapStatus(map, name) {
   const hit = map[normStatus(name)];
   if (hit && hit.portal) return { portal: hit.portal, done: !!hit.done };
@@ -26148,6 +26443,13 @@ async function handle35(request, env, ctx, url, sess) {
       }
       return out.sort((x, y) => String(x.at).localeCompare(String(y.at)));
     };
+    const matchEngList = async (names) => {
+      if (!Array.isArray(names) || !names.length) return [];
+      const um = await loadUserMap(db, tid);
+      const out = [];
+      for (const nm of names) for (const u of matchEngineers(um, nm)) if (!out.includes(u)) out.push(u);
+      return out;
+    };
     if (b.target === "live" && b.jobId) {
       const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, b.jobId).first();
       if (!row) return json4({ ok: false });
@@ -26158,6 +26460,10 @@ async function handle35(request, env, ctx, url, sess) {
       }
       const kept = (Array.isArray(d.statusHistory) ? d.statusHistory : []).filter((h) => h && h.src !== "sync-pending" && h.by !== "Workever sync");
       d.statusHistory = dedupSort(kept.concat(history));
+      if (!(Array.isArray(d.assignedEngineers) && d.assignedEngineers.filter(Boolean).length)) {
+        const eng = await matchEngList(b.engineers);
+        if (eng.length) d.assignedEngineers = eng;
+      }
       if (completedAt) d.closedAt = completedAt;
       if (completedAt) await db.prepare("UPDATE sla_jobs SET data=?, closed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.jobId).run();
       else await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.jobId).run();
@@ -26172,6 +26478,10 @@ async function handle35(request, env, ctx, url, sess) {
       } catch {
       }
       d.statusHistory = dedupSort(history);
+      if (!(Array.isArray(d.assignedEngineers) && d.assignedEngineers.filter(Boolean).length)) {
+        const eng = await matchEngList(b.engineers);
+        if (eng.length) d.assignedEngineers = eng;
+      }
       if (completedAt) await db.prepare("UPDATE sla_jobs_archive SET data=?, completed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.mos).run();
       else await db.prepare("UPDATE sla_jobs_archive SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.mos).run();
       return json4({ ok: true });
@@ -26184,6 +26494,7 @@ async function handle35(request, env, ctx, url, sess) {
     const jobs = Array.isArray(b.jobs) ? b.jobs : [];
     if (!jobs.length) return json4({ ok: true, counts: {}, needPhotos: [], needDetail: [] });
     const map = await loadMap2(db);
+    const userMap = await loadUserMap(db, tid);
     const nowIso = (/* @__PURE__ */ new Date()).toISOString();
     const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
     const liveByRef = {};
@@ -26221,6 +26532,10 @@ async function handle35(request, env, ctx, url, sess) {
             if (!Array.isArray(data2.statusHistory)) data2.statusHistory = [];
             data2.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync", src: "sync-pending" });
             data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
+            const engs = matchEngineers(userMap, j.assignedLabel);
+            if (engs.length && !(Array.isArray(data2.assignedEngineers) && data2.assignedEngineers.filter(Boolean).length)) {
+              data2.assignedEngineers = engs;
+            }
             await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso, nowIso, JSON.stringify(data2), tid, live.id).run();
             counts.updatedLive++;
             addLog("update-live", j, live.status, m.portal, j.name, live.id);
@@ -26248,6 +26563,7 @@ async function handle35(request, env, ctx, url, sess) {
           continue;
         }
         const siteName = String(j.siteName || j.customerName || "").trim();
+        const engsA = matchEngineers(userMap, j.assignedLabel);
         const data = {
           source: "workever",
           mos,
@@ -26260,13 +26576,16 @@ async function handle35(request, env, ctx, url, sess) {
           address: j.address || {},
           workeverStatus: j.status || "",
           syncedAt: nowIso,
-          runId
+          runId,
+          assignedEngineers: engsA,
+          assignedLabel: j.assignedLabel || ""
         };
-        const search = `${mos} ${j.name || ""} ${siteName} ${j.postcode || ""} ${j.customerName || ""}`.toLowerCase().slice(0, 4e3);
+        const assignedTo = engsA.length ? engsA.join(", ") : j.assignedLabel && !/not allocated/i.test(j.assignedLabel) ? j.assignedLabel : "";
+        const search = `${mos} ${j.name || ""} ${siteName} ${j.postcode || ""} ${j.customerName || ""} ${engsA.join(" ")}`.toLowerCase().slice(0, 4e3);
         await db.prepare(`INSERT INTO sla_jobs_archive
           (tenant_id, id, ref, status, assigned_to, site_name, postcode, created_at, completed_at, search, data, site_code)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET status=excluded.status`).bind(tid, mos, mos, m.portal, j.assignedLabel || "", siteName, j.postcode || "", null, null, search, JSON.stringify(data), String(j.siteCode || "")).run();
+          ON CONFLICT(id) DO UPDATE SET status=excluded.status`).bind(tid, mos, mos, m.portal, assignedTo, siteName, j.postcode || "", null, null, search, JSON.stringify(data), String(j.siteCode || "")).run();
         counts.importedArchive++;
         addLog("import-archive", j, "", m.portal, j.name);
         needDetail.push(mos);
@@ -26293,6 +26612,143 @@ async function handle35(request, env, ctx, url, sess) {
     return json4({ ok: true, counts, needPhotos, needDetail });
   }
   return json4({ ok: false, error: "Not found: " + path }, 404);
+}
+
+// src/routes/statuscomms.js
+async function jobById(env, tid, id) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return row && row.data ? JSON.parse(row.data) : null;
+  } catch {
+    return null;
+  }
+}
+async function requireCommsAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
+    return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle36(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
+  if (path === "/comms/status-emails" && method === "GET") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    return json({ ok: true, cfg: await getStatusEmailConfig(env, tid), defs: STATUS_DEFS }, {}, env, request);
+  }
+  if (path === "/comms/status-emails" && method === "POST") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    const b = await request.json().catch(() => ({}));
+    const saved = await saveStatusEmailConfig(env, tid, b || {});
+    return json({ ok: true, cfg: saved }, {}, env, request);
+  }
+  if (path === "/comms/status-emails/preview" && method === "POST") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    const b = await request.json().catch(() => ({}));
+    const cfg = await getStatusEmailConfig(env, tid);
+    const statusKey = b.status || "Scheduled";
+    const tpl = { ...cfg.statuses[statusKey] || defaultConfig().statuses.Scheduled, companyTel: cfg.companyTel };
+    const statusDef = STATUS_DEFS.find((s) => s.key === statusKey) || { key: statusKey };
+    const job = b.jobId && await jobById(env, tid, b.jobId) || {
+      id: "PREVIEW",
+      helpdeskRef: "0331 Camberley, Frimley Road",
+      siteName: "Camberley, Frimley Road",
+      address: "19 Frimley Road, Camberley",
+      postcode: "GU15 3EN",
+      status: statusKey,
+      scheduledAt: new Date(Date.now() + 2 * 864e5).toISOString(),
+      description: "Sample job"
+    };
+    const contactEmail = cfg.replyTo || "enquiries@mostlane.com";
+    const out = renderStatusEmail({ env, job, tpl, statusDef, contactEmail });
+    return json({ ok: true, subject: out.subject, html: out.html }, {}, env, request);
+  }
+  if (path === "/comms/reschedule-requests" && method === "GET") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    await ensureReschedTable(env);
+    const status = url.searchParams.get("status") || "open";
+    const db = tenantDB(env, tid);
+    const q = status === "all" ? db.prepare("SELECT * FROM job_reschedule_requests WHERE tenant_id=? ORDER BY created_at DESC LIMIT 200").bind(tid) : db.prepare("SELECT * FROM job_reschedule_requests WHERE tenant_id=? AND status=? ORDER BY created_at DESC LIMIT 200").bind(tid, status);
+    const { results } = await q.all();
+    const requests = (results || []).map((r) => ({ ...r, suggestions: safeArr(r.suggestions) }));
+    return json({ ok: true, requests }, {}, env, request);
+  }
+  if (path === "/comms/reschedule-requests/resolve" && method === "POST") {
+    const g = await requireCommsAdmin(env, request);
+    if (g.err) return g.err;
+    await ensureReschedTable(env);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("id required", 400, env, request);
+    await tenantDB(env, tid).prepare(
+      "UPDATE job_reschedule_requests SET status='resolved', resolved_at=?, resolved_by=? WHERE tenant_id=? AND id=?"
+    ).bind((/* @__PURE__ */ new Date()).toISOString(), g.sess.user.username, tid, b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/customer/job" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const { jobId, exp, sig } = b;
+    if (!jobId || !await verifyResched(env, jobId, exp, sig))
+      return error("This link has expired or is invalid.", 403, env, request);
+    const job = await jobById(env, tid, jobId);
+    if (!job) return error("Job not found.", 404, env, request);
+    const cfg = await getStatusEmailConfig(env, tid);
+    return json({
+      ok: true,
+      job: {
+        reference: job.helpdeskRef || job.reference || "",
+        siteName: job.siteName || "",
+        address: [job.address, job.postcode].filter(Boolean).join(", "),
+        scheduledAt: job.scheduledAt || "",
+        status: job.status || ""
+      },
+      company: { name: "Mostlane", tel: cfg.companyTel || "", replyTo: cfg.replyTo || "" }
+    }, {}, env, request);
+  }
+  if (path === "/customer/reschedule" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const { jobId, exp, sig } = b;
+    if (!jobId || !await verifyResched(env, jobId, exp, sig))
+      return error("This link has expired or is invalid.", 403, env, request);
+    const job = await jobById(env, tid, jobId);
+    if (!job) return error("Job not found.", 404, env, request);
+    await ensureReschedTable(env);
+    const note = String(b.note || "").slice(0, 2e3);
+    const suggestions = Array.isArray(b.suggestions) ? b.suggestions.slice(0, 6).map((s) => String(s).slice(0, 120)) : [];
+    if (!note && !suggestions.length) return error("Please add a note or a suggested time.", 400, env, request);
+    const id = crypto.randomUUID();
+    const ip = request.headers.get("CF-Connecting-IP") || "";
+    const ref = job.helpdeskRef || job.reference || jobId;
+    const siteName = job.siteName || "";
+    await tenantDB(env, tid).prepare(
+      `INSERT INTO job_reschedule_requests (id,tenant_id,job_id,job_ref,site_name,note,suggestions,created_at,status,ip)
+       VALUES (?,?,?,?,?,?,?,?, 'open', ?)`
+    ).bind(id, tid, jobId, ref, siteName, note, JSON.stringify(suggestions), (/* @__PURE__ */ new Date()).toISOString(), ip).run();
+    ctx?.waitUntil(sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], {
+      title: "Customer wants to rearrange",
+      body: `${siteName || ref}: ${note ? note.slice(0, 80) : "suggested new times"}`,
+      url: `/job-view.html?jobId=${encodeURIComponent(jobId)}`,
+      tag: `resched:${id}`,
+      actionable: true
+    }).catch(() => {
+    }));
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Not found: " + path, 404, env, request);
+}
+function safeArr(s) {
+  try {
+    const a = JSON.parse(s);
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
 }
 
 // src/index.js
@@ -26391,6 +26847,10 @@ var ROUTES = [
   // Projects: create/get/update/link/todo/docs
   ["*", "/health/", handle32],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
+  ["*", "/comms", handle36],
+  // customer status-email config + reschedule inbox (admin)
+  ["*", "/customer", handle36],
+  // public: customer reschedule flow (token-verified)
   ["*", "/tuya", handle33],
   // yard gate: Tuya Cloud open command + gate-open state
   ["*", "/fra", handle34]
@@ -26706,7 +27166,10 @@ var PUBLIC_ROUTES = [
   // Project documents streamed for the in-app viewer / new tab — signed URL, verified in-handler.
   ["GET", "/project/doc"],
   // FRA follow-up quote copies streamed inline — signed URL, verified in-handler.
-  ["GET", "/fra/quote"]
+  ["GET", "/fra/quote"],
+  // Customer reschedule flow (job-reschedule.html, no login) — signed token verified in-handler.
+  ["POST", "/customer/job"],
+  ["POST", "/customer/reschedule"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

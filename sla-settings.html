@@ -445,7 +445,7 @@ function buildRunner(){
   // 09:22" (UK local) to ISO (BST-aware) and finds the completion time.
   const ukToIso=(s)=>{ const m=String(s||"").match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})\\D+(\\d{2}):(\\d{2})/); if(!m)return null; const dd=+m[1],mo=+m[2],yy=+m[3],hh=+m[4],mi=+m[5]; const utc=Date.UTC(yy,mo-1,dd,hh,mi); const lastSun=(mon)=>{ const x=new Date(Date.UTC(yy,mon+1,0)); return x.getUTCDate()-x.getUTCDay(); }; const bstStart=Date.UTC(yy,2,lastSun(2),1), bstEnd=Date.UTC(yy,9,lastSun(9),1); const off=(utc>=bstStart&&utc<bstEnd)?60:0; return new Date(utc-off*60000).toISOString(); };
   const DONEST=/closed|complete|invoiced/i;
-  const workeverHistory=async(uuid)=>{ const j=await wg("/api/v1/jobs/"+uuid+"/activities"); const items=(j&&j.items)||[]; const history=[]; let completedAt=null,maxAt=null; for(const a of items){ if(!a||!a.statusName)continue; const at=ukToIso(a.creationDateFormatted); if(!at)continue; history.push({status:a.statusName,at,by:a.createdByName||"Workever"}); if(!maxAt||at>maxAt)maxAt=at; if(DONEST.test(a.statusName)&&(!completedAt||at>completedAt))completedAt=at; } if(!completedAt)completedAt=maxAt; return {history,completedAt}; };
+  const workeverHistory=async(uuid)=>{ const j=await wg("/api/v1/jobs/"+uuid+"/activities"); const items=(j&&j.items)||[]; const history=[]; let completedAt=null,maxAt=null; const engSet={}; for(const a of items){ if(!a)continue; if(a.createdByName && !/office|admin|login|system|reception/i.test(a.createdByName)) engSet[a.createdByName]=1; if(!a.statusName)continue; const at=ukToIso(a.creationDateFormatted); if(!at)continue; history.push({status:a.statusName,at,by:a.createdByName||"Workever"}); if(!maxAt||at>maxAt)maxAt=at; if(DONEST.test(a.statusName)&&(!completedAt||at>completedAt))completedAt=at; } if(!completedAt)completedAt=maxAt; return {history,completedAt,engineers:Object.keys(engSet)}; };
   const flush=async()=>{ if(!batch.length)return; let res=null; try{ res=await post("/sla/workever/ingest",{runId:RUN,jobs:batch}); }catch(e){ res=null; }
     if(!res || !res.counts){ INGEST_FAIL++; if(INGEST_FAIL>=3){ ABORT={reason:"the portal rejected the sync (server error) "+((res&&res.error)?("— "+res.error):"— check the red 500 lines above"), mos:[], sample:[]}; } batch=[]; batchU={}; return; } else INGEST_FAIL=0;
     if(res&&res.counts) for(const k in T) if(k!=="files") T[k]+=res.counts[k]||0;
@@ -462,7 +462,7 @@ function buildRunner(){
           if(pr2)T.files+=pr2.imported||0; } else if(pr)T.files+=pr.imported||0; };
       let archFb=[]; const flushArch=async()=>{ if(!archFb.length)return; const files=archFb; archFb=[]; await impf("/sla/archive/photos/import",{files},files.length,[...new Set(files.map(f=>f.mos))],files.map(f=>f.name)); };
       for(const np of res.needPhotos){ if(ABORT)break; if(!np.uuid) continue; const files=await harvestPhotos(np);
-        const wh=await workeverHistory(np.uuid); if(wh&&(wh.history.length||wh.completedAt)) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:np.mos,history:wh.history,completedAt:wh.completedAt});
+        const wh=await workeverHistory(np.uuid); if(wh&&(wh.history.length||wh.completedAt||(wh.engineers||[]).length)) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:np.mos,history:wh.history,completedAt:wh.completedAt,engineers:wh.engineers});
         if(np.target==="live"&&np.portalId){ if(files.length){ await impf("/sla/workever/job-files",{jobId:np.portalId,files},files.length,[np.mos],files.map(f=>f.name)); if(ABORT)break; } }
         else { for(const f of files){ archFb.push(f); if(archFb.length>=15){ await flushArch(); if(ABORT)break; } } if(ABORT)break; } }
       if(!ABORT) await flushArch(); }
@@ -537,13 +537,14 @@ function buildTestRunner(target){
   }
   console.log("  file import ("+tgt+") →", imp);
   // Real status-change times from Workever's activity log
-  let compAt=null;
+  let compAt=null, engList=[];
   if(np){
     const acts=await wg("/api/v1/jobs/"+job.uuid+"/activities"); const items=(acts&&acts.items)||[];
     const ukToIso=(s)=>{ const m=String(s||"").match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})\\D+(\\d{2}):(\\d{2})/); if(!m)return null; const dd=+m[1],mo=+m[2],yy=+m[3],hh=+m[4],mi=+m[5]; const utc=Date.UTC(yy,mo-1,dd,hh,mi); const lastSun=(mon)=>{ const x=new Date(Date.UTC(yy,mon+1,0)); return x.getUTCDate()-x.getUTCDay(); }; const bstStart=Date.UTC(yy,2,lastSun(2),1), bstEnd=Date.UTC(yy,9,lastSun(9),1); const off=(utc>=bstStart&&utc<bstEnd)?60:0; return new Date(utc-off*60000).toISOString(); };
-    const history=[]; let maxAt=null; for(const a of items){ if(!a||!a.statusName)continue; const at=ukToIso(a.creationDateFormatted); if(!at)continue; history.push({status:a.statusName,at,by:a.createdByName||"Workever"}); if(!maxAt||at>maxAt)maxAt=at; if(/closed|complete|invoiced/i.test(a.statusName)&&(!compAt||at>compAt))compAt=at; } if(!compAt)compAt=maxAt;
-    console.log("  activities:", items.length, "→ completed", compAt);
-    if(history.length||compAt) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:job.mos,history,completedAt:compAt});
+    const history=[]; let maxAt=null; const engSet={}; for(const a of items){ if(!a)continue; if(a.createdByName && !/office|admin|login|system|reception/i.test(a.createdByName)) engSet[a.createdByName]=1; if(!a.statusName)continue; const at=ukToIso(a.creationDateFormatted); if(!at)continue; history.push({status:a.statusName,at,by:a.createdByName||"Workever"}); if(!maxAt||at>maxAt)maxAt=at; if(/closed|complete|invoiced/i.test(a.statusName)&&(!compAt||at>compAt))compAt=at; } if(!compAt)compAt=maxAt;
+    engList=Object.keys(engSet);
+    console.log("  activities:", items.length, "→ completed", compAt, "· engineers", engList);
+    if(history.length||compAt||engList.length) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:job.mos,history,completedAt:compAt,engineers:engList});
   }
   // Verify portal side (the right store for where the job landed)
   const P={photo:0,signature:0,document:0};
@@ -574,6 +575,7 @@ function buildTestRunner(target){
   rep("Signature", W.signature, P.signature, !liveT);
   rep("Documents", W.document, P.document, !liveT);
   if(np) L.push((compAt?"✅":"➖")+" Status times from Workever"+(compAt?": completed "+new Date(compAt).toLocaleString("en-GB"):" (none found)"));
+  if(np){ const asg=(job.assignedLabel && !/not allocated/i.test(job.assignedLabel))?job.assignedLabel:(engList.length?engList.join(", ")+" (from activity)":""); L.push((asg?"✅":"➖")+" Assigned engineer"+(asg?": "+asg:": none recorded in Workever")); }
   if(np && totalW>0){ if(imp.failed>0){ L.push("❌ "+imp.failed+" file(s) failed to store"); fail=true; } else L.push("✅ No file transfers failed"); }
   const overall = fail ? "❌ FAIL" : "✅ PASS";
   console.log("%c"+overall+"  —  "+job.mos+"  ("+job.name+")","color:"+(fail?"#c00":"#0a0")+";font-weight:bold;font-size:16px");
