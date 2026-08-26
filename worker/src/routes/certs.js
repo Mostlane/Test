@@ -20,7 +20,7 @@
 //
 // Table (self-migrating): certificates.  Config: app_config cert:config:<tid>.
 
-import { json, error } from "../lib/http.js";
+import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { buildCertPdf } from "../lib/certpdf.js";
 import { logoBytes } from "../lib/logo.js";
@@ -348,7 +348,9 @@ export async function handle(request, env, ctx, url, sess) {
     const sig = dataUrlToBytes(rec.signature);
     let logo = null; try { logo = logoBytes(); } catch {}
     const bytes = buildCertPdf(rec, { logo, signature: sig });
-    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${(rec.certNumber || cert.id)}.pdf"`, "Cache-Control": "no-store" } });
+    // Raw (non-JSON) response — must carry CORS itself, else the cross-origin
+    // fetch (portal → workers.dev) that streams it in for preview is blocked.
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${(rec.certNumber || cert.id)}.pdf"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
   }
 
   // ── One record (office) ──────────────────────────────────────────────────────
