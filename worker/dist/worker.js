@@ -26148,7 +26148,7 @@ async function handle35(request, env, ctx, url, sess) {
         d = row.data ? JSON.parse(row.data) : {};
       } catch {
       }
-      const kept = (Array.isArray(d.statusHistory) ? d.statusHistory : []).filter((h) => h && h.src !== "sync-pending");
+      const kept = (Array.isArray(d.statusHistory) ? d.statusHistory : []).filter((h) => h && h.src !== "sync-pending" && h.by !== "Workever sync");
       d.statusHistory = dedupSort(kept.concat(history));
       if (completedAt) d.closedAt = completedAt;
       if (completedAt) await db.prepare("UPDATE sla_jobs SET data=?, closed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.jobId).run();
