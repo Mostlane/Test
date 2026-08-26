@@ -2485,6 +2485,19 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const priority = isProjJob ? "" : (body.priority || existing?.priority || "Priority 4");
   const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
 
+  // Resolve the site NAME so a project job reads its real name (e.g. "Yard"),
+  // not the bare P-number — even when the job was raised before the site was
+  // named, or the site was renamed afterwards. Falls back to the site code.
+  let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
+  const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
+  if (!siteNameResolved && siteCodeVal) {
+    try {
+      const srow = await tenantDB(env, tenantId).prepare("SELECT site_name FROM sites WHERE site_number=? LIMIT 1").bind(siteCodeVal).first();
+      const nm = srow && String(srow.site_name || "").trim();
+      if (nm && nm !== siteCodeVal) siteNameResolved = nm;
+    } catch {}
+  }
+
   const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
     ? body.assignedEngineers.filter(Boolean)
     : (body.assignedTo ? [body.assignedTo]
@@ -2543,9 +2556,9 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     if (idIsNumSite && !/^\d/.test(String(helpdeskRef))) {
       helpdeskRef = id;
     } else if (!helpdeskRef || UUID_RE.test(String(helpdeskRef)) || (helpdeskRef === id && !idIsNumSite)) {
-      const siteNm = String(body.siteName || existing?.siteName || "").trim();
-      const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
-      helpdeskRef = isProjJob ? (siteCd || siteNm || id) : (siteNm || siteCd || id);
+      // Site NAME first (else the site code) — for PROJECTS too, so a project job
+      // reads "Yard", not the bare "P0007". An explicitly typed reference wins above.
+      helpdeskRef = siteNameResolved || siteCodeVal || id;
     }
   }
 
@@ -2562,7 +2575,7 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     siteCode: body.siteCode || existing?.siteCode || "",  // carried so the siteCode filter works
     // Full site details captured at creation — shown to engineers (address,
     // phone, directions) without a lookup. Previously these were dropped.
-    siteName: body.siteName || existing?.siteName || "",
+    siteName: siteNameResolved || "",
     address: body.address || existing?.address || "",
     telephone: body.telephone || existing?.telephone || "",
     postcode: body.postcode || existing?.postcode || "",
@@ -2713,7 +2726,7 @@ async function patchJob(env, tenantId, id, patch) {
       job.helpdeskRef = idStr;   // restore "<number>-<site>" from the id
     } else if (!ref || uuidRe.test(ref) || (ref === idStr && !idIsNumSite)) {
       const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
-      const healed = jobIsProject(job) ? (siteCd || siteNm) : (siteNm || siteCd);
+      const healed = siteNm || siteCd;   // site NAME first, for projects too
       if (healed) job.helpdeskRef = healed;
     }
   }
