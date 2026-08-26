@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=18"></script>
+  <script src="/portal-config.js?v=19"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -525,7 +525,10 @@
     var fs = !!(job && job.firestopping);
     var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
-    $("backBtn").onclick=function(){ location.href=backTo; };
+    // Back goes through the portal's shared breadcrumb (window.mlBack) so it
+    // returns to the genuine previous page and can never trap the user in a
+    // revolving cycle. backTo is only the cold-start fallback.
+    $("backBtn").onclick=function(){ if(window.mlBack) window.mlBack(backTo); else location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
     if(!fs && !au && !cert){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});

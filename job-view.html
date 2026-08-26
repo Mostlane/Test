@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=18"></script>
+  <script src="/portal-config.js?v=19"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -1911,7 +1911,13 @@ function init(){
       dest = /sla-main\.html/.test(r) ? "sla-main.html" : "engineer-jobs.html";
     }
     backBtn.setAttribute("href", dest);
-    backBtn.addEventListener("click", e => { e.preventDefault(); location.href = dest; });
+    // Back goes through the portal's shared breadcrumb (window.mlBack) so it
+    // returns to the genuine previous page and can never ping-pong parent⇄job.
+    // `dest` is only the cold-start fallback (push notification / fresh tab).
+    backBtn.addEventListener("click", e => {
+      e.preventDefault();
+      if (window.mlBack) window.mlBack(dest); else location.href = dest;
+    });
   }
   buildStatusChips();
   $("noteInput").addEventListener("input", updateSaveButton);
