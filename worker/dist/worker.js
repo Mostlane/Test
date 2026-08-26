@@ -5276,6 +5276,14 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
   }
+  if (subpath === "/emsets") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (method === "GET") return jsonResponse({ ok: true, sets: await getEmSets(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      return jsonResponse({ ok: true, ...await rebuildEmSets(env, tenantId) }, headers);
+    }
+  }
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
@@ -7399,6 +7407,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the standard completion (photo/note/signature). Preserved across re-saves.
     firestopping: body.firestopping !== void 0 ? !!body.firestopping : existing?.firestopping || false,
     firestop: existing?.firestop,
+    // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
+    emTest: body.emTest !== void 0 ? !!body.emTest : existing?.emTest || false,
+    pat: body.pat !== void 0 ? !!body.pat : existing?.pat || false,
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
@@ -7488,6 +7499,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.requiresPhoto !== void 0) job.requiresPhoto = !!patch.requiresPhoto;
   if (patch.requiresNote !== void 0) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
+  if (patch.emTest !== void 0) job.emTest = !!patch.emTest;
+  if (patch.pat !== void 0) job.pat = !!patch.pat;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
@@ -8823,6 +8836,44 @@ var DEFAULT_WORK_AREAS = [
   "Decorating",
   "General maintenance"
 ].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
+function emSetFromKey(r2key) {
+  const name = String(r2key || "").split("/").pop() || "";
+  const n = name.replace(/^\d+-/, "");
+  const m = n.match(/(\d{3,5})[-.](?:DEC)?(\d{2})[A-Za-z]?(?:_\d+)?_?\.pdf$/i);
+  return m ? { set: m[1], year: Number(m[2]) } : null;
+}
+async function getEmSets(env, tid) {
+  const db = tenantDB(env, tid);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
+  let m;
+  try {
+    m = row ? JSON.parse(row.value) : {};
+  } catch {
+    m = {};
+  }
+  return m && typeof m === "object" ? m : {};
+}
+async function rebuildEmSets(env, tid) {
+  const db = tenantDB(env, tid);
+  let rows = [];
+  try {
+    rows = (await db.prepare("SELECT code, r2_key FROM compliance_files WHERE type='em'").all()).results || [];
+  } catch {
+  }
+  const best = {};
+  for (const r of rows) {
+    const p = emSetFromKey(r.r2_key);
+    if (!p) continue;
+    if (!best[r.code] || p.year > best[r.code].year) best[r.code] = p;
+  }
+  const map = {}, mismatches = [];
+  for (const code of Object.keys(best)) {
+    map[code] = best[code].set;
+    if (best[code].set !== code) mismatches.push({ code, set: best[code].set });
+  }
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:emsets:" + tid, JSON.stringify(map)).run();
+  return { count: Object.keys(map).length, mismatches };
+}
 var FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
 async function getFallbacks(env, tenantId) {
   const db = tenantDB(env, tenantId);

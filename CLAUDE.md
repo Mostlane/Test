@@ -2029,6 +2029,27 @@ predicted day. **Hybrid — Maps for the facts, Claude for the judgement:**
   just added to the day.** No pop-up when nothing is same-site or in range.
   `sla-jobedit.js?v=19`.
 
+## EM light test + PAT job types (add-job.html + sla.js — Aug 2026)
+Add Job has **💡 EM light test** + **🔌 PAT** ticks. Ticking them auto-fills the
+**description** and **duration**: PAT → `Import certificate number <storeCode>-<YY>`,
+45 min; EM → `Import certificate number <EMsetNumber>-<YY>`, 3 h; **both = ONE
+combined job** (3 h — PAT runs in the first 45 min — both cert lines). The job
+carries **`job.emTest`/`job.pat`** flags (threaded through create/patch). The EM
+"set number" differs from the store code for renumbered sites (funeral homes,
+burial grounds, some Starbucks), so it's **extracted from last year's saved EM
+certificates**: `emSetFromKey` parses the `compliance_files` (type='em') filename
+tail `<setNumber>-<YY>` (handles `.`/DEC/`26e`/copy suffixes), keeping the
+latest-year cert per store. **GET /sla/emsets** (any session — Add Job reads it),
+**POST /sla/emsets** (SLA admin — re-extracts, returns `{count, mismatches}` where
+set≠code) stored in app_config `sla:emsets:<tid>`. Add Job's **🔄 Refresh EM
+numbers** button triggers the rebuild (run it once, and after each year's certs
+land). Falls back to the store code when a store has no mapped set number.
+**Add Job also now has the full release/visibility control** (drip-feed: now / 5pm
+day-before / at a set time / afterPrev → `job.release`) — previously missing.
+**TODO (next):** scheduler cross-over optimiser — an EM job is 45 min active +
+~2 h idle (drain-down) + 15 min light check; when two EM sites are close, recommend
+interleaving them (do site B during A's wait, loop back to check A's lights).
+
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
 from the engineer's per-seal photos + a signed declaration, bundled with the
