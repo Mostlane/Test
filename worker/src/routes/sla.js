@@ -756,6 +756,7 @@ export async function handle(request, env, ctx, url, sess) {
         const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
         for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
       } catch {}
+      await purgeUnverifiedCertsForJob(env, tenantId, id);
     }
     return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
   }
@@ -1520,6 +1521,9 @@ export async function handle(request, env, ctx, url, sess) {
         const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
         for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
       } catch {}
+      // Remove any unverified (draft/submitted) EM/PAT certificates this job made;
+      // finalised ones stay filed on the compliance chart.
+      await purgeUnverifiedCertsForJob(env, tenantId, id);
       return jsonResponse({ ok: true, deleted: id, reference: job.helpdeskRef || id }, headers);
     }
 
@@ -2447,6 +2451,15 @@ async function getJob(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
+}
+// Deleting a job removes the DRAFT / submitted (unverified) certificates it made,
+// but NEVER one the office has finalised (status='final') — those are filed on the
+// compliance chart and their PDF must survive. Draft/review certs hold no separate
+// R2 files (the signature is inline, the PDF is generated on demand), so removing
+// the DB rows is a complete clean-up.
+async function purgeUnverifiedCertsForJob(env, tenantId, jobId) {
+  if (!jobId) return;
+  try { await env.DB.prepare("DELETE FROM certificates WHERE tenant_id=? AND job_id=? AND status <> 'final'").bind(tenantId, String(jobId)).run(); } catch {}
 }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
