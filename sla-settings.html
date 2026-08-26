@@ -463,7 +463,7 @@ function buildRunner(){
       let archFb=[]; const flushArch=async()=>{ if(!archFb.length)return; const files=archFb; archFb=[]; await impf("/sla/archive/photos/import",{files},files.length,[...new Set(files.map(f=>f.mos))],files.map(f=>f.name)); };
       for(const np of res.needPhotos){ if(ABORT)break; if(!np.uuid) continue; const files=await harvestPhotos(np);
         const wh=await workeverHistory(np.uuid); if(wh&&(wh.history.length||wh.completedAt||(wh.engineers||[]).length)) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:np.mos,history:wh.history,completedAt:wh.completedAt,engineers:wh.engineers});
-        if(np.target==="live"&&np.portalId){ if(files.length){ await impf("/sla/workever/job-files",{jobId:np.portalId,files},files.length,[np.mos],files.map(f=>f.name)); if(ABORT)break; } }
+        if(np.target==="live"&&np.portalId){ if(files.length){ await impf("/sla/workever/job-files",{jobId:np.portalId,files,signedAt:(wh&&wh.completedAt)||null},files.length,[np.mos],files.map(f=>f.name)); if(ABORT)break; } }
         else { for(const f of files){ archFb.push(f); if(archFb.length>=15){ await flushArch(); if(ABORT)break; } } if(ABORT)break; } }
       if(!ABORT) await flushArch(); }
     batch=[]; batchU={}; };
@@ -530,13 +530,8 @@ function buildTestRunner(target){
   if(ing.needDetail&&ing.needDetail.length&&job.description) await post("/sla/workever/enrich",{items:[{mos:job.mos,description:job.description}]});
   const np=(ing.needPhotos&&ing.needPhotos[0])||null;
   const files=[], seen={}; for(const f of all){ const url=f&&f.links&&f.links.file; if(!url||seen[f.id])continue; seen[f.id]=1; const base=decodeURIComponent(String(url).split("/").pop().split("?")[0]); files.push({id:job.mos+":"+base, mos:job.mos, name:f.fileName||"", url, type:f.documentType||"", bytes:f.documentLength||0, kind:kindOf(f)}); }
-  let imp={imported:0,skipped:0,failed:0}, tgt="(none — job already up to date, portal keeps its own)";
-  if(files.length && np){
-    if(np.target==="live"&&np.portalId){ tgt="live job "+np.portalId; imp=(await post("/sla/workever/job-files",{jobId:np.portalId,files}))||imp; }
-    else { tgt="archive"; imp=(await post("/sla/archive/photos/import",{files}))||imp; }
-  }
-  console.log("  file import ("+tgt+") →", imp);
-  // Real status-change times from Workever's activity log
+  // Real status-change times from Workever's activity log (computed first so the
+  // signature can be stamped with the real completion time).
   let compAt=null, engList=[];
   if(np){
     const acts=await wg("/api/v1/jobs/"+job.uuid+"/activities"); const items=(acts&&acts.items)||[];
@@ -546,6 +541,12 @@ function buildTestRunner(target){
     console.log("  activities:", items.length, "→ completed", compAt, "· engineers", engList);
     if(history.length||compAt||engList.length) await post("/sla/workever/job-history",{target:np.target,jobId:np.portalId,mos:job.mos,history,completedAt:compAt,engineers:engList});
   }
+  let imp={imported:0,skipped:0,failed:0}, tgt="(none — job already up to date, portal keeps its own)";
+  if(files.length && np){
+    if(np.target==="live"&&np.portalId){ tgt="live job "+np.portalId; imp=(await post("/sla/workever/job-files",{jobId:np.portalId,files,signedAt:compAt}))||imp; }
+    else { tgt="archive"; imp=(await post("/sla/archive/photos/import",{files}))||imp; }
+  }
+  console.log("  file import ("+tgt+") →", imp);
   // Verify portal side (the right store for where the job landed)
   const P={photo:0,signature:0,document:0};
   if(np&&np.target==="live"&&np.portalId){ const jf=await pget("/sla/jobs/"+np.portalId+"/files"); P.photo=((jf&&jf.files)||[]).length; }
