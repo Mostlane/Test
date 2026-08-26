@@ -9251,6 +9251,66 @@ function emSetFromKey(r2key) {
   const m = n.match(/(\d{3,5})[-.](?:DEC)?(\d{2})[A-Za-z]?(?:_\d+)?_?\.pdf$/i);
   return m ? { set: m[1], year: Number(m[2]) } : null;
 }
+function emLatin1(u82) {
+  let s = "";
+  const CH = 8192;
+  for (let i = 0; i < u82.length; i += CH) s += String.fromCharCode.apply(null, u82.subarray(i, i + CH));
+  return s;
+}
+async function emInflate(u82) {
+  for (const fmt of ["deflate", "deflate-raw"]) {
+    try {
+      const stream = new Response(u82).body.pipeThrough(new DecompressionStream(fmt));
+      const buf = await new Response(stream).arrayBuffer();
+      const out = new Uint8Array(buf);
+      if (out.length) return out;
+    } catch {
+    }
+  }
+  return null;
+}
+async function emPdfText(bytes) {
+  const u82 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const s = emLatin1(u82);
+  const out = [];
+  const re = /stream\r?\n/g;
+  let m;
+  while (m = re.exec(s)) {
+    const start = m.index + m[0].length;
+    const end = s.indexOf("endstream", start);
+    if (end < 0) break;
+    let raw = u82.subarray(start, end);
+    let e = raw.length;
+    while (e > 0 && (raw[e - 1] === 10 || raw[e - 1] === 13)) e--;
+    raw = raw.slice(0, e);
+    const dec = await emInflate(raw);
+    const ds = emLatin1(dec || raw);
+    const toks = ds.match(/\((?:[^()\\]|\\.)*\)/g);
+    if (toks) for (const t of toks) {
+      const v = t.slice(1, -1).replace(/\\([()\\])/g, "$1");
+      if (v.trim()) out.push(v);
+    }
+    re.lastIndex = end + 9;
+  }
+  return out.join(" ").replace(/\s+/g, " ");
+}
+function emNumberFromText(txt) {
+  if (!txt) return null;
+  const m = txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) || txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) || txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
+  return m ? { set: m[1], year: Number(m[3]) } : null;
+}
+async function emSetFromPdf(env, r2key) {
+  try {
+    if (!env.JOB_FILES) return null;
+    const obj = await env.JOB_FILES.get(r2key);
+    if (!obj) return null;
+    const buf = await obj.arrayBuffer();
+    if (!buf || buf.byteLength > 4 * 1024 * 1024) return null;
+    return emNumberFromText(await emPdfText(buf));
+  } catch {
+    return null;
+  }
+}
 async function getEmSets(env, tid) {
   const db = tenantDB(env, tid);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
@@ -9272,16 +9332,29 @@ async function rebuildEmSets(env, tid) {
   const best = {};
   for (const r of rows) {
     const p = emSetFromKey(r.r2_key);
-    if (!p) continue;
-    if (!best[r.code] || p.year > best[r.code].year) best[r.code] = p;
+    const year = p ? p.year : -1;
+    if (!best[r.code] || year > best[r.code].year) best[r.code] = { set: p ? p.set : null, year, key: r.r2_key };
   }
   const map = {}, mismatches = [];
+  let pdfReads = 0;
+  const MAX_PDF = 90;
   for (const code of Object.keys(best)) {
-    map[code] = best[code].set;
-    if (best[code].set !== code) mismatches.push({ code, set: best[code].set });
+    const b = best[code];
+    let set = b.set, source = "filename";
+    if ((!set || set !== code) && pdfReads < MAX_PDF) {
+      pdfReads++;
+      const fromPdf = await emSetFromPdf(env, b.key);
+      if (fromPdf && fromPdf.set) {
+        set = fromPdf.set;
+        source = "certificate";
+      }
+    }
+    if (!set) set = code;
+    map[code] = set;
+    if (set !== code) mismatches.push({ code, set, source });
   }
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:emsets:" + tid, JSON.stringify(map)).run();
-  return { count: Object.keys(map).length, mismatches };
+  return { count: Object.keys(map).length, mismatches, pdfReads };
 }
 var FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
 async function getFallbacks(env, tenantId) {

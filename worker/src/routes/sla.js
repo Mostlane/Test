@@ -4025,6 +4025,73 @@ function emSetFromKey(r2key) {
   const m = n.match(/(\d{3,5})[-.](?:DEC)?(\d{2})[A-Za-z]?(?:_\d+)?_?\.pdf$/i);
   return m ? { set: m[1], year: Number(m[2]) } : null;
 }
+// Read the EM certificate number STRAIGHT FROM THE PDF CONTENT (authoritative).
+// The filename is only a proxy — some certs were filed under the wrong store or
+// carry no number at all — so where the filename disagrees with the store code
+// we open the certificate itself. Tysoft EasyCert prints the number in the page
+// footer ("…Copyright Tysoft 2025. 0014-25 Page: 1 of 2" and "…Ref: 0014-25 -
+// Page: 2 of 2"); the "Certificate Number:" form field is often left blank, so
+// the footer/Ref is the reliable anchor. Pure WebCrypto/DecompressionStream — no
+// PDF library. Only the FlateDecode text streams matter (images fail to inflate
+// and are skipped).
+function emLatin1(u8) {
+  let s = ""; const CH = 8192;
+  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  return s;
+}
+async function emInflate(u8) {
+  for (const fmt of ["deflate", "deflate-raw"]) {
+    try {
+      const stream = new Response(u8).body.pipeThrough(new DecompressionStream(fmt));
+      const buf = await new Response(stream).arrayBuffer();
+      const out = new Uint8Array(buf);
+      if (out.length) return out;
+    } catch {}
+  }
+  return null;
+}
+async function emPdfText(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const s = emLatin1(u8);
+  const out = [];
+  const re = /stream\r?\n/g; let m;
+  while ((m = re.exec(s))) {
+    const start = m.index + m[0].length;
+    const end = s.indexOf("endstream", start);
+    if (end < 0) break;
+    let raw = u8.subarray(start, end);
+    let e = raw.length; while (e > 0 && (raw[e - 1] === 10 || raw[e - 1] === 13)) e--;  // trim trailing CR/LF
+    raw = raw.slice(0, e);
+    const dec = await emInflate(raw);
+    const ds = emLatin1(dec || raw);
+    const toks = ds.match(/\((?:[^()\\]|\\.)*\)/g);
+    if (toks) for (const t of toks) {
+      const v = t.slice(1, -1).replace(/\\([()\\])/g, "$1");
+      if (v.trim()) out.push(v);
+    }
+    re.lastIndex = end + 9;
+  }
+  return out.join(" ").replace(/\s+/g, " ");
+}
+function emNumberFromText(txt) {
+  if (!txt) return null;
+  const m =
+    txt.match(/\bRef:\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) ||
+    txt.match(/Copyright\s+Tysoft\s+\d{4}\.\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i) ||
+    txt.match(/(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\s*-?\s*Page:/i) ||
+    txt.match(/Certificate\s*Number:?\s*(\d{3,5})\s*-\s*(DEC)?\s*(\d{2})\b/i);
+  return m ? { set: m[1], year: Number(m[3]) } : null;
+}
+async function emSetFromPdf(env, r2key) {
+  try {
+    if (!env.JOB_FILES) return null;
+    const obj = await env.JOB_FILES.get(r2key);
+    if (!obj) return null;
+    const buf = await obj.arrayBuffer();
+    if (!buf || buf.byteLength > 4 * 1024 * 1024) return null;   // guard huge files
+    return emNumberFromText(await emPdfText(buf));
+  } catch { return null; }
+}
 async function getEmSets(env, tid) {
   const db = tenantDB(env, tid);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
@@ -4035,18 +4102,30 @@ async function rebuildEmSets(env, tid) {
   const db = tenantDB(env, tid);
   let rows = [];
   try { rows = (await db.prepare("SELECT code, r2_key FROM compliance_files WHERE type='em'").all()).results || []; } catch {}
-  const best = {};   // code -> {set, year} — keep the latest-year cert per store
+  const best = {};   // code -> {set, year, key} — keep the latest-year cert per store
   for (const r of rows) {
-    const p = emSetFromKey(r.r2_key); if (!p) continue;
-    if (!best[r.code] || p.year > best[r.code].year) best[r.code] = p;
+    const p = emSetFromKey(r.r2_key);
+    const year = p ? p.year : -1;
+    if (!best[r.code] || year > best[r.code].year) best[r.code] = { set: p ? p.set : null, year, key: r.r2_key };
   }
   const map = {}, mismatches = [];
+  let pdfReads = 0; const MAX_PDF = 90;
   for (const code of Object.keys(best)) {
-    map[code] = best[code].set;
-    if (best[code].set !== code) mismatches.push({ code, set: best[code].set });
+    const b = best[code];
+    let set = b.set, source = "filename";
+    // When the filename number is missing or disagrees with the store code, the
+    // printed certificate number is authoritative — open the PDF and read it.
+    if ((!set || set !== code) && pdfReads < MAX_PDF) {
+      pdfReads++;
+      const fromPdf = await emSetFromPdf(env, b.key);
+      if (fromPdf && fromPdf.set) { set = fromPdf.set; source = "certificate"; }
+    }
+    if (!set) set = code;                 // last resort: assume the set == store code
+    map[code] = set;
+    if (set !== code) mismatches.push({ code, set, source });
   }
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:emsets:" + tid, JSON.stringify(map)).run();
-  return { count: Object.keys(map).length, mismatches };
+  return { count: Object.keys(map).length, mismatches, pdfReads };
 }
 
 // ── Per-engineer fallback jobs (config + the daily cron that assigns them) ──
