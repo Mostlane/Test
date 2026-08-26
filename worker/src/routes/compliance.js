@@ -588,6 +588,18 @@ export async function handle(request, env, ctx, url, sess) {
         ).bind(tid, scheme).run();
       } catch {}
     }
+    // Reactivate any store wrongly hidden while its linked site is live (a
+    // historical active-flag desync). Reactivate-ONLY — never deactivates on
+    // load — so it can only un-hide a live store, never surprise-hide one.
+    try {
+      await env.DB.prepare(
+        `UPDATE compliance_stores SET active=1
+           WHERE tenant_id=? AND scheme=? AND active=0
+             AND site_number IN (
+               SELECT s.site_number FROM sites s
+               WHERE s.tenant_id=compliance_stores.tenant_id AND s.active=1 AND COALESCE(s.archived,0)=0)`
+      ).bind(tid, scheme).run();
+    } catch {}
     // 'coop' resolves live name/postcode from the sites table; other schemes
     // (Fareham) store them directly on the compliance row.
     const { results } = scheme === "coop"

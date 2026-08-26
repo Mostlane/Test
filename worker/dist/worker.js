@@ -21821,6 +21821,16 @@ async function handle25(request, env, ctx, url, sess) {
       } catch {
       }
     }
+    try {
+      await env.DB.prepare(
+        `UPDATE compliance_stores SET active=1
+           WHERE tenant_id=? AND scheme=? AND active=0
+             AND site_number IN (
+               SELECT s.site_number FROM sites s
+               WHERE s.tenant_id=compliance_stores.tenant_id AND s.active=1 AND COALESCE(s.archived,0)=0)`
+      ).bind(tid, scheme).run();
+    } catch {
+    }
     const { results } = scheme === "coop" ? await env.DB.prepare(
       // Resolve the live site by the store's LINK (site_number), falling back
       // to its code — and match numerically as well as exactly, so a padded
@@ -24329,7 +24339,7 @@ function parsePatRowsTokens(toks) {
   if (!toks || !toks.length) return [];
   const isDate = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
   const isStatus = (s) => /^(Pass|Fail|Skip)$/i.test(s);
-  const isId = (s) => /^[A-Za-z]{1,5}\d{2,}$/.test(s);
+  const isId = (s) => /^[A-Za-z]{1,5}\d{1,}$/.test(s) || /^\d{4,}$/.test(s);
   const isInt = (s) => /^\d{1,3}$/.test(s);
   const rows = [];
   for (let i = 0; i < toks.length - 3; i++) {
@@ -24345,8 +24355,8 @@ function parsePatRowsTokens(toks) {
     const middle = toks.slice(i + 2, end - 2);
     rows.push({
       no: rows.length + 1,
-      appliance: String(middle[0] || "").slice(0, 60),
-      location: String(middle[1] || "").slice(0, 60),
+      appliance: String(middle[0] || "").trim().slice(0, 60),
+      location: String(middle[1] || "").trim().slice(0, 60),
       cls: "",
       visual: "",
       earth: "",
