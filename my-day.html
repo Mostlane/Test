@@ -114,18 +114,10 @@ async function fillSiteBlock(j){
     (dest ? `<a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}">🗺️ Directions</a>` : "");
 }
 
-// "Raise a PO" opens this engineer's personal link on the PO system.
-let poUrlCache;
-async function fillPoLink(){
+// "Raise a PO" opens the in-portal PO raise form (no longer the old PO worker).
+function fillPoLink(){
   const a = $("poLink"); if(!a) return;
-  if(poUrlCache === undefined){
-    try{
-      const r = await authFetch(`${API}/po-config`, {cache:"no-store"});
-      const c = await r.json().catch(() => ({}));
-      poUrlCache = (r.ok && c.ok && c.url) ? c.url : "";
-    }catch(e){ poUrlCache = ""; }
-  }
-  if(poUrlCache){ a.href = poUrlCache; a.style.display = "block"; }
+  a.href = "po-raise.html"; a.style.display = "block";
 }
 
 function getEngineer(){

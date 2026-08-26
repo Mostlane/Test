@@ -3062,6 +3062,18 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      UNAFFECTED (the office manages the full site list on po-admin.html → Sites).
      `getRaiseOptions`/`liveProjectNames`/`isLiveProjectSite` are the po.js helpers;
      they read env.DB (projects + users.vehicle_assigned).
+   - **Shared/pool vehicles (Aug 2026):** an engineer's vehicle options are their
+     **assigned van + any shared/pool vehicle** (the tippers) — `vehicles.pool`
+     (self-migrating in fleet.js; the two tippers HN69 SYP + WM73 VFL are pool=1).
+     getRaiseOptions filters `v.mine || v.pool`; po-raise groups **Your vehicle /
+     Shared vehicles**. Mark a new shared vehicle with `UPDATE vehicles SET pool=1`.
+   - **Job-card "Raise PO for this job" now opens the IN-PORTAL form (Aug 2026):**
+     the button on **job-view.html** + **engineer-job.html** (and my-day.html's
+     generic "Raise a PO" link) build **`po-raise.html#mlpo=<base64(JSON)>`** —
+     NOT the old `/po-config` personal URL to the standalone worker (that opened
+     the retired PO system). The reactive PO carries `job_id` so it ties to the
+     job and bypasses the project-only rule (po-raise reveals the read-only job
+     ref + submits). `/po-config` + `profile.poUrl` are fully dead now.
    - **Merge duplicate sites (Aug 2026):** the same place saved under several
      names splits its costing. po-admin.html → Sites → **"Merge duplicate sites"**
      card: tick the duplicates, pick the one site to keep, Merge. Backend
