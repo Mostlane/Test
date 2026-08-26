@@ -1471,6 +1471,26 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
 
+    // POST /sla/jobs/{id}/em-timer — start / reset / clear the 3-hour EM
+    // drain-down countdown. Persisted on the job so the engineer (job card +
+    // list) AND the office (board) all see the same live timer. {action, durationMinutes?}
+    if (parts[2] === "em-timer" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = new Date().toISOString();
+      if (String(b.action || "start") === "clear") {
+        job.emTimer = null;
+      } else {
+        const mins = Number.isFinite(Number(b.durationMinutes)) ? Math.max(1, Math.min(600, Number(b.durationMinutes))) : 180;
+        job.emTimer = { startedAt: now, durationMinutes: mins, startedBy: sess.user.username };
+      }
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+
     // POST /sla/jobs/{id}/ra-resolve — an admin clears a safety flag (controls
     // now in place / reassigned / rescheduled). Releases + notifies the engineer.
     if (parts[2] === "ra-resolve" && method === "POST") {
@@ -2652,6 +2672,7 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
     emTest: body.emTest !== undefined ? !!body.emTest : (existing?.emTest || false),
     pat: body.pat !== undefined ? !!body.pat : (existing?.pat || false),
+    emTimer: body.emTimer !== undefined ? (body.emTimer || null) : (existing?.emTimer || null),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
@@ -2759,6 +2780,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.auditItems !== undefined) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.emTest !== undefined) job.emTest = !!patch.emTest;
   if (patch.pat !== undefined) job.pat = !!patch.pat;
+  if (patch.emTimer !== undefined) job.emTimer = patch.emTimer || null;   // 3h drain-down countdown
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;

@@ -370,6 +370,8 @@
       // a signed declaration) — the shared component handles it + the download.
       h+='<div class="card"><div id="firestopHost"></div></div>';
     } else if(cert){
+      // EM jobs (incl. combined EM+PAT): the 3-hour battery drain-down timer.
+      if(job.emTest) h+='<div class="card" id="emTimerCard"></div>';
       // EM / PAT jobs complete via the portal certificate (filled + signed, then
       // submitted for office review) — the shared component handles it.
       h+='<div class="card"><div id="certHost"></div></div>';
@@ -550,6 +552,40 @@
     drawStatus(); drawTimeline(); applyLock();
     if(fs) mountFirestop();
     if(cert) mountCert();
+    if(cert && job.emTest) initEmTimer();
+  }
+  // ── EM 3-hour drain-down timer (shared, persisted on job.emTimer) ──────────
+  var emTick=null;
+  function emRemainMs(){ var t=job.emTimer; if(!t||!t.startedAt) return null; return Date.parse(t.startedAt)+((t.durationMinutes||180)*60000)-Date.now(); }
+  function fmtHMS(ms){ if(ms<0)ms=0; var s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60; return h+":"+String(m).padStart(2,"0")+":"+String(ss).padStart(2,"0"); }
+  function renderEmTimer(){
+    var card=$("emTimerCard"); if(!card) return;
+    var t=job.emTimer, rem=emRemainMs();
+    var h='<div class="sec-h"><span class="t">💡 3-hour drain-down timer</span></div>';
+    if(!t||!t.startedAt){
+      h+='<div class="hint">Flick the lights onto battery, then start the 3-hour timer. It shows here and in the office while it counts down.</div>';
+      h+='<button class="btn line wide" id="emStartBtn" style="margin-top:8px">▶ Start 3-hour drain test</button>';
+    } else if(rem>0){
+      h+='<div style="text-align:center;margin:8px 0"><div id="emCount" style="font-size:36px;font-weight:800;color:#003468;letter-spacing:1px">'+fmtHMS(rem)+'</div><div class="hint">remaining · started '+fmtTime(t.startedAt)+'</div></div>';
+      h+='<div style="text-align:center"><button class="btn line" id="emResetBtn" style="font-size:13px;padding:6px 12px">↻ Restart</button> <button class="btn line" id="emStopBtn" style="font-size:13px;padding:6px 12px">✕ Stop</button></div>';
+    } else {
+      h+='<div style="text-align:center;margin:6px 0;background:#e9f8ef;border:1px solid #b7e3c6;border-radius:10px;padding:12px"><div style="font-size:21px;font-weight:800;color:#0a7d33">✅ 3 hours complete</div><div class="hint" style="color:#0a7d33">Walk the site and check the emergency lights are still lit, then complete the certificate below.</div></div>';
+      h+='<div style="text-align:center;margin-top:8px"><button class="btn line" id="emResetBtn" style="font-size:13px;padding:6px 12px">↻ Restart</button> <button class="btn line" id="emStopBtn" style="font-size:13px;padding:6px 12px">✕ Clear</button></div>';
+    }
+    card.innerHTML=h;
+    var sb=$("emStartBtn"); if(sb) sb.onclick=function(){ setEmTimer("start"); };
+    var rb=$("emResetBtn"); if(rb) rb.onclick=async function(){ var ok=window.MLUI?await MLUI.confirm("Restart the 3-hour timer from now?",{okLabel:"Restart"}):confirm("Restart the timer?"); if(ok) setEmTimer("start"); };
+    var xb=$("emStopBtn"); if(xb) xb.onclick=async function(){ var ok=window.MLUI?await MLUI.confirm("Stop and clear the drain-down timer?",{danger:true,okLabel:"Stop"}):confirm("Stop the timer?"); if(ok) setEmTimer("clear"); };
+  }
+  async function setEmTimer(action){
+    var fallback=(action==="clear")?null:{startedAt:new Date().toISOString(),durationMinutes:180,startedBy:getUser()};
+    try{ var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/em-timer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:action})}); var j=await r.json(); job.emTimer=(j&&j.emTimer!==undefined)?j.emTimer:fallback; }catch(e){ job.emTimer=fallback; }
+    renderEmTimer();
+  }
+  function initEmTimer(){
+    renderEmTimer();
+    if(emTick) clearInterval(emTick);
+    emTick=setInterval(function(){ var el=$("emCount"); var rem=emRemainMs(); if(rem==null) return; if(rem>0){ if(el) el.textContent=fmtHMS(rem); } else if(el){ renderEmTimer(); } },1000);
   }
   var certMounted=false, certInstances={};
   function mountCert(){

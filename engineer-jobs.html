@@ -81,6 +81,8 @@
     .status-overdue{background:color-mix(in srgb,var(--urgent) 13%,transparent);color:var(--urgent)}
     .urgent-pill{background:color-mix(in srgb,var(--urgent) 13%,transparent);color:var(--urgent)}
     .status-complete{background:var(--chip);color:var(--muted)}
+    .em-chip{border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;display:inline-flex;align-items:center;gap:4px;background:#eaf1fb;color:#003468;border:1px solid #c9dcf3;font-variant-numeric:tabular-nums}
+    .em-chip.em-done{background:#e9f8ef;color:#0a7d33;border-color:#b7e3c6}
     .sla-badge{display:none !important}
     .job-actions{display:flex;gap:10px;margin-top:13px}
     .act{min-height:50px;border-radius:13px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);text-decoration:none;touch-action:manipulation}
@@ -368,6 +370,36 @@ function stripClass(status, urgent){
   if(urgent) return "strip-bad";
   return "strip-ok";
 }
+// EM 3-hour drain-down timer chip for the job list. Shows time remaining while
+// the engineer's emergency-light discharge test runs, or "lights due" when done.
+function emTimerRemain(job){
+  var t = job && job.emTimer;
+  if(!(t && t.startedAt)) return null;
+  var end = Date.parse(t.startedAt) + ((Number(t.durationMinutes)||180) * 60000);
+  return end - Date.now();
+}
+function fmtHM(ms){
+  var s = Math.max(0, Math.floor(ms/1000)), h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return h + ":" + String(m).padStart(2,"0");
+}
+function emTimerChip(job){
+  var rem = emTimerRemain(job);
+  if(rem === null) return "";
+  var end = Date.parse(job.emTimer.startedAt) + ((Number(job.emTimer.durationMinutes)||180) * 60000);
+  var done = rem <= 0;
+  return `<span class="em-chip${done?" em-done":""}" data-emend="${end}">${done ? "✅ lights due" : "⏱ " + fmtHM(rem)}</span>`;
+}
+// Live-updates every EM chip currently in the DOM once a second (cards re-render
+// often, so poll the DOM rather than tracking individual timers).
+function tickEmChips(){
+  var chips = document.querySelectorAll(".em-chip[data-emend]");
+  for(var i=0;i<chips.length;i++){
+    var el = chips[i], rem = Number(el.dataset.emend) - Date.now();
+    if(rem > 0){ el.textContent = "⏱ " + fmtHM(rem); el.classList.remove("em-done"); }
+    else { el.textContent = "✅ lights due"; el.classList.add("em-done"); }
+  }
+}
+setInterval(tickEmChips, 1000);
 // Big card markup shared by the day timeline and the "not booked in" box.
 function jobCardInner(job, slaInfo, target){
   // The store/site line is the title (e.g. "25826 Portsmouth, Copnor Road 331").
@@ -393,6 +425,7 @@ function jobCardInner(job, slaInfo, target){
       <div class="job-meta">
         ${isUrgentJob(job) ? `<span class="status-pill urgent-pill">Urgent</span>` : ""}
         <span class="${statusClass(job.status)}">${done ? "✓ " : ""}${statusTxt}</span>
+        ${emTimerChip(job)}
       </div>
       <div class="job-actions">
         ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
