@@ -422,15 +422,27 @@
   async function requestVanCheck(reg){
     const v = FLEET.find(x=>(x.reg||"")===reg);
     const driver = v && v.driver ? pName(v.driver) : "";
-    if(!driver){ alert("This van has no assigned driver — assign it first (👤 Driver)."); return; }
+    const hasDriver = !!(v && v.driver);
     if(!VC_SETTINGS){ try{ VC_SETTINGS = await aFetch("/vancheck/settings").then(r=>r.json()); }catch(e){ VC_SETTINGS = {}; } }
     const s = (VC_SETTINGS && VC_SETTINGS.settings) || VC_SETTINGS || {};
     const preset = toLocalInput(nextVanDeadline(s.dueDow, s.dueTime));
+    // Pool / unassigned van → the office picks which engineer to request from.
+    let engPicker = "";
+    if(!hasDriver){
+      const opts = (PUSERS||[]).filter(u=>u.Username && String(u.Status||"Active")!=="Disabled")
+        .sort((a,b)=>pLabel(a).localeCompare(pLabel(b)))
+        .map(u=>`<option value="${esc(u.Username)}">${esc(pLabel(u))}</option>`).join("");
+      engPicker = '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">Request from which engineer?</label>'
+        + '<select id="vcReqEng" style="width:100%;padding:9px;border:1px solid #c9d2dd;border-radius:9px;font:inherit;margin-bottom:12px;"><option value="">— pick an engineer —</option>'+opts+'</select>';
+    }
     const ov = document.createElement("div");
     ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
     ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:400px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
       + '<h3 style="margin:0 0 6px;color:#003366;">Request a van check</h3>'
-      + '<p style="margin:0 0 14px;color:#334;font-size:14px;">Ask <b>'+esc(driver)+'</b> to complete a van check on <b>'+esc(reg)+'</b>.</p>'
+      + '<p style="margin:0 0 14px;color:#334;font-size:14px;">'+(hasDriver
+          ? 'Ask <b>'+esc(driver)+'</b> to complete a van check on <b>'+esc(reg)+'</b>.'
+          : 'Request a van check on the shared/pool van <b>'+esc(reg)+'</b>.')+'</p>'
+      + engPicker
       + '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">Complete by</label>'
       + '<input type="datetime-local" id="vcReqDue" value="'+preset+'" style="width:100%;padding:9px;border:1px solid #c9d2dd;border-radius:9px;font:inherit;margin-bottom:12px;">'
       + '<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;margin-bottom:16px;"><input type="checkbox" id="vcReqSnooze" checked style="width:auto;"> Allow the driver to snooze this reminder</label>'
@@ -446,16 +458,20 @@
       const dv = ov.querySelector("#vcReqDue").value;
       const dueAt = dv ? new Date(dv).toISOString() : null;
       const snooze = ov.querySelector("#vcReqSnooze").checked;
+      const engSel = ov.querySelector("#vcReqEng");
+      const username = engSel ? engSel.value : "";
+      if(!hasDriver && !username){ alert("Pick which engineer to request the check from."); return; }
+      const toName = hasDriver ? driver : (engSel && engSel.options[engSel.selectedIndex] ? engSel.options[engSel.selectedIndex].textContent : "the engineer");
       const btn = ov.querySelector("#vcReqSend"); btn.disabled = true; btn.textContent = "Sending…";
       try{
-        const r = await aFetch("/vancheck/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg, dueAt, snooze})}).then(r=>r.json());
+        const body = { reg, dueAt, snooze }; if(username) body.username = username;
+        const r = await aFetch("/vancheck/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
         if(!r || !r.ok){ alert((r&&r.error)||"Could not send the request."); btn.disabled=false; btn.textContent="Send request"; return; }
         close();
-        // Flip the card to "✓ Check requested" straight away (it won't offer to
-        // request again until the driver completes it and the next load clears it).
+        // Flip the card to "✓ Check requested" straight away.
         if(v) v.vanCheckRequested = true;
         renderFleet();
-        if(window.MLUI && MLUI.toast) MLUI.toast("Van check requested from "+driver); else alert("Van check requested from "+driver);
+        if(window.MLUI && MLUI.toast) MLUI.toast("Van check requested from "+toName); else alert("Van check requested from "+toName);
       }catch(e){ alert("Could not send the request."); btn.disabled=false; btn.textContent="Send request"; }
     };
   }
@@ -569,9 +585,9 @@
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
           <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
           <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
-          ${v.driver?(v.vanCheckRequested
-            ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when the driver completes it">✓ Check requested</button>`
-            :`<button class="btn ghost small" onclick="requestVanCheck('${esc(reg)}')" title="Ask ${esc(pName(v.driver))} to do a van check on this van">🧷 Request check</button>`):""}
+          ${v.vanCheckRequested
+            ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when it's completed">✓ Check requested</button>`
+            :`<button class="btn ghost small" onclick="requestVanCheck('${esc(reg)}')" title="${v.driver?('Ask '+esc(pName(v.driver))+' to do a van check'):'Request a van check (pick an engineer)'}">🧷 Request check</button>`}
           ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
           <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
           <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
@@ -657,9 +673,9 @@
         <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
         <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
         <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
-        ${v.driver?(v.vanCheckRequested
-          ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when the driver completes it">✓ Check requested</button>`
-          :`<button class="btn ghost small" onclick="pClose();requestVanCheck('${esc(reg)}')">🧷 Request check</button>`):""}
+        ${v.vanCheckRequested
+          ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when it's completed">✓ Check requested</button>`
+          :`<button class="btn ghost small" onclick="pClose();requestVanCheck('${esc(reg)}')">🧷 Request check</button>`}
         ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
         <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
         <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>

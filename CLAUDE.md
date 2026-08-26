@@ -927,6 +927,22 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   check (status→done clears the pending flag on the next load). The button also
   flips immediately client-side after a successful request (sets the FLEET row +
   renderFleet).
+  **Pool/tipper checks DON'T satisfy the weekly assigned-van check (Aug 2026):**
+  a driver who did a check on a POOL vehicle (a tipper — not their assigned van)
+  used to have it counted as their weekly check (the weekly row is keyed by
+  (username, week) regardless of reg). Now **/vancheck/submit stores a check on a
+  non-assigned reg under a distinct key** `week = "pool:<mondayWeek>:<REG>"`, so
+  the weekly grid + `mineDue` keep showing the driver's OWN van as outstanding
+  until they check IT (or it's skipped). The engineer form (**van-check.html**)
+  makes **Vehicle a `<select>`** — their assigned van (default) + any shared/pool
+  tipper (`/vancheck/config` returns **`poolVehicles`** = vehicles.pool=1), **no
+  free text**. **Pool-van request → engineer picker:** on an unassigned/pool van
+  the vehicles.html "Request check" modal shows a **"Request from which engineer?"**
+  dropdown and **/vancheck/request accepts an explicit `username`** (else it
+  resolves the reg's assigned driver). **Home hub count includes requests:**
+  /vancheck/week returns **`customPending[]`** (pending requests, incl. pool-van
+  ones) and the hub Van-checks widget + KPI fold them into the outstanding total,
+  deduped against drivers already weekly-outstanding.
 - `fleet.js` — the whole Vehicles/Fleet backend (gate: FullAccess|Vehicles).
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);

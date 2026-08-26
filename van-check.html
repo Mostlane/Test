@@ -16,7 +16,7 @@
     .wrap { max-width:640px; margin:14px auto 60px; padding:0 12px; }
     .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
     label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
-    input[type=text],input[type=number],textarea { width:100%; padding:11px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    input[type=text],input[type=number],textarea,select { width:100%; padding:11px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; background:#fff; }
     textarea { min-height:60px; }
     .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:12px 16px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; }
     .btn.grey { background:#5b6b7b; } .btn.small { padding:7px 10px; font-size:13px; font-weight:600; }
@@ -94,7 +94,8 @@
     <div id="formWrap" style="display:none;">
       <div class="card">
         <label>Vehicle</label>
-        <input type="text" id="f_vehicle" placeholder="Registration">
+        <select id="f_vehicle"></select>
+        <div class="muted" id="poolHint" style="font-size:12px;margin:-4px 0 6px;display:none;">Your van is selected. You can pick a shared tipper instead — doing a tipper check won't clear your own van's check.</div>
         <label>Mileage</label>
         <input type="number" id="f_mileage" inputmode="numeric" placeholder="Current mileage">
       </div>
@@ -177,6 +178,7 @@
     // Auto-fill the engineer's assigned registration: prefer the server's
     // vehicle_assigned, fall back to the reg cached at login (VehicleAssigned).
     try { CFG.vehicle = CFG.vehicle || localStorage.getItem("mostlaneVehicle") || sessionStorage.getItem("mostlaneVehicle") || ""; } catch (e) {}
+    buildVehOptions();
     const dueBox = g("dueBox");
     dueBox.style.display = "block";
     if (CUSTOM_ID) {
@@ -205,7 +207,7 @@
       answers = draft.answers || {}; defectNotes = draft.defectNotes || {};
       photos = draft.photos || []; slotPhotos = draft.slotPhotos || {};
       safe = (draft.safe === true || draft.safe === false) ? draft.safe : null;
-      g("f_vehicle").value = draft.vehicle || d.vehicle || "";
+      setVeh(draft.vehicle || d.vehicle || CFG.vehicle || "");
       g("f_mileage").value = draft.mileage || ""; g("f_note").value = draft.note || "";
       startForm();
       const m = g("msg"); m.className = "msg ok"; m.textContent = "📝 Restored your unsaved draft — carry on where you left off.";
@@ -214,6 +216,23 @@
     if (d.myCheck && d.myCheck.source === "portal") showDone(); else startForm();
   })();
 
+  // Vehicle picker: the driver's assigned van (default) + any shared/pool tippers
+  // — options only, NO free text. A tipper check doesn't clear the weekly van check.
+  function normReg(r){ return String(r||"").toUpperCase().replace(/\s+/g,""); }
+  function buildVehOptions(){
+    const sel = g("f_vehicle"); if(!sel) return;
+    sel.innerHTML = ""; const seen = new Set();
+    const add = (reg, label) => { const k = normReg(reg); if(!reg || seen.has(k)) return; seen.add(k); const o = document.createElement("option"); o.value = reg; o.textContent = label || reg; sel.appendChild(o); };
+    if (CUSTOM_ID) { add(CFG.vehicle, CFG.vehicle); return; }   // custom check: fixed reg
+    if (CFG.vehicle) add(CFG.vehicle, CFG.vehicle + " — your van");
+    (CFG.poolVehicles || []).forEach(p => add(p.reg, p.reg + (p.desc ? " — " + p.desc : "") + " · shared"));
+    if (!sel.options.length && CFG.vehicle) add(CFG.vehicle, CFG.vehicle);
+    g("poolHint").style.display = (!CUSTOM_ID && (CFG.poolVehicles || []).length) ? "block" : "none";
+  }
+  function setVeh(reg){
+    const sel = g("f_vehicle"); if(!sel) return;
+    if(reg){ const k = normReg(reg); if(![...sel.options].some(o => normReg(o.value) === k)){ const o = document.createElement("option"); o.value = reg; o.textContent = reg; sel.appendChild(o); } sel.value = reg; }
+  }
   function showDone() {
     g("doneBox").style.display = "block"; g("formWrap").style.display = "none";
     const c = CFG.myCheck;
@@ -230,13 +249,13 @@
     const slotKeys = new Set(Object.values(c.slotPhotos || {}));
     photos = (c.photos || []).filter(k => !slotKeys.has(k)).map(k => ({ key: k }));
     safe = c.safeToDrive === false ? false : true;
-    g("f_vehicle").value = c.vehicle || CFG.vehicle || "";
+    setVeh(c.vehicle || CFG.vehicle || "");
     g("f_mileage").value = c.mileage || "";
     g("f_note").value = c.note || "";
   }
   function startForm() {
     g("doneBox").style.display = "none"; g("formWrap").style.display = "block";
-    if (!g("f_vehicle").value) g("f_vehicle").value = CFG.vehicle || "";
+    if (!g("f_vehicle").value) setVeh(CFG.vehicle || "");
     renderItems(); renderEquip(); renderSlots(); renderPhotos(); renderSafe();
   }
 
@@ -319,6 +338,7 @@
   g("checkItems").addEventListener("click", onPick("check", renderItems));
   g("checkItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
   ["f_vehicle", "f_mileage", "f_note"].forEach(id => g(id).addEventListener("input", saveDraft));
+  g("f_vehicle").addEventListener("change", saveDraft);
 
   function renderSafe() {
     g("safeYes").className = safe === true ? "on-yes" : "";

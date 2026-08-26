@@ -1489,7 +1489,7 @@ const MAP = window.ML_PERM_MAP || {
           if (!d || !d.ok) throw new Error("bad");
           var rows = d.rows || [];
           var required = rows.filter(function (r) { return r.enabled !== false; });
-          var done = 0, outstanding = [], defects = [];
+          var done = 0, outstanding = [], defects = [], outUsers = {};
           required.forEach(function (r) {
             var c = r.check;
             if (c && !c.skipped) {
@@ -1500,8 +1500,13 @@ const MAP = window.ML_PERM_MAP || {
               if (notSafe || issues || al) defects.push({ name: r.name, reg: (c.vehicle || r.vehicle || ""), notSafe: notSafe, issues: issues, alerts: al });
             } else if (!c) {
               outstanding.push(r.name);
+              outUsers[String(r.username || "").toLowerCase()] = 1;
             }
           });
+          // Pending one-off REQUESTS count too (a pool-van request, or a check
+          // requested for someone whose weekly isn't already outstanding).
+          var custom = (d.customPending || []).filter(function (c) { return !outUsers[String(c.username || "").toLowerCase()]; });
+          custom.forEach(function (c) { outstanding.push(c.name + (c.reg ? " (" + c.reg + ")" : "") + " · requested"); });
           var N = done + outstanding.length;
           var wk = "";
           try { wk = new Date(d.week + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" }); } catch (e) {}
@@ -1826,7 +1831,7 @@ const MAP = window.ML_PERM_MAP || {
         { area: "sla", ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-main.html", get: "/sla/jobs",
           calc: function (j) { if (!Array.isArray(j)) return null; var open = j.filter(function (x) { return !/(?:complete|closed|done)/i.test(String(x.status || "")); }); var od = j.filter(function (x) { return x.sla && x.sla.state === "BREACHED"; }); return { n: open.length, label: od.length ? "open · " + od.length + " overdue" : "open jobs", bad: od.length > 0 }; } },
         { area: "vehicles", ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚐", href: "van-checks.html", get: "/vancheck/week",
-          calc: function (d) { if (!d || !d.ok) return null; var out = (d.rows || []).filter(function (r) { return r.enabled !== false && !r.check; }).length; return { n: out, label: "van checks due", bad: false }; } },
+          calc: function (d) { if (!d || !d.ok) return null; var ou = {}; var out = (d.rows || []).filter(function (r) { if (r.enabled !== false && !r.check) { ou[String(r.username || "").toLowerCase()] = 1; return true; } return false; }).length; var cx = (d.customPending || []).filter(function (c) { return !ou[String(c.username || "").toLowerCase()]; }).length; return { n: out + cx, label: "van checks due", bad: false }; } },
         { area: "vehicles", ok: yes(p.FullAccess) || yes(p.Vehicles), emoji: "🚗", href: "vehicles.html?filter=attention", get: "/fleet/vehicles",
           calc: function (d) { if (!d || !d.ok) return null; var f = {}; (d.vehicles || []).filter(function (v) { return v.active !== false; }).forEach(function (v) { var m = daysUntil(v.motDue), t = daysUntil(v.taxDue); if ((m != null && m <= 30) || (t != null && t <= 30) || v.serviceStatus === "bad" || v.serviceStatus === "warn" || v.pendingHandover) f[v.reg] = 1; }); return { n: Object.keys(f).length, label: "vans to attend", bad: false }; } },
         { area: "sla", ok: yes(p.FullAccess) || yes(p.SLA) || yes(p.SLAAdmin), emoji: "🚨", href: "sla-scheduler.html", get: "/sla/jobs",
