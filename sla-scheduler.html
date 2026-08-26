@@ -275,7 +275,10 @@
       </div>
       <div class="controls-group">
         <span>Date:</span>
+        <button type="button" class="btn tiny" id="prevDay" title="Previous">‹</button>
         <input type="date" id="datePicker">
+        <button type="button" class="btn tiny" id="nextDay" title="Next">›</button>
+        <button type="button" class="btn tiny" id="todayBtn" title="Jump to today">Today</button>
       </div>
       <div class="controls-group">
         <span>Engineer:</span>
@@ -2270,6 +2273,15 @@ async function init(){
   selectedDate = new Date();
   dp.value = formatDateInput(selectedDate);
   dp.addEventListener("change", () => { selectedDate = parseDateInput(dp.value); render(); });
+  // Skip to next/previous day (±7 in week view), or jump back to today.
+  const stepDate = (delta) => {
+    const step = (typeof viewMode !== "undefined" && viewMode === "week") ? delta * 7 : delta;
+    selectedDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() + step);
+    dp.value = formatDateInput(selectedDate); render();
+  };
+  $("prevDay").addEventListener("click", () => stepDate(-1));
+  $("nextDay").addEventListener("click", () => stepDate(1));
+  $("todayBtn").addEventListener("click", () => { selectedDate = new Date(); dp.value = formatDateInput(selectedDate); render(); });
 
   $("viewToggle").addEventListener("click", e => {
     if(e.target.tagName !== "BUTTON") return;
