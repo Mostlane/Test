@@ -204,6 +204,42 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, imported, skipped, failed });
   }
 
+  // Write the REAL status-change history + completion time from Workever's
+  // /activities log onto a job (live or archive). history: [{status,at,by}]
+  // with `at` already ISO. Replaces the sync-time placeholder for live jobs.
+  if (path === "/sla/workever/job-history" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const history = (Array.isArray(b.history) ? b.history : []).filter(h => h && h.status && h.at)
+      .map(h => ({ status: String(h.status), at: String(h.at), by: String(h.by || "Workever") }));
+    const completedAt = (b.completedAt && /^\d{4}-\d{2}-\d{2}/.test(String(b.completedAt))) ? String(b.completedAt) : null;
+    const dedupSort = arr => {
+      const seen = new Set(), out = [];
+      for (const h of arr) { const k = h.status + "|" + h.at; if (!seen.has(k)) { seen.add(k); out.push(h); } }
+      return out.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+    };
+    if (b.target === "live" && b.jobId) {
+      const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, b.jobId).first();
+      if (!row) return json({ ok: false });
+      let d = {}; try { d = row.data ? JSON.parse(row.data) : {}; } catch {}
+      const kept = (Array.isArray(d.statusHistory) ? d.statusHistory : []).filter(h => h && h.src !== "sync-pending" && h.by !== "Workever sync");
+      d.statusHistory = dedupSort(kept.concat(history));
+      if (completedAt) d.closedAt = completedAt;
+      if (completedAt) await db.prepare("UPDATE sla_jobs SET data=?, closed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.jobId).run();
+      else await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.jobId).run();
+      return json({ ok: true });
+    }
+    if (b.target === "archive" && b.mos) {
+      const row = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND id=?").bind(tid, b.mos).first();
+      if (!row) return json({ ok: false });
+      let d = {}; try { d = row.data ? JSON.parse(row.data) : {}; } catch {}
+      d.statusHistory = dedupSort(history);
+      if (completedAt) await db.prepare("UPDATE sla_jobs_archive SET data=?, completed_at=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), completedAt, tid, b.mos).run();
+      else await db.prepare("UPDATE sla_jobs_archive SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, b.mos).run();
+      return json({ ok: true });
+    }
+    return json({ ok: false, error: "bad target" });
+  }
+
   if (path === "/sla/workever/ingest" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     const runId = String(b.runId || "run");
@@ -254,7 +290,9 @@ export async function handle(request, env, ctx, url, sess) {
             data.status = m.portal;
             data.closedAt = data.closedAt || nowIso;
             if (!Array.isArray(data.statusHistory)) data.statusHistory = [];
-            data.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync" });
+            // Placeholder at sync-time — replaced by the real Workever activity
+            // times via /sla/workever/job-history (marked so it can be removed).
+            data.statusHistory.push({ status: m.portal, at: nowIso, by: "Workever sync", src: "sync-pending" });
             data.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
             await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?")
               .bind(m.portal, nowIso, nowIso, JSON.stringify(data), tid, live.id).run();
