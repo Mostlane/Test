@@ -586,6 +586,17 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `seriesId`/`seriesSkipped` + `release.hour` are threaded through
   createOrUpdateJobFromPayload + patchJob and surfaced on `releaseView`
   (mode "skipped" / `series:true`).
+  **Already-booked-that-day warning (`sla-jobedit.js?v=21`, Aug 2026):** when the
+  office assigns a job to an engineer who ALREADY has job(s) that day — a normal
+  job OR a hidden project drip day — a **pre-save** warning modal lists them
+  ("⚠ Already booked that day … Assign anyway / Cancel"). It runs in `save()`
+  BEFORE the PATCH (Cancel aborts the save), only for a NEWLY-added engineer on a
+  scheduled job, via **GET /sla/engineer-day?engineer=&date=&excludeId=** (all the
+  engineer's jobs that date incl. hidden series days, excl. cancelled/skipped).
+  It is **independent of and composes with** the post-save series-clash prompt
+  (fit-after/skip) and the "whilst you're here" nearby-jobs pop-up — the warning
+  fires first (pre-save), the others after a successful save. Best-effort: any
+  lookup error never blocks the save.
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).

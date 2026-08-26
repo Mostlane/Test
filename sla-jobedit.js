@@ -720,6 +720,14 @@
       requiresNote: $("mljeReqNote").checked,
       changedBy: currentUser()
     };
+    // Pre-save safeguard: warn if a NEWLY-added engineer already has job(s) that
+    // day (incl. a project drip day). Runs before the save so the office can back
+    // out; it's independent of the post-save series-clash + nearby suggestions.
+    const preNewEngs = assignedEngineers.filter(e => e && openEngineers.indexOf(e) === -1);
+    if (preNewEngs.length && scheduledAt) {
+      const proceed = await warnDayClash(preNewEngs, scheduledAt, currentJob.id);
+      if (!proceed) { msg.textContent = ""; $("mljeSave").disabled = false; return; }
+    }
     try {
       msg.textContent = "Saving job…";
       const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id), {
@@ -794,6 +802,57 @@
         const b = e.target.closest("[data-c]");
         if (b) { document.body.removeChild(ov); resolve(b.dataset.c); }
         else if (e.target === ov) { document.body.removeChild(ov); resolve("leave"); }
+      });
+      document.body.appendChild(ov);
+    });
+  }
+
+  function engName(u) {
+    const f = (engineers || []).find(x => String(x.username || "").toLowerCase() === String(u || "").toLowerCase());
+    return (f && f.name) || u;
+  }
+  // Pre-save safeguard: does a newly-assigned engineer already have job(s) that
+  // day? Returns true to proceed with the assignment, false to back out.
+  async function warnDayClash(newEngs, scheduledAt, excludeId) {
+    try {
+      const date = new Date(scheduledAt).toISOString().slice(0, 10);
+      const groups = [];
+      for (const eng of newEngs) {
+        const res = await authFetch("/sla/engineer-day?engineer=" + encodeURIComponent(eng) + "&date=" + date + "&excludeId=" + encodeURIComponent(excludeId || ""));
+        const d = await res.json().catch(() => ({}));
+        const jobs = (d && d.jobs) || [];
+        if (jobs.length) groups.push({ eng, jobs });
+      }
+      if (!groups.length) return true;   // no clash — proceed silently
+      return await dayClashPrompt(groups, date);
+    } catch (e) { return true; }   // best-effort — never block a save on an error
+  }
+  function dayClashPrompt(groups, date) {
+    return new Promise(resolve => {
+      const dstr = (() => { try { return new Date(date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }); } catch { return date; } })();
+      const tm = iso => { try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+      const body = groups.map(g => {
+        const rows = g.jobs.map(j => '<li style="margin:2px 0;">' + (j.scheduledAt ? '<b>' + tm(j.scheduledAt) + '</b> · ' : '')
+          + esc(j.ref) + (j.siteName ? ' <span style="color:#64748b;">— ' + esc(j.siteName) + '</span>' : '')
+          + (j.series ? ' <span style="background:#ede9fe;color:#5b21b6;border-radius:6px;padding:0 6px;font-size:11px;">project day</span>' : '')
+          + ' <span style="color:#64748b;font-size:12px;">' + esc(j.status) + '</span></li>').join("");
+        return '<p style="margin:8px 0 2px;font-weight:700;color:#334;">' + esc(engName(g.eng)) + ' already has ' + g.jobs.length + ' job' + (g.jobs.length === 1 ? '' : 's') + ' this day:</p><ul style="margin:0 0 4px 18px;padding:0;font-size:13.5px;">' + rows + '</ul>';
+      }).join("");
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+      const btn = "padding:10px 16px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;";
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);max-height:80vh;overflow:auto;">'
+        + '<h3 style="margin:0 0 6px;color:#92400e;font-size:17px;">⚠ Already booked that day</h3>'
+        + '<p style="margin:0 0 6px;color:#334;font-size:13.5px;">On <b>' + dstr + '</b>:</p>'
+        + body
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'
+        + '<button data-c="cancel" style="' + btn + 'background:#fff;color:#334;">Cancel</button>'
+        + '<button data-c="ok" style="' + btn + 'background:#92400e;color:#fff;border-color:#92400e;">Assign anyway</button>'
+        + '</div></div>';
+      ov.addEventListener("click", e => {
+        const b = e.target.closest("[data-c]");
+        if (b) { document.body.removeChild(ov); resolve(b.dataset.c === "ok"); }
+        else if (e.target === ov) { document.body.removeChild(ov); resolve(false); }
       });
       document.body.appendChild(ov);
     });
