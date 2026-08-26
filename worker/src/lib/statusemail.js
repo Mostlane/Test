@@ -196,7 +196,7 @@ export function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   const noticeBlock = showNotice ? `
         <tr><td style="padding:18px 28px 0">
           <div style="background:#fff8e6;border:1px solid #f0d8a0;border-radius:10px;padding:14px 16px;font-size:13px;color:${ink};line-height:1.55">
-            <strong>Please note:</strong> if this time is not convenient, please email
+            <strong>Please note:</strong> If this time is not convenient, please email
             <a href="mailto:${esc(contactEmail)}" style="color:${navy};font-weight:700;text-decoration:none">${esc(contactEmail)}</a>
             as soon as possible so we can rearrange — otherwise a cancellation charge may apply.
           </div>
@@ -206,8 +206,8 @@ export function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8;padding:24px 12px">
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${line}">
-        <tr><td align="center" style="background:${navy};padding:26px 28px">
-          <img src="${esc(logo)}" alt="Mostlane" height="56" style="height:56px;display:block;border:0;margin:0 auto" />
+        <tr><td align="center" style="background:${navy};padding:30px 28px">
+          <img src="${esc(logo)}" alt="Mostlane" height="72" style="height:72px;display:block;border:0;margin:0 auto" />
         </td></tr>
         <tr><td style="padding:28px 28px 8px">
           <div style="font-size:20px;font-weight:700;color:${ink};margin-bottom:8px">${esc(fill(tpl.subject, v))}</div>
@@ -237,7 +237,7 @@ export function renderStatusEmail({ env, job, tpl, statusDef, contactEmail }) {
     (statusDef && statusDef.key === "Scheduled" && v["{scheduled}"]) ? `Scheduled for: ${v["{scheduled}"]}` : "",
     `Status: ${v["{status}"]}`,
     v["{description}"] ? `\nJob details: ${v["{description}"]}` : "",
-    showNotice ? `\nPlease note: if this time is not convenient, email ${contactEmail} as soon as possible so we can rearrange — otherwise a cancellation charge may apply.` : "",
+    showNotice ? `\nPlease note: If this time is not convenient, please email ${contactEmail} as soon as possible so we can rearrange — otherwise a cancellation charge may apply.` : "",
     "", "Kind regards, Mostlane",
   ].filter(Boolean);
 
