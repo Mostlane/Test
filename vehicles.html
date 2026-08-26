@@ -451,6 +451,10 @@
         const r = await aFetch("/vancheck/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg, dueAt, snooze})}).then(r=>r.json());
         if(!r || !r.ok){ alert((r&&r.error)||"Could not send the request."); btn.disabled=false; btn.textContent="Send request"; return; }
         close();
+        // Flip the card to "✓ Check requested" straight away (it won't offer to
+        // request again until the driver completes it and the next load clears it).
+        if(v) v.vanCheckRequested = true;
+        renderFleet();
         if(window.MLUI && MLUI.toast) MLUI.toast("Van check requested from "+driver); else alert("Van check requested from "+driver);
       }catch(e){ alert("Could not send the request."); btn.disabled=false; btn.textContent="Send request"; }
     };
@@ -565,7 +569,9 @@
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
           <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
           <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
-          ${v.driver?`<button class="btn ghost small" onclick="requestVanCheck('${esc(reg)}')" title="Ask ${esc(pName(v.driver))} to do a van check on this van">🧷 Request check</button>`:""}
+          ${v.driver?(v.vanCheckRequested
+            ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when the driver completes it">✓ Check requested</button>`
+            :`<button class="btn ghost small" onclick="requestVanCheck('${esc(reg)}')" title="Ask ${esc(pName(v.driver))} to do a van check on this van">🧷 Request check</button>`):""}
           ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
           <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
           <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
@@ -651,7 +657,9 @@
         <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
         <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
         <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
-        ${v.driver?`<button class="btn ghost small" onclick="pClose();requestVanCheck('${esc(reg)}')">🧷 Request check</button>`:""}
+        ${v.driver?(v.vanCheckRequested
+          ?`<button class="btn ghost small" disabled style="opacity:.6;cursor:default" title="A van check has been requested — it clears when the driver completes it">✓ Check requested</button>`
+          :`<button class="btn ghost small" onclick="pClose();requestVanCheck('${esc(reg)}')">🧷 Request check</button>`):""}
         ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
         <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
         <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>

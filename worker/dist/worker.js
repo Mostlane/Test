@@ -17476,7 +17476,7 @@ async function handle22(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -17489,8 +17489,12 @@ async function handle22(request, env, ctx, url, sess) {
       appCfg(DEFECTCLR_KEY(tid)),
       // defects marked resolved by an admin
       appCfg(VCACK_KEY(tid)),
-      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()
+      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
+      // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
+      // and can't re-request until it's done). Fails soft if the table is absent.
+      env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] }))
     ]);
+    const pendVc = new Set((pendVcRes.results || []).map((r) => dn(r.reg)));
     const defects = await vanCheckDefects(env, tid, defResolved);
     const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
@@ -17562,6 +17566,8 @@ async function handle22(request, env, ctx, url, sess) {
         // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
         // card status bar: ok | ack | due
+        vanCheckRequested: pendVc.has(dn(v.reg)),
+        // a one-off check is pending — hide the Request button
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0
