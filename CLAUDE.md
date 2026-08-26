@@ -2120,6 +2120,11 @@ it straight onto the compliance chart (rolling the next-due date).
   FullAccess) = the office queue: open a submitted/draft cert → edit in MLCert office
   mode → set number + date → **🏁 Finalise & file to compliance** (or ⬆ upload a
   replacement, or 🗑 delete). Engineer is pushed when the cert is issued.
+- **Job delete cleans up unverified certs:** deleting an SLA job (single DELETE +
+  bulk-delete in sla.js) calls **`purgeUnverifiedCertsForJob`** → removes the job's
+  DRAFT/submitted certificates (`status <> 'final'`) but NEVER a finalised one (it's
+  filed on the compliance chart; its PDF stays). Draft/review certs hold no separate
+  R2 files (inline signature, on-demand PDF), so deleting the DB rows is a full clean-up.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** verify PAT column mapping against a real PAT cert (only EM was
   sampled); optional hub widget for the pending-review count; Help guide.
