@@ -289,6 +289,16 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type"))) }, {}, env, request);
   }
 
+  // ── Re-pull the previous certificate's details on demand (into an existing
+  //    draft that was created before the reader existed, or to refresh it). ────
+  if (sub === "/prefill" && method === "GET") {
+    const type = T(q.get("type"));
+    let code = q.get("code") || "";
+    if (!code && q.get("jobId")) { const job = await getJob(env, tid, String(q.get("jobId"))); code = job ? (job.siteCode || "") : ""; }
+    const pre = await prefillFromPrevious(env, tid, code, type);
+    return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length }, {}, env, request);
+  }
+
   // ── Load or seed the certificate for a job ───────────────────────────────────
   if (sub === "/for-job" && method === "GET") {
     const jobId = String(q.get("jobId") || "");

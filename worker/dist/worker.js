@@ -24504,6 +24504,16 @@ async function handle30(request, env, ctx, url, sess) {
   if (sub === "/number" && method === "GET") {
     return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type"))) }, {}, env, request);
   }
+  if (sub === "/prefill" && method === "GET") {
+    const type = T(q.get("type"));
+    let code = q.get("code") || "";
+    if (!code && q.get("jobId")) {
+      const job = await getJob2(env, tid, String(q.get("jobId")));
+      code = job ? job.siteCode || "" : "";
+    }
+    const pre = await prefillFromPrevious(env, tid, code, type);
+    return json({ ok: true, rows: pre.rows, header: pre.header || null, from: pre.from, source: pre.source || null, prefilledRows: pre.rows.length }, {}, env, request);
+  }
   if (sub === "/for-job" && method === "GET") {
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
