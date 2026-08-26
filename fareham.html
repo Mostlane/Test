@@ -66,6 +66,9 @@
     .bubble.active { background:#28a745; }
 
     .search-input { padding:8px; width:300px; border-radius:20px; border:1px solid #ccc; }
+    .closed-badge { display:inline-block; margin-left:6px; background:#e5e7eb; color:#4b5563; border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; vertical-align:middle; }
+    tr.closed-row { background:#f7f8fa; color:#6b7280; }
+    tr.closed-row td.site { color:#4b5563; }
 
     .table-wrapper { overflow-x:auto; overflow-y:auto; max-height:70vh; width:100%; }
     table { width:100%; border-collapse:collapse; margin-top:10px; }
@@ -911,8 +914,9 @@ function renderTable(d){
     const keyCell = `<button class="doc-btn key" data-code="${e.storeCode}" title="${keySet?'Access info — view/edit':'Add access info'}">${keySet?'🔑':'🔑❓'}</button>`;
     const ws = worstStatus(e);
     const dtd = (type) => { const s = typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
+    if(e.active===0) tr.classList.add('closed-row');
     tr.innerHTML = `
-      <td>${e.storeCode}</td><td class="site">${e.siteName}</td><td>${esc(e.storeType||'')}</td>
+      <td>${e.storeCode}</td><td class="site">${e.siteName}${(e.active===0 && viewMode!=='closed')?' <span class=\"closed-badge\">🗄 Closed</span>':''}</td><td>${esc(e.storeType||'')}</td>
       <td class="${ws?'st-'+ws:''}">${statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('emMonthly')}${dtd('emYearly')}${dtd('pat')}${dtd('pv')}
       <td>${locCell}</td><td>${keyCell}</td>
@@ -934,7 +938,9 @@ function renderTable(d){
 
 /* apply filters + re-render */
 function applyFilters(){
-  let data = baseData();
+  const q = document.getElementById('searchBar').value.toLowerCase().trim();
+  // When SEARCHING, span active AND archived so nothing is hidden by the view.
+  let data = q ? allData.slice() : baseData();
   if (activeStoreType !== 'ALL') data = data.filter(e=>e.storeType === activeStoreType);
   if (activeCategories.size > 0) {
     data = data.filter(e=>{
@@ -944,7 +950,6 @@ function applyFilters(){
       return true;
     });
   }
-  const q = document.getElementById('searchBar').value.toLowerCase().trim();
   if (q) {
     data = data.filter(e =>
       (e.storeCode || '').toLowerCase().includes(q) ||
