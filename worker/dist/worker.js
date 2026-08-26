@@ -7611,6 +7611,16 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
   const priority = isProjJob ? "" : body.priority || existing?.priority || "Priority 4";
   const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
+  let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
+  const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
+  if (!siteNameResolved && siteCodeVal) {
+    try {
+      const srow = await tenantDB(env, tenantId).prepare("SELECT site_name FROM sites WHERE site_number=? LIMIT 1").bind(siteCodeVal).first();
+      const nm = srow && String(srow.site_name || "").trim();
+      if (nm && nm !== siteCodeVal) siteNameResolved = nm;
+    } catch {
+    }
+  }
   const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
@@ -7637,9 +7647,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     if (idIsNumSite && !/^\d/.test(String(helpdeskRef))) {
       helpdeskRef = id;
     } else if (!helpdeskRef || UUID_RE.test(String(helpdeskRef)) || helpdeskRef === id && !idIsNumSite) {
-      const siteNm = String(body.siteName || existing?.siteName || "").trim();
-      const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
-      helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
+      helpdeskRef = siteNameResolved || siteCodeVal || id;
     }
   }
   const job = {
@@ -7657,7 +7665,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // carried so the siteCode filter works
     // Full site details captured at creation — shown to engineers (address,
     // phone, directions) without a lookup. Previously these were dropped.
-    siteName: body.siteName || existing?.siteName || "",
+    siteName: siteNameResolved || "",
     address: body.address || existing?.address || "",
     telephone: body.telephone || existing?.telephone || "",
     postcode: body.postcode || existing?.postcode || "",
@@ -7786,7 +7794,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
       job.helpdeskRef = idStr;
     } else if (!ref || uuidRe.test(ref) || ref === idStr && !idIsNumSite) {
       const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
-      const healed = jobIsProject(job) ? siteCd || siteNm : siteNm || siteCd;
+      const healed = siteNm || siteCd;
       if (healed) job.helpdeskRef = healed;
     }
   }
