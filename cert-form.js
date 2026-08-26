@@ -134,7 +134,8 @@
       h += '<div class="cc"><h4>' + (type === "pat" ? "Appliances tested" : "Emergency lighting tests") + ' <span class="muted">(' + rec.rows.length + ')</span></h4>';
       h += '<div class="mlrows" id="mlcRows"></div>';
       if (editable) h += '<div class="toolbar"><button class="btn ghost sm" data-act="add">＋ Add ' + (type === "pat" ? "appliance" : "light") + '</button><button class="btn ghost sm" data-act="add5">＋ Add 5</button>'
-        + '<button class="btn ghost sm" data-act="allpass">✔ Mark all Pass</button></div>';
+        + '<button class="btn ghost sm" data-act="allpass">✔ Mark all Pass</button>'
+        + '<button class="btn ghost sm" data-act="pull">↻ Pull last certificate</button></div>';
       h += '</div>';
 
       // Contractor
@@ -268,6 +269,7 @@
       const tb = container.querySelector('[data-act="add"]'); if (tb) tb.addEventListener("click", () => { addRows(1); });
       const t5 = container.querySelector('[data-act="add5"]'); if (t5) t5.addEventListener("click", () => { addRows(5); });
       const ap = container.querySelector('[data-act="allpass"]'); if (ap) ap.addEventListener("click", allPass);
+      const pl = container.querySelector('[data-act="pull"]'); if (pl) pl.addEventListener("click", pullPrevious);
       const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
       const pdf = container.querySelector("#mlcPdf"); if (pdf) pdf.addEventListener("click", async () => {
         // Open the tab synchronously (keeps the user gesture), then stream the PDF
@@ -294,6 +296,26 @@
     function allPass() {
       rec.rows.forEach(r => { if (type === "em") { r.normal = "Pass"; r.led = "Pass"; r.emergency = "Pass"; if (!r.battery) r.battery = 180; } else { r.visual = "Pass"; r.result = "Pass"; } });
       renderRows(); wire(); queueSave();
+    }
+    // Re-pull the previous certificate's items (+ blank header fields) on demand —
+    // for a draft made before the reader existed, or to refresh from the last cert.
+    async function pullPrevious() {
+      let d;
+      try { d = await authFetch("/certs/prefill?type=" + type + "&code=" + encodeURIComponent(rec.siteCode || "") + "&jobId=" + encodeURIComponent(rec.jobId || jobId || "")).then(r => r.json()); }
+      catch (e) { alert("Couldn't reach the previous certificate."); return; }
+      if (!d || !d.ok) { alert("Couldn't reach the previous certificate."); return; }
+      if (!d.rows || !d.rows.length) { alert("No previous certificate found for this site — nothing to pull. (It may be a scanned image with no readable text.)"); return; }
+      if (rec.rows.length && !confirm("Replace the current list with " + d.rows.length + " item" + (d.rows.length === 1 ? "" : "s") + " from the last certificate?")) return;
+      rec.rows = d.rows;
+      const hh = d.header;   // fill BLANK header fields only — never overwrite typed edits
+      if (hh) {
+        if (hh.client && !(rec.client && rec.client.name)) rec.client = hh.client;
+        if (hh.installation && !(rec.installation && rec.installation.name)) rec.installation = hh.installation;
+        if (hh.extent && !rec.extent) rec.extent = hh.extent;
+        if (hh.comments && !rec.comments) rec.comments = hh.comments;
+      }
+      rec._prefilledRows = d.rows.length;
+      render(); queueSave();
     }
 
     // Validate + save + submit for office review (NO job patch). Returns true on
