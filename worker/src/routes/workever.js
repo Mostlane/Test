@@ -190,7 +190,8 @@ export async function handle(request, env, ctx, url, sess) {
     const jobId = String(b.jobId || "").trim();
     const files = Array.isArray(b.files) ? b.files : [];
     if (!jobId || !files.length) return json({ ok: true, imported: 0, skipped: 0, failed: 0 });
-    let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null;
+    const isoDate = s => (s && /^\d{4}-\d{2}-\d{2}/.test(String(s))) ? String(s) : null;
+    let imported = 0, skipped = 0, failed = 0, seq = 0, sigKey = null, sigDate = null;
     for (const f of files) {
       try {
         if (!f || !f.url) { failed++; continue; }
@@ -200,7 +201,7 @@ export async function handle(request, env, ctx, url, sess) {
         const key = f.kind === "signature" ? `jobs/${jobId}/signature/wev-${safe}.png`
           : f.kind === "document" ? `jobs/${jobId}/docs/wev-${safe}.${ext}`
           : `jobs/${jobId}/photos/wev-${safe}.${ext}`;
-        if (f.kind === "signature" && !sigKey) sigKey = key;
+        if (f.kind === "signature") { if (!sigKey) sigKey = key; if (!sigDate) sigDate = isoDate(f.date); }
         if (await env.JOB_FILES.head(key)) { skipped++; continue; }
         const resp = await fetch(f.url);
         if (!resp.ok || !resp.body) { failed++; continue; }
@@ -216,7 +217,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (row) {
           let d = {}; try { d = row.data ? JSON.parse(row.data) : {}; } catch {}
           if (!d.signature || !d.signature.fileKey) {
-            d.signature = { signedBy: "Customer (Workever)", signedAt: new Date().toISOString(), fileKey: sigKey };
+            d.signature = { signedBy: "Customer (Workever)", signedAt: sigDate || isoDate(b.signedAt) || new Date().toISOString(), fileKey: sigKey };
             await db.prepare("UPDATE sla_jobs SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(d), tid, jobId).run();
           }
         }

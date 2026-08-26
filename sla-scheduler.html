@@ -261,6 +261,7 @@
         <button class="btn" id="openMapBtn">🗺️ Map view</button>
         <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
         <a class="btn" href="job-durations.html" title="See how job length estimates are learned + which jobs ran over">⏱ Durations</a>
+        <button class="btn" id="openFallbackBtn" title="Auto-give each engineer at least one job for the next working day">🛟 Fallbacks</button>
       </div>
     </header>
 
@@ -500,6 +501,34 @@
   </div>
   <div id="jobsMap"></div>
   <div class="map-note" id="mapNote">Tap a pin for the job summary.</div>
+</div>
+
+<!-- FALLBACK JOBS — per-engineer "at least one job for tomorrow" safety net -->
+<div class="modal-backdrop" id="fbBackdrop">
+  <div class="modal" style="max-width:720px;width:100%;max-height:88vh;overflow:auto;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <h2 style="margin:0;flex:1;font-size:18px;">🛟 Fallback jobs</h2>
+      <button type="button" class="btn" id="fbClose">✕</button>
+    </div>
+    <p style="margin:0 0 10px;color:#5b6b78;font-size:13px;line-height:1.5;">
+      Each field engineer can have a fallback job — somewhere to head if nothing else is booked.
+      The system <b>warns the office at 3:30pm &amp; 6pm</b> about anyone with no job for the next working day,
+      then <b>auto-assigns their fallback at 7pm</b> (Friday covers Monday). Fallback jobs appear to the
+      engineer at <b>5pm the evening before</b>, and are dropped automatically if they get a real job that day.
+    </p>
+    <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin:8px 0;cursor:pointer;">
+      <input type="checkbox" id="fbEnabled"> Turn on automatic fallback assignment
+    </label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin:0 0 12px;">
+      Fallback jobs start at <input type="time" id="fbStart" value="08:00" style="width:auto;padding:6px;border:1px solid var(--border);border-radius:8px;">
+    </label>
+    <div id="fbRows"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+      <span id="fbMsg" style="flex:1;align-self:center;font-size:13px;color:#5b6b78;"></span>
+      <button type="button" class="btn" id="fbCancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="fbSave">Save fallbacks</button>
+    </div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1813,6 +1842,53 @@ function openJobCard(id){
 }
 $("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.display = "none"; });
 $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
+
+// ── Fallback jobs config ──────────────────────────────────────────────────
+function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
+async function openFallbacks(){
+  $("fbBackdrop").style.display = "flex"; $("fbMsg").textContent = "Loading…";
+  let cfg = { enabled:false, startHour:8, byEngineer:{} };
+  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok) cfg = d.config || cfg; } catch(e){}
+  $("fbEnabled").checked = !!cfg.enabled;
+  $("fbStart").value = String(cfg.startHour!=null?cfg.startHour:8).padStart(2,"0") + ":00";
+  const fields = (engineers||[]).filter(isFieldEng);
+  $("fbRows").innerHTML = fields.map(function(e){
+    const fb = (cfg.byEngineer||{})[fbNorm(e.username)] || {};
+    return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">'
+      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">'+escapeHtml(e.name)+'</b>'
+      + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label></div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+      + '<input class="fb-site" placeholder="Site / where to head (e.g. Yard)" value="'+escapeHtml(fb.siteName||"")+'" style="flex:2 1 180px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
+      + '<input class="fb-pc" placeholder="Postcode" value="'+escapeHtml(fb.postcode||"")+'" style="flex:1 1 90px;padding:8px;border:1px solid var(--border);border-radius:8px;"></div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">'
+      + '<input class="fb-desc" placeholder="What to do (e.g. Standby / report to yard)" value="'+escapeHtml(fb.description||"")+'" style="flex:2 1 220px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
+      + '<input class="fb-dur" type="number" min="15" step="15" value="'+(fb.durationMinutes||480)+'" title="Minutes on site" style="flex:0 0 80px;padding:8px;border:1px solid var(--border);border-radius:8px;"><span style="align-self:center;font-size:12px;color:#5b6b78;">mins</span></div>'
+      + '</div>';
+  }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
+  $("fbMsg").textContent = "";
+}
+async function saveFallbacks(){
+  const byEngineer = {};
+  document.querySelectorAll("#fbRows .fb-row").forEach(function(row){
+    const siteName = row.querySelector(".fb-site").value.trim();
+    const description = row.querySelector(".fb-desc").value.trim();
+    if(!siteName && !description) return;
+    byEngineer[row.dataset.user] = { siteName, postcode: row.querySelector(".fb-pc").value.trim(), description,
+      durationMinutes: Number(row.querySelector(".fb-dur").value)||480, active: row.querySelector(".fb-active").checked };
+  });
+  const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
+  $("fbMsg").textContent = "Saving…";
+  try {
+    const r = await authFetch("/sla/fallbacks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("fbEnabled").checked, startHour:sh, byEngineer})}).then(r=>r.json());
+    if(r && r.ok){ $("fbMsg").textContent="Saved ✓"; setTimeout(function(){ $("fbBackdrop").style.display="none"; }, 700); }
+    else $("fbMsg").textContent = (r&&r.error)||"Couldn't save.";
+  } catch(e){ $("fbMsg").textContent = "Couldn't save."; }
+}
+$("openFallbackBtn").addEventListener("click", openFallbacks);
+$("fbClose").addEventListener("click", function(){ $("fbBackdrop").style.display="none"; });
+$("fbCancel").addEventListener("click", function(){ $("fbBackdrop").style.display="none"; });
+$("fbSave").addEventListener("click", saveFallbacks);
+$("fbBackdrop").addEventListener("click", function(e){ if(e.target===$("fbBackdrop")) $("fbBackdrop").style.display="none"; });
 $("jcOpenFull").addEventListener("click", () => { if(jcJobId){ const e = encodeURIComponent(jcJobId); window.open("job-view.html?jobId=" + e + "&id=" + e, "_blank"); } });
 
 function openJobModal(jobId){
@@ -2097,10 +2173,10 @@ function openMap(scope){
   }
   if(!map){
     map = L.map("jobsMap");
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       subdomains: "abcd",
-      attribution: "© OpenStreetMap © CARTO"
+      attribution: "© OpenStreetMap contributors"
     }).addTo(map);
     mapLayer = L.layerGroup().addTo(map);
   }

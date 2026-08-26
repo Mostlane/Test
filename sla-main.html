@@ -1074,18 +1074,31 @@ function renderCatList(){
     el.addEventListener("click", e => onCatDelete(+e.currentTarget.dataset.del)));
 }
 
-function catAdd(){
+async function catAdd(){
   const name = $("catNewName").value.trim();
   if(!name){ $("catStatusText").textContent = "Enter a name first."; return; }
   const lc = name.toLowerCase();
   if(BASE_STATUSES.some(s => s[0].toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" is already a built-in status.`; return; }
-  if(catWork.some(c => c.name.toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" already exists.`; return; }
-  catWork.push({ name, colour: $("catNewColour").value || "#64748b", done: $("catNewDone").checked });
-  $("catNewName").value = "";
-  $("catNewColour").value = "#0ea5e9";
-  $("catNewDone").checked = false;
-  $("catStatusText").textContent = "";
-  renderCatList();
+  const colour = $("catNewColour").value || "#0ea5e9";
+  const done = $("catNewDone").checked;
+  $("catStatusText").textContent = "Saving…";
+  try{
+    // Re-read the LIVE saved list (never trust local state — the modal may have
+    // been reopened/reset), append the new category, and save the full list.
+    await loadCategories();
+    const cats = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour, done: !!c.done }));
+    if(cats.some(c => c.name.toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" already exists.`; return; }
+    cats.push({ name, colour, done });
+    const res = await authFetch("/sla/categories", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ categories: cats }) });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    $("catNewName").value = ""; $("catNewColour").value = "#0ea5e9"; $("catNewDone").checked = false;
+    await loadCategories();
+    catWork = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour, done: !!c.done }));
+    renderCatList();
+    populateBulkDropdown();
+    await loadJobs();
+    $("catStatusText").textContent = `✅ Added "${name}".`;
+  }catch(err){ $("catStatusText").textContent = "❌ Couldn't save: " + err.message; }
 }
 
 /* Delete a row. A brand-new (unsaved) category with no jobs just drops out of the
@@ -1319,8 +1332,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       // first, so this runs after loadCategories resolves.
       try{
         const panel = new URLSearchParams(location.search).get("panel");
-        if(panel === "categories") openCatModal();
-        else if(panel === "sheet") openSheetCfg();
+        if(panel === "categories" || panel === "sheet"){
+          if(panel === "categories") openCatModal(); else openSheetCfg();
+          // Strip the param so a refresh doesn't keep re-opening the modal.
+          try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+        }
       }catch(e){}
     });
   }

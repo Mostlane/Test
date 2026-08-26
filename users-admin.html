@@ -444,7 +444,7 @@
       const has = isFinite(startLat) && isFinite(startLng) && (startLat || startLng);
       const center = has ? [startLat, startLng] : [50.85, -1.2];   // Solent default
       const map = L.map(g("homePinMap")).setView(center, has ? 15 : 10);
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { maxZoom: 19, attribution: "© OpenStreetMap © CARTO" }).addTo(map);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
       const marker = L.marker(center, { draggable: true }).addTo(map);
       map.on("click", e => marker.setLatLng(e.latlng));
       setTimeout(() => map.invalidateSize(), 90);
