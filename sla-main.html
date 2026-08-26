@@ -1188,12 +1188,15 @@ async function catSaveChanges(){
 /* Remember the board's search + status + priority across navigation, so opening
    a job card and pressing Back returns to the SAME filtered view (not a reset).
    Kept in sessionStorage (per-tab) — cleared by the Reset button. */
+// Per-user "local memory" of the board view — kept in localStorage so it
+// survives leaving the page (into a job) and coming back, and across tabs. It is
+// cleared only when SLA is entered fresh from the menu (?reset=1).
 function persistFilters(){
-  try{ sessionStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority })); }catch(e){}
+  try{ localStorage.setItem("slaMainFilters", JSON.stringify({ q: $("searchBox").value, status: activeStatus, priority: activePriority })); }catch(e){}
 }
 function restoreFilters(){
   try{
-    const s = JSON.parse(sessionStorage.getItem("slaMainFilters") || "null");
+    const s = JSON.parse(localStorage.getItem("slaMainFilters") || "null");
     if(!s) return false;
     if(typeof s.q === "string") $("searchBox").value = s.q;
     if(s.status) activeStatus = s.status;
@@ -1201,7 +1204,7 @@ function restoreFilters(){
     return true;
   }catch(e){ return false; }
 }
-function resetSavedFilters(){ try{ sessionStorage.removeItem("slaMainFilters"); }catch(e){} }
+function resetSavedFilters(){ try{ localStorage.removeItem("slaMainFilters"); }catch(e){} }
 // True only when the page was reached via browser Back/Forward — the one case
 // where we restore the saved filters. A fresh navigation (side menu, the Jobs
 // header) or a reload/refresh starts clean.
@@ -1313,10 +1316,15 @@ function init(){
 
 window.addEventListener("DOMContentLoaded", async () => {
   init();
-  // Restore the last search/status/priority ONLY when we arrived via Back/Forward,
-  // so Back from a job card returns to the same filtered board — but a fresh
-  // navigation (side menu / Jobs header) or a refresh starts clean.
-  if(cameFromBackForward()) restoreFilters(); else resetSavedFilters();
+  // Per-user memory: ALWAYS restore the last search/status/priority (so Back from
+  // a job — or a refresh — returns to the same filtered board) EXCEPT when SLA is
+  // opened fresh from the menu, which carries ?reset=1 and clears back to "All".
+  if(new URLSearchParams(location.search).get("reset") === "1"){
+    resetSavedFilters();
+    try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+  } else {
+    restoreFilters();
+  }
   if(await gate()){
     // Jobs load independently of categories — a slow/failed category fetch must
     // never hold up (or blank) the board. Categories merge into the chips/

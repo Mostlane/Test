@@ -376,7 +376,7 @@ a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
     <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Timesheet</a>
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
-    <a class="button" href="sla-main.html" id="SLA"><span class="emoji">🚨</span> SLA</a>
+    <a class="button" href="sla-main.html?reset=1" id="SLA"><span class="emoji">🚨</span> SLA</a>
     <a class="button" href="stats.html" id="Stats"><span class="emoji">📊</span> Stats</a>
     <a class="button" href="health.html" id="Health"><span class="emoji">🩺</span> Health</a>
     <a class="button" href="notification-centre.html" id="Notifications"><span class="emoji">🔕</span> Notification Centre</a>
@@ -1608,7 +1608,7 @@ const MAP = window.ML_PERM_MAP || {
             tone: overdue.length ? "bad" : needs.length ? "warn" : "",
             ok: (needs.length || overdue.length || unassigned.length) ? "" : "All open jobs are scheduled and on track.",
             rows: rows,
-            actions: act("sla-main.html", "Open board", true) + act("sla-scheduler.html", "Scheduler")
+            actions: act("sla-main.html?reset=1", "Open board", true) + act("sla-scheduler.html", "Scheduler")
           });
         });
       }
