@@ -406,7 +406,7 @@ function buildRunner(){
   return `/* Mostlane → Workever sync runner. Paste into the console on mostlane.workever.app (must be logged in). Safe to re-run. */
 (async () => {
   const API=${JSON.stringify(api)}, TOKEN=${JSON.stringify(token)};
-  const RUN = localStorage.mlSyncRun || (localStorage.mlSyncRun = "wk-"+Date.now());
+  const RUN = "wk-"+Date.now();   // a fresh run every time — always starts at page 1
   const wg = async u => { try{ const r=await fetch(u,{credentials:"include",headers:{"X-Requested-With":"XMLHttpRequest","Accept":"application/json"}}); return r.ok?r.json():null; }catch{ return null; } };
   const post = (p,b) => fetch(API+p,{method:"POST",headers:{Authorization:"Bearer "+TOKEN,"Content-Type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json());
   console.log("%cWorkever sync starting…","color:#06c;font-weight:bold");
@@ -456,18 +456,15 @@ function buildRunner(){
   // pages sequentially is slow) — grab WIN pages at once, ingest the window,
   // then advance the resume marker (only after the batch is SAVED, so a failure
   // re-processes rather than skips).
-  let start=Number(localStorage.mlSyncPage||1);
   const WIN=6;
-  for(let pg=start; pg<=pages && !ABORT; pg+=WIN){
+  for(let pg=1; pg<=pages && !ABORT; pg+=WIN){
     const nums=[]; for(let k=0;k<WIN && (pg+k)<=pages;k++) nums.push(pg+k);
     const results=await Promise.all(nums.map(n=>wg("/api/v1/jobs-list?page="+n+"&size=50")));
     for(const j of results){ if(!j) continue; for(const it of (j.items||[])){ batchU[it.identifier]=it.id; batch.push({ mos:it.identifier, uuid:it.id, name:it.name, status:sName[it.jobStatusId]||"", cost:it.totalCosts||0, priority:it.priority||"", siteCode:it.locationNameJob||"", siteName:it.customerName||"", postcode:it.postalJob||"", customerName:it.customerName||"", address:{line1:it.addressJob,city:it.cityJob,postcode:it.postalJob,state:it.stateJob}, assignedLabel:it.assignedWorkersLabel||"" }); } }
     await flush(); if(ABORT) break;
     const done=Math.min(pages, pg+nums.length-1);
-    localStorage.mlSyncPage=done+1;
     console.log("%cpage "+done+"/"+pages+"  live+"+T.updatedLive+" new+"+T.importedArchive+" arch+"+T.updatedArchive+" files+"+T.files+" skip+"+T.skipped+" err+"+T.errors,"color:#06c");
   }
-  if(!ABORT) localStorage.mlSyncPage=pages+1;
   if(ABORT){
     // Leave the resume marker in place so re-running picks up where it stopped.
     console.log("%c⛔ STOPPED — a transfer failed","color:#c00;font-weight:bold",ABORT,T);
