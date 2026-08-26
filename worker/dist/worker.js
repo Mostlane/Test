@@ -21821,16 +21821,6 @@ async function handle25(request, env, ctx, url, sess) {
       } catch {
       }
     }
-    try {
-      await env.DB.prepare(
-        `UPDATE compliance_stores SET active=1
-           WHERE tenant_id=? AND scheme=? AND active=0
-             AND site_number IN (
-               SELECT s.site_number FROM sites s
-               WHERE s.tenant_id=compliance_stores.tenant_id AND s.active=1 AND COALESCE(s.archived,0)=0)`
-      ).bind(tid, scheme).run();
-    } catch {
-    }
     const { results } = scheme === "coop" ? await env.DB.prepare(
       // Resolve the live site by the store's LINK (site_number), falling back
       // to its code — and match numerically as well as exactly, so a padded

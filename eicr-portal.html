@@ -63,6 +63,9 @@
     .bubble.active { background:#28a745; }
 
     .search-input { padding:8px; width:300px; border-radius:20px; border:1px solid #ccc; }
+    .closed-badge { display:inline-block; margin-left:6px; background:#e5e7eb; color:#4b5563; border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; vertical-align:middle; }
+    tr.closed-row { background:#f7f8fa; color:#6b7280; }
+    tr.closed-row td.site { color:#4b5563; }
 
     .table-wrapper { overflow-x:auto; overflow-y:auto; max-height:70vh; width:100%; }
     table { width:100%; border-collapse:collapse; margin-top:10px; }
@@ -904,13 +907,16 @@ function renderTable(d){
     const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
       + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
       + reopenBtn;
-    // Closed Sites: plain document dates, no status light/tints (due warnings
-    // don't apply to an archived store).
-    const closed = (viewMode === 'closed');
+    // Archived stores render "plain" (no status light/tints — due warnings don't
+    // apply). This is per-ROW so an archived store that surfaces via a search in
+    // the live view is still shown correctly and clearly marked as Closed.
+    const closed = (viewMode === 'closed') || e.active === 0;
+    const closedBadge = (e.active === 0 && viewMode !== 'closed') ? ' <span class="closed-badge">🗄 Closed</span>' : '';
     const ws = closed ? '' : worstStatus(e);
     const dtd = (type) => { const s = closed ? '' : typeStatus(e, type); return `<td class="dc${s ? ' st-'+s : ''}">${dateCell(e.storeCode, type, e[type])}</td>`; };
+    if (closed) tr.classList.add('closed-row');
     tr.innerHTML = `
-      <td>${e.storeCode}</td><td class="site">${e.siteName}</td><td>${e.storeType}</td>
+      <td>${e.storeCode}</td><td class="site">${e.siteName}${closedBadge}</td><td>${e.storeType}</td>
       <td>${e.postcode}</td><td class="${ws?'st-'+ws:''}">${closed ? '' : statusEmoji(ws)}</td>
       ${dtd('fiveYear')}${dtd('pat')}${dtd('em')}
       ${dtd('pv')}${dtd('ev')}${dtd('pump')}
@@ -932,7 +938,11 @@ function renderTable(d){
 
 /* apply filters + re-render */
 function applyFilters(){
-  let data = baseData();
+  const q = document.getElementById('searchBar').value.toLowerCase().trim();
+  // When SEARCHING, span EVERYTHING — active AND archived/closed — so nothing is
+  // hidden by the current view; archived rows are clearly marked in renderTable.
+  // With no search term, show just the current view (live chart / Closed Sites).
+  let data = q ? allData.slice() : baseData();
   if (activeStoreType !== 'ALL') data = data.filter(e=>e.storeType === activeStoreType);
   if (activeCategories.size > 0) {
     data = data.filter(e=>{
@@ -942,7 +952,6 @@ function applyFilters(){
       return true;
     });
   }
-  const q = document.getElementById('searchBar').value.toLowerCase().trim();
   if (q) {
     data = data.filter(e =>
       (e.storeCode || '').toLowerCase().includes(q) ||
