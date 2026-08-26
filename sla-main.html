@@ -688,17 +688,20 @@ function render(){
     : "";
 
   for(const j of list){
-    const rawRef = String(j.helpdeskRef || j.id || "").trim();
-    // A manual job with no typed reference has helpdeskRef defaulted to its UUID
-    // id — a placeholder, not a real ticket (its leading "0" would otherwise show
-    // as the reference). Hide it.
-    const isUuidRef = rawRef === String(j.id) ||
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawRef);
-    // Show the reference whenever it looks like a real one: it starts with a
-    // ticket number ("25878-Portsmouth…", "25886/1 - Gatwick Road") — however
-    // long — or it's a short ref. A long non-numeric string is a fault sentence
-    // stuffed into the reference (legacy jobs), so keep that hidden.
-    const ref = isUuidRef ? "" : ((/^\d/.test(rawRef) || rawRef.length <= 24) ? esc(rawRef) : "");
+    // The "Job" title should read "<ticket number> - <site>" (e.g.
+    // "28548-Bristol, Ashley Down Road"). That's the helpdeskRef when it starts
+    // with the number; but the ref sometimes gets defaulted to just the site name
+    // ("Beggarwood") while the job id still carries the full "number-site"
+    // ("28552/1-Beggarwood"). So prefer a numeric ref, else fall back to the id
+    // (which reliably has it), else a short legacy ref. Only a raw UUID id — a
+    // manual job with no real ticket — is hidden (shown as "Open").
+    const rawRef = String(j.helpdeskRef || "").trim();
+    const idStr = String(j.id || "");
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let ref = "";
+    if (/^\d/.test(rawRef)) ref = esc(rawRef);
+    else if (/^\d/.test(idStr) && !UUID.test(idStr)) ref = esc(idStr);
+    else if (rawRef && !UUID.test(rawRef) && rawRef.length <= 24) ref = esc(rawRef);
     const name = esc((window.mlJobName && window.mlJobName(j)) || j.siteName || j.siteCode || "");
     const colour = STATUS_COLOUR[j.status] || "#9ca3af";
     const sched = fmtSched(j);

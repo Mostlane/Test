@@ -7251,10 +7251,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const requiresNote = body.requiresNote !== void 0 ? !!body.requiresNote : existing?.requiresNote !== void 0 ? !!existing.requiresNote : !isProjJob;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let helpdeskRef = body.reference || existing?.helpdeskRef || id;
-  if (!body.reference && (!helpdeskRef || helpdeskRef === id || UUID_RE.test(String(helpdeskRef)))) {
-    const siteNm = String(body.siteName || existing?.siteName || "").trim();
-    const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
-    helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
+  if (!body.reference) {
+    const idIsNumSite = /^\d/.test(String(id)) && !UUID_RE.test(String(id));
+    if (idIsNumSite && !/^\d/.test(String(helpdeskRef))) {
+      helpdeskRef = id;
+    } else if (!helpdeskRef || UUID_RE.test(String(helpdeskRef)) || helpdeskRef === id && !idIsNumSite) {
+      const siteNm = String(body.siteName || existing?.siteName || "").trim();
+      const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
+      helpdeskRef = isProjJob ? siteCd || siteNm || id : siteNm || siteCd || id;
+    }
   }
   const job = {
     id,
@@ -7389,7 +7394,12 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.helpdeskRef !== void 0 && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
   {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) {
+    const idStr = String(job.id || "");
+    const idIsNumSite = /^\d/.test(idStr) && !uuidRe.test(idStr);
+    const ref = String(job.helpdeskRef || "");
+    if (idIsNumSite && !/^\d/.test(ref)) {
+      job.helpdeskRef = idStr;
+    } else if (!ref || uuidRe.test(ref) || ref === idStr && !idIsNumSite) {
       const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
       const healed = jobIsProject(job) ? siteCd || siteNm : siteNm || siteCd;
       if (healed) job.helpdeskRef = healed;

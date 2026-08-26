@@ -2430,10 +2430,18 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // defaulted to the UUID the same way. An explicitly typed reference always wins.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let helpdeskRef = body.reference || existing?.helpdeskRef || id;
-  if (!body.reference && (!helpdeskRef || helpdeskRef === id || UUID_RE.test(String(helpdeskRef)))) {
-    const siteNm = String(body.siteName || existing?.siteName || "").trim();
-    const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
-    helpdeskRef = isProjJob ? (siteCd || siteNm || id) : (siteNm || siteCd || id);
+  if (!body.reference) {
+    // The id reliably carries "<number>-<site>". If it does and the ref has lost
+    // its number, restore the ref FROM the id (don't strip it to the site name —
+    // the old "ref === id ⇒ placeholder" rule corrupted these on every save).
+    const idIsNumSite = /^\d/.test(String(id)) && !UUID_RE.test(String(id));
+    if (idIsNumSite && !/^\d/.test(String(helpdeskRef))) {
+      helpdeskRef = id;
+    } else if (!helpdeskRef || UUID_RE.test(String(helpdeskRef)) || (helpdeskRef === id && !idIsNumSite)) {
+      const siteNm = String(body.siteName || existing?.siteName || "").trim();
+      const siteCd = String(body.siteCode || existing?.siteCode || "").trim();
+      helpdeskRef = isProjJob ? (siteCd || siteNm || id) : (siteNm || siteCd || id);
+    }
   }
 
   const job = {
@@ -2579,11 +2587,22 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.priority !== undefined && patch.priority) job.priority = patch.priority;
   if (patch.description !== undefined && patch.description) job.description = patch.description;
   if (patch.helpdeskRef !== undefined && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
-  // A reference must never be the internal UUID — heal a UUID default to a clear
-  // name: project → project number (site code); otherwise the site name.
+  // The reference should read "<ticket number> - <site>". The job id reliably
+  // carries that ("28548-Bristol, Ashley Down Road"), so:
+  //  • if the id is a real "<number>-<site>" and the ref has lost its number
+  //    (just the site, or equals the id), restore the ref FROM the id;
+  //  • else, a genuine placeholder (empty / a raw UUID / equals a UUID id) heals
+  //    to a clear name (project → number, otherwise the site).
+  // NB the old rule "ref === id ⇒ placeholder" was WRONG for these jobs and was
+  // stripping the number off the ref on every patch.
   {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!job.helpdeskRef || job.helpdeskRef === job.id || uuidRe.test(String(job.helpdeskRef))) {
+    const idStr = String(job.id || "");
+    const idIsNumSite = /^\d/.test(idStr) && !uuidRe.test(idStr);
+    const ref = String(job.helpdeskRef || "");
+    if (idIsNumSite && !/^\d/.test(ref)) {
+      job.helpdeskRef = idStr;   // restore "<number>-<site>" from the id
+    } else if (!ref || uuidRe.test(ref) || (ref === idStr && !idIsNumSite)) {
       const siteNm = String(job.siteName || "").trim(), siteCd = String(job.siteCode || "").trim();
       const healed = jobIsProject(job) ? (siteCd || siteNm) : (siteNm || siteCd);
       if (healed) job.helpdeskRef = healed;
