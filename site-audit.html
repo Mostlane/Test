@@ -183,20 +183,37 @@ async function loadSites(){
   }catch{ allSites=[]; }
 }
 let pickedSite=null;
+// Read the NAME first (that's what the office recognises); postcode next; the
+// site code demoted to a faint suffix rather than leading the row.
+function siteLabel(s){
+  const main=[s.name||("Site "+(s.code||"?")), s.postcode].filter(Boolean).join(" — ");
+  return s.code ? main+"   ·   "+s.code : main;
+}
+// Show sites sorted A→Z by name. Empty query = the WHOLE list (browse all);
+// typing filters across name / code / postcode / address. Options carry the
+// site's index (not its code) so blank-coded sites can't collide.
+function renderSiteOptions(q){
+  const sel=$("siteSelect");
+  let list=allSites.map((s,idx)=>({s,idx}));
+  const ql=(q||"").trim().toLowerCase();
+  if(ql) list=list.filter(o=>((o.s.name+" "+o.s.code+" "+o.s.postcode+" "+(o.s.address||"")).toLowerCase().includes(ql)));
+  list.sort((a,b)=>String(a.s.name||"").localeCompare(String(b.s.name||""), undefined, {sensitivity:"base"}));
+  sel.innerHTML="";
+  list.slice(0,800).forEach(o=>{ const op=document.createElement("option"); op.value=String(o.idx); op.textContent=siteLabel(o.s); sel.appendChild(op); });
+  sel.size=Math.min(12,Math.max(2,Math.min(list.length,12)));
+  sel.style.display=list.length?"block":"none";
+  return list.length;
+}
 function wireSiteSearch(){
   const input=$("siteSearch"), sel=$("siteSelect");
-  input.addEventListener("input",()=>{
-    const q=input.value.trim().toLowerCase();
-    if(!q){ sel.style.display="none"; return; }
-    const hits=allSites.filter(s=>((s.code+" "+s.name+" "+s.postcode).toLowerCase().includes(q))).slice(0,20);
-    sel.innerHTML="";
-    hits.forEach(s=>{ const o=document.createElement("option"); o.value=s.code; o.textContent=(s.code?s.code+" ":"")+s.name+(s.postcode?" ("+s.postcode+")":""); sel.appendChild(o); });
-    sel.size=Math.min(8,Math.max(2,hits.length)); sel.style.display=hits.length?"block":"none";
-  });
+  input.placeholder="Tap to see every site, or type to filter…";
+  // Tapping the box (with nothing chosen) opens the full list to browse.
+  input.addEventListener("focus",()=>{ if(!pickedSite) renderSiteOptions(input.value); });
+  input.addEventListener("input",()=>{ pickedSite=null; $("sitePicked").textContent=""; renderSiteOptions(input.value); });
   sel.addEventListener("change",()=>{
-    pickedSite=allSites.find(s=>s.code===sel.value)||null;
-    if(pickedSite){ input.value=(pickedSite.code?pickedSite.code+" ":"")+pickedSite.name; sel.style.display="none";
-      $("sitePicked").textContent="✓ "+[pickedSite.address,pickedSite.postcode].filter(Boolean).join(", "); }
+    const s=allSites[+sel.value]; if(!s) return;
+    pickedSite=s; input.value=s.name||""; sel.style.display="none";
+    $("sitePicked").textContent="✓ "+[s.address,s.postcode,s.code?("code "+s.code):""].filter(Boolean).join(" · ");
   });
 }
 
@@ -292,8 +309,8 @@ function matchSite(title){
   var q=String(title).toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
   if(q.length<3) return;
   var hit=allSites.find(s=>{ var n=(s.name||"").toLowerCase(); return n.length>2 && (n.includes(q)||q.includes(n)); });
-  if(hit){ pickedSite=hit; $("siteSearch").value=(hit.code?hit.code+" ":"")+hit.name;
-    $("sitePicked").textContent="✓ "+[hit.address,hit.postcode].filter(Boolean).join(", ")+" — matched from the report; change it if wrong"; }
+  if(hit){ pickedSite=hit; $("siteSearch").value=hit.name||"";
+    $("sitePicked").textContent="✓ "+[hit.address,hit.postcode,hit.code?("code "+hit.code):""].filter(Boolean).join(" · ")+" — matched from the report; change it if wrong"; }
 }
 async function importReport(file){
   if(!/\.pdf$/i.test(file.name||"") && file.type!=="application/pdf"){ setDrop("That's not a PDF — drop a Site Audit Pro PDF export."); return; }
