@@ -560,6 +560,32 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   handles adding an engineer to an ALREADY-announced job. The office board
   (sla-main) shows a 🕒/⛓ badge on gated jobs (from `decorate.releaseView`);
   engineers never receive them. Editor is `sla-jobedit.js?v=12`.
+  **Multi-day project drip series (Aug 2026):** a project can be assigned to an
+  engineer for **N days at once**, drip-fed so they can't see too far ahead. From
+  **project-hub.html** "Create a job" → tick **📆 Send as multiple days**: first
+  day, how many days, daily start/finish, **reveal time** (the evening before),
+  include-weekends. The client builds each day's absolute `scheduledAt` (London)
+  and POSTs **/project/create-day-series** (projects-api.js), which creates one
+  SLA job per day linked by **`job.seriesId`**, each with
+  `release:{mode:"dayBefore", hour:<revealHour>}` (the dayBefore release hour is
+  now **configurable** — `londonHourDayBefore`). The office sees every day in the
+  scheduler; the engineer only sees a day from the reveal time the evening before.
+  **Auto skip-on-clash safeguard:** a series day is DROPPED (never revealed) if the
+  engineer already has another job that day — `engineerHasOtherJobThatDay` gates
+  `releaseVisibleNow` live, and `sweepJobReleases` persists `job.seriesSkipped=true`
+  at release time (so a forgotten day can't double-book). Skipped days are just
+  dropped (no auto-extend, per Jamie). **Stop** the drip any time from the hub
+  (**/project/series/stop** → `stopSeries` deletes days not yet revealed; visible
+  days stay). The hub lists each series with per-day hidden/visible/skipped badges
+  (**GET /project/series**). **Interactive clash prompt (`sla-jobedit.js?v=20`):**
+  when the office allocates a job to an engineer who has a series day that date
+  (checked via **GET /sla/series-clash?engineer=&date=&excludeId=**), a modal
+  offers **Fit the project after this job** (default — shifts the series day's
+  start to this job's finish, keeping its set finish time), **Skip that day**
+  (`seriesSkipped=true`), or **Leave it** (the auto-safeguard skips it anyway).
+  `seriesId`/`seriesSkipped` + `release.hour` are threaded through
+  createOrUpdateJobFromPayload + patchJob and surfaced on `releaseView`
+  (mode "skipped" / `series:true`).
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).

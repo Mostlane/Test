@@ -731,6 +731,9 @@
       msg.className = "mlje-msg ok";
       const cb = onSavedCb;
       if (cb) { try { cb(saved); } catch (e) {} }
+      // Clash with a project drip day? Offer to fit the project after this job,
+      // skip it, or leave it (it auto-skips that day anyway).
+      await maybeSeriesClash(saved);
       // Newly allocated to an operative? Offer same-site + nearby OPEN jobs to
       // batch onto the same person before we close.
       const newlyAssigned = assignedEngineers.filter(e => e && openEngineers.indexOf(e) === -1);
@@ -741,6 +744,59 @@
       msg.className = "mlje-msg err";
       $("mljeSave").disabled = false;
     }
+  }
+
+  // After allocating a job, check whether the engineer already has a project
+  // drip-series day that date and let the office decide what to do with it.
+  async function maybeSeriesClash(saved) {
+    try {
+      if (!saved || !saved.scheduledAt || saved.seriesId) return;
+      const engs = (Array.isArray(saved.assignedEngineers) && saved.assignedEngineers.length)
+        ? saved.assignedEngineers : (saved.assignedTo ? [saved.assignedTo] : []);
+      if (!engs.length) return;
+      const date = new Date(saved.scheduledAt).toISOString().slice(0, 10);
+      for (const eng of engs) {
+        const res = await authFetch("/sla/series-clash?engineer=" + encodeURIComponent(eng) + "&date=" + date + "&excludeId=" + encodeURIComponent(saved.id));
+        const d = await res.json().catch(() => ({}));
+        const clash = d && d.clash;
+        if (!clash) continue;
+        const choice = await seriesClashPrompt(clash);
+        if (choice === "fit") {
+          const newStart = saved.scheduledEnd || saved.scheduledAt;
+          const keepEnd = clash.scheduledEnd && Date.parse(clash.scheduledEnd) > Date.parse(newStart) ? clash.scheduledEnd : null;
+          let dur = keepEnd ? Math.round((Date.parse(keepEnd) - Date.parse(newStart)) / 60000) : 60;
+          if (!(dur > 0)) dur = 60;
+          await authFetch("/sla/jobs/" + encodeURIComponent(clash.id), { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scheduledAt: newStart, scheduledEnd: keepEnd || undefined, durationMinutes: dur }) });
+        } else if (choice === "skip") {
+          await authFetch("/sla/jobs/" + encodeURIComponent(clash.id), { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ seriesSkipped: true }) });
+        }
+        break;   // one clash decision is enough
+      }
+    } catch (e) { /* clash prompt is best-effort — the auto safeguard still covers it */ }
+  }
+  function seriesClashPrompt(clash) {
+    return new Promise(resolve => {
+      const day = clash.scheduledAt ? new Date(clash.scheduledAt).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }) : "that day";
+      const ov = document.createElement("div");
+      ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
+      const btn = "display:block;width:100%;padding:11px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;text-align:left;";
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:410px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
+        + '<h3 style="margin:0 0 8px;color:#003366;font-size:17px;">Project day clash</h3>'
+        + '<p style="margin:0 0 14px;color:#334;font-size:14px;line-height:1.5;">This engineer already has a project day on <b>' + day + '</b>. What should happen to it?</p>'
+        + '<div style="display:flex;flex-direction:column;gap:8px;">'
+        + '<button data-c="fit" style="' + btn + 'background:#003366;color:#fff;border-color:#003366;">✅ Fit the project in <b>after</b> this job</button>'
+        + '<button data-c="skip" style="' + btn + 'background:#fff;color:#991b1b;">⏭ Skip the project that day</button>'
+        + '<button data-c="leave" style="' + btn + 'background:#f4f6f9;color:#475569;">Leave it for now</button>'
+        + '</div></div>';
+      ov.addEventListener("click", e => {
+        const b = e.target.closest("[data-c]");
+        if (b) { document.body.removeChild(ov); resolve(b.dataset.c); }
+        else if (e.target === ov) { document.body.removeChild(ov); resolve("leave"); }
+      });
+      document.body.appendChild(ov);
+    });
   }
 
   async function del() {
