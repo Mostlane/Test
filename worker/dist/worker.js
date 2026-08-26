@@ -14054,6 +14054,12 @@ async function ensureCustomTable(db) {
       items TEXT, status TEXT, sent_by TEXT, sent_at TEXT, submitted_at TEXT)`).run();
   } catch {
   }
+  for (const c of ["due_at TEXT", "snooze INTEGER DEFAULT 1"]) {
+    try {
+      await db.prepare(`ALTER TABLE custom_van_checks ADD COLUMN ${c}`).run();
+    } catch {
+    }
+  }
 }
 async function nameMap(env, tid) {
   const out = {};
@@ -14267,6 +14273,33 @@ async function handle17(request, env, ctx, url, sess) {
     }
     return json({ ok: true, created }, {}, env, request);
   }
+  if (path === "/vancheck/request" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    await ensureCustomTable(db);
+    const b = await request.json().catch(() => ({}));
+    const reg = String(b.reg || "").trim();
+    if (!reg) return error("No vehicle given.", 400, env, request);
+    const norm = (r) => String(r || "").toUpperCase().replace(/\s+/g, "");
+    const { results: urows } = await db.prepare("SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(db.tenantId).all();
+    const driver = (urows || []).find((u) => norm(u.vehicle_assigned) === norm(reg));
+    if (!driver) return error("No active driver is assigned to " + reg + ". Assign the van to a driver first.", 400, env, request);
+    const un = driver.username;
+    const dueAt = b.dueAt && Number.isFinite(Date.parse(b.dueAt)) ? new Date(b.dueAt).toISOString() : deadlineFor(mondayOf3(londonDate2()), await getSettings(db));
+    const snooze = b.snooze === false ? 0 : 1;
+    const s = await getSettings(db);
+    const items = JSON.stringify({ checklist: s.checklist || [], equipment: s.equipment || [], photoSlots: s.photoSlots || [] });
+    const id = "cvc-" + crypto.randomUUID().slice(0, 12);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await db.prepare("INSERT INTO custom_van_checks (id,tenant_id,username,reg,tpl_id,name,items,status,sent_by,sent_at,due_at,snooze) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(id, db.tenantId, un, reg, "", "Van check \u2014 " + reg, items, "pending", me, now, dueAt, snooze).run();
+    if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, db.tenantId, un, {
+      title: "Van check requested",
+      body: `Please complete the van check for ${reg}.`,
+      url: "/van-check.html?custom=" + id,
+      tag: "custom-vancheck",
+      actionable: true
+    }));
+    return json({ ok: true, id, driver: un, reg, dueAt, snooze: !!snooze }, {}, env, request);
+  }
   if (path === "/vancheck/custom-status" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
     await ensureCustomTable(db);
@@ -14306,7 +14339,7 @@ async function handle17(request, env, ctx, url, sess) {
       status: row.status,
       week: row.id,
       vehicle: row.reg || sess.user.vehicle_assigned || "",
-      deadline: { dueAt: new Date(Date.now() + 7 * 864e5).toISOString(), overdue: false },
+      deadline: { dueAt: row.due_at || new Date(Date.now() + 7 * 864e5).toISOString(), overdue: row.due_at ? Date.now() > Date.parse(row.due_at) : false },
       checklist: it.checklist || [],
       equipment: it.equipment || [],
       photoSlots: it.photoSlots || [],
@@ -14697,9 +14730,16 @@ async function handle17(request, env, ctx, url, sess) {
       missing = (drivers || []).filter((u) => !doneSet.has(u.username) && !off.has(u.username)).map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
     }
     await ensureCustomTable(db);
-    const cp = await db.prepare("SELECT COUNT(*) AS n FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending'").bind(db.tenantId, me).first();
-    const customPending = cp ? Number(cp.n) || 0 : 0;
-    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending }, {}, env, request);
+    const { results: crows } = await db.prepare("SELECT id, name, reg, due_at, snooze FROM custom_van_checks WHERE tenant_id=? AND username=? AND status='pending' ORDER BY sent_at DESC").bind(db.tenantId, me).all();
+    const customChecks = (crows || []).map((r) => ({
+      id: r.id,
+      name: r.name || "Van check",
+      reg: r.reg || "",
+      dueAt: r.due_at || null,
+      overdue: r.due_at ? Date.now() > Date.parse(r.due_at) : false,
+      snooze: r.snooze == null ? true : !!Number(r.snooze)
+    }));
+    return json({ ok: true, week, dueAt, overdue, mineDue, vehicle: myVehicle, missing, customPending: customChecks.length, customChecks }, {}, env, request);
   }
   return error("Unknown van-check route", 404, env, request);
 }
@@ -17436,7 +17476,7 @@ async function handle22(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -17449,8 +17489,12 @@ async function handle22(request, env, ctx, url, sess) {
       appCfg(DEFECTCLR_KEY(tid)),
       // defects marked resolved by an admin
       appCfg(VCACK_KEY(tid)),
-      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()
+      env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
+      // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
+      // and can't re-request until it's done). Fails soft if the table is absent.
+      env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] }))
     ]);
+    const pendVc = new Set((pendVcRes.results || []).map((r) => dn(r.reg)));
     const defects = await vanCheckDefects(env, tid, defResolved);
     const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
@@ -17522,6 +17566,8 @@ async function handle22(request, env, ctx, url, sess) {
         // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
         // card status bar: ok | ack | due
+        vanCheckRequested: pendVc.has(dn(v.reg)),
+        // a one-off check is pending — hide the Request button
         // Money views — Full Access only.
         finance: money2 ? financeOf(v) : void 0,
         runningCost: money2 ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : void 0

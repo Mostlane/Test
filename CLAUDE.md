@@ -905,6 +905,28 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   getRules/saveRules), so the blunt on/off is controllable in one place instead of
   buried in the notification centre. Front-end: van-checks.html grid has an
   On✓/Off toggle column + the pause banner.
+  **Request a van check for ONE vehicle (Aug 2026):** a **🧷 Request check** button
+  on each vehicle card + deep-dive in **vehicles.html** (shown when the van has a
+  driver) opens a modal — driver name, **Complete-by deadline preset to the normal
+  weekly deadline** (`nextVanDeadline` from GET /vancheck/settings dueDow/dueTime),
+  and an **"Allow snooze" tickbox** — then POSTs **/vancheck/request** `{reg, dueAt,
+  snooze}` (Vehicles|FullAccess). Use case: a driver did a check on a fleet/pool van
+  but their OWN van's weekly check is still outstanding. It reuses the existing
+  **custom_van_checks** flow (extended with `due_at` + `snooze` columns): resolves
+  the reg's assigned driver, creates a pending check with the STANDARD checklist
+  from settings, and pushes them (`/van-check.html?custom=<id>`; the normal submit
+  path marks it done). **/vancheck/attention now returns `customChecks[]`** (each
+  pending request's `{id,reg,dueAt,overdue,snooze}`), and **main.html's attention
+  gate** renders one note per request with that deadline — snoozeable up to 2h
+  before the deadline when `snooze` is on, or **non-snoozable (`maxSnooze:0`)** when
+  the tickbox was cleared. custom-get serves the check's `due_at` as its deadline.
+  **The card won't re-request while one is pending:** `/fleet/vehicles` returns
+  **`vanCheckRequested`** per reg (a `DISTINCT reg` scan of `custom_van_checks`
+  status='pending'), so the button renders **"✓ Check requested" (disabled)**
+  instead of 🧷 Request check; it flips back only once the driver COMPLETES the
+  check (status→done clears the pending flag on the next load). The button also
+  flips immediately client-side after a successful request (sets the FLEET row +
+  renderFleet).
 - `fleet.js` — the whole Vehicles/Fleet backend (gate: FullAccess|Vehicles).
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
