@@ -3030,6 +3030,25 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      `po-admin.html` (system config + suppliers/subcontractors/trades/sites/
      closures — the obsolete Engineers/Office-Users token-link tabs were dropped).
      CSV + print are done CLIENT-side (no un-authenticated new tab).
+   - **Engineers can ONLY raise against a KNOWN site (Aug 2026):** a free-text /
+     new site name is rejected so job costing stays on one clean name.
+     Enforced client-side (po-raise.html: the "No match" dropdown says to ask the
+     office to add the site, and `submitPO` blocks a typed site not in `SITES`)
+     AND server-side (po.js `issuePO` engineer branch: a provided `site` must
+     exist in PO_DB `sites` active — **a vehicle-tagged PO carries `vehicle_reg`
+     and its site box is just a label, so it's exempt**). Office POs are
+     UNAFFECTED (the office manages the site list). New sites are added on
+     po-admin.html → Sites.
+   - **Merge duplicate sites (Aug 2026):** the same place saved under several
+     names splits its costing. po-admin.html → Sites → **"Merge duplicate sites"**
+     card: tick the duplicates, pick the one site to keep, Merge. Backend
+     (po.js): **GET /po/api/sites/usage** (office — every site NAME on a PO with
+     its PO count + `known` flag, plus known sites with 0 POs, so a duplicate can
+     be merged into a clean unused site) and **POST /po/api/sites/merge**
+     `{into, from:[names]}` (office — `UPDATE po_log SET site=into WHERE site IN
+     from`, then deactivates the source `sites` rows and ensures `into` is a known
+     active site; returns `{merged, posMoved}`). Since costing matches
+     `po_log.site` by NAME, the spend rolls straight up onto the kept site.
    - **`po.html` is now a ROLE ROUTER** (the single launcher every PO entry point —
      field-app PO tab, menu tile, sidebar — already points at): PurchaseOrders|
      FullAccess → `po-office.html`, field engineers → `po-raise.html`, else a
