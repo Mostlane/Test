@@ -62,6 +62,7 @@
     <a class="ml-back" href="/projects-live.html" style="text-decoration:none;">‹ Back</a>
     <h1 id="hTitle">Project</h1>
     <select id="statusSel" class="hide" style="width:auto;padding:7px 10px;color:#1f2937;"></select>
+    <button id="archiveBtn" class="hide" style="width:auto;padding:7px 12px;border:1px solid #c9d2dd;border-radius:10px;background:#fff;color:#003366;font-weight:700;cursor:pointer;white-space:nowrap;"></button>
   </header>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
 
@@ -149,9 +150,35 @@
       if (CAN) {
         const sel = g("statusSel"); sel.classList.remove("hide");
         sel.innerHTML = ["live", "complete", "archived"].map(s => `<option value="${s}" ${P.status === s ? "selected" : ""}>${s[0].toUpperCase() + s.slice(1)}</option>`).join("");
-        sel.onchange = async () => { await authFetch("/project/update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, status: sel.value }) }); };
+        sel.onchange = () => setStatus(sel.value);
+        renderArchiveBtn();
       }
       render();
+    }
+
+    // The prominent Archive / Restore button — the obvious way to take a project
+    // off the live list (which also stops engineers raising POs against it).
+    function renderArchiveBtn() {
+      const b = g("archiveBtn"); if (!b || !CAN) return;
+      b.classList.remove("hide");
+      const archived = (P.status || "live") === "archived";
+      b.textContent = archived ? "♻ Restore" : "🗄 Archive";
+      b.style.background = archived ? "#eef7f0" : "#fff";
+      b.onclick = () => setStatus(archived ? "live" : "archived");
+    }
+    async function setStatus(status) {
+      if (status === "archived") {
+        const ok = window.MLUI ? await MLUI.confirm("Archive “" + (P.name || "this project") + "”? It drops off the live projects list and engineers can no longer raise POs against it. You can restore it any time.", { title: "Archive project", okLabel: "Archive", danger: true }) : confirm("Archive this project?");
+        if (!ok) return;
+      }
+      try {
+        const r = await authFetch("/project/update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, status }) }).then(r => r.json());
+        if (r && r.project) P = r.project; else P.status = status;
+        const sel = g("statusSel"); if (sel) sel.value = P.status || status;
+        renderArchiveBtn();
+        if (window.MLUI && MLUI.toast) MLUI.toast(status === "archived" ? "Project archived" : ("Project set to " + (P.status || status)));
+        render();
+      } catch (e) { alert("Couldn't update the project status: " + e.message); }
     }
 
     function render() {
