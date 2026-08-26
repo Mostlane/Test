@@ -5156,6 +5156,16 @@ async function handle8(request, env, ctx, url, sess) {
     const hit = all.find((j) => j.seriesId && !j.seriesSkipped && j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && assignedList(j).some((a) => normId(a) === eid));
     return jsonResponse({ clash: hit ? { id: hit.id, description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
   }
+  if (subpath === "/engineer-day" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const date = searchParams.get("date") || "";
+    const excludeId = searchParams.get("excludeId") || "";
+    if (!engineer || !date) return jsonResponse({ jobs: [] }, headers);
+    const eid = normId(engineer);
+    const all = await listJobs(env, tenantId);
+    const jobs = all.filter((j) => j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && !j.seriesSkipped && String(j.status || "").toLowerCase() !== "cancelled" && assignedList(j).some((a) => normId(a) === eid)).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, scheduledAt: j.scheduledAt || null, status: j.status || "", series: !!j.seriesId, siteName: j.siteName || "" })).sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+    return jsonResponse({ jobs }, headers);
+  }
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
