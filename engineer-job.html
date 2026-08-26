@@ -8,7 +8,7 @@
   <title>Job — Mostlane</title>
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
-  <script src="sla-jobedit.js?v=19"></script>
+  <script src="sla-jobedit.js?v=20"></script>
   <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
@@ -517,19 +517,14 @@
       onComplete: function(){ toast("Firestopping job completed"); setTimeout(function(){ location.href=backTo; }, 1200); }
     });
   }
-  async function fillPoButton(){
+  function fillPoButton(){
+    // Opens the in-portal PO raise form with the job details on the URL so the
+    // PO ties to this job (job_id) — no longer the old standalone PO worker.
     var btn=$("poBtn"); if(!btn) return;
-    try{
-      var t=localStorage.getItem("mostlaneToken");
-      var r=await fetch(MOSTLANE_API+"/po-config",{headers:t?{"Authorization":"Bearer "+t}:{}});
-      var c=await r.json().catch(function(){return{};});
-      if(r.ok&&c.ok&&c.url){
-        var href=c.url;
-        try{ var payload={jobRef:job.helpdeskRef||job.id,jobId:job.id,site:job.siteName||job.siteCode||"",address:[job.address,job.postcode].filter(Boolean).join(", "),description:job.description||"",by:getUser()};
-          href += (href.indexOf("#")>=0?"&":"#")+"mlpo="+btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }catch(e){}
-        btn.style.display=""; btn.onclick=function(){ location.href=href; };
-      }
-    }catch(e){}
+    var href="po-raise.html";
+    try{ var payload={jobRef:job.helpdeskRef||job.id,jobId:job.id,site:job.siteName||job.siteCode||"",address:[job.address,job.postcode].filter(Boolean).join(", "),description:job.description||"",by:getUser()};
+      href += "#mlpo="+btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }catch(e){}
+    btn.style.display=""; btn.onclick=function(){ location.href=href; };
   }
   function setupOfficeEdit(){
     // Office-only control — a field engineer never gets it, even with an SLAAdmin

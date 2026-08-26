@@ -41,15 +41,54 @@ async function getVehicles(env) {
     const where = [];
     if (cols.has("active")) where.push(`(active IS NULL OR active = 1)`);
     if (cols.has("tenant_id")) where.push(`tenant_id = 1`);
-    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")} FROM vehicles`
+    const sql = `SELECT ${regCol} AS reg, ${pick("make")}, ${pick("model")}, ${pick("pool")} FROM vehicles`
       + (where.length ? ` WHERE ${where.join(" AND ")}` : "") + ` ORDER BY ${regCol}`;
     const rows = await db.prepare(sql).all();
     return (rows.results || []).filter(r => r.reg && String(r.reg).trim()).map(r => {
       const reg = String(r.reg).trim().toUpperCase();
       const desc = [r.make, r.model].filter(Boolean).join(" ").trim();
-      return { reg, make: r.make || null, model: r.model || null, desc, label: desc ? `${reg} — ${desc}` : reg };
+      return { reg, make: r.make || null, model: r.model || null, desc, pool: !!Number(r.pool || 0), label: desc ? `${reg} — ${desc}` : reg };
     });
   } catch (e) { console.error("PO vehicle lookup failed:", e.message); return []; }
+}
+
+// Names of LIVE projects (the only sites an engineer may raise a PO against
+// from the standalone form). Reads the portal projects table (env.DB). Archived
+// / complete projects are excluded so a finished job can't take new spend.
+async function liveProjectNames(env) {
+  const db = env.DB;
+  if (!db) return [];
+  try {
+    const rows = await db.prepare(
+      `SELECT name FROM projects WHERE tenant_id IN ('1.0','1',1) AND (status='live' OR status IS NULL) ORDER BY name`
+    ).all();
+    return (rows.results || []).map(r => String(r.name || "").trim()).filter(Boolean);
+  } catch (e) { console.error("PO live-project lookup failed:", e.message); return []; }
+}
+async function isLiveProjectSite(env, name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  return (await liveProjectNames(env)).some(p => p.toLowerCase() === n);
+}
+
+// The engineer raise-PO form's option set: every LIVE project (as a pickable
+// "site") + all vehicles, with the caller's own assigned van flagged `mine` so
+// the front-end can surface it first. Reactive-maintenance jobs are deliberately
+// NOT here — those POs are raised from the job card so they tie to a job.
+async function getRaiseOptions(env, username) {
+  const projects = (await liveProjectNames(env)).map(name => ({ name }));
+  let mineReg = "";
+  try {
+    const u = await env.DB.prepare(
+      `SELECT vehicle_assigned FROM users WHERE tenant_id IN ('1.0','1',1) AND lower(username)=lower(?)`
+    ).bind(String(username || "")).first();
+    mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
+  } catch (e) { /* no assigned van */ }
+  // Engineers pick ONLY their assigned van + shared/pool vehicles (e.g. tippers).
+  const vehicles = (await getVehicles(env))
+    .map(v => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg }))
+    .filter(v => v.mine || v.pool);
+  return { projects, vehicles };
 }
 
 // ── Router: everything under /po/* ─────────────────────────────────────────
@@ -82,6 +121,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (path === "/api/engineers" && method === "GET") return jr(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr(await getVehicles(env));
+    if (path === "/api/raise-options" && method === "GET") return jr(await getRaiseOptions(env, sess.user.username));
     if (path === "/api/closures" && method === "GET") return jr(await getClosures(db));
     if (path === "/api/jobs/search" && method === "GET") return jr(await searchJobs(db, q));
 
@@ -97,7 +137,7 @@ export async function handle(request, env, ctx, url, sess) {
         b.engineer_slug = userSlug(sess); b.engineer_name = userName(sess);
         b.cost_category = "materials"; // engineers never raise subcontractor POs
       }
-      const res = await issuePO(db, b);
+      const res = await issuePO(db, b, env);
       return jr(res, res.error ? 400 : 200);
     }
 
@@ -496,7 +536,7 @@ async function nextPoNumber(db) {
   return row.next;
 }
 
-async function issuePO(db, body) {
+async function issuePO(db, body, env) {
   const status = await getSystemStatus(db);
   if (status.mode === "disabled") return { error: status.message };
   if (status.mode === "office_hours" && body.source !== "office") return { error: status.message };
@@ -520,12 +560,17 @@ async function issuePO(db, body) {
     if (!body.description || !body.description.trim()) return { error: "Description is required" };
     const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
     if (!supplierCheck) return { error: "Supplier must be picked from the list" };
-    // Engineers may only raise against a KNOWN site (or a company vehicle) — never
-    // a new/free-text site name, so job costing stays clean. A vehicle-tagged PO
-    // carries vehicle_reg and its site box is just a readable label, so skip it.
-    if (hasSite && !(body.vehicle_reg && body.vehicle_reg.trim())) {
-      const siteCheck = await db.prepare(`SELECT 1 FROM sites WHERE name = ? AND active = 1`).bind(body.site.trim()).first();
-      if (!siteCheck) return { error: "Site must be chosen from the known-sites list. Ask the office to add a new site first." };
+    // Engineers raise ONLY against: a company vehicle (vehicle_reg, AdBlue/parts),
+    // a reactive job via the job-card "Raise PO for this job" link (job_id ties
+    // it), or a LIVE PROJECT site. A plainly-typed site (reactive or otherwise) is
+    // rejected — reactive POs must come from the job card so they tie to a job and
+    // job costing stays clean.
+    const hasVehicle = body.vehicle_reg && String(body.vehicle_reg).trim();
+    const hasJob = body.job_id && String(body.job_id).trim();
+    if (hasSite && !hasVehicle && !hasJob) {
+      if (!(env && await isLiveProjectSite(env, body.site.trim()))) {
+        return { error: "Engineers can only raise POs against a live project or your vehicle. For a reactive job, use “Raise PO for this job” inside the job card." };
+      }
     }
   }
   const issuedAt = (/* @__PURE__ */ new Date()).toISOString();

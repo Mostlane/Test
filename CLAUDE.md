@@ -560,6 +560,32 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   handles adding an engineer to an ALREADY-announced job. The office board
   (sla-main) shows a 🕒/⛓ badge on gated jobs (from `decorate.releaseView`);
   engineers never receive them. Editor is `sla-jobedit.js?v=12`.
+  **Multi-day project drip series (Aug 2026):** a project can be assigned to an
+  engineer for **N days at once**, drip-fed so they can't see too far ahead. From
+  **project-hub.html** "Create a job" → tick **📆 Send as multiple days**: first
+  day, how many days, daily start/finish, **reveal time** (the evening before),
+  include-weekends. The client builds each day's absolute `scheduledAt` (London)
+  and POSTs **/project/create-day-series** (projects-api.js), which creates one
+  SLA job per day linked by **`job.seriesId`**, each with
+  `release:{mode:"dayBefore", hour:<revealHour>}` (the dayBefore release hour is
+  now **configurable** — `londonHourDayBefore`). The office sees every day in the
+  scheduler; the engineer only sees a day from the reveal time the evening before.
+  **Auto skip-on-clash safeguard:** a series day is DROPPED (never revealed) if the
+  engineer already has another job that day — `engineerHasOtherJobThatDay` gates
+  `releaseVisibleNow` live, and `sweepJobReleases` persists `job.seriesSkipped=true`
+  at release time (so a forgotten day can't double-book). Skipped days are just
+  dropped (no auto-extend, per Jamie). **Stop** the drip any time from the hub
+  (**/project/series/stop** → `stopSeries` deletes days not yet revealed; visible
+  days stay). The hub lists each series with per-day hidden/visible/skipped badges
+  (**GET /project/series**). **Interactive clash prompt (`sla-jobedit.js?v=20`):**
+  when the office allocates a job to an engineer who has a series day that date
+  (checked via **GET /sla/series-clash?engineer=&date=&excludeId=**), a modal
+  offers **Fit the project after this job** (default — shifts the series day's
+  start to this job's finish, keeping its set finish time), **Skip that day**
+  (`seriesSkipped=true`), or **Leave it** (the auto-safeguard skips it anyway).
+  `seriesId`/`seriesSkipped` + `release.hour` are threaded through
+  createOrUpdateJobFromPayload + patchJob and surfaced on `releaseView`
+  (mode "skipped" / `series:true`).
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).
@@ -2162,6 +2188,17 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   **project-hub.html** shows a matching **👥 Who can see this project** card
   (admins only — same UI) saving via **POST /project/update** `{visibleTo:[…]}`.
   Case-insensitive match; `sanitiseVisible` dedupes/caps 200.
+- **Archive / Restore (Aug 2026):** status is `live | complete | archived` and the
+  status change already cascades (deactivates the Pxxxx site → compliance_stores,
+  PO_DB via `setPOSiteActive`, SiteLog geofence; back to live/complete
+  re-activates). **project-hub.html** now has an explicit **🗄 Archive** / **♻
+  Restore** button in the header (admins) next to the live/complete/archived
+  dropdown — `setStatus()` confirms an archive (MLUI), POSTs /project/update
+  `{status}`, toasts, and re-renders the badge (the old bare dropdown gave no
+  feedback, so it read as "can't archive"). **projects-live.html** already tabs
+  Live / Complete / Archived / All (defaults Live), so an archived project drops
+  off the live list. **Archiving also removes the project from the engineer PO
+  picker** (po.js `liveProjectNames` is status='live' only).
 - **Endpoints (routes/projects-api.js, mounted /project + /projects):** GET
   /projects/list, GET /project/get, POST /project/create|update|link|todo|delete
   (manage=ProjectsAdmin|FullAccess), GET /project/docs, POST /project/doc (multipart)
@@ -3030,15 +3067,39 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
      `po-admin.html` (system config + suppliers/subcontractors/trades/sites/
      closures — the obsolete Engineers/Office-Users token-link tabs were dropped).
      CSV + print are done CLIENT-side (no un-authenticated new tab).
-   - **Engineers can ONLY raise against a KNOWN site (Aug 2026):** a free-text /
-     new site name is rejected so job costing stays on one clean name.
-     Enforced client-side (po-raise.html: the "No match" dropdown says to ask the
-     office to add the site, and `submitPO` blocks a typed site not in `SITES`)
-     AND server-side (po.js `issuePO` engineer branch: a provided `site` must
-     exist in PO_DB `sites` active — **a vehicle-tagged PO carries `vehicle_reg`
-     and its site box is just a label, so it's exempt**). Office POs are
-     UNAFFECTED (the office manages the site list). New sites are added on
-     po-admin.html → Sites.
+   - **Engineers raise ONLY against a live project / their vehicle / a job-linked
+     reactive PO (Aug 2026):** from the standalone po-raise.html form an engineer
+     can pick only a **LIVE PROJECT** (as a site) or a **company vehicle** — no
+     free-text sites, and no loose reactive/incident POs. A REACTIVE maintenance
+     PO must be raised from the job card's **"Raise PO for this job"** button,
+     which opens po-raise.html with `#mlpo=` carrying the job's `job_id` (+ site +
+     ref) so the PO ties to the job for costing. Enforced client-side
+     (po-raise.html: options come from **GET /po/api/raise-options** = live
+     projects + **only the engineer's assigned van + shared/pool vehicles** (a
+     `vehicles.pool` flag, self-migrating in fleet.js — e.g. the tippers any
+     engineer may raise against; getRaiseOptions filters `v.mine || v.pool`); the picker
+     has a type-ahead AND a **▾ All** browse-all dropdown grouped Live projects /
+     Your vehicle / Shared vehicles; the incident field is hidden on a fresh open
+     and only revealed read-only when prefilled from a job link; `submitPO` allows
+     only a project, a vehicle, or a `job_id`-carrying reactive PO) AND server-side
+     (po.js `issuePO` engineer branch: allow if `vehicle_reg` OR `job_id` present,
+     else `site` must be a **live project** via `isLiveProjectSite(env, name)`
+     which reads the portal `projects` table status='live'). Office POs are
+     UNAFFECTED (the office manages the full site list on po-admin.html → Sites).
+     `getRaiseOptions`/`liveProjectNames`/`isLiveProjectSite` are the po.js helpers;
+     they read env.DB (projects + users.vehicle_assigned).
+   - **Shared/pool vehicles (Aug 2026):** an engineer's vehicle options are their
+     **assigned van + any shared/pool vehicle** (the tippers) — `vehicles.pool`
+     (self-migrating in fleet.js; the two tippers HN69 SYP + WM73 VFL are pool=1).
+     getRaiseOptions filters `v.mine || v.pool`; po-raise groups **Your vehicle /
+     Shared vehicles**. Mark a new shared vehicle with `UPDATE vehicles SET pool=1`.
+   - **Job-card "Raise PO for this job" now opens the IN-PORTAL form (Aug 2026):**
+     the button on **job-view.html** + **engineer-job.html** (and my-day.html's
+     generic "Raise a PO" link) build **`po-raise.html#mlpo=<base64(JSON)>`** —
+     NOT the old `/po-config` personal URL to the standalone worker (that opened
+     the retired PO system). The reactive PO carries `job_id` so it ties to the
+     job and bypasses the project-only rule (po-raise reveals the read-only job
+     ref + submits). `/po-config` + `profile.poUrl` are fully dead now.
    - **Merge duplicate sites (Aug 2026):** the same place saved under several
      names splits its costing. po-admin.html → Sites → **"Merge duplicate sites"**
      card: tick the duplicates, pick the one site to keep, Merge. Backend

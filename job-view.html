@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=19"></script>
+  <script src="sla-jobedit.js?v=20"></script>
   <script src="firestop-form.js?v=1"></script>
   <style>
     :root{
@@ -1123,36 +1123,25 @@ async function loadJob(){
   }
 }
 
-/* "Raise PO" opens this user's personal link on the PO system, carrying the
-   job details in the URL (#mlpo=…) so the PO can pre-fill everything except
-   the materials and the supplier. */
-async function fillPoButton(){
+/* "Raise PO" opens the in-portal PO raise form (po-raise.html), carrying the
+   job details on the URL (#mlpo=…) so the PO pre-fills the site + job link
+   (job_id ties it to the job for costing) — the engineer just adds the
+   supplier + materials. */
+function fillPoButton(){
   const btn = $("poBtn");
   if(!btn || btn.dataset.done) return;
   btn.dataset.done = "1";
   try{
-    const t = localStorage.getItem("mostlaneToken");
-    const r = await fetch(window.MOSTLANE_API + "/po-config", { headers: t ? { "Authorization": "Bearer " + t } : {} });
-    const c = await r.json().catch(() => ({}));
-    if(r.ok && c.ok && c.url){
-      let href = c.url;
-      try{
-        const payload = {
-          jobRef: job?.helpdeskRef || job?.id || "",
-          jobId: job?.id || "",
-          site: job?.siteName || job?.siteCode || "",
-          address: [job?.address, job?.postcode].filter(Boolean).join(", "),
-          description: job?.description || "",
-          by: getUser()
-        };
-        href += (href.includes("#") ? "&" : "#") + "mlpo=" +
-                btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-      }catch(e){}
-      btn.href = href;
-      return;
-    }
-  }catch(e){}
-  btn.style.display = "none";   // no PO link on this account — hide the button
+    const payload = {
+      jobRef: job?.helpdeskRef || job?.id || "",
+      jobId: job?.id || "",
+      site: job?.siteName || job?.siteCode || "",
+      address: [job?.address, job?.postcode].filter(Boolean).join(", "),
+      description: job?.description || "",
+      by: getUser()
+    };
+    btn.href = "po-raise.html#mlpo=" + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  }catch(e){ btn.href = "po-raise.html"; }
 }
 
 /* ---- Site details (from the job, else looked up in the sites DB) ---- */

@@ -59,6 +59,22 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* GET /sla/categories — custom job categories (any session, so every page can
      merge them into its status list). POST — replace the whole list (SLA admin). */
+  // Does an engineer already have a PROJECT drip-series day on a given date? Used
+  // by the editor to offer "fit the project after this job / skip that day" when
+  // the office allocates a clashing job.
+  if (subpath === "/series-clash" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const date = searchParams.get("date") || "";
+    const excludeId = searchParams.get("excludeId") || "";
+    if (!engineer || !date) return jsonResponse({ clash: null }, headers);
+    const eid = normId(engineer);
+    const all = await listJobs(env, tenantId);
+    const hit = all.find(j => j.seriesId && !j.seriesSkipped && j.id !== excludeId
+      && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date
+      && assignedList(j).some(a => normId(a) === eid));
+    return jsonResponse({ clash: hit ? { id: hit.id, description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
+  }
+
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
@@ -2053,19 +2069,38 @@ function londonInstant(y, mo, d, h, mi) {
   const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
   return guess - londonOffsetMs(guess);   // one correction is exact except across the DST second
 }
-function londonFivePmDayBefore(schedISO) {
+function londonHourDayBefore(schedISO, hour) {
   const s = Date.parse(schedISO); if (!Number.isFinite(s)) return null;
   const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(s)).split("-").map(Number);
   const prev = new Date(Date.UTC(y, m - 1, d)); prev.setUTCDate(prev.getUTCDate() - 1);
-  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), 17, 0);
+  const h = Number.isFinite(Number(hour)) ? Math.max(0, Math.min(23, Number(hour))) : 17;
+  return londonInstant(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate(), h, 0);
 }
 // The instant a time-based release becomes visible (ms), or null for now/afterPrev.
 function releaseInstant(job) {
   const r = job && job.release;
   if (!r || !r.mode || r.mode === "now") return null;
   if (r.mode === "at") { const t = Date.parse(r.at); return Number.isFinite(t) ? t : null; }
-  if (r.mode === "dayBefore") return job.scheduledAt ? londonFivePmDayBefore(job.scheduledAt) : null;
+  // dayBefore: the evening before the scheduled day, at r.hour (Europe/London,
+  // default 17:00) — used by the project multi-day drip feed.
+  if (r.mode === "dayBefore") return job.scheduledAt ? londonHourDayBefore(job.scheduledAt, r.hour) : null;
   return null;
+}
+// A project multi-day "series" job is auto-SKIPPED (dropped) if the engineer
+// picked up another job that same day — the safeguard so a forgotten drip day
+// never double-books. Any other active, non-cancelled job for the same engineer
+// on the same day (outside this series) counts as the clash.
+function engineerHasOtherJobThatDay(job, allJobs) {
+  if (!job || !job.scheduledAt || !job.seriesId) return false;
+  const day = new Date(job.scheduledAt).toISOString().slice(0, 10);
+  const engs = new Set(assignedList(job).map(normId));
+  if (!engs.size) return false;
+  return (allJobs || []).some(o => o.id !== job.id
+    && o.seriesId !== job.seriesId
+    && !o.seriesSkipped
+    && String(o.status || "").toLowerCase() !== "cancelled"
+    && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day
+    && assignedList(o).some(a => engs.has(normId(a))));
 }
 const RELEASE_DONE = new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function jobIsFinished(job) { return RELEASE_DONE.has(String(job.status || "").toLowerCase()); }
@@ -2086,6 +2121,9 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
 }
 // Is the job visible to its engineers right now? (allJobs only needed for afterPrev)
 function releaseVisibleNow(job, allJobs) {
+  if (job && job.seriesSkipped) return false;   // dropped project day — never shown
+  // A project series day yields to any other job the engineer has that day.
+  if (job && job.seriesId && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
   const r = job && job.release;
   if (!r || !r.mode || r.mode === "now") return true;
   if (r.mode === "at" || r.mode === "dayBefore") { const t = releaseInstant(job); return t == null || t <= Date.now(); }
@@ -2150,6 +2188,22 @@ async function pushJobToEngineers(env, tid, job, engineerIds) {
 }
 // First-time announcement: if the job is visible + has engineers + hasn't been
 // announced, push ALL its engineers and mark it notified (persisting the flag).
+// Stop a project drip "series": remove every day that hasn't gone visible to the
+// engineer yet (releaseNotified false, not already skipped). Released / past days
+// are kept (the engineer already has them). Returns how many were removed.
+export async function stopSeries(env, tenantId, seriesId) {
+  if (!seriesId) return { removed: 0, total: 0 };
+  const db = tenantDB(env, tenantId);
+  const jobs = await listJobs(env, tenantId);
+  const inSeries = jobs.filter(j => j.seriesId === seriesId);
+  const kill = inSeries.filter(j => !j.releaseNotified && !j.seriesSkipped);
+  let removed = 0;
+  for (const j of kill) {
+    try { await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, j.id).run(); removed++; } catch {}
+  }
+  return { removed, total: inSeries.length };
+}
+
 export async function reconcileRelease(env, tid, job, allJobs) {
   if (!job || job.releaseNotified) return false;
   const engs = assignedList(job);
@@ -2165,8 +2219,19 @@ export async function reconcileRelease(env, tid, job, allJobs) {
 export async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
-    if (j.releaseNotified || !assignedList(j).length) continue;
+    if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
     const r = j.release; if (!r || !r.mode || r.mode === "now") continue;
+    // Project-series safeguard: when a drip day's release time has arrived but
+    // the engineer already has another job that day, permanently DROP it (skip)
+    // rather than announcing it — so a forgotten day never double-books.
+    if (j.seriesId && engineerHasOtherJobThatDay(j, jobs)) {
+      const t = releaseInstant(j);
+      if (t == null || t <= Date.now()) {
+        j.seriesSkipped = true;
+        await saveJob(env, tid, j).catch(() => {});
+      }
+      continue;
+    }
     await reconcileRelease(env, tid, j, jobs).catch(() => {});
   }
 }
@@ -2392,10 +2457,16 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Visibility scheduling (carried across re-saves). A changed release re-arms
     // the announcement push; releaseNotified tracks whether it has fired.
     release: (body.release !== undefined
-      ? (body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || undefined } : undefined)
+      ? (body.release && body.release.mode && body.release.mode !== "now"
+          ? { mode: body.release.mode, at: body.release.at || undefined, hour: (body.release.hour != null ? Number(body.release.hour) : undefined) }
+          : undefined)
       : existing?.release),
     releaseNotified: (body.release !== undefined && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null))
       ? false : (existing?.releaseNotified || false),
+    // Project multi-day drip "series": seriesId links the days; seriesSkipped
+    // permanently drops a day (clash safeguard). Both preserved across re-saves.
+    seriesId: body.seriesId !== undefined ? (String(body.seriesId || "") || null) : (existing?.seriesId ?? null),
+    seriesSkipped: body.seriesSkipped !== undefined ? !!body.seriesSkipped : (existing?.seriesSkipped || false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -2440,7 +2511,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.release !== undefined) {
     const prev = job.release ? JSON.stringify(job.release) : "";
     if (!patch.release || !patch.release.mode || patch.release.mode === "now") job.release = undefined;
-    else job.release = { mode: patch.release.mode, at: patch.release.at || undefined };
+    else job.release = { mode: patch.release.mode, at: patch.release.at || undefined, hour: (patch.release.hour != null ? Number(patch.release.hour) : undefined) };
     if ((job.release ? JSON.stringify(job.release) : "") !== prev) job.releaseNotified = false;
   }
   // Every job gets a finish time. If the start moves and no explicit end came
@@ -2476,6 +2547,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
+  if (patch.seriesId !== undefined) job.seriesId = String(patch.seriesId || "") || null;
+  if (patch.seriesSkipped !== undefined) job.seriesSkipped = !!patch.seriesSkipped;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
@@ -3587,9 +3660,11 @@ function decorateJobWithLiveSla(job) {
   // Release info for the office board (engineers never receive hidden jobs, so
   // this only surfaces on the admin views): mode, computed instant, label.
   let releaseView;
-  if (job.release && job.release.mode && job.release.mode !== "now") {
+  if (job.seriesSkipped) {
+    releaseView = { mode: "skipped", at: null, label: "Skipped — engineer had another job that day", series: true };
+  } else if (job.release && job.release.mode && job.release.mode !== "now") {
     const t = releaseInstant(job);
-    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job) };
+    releaseView = { mode: job.release.mode, at: t ? new Date(t).toISOString() : null, label: releaseLabel(job), series: !!job.seriesId };
   }
   return { ...job, releaseView, sla: { state, now: new Date().toISOString() } };
 }

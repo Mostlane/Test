@@ -27,7 +27,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import * as sitelogApi from "./sitelog-api.js";
-import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs, reconcileRelease, notifyNewlyAssigned, stopSeries } from "./sla.js";
 import { ratesMap, writeProjFin, renameProjFinKey, deleteProjFinKey } from "./costing.js";
 import { syncSiteToSiteLog, removeSiteFromSiteLog, syncSiteToCompliance, setPOSiteActive } from "./sites.js";
 
@@ -644,6 +644,96 @@ export async function handle(request, env, ctx, url, sess) {
     // notifyNewlyAssigned(before, after): brand-new job → before is null so the
     // release reconciler above sends the assignment push.
     return json({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status }, {}, env, request);
+  }
+
+  // ── Multi-day project assignment ("drip series") ──────────────────────────
+  // Creates one job per day for the same project + engineer(s), all linked by a
+  // seriesId. Each day is HIDDEN from the engineer until `releaseHour` the
+  // evening before (Europe/London) — so they can't see too far ahead — but the
+  // office sees them all in the scheduler. The client sends each day already
+  // resolved to an absolute scheduledAt (it knows London time) + duration.
+  if (path === "/project/create-day-series" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await getRow(String(b.id || ""));
+    if (!row) return error("Project not found", 404, env, request);
+    const data = parse(row);
+    const description = String(b.description || "").trim();
+    if (!description) return error("Description required", 400, env, request);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.map(s => String(s || "").trim()).filter(Boolean) : [];
+    if (!engineers.length) return error("Pick at least one engineer", 400, env, request);
+    const days = Array.isArray(b.days)
+      ? b.days.map(d => ({ scheduledAt: d.scheduledAt, durationMinutes: d.durationMinutes }))
+        .filter(d => d.scheduledAt && Number.isFinite(Date.parse(d.scheduledAt))) : [];
+    if (!days.length) return error("No days given", 400, env, request);
+    if (days.length > 60) return error("Too many days (max 60)", 400, env, request);
+    const releaseHour = Number.isFinite(Number(b.releaseHour)) ? Math.max(0, Math.min(23, Number(b.releaseHour))) : 17;
+    const seriesId = "SER-" + (crypto.randomUUID ? crypto.randomUUID().slice(0, 12) : Math.abs(Date.parse(days[0].scheduledAt)).toString(36) + engineers[0]);
+    // Same site details the single create-job uses.
+    let siteRow = null;
+    try {
+      siteRow = await env.DB.prepare(
+        "SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND client='projects' AND site_number=?"
+      ).bind(tenantId, row.number).first();
+    } catch {}
+    let siteData = {}; try { if (siteRow && siteRow.data) siteData = JSON.parse(siteRow.data); } catch {}
+    const base = {
+      description, projectId: row.id, seriesId,
+      siteCode: row.number, siteName: row.name, storeType: "projects",
+      address: (siteRow && [siteData.address1, siteData.town, siteData.county, siteRow.postcode].filter(Boolean).join(", ")) || "",
+      telephone: siteData.telephone || siteData.phone || "",
+      postcode: (siteRow && siteRow.postcode) || data.postcode || "",
+      lat: data.lat != null ? data.lat : (siteData.lat != null ? siteData.lat : undefined),
+      lon: data.lon != null ? data.lon : (siteData.lng != null ? siteData.lng : (siteData.lon != null ? siteData.lon : undefined)),
+      mileageFromHQ: data.mileageOneWay != null ? data.mileageOneWay : undefined,
+      assignedEngineers: engineers,
+      requiresRA: b.requiresRA === true, requiresSignature: b.requiresSignature === true,
+      requiresPhoto: b.requiresPhoto === true, requiresNote: b.requiresNote === true,
+      changedBy: me,
+    };
+    const ids = [];
+    for (const d of days) {
+      const payload = { ...base,
+        scheduledAt: new Date(d.scheduledAt).toISOString(),
+        durationMinutes: d.durationMinutes ? Math.max(15, Number(d.durationMinutes)) : undefined,
+        release: { mode: "dayBefore", hour: releaseHour },
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      ids.push(job.id);
+      // Announce any day whose release has already passed (e.g. today's).
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
+    }
+    return json({ ok: true, seriesId, count: ids.length, ids }, {}, env, request);
+  }
+
+  // List this project's drip series (grouped days) — for the hub's manage view.
+  if (path === "/project/series" && method === "GET") {
+    const pid = url.searchParams.get("id") || "";
+    const row = await getRow(pid);
+    if (!row || !canSeeProject(parse(row), me, canManage)) return error("Project not found", 404, env, request);
+    const jobs = (await listJobs(env, tenantId)).filter(j => j.seriesId && j.projectId === row.id);
+    const byId = {};
+    for (const j of jobs) {
+      const s = byId[j.seriesId] || (byId[j.seriesId] = { seriesId: j.seriesId, engineers: [], releaseHour: (j.release && j.release.hour != null ? j.release.hour : 17), days: [] });
+      if (!s.engineers.length) s.engineers = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+      s.days.push({ id: j.id, scheduledAt: j.scheduledAt || null, scheduledEnd: j.scheduledEnd || null,
+        status: j.status || "Pending", released: !!j.releaseNotified, skipped: !!j.seriesSkipped });
+    }
+    const series = Object.values(byId).map(s => {
+      s.days.sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
+      s.pendingDays = s.days.filter(d => !d.released && !d.skipped).length;
+      s.description = (jobs.find(j => j.seriesId === s.seriesId) || {}).description || "";
+      return s;
+    }).sort((a, b) => String(a.days[0]?.scheduledAt).localeCompare(String(b.days[0]?.scheduledAt)));
+    return json({ ok: true, series, canManage }, {}, env, request);
+  }
+
+  // Stop a drip series — removes every day the engineer hasn't seen yet.
+  if (path === "/project/series/stop" && method === "POST") {
+    if (!canManage) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const res = await stopSeries(env, tenantId, String(b.seriesId || ""));
+    return json({ ok: true, ...res }, {}, env, request);
   }
 
   // ── Site visits for this project (jobs + per-engineer time segments) ──────

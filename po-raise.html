@@ -171,17 +171,20 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; 
     <div id="form-area" style="display:none">
       <div class="card fade-in">
         <h1 style="margin-bottom:4px">Raise a PO</h1>
-        <p class="muted">Outside office hours only. Enter a site or an incident number, plus supplier and description.</p>
+        <p class="muted">Outside office hours only. Pick a <strong>live project</strong> or <strong>your vehicle</strong>, then supplier and description. For a reactive maintenance job, raise the PO from the <strong>“Raise PO for this job”</strong> button inside the job card so it ties to the job.</p>
         <div id="prefill-note" style="display:none;margin-top:12px;padding:10px 12px;border-radius:10px;background:#d6f5dd;color:#1e6c33;font-size:13px;font-weight:600"></div>
         <div class="field" style="position:relative;margin-top:16px">
-          <label>Site <span style="font-weight:400;color:#5a6677">(or a company vehicle)</span></label>
-          <input id="site" type="text" placeholder="Start typing a site or vehicle reg..." autocomplete="off" oninput="onSiteInput()" onfocus="filterSites()" onblur="setTimeout(hideSites,200)">
+          <label>Project or vehicle</label>
+          <div style="display:flex;gap:8px;align-items:stretch">
+            <input id="site" type="text" placeholder="Start typing a project or your vehicle…" autocomplete="off" style="flex:1;min-width:0" oninput="onSiteInput()" onfocus="filterSites()" onblur="setTimeout(hideSites,200)">
+            <button type="button" id="browseBtn" onclick="toggleBrowse(event)" title="Show all" style="flex:0 0 auto;width:auto;padding:0 14px;background:#eef2f7;color:#003366;border:1px solid #c9d2dd;border-radius:10px;font-weight:700">▾ All</button>
+          </div>
           <div id="site-dropdown" class="ac-dropdown" style="display:none"></div>
           <input id="vehicle_reg" type="hidden">
         </div>
-        <div class="field">
-          <label>Incident number <span style="font-weight:400;color:#5a6677">(for incident jobs — use instead of, or as well as, a site)</span></label>
-          <input id="incident_no" type="text" placeholder="e.g. INC123456" autocomplete="off">
+        <div class="field" id="incident-field" style="display:none">
+          <label>Job reference <span style="font-weight:400;color:#5a6677">(from the job card)</span></label>
+          <input id="incident_no" type="text" autocomplete="off" readonly style="background:#f4f6f9">
           <input id="job_id" type="hidden"><input id="job_ref" type="hidden">
         </div>
         <div class="field" style="position:relative">
@@ -208,18 +211,17 @@ const API = window.MOSTLANE_API;
 function authFetch(path, opts){ opts=opts||{}; opts.headers=Object.assign({"Authorization":"Bearer "+localStorage.getItem("mostlaneToken")}, opts.headers||{}); return fetch(API+path, opts); }
 async function boot(){ try{ var me=await authFetch("/auth/me").then(function(r){return r.json();}); var u=me&&me.user||{};if(localStorage.getItem("mostlaneViewAsReal")){try{u=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}")||u;}catch(e){}} if(!(u.StaffType==="field"||u.FullAccess==="Yes"||u.PurchaseOrders==="Yes")){ document.getElementById("poGate").innerHTML="You don’t have access to raise POs."; return; } }catch(e){ location.href="login.html"; return; } document.getElementById("poGate").style.display="none"; document.getElementById("poApp").style.display="block"; init(); }
 let SUPPLIERS = [];
-let SITES = [];
-let VEHICLES = [];
+let PROJECTS = [];   // live projects an engineer may raise against
+let VEHICLES = [];   // company vehicles (their assigned one flagged .mine)
 async function init() {
-  const [status, suppliers, sites, vehicles] = await Promise.all([
+  const [status, suppliers, opts] = await Promise.all([
     authFetch('/po/api/status').then(r => r.json()),
     authFetch('/po/api/suppliers').then(r => r.json()),
-    authFetch('/po/api/sites').then(r => r.json()),
-    authFetch('/po/api/vehicles').then(r => r.json()).catch(() => [])
+    authFetch('/po/api/raise-options').then(r => r.json()).catch(() => ({ projects: [], vehicles: [] }))
   ]);
   SUPPLIERS = suppliers;
-  SITES = sites;
-  VEHICLES = Array.isArray(vehicles) ? vehicles : [];
+  PROJECTS = Array.isArray(opts && opts.projects) ? opts.projects : [];
+  VEHICLES = Array.isArray(opts && opts.vehicles) ? opts.vehicles : [];
   const statusArea = document.getElementById('status-area');
   if (status.mode === 'disabled') { statusArea.innerHTML = '<div class="card fade-in"><div class="alert warn">' + escapeHtml(status.message) + '</div></div>'; loadMyPOs(true); return; }
   if (status.mode === 'office_hours') {
@@ -260,6 +262,10 @@ function prefillFromJobLink() {
     const jobRefField = document.getElementById('job_ref');
     if (d.jobId && jobIdField) { jobIdField.value = d.jobId; filled = true; }
     if (d.jobRef && jobRefField) { jobRefField.value = d.jobRef; }
+    // A reactive job PO came in via the job card — reveal the (read-only) job
+    // reference so the engineer sees what it's tied to. Fresh manual opens keep
+    // it hidden (reactive POs must come from the job card).
+    if (d.jobId) { const f = document.getElementById('incident-field'); if (f) f.style.display = 'block'; }
     if (filled) {
       const note = document.getElementById('prefill-note');
       if (note) {
@@ -281,29 +287,50 @@ function onSiteInput() {
   }
   filterSites();
 }
-function filterSites() {
+// Build the dropdown from live projects + vehicles. Pass showAll=true (the ▾ All
+// button) to list everything grouped; otherwise it filters by what's typed.
+function renderOptions(showAll) {
   const input = document.getElementById('site');
   const dd = document.getElementById('site-dropdown');
   const q = input.value.trim().toLowerCase();
-  if (!q) { dd.style.display = 'none'; return; }
-  const sites = SITES.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
-  // Vehicles match on reg or make/model, and show alongside the sites
   const norm = q.replace(/\s+/g, '');
-  const vehicles = VEHICLES.filter(v =>
-    v.reg.toLowerCase().replace(/\s+/g, '').includes(norm) || (v.desc || '').toLowerCase().includes(q)
-  ).slice(0, 6);
-  if (!sites.length && !vehicles.length) {
-    dd.innerHTML = '<div class="ac-empty">No match — sites must be picked from the list. Ask the office to add a new site first.</div>';
+  const projMatch = p => showAll || !q || p.name.toLowerCase().includes(q);
+  const vehMatch = v => showAll || !q || v.reg.toLowerCase().replace(/\s+/g, '').includes(norm) || (v.desc || '').toLowerCase().includes(q);
+  const projects = PROJECTS.filter(projMatch);
+  // Your own van(s) first, then the rest of the fleet.
+  const vehicles = VEHICLES.filter(vehMatch).slice().sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0));
+  if (!projects.length && !vehicles.length) {
+    dd.innerHTML = '<div class="ac-empty">' + (PROJECTS.length || VEHICLES.length
+      ? 'No match. Reactive jobs: raise the PO from the job card instead.'
+      : 'No live projects or vehicles available.') + '</div>';
     dd.style.display = 'block';
     return;
   }
-  const vHtml = vehicles.map(v =>
-    '<div class="ac-item" onmousedown="pickVehicle(\''+escapeJsAttr(v.reg)+'\',\''+escapeJsAttr(v.desc || '')+'\')">'
-    + '🚐 ' + highlight(v.reg, q) + (v.desc ? ' <span class="muted">— ' + escapeHtml(v.desc) + '</span>' : '')
-    + '</div>').join('');
-  const sHtml = sites.map(s => '<div class="ac-item" onmousedown="pickSite(\''+escapeJsAttr(s.name)+'\')">'+highlight(s.name, q)+'</div>').join('');
-  dd.innerHTML = vHtml + sHtml;
+  const hdr = t => '<div class="ac-empty" style="font-weight:700;color:#003366;background:#f4f6f9">' + t + '</div>';
+  let html = '';
+  if (projects.length) {
+    html += hdr('Live projects');
+    html += projects.map(p => '<div class="ac-item" onmousedown="pickSite(\'' + escapeJsAttr(p.name) + '\')">📁 ' + (q ? highlight(p.name, q) : escapeHtml(p.name)) + '</div>').join('');
+  }
+  // Your assigned van first, then shared/pool vehicles (e.g. the tippers).
+  const mine = vehicles.filter(v => v.mine);
+  const shared = vehicles.filter(v => !v.mine && v.pool);
+  const vRow = v => '<div class="ac-item" onmousedown="pickVehicle(\'' + escapeJsAttr(v.reg) + '\',\'' + escapeJsAttr(v.desc || '') + '\')">🚐 '
+    + (q ? highlight(v.reg, q) : escapeHtml(v.reg)) + (v.desc ? ' <span class="muted">— ' + escapeHtml(v.desc) + '</span>' : '') + '</div>';
+  if (mine.length) { html += hdr('Your vehicle'); html += mine.map(vRow).join(''); }
+  if (shared.length) { html += hdr('Shared vehicles'); html += shared.map(vRow).join(''); }
+  dd.innerHTML = html;
   dd.style.display = 'block';
+}
+function filterSites() { const dd = document.getElementById('site-dropdown'); dd.dataset.all = ''; renderOptions(false); }
+// ▾ All — show the whole list regardless of what's typed. Toggles.
+function toggleBrowse(e) {
+  if (e) e.preventDefault();
+  const dd = document.getElementById('site-dropdown');
+  if (dd.style.display === 'block' && dd.dataset.all === '1') { hideSites(); return; }
+  dd.dataset.all = '1';
+  renderOptions(true);
+  document.getElementById('site').focus();
 }
 // Picking a van stamps vehicle_reg and puts a readable label in the site box,
 // so the PO still reads sensibly in the log, reports and exports.
@@ -315,7 +342,7 @@ function pickVehicle(reg, desc) {
   hideSites();
 }
 function pickSite(name) { document.getElementById('site').value = name; document.getElementById('vehicle_reg').value = ''; pickedVehicleLabel = null; hideSites(); }
-function hideSites() { document.getElementById('site-dropdown').style.display = 'none'; }
+function hideSites() { const dd = document.getElementById('site-dropdown'); dd.style.display = 'none'; dd.dataset.all = ''; }
 function filterSuppliers() {
   const input = document.getElementById('supplier');
   const dd = document.getElementById('supplier-dropdown');
@@ -364,16 +391,18 @@ async function submitPO(btn) {
   const incident = document.getElementById('incident_no').value.trim();
   const supplier = document.getElementById('supplier').value.trim();
   const description = document.getElementById('description').value.trim();
-  if (!site && !incident) { alert('Enter a site or an incident number'); return; }
+  const vehicleReg = (document.getElementById('vehicle_reg') || {}).value || '';
+  const jobId = (document.getElementById('job_id') || {}).value || '';
+  if (!site) { alert('Pick a live project or your vehicle'); return; }
   if (!supplier) { alert('Supplier is required'); return; }
   if (!description) { alert('Description is required'); return; }
   const valid = SUPPLIERS.some(s => s.name === supplier);
   if (!valid) { alert('Please pick a supplier from the dropdown list'); return; }
-  // A site must be one of the known sites (or a company vehicle) — no free-text
-  // new sites, so job costing stays on one clean site name.
-  const vehicleReg = (document.getElementById('vehicle_reg') || {}).value || '';
-  if (site && !vehicleReg && !SITES.some(s => s.name === site)) {
-    alert('Site must be picked from the known-sites list. Ask the office to add a new site first.'); return;
+  // Engineers raise ONLY against a live project, their vehicle, or a reactive job
+  // opened from the job card (which carries the job id). A plainly-typed site is
+  // rejected — reactive POs must come from the job card so they tie to a job.
+  if (!vehicleReg && !jobId && !PROJECTS.some(p => p.name === site)) {
+    alert('Pick a live project or your vehicle from the list. For a reactive job, raise the PO from the job card instead.'); return;
   }
   submittingEngineerPO = true;
   if (btn) { btn.disabled = true; btn.textContent = 'Issuing...'; }
