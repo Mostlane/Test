@@ -21400,6 +21400,37 @@ async function getVehicles(env) {
     return [];
   }
 }
+async function liveProjectNames(env) {
+  const db = env.DB;
+  if (!db) return [];
+  try {
+    const rows = await db.prepare(
+      `SELECT name FROM projects WHERE tenant_id IN ('1.0','1',1) AND (status='live' OR status IS NULL) ORDER BY name`
+    ).all();
+    return (rows.results || []).map((r) => String(r.name || "").trim()).filter(Boolean);
+  } catch (e) {
+    console.error("PO live-project lookup failed:", e.message);
+    return [];
+  }
+}
+async function isLiveProjectSite(env, name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return false;
+  return (await liveProjectNames(env)).some((p) => p.toLowerCase() === n);
+}
+async function getRaiseOptions(env, username) {
+  const projects = (await liveProjectNames(env)).map((name) => ({ name }));
+  let mineReg = "";
+  try {
+    const u = await env.DB.prepare(
+      `SELECT vehicle_assigned FROM users WHERE tenant_id IN ('1.0','1',1) AND lower(username)=lower(?)`
+    ).bind(String(username || "")).first();
+    mineReg = String(u && u.vehicle_assigned || "").trim().toUpperCase().replace(/\s+/g, "");
+  } catch (e) {
+  }
+  const vehicles = (await getVehicles(env)).map((v) => ({ ...v, mine: !!mineReg && v.reg.replace(/\s+/g, "") === mineReg }));
+  return { projects, vehicles };
+}
 async function handle27(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
@@ -21428,6 +21459,7 @@ async function handle27(request, env, ctx, url, sess) {
     if (path === "/api/engineers" && method === "GET") return jr7(await getPortalEngineers(env, sess.tenantId));
     if (path === "/api/office-users" && method === "GET") return jr7(await getOfficeUsers(db));
     if (path === "/api/vehicles" && method === "GET") return jr7(await getVehicles(env));
+    if (path === "/api/raise-options" && method === "GET") return jr7(await getRaiseOptions(env, sess.user.username));
     if (path === "/api/closures" && method === "GET") return jr7(await getClosures(db));
     if (path === "/api/jobs/search" && method === "GET") return jr7(await searchJobs(db, q));
     if (path === "/api/pos" && method === "POST") {
@@ -21442,7 +21474,7 @@ async function handle27(request, env, ctx, url, sess) {
         b.engineer_name = userName(sess);
         b.cost_category = "materials";
       }
-      const res = await issuePO(db, b);
+      const res = await issuePO(db, b, env);
       return jr7(res, res.error ? 400 : 200);
     }
     if (path === "/api/my-pos" && method === "GET") {
@@ -21747,7 +21779,7 @@ async function nextPoNumber(db) {
   `).bind(PO_START, PO_START, PO_START).first();
   return row.next;
 }
-async function issuePO(db, body) {
+async function issuePO(db, body, env) {
   const status = await getSystemStatus(db);
   if (status.mode === "disabled") return { error: status.message };
   if (status.mode === "office_hours" && body.source !== "office") return { error: status.message };
@@ -21771,9 +21803,12 @@ async function issuePO(db, body) {
     if (!body.description || !body.description.trim()) return { error: "Description is required" };
     const supplierCheck = await db.prepare(`SELECT 1 FROM suppliers WHERE name = ? AND active = 1`).bind(body.supplier).first();
     if (!supplierCheck) return { error: "Supplier must be picked from the list" };
-    if (hasSite && !(body.vehicle_reg && body.vehicle_reg.trim())) {
-      const siteCheck = await db.prepare(`SELECT 1 FROM sites WHERE name = ? AND active = 1`).bind(body.site.trim()).first();
-      if (!siteCheck) return { error: "Site must be chosen from the known-sites list. Ask the office to add a new site first." };
+    const hasVehicle = body.vehicle_reg && String(body.vehicle_reg).trim();
+    const hasJob = body.job_id && String(body.job_id).trim();
+    if (hasSite && !hasVehicle && !hasJob) {
+      if (!(env && await isLiveProjectSite(env, body.site.trim()))) {
+        return { error: "Engineers can only raise POs against a live project or your vehicle. For a reactive job, use \u201CRaise PO for this job\u201D inside the job card." };
+      }
     }
   }
   const issuedAt = (/* @__PURE__ */ new Date()).toISOString();
