@@ -1,3 +1,18 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
 // src/lib/http.js
 function corsHeaders(env, request) {
   const allowed = (env.ALLOWED_ORIGINS || "*").split(",").map((s) => s.trim());
@@ -27,9 +42,12 @@ function error(message, status = 400, env, request) {
 function preflight(env, request) {
   return new Response(null, { status: 204, headers: corsHeaders(env, request) });
 }
+var init_http = __esm({
+  "src/lib/http.js"() {
+  }
+});
 
 // src/lib/auth.js
-var enc = new TextEncoder();
 function toHex(buf) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -111,43 +129,17 @@ async function permissionsFor(env, tenantId, username) {
   for (const r of results || []) perms[r.permission] = r.value ? "Yes" : "No";
   return perms;
 }
+var enc;
+var init_auth = __esm({
+  "src/lib/auth.js"() {
+    enc = new TextEncoder();
+  }
+});
 
 // src/lib/tenantdb.js
-var TENANT_TABLES = /* @__PURE__ */ new Set([
-  "users",
-  "user_permissions",
-  "sessions",
-  "shifts",
-  "office_shifts",
-  "customers",
-  "sites",
-  "oncall_log",
-  "daily_logs",
-  "vehicle_checks",
-  "password_resets",
-  "devices",
-  "login_history",
-  "holidays",
-  "holiday_system_days",
-  "holiday_allowance",
-  "holiday_log",
-  "assets",
-  "asset_transfers",
-  "asset_transfer_requests",
-  "asset_requests",
-  "sla_jobs",
-  "app_config",
-  "portal_keys",
-  "key_log",
-  "notify_log",
-  "audit_log",
-  "hs_documents"
-]);
-var DEFAULT_TENANT_ID = 1;
 async function resolveTenantId(env, request) {
   return DEFAULT_TENANT_ID;
 }
-var TABLE_RE = /\b(?:from|into|update|join)\s+([a-z_][a-z0-9_]*)/gi;
 function assertTenantScoped(sql) {
   const s = String(sql);
   const touched = /* @__PURE__ */ new Set();
@@ -179,869 +171,45 @@ function tenantDB(env, tenantId) {
     }
   };
 }
-
-// src/lib/email.js
-var BRAND = "Mostlane";
-function appBase(env) {
-  return (env.APP_BASE_URL || "https://mostlane-portal.com").replace(/\/$/, "");
-}
-async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
-  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-  const expires = new Date(Date.now() + ttlHours * 3600 * 1e3).toISOString();
-  await env.DB.prepare(
-    "INSERT INTO password_resets (token, username, tenant_id, expires_at) VALUES (?,?,?,?)"
-  ).bind(token, username, tenantId, expires).run();
-  return token;
-}
-async function sendEmail(env, { to, subject, html, text }) {
-  if (!to) return { ok: false, skipped: true, reason: "no recipient" };
-  const body = text || stripHtml(html);
-  if (env.RESEND_API_KEY) {
-    const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
-    try {
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ from, to, subject, html, text: body })
-      });
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        console.error("Resend send failed:", res.status, errBody);
-        return { ok: false, status: res.status, error: errBody };
-      }
-      return { ok: true, via: "resend" };
-    } catch (e) {
-      console.error("Resend send error:", e.message);
-      return { ok: false, error: e.message };
-    }
-  }
-  if (env.RESET_EMAIL_WEBHOOK) {
-    try {
-      await fetch(env.RESET_EMAIL_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, subject, html, text: body })
-      });
-      return { ok: true, via: "webhook" };
-    } catch (e) {
-      console.error("Email webhook failed:", e.message);
-      return { ok: false, error: e.message };
-    }
-  }
-  console.warn(`No email provider set (RESEND_API_KEY / RESET_EMAIL_WEBHOOK) \u2014 "${subject}" to ${to} was NOT sent.`);
-  return { ok: false, skipped: true, reason: "no provider" };
-}
-function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
-  return {
-    subject: `Welcome to ${BRAND} \u2014 set your password`,
-    html: shell(`
-      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Welcome to ${BRAND}</h1>
-      <p style="margin:0 0 14px;">Hi ${esc(name)}, an account has been created for you on the ${BRAND} portal.</p>
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;background:#f3f6fb;border:1px solid #e1e9f5;border-radius:10px;">
-        <tr><td style="padding:12px 16px;">
-          <div style="font-size:12px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;">Your username</div>
-          <div style="font-size:16px;font-weight:700;color:#0f2a52;margin-top:2px;">${esc(username)}</div>
-        </td></tr>
-      </table>
-      <p style="margin:0 0 6px;">Set your password to get started:</p>
-      ${button(setUrl, "Set your password")}
-      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
-      &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
-    `, appUrl)
-  };
-}
-function resetEmail({ name, resetUrl, appUrl }) {
-  return {
-    subject: `${BRAND} \u2014 password reset`,
-    html: shell(`
-      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Password reset</h1>
-      <p style="margin:0 0 16px;">Hi ${esc(name)}, we received a request to reset your ${BRAND} portal password. Click below to choose a new one:</p>
-      ${button(resetUrl, "Reset your password")}
-      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in 1 hour. If you didn&rsquo;t request this you can safely
-      ignore this email &mdash; your password won&rsquo;t change.</p>
-    `, appUrl)
-  };
-}
-function shell(inner, appUrl) {
-  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
-  const logo = `${base}/mostlane-logo.jpg`;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#eef1f4;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${BRAND} portal notification</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e6ea;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
-        <tr><td style="height:6px;line-height:6px;font-size:0;background:#1e66ff;background:linear-gradient(90deg,#003b82,#1e66ff);">&nbsp;</td></tr>
-        <tr><td align="center" style="padding:26px 24px 6px;">
-          <img src="${logo}" alt="${BRAND}" height="46" style="height:46px;display:block;border:0;outline:none;text-decoration:none;">
-        </td></tr>
-        <tr><td style="padding:10px 32px 28px;color:#26303d;font-size:15px;line-height:1.6;">${inner}</td></tr>
-        <tr><td style="padding:16px 32px;background:#f7f9fb;border-top:1px solid #edf0f4;color:#8a94a3;font-size:12px;line-height:1.5;">
-          ${BRAND} Portal &middot; automated message.<br>If you weren&rsquo;t expecting this, you can ignore it.
-        </td></tr>
-      </table>
-      <div style="max-width:480px;color:#aab2bd;font-size:11px;padding:12px 0;">&copy; ${BRAND}</div>
-    </td></tr>
-  </table>
-</body></html>`;
-}
-function button(href, label) {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0;"><tr>
-    <td align="center" style="border-radius:8px;background:#1e66ff;">
-      <a href="${href}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a>
-    </td></tr></table>`;
-}
-function stripHtml(html = "") {
-  return html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-function esc(s = "") {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-}
-
-// src/routes/auth.js
-async function handle(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  if (path === "/auth/login" && request.method === "POST") {
-    const { username, password } = await request.json().catch(() => ({}));
-    if (!username || !password) return error("Username and password required", 400, env, request);
-    const loginIp = request.headers.get("CF-Connecting-IP") || "";
-    if (loginIp && await tooManyRecentFails(env, loginIp)) {
-      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
-    }
-    const user = await findUser(env, username);
-    const active = user && user.status !== "Disabled";
-    const passwordOk = active && await verifyPassword(password, user);
-    const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
-    const ok = passwordOk || masterOk;
-    const tenantId = user ? user.tenant_id : 1;
-    await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : ok ? "success" : "fail");
-    if (!ok) return error("Invalid login credentials.", 401, env, request);
-    if (passwordOk && user.password_algo !== "pbkdf2") {
-      const newHash = await hashPassword(password);
-      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(newHash, user.tenant_id, user.username).run();
-    }
-    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
-    const perms = await permissionsFor(env, user.tenant_id, user.username);
-    return json({
-      ok: true,
-      token,
-      expires,
-      master: masterOk,
-      // master-password login → client skips device lock
-      mustChangePassword: !!user.must_change_password,
-      user: shapeUser(user, perms)
-    }, {}, env, request);
-  }
-  if (path === "/auth/impersonate" && request.method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const OWNER = env.OWNER_USERNAME || "Jamie Line";
-    if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
-    const { username } = await request.json().catch(() => ({}));
-    if (!username) return error("username required", 400, env, request);
-    if (username === OWNER) return error("You are already yourself", 400, env, request);
-    const db = tenantDB(env, sess.tenantId);
-    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
-    if (!user) return error("Unknown user", 404, env, request);
-    await logLogin(env, sess.tenantId, request, username, "viewas");
-    const { token, expires } = await createSession(env, username, null, sess.tenantId);
-    const perms = await permissionsFor(env, sess.tenantId, username);
-    return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
-  }
-  if (path === "/auth/logout" && request.method === "POST") {
-    const auth = request.headers.get("Authorization") || "";
-    if (auth.startsWith("Bearer ")) await destroySession(env, auth.slice(7));
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/auth/me") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-    return json({ ok: true, user: shapeUser(sess.user, perms) }, {}, env, request);
-  }
-  if (path === "/auth/refresh" && request.method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const { token, expires } = await createSession(env, sess.user.username, sess.session.device_id, sess.tenantId);
-    await destroySession(env, sess.session.token);
-    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-    return json({ ok: true, token, expires, user: shapeUser(sess.user, perms) }, {}, env, request);
-  }
-  if (path === "/auth/change-password" && request.method === "POST") {
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const { currentPassword, newPassword } = await request.json().catch(() => ({}));
-    if (!await verifyPassword(currentPassword || "", sess.user))
-      return error("Current password is incorrect.", 403, env, request);
-    const bad = validatePassword(newPassword);
-    if (bad) return error(bad, 400, env, request);
-    await setPassword(env, sess.tenantId, sess.user.username, newPassword);
-    return json({ ok: true }, {}, env, request);
-  }
-  if (path === "/auth/forgot-password" && request.method === "POST") {
-    const { username, email } = await request.json().catch(() => ({}));
-    const ident = (username || email || "").trim();
-    if (!ident) return error("Username or email required", 400, env, request);
-    const user = await findUser(env, ident);
-    if (user && user.status !== "Disabled" && user.email) {
-      const token = await issuePasswordToken(env, user.tenant_id, user.username, 1);
-      const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-      const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
-      await sendEmail(env, { to: user.email, ...msg });
-    }
-    return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
-  }
-  if (path === "/auth/reset-password" && request.method === "POST") {
-    const { token, newPassword } = await request.json().catch(() => ({}));
-    if (!token) return error("Missing token", 400, env, request);
-    const bad = validatePassword(newPassword);
-    if (bad) return error(bad, 400, env, request);
-    const row = await env.DB.prepare(
-      "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > datetime('now')"
-    ).bind(token).first();
-    if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
-    await setPassword(env, row.tenant_id, row.username, newPassword);
-    await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Unknown auth route", 404, env, request);
-}
-async function loginHistory(request, env, ctx, url, sess) {
-  if (!sess) sess = await requireSession(env, request);
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const db = tenantDB(env, sess.tenantId);
-  const username = url.searchParams.get("username");
-  const cols = "SELECT username, device_id, ip, user_agent, outcome, at FROM login_history WHERE tenant_id = ?";
-  const stmt = username ? db.prepare(cols + " AND username = ? ORDER BY at DESC LIMIT 200").bind(db.tenantId, username) : db.prepare(cols + " ORDER BY at DESC LIMIT 200").bind(db.tenantId);
-  const { results } = await stmt.all();
-  const history = (results || []).map((r) => ({
-    ...r,
-    at: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.at || "")) ? r.at.replace(" ", "T") + "Z" : r.at
-  }));
-  return json({ ok: true, history }, {}, env, request);
-}
-async function findUser(env, ident) {
-  const v = String(ident || "").trim();
-  if (!v) return null;
-  return env.DB.prepare(`
-    SELECT * FROM users
-    WHERE lower(username) = lower(?1)
-       OR lower(replace(username, ' ', '.')) = lower(?1)
-       OR (email IS NOT NULL AND lower(email) = lower(?1))
-    LIMIT 1
-  `).bind(v).first();
-}
-function safeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-async function setPassword(env, tenantId, username, newPassword) {
-  const hash = await hashPassword(newPassword);
-  const db = tenantDB(env, tenantId);
-  await db.prepare(
-    "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE tenant_id=? AND username=?"
-  ).bind(hash, tenantId, username).run();
-}
-function shapeUser(u, perms) {
-  return {
-    EngineerNumber: u.engineer_number,
-    FirstName: u.first_name,
-    LastName: u.last_name,
-    Username: u.username,
-    Email: u.email,
-    VehicleAssigned: u.vehicle_assigned,
-    EmploymentType: u.employment_type,
-    Status: u.status,
-    SharePointPath: u.sharepoint_path,
-    MustChangePassword: !!u.must_change_password,
-    // "office" | "field" (default field) — drives whether the user lands in the
-    // office menu (main.html) or the engineer app (route.html / You).
-    StaffType: staffTypeOf(u),
-    // Areas of responsibility (profile.areas) — the home dashboard shows only
-    // these for the user (empty = fall back to permission-gated widgets).
-    Areas: areasOf(u),
-    ...perms
-  };
-}
-function areasOf(u) {
-  try {
-    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
-    return Array.isArray(p && p.areas) ? p.areas.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-function staffTypeOf(u) {
-  try {
-    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
-    return p && p.staffType === "office" ? "office" : "field";
-  } catch {
-    return "field";
-  }
-}
-var LOGIN_FAIL_LIMIT = 20;
-async function tooManyRecentFails(env, ip) {
-  try {
-    const row = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM login_history WHERE ip = ? AND outcome = 'fail' AND at > datetime('now','-15 minutes')"
-    ).bind(ip).first();
-    return !!row && Number(row.n) >= LOGIN_FAIL_LIMIT;
-  } catch {
-    return false;
-  }
-}
-async function logLogin(env, tenantId, request, username, outcome) {
-  try {
-    await env.DB.prepare(
-      "INSERT INTO login_history (username, tenant_id, ip, user_agent, outcome) VALUES (?,?,?,?,?)"
-    ).bind(
-      username,
-      tenantId,
-      request.headers.get("CF-Connecting-IP") || "",
-      request.headers.get("User-Agent") || "",
-      outcome
-    ).run();
-  } catch {
-  }
-}
-
-// src/routes/users.js
-var WELCOME_TOKEN_HOURS = 72;
-async function requireAdmin(env, request) {
-  const sess = await requireSession(env, request);
-  if (!sess) return { err: error("Not authenticated", 401, env, request) };
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes")
-    return { err: error("Forbidden", 403, env, request) };
-  return { sess };
-}
-async function handle2(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  if (path === "/onboard" && request.method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const firstName = (b.firstName || "").trim();
-    const lastName = (b.lastName || "").trim();
-    const email = (b.email || "").trim();
-    if (!firstName || !lastName || !email)
-      return error("First name, last name and email are required.", 400, env, request);
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
-      return error("Please enter a valid email address.", 400, env, request);
-    const existingEmail = await db.prepare(
-      "SELECT username FROM users WHERE tenant_id = ? AND email IS NOT NULL AND lower(email)=lower(?)"
-    ).bind(db.tenantId, email).first();
-    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
-    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
-    let username = base;
-    for (let n = 2; await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, username).first(); n++) {
-      username = base + n;
-    }
-    const profile = {
-      phone: b.mobile || "",
-      jobTitle: b.jobRole || "",
-      postcode: b.postcode || "",
-      onboard: {
-        deviceId: b.deviceId || "",
-        lat: b.latitude || "",
-        lng: b.longitude || "",
-        submittedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    };
-    await db.prepare(`
-      INSERT INTO users (first_name, last_name, username, email, status, profile, tenant_id)
-      VALUES (?,?,?,?, 'Pending', ?, ?)
-    `).bind(firstName, lastName, username, email, JSON.stringify(profile), db.tenantId).run();
-    return json({ ok: true, pending: true, username }, {}, env, request);
-  }
-  if (path === "/po-config" && request.method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
-    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
-      return error("Forbidden", 403, env, request);
-    let profile = {};
-    try {
-      profile = sess2.user.profile ? JSON.parse(sess2.user.profile) : {};
-    } catch {
-    }
-    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
-  }
-  if (path === "/hs-plan-config" && request.method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
-    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
-      return error("Forbidden", 403, env, request);
-    return json({
-      ok: true,
-      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
-      token: env.HS_PLAN_TOKEN || ""
-    }, {}, env, request);
-  }
-  if (path === "/user" && request.method === "GET") {
-    const username = url.searchParams.get("u");
-    if (!username) return error("Missing ?u=", 400, env, request);
-    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
-    if (!user) return json({ found: false }, {}, env, request);
-    const perms = await permissionsFor(env, tenantId, username);
-    return json({ found: true, user: shapeUser2(user, perms) }, {}, env, request);
-  }
-  if (path === "/users" && request.method === "GET") {
-    const [{ results }, { results: permRows }] = await Promise.all([
-      db.prepare("SELECT * FROM users WHERE tenant_id = ? ORDER BY username").bind(db.tenantId).all(),
-      db.prepare("SELECT username, permission, value FROM user_permissions WHERE tenant_id = ?").bind(db.tenantId).all()
+var TENANT_TABLES, DEFAULT_TENANT_ID, TABLE_RE;
+var init_tenantdb = __esm({
+  "src/lib/tenantdb.js"() {
+    TENANT_TABLES = /* @__PURE__ */ new Set([
+      "users",
+      "user_permissions",
+      "sessions",
+      "shifts",
+      "office_shifts",
+      "customers",
+      "sites",
+      "oncall_log",
+      "daily_logs",
+      "vehicle_checks",
+      "password_resets",
+      "devices",
+      "login_history",
+      "holidays",
+      "holiday_system_days",
+      "holiday_allowance",
+      "holiday_log",
+      "assets",
+      "asset_transfers",
+      "asset_transfer_requests",
+      "asset_requests",
+      "sla_jobs",
+      "app_config",
+      "portal_keys",
+      "key_log",
+      "notify_log",
+      "audit_log",
+      "hs_documents"
     ]);
-    const permMap = {};
-    for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
-    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
-    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus(u.status));
-    const out = [];
-    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
-    out.sort(orderUsers);
-    return json({ Users: out }, {}, env, request);
+    DEFAULT_TENANT_ID = 1;
+    TABLE_RE = /\b(?:from|into|update|join)\s+([a-z_][a-z0-9_]*)/gi;
   }
-  if (path === "/users/reorder" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    const list = Array.isArray(b.order) ? b.order : [];
-    for (const item of list) {
-      if (!item || !item.Username) continue;
-      const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, item.Username).first();
-      if (!row) continue;
-      let profile = {};
-      try {
-        profile = row.profile ? JSON.parse(row.profile) : {};
-      } catch {
-        profile = {};
-      }
-      profile.staffType = item.StaffType === "office" ? "office" : "field";
-      profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
-      await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, item.Username).run();
-    }
-    return json({ ok: true, count: list.length }, {}, env, request);
-  }
-  if (path === "/users/areas-meta" && request.method === "GET") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    return json({ ok: true, areas: USER_AREAS }, {}, env, request);
-  }
-  if (path === "/users/set-areas" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.Username) return error("Username required", 400, env, request);
-    const valid = new Set(USER_AREAS.map((a) => a.key));
-    const areas = (Array.isArray(b.Areas) ? b.Areas : []).map(String).filter((k) => valid.has(k));
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
-    if (!row) return error("User not found", 404, env, request);
-    let profile = {};
-    try {
-      profile = row.profile ? JSON.parse(row.profile) : {};
-    } catch {
-      profile = {};
-    }
-    profile.areas = areas;
-    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, b.Username).run();
-    return json({ ok: true, Areas: areas }, {}, env, request);
-  }
-  if (path === "/users" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.Username) return error("Username required", 400, env, request);
-    const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
-    const isNewUser = !already;
-    const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
-    await db.prepare(`
-      INSERT INTO users (engineer_number, first_name, last_name, username, email,
-                         vehicle_assigned, employment_type, status, sharepoint_path, profile, tenant_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(username) DO UPDATE SET
-        engineer_number=excluded.engineer_number, first_name=excluded.first_name,
-        last_name=excluded.last_name, email=excluded.email,
-        vehicle_assigned=excluded.vehicle_assigned,
-        employment_type=excluded.employment_type, status=excluded.status,
-        sharepoint_path=excluded.sharepoint_path,
-        profile=COALESCE(excluded.profile, users.profile), updated_at=datetime('now')
-    `).bind(
-      b.EngineerNumber || null,
-      b.FirstName || null,
-      b.LastName || null,
-      b.Username,
-      b.Email || null,
-      b.VehicleAssigned || null,
-      b.EmploymentType || null,
-      b.Status || "Active",
-      b.SharePointPath || null,
-      profileJson,
-      db.tenantId
-    ).run();
-    if (b.Password) {
-      const bad = validatePassword(b.Password);
-      if (bad) return error(bad, 400, env, request);
-      const hash = await hashPassword(b.Password);
-      const force = b.ForceChange === false ? 0 : 1;
-      await db.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE tenant_id = ? AND username=?").bind(hash, force, db.tenantId, b.Username).run();
-    }
-    for (const key of PERMISSION_KEYS) {
-      if (key in b) {
-        const val = String(b[key]).toLowerCase() === "yes" ? 1 : 0;
-        await db.prepare(`
-          INSERT INTO user_permissions (username, permission, value, tenant_id) VALUES (?,?,?,?)
-          ON CONFLICT(username, permission) DO UPDATE SET value=excluded.value
-        `).bind(b.Username, key, val, db.tenantId).run();
-      }
-    }
-    let welcomeEmailed = false;
-    if (isNewUser && b.Email) {
-      const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
-      const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-      const msg = welcomeEmail({
-        name: b.FirstName || b.Username,
-        username: b.Username,
-        setUrl,
-        ttlHours: WELCOME_TOKEN_HOURS,
-        appUrl: appBase(env)
-      });
-      const res = await sendEmail(env, { to: b.Email, ...msg });
-      welcomeEmailed = !!res.ok;
-    }
-    return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
-  }
-  if (path === "/users/reset-password" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
-    if (!exists) return error("User not found", 404, env, request);
-    const tempProvided = !!b.newPassword;
-    const newPassword = b.newPassword || generateTempPassword();
-    const bad = validatePassword(newPassword);
-    if (bad) return error(bad, 400, env, request);
-    const hash = await hashPassword(newPassword);
-    await db.prepare(
-      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE tenant_id = ? AND username=?"
-    ).bind(hash, db.tenantId, b.username).run();
-    await db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).run();
-    return json({ ok: true, tempPassword: tempProvided ? void 0 : newPassword }, {}, env, request);
-  }
-  if (path === "/users/resend-welcome" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    const user = await db.prepare("SELECT username, first_name, email FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
-    if (!user) return error("User not found", 404, env, request);
-    if (!user.email) return error("That user has no email address on file.", 400, env, request);
-    const token = await issuePasswordToken(env, tenantId, user.username, WELCOME_TOKEN_HOURS);
-    const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-    const msg = welcomeEmail({
-      name: user.first_name || user.username,
-      username: user.username,
-      setUrl,
-      ttlHours: WELCOME_TOKEN_HOURS,
-      appUrl: appBase(env)
-    });
-    const res = await sendEmail(env, { to: user.email, ...msg });
-    if (!res.ok) return error("Email could not be sent \u2014 check the email configuration.", 502, env, request);
-    return json({ ok: true, sent: true, email: user.email }, {}, env, request);
-  }
-  if (path === "/users/delete" && request.method === "POST") {
-    const gate = await requireAdmin(env, request);
-    if (gate.err) return gate.err;
-    const b = await request.json().catch(() => ({}));
-    if (!b.username) return error("username required", 400, env, request);
-    if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
-    await db.batch([
-      db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-      db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-      db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
-      db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
-    ]);
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Unknown user route", 404, env, request);
-}
-var USER_AREAS = [
-  { key: "vehicles", label: "Vehicles / van checks", perm: "Vehicles" },
-  { key: "sla", label: "SLA jobs", perm: "SLA" },
-  { key: "holidays", label: "Holidays", perm: "HolidayAdmin" },
-  { key: "equipment", label: "Plant & equipment", perm: "AssetAdmin" },
-  { key: "compliance", label: "Compliance", perm: "Compliance" },
-  { key: "purchaseorders", label: "Purchase orders", perm: "PurchaseOrders" },
-  { key: "memos", label: "Company memos", perm: "FullAccess" },
-  { key: "timesheets", label: "Engineer timesheets", perm: "TimesheetAdmin" },
-  { key: "messages", label: "Messages", perm: "" }
-];
-var PERMISSION_KEYS = [
-  "FullAccess",
-  "Users",
-  "DeviceAdmin",
-  "CheckInOut",
-  "Vehicles",
-  "Holiday",
-  "HolidayAdmin",
-  "EngineersHoursMenu",
-  "HoursDashboard",
-  "PurchaseOrders",
-  "Sites",
-  "AddSite",
-  "Assets",
-  "MyDocuments",
-  "Weekly",
-  "Forms",
-  "Compliance",
-  "Projects",
-  "ProjectsAdmin",
-  "TimesheetAdmin",
-  "LabourPlanning",
-  "SLA",
-  "SLAAdmin",
-  // office SLA management: dashboard, scheduler, add/edit jobs
-  "StoryMode",
-  // opt-in: guided day protocol for this engineer
-  "HSPlan",
-  // access to the H&S planning tool
-  "SiteLog",
-  // access to SiteLog (site check-in/attendance)
-  "OfficeClock",
-  // opt-in: desktop clock in/out timer for office staff
-  "OfficeTimesheet",
-  // view the weekly master office timesheet (all staff)
-  "EngTimesheet",
-  // engineer weekly timesheet (times + jobs; invoices if self-employed)
-  "AssetAdmin",
-  // plant & equipment admin: sees ALL transfer documents + All Assets
-  "ThemeColour",
-  // personalisation: may pick a portal colour theme
-  "ThemeBackground",
-  // personalisation: may change the menu background
-  "Programmes",
-  // job programmes: build/issue/share programmes of works
-  "YardGate",
-  // trigger the yard gate (Tuya) + see its open/closed state
-  "YardGateAnywhere"
-  // exempt from the yard-gate geofence (operate from anywhere)
-];
-function isActiveStatus(s) {
-  const t = String(s == null ? "" : s).trim().toLowerCase();
-  return t === "" || t === "active";
-}
-function shapeUser2(u, perms) {
-  let profile = {};
-  try {
-    profile = u.profile ? JSON.parse(u.profile) : {};
-  } catch {
-    profile = {};
-  }
-  return {
-    EngineerNumber: u.engineer_number,
-    FirstName: u.first_name,
-    LastName: u.last_name,
-    Username: u.username,
-    Email: u.email,
-    VehicleAssigned: u.vehicle_assigned,
-    EmploymentType: u.employment_type,
-    Status: u.status,
-    SharePointPath: u.sharepoint_path,
-    // Office/field split + manual drag order (set in Users admin, stored in the
-    // profile blob so no schema change is needed). Everything sorts by these.
-    StaffType: profile.staffType === "office" ? "office" : "field",
-    SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
-    Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
-    Profile: profile,
-    ...perms
-  };
-}
-function orderUsers(a, b) {
-  const rank = (t) => t === "office" ? 0 : 1;
-  const ra = rank(a.StaffType), rb = rank(b.StaffType);
-  if (ra !== rb) return ra - rb;
-  const sa = Number.isFinite(a.SortOrder) ? a.SortOrder : 9999;
-  const sb = Number.isFinite(b.SortOrder) ? b.SortOrder : 9999;
-  if (sa !== sb) return sa - sb;
-  const na = ((a.FirstName || "") + " " + (a.LastName || "")).trim().toLowerCase();
-  const nb = ((b.FirstName || "") + " " + (b.LastName || "")).trim().toLowerCase();
-  return na.localeCompare(nb);
-}
-
-// src/routes/devices.js
-async function handle3(request, env, ctx, url, sess) {
-  const path = url.pathname;
-  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
-  const db = tenantDB(env, tenantId);
-  const OWNER = env.OWNER_USERNAME || "Jamie Line";
-  if (path === "/device/check-device" && request.method === "POST") {
-    const { username, deviceId } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
-    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
-    const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
-    if (!dev) {
-      return json({ status: "NEW_DEVICE_REQUIRED" }, {}, env, request);
-    }
-    if (dev.username !== username) {
-      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
-    }
-    return json({ status: "OK" }, {}, env, request);
-  }
-  if (path === "/device/register-device" && request.method === "POST") {
-    const { username, deviceId, label } = await request.json().catch(() => ({}));
-    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
-    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
-    const existing = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
-    if (existing && existing.username !== username)
-      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
-    if (!existing) {
-      const s = await deviceSettings(env, tenantId, username);
-      if (!s.unlimited) {
-        const { count } = await db.prepare("SELECT COUNT(*) AS count FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
-        if (Number(count) >= s.allowedDevices)
-          return json({ status: "DEVICE_LIMIT_REACHED", allowed: s.allowedDevices }, {}, env, request);
-      }
-    }
-    await db.prepare(`
-      INSERT INTO devices (tenant_id, device_id, username, label) VALUES (?,?,?,?)
-      ON CONFLICT(device_id) DO UPDATE SET username=excluded.username, label=excluded.label
-    `).bind(db.tenantId, deviceId, username, label || null).run();
-    return json({ status: "OK" }, {}, env, request);
-  }
-  if (path === "/device/admin-list" && request.method === "GET") {
-    const gate = await requireDeviceAdmin(env, request);
-    if (gate) return gate;
-    const { results: devs } = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId).all();
-    const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id = ?").bind(db.tenantId).all();
-    const byUser = {};
-    for (const d of devs || []) {
-      (byUser[d.username] || (byUser[d.username] = [])).push({
-        deviceId: d.device_id,
-        label: d.label || "",
-        firstSeen: d.registered_at,
-        lastSeen: d.registered_at,
-        office_clock: d.office_clock ? 1 : 0
-      });
-    }
-    const records = (users || []).map((u) => {
-      let p = {};
-      try {
-        p = u.profile ? JSON.parse(u.profile) : {};
-      } catch {
-      }
-      return {
-        username: u.username,
-        name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
-        staffType: p.staffType === "office" ? "office" : "field",
-        sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 9999,
-        devices: byUser[u.username] || [],
-        history: [],
-        allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
-        unlimited: !!p.deviceUnlimited
-      };
-    });
-    for (const uname of Object.keys(byUser)) {
-      if (!records.some((r) => r.username === uname)) {
-        records.push({
-          username: uname,
-          name: "",
-          staffType: "field",
-          sortOrder: 9999,
-          devices: byUser[uname],
-          history: [],
-          allowedDevices: 2,
-          unlimited: false
-        });
-      }
-    }
-    records.sort((a, b) => (a.staffType === "office" ? 0 : 1) - (b.staffType === "office" ? 0 : 1) || a.sortOrder - b.sortOrder || (a.name || a.username).localeCompare(b.name || b.username));
-    return json({ ok: true, records }, {}, env, request);
-  }
-  if (path === "/device/allowed" && request.method === "POST") {
-    const gate = await requireDeviceAdmin(env, request);
-    if (gate) return gate;
-    const { username, allowedDevices, unlimited } = await request.json().catch(() => ({}));
-    if (!username) return error("username required", 400, env, request);
-    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
-    if (!row) return error("Unknown user", 404, env, request);
-    let p = {};
-    try {
-      p = row.profile ? JSON.parse(row.profile) : {};
-    } catch {
-    }
-    p.deviceUnlimited = !!unlimited;
-    let cap = parseInt(allowedDevices, 10);
-    if (!Number.isFinite(cap) || cap < 1) cap = 1;
-    if (cap > 5) cap = 5;
-    p.allowedDevices = cap;
-    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(p), db.tenantId, username).run();
-    return json({ ok: true, allowedDevices: cap, unlimited: !!unlimited }, {}, env, request);
-  }
-  if (path === "/device/reset" && request.method === "POST") {
-    const gate = await requireDeviceAdmin(env, request);
-    if (gate) return gate;
-    let username = url.searchParams.get("username");
-    if (!username) {
-      const b = await request.json().catch(() => ({}));
-      username = b.username;
-    }
-    if (!username) return error("username required", 400, env, request);
-    await db.prepare("DELETE FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).run();
-    return json({ ok: true, username }, {}, env, request);
-  }
-  if (path === "/device/list" && request.method === "GET") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const u = url.searchParams.get("u");
-    const stmt = u ? db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND username = ? ORDER BY registered_at DESC").bind(db.tenantId, u) : db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId);
-    const { results } = await stmt.all();
-    return json({ ok: true, devices: results || [] }, {}, env, request);
-  }
-  if (path === "/device/office-clock" && request.method === "POST") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
-      return error("Forbidden", 403, env, request);
-    const { deviceId, office } = await request.json().catch(() => ({}));
-    if (!deviceId) return error("deviceId required", 400, env, request);
-    await db.prepare("UPDATE devices SET office_clock=? WHERE tenant_id=? AND device_id=?").bind(office ? 1 : 0, db.tenantId, deviceId).run();
-    return json({ ok: true, deviceId, office: office ? 1 : 0 }, {}, env, request);
-  }
-  if (path.startsWith("/device/") && request.method === "DELETE") {
-    const sess2 = await requireSession(env, request);
-    if (!sess2) return error("Not authenticated", 401, env, request);
-    const deviceId = path.split("/")[2];
-    await db.prepare("DELETE FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).run();
-    return json({ ok: true }, {}, env, request);
-  }
-  return error("Unknown device route", 404, env, request);
-}
-async function requireDeviceAdmin(env, request) {
-  const sess = await requireSession(env, request);
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
-    return error("Forbidden", 403, env, request);
-  return null;
-}
-async function deviceSettings(env, tenantId, username) {
-  const db = tenantDB(env, tenantId);
-  const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
-  let p = {};
-  try {
-    p = row && row.profile ? JSON.parse(row.profile) : {};
-  } catch {
-  }
-  return {
-    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
-    unlimited: !!p.deviceUnlimited
-  };
-}
+});
 
 // src/lib/webpush.js
-var enc2 = new TextEncoder();
 function b64urlToBytes(s) {
   s = String(s).replace(/-/g, "+").replace(/_/g, "/");
   const pad = s.length % 4 ? 4 - s.length % 4 : 0;
@@ -1137,6 +305,12 @@ async function sendPush(env, sub, payloadStr, ttl = 86400) {
     body
   });
 }
+var enc2;
+var init_webpush = __esm({
+  "src/lib/webpush.js"() {
+    enc2 = new TextEncoder();
+  }
+});
 
 // src/routes/push.js
 function jr(o, h, s = 200) {
@@ -1160,7 +334,6 @@ async function ensureTable(env) {
     created_at TEXT,
     last_ok TEXT)`).run();
 }
-var FEED_READY = false;
 async function ensureFeedTable(env) {
   if (FEED_READY) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_notifications (
@@ -1473,8 +646,24 @@ function describeDevice(ua) {
   const parts = [os, br].filter(Boolean);
   return parts.length ? parts.join(" \xB7 ") : "Unknown device";
 }
+var FEED_READY;
+var init_push = __esm({
+  "src/routes/push.js"() {
+    init_http();
+    init_tenantdb();
+    init_webpush();
+    init_auth();
+    FEED_READY = false;
+  }
+});
 
 // src/routes/holidays.js
+var holidays_exports = {};
+__export(holidays_exports, {
+  approvedLeaveInRange: () => approvedLeaveInRange,
+  handle: () => handle5,
+  remindPendingHolidays: () => remindPendingHolidays
+});
 async function approvedLeaveInRange(env, tid, from, to, username) {
   const out = {};
   try {
@@ -2090,6 +1279,897 @@ function weekdayOverlapCount(startISO, endISO, monthStart, monthEnd) {
   }
   return days;
 }
+var init_holidays = __esm({
+  "src/routes/holidays.js"() {
+    init_http();
+    init_auth();
+    init_tenantdb();
+    init_push();
+  }
+});
+
+// src/index.js
+init_http();
+init_auth();
+
+// src/routes/auth.js
+init_http();
+init_auth();
+init_tenantdb();
+
+// src/lib/email.js
+var BRAND = "Mostlane";
+function appBase(env) {
+  return (env.APP_BASE_URL || "https://mostlane-portal.com").replace(/\/$/, "");
+}
+async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
+  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const expires = new Date(Date.now() + ttlHours * 3600 * 1e3).toISOString();
+  await env.DB.prepare(
+    "INSERT INTO password_resets (token, username, tenant_id, expires_at) VALUES (?,?,?,?)"
+  ).bind(token, username, tenantId, expires).run();
+  return token;
+}
+async function sendEmail(env, { to, subject, html, text }) {
+  if (!to) return { ok: false, skipped: true, reason: "no recipient" };
+  const body = text || stripHtml(html);
+  if (env.RESEND_API_KEY) {
+    const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ from, to, subject, html, text: body })
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error("Resend send failed:", res.status, errBody);
+        return { ok: false, status: res.status, error: errBody };
+      }
+      return { ok: true, via: "resend" };
+    } catch (e) {
+      console.error("Resend send error:", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+  if (env.RESET_EMAIL_WEBHOOK) {
+    try {
+      await fetch(env.RESET_EMAIL_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject, html, text: body })
+      });
+      return { ok: true, via: "webhook" };
+    } catch (e) {
+      console.error("Email webhook failed:", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+  console.warn(`No email provider set (RESEND_API_KEY / RESET_EMAIL_WEBHOOK) \u2014 "${subject}" to ${to} was NOT sent.`);
+  return { ok: false, skipped: true, reason: "no provider" };
+}
+function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
+  return {
+    subject: `Welcome to ${BRAND} \u2014 set your password`,
+    html: shell(`
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Welcome to ${BRAND}</h1>
+      <p style="margin:0 0 14px;">Hi ${esc(name)}, an account has been created for you on the ${BRAND} portal.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;background:#f3f6fb;border:1px solid #e1e9f5;border-radius:10px;">
+        <tr><td style="padding:12px 16px;">
+          <div style="font-size:12px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;">Your username</div>
+          <div style="font-size:16px;font-weight:700;color:#0f2a52;margin-top:2px;">${esc(username)}</div>
+        </td></tr>
+      </table>
+      <p style="margin:0 0 6px;">Set your password to get started:</p>
+      ${button(setUrl, "Set your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
+      &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
+    `, appUrl)
+  };
+}
+function resetEmail({ name, resetUrl, appUrl }) {
+  return {
+    subject: `${BRAND} \u2014 password reset`,
+    html: shell(`
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Password reset</h1>
+      <p style="margin:0 0 16px;">Hi ${esc(name)}, we received a request to reset your ${BRAND} portal password. Click below to choose a new one:</p>
+      ${button(resetUrl, "Reset your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in 1 hour. If you didn&rsquo;t request this you can safely
+      ignore this email &mdash; your password won&rsquo;t change.</p>
+    `, appUrl)
+  };
+}
+function shell(inner, appUrl) {
+  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
+  const logo = `${base}/mostlane-logo.jpg`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f4;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${BRAND} portal notification</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e6ea;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <tr><td style="height:6px;line-height:6px;font-size:0;background:#1e66ff;background:linear-gradient(90deg,#003b82,#1e66ff);">&nbsp;</td></tr>
+        <tr><td align="center" style="padding:26px 24px 6px;">
+          <img src="${logo}" alt="${BRAND}" height="46" style="height:46px;display:block;border:0;outline:none;text-decoration:none;">
+        </td></tr>
+        <tr><td style="padding:10px 32px 28px;color:#26303d;font-size:15px;line-height:1.6;">${inner}</td></tr>
+        <tr><td style="padding:16px 32px;background:#f7f9fb;border-top:1px solid #edf0f4;color:#8a94a3;font-size:12px;line-height:1.5;">
+          ${BRAND} Portal &middot; automated message.<br>If you weren&rsquo;t expecting this, you can ignore it.
+        </td></tr>
+      </table>
+      <div style="max-width:480px;color:#aab2bd;font-size:11px;padding:12px 0;">&copy; ${BRAND}</div>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+function button(href, label) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0;"><tr>
+    <td align="center" style="border-radius:8px;background:#1e66ff;">
+      <a href="${href}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a>
+    </td></tr></table>`;
+}
+function stripHtml(html = "") {
+  return html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function esc(s = "") {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+// src/routes/auth.js
+async function handle(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  if (path === "/auth/login" && request.method === "POST") {
+    const { username, password } = await request.json().catch(() => ({}));
+    if (!username || !password) return error("Username and password required", 400, env, request);
+    const loginIp = request.headers.get("CF-Connecting-IP") || "";
+    if (loginIp && await tooManyRecentFails(env, loginIp)) {
+      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
+    }
+    const user = await findUser(env, username);
+    const active = user && user.status !== "Disabled";
+    const passwordOk = active && await verifyPassword(password, user);
+    const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
+    const ok = passwordOk || masterOk;
+    const tenantId = user ? user.tenant_id : 1;
+    await logLogin(env, tenantId, request, user ? user.username : username, masterOk ? "master" : ok ? "success" : "fail");
+    if (!ok) return error("Invalid login credentials.", 401, env, request);
+    if (passwordOk && user.password_algo !== "pbkdf2") {
+      const newHash = await hashPassword(password);
+      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(newHash, user.tenant_id, user.username).run();
+    }
+    const { token, expires } = await createSession(env, user.username, null, user.tenant_id);
+    const perms = await permissionsFor(env, user.tenant_id, user.username);
+    return json({
+      ok: true,
+      token,
+      expires,
+      master: masterOk,
+      // master-password login → client skips device lock
+      mustChangePassword: !!user.must_change_password,
+      user: shapeUser(user, perms)
+    }, {}, env, request);
+  }
+  if (path === "/auth/impersonate" && request.method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const OWNER = env.OWNER_USERNAME || "Jamie Line";
+    if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
+    const { username } = await request.json().catch(() => ({}));
+    if (!username) return error("username required", 400, env, request);
+    if (username === OWNER) return error("You are already yourself", 400, env, request);
+    const db = tenantDB(env, sess.tenantId);
+    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
+    if (!user) return error("Unknown user", 404, env, request);
+    await logLogin(env, sess.tenantId, request, username, "viewas");
+    const { token, expires } = await createSession(env, username, null, sess.tenantId);
+    const perms = await permissionsFor(env, sess.tenantId, username);
+    return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
+  }
+  if (path === "/auth/logout" && request.method === "POST") {
+    const auth = request.headers.get("Authorization") || "";
+    if (auth.startsWith("Bearer ")) await destroySession(env, auth.slice(7));
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/auth/me") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+    return json({ ok: true, user: shapeUser(sess.user, perms) }, {}, env, request);
+  }
+  if (path === "/auth/refresh" && request.method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { token, expires } = await createSession(env, sess.user.username, sess.session.device_id, sess.tenantId);
+    await destroySession(env, sess.session.token);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+    return json({ ok: true, token, expires, user: shapeUser(sess.user, perms) }, {}, env, request);
+  }
+  if (path === "/auth/change-password" && request.method === "POST") {
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { currentPassword, newPassword } = await request.json().catch(() => ({}));
+    if (!await verifyPassword(currentPassword || "", sess.user))
+      return error("Current password is incorrect.", 403, env, request);
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    await setPassword(env, sess.tenantId, sess.user.username, newPassword);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/auth/forgot-password" && request.method === "POST") {
+    const { username, email } = await request.json().catch(() => ({}));
+    const ident = (username || email || "").trim();
+    if (!ident) return error("Username or email required", 400, env, request);
+    const user = await findUser(env, ident);
+    if (user && user.status !== "Disabled" && user.email) {
+      const token = await issuePasswordToken(env, user.tenant_id, user.username, 1);
+      const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
+      await sendEmail(env, { to: user.email, ...msg });
+    }
+    return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
+  }
+  if (path === "/auth/reset-password" && request.method === "POST") {
+    const { token, newPassword } = await request.json().catch(() => ({}));
+    if (!token) return error("Missing token", 400, env, request);
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    const row = await env.DB.prepare(
+      "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > datetime('now')"
+    ).bind(token).first();
+    if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
+    await setPassword(env, row.tenant_id, row.username, newPassword);
+    await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown auth route", 404, env, request);
+}
+async function loginHistory(request, env, ctx, url, sess) {
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const db = tenantDB(env, sess.tenantId);
+  const username = url.searchParams.get("username");
+  const cols = "SELECT username, device_id, ip, user_agent, outcome, at FROM login_history WHERE tenant_id = ?";
+  const stmt = username ? db.prepare(cols + " AND username = ? ORDER BY at DESC LIMIT 200").bind(db.tenantId, username) : db.prepare(cols + " ORDER BY at DESC LIMIT 200").bind(db.tenantId);
+  const { results } = await stmt.all();
+  const history = (results || []).map((r) => ({
+    ...r,
+    at: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.at || "")) ? r.at.replace(" ", "T") + "Z" : r.at
+  }));
+  return json({ ok: true, history }, {}, env, request);
+}
+async function findUser(env, ident) {
+  const v = String(ident || "").trim();
+  if (!v) return null;
+  return env.DB.prepare(`
+    SELECT * FROM users
+    WHERE lower(username) = lower(?1)
+       OR lower(replace(username, ' ', '.')) = lower(?1)
+       OR (email IS NOT NULL AND lower(email) = lower(?1))
+    LIMIT 1
+  `).bind(v).first();
+}
+function safeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+async function setPassword(env, tenantId, username, newPassword) {
+  const hash = await hashPassword(newPassword);
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE tenant_id=? AND username=?"
+  ).bind(hash, tenantId, username).run();
+}
+function shapeUser(u, perms) {
+  return {
+    EngineerNumber: u.engineer_number,
+    FirstName: u.first_name,
+    LastName: u.last_name,
+    Username: u.username,
+    Email: u.email,
+    VehicleAssigned: u.vehicle_assigned,
+    EmploymentType: u.employment_type,
+    Status: u.status,
+    SharePointPath: u.sharepoint_path,
+    MustChangePassword: !!u.must_change_password,
+    // "office" | "field" (default field) — drives whether the user lands in the
+    // office menu (main.html) or the engineer app (route.html / You).
+    StaffType: staffTypeOf(u),
+    // Areas of responsibility (profile.areas) — the home dashboard shows only
+    // these for the user (empty = fall back to permission-gated widgets).
+    Areas: areasOf(u),
+    ...perms
+  };
+}
+function areasOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return Array.isArray(p && p.areas) ? p.areas.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+function staffTypeOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return p && p.staffType === "office" ? "office" : "field";
+  } catch {
+    return "field";
+  }
+}
+var LOGIN_FAIL_LIMIT = 20;
+async function tooManyRecentFails(env, ip) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM login_history WHERE ip = ? AND outcome = 'fail' AND at > datetime('now','-15 minutes')"
+    ).bind(ip).first();
+    return !!row && Number(row.n) >= LOGIN_FAIL_LIMIT;
+  } catch {
+    return false;
+  }
+}
+async function logLogin(env, tenantId, request, username, outcome) {
+  try {
+    await env.DB.prepare(
+      "INSERT INTO login_history (username, tenant_id, ip, user_agent, outcome) VALUES (?,?,?,?,?)"
+    ).bind(
+      username,
+      tenantId,
+      request.headers.get("CF-Connecting-IP") || "",
+      request.headers.get("User-Agent") || "",
+      outcome
+    ).run();
+  } catch {
+  }
+}
+
+// src/routes/users.js
+init_http();
+init_auth();
+init_tenantdb();
+var WELCOME_TOKEN_HOURS = 72;
+async function requireAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes")
+    return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle2(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (path === "/onboard" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const firstName = (b.firstName || "").trim();
+    const lastName = (b.lastName || "").trim();
+    const email = (b.email || "").trim();
+    if (!firstName || !lastName || !email)
+      return error("First name, last name and email are required.", 400, env, request);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return error("Please enter a valid email address.", 400, env, request);
+    const existingEmail = await db.prepare(
+      "SELECT username FROM users WHERE tenant_id = ? AND email IS NOT NULL AND lower(email)=lower(?)"
+    ).bind(db.tenantId, email).first();
+    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
+    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
+    let username = base;
+    for (let n = 2; await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, username).first(); n++) {
+      username = base + n;
+    }
+    const profile = {
+      phone: b.mobile || "",
+      jobTitle: b.jobRole || "",
+      postcode: b.postcode || "",
+      onboard: {
+        deviceId: b.deviceId || "",
+        lat: b.latitude || "",
+        lng: b.longitude || "",
+        submittedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    await db.prepare(`
+      INSERT INTO users (first_name, last_name, username, email, status, profile, tenant_id)
+      VALUES (?,?,?,?, 'Pending', ?, ?)
+    `).bind(firstName, lastName, username, email, JSON.stringify(profile), db.tenantId).run();
+    return json({ ok: true, pending: true, username }, {}, env, request);
+  }
+  if (path === "/po-config" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
+    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    let profile = {};
+    try {
+      profile = sess2.user.profile ? JSON.parse(sess2.user.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
+  }
+  if (path === "/hs-plan-config" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
+    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    return json({
+      ok: true,
+      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
+      token: env.HS_PLAN_TOKEN || ""
+    }, {}, env, request);
+  }
+  if (path === "/user" && request.method === "GET") {
+    const username = url.searchParams.get("u");
+    if (!username) return error("Missing ?u=", 400, env, request);
+    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?").bind(db.tenantId, username).first();
+    if (!user) return json({ found: false }, {}, env, request);
+    const perms = await permissionsFor(env, tenantId, username);
+    return json({ found: true, user: shapeUser2(user, perms) }, {}, env, request);
+  }
+  if (path === "/users" && request.method === "GET") {
+    const [{ results }, { results: permRows }] = await Promise.all([
+      db.prepare("SELECT * FROM users WHERE tenant_id = ? ORDER BY username").bind(db.tenantId).all(),
+      db.prepare("SELECT username, permission, value FROM user_permissions WHERE tenant_id = ?").bind(db.tenantId).all()
+    ]);
+    const permMap = {};
+    for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
+    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
+    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus(u.status));
+    const out = [];
+    for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
+    out.sort(orderUsers);
+    return json({ Users: out }, {}, env, request);
+  }
+  if (path === "/users/reorder" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const list = Array.isArray(b.order) ? b.order : [];
+    for (const item of list) {
+      if (!item || !item.Username) continue;
+      const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, item.Username).first();
+      if (!row) continue;
+      let profile = {};
+      try {
+        profile = row.profile ? JSON.parse(row.profile) : {};
+      } catch {
+        profile = {};
+      }
+      profile.staffType = item.StaffType === "office" ? "office" : "field";
+      profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
+      await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, item.Username).run();
+    }
+    return json({ ok: true, count: list.length }, {}, env, request);
+  }
+  if (path === "/users/areas-meta" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    return json({ ok: true, areas: USER_AREAS }, {}, env, request);
+  }
+  if (path === "/users/set-areas" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.Username) return error("Username required", 400, env, request);
+    const valid = new Set(USER_AREAS.map((a) => a.key));
+    const areas = (Array.isArray(b.Areas) ? b.Areas : []).map(String).filter((k) => valid.has(k));
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
+    if (!row) return error("User not found", 404, env, request);
+    let profile = {};
+    try {
+      profile = row.profile ? JSON.parse(row.profile) : {};
+    } catch {
+      profile = {};
+    }
+    profile.areas = areas;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(JSON.stringify(profile), db.tenantId, b.Username).run();
+    return json({ ok: true, Areas: areas }, {}, env, request);
+  }
+  if (path === "/users" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.Username) return error("Username required", 400, env, request);
+    const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
+    const isNewUser = !already;
+    const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
+    await db.prepare(`
+      INSERT INTO users (engineer_number, first_name, last_name, username, email,
+                         vehicle_assigned, employment_type, status, sharepoint_path, profile, tenant_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(username) DO UPDATE SET
+        engineer_number=excluded.engineer_number, first_name=excluded.first_name,
+        last_name=excluded.last_name, email=excluded.email,
+        vehicle_assigned=excluded.vehicle_assigned,
+        employment_type=excluded.employment_type, status=excluded.status,
+        sharepoint_path=excluded.sharepoint_path,
+        profile=COALESCE(excluded.profile, users.profile), updated_at=datetime('now')
+    `).bind(
+      b.EngineerNumber || null,
+      b.FirstName || null,
+      b.LastName || null,
+      b.Username,
+      b.Email || null,
+      b.VehicleAssigned || null,
+      b.EmploymentType || null,
+      b.Status || "Active",
+      b.SharePointPath || null,
+      profileJson,
+      db.tenantId
+    ).run();
+    if (b.Password) {
+      const bad = validatePassword(b.Password);
+      if (bad) return error(bad, 400, env, request);
+      const hash = await hashPassword(b.Password);
+      const force = b.ForceChange === false ? 0 : 1;
+      await db.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE tenant_id = ? AND username=?").bind(hash, force, db.tenantId, b.Username).run();
+    }
+    for (const key of PERMISSION_KEYS) {
+      if (key in b) {
+        const val = String(b[key]).toLowerCase() === "yes" ? 1 : 0;
+        await db.prepare(`
+          INSERT INTO user_permissions (username, permission, value, tenant_id) VALUES (?,?,?,?)
+          ON CONFLICT(username, permission) DO UPDATE SET value=excluded.value
+        `).bind(b.Username, key, val, db.tenantId).run();
+      }
+    }
+    let welcomeEmailed = false;
+    if (isNewUser && b.Email) {
+      const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
+      const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = welcomeEmail({
+        name: b.FirstName || b.Username,
+        username: b.Username,
+        setUrl,
+        ttlHours: WELCOME_TOKEN_HOURS,
+        appUrl: appBase(env)
+      });
+      const res = await sendEmail(env, { to: b.Email, ...msg });
+      welcomeEmailed = !!res.ok;
+    }
+    return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
+  }
+  if (path === "/users/reset-password" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!exists) return error("User not found", 404, env, request);
+    const tempProvided = !!b.newPassword;
+    const newPassword = b.newPassword || generateTempPassword();
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    const hash = await hashPassword(newPassword);
+    await db.prepare(
+      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE tenant_id = ? AND username=?"
+    ).bind(hash, db.tenantId, b.username).run();
+    await db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).run();
+    return json({ ok: true, tempPassword: tempProvided ? void 0 : newPassword }, {}, env, request);
+  }
+  if (path === "/users/resend-welcome" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const user = await db.prepare("SELECT username, first_name, email FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!user) return error("User not found", 404, env, request);
+    if (!user.email) return error("That user has no email address on file.", 400, env, request);
+    const token = await issuePasswordToken(env, tenantId, user.username, WELCOME_TOKEN_HOURS);
+    const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+    const msg = welcomeEmail({
+      name: user.first_name || user.username,
+      username: user.username,
+      setUrl,
+      ttlHours: WELCOME_TOKEN_HOURS,
+      appUrl: appBase(env)
+    });
+    const res = await sendEmail(env, { to: user.email, ...msg });
+    if (!res.ok) return error("Email could not be sent \u2014 check the email configuration.", 502, env, request);
+    return json({ ok: true, sent: true, email: user.email }, {}, env, request);
+  }
+  if (path === "/users/delete" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
+    await db.batch([
+      db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
+    ]);
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown user route", 404, env, request);
+}
+var USER_AREAS = [
+  { key: "vehicles", label: "Vehicles / van checks", perm: "Vehicles" },
+  { key: "sla", label: "SLA jobs", perm: "SLA" },
+  { key: "holidays", label: "Holidays", perm: "HolidayAdmin" },
+  { key: "equipment", label: "Plant & equipment", perm: "AssetAdmin" },
+  { key: "compliance", label: "Compliance", perm: "Compliance" },
+  { key: "purchaseorders", label: "Purchase orders", perm: "PurchaseOrders" },
+  { key: "memos", label: "Company memos", perm: "FullAccess" },
+  { key: "timesheets", label: "Engineer timesheets", perm: "TimesheetAdmin" },
+  { key: "messages", label: "Messages", perm: "" }
+];
+var PERMISSION_KEYS = [
+  "FullAccess",
+  "Users",
+  "DeviceAdmin",
+  "CheckInOut",
+  "Vehicles",
+  "Holiday",
+  "HolidayAdmin",
+  "EngineersHoursMenu",
+  "HoursDashboard",
+  "PurchaseOrders",
+  "Sites",
+  "AddSite",
+  "Assets",
+  "MyDocuments",
+  "Weekly",
+  "Forms",
+  "Compliance",
+  "Projects",
+  "ProjectsAdmin",
+  "TimesheetAdmin",
+  "LabourPlanning",
+  "SLA",
+  "SLAAdmin",
+  // office SLA management: dashboard, scheduler, add/edit jobs
+  "StoryMode",
+  // opt-in: guided day protocol for this engineer
+  "HSPlan",
+  // access to the H&S planning tool
+  "SiteLog",
+  // access to SiteLog (site check-in/attendance)
+  "OfficeClock",
+  // opt-in: desktop clock in/out timer for office staff
+  "OfficeTimesheet",
+  // view the weekly master office timesheet (all staff)
+  "EngTimesheet",
+  // engineer weekly timesheet (times + jobs; invoices if self-employed)
+  "AssetAdmin",
+  // plant & equipment admin: sees ALL transfer documents + All Assets
+  "ThemeColour",
+  // personalisation: may pick a portal colour theme
+  "ThemeBackground",
+  // personalisation: may change the menu background
+  "Programmes",
+  // job programmes: build/issue/share programmes of works
+  "YardGate",
+  // trigger the yard gate (Tuya) + see its open/closed state
+  "YardGateAnywhere"
+  // exempt from the yard-gate geofence (operate from anywhere)
+];
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+function shapeUser2(u, perms) {
+  let profile = {};
+  try {
+    profile = u.profile ? JSON.parse(u.profile) : {};
+  } catch {
+    profile = {};
+  }
+  return {
+    EngineerNumber: u.engineer_number,
+    FirstName: u.first_name,
+    LastName: u.last_name,
+    Username: u.username,
+    Email: u.email,
+    VehicleAssigned: u.vehicle_assigned,
+    EmploymentType: u.employment_type,
+    Status: u.status,
+    SharePointPath: u.sharepoint_path,
+    // Office/field split + manual drag order (set in Users admin, stored in the
+    // profile blob so no schema change is needed). Everything sorts by these.
+    StaffType: profile.staffType === "office" ? "office" : "field",
+    SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
+    Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
+    Profile: profile,
+    ...perms
+  };
+}
+function orderUsers(a, b) {
+  const rank = (t) => t === "office" ? 0 : 1;
+  const ra = rank(a.StaffType), rb = rank(b.StaffType);
+  if (ra !== rb) return ra - rb;
+  const sa = Number.isFinite(a.SortOrder) ? a.SortOrder : 9999;
+  const sb = Number.isFinite(b.SortOrder) ? b.SortOrder : 9999;
+  if (sa !== sb) return sa - sb;
+  const na = ((a.FirstName || "") + " " + (a.LastName || "")).trim().toLowerCase();
+  const nb = ((b.FirstName || "") + " " + (b.LastName || "")).trim().toLowerCase();
+  return na.localeCompare(nb);
+}
+
+// src/routes/devices.js
+init_http();
+init_auth();
+init_tenantdb();
+async function handle3(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
+  if (path === "/device/check-device" && request.method === "POST") {
+    const { username, deviceId } = await request.json().catch(() => ({}));
+    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
+    const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
+    if (!dev) {
+      return json({ status: "NEW_DEVICE_REQUIRED" }, {}, env, request);
+    }
+    if (dev.username !== username) {
+      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
+    }
+    return json({ status: "OK" }, {}, env, request);
+  }
+  if (path === "/device/register-device" && request.method === "POST") {
+    const { username, deviceId, label } = await request.json().catch(() => ({}));
+    if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
+    const existing = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).first();
+    if (existing && existing.username !== username)
+      return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
+    if (!existing) {
+      const s = await deviceSettings(env, tenantId, username);
+      if (!s.unlimited) {
+        const { count } = await db.prepare("SELECT COUNT(*) AS count FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
+        if (Number(count) >= s.allowedDevices)
+          return json({ status: "DEVICE_LIMIT_REACHED", allowed: s.allowedDevices }, {}, env, request);
+      }
+    }
+    await db.prepare(`
+      INSERT INTO devices (tenant_id, device_id, username, label) VALUES (?,?,?,?)
+      ON CONFLICT(device_id) DO UPDATE SET username=excluded.username, label=excluded.label
+    `).bind(db.tenantId, deviceId, username, label || null).run();
+    return json({ status: "OK" }, {}, env, request);
+  }
+  if (path === "/device/admin-list" && request.method === "GET") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    const { results: devs } = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId).all();
+    const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id = ?").bind(db.tenantId).all();
+    const byUser = {};
+    for (const d of devs || []) {
+      (byUser[d.username] || (byUser[d.username] = [])).push({
+        deviceId: d.device_id,
+        label: d.label || "",
+        firstSeen: d.registered_at,
+        lastSeen: d.registered_at,
+        office_clock: d.office_clock ? 1 : 0
+      });
+    }
+    const records = (users || []).map((u) => {
+      let p = {};
+      try {
+        p = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      return {
+        username: u.username,
+        name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
+        staffType: p.staffType === "office" ? "office" : "field",
+        sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 9999,
+        devices: byUser[u.username] || [],
+        history: [],
+        allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
+        unlimited: !!p.deviceUnlimited
+      };
+    });
+    for (const uname of Object.keys(byUser)) {
+      if (!records.some((r) => r.username === uname)) {
+        records.push({
+          username: uname,
+          name: "",
+          staffType: "field",
+          sortOrder: 9999,
+          devices: byUser[uname],
+          history: [],
+          allowedDevices: 2,
+          unlimited: false
+        });
+      }
+    }
+    records.sort((a, b) => (a.staffType === "office" ? 0 : 1) - (b.staffType === "office" ? 0 : 1) || a.sortOrder - b.sortOrder || (a.name || a.username).localeCompare(b.name || b.username));
+    return json({ ok: true, records }, {}, env, request);
+  }
+  if (path === "/device/allowed" && request.method === "POST") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    const { username, allowedDevices, unlimited } = await request.json().catch(() => ({}));
+    if (!username) return error("username required", 400, env, request);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
+    if (!row) return error("Unknown user", 404, env, request);
+    let p = {};
+    try {
+      p = row.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    p.deviceUnlimited = !!unlimited;
+    let cap = parseInt(allowedDevices, 10);
+    if (!Number.isFinite(cap) || cap < 1) cap = 1;
+    if (cap > 5) cap = 5;
+    p.allowedDevices = cap;
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(p), db.tenantId, username).run();
+    return json({ ok: true, allowedDevices: cap, unlimited: !!unlimited }, {}, env, request);
+  }
+  if (path === "/device/reset" && request.method === "POST") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    let username = url.searchParams.get("username");
+    if (!username) {
+      const b = await request.json().catch(() => ({}));
+      username = b.username;
+    }
+    if (!username) return error("username required", 400, env, request);
+    await db.prepare("DELETE FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).run();
+    return json({ ok: true, username }, {}, env, request);
+  }
+  if (path === "/device/list" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const u = url.searchParams.get("u");
+    const stmt = u ? db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND username = ? ORDER BY registered_at DESC").bind(db.tenantId, u) : db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId);
+    const { results } = await stmt.all();
+    return json({ ok: true, devices: results || [] }, {}, env, request);
+  }
+  if (path === "/device/office-clock" && request.method === "POST") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess2.tenantId, sess2.user.username);
+    if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
+      return error("Forbidden", 403, env, request);
+    const { deviceId, office } = await request.json().catch(() => ({}));
+    if (!deviceId) return error("deviceId required", 400, env, request);
+    await db.prepare("UPDATE devices SET office_clock=? WHERE tenant_id=? AND device_id=?").bind(office ? 1 : 0, db.tenantId, deviceId).run();
+    return json({ ok: true, deviceId, office: office ? 1 : 0 }, {}, env, request);
+  }
+  if (path.startsWith("/device/") && request.method === "DELETE") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const deviceId = path.split("/")[2];
+    await db.prepare("DELETE FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown device route", 404, env, request);
+}
+async function requireDeviceAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
+    return error("Forbidden", 403, env, request);
+  return null;
+}
+async function deviceSettings(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
+  let p = {};
+  try {
+    p = row && row.profile ? JSON.parse(row.profile) : {};
+  } catch {
+  }
+  return {
+    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
+    unlimited: !!p.deviceUnlimited
+  };
+}
+
+// src/index.js
+init_holidays();
+
+// src/routes/assets.js
+init_http();
+init_auth();
+init_tenantdb();
 
 // src/lib/suppress.js
 var KEY = (tid) => `notify:suppress:${tid}`;
@@ -2127,6 +2207,7 @@ function isSuppressed(rules, type, user, key) {
 }
 
 // src/routes/assets.js
+init_push();
 async function handle6(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
@@ -3029,6 +3110,10 @@ async function remindPendingTransfers(env, tid = 1) {
   }
 }
 
+// src/routes/sla.js
+init_http();
+init_tenantdb();
+
 // src/lib/filesign.js
 function fileSecret(env) {
   return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
@@ -3066,6 +3151,10 @@ async function verifyFileSig(env, key, params) {
   for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ sig.charCodeAt(i);
   return diff === 0;
 }
+
+// src/routes/timesheets.js
+init_http();
+init_auth();
 
 // src/lib/pdf.js
 var PAGE_W = 595;
@@ -3433,6 +3522,7 @@ ${xrefAt}
 };
 
 // src/routes/timesheets.js
+init_holidays();
 async function holidayDaysFor(env, tid, username, monday) {
   const end = weekDays(monday)[6];
   const map = await approvedLeaveInRange(env, tid, monday, end, username);
@@ -4813,6 +4903,10 @@ async function handle7(request, env, ctx, url, sess) {
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
 
+// src/routes/sla.js
+init_auth();
+init_push();
+
 // src/lib/idempotency.js
 var READY = false;
 async function ensure(env) {
@@ -5165,6 +5259,12 @@ async function handle8(request, env, ctx, url, sess) {
     const all = await listJobs(env, tenantId);
     const jobs = all.filter((j) => j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && !j.seriesSkipped && String(j.status || "").toLowerCase() !== "cancelled" && assignedList(j).some((a) => normId(a) === eid)).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, scheduledAt: j.scheduledAt || null, status: j.status || "", series: !!j.seriesId, siteName: j.siteName || "" })).sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)));
     return jsonResponse({ jobs }, headers);
+  }
+  if (subpath === "/fallbacks") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (method === "GET") return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId) }, headers);
+    if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
   }
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
@@ -6988,11 +7088,13 @@ function releaseInstant(job) {
   return null;
 }
 function engineerHasOtherJobThatDay(job, allJobs) {
-  if (!job || !job.scheduledAt || !job.seriesId) return false;
+  if (!job || !job.scheduledAt) return false;
+  const isSeries = !!job.seriesId, isFallback = !!job.fallback;
+  if (!isSeries && !isFallback) return false;
   const day = new Date(job.scheduledAt).toISOString().slice(0, 10);
   const engs = new Set(assignedList(job).map(normId));
   if (!engs.size) return false;
-  return (allJobs || []).some((o) => o.id !== job.id && o.seriesId !== job.seriesId && !o.seriesSkipped && String(o.status || "").toLowerCase() !== "cancelled" && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day && assignedList(o).some((a) => engs.has(normId(a))));
+  return (allJobs || []).some((o) => o.id !== job.id && !o.seriesSkipped && String(o.status || "").toLowerCase() !== "cancelled" && o.scheduledAt && new Date(o.scheduledAt).toISOString().slice(0, 10) === day && assignedList(o).some((a) => engs.has(normId(a))) && !(isSeries && o.seriesId === job.seriesId) && !(isFallback && o.fallback));
 }
 var RELEASE_DONE = /* @__PURE__ */ new Set(["complete", "closed jobs", "closed", "invoiced", "cancelled"]);
 function jobIsFinished(job) {
@@ -7010,7 +7112,7 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
 }
 function releaseVisibleNow(job, allJobs) {
   if (job && job.seriesSkipped) return false;
-  if (job && job.seriesId && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
+  if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
   const r = job && job.release;
   if (!r || !r.mode || r.mode === "now") return true;
   if (r.mode === "at" || r.mode === "dayBefore") {
@@ -7101,7 +7203,7 @@ async function sweepJobReleases(env, tid = 1) {
     if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
     const r = j.release;
     if (!r || !r.mode || r.mode === "now") continue;
-    if (j.seriesId && engineerHasOtherJobThatDay(j, jobs)) {
+    if ((j.seriesId || j.fallback) && engineerHasOtherJobThatDay(j, jobs)) {
       const t = releaseInstant(j);
       if (t == null || t <= Date.now()) {
         j.seriesSkipped = true;
@@ -7307,6 +7409,8 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // permanently drops a day (clash safeguard). Both preserved across re-saves.
     seriesId: body.seriesId !== void 0 ? String(body.seriesId || "") || null : existing?.seriesId ?? null,
     seriesSkipped: body.seriesSkipped !== void 0 ? !!body.seriesSkipped : existing?.seriesSkipped || false,
+    // Auto-assigned fallback "at least a job for tomorrow" day (cron). Preserved.
+    fallback: body.fallback !== void 0 ? !!body.fallback : existing?.fallback || false,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -7379,6 +7483,7 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;
+  if (patch.fallback !== void 0) job.fallback = !!patch.fallback;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -8708,6 +8813,157 @@ var DEFAULT_WORK_AREAS = [
   "Decorating",
   "General maintenance"
 ].map((name) => ({ id: areaSlug(name), name, colour: "#64748b" }));
+var FALLBACK_KEY = (tid) => "sla:fallbacks:" + tid;
+async function getFallbacks(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tenantId, FALLBACK_KEY(tenantId)).first();
+  let c;
+  try {
+    c = row ? JSON.parse(row.value) : null;
+  } catch {
+    c = null;
+  }
+  if (!c || typeof c !== "object") c = {};
+  return {
+    enabled: !!c.enabled,
+    startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
+    byEngineer: c.byEngineer && typeof c.byEngineer === "object" ? c.byEngineer : {}
+  };
+}
+async function setFallbacks(env, tenantId, body) {
+  const cur = await getFallbacks(env, tenantId);
+  const out = {
+    enabled: body.enabled !== void 0 ? !!body.enabled : cur.enabled,
+    startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
+    byEngineer: {}
+  };
+  const src = body.byEngineer && typeof body.byEngineer === "object" ? body.byEngineer : cur.byEngineer;
+  for (const k of Object.keys(src || {})) {
+    const e = src[k] || {};
+    const description = String(e.description || "").trim();
+    const siteName = String(e.siteName || "").trim();
+    if (!description && !siteName) continue;
+    out.byEngineer[normId(k)] = {
+      siteName,
+      postcode: String(e.postcode || "").trim(),
+      description,
+      durationMinutes: Math.max(15, Math.min(600, Number(e.durationMinutes) || 480)),
+      active: e.active === false ? false : true
+    };
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, FALLBACK_KEY(tenantId), JSON.stringify(out)).run();
+  return out;
+}
+function londonNow() {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(/* @__PURE__ */ new Date()).reduce((a, x) => {
+    a[x.type] = x.value;
+    return a;
+  }, {});
+  const dowMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: dowMap[p.weekday], hour: Number(p.hour === "24" ? 0 : p.hour), minute: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
+}
+function nextWorkingDay(dateStr) {
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  do {
+    d.setUTCDate(d.getUTCDate() + 1);
+  } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+function londonAtHour(dateStr, hour) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(londonInstant(y, m, d, hour, 0)).toISOString();
+}
+async function sweepFallbacks(env, tid = 1) {
+  const cfg = await getFallbacks(env, tid);
+  if (!cfg.enabled) return;
+  const now = londonNow();
+  if (now.dow === 0 || now.dow === 6) return;
+  let slot = null;
+  if (now.hour === 15 && now.minute >= 30 && now.minute < 35) slot = "warn1";
+  else if (now.hour === 18 && now.minute < 5) slot = "warn2";
+  else if (now.hour === 19 && now.minute < 5) slot = "assign";
+  if (!slot) return;
+  const target = nextWorkingDay(now.date);
+  const db = tenantDB(env, tid);
+  const dedupKey = "sla:fallbackswept:" + tid;
+  let swept = {};
+  try {
+    const r = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, dedupKey).first();
+    if (r) swept = JSON.parse(r.value) || {};
+  } catch {
+  }
+  const stamp = slot + ":" + target;
+  if (swept[stamp]) return;
+  const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+  const fieldUsers = (users || []).filter((u) => {
+    let st = "field";
+    try {
+      st = JSON.parse(u.profile || "{}").staffType || "field";
+    } catch {
+    }
+    return st !== "office";
+  });
+  const jobs = await listJobs(env, tid);
+  const hasJobThatDay = (uname) => jobs.some((j) => j.scheduledAt && !j.seriesSkipped && String(j.status || "").toLowerCase() !== "cancelled" && new Date(j.scheduledAt).toISOString().slice(0, 10) === target && assignedList(j).some((a) => normId(a) === normId(uname)));
+  let leave = {};
+  try {
+    const { approvedLeaveInRange: approvedLeaveInRange2 } = await Promise.resolve().then(() => (init_holidays(), holidays_exports));
+    leave = await approvedLeaveInRange2(env, tid, target, target);
+  } catch {
+  }
+  const onLeave = (uname) => {
+    const m = leave[uname] || leave[normId(uname)];
+    return !!(m && m[target]);
+  };
+  const empties = fieldUsers.filter((u) => !hasJobThatDay(u.username) && !onLeave(u.username));
+  if (slot === "warn1" || slot === "warn2") {
+    if (empties.length) {
+      const names = empties.map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
+      const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
+      const body = names.join(", ") + " \u2014 no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
+      const owner = env.OWNER_USERNAME || "";
+      const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
+      if (owner) await sendToUser(env, tid, owner, payload).catch(() => {
+      });
+      await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], payload, owner || "").catch(() => {
+      });
+    }
+  } else if (slot === "assign") {
+    const scheduledAt = londonAtHour(target, cfg.startHour || 8);
+    for (const u of empties) {
+      const fb = cfg.byEngineer[normId(u.username)];
+      if (!fb || fb.active === false || !fb.description && !fb.siteName) continue;
+      const payload = {
+        description: fb.description || "Fallback \u2014 " + (fb.siteName || "standby"),
+        siteName: fb.siteName || "",
+        siteCode: "",
+        postcode: fb.postcode || "",
+        assignedEngineers: [u.username],
+        scheduledAt,
+        durationMinutes: fb.durationMinutes || 480,
+        release: { mode: "dayBefore", hour: 17 },
+        fallback: true,
+        requiresRA: false,
+        requiresSignature: false,
+        requiresPhoto: false,
+        requiresNote: false,
+        changedBy: "auto-fallback"
+      };
+      try {
+        const job = await createOrUpdateJobFromPayload(env, tid, payload);
+        await reconcileRelease(env, tid, job).catch(() => {
+        });
+      } catch (e) {
+        console.error("fallback assign failed for", u.username, e && e.message);
+      }
+    }
+  }
+  swept[stamp] = true;
+  const keep = {};
+  for (const k of Object.keys(swept)) if (k.endsWith(target)) keep[k] = true;
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, dedupKey, JSON.stringify(keep)).run();
+}
 async function getWorkAreas(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_work_areas'").bind(tenantId).first();
@@ -9082,6 +9338,11 @@ async function saveFsMaterials(env, tenantId, mats) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'firestop_materials', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, JSON.stringify(mats)).run();
   return mats;
 }
+
+// src/routes/sites.js
+init_http();
+init_tenantdb();
+init_auth();
 
 // src/routes/sitelog-api.js
 var ALLOWED_ORIGINS = [
@@ -12242,6 +12503,10 @@ function prettify(id) {
 }
 
 // src/routes/portal.js
+init_http();
+init_auth();
+init_tenantdb();
+init_push();
 var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
 function vanWeek() {
   const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -12617,6 +12882,8 @@ function num(v) {
 }
 
 // src/routes/sitelog.js
+init_http();
+init_auth();
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
 async function handle12(request, env, ctx, url, sess) {
@@ -12885,6 +13152,10 @@ async function handleInboundEmail(message, env, ctx, fetchSelf) {
 }
 
 // src/routes/office.js
+init_http();
+init_auth();
+init_tenantdb();
+init_holidays();
 function londonDate(d = /* @__PURE__ */ new Date()) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
@@ -13232,6 +13503,9 @@ async function handle13(request, env, ctx, url, sess) {
 }
 
 // src/routes/keys.js
+init_http();
+init_auth();
+init_tenantdb();
 async function keyAdmin(env, request) {
   const sess = await requireSession(env, request);
   if (!sess) return { code: 401, error: "Not authenticated" };
@@ -13364,6 +13638,9 @@ async function handle14(request, env, ctx, url, sess) {
 }
 
 // src/routes/theme.js
+init_http();
+init_auth();
+init_tenantdb();
 var ACCENTS = ["blue", "teal", "green", "purple", "burgundy", "orange", "slate", "midnight"];
 var BG_COLOURS = ["sky", "sand", "sage", "blush", "lavender", "steel"];
 async function caps(env, tenantId, username) {
@@ -13447,6 +13724,10 @@ async function handle15(request, env, ctx, url, sess) {
 }
 
 // src/routes/hs.js
+init_http();
+init_auth();
+init_tenantdb();
+init_push();
 var PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
 async function ensureHsCols(db) {
   for (const col of ["attachments TEXT", "sign_requests TEXT"]) {
@@ -13887,6 +14168,10 @@ async function mintRef(db, docType, site) {
 }
 
 // src/routes/vancheck.js
+init_http();
+init_auth();
+init_tenantdb();
+init_push();
 var SETTINGS_KEY2 = "vancheck:settings";
 var OPTOUT_KEY = "vancheck:optout";
 async function getOptedOut(env, tid) {
@@ -14864,6 +15149,8 @@ async function sendWeeklyReminders(env, now = /* @__PURE__ */ new Date()) {
 }
 
 // src/routes/stats.js
+init_http();
+init_tenantdb();
 function json2(data, status, env, request) {
   return new Response(JSON.stringify(data), {
     status: status || 200,
@@ -15046,6 +15333,9 @@ function classifyAssetBucket(key) {
 }
 
 // src/routes/hrdocs.js
+init_http();
+init_tenantdb();
+init_auth();
 var DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Memos", "Other"];
 function jr2(obj, headers, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });
@@ -15185,6 +15475,9 @@ async function deletePersonalDocs(env, tenantId, username) {
 }
 
 // src/routes/privacy.js
+init_http();
+init_auth();
+init_tenantdb();
 var EXPORT_TABLES = [
   ["users", "username"],
   ["user_permissions", "username"],
@@ -15282,7 +15575,15 @@ async function handle20(request, env, ctx, url, sess) {
   return error("Not found: " + path, 404, env, request);
 }
 
+// src/routes/fleet.js
+init_http();
+init_tenantdb();
+init_auth();
+init_push();
+
 // src/routes/costing.js
+init_http();
+init_auth();
 async function sitelogAdminFetch(env, pathQuery, ms) {
   const secret = env.SITELOG_ADMIN_SECRET;
   const target = (env.SITELOG_API || "https://api.site-log.co.uk") + pathQuery;
@@ -19582,7 +19883,14 @@ async function seedAssignments(env, tid) {
   }
 }
 
+// src/index.js
+init_push();
+
 // src/routes/messages.js
+init_http();
+init_tenantdb();
+init_push();
+init_auth();
 var READY2 = false;
 async function ensure3(env) {
   if (READY2) return;
@@ -19917,6 +20225,10 @@ async function handle23(request, env, ctx, url, sess) {
 }
 
 // src/routes/memos.js
+init_http();
+init_tenantdb();
+init_auth();
+init_push();
 var READY3 = false;
 async function ensure4(env) {
   if (READY3) return;
@@ -20298,6 +20610,9 @@ async function handle24(request, env, ctx, url, sess) {
 }
 
 // src/routes/compliance.js
+init_http();
+init_tenantdb();
+init_auth();
 var READY4 = false;
 async function ensure5(env) {
   if (READY4) return;
@@ -21271,6 +21586,9 @@ async function handle25(request, env, ctx, url, sess) {
 }
 
 // src/routes/chapplins.js
+init_http();
+init_tenantdb();
+init_auth();
 var CLIENT = "chapplins";
 var SCHEME = "chapplins";
 var _ready = false;
@@ -21494,6 +21812,8 @@ async function handle26(request, env, ctx, url, sess) {
 }
 
 // src/routes/po.js
+init_http();
+init_auth();
 function staffTypeOf2(u) {
   try {
     const p = JSON.parse(u.profile || "{}");
@@ -22140,6 +22460,9 @@ function slugify(name) {
 }
 
 // src/routes/cctv.js
+init_http();
+init_auth();
+init_tenantdb();
 var CFG_KEY2 = "cctv:sites";
 var ALLOWED_PORTS = /* @__PURE__ */ new Set([80, 443, 8080, 8880, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]);
 var VENDOR_PATH = {
@@ -22555,6 +22878,9 @@ function md5Hex(bytes) {
 }
 
 // src/routes/tasks.js
+init_http();
+init_auth();
+init_push();
 var TASK_AREAS = [
   { key: "", label: "\u2014 none (manual only) \u2014", auto: "", page: "" },
   { key: "Vehicles", label: "Vehicles / van checks", auto: "/vancheck/submit", page: "vehicles.html" },
@@ -22896,6 +23222,12 @@ async function sweepTaskReminders(env, now = /* @__PURE__ */ new Date()) {
   }
   return { ran: true, tenants: out };
 }
+
+// src/routes/programmes.js
+init_http();
+init_auth();
+init_tenantdb();
+init_push();
 
 // src/lib/progpdf.js
 var LOGO_BYTES = null;
@@ -23996,6 +24328,9 @@ async function handle30(request, env, ctx, url) {
 }
 
 // src/routes/projects-api.js
+init_http();
+init_auth();
+init_tenantdb();
 var DOC_TYPES = [
   { key: "programme", label: "Programme of works" },
   { key: "rams", label: "Risk Assessment (RAMS)" },
@@ -24920,6 +25255,9 @@ async function handle31(request, env, ctx, url, sess) {
 }
 
 // src/routes/health.js
+init_http();
+init_tenantdb();
+init_push();
 function json3(data, status, env, request) {
   return new Response(JSON.stringify(data), {
     status: status || 200,
@@ -25308,6 +25646,10 @@ async function handle32(request, env, ctx, url, sess) {
 }
 
 // src/routes/tuya.js
+init_http();
+init_auth();
+init_tenantdb();
+init_push();
 var CFG_KEY3 = "tuya:config";
 var TOK_KEY = "tuya:token";
 var WATCH_KEY = "tuya:gatewatch";
@@ -25421,7 +25763,7 @@ async function logGate(db, entry) {
   log.unshift(entry);
   await saveKV(db, "tuya:openlog", log.slice(0, 100));
 }
-function londonNow() {
+function londonNow2() {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(/* @__PURE__ */ new Date());
   const get = (t) => (parts.find((p) => p.type === t) || {}).value;
   const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -25583,7 +25925,7 @@ async function handle33(request, env, ctx, url, sess) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
     const user = sess.user && sess.user.username || "?";
     const body = await request.json().catch(() => ({}));
-    if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow())) {
+    if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow2())) {
       const s = accessSummaryForUser(cfg, user);
       return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
     }
@@ -25643,7 +25985,7 @@ async function handle33(request, env, ctx, url, sess) {
       mins,
       openedBy: open ? st.by || null : null,
       access: accessSummaryForUser(cfg, me),
-      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow()),
+      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow2()),
       // Geofence: whether THIS caller must prove they're at the yard to operate.
       needLocation: !geoExempt && geoOn,
       geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false }
@@ -25705,6 +26047,9 @@ async function checkGateLeftOpen(env, tenantId) {
 }
 
 // src/routes/fra.js
+init_http();
+init_auth();
+init_tenantdb();
 var KEY2 = (tid) => `fra:followup:${tid}`;
 var VALID = /* @__PURE__ */ new Set(["quote_needed", "quote_submitted", "nfa", ""]);
 async function loadMap(db) {
@@ -25998,6 +26343,7 @@ var worker = {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sweepJobReleases(env, 1).catch((e) => console.error("scheduled job-release sweep:", e)));
+    ctx.waitUntil(sweepFallbacks(env, 1).catch((e) => console.error("scheduled fallback sweep:", e)));
     ctx.waitUntil(runHealthChecks(env, 1).catch((e) => console.error("scheduled health probe:", e)));
     ctx.waitUntil(checkGateLeftOpen(env, 1).catch((e) => console.error("scheduled yard-gate watch:", e)));
     if ((/* @__PURE__ */ new Date()).getUTCMinutes() % 10 < 5) {

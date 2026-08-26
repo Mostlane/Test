@@ -603,6 +603,26 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `seriesId`/`seriesSkipped` + `release.hour` are threaded through
   createOrUpdateJobFromPayload + patchJob and surfaced on `releaseView`
   (mode "skipped" / `series:true`).
+  **Per-engineer FALLBACK jobs — "at least a job for tomorrow" (Aug 2026):** so an
+  engineer always knows where they're heading next day. Config in app_config
+  **`sla:fallbacks:<tid>`** = `{enabled, startHour, byEngineer:{<normId>:{siteName,
+  postcode,description,durationMinutes,active}}}` via **GET/POST /sla/fallbacks**
+  (SLA admin); managed on **sla-scheduler.html → 🛟 Fallbacks** (master enable +
+  start time + a row per FIELD engineer). Cron **`sla.sweepFallbacks`** (every
+  5-min tick, self-gates on Europe/London): **warns** the office (owner +
+  FullAccess/SLAAdmin push) at **15:30 & 18:00** about field engineers with no job
+  for the **next working day**, and at **19:00 auto-assigns** each still-empty
+  engineer their fallback for that day (Mon–Fri; **Friday's run targets Monday**,
+  skipping the weekend — so no Sat/Sun run). The fallback job is created with
+  `release:{mode:"dayBefore",hour:17}` (visible at **5pm the evening before**;
+  since a Monday fallback is created Friday it stays hidden until Sunday 5pm) and
+  **`job.fallback=true`**. `nextWorkingDay`/`londonNow`/`londonAtHour` are the
+  helpers; dedup per slot/day in app_config `sla:fallbackswept:<tid>`; skips anyone
+  on approved leave (`approvedLeaveInRange`). **Auto-drop safeguard:** a fallback
+  job (like a series day) is dropped if the engineer gets a REAL job that day —
+  `engineerHasOtherJobThatDay` now also covers `job.fallback`, so
+  `releaseVisibleNow` hides it and `sweepJobReleases` persists `seriesSkipped`.
+  `job.fallback` is threaded through create/patch.
   **Already-booked-that-day warning (`sla-jobedit.js?v=21`, Aug 2026):** when the
   office assigns a job to an engineer who ALREADY has job(s) that day — a normal
   job OR a hidden project drip day — a **pre-save** warning modal lists them
