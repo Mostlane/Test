@@ -1074,7 +1074,7 @@ function renderCatList(){
     el.addEventListener("click", e => onCatDelete(+e.currentTarget.dataset.del)));
 }
 
-function catAdd(){
+async function catAdd(){
   const name = $("catNewName").value.trim();
   if(!name){ $("catStatusText").textContent = "Enter a name first."; return; }
   const lc = name.toLowerCase();
@@ -1084,8 +1084,20 @@ function catAdd(){
   $("catNewName").value = "";
   $("catNewColour").value = "#0ea5e9";
   $("catNewDone").checked = false;
-  $("catStatusText").textContent = "";
   renderCatList();
+  // Save immediately so the category persists AND gets its board chip right away —
+  // no separate "Save changes" step to forget. (Save changes still applies edits.)
+  $("catStatusText").textContent = "Saving…";
+  try{
+    const res = await authFetch("/sla/categories", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ categories: catWork }) });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    await loadCategories();
+    catWork = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour, done: !!c.done }));
+    renderCatList();
+    populateBulkDropdown();
+    await loadJobs();
+    $("catStatusText").textContent = `✅ Added "${name}".`;
+  }catch(err){ $("catStatusText").textContent = "❌ Couldn't save: " + err.message; }
 }
 
 /* Delete a row. A brand-new (unsaved) category with no jobs just drops out of the
