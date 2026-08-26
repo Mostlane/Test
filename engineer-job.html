@@ -521,6 +521,7 @@
 
   function wire(){
     var fs = !!(job && job.firestopping);
+    var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
     $("backBtn").onclick=function(){ location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
@@ -537,7 +538,7 @@
       $("auditFile").addEventListener("change", onAuditPhoto);
       renderAuditList();
     }
-    if(!fs){   // the completion slider exists for standard AND audit jobs (not firestop)
+    if(!fs && !cert){   // the completion slider exists for standard AND audit jobs (not firestop / EM-PAT cert)
       var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
       knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
       knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
