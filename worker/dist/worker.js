@@ -6887,6 +6887,22 @@ async function handle8(request, env, ctx, url, sess) {
       }, sess.user.username));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
+    if (parts[2] === "em-timer" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson2(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      if (String(b.action || "start") === "clear") {
+        job.emTimer = null;
+      } else {
+        const mins = Number.isFinite(Number(b.durationMinutes)) ? Math.max(1, Math.min(600, Number(b.durationMinutes))) : 180;
+        job.emTimer = { startedAt: now, durationMinutes: mins, startedBy: sess.user.username };
+      }
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
     if (parts[2] === "ra-resolve" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -7893,6 +7909,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
     emTest: body.emTest !== void 0 ? !!body.emTest : existing?.emTest || false,
     pat: body.pat !== void 0 ? !!body.pat : existing?.pat || false,
+    emTimer: body.emTimer !== void 0 ? body.emTimer || null : existing?.emTimer || null,
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
@@ -7985,6 +8002,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.auditItems !== void 0) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.emTest !== void 0) job.emTest = !!patch.emTest;
   if (patch.pat !== void 0) job.pat = !!patch.pat;
+  if (patch.emTimer !== void 0) job.emTimer = patch.emTimer || null;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;

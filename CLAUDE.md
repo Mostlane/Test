@@ -2046,6 +2046,20 @@ numbers** button triggers the rebuild (run it once, and after each year's certs
 land). Falls back to the store code when a store has no mapped set number.
 **Add Job also now has the full release/visibility control** (drip-feed: now / 5pm
 day-before / at a set time / afterPrev → `job.release`) — previously missing.
+**EM 3-hour drain-down TIMER (Aug 2026):** on an EM job (`job.emTest`) the engineer
+starts a live countdown when they flick the lights onto battery, and it's visible to
+BOTH the engineer AND the office. Stored on the job as **`job.emTimer` =
+{startedAt, durationMinutes (default 180, clamp 1–600), startedBy}** (threaded through
+`createOrUpdateJobFromPayload` + `patchJob`; `decorateJobWithLiveSla` spreads it so the
+board sees it). **POST /sla/jobs/{id}/em-timer** `{action:"start"|"clear",
+durationMinutes?}` sets/clears it and returns the decorated job. Front-end:
+**engineer-job.html** shows a "💡 3-hour drain-down timer" card above the certificate
+(▶ Start → big live H:MM:SS `#emCount`, ↻ Restart / ✕ Stop, then a green "✅ 3 hours
+complete — walk the site" state; `initEmTimer` ticks 1s). A glanceable **chip** shows
+on the engineer job LIST (engineer-jobs.html `emTimerChip` in `jobCardInner`) and the
+office board (sla-main.html, table statusline + mobile card) — `⏱ H:MM` remaining in
+navy, flipping to a green "✅ lights due" when done; a shared 1s `tickEmChips()` polls
+`.em-chip[data-emend]` in the DOM so re-rendered cards stay live.
 **TODO (next):** scheduler cross-over optimiser — an EM job is 45 min active +
 ~2 h idle (drain-down) + 15 min light check; when two EM sites are close, recommend
 interleaving them (do site B during A's wait, loop back to check A's lights).

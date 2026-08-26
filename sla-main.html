@@ -117,6 +117,8 @@
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
     .rel-badge{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#8a5a00;background:#fff6e5;border:1px solid #f0d9a6;border-radius:999px;padding:1px 8px;vertical-align:middle;}
+    .em-chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#003468;background:#eaf1fb;border:1px solid #c9dcf3;border-radius:999px;padding:1px 8px;vertical-align:middle;font-variant-numeric:tabular-nums;}
+    .em-chip.em-done{color:#0a7d33;background:#e9f8ef;border-color:#b7e3c6;}
     .arch-tag{display:inline-block;font-size:10px;font-weight:700;color:#475569;background:#eef2f7;border:1px solid #d7dee7;border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;}
     .grp-tag{display:inline-block;font-size:10px;font-weight:700;color:#3730a3;background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;padding:1px 7px;margin-left:2px;vertical-align:middle;cursor:help;}
     tr.archrow{background:#fafbfc;} tr.archrow td{color:#475569;}
@@ -554,6 +556,23 @@ function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","
 function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
 // Projects carry no priority level and no SLA — blank both on the board.
 function isProjectJob(j){ return /^p\d/i.test(String((j&&j.siteCode)||"")) || /project/i.test(String((j&&(j.storeType||j.client))||"")); }
+// EM 3-hour drain-down timer chip — mirrors the engineer job-list chip so the
+// office can see how long each running emergency-light discharge test has left.
+function fmtHM(ms){ var s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h+":"+String(m).padStart(2,"0"); }
+function emTimerChip(job){
+  var t = job && job.emTimer;
+  if(!(t && t.startedAt)) return "";
+  var end = Date.parse(t.startedAt) + ((Number(t.durationMinutes)||180)*60000);
+  var done = (end - Date.now()) <= 0;
+  return `<span class="em-chip${done?" em-done":""}" data-emend="${end}">${done?"✅ lights due":("⏱ "+fmtHM(end-Date.now()))}</span>`;
+}
+function tickEmChips(){
+  var chips=document.querySelectorAll(".em-chip[data-emend]");
+  for(var i=0;i<chips.length;i++){ var el=chips[i],rem=Number(el.dataset.emend)-Date.now();
+    if(rem>0){ el.textContent="⏱ "+fmtHM(rem); el.classList.remove("em-done"); }
+    else { el.textContent="✅ lights due"; el.classList.add("em-done"); } }
+}
+setInterval(tickEmChips, 1000);
 function isClosed(j){ return ["Complete","Closed Jobs","Invoiced"].includes(j.status) || doneCatNames().includes(j.status); }
 
 function slaBadge(job){
@@ -734,7 +753,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
-        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}</div>
+        <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
       <td>
@@ -769,6 +788,7 @@ function render(){
       <div class="mjob-meta">
         <span class="statuspick" data-action="status" title="Tap to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
+        ${emTimerChip(j)}
       </div>
       <div class="mjob-meta">${sched ? "🗓 " + sched : ""} ${engNames ? "· 👤 " + esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</div>
       <div class="mjob-actions">
