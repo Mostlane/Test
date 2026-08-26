@@ -470,6 +470,23 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the original scheduled slot and the hover shows "Scheduled HH:MM (worked HH:MM)".
   Falls back to the scheduled slot when there are no actual times (office-marked
   complete) or the work wasn't on the shown day. Week view just greens the chip.
+  **Overlapping jobs STACK in the day view (Aug 2026):** overlapping blocks used
+  to sit on top of each other (top:6px each — hard to tap the right one). Day view
+  now packs an engineer's jobs into **sub-lanes** (greedy interval packing sorted
+  by start; a <4px shared edge still counts as clear so touching jobs share a
+  line) and **auto-sizes the row** to fit however many lanes are needed — each
+  block gets `top = 6 + lane*(JOB_H+GAP)` and a per-lane height (26px when
+  stacked, 32px single). The now-line height sums the variable row heights
+  (`bodyH`), not `count*DAY_ROW_HEIGHT`. Lanes are purely visual — drag still
+  reads x for time / the row for engineer.
+  **Field engineers only by default + "Show office staff" toggle (Aug 2026):** the
+  scheduler shows only FIELD staff by default; a **Show office staff** checkbox in
+  the toolbar reveals office/admin staff, **remembered per user** (localStorage
+  `mlSchedShowOffice` for instant paint + mirrored to **/prefs `schedShowOffice`**
+  so it follows them across devices — the server copy wins on load). `isFieldEng`
+  (staffType!=="office") drives `getFilteredEngineers` + the Engineer dropdown
+  (`populateEngineerFilter`, rebuilt on toggle); picking a specific engineer in the
+  dropdown still shows them regardless. Applies to both day + week views.
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference

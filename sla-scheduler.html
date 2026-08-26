@@ -281,6 +281,9 @@
         <select id="engineerFilter"><option value="all">All engineers</option></select>
       </div>
       <div class="controls-group">
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px;"><input type="checkbox" id="showOfficeChk"> <span>Show office staff</span></label>
+      </div>
+      <div class="controls-group">
         <span class="tag">Drag jobs to move them — time updates for every engineer on the job</span>
       </div>
     </div>
@@ -558,6 +561,11 @@ let jobs = [];
 let viewMode = "day";
 let selectedDate = new Date();
 let engineerFilter = "all";
+// Scheduler shows FIELD engineers by default; office/admin staff are hidden
+// until the user ticks "Show office staff" (remembered per user).
+let showOffice = false;
+try { showOffice = localStorage.getItem("mlSchedShowOffice") === "1"; } catch (e) {}
+function isFieldEng(e){ return String(e.staffType || "field") !== "office"; }
 
 let dragState = { active:false, jobId:null, fromTray:false, moved:false, pointerId:null, offsetX:0, ghost:null, targetEngineer:null, targetMins:null };
 
@@ -692,8 +700,21 @@ function ensureHolidays(){
 }
 
 function getFilteredEngineers(){
-  if(engineerFilter === "all") return engineers;
-  return engineers.filter(e => e.username === engineerFilter);
+  if(engineerFilter !== "all") return engineers.filter(e => e.username === engineerFilter);
+  return showOffice ? engineers : engineers.filter(isFieldEng);
+}
+// Rebuild the Engineer dropdown to match the field/office filter (keeps the
+// current pick if it's still listed).
+function populateEngineerFilter(){
+  const sel = $("engineerFilter"); if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const all = document.createElement("option"); all.value = "all"; all.textContent = "All engineers"; sel.appendChild(all);
+  (showOffice ? engineers : engineers.filter(isFieldEng)).forEach(e => {
+    const opt = document.createElement("option"); opt.value = e.username; opt.textContent = e.name; sel.appendChild(opt);
+  });
+  if(prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  else { sel.value = "all"; engineerFilter = "all"; }
 }
 
 /* ============== RENDER ============== */
@@ -812,6 +833,7 @@ function renderDayView(container){
   header.appendChild(hours);
   timeline.appendChild(header);
 
+  let bodyH = 0;   // running total of row heights (variable now) for the now-line
   engineerList.forEach(engineer => {
     const row = document.createElement("div");
     row.className = "day-row";
@@ -827,7 +849,6 @@ function renderDayView(container){
     const track = document.createElement("div");
     track.className = "day-track";
     track.style.width = trackWidth + "px";
-    track.style.height = DAY_ROW_HEIGHT + "px";
     track.dataset.engineer = engineer.username;
 
     for(let h = DAY_START_HOUR+1; h < DAY_END_HOUR; h++){
@@ -841,14 +862,11 @@ function renderDayView(container){
       .filter(j => j.scheduledAt && j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
       .filter(j => sameDay(new Date(j.scheduledAt), dayDate));
 
-    jobsForEngineer.forEach(job => {
+    // Pass 1: compute each job's on-lane time window (scheduled, or the ACTUAL
+    // worked window for a finished job so an early finish slides left).
+    const placements = jobsForEngineer.map(job => {
       const done = isDoneStatus(job.status);
-      // The scheduled slot (what the office set) — kept, and marked on the lane.
       const schedStartMins = clamp(minsSinceMidnight(new Date(job.scheduledAt)), dayStartMins, dayEndMins - 15);
-      // A finished job is drawn at the time it was ACTUALLY worked (from the
-      // status history), so an early finish slides left. Falls back to the
-      // scheduled slot when there are no actual times. Only apply when the work
-      // actually happened on this day.
       const actRaw = done ? actualWindow(job, engineer.username) : null;
       const act = (actRaw && sameDay(actRaw.start, dayDate)) ? actRaw : null;
       let startMins, endMins;
@@ -860,8 +878,31 @@ function renderDayView(container){
         startMins = schedStartMins;
         endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
       }
-      const shifted = act && Math.abs(startMins - schedStartMins) >= 5;
+      return { job, done, schedStartMins, startMins, endMins, shifted: act && Math.abs(startMins - schedStartMins) >= 5 };
+    });
 
+    // Pass 2: stack overlapping jobs into sub-lanes (greedy interval packing) so
+    // they never sit on top of each other. Non-overlapping jobs share a lane
+    // (side by side); the row grows to fit however many lanes are needed. A tiny
+    // shared-edge overlap (< SNUG px) still counts as "clear" so touching jobs
+    // stay on one line. Sorted by start so earlier jobs claim the top lanes.
+    const SNUG = 4 / pxPerMin;   // minutes equivalent of a 4px visual gap
+    placements.sort((a,b) => a.startMins - b.startMins || a.endMins - b.endMins);
+    const laneEnds = [];
+    placements.forEach(p => {
+      let lane = laneEnds.findIndex(end => end - p.startMins <= SNUG);
+      if(lane === -1){ lane = laneEnds.length; laneEnds.push(0); }
+      laneEnds[lane] = p.endMins;
+      p.lane = lane;
+    });
+    const numLanes = Math.max(1, laneEnds.length);
+    const GAP = 3;
+    const JOB_H = numLanes > 1 ? 26 : 32;
+    const rowH = Math.max(DAY_ROW_HEIGHT, 6 + numLanes * JOB_H + (numLanes - 1) * GAP + 6);
+    track.style.height = rowH + "px";
+
+    placements.forEach(p => {
+      const { job, done, schedStartMins, startMins, endMins, shifted, lane } = p;
       // Faint dashed tick at the original scheduled slot when the block moved.
       if(shifted){
         const mk = document.createElement("div");
@@ -877,6 +918,9 @@ function renderDayView(container){
       el.dataset.engineer = engineer.username;
       el.style.left = ((startMins - dayStartMins) * pxPerMin) + "px";
       el.style.width = Math.max(28, (endMins - startMins) * pxPerMin) + "px";
+      el.style.top = (6 + lane * (JOB_H + GAP)) + "px";
+      el.style.height = JOB_H + "px";
+      el.style.lineHeight = (JOB_H - 2) + "px";
       const colour = STATUS_COLOUR[job.status] || "#60a5fa";
       el.style.borderColor = colour;
       el.style.background = colour + (done ? "33" : "22");
@@ -899,6 +943,7 @@ function renderDayView(container){
       track.appendChild(el);
     });
 
+    bodyH += rowH + 1;   // +1 for the row's bottom border
     row.appendChild(track);
     timeline.appendChild(row);
   });
@@ -910,7 +955,7 @@ function renderDayView(container){
       const nowLine = document.createElement("div");
       nowLine.className = "now-line-v";
       nowLine.style.left = (DAY_NAME_WIDTH + (nowMins-dayStartMins)*pxPerMin) + "px";
-      nowLine.style.height = ((getFilteredEngineers().length*DAY_ROW_HEIGHT) + 28) + "px";
+      nowLine.style.height = (bodyH + 28) + "px";   // header + all (variable-height) rows
       timeline.appendChild(nowLine);
     }
   }
@@ -2160,6 +2205,18 @@ async function init(){
   });
 
   $("engineerFilter").addEventListener("change", e => { engineerFilter = e.target.value; render(); });
+  const soc = $("showOfficeChk");
+  if(soc){
+    soc.checked = showOffice;
+    soc.addEventListener("change", () => {
+      showOffice = soc.checked;
+      try { localStorage.setItem("mlSchedShowOffice", showOffice ? "1" : "0"); } catch(e){}
+      // Mirror to the server so the preference follows the user across devices.
+      try { authFetch("/prefs", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ schedShowOffice: showOffice }) }); } catch(e){}
+      populateEngineerFilter();
+      render();
+    });
+  }
 
   // Needs-scheduling tray: reinstate hidden jobs + collapse/expand.
   $("trayReinstate").addEventListener("click", () => { saveTrayHidden(new Set()); renderTray(); });
@@ -2186,13 +2243,18 @@ async function init(){
   try{
     await loadEngineers();
     loadSkills();   // fire-and-forget; suggestions weight by it once loaded
-    const sel = $("engineerFilter");
-    engineers.forEach(e => {
-      const opt = document.createElement("option");
-      opt.value = e.username;
-      opt.textContent = e.name;
-      sel.appendChild(opt);
-    });
+    // The server copy of the "show office staff" preference wins if present, so
+    // it follows the user across devices (localStorage gave the instant default).
+    try {
+      const pf = await authFetch("/prefs").then(r => r.ok ? r.json() : null).catch(() => null);
+      const p = pf && (pf.prefs || pf);
+      if(p && typeof p.schedShowOffice === "boolean"){
+        showOffice = p.schedShowOffice;
+        try { localStorage.setItem("mlSchedShowOffice", showOffice ? "1" : "0"); } catch(e){}
+        const c = $("showOfficeChk"); if(c) c.checked = showOffice;
+      }
+    } catch(e){}
+    populateEngineerFilter();
     await loadJobs();
     await loadHolidays();
     render();
