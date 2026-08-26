@@ -2093,10 +2093,17 @@ it straight onto the compliance chart (rolling the next-due date).
 - **Numbering:** EM = the store's EM set number (from `sla:emsets`) + `-YY`; PAT =
   rolling sequence (max historical +1, tracked in `cert:patseq:<tid>`) + `-YY`. Both
   office-overridable at finalise.
-- **Prefill (the clever bit):** `/certs/for-job` reads the site's most recent stored
-  EM/PAT cert PDF (pdfExtractText) and carries the **luminaire/appliance LIST** forward
-  (`parseEmRows`/`parsePatRows`) so a monthly re-test is a re-confirm not a retype;
-  client/installation come from the portal site, contractor + boilerplate from config.
+- **Prefill (the clever bit — carry last visit's items forward):** `/certs/for-job`
+  seeds a new cert's item list from the PREVIOUS visit so it's a re-confirm, not a
+  retype. It reads the site's most recent **FINALISED portal certificate's structured
+  rows** first (clean, and it chains forward year on year), and only falls back to
+  **PDF-parsing the legacy Tysoft cert** (`pdfExtractText` + `parseEmRows`/`parsePatRows`)
+  when there's no portal cert yet. `carryRows()` keeps each item's IDENTITY (luminaire
+  position/description, appliance/location/class) but **BLANKS the results + measurements**
+  so the engineer actively re-confirms every one on site (All-Pass button + per-row
+  toggles). NB our own PDF renders results as dots (no "Pass" text), so the structured-
+  first read is what makes prefill work on portal-generated certs. Client/installation
+  come from the portal site, contractor + boilerplate from config.
 - **Filing:** `compliance.js` exports **`fileCertificatePdf(env,tid,{scheme,code,type,
   bytes,filename,docDate,bump,source,label})`** — the exact R2 put + compliance_files
   insert + bumpDue path the manual upload uses, so a finalised cert lands on the chart
