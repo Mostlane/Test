@@ -525,7 +525,7 @@
     var au = jobIsAudit();
     $("backBtn").onclick=function(){ location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
-    if(!fs && !au){
+    if(!fs && !au && !cert){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
       $("fileInput").addEventListener("change",uploadPhotos);
       wireHqToggle();
