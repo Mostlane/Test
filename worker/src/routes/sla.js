@@ -115,6 +115,17 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson(request)) }, headers);
   }
 
+  // EM certificate set-numbers (per store). GET any session (Add Job reads it);
+  // POST re-extracts from the compliance certs (SLA admin).
+  if (subpath === "/emsets") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (method === "GET") return jsonResponse({ ok: true, sets: await getEmSets(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      return jsonResponse({ ok: true, ...(await rebuildEmSets(env, tenantId)) }, headers);
+    }
+  }
+
   if (subpath === "/categories") {
     if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
     if (method === "POST") {
@@ -2615,6 +2626,9 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Site-audit checklist: ONE job, many items, each item needing a completion
     // photo in the field. Text edits preserve completed items (matched by id).
     auditItems: normAuditItems(body.auditItems, existing),
+    // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
+    emTest: body.emTest !== undefined ? !!body.emTest : (existing?.emTest || false),
+    pat: body.pat !== undefined ? !!body.pat : (existing?.pat || false),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== undefined ? !!body.investigateOnly : (existing?.investigateOnly || false),
@@ -2720,6 +2734,8 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.requiresNote !== undefined) job.requiresNote = !!patch.requiresNote;
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
   if (patch.auditItems !== undefined) job.auditItems = normAuditItems(patch.auditItems, job);
+  if (patch.emTest !== undefined) job.emTest = !!patch.emTest;
+  if (patch.pat !== undefined) job.pat = !!patch.pat;
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
@@ -3998,6 +4014,40 @@ const DEFAULT_WORK_AREAS = [
   "Electrical", "Plumbing", "Fabric / Building", "Firestopping", "Fire alarms",
   "Heating / HVAC", "Joinery / Carpentry", "Decorating", "General maintenance",
 ].map(name => ({ id: areaSlug(name), name, colour: "#64748b" }));
+
+// ── EM (emergency-lighting) certificate "set numbers" per store ─────────────
+// The EM cert filename ends "<setNumber>-<YY>" (e.g. "0177-25"). The set number
+// usually equals the store code but genuinely differs for renumbered sites, so
+// it's extracted from the saved compliance certs (repeatable each year).
+function emSetFromKey(r2key) {
+  const name = String(r2key || "").split("/").pop() || "";
+  const n = name.replace(/^\d+-/, "");   // strip the leading upload timestamp
+  const m = n.match(/(\d{3,5})[-.](?:DEC)?(\d{2})[A-Za-z]?(?:_\d+)?_?\.pdf$/i);
+  return m ? { set: m[1], year: Number(m[2]) } : null;
+}
+async function getEmSets(env, tid) {
+  const db = tenantDB(env, tid);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
+  let m; try { m = row ? JSON.parse(row.value) : {}; } catch { m = {}; }
+  return (m && typeof m === "object") ? m : {};
+}
+async function rebuildEmSets(env, tid) {
+  const db = tenantDB(env, tid);
+  let rows = [];
+  try { rows = (await db.prepare("SELECT code, r2_key FROM compliance_files WHERE type='em'").all()).results || []; } catch {}
+  const best = {};   // code -> {set, year} — keep the latest-year cert per store
+  for (const r of rows) {
+    const p = emSetFromKey(r.r2_key); if (!p) continue;
+    if (!best[r.code] || p.year > best[r.code].year) best[r.code] = p;
+  }
+  const map = {}, mismatches = [];
+  for (const code of Object.keys(best)) {
+    map[code] = best[code].set;
+    if (best[code].set !== code) mismatches.push({ code, set: best[code].set });
+  }
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, "sla:emsets:" + tid, JSON.stringify(map)).run();
+  return { count: Object.keys(map).length, mismatches };
+}
 
 // ── Per-engineer fallback jobs (config + the daily cron that assigns them) ──
 const FALLBACK_KEY = tid => "sla:fallbacks:" + tid;
