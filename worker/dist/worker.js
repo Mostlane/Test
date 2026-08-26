@@ -25524,6 +25524,234 @@ async function handle34(request, env, ctx, url, sess) {
   return json4({ ok: false, error: "Not found: " + path }, 404);
 }
 
+// src/routes/workever.js
+var MAP_KEY = "workever:statusmap";
+var LASTRUN_KEY = "workever:lastrun";
+var DONE_PORTAL = /* @__PURE__ */ new Set(["Complete", "Closed Jobs", "Invoiced"]);
+var DEFAULT_MAP = {
+  "closed jobs": { portal: "Closed Jobs", done: true },
+  "completed": { portal: "Complete", done: true },
+  "sc compliance complete": { portal: "Complete", done: true },
+  "fbc complete": { portal: "Complete", done: true },
+  "invoiced": { portal: "Invoiced", done: true },
+  "scheduled": { portal: "Scheduled", done: false },
+  "pending": { portal: "Pending", done: false },
+  "in progress": { portal: "In Progress", done: false },
+  "on hold": { portal: "On Hold", done: false },
+  "travelling": { portal: "Travelling", done: false },
+  "to quote - office": { portal: "Quote", done: false },
+  "chaplins": { portal: "Pending", done: false },
+  "fra 2026": { portal: "FRA Works", done: false }
+};
+async function ensureLog(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS workever_sync_log (
+    tenant_id TEXT, run_id TEXT, at TEXT, action TEXT, mos TEXT, ref TEXT,
+    portal_id TEXT, from_status TEXT, to_status TEXT, note TEXT)`).run();
+}
+async function loadMap2(db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, MAP_KEY).first();
+  let m = null;
+  try {
+    m = row ? JSON.parse(row.value) : null;
+  } catch {
+  }
+  return m && typeof m === "object" ? m : { ...DEFAULT_MAP };
+}
+async function saveMap2(db, m) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, MAP_KEY, JSON.stringify(m)).run();
+}
+async function loadKV2(db, key) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, key).first();
+  try {
+    return row ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function saveKV2(db, key, obj) {
+  await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, key, JSON.stringify(obj)).run();
+}
+function leadRef(s) {
+  const m = String(s || "").match(/^\s*(\d+(?:\/\d+)?)/);
+  return m ? m[1] : "";
+}
+function normStatus(s) {
+  return String(s || "").trim().toLowerCase();
+}
+function mapStatus(map, name) {
+  const hit = map[normStatus(name)];
+  if (hit && hit.portal) return { portal: hit.portal, done: !!hit.done };
+  const done = /complete|closed|done|invoic|finish/i.test(name || "");
+  return { portal: done ? "Complete" : "Pending", done };
+}
+async function handle35(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  const json4 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes") return json4({ ok: false, error: "Forbidden" }, 403);
+  const db = tenantDB(env, sess.tenantId);
+  const tid = sess.tenantId;
+  await ensureLog(db);
+  if (path === "/sla/workever/config" && method === "GET") {
+    return json4({ ok: true, map: await loadMap2(db), lastrun: await loadKV2(db, LASTRUN_KEY) });
+  }
+  if (path === "/sla/workever/config" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.map || typeof b.map !== "object") return json4({ ok: false, error: "map required" }, 400);
+    await saveMap2(db, b.map);
+    return json4({ ok: true, map: b.map });
+  }
+  if (path === "/sla/workever/log" && method === "GET") {
+    const limit = Math.min(2e3, parseInt(url.searchParams.get("limit"), 10) || 500);
+    const runId = url.searchParams.get("runId");
+    const q = runId ? db.prepare("SELECT * FROM workever_sync_log WHERE tenant_id=? AND run_id=? ORDER BY at DESC LIMIT ?").bind(tid, runId, limit) : db.prepare("SELECT * FROM workever_sync_log WHERE tenant_id=? ORDER BY at DESC LIMIT ?").bind(tid, limit);
+    const { results } = await q.all();
+    return json4({ ok: true, log: results || [], lastrun: await loadKV2(db, LASTRUN_KEY) });
+  }
+  if (path === "/sla/workever/reset" && method === "POST") {
+    await db.prepare("DELETE FROM workever_sync_log WHERE tenant_id=?").bind(tid).run();
+    await saveKV2(db, LASTRUN_KEY, null);
+    return json4({ ok: true });
+  }
+  if (path === "/sla/workever/enrich" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const items = Array.isArray(b.items) ? b.items : [];
+    let n = 0;
+    for (const it of items) {
+      const mos = String(it.mos || "").trim();
+      const desc = String(it.description || "").trim();
+      if (!mos || !desc) continue;
+      const row = await db.prepare("SELECT data, search FROM sla_jobs_archive WHERE tenant_id=? AND id=?").bind(tid, mos).first();
+      if (!row) continue;
+      let data = {};
+      try {
+        data = row.data ? JSON.parse(row.data) : {};
+      } catch {
+      }
+      data.description = desc;
+      const search = ((row.search || "") + " " + desc).toLowerCase().slice(0, 4e3);
+      await db.prepare("UPDATE sla_jobs_archive SET data=?, search=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(data), search, tid, mos).run();
+      n++;
+    }
+    return json4({ ok: true, enriched: n });
+  }
+  if (path === "/sla/workever/ingest" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const runId = String(b.runId || "run");
+    const jobs = Array.isArray(b.jobs) ? b.jobs : [];
+    if (!jobs.length) return json4({ ok: true, counts: {}, needPhotos: [], needDetail: [] });
+    const map = await loadMap2(db);
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const liveRows = (await db.prepare("SELECT id, helpdesk_ref, status FROM sla_jobs WHERE tenant_id=?").bind(tid).all()).results || [];
+    const liveByRef = {};
+    for (const r of liveRows) {
+      const k = leadRef(r.helpdesk_ref);
+      if (k && !liveByRef[k]) liveByRef[k] = r;
+    }
+    const mosList = jobs.map((j) => String(j.mos || "").trim()).filter(Boolean);
+    const archById = {};
+    for (let i = 0; i < mosList.length; i += 100) {
+      const chunk = mosList.slice(i, i + 100);
+      const ph = chunk.map(() => "?").join(",");
+      const { results } = await db.prepare(`SELECT id, status FROM sla_jobs_archive WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...chunk).all();
+      for (const r of results || []) archById[r.id] = r.status;
+    }
+    const counts = { updatedLive: 0, importedArchive: 0, updatedArchive: 0, skipped: 0, errors: 0 };
+    const needPhotos = [], needDetail = [], logRows = [];
+    const addLog = (action, j, from, to, note, portalId) => logRows.push([tid, runId, nowIso, action, j.mos || "", leadRef(j.name), portalId || "", from || "", to || "", note || ""]);
+    for (const j of jobs) {
+      try {
+        const mos = String(j.mos || "").trim();
+        const m = mapStatus(map, j.status);
+        const ref = leadRef(j.name);
+        const live = ref ? liveByRef[ref] : null;
+        if (live) {
+          if (m.done && !DONE_PORTAL.has(live.status)) {
+            const cur = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, live.id).first();
+            let data2 = {};
+            try {
+              data2 = cur && cur.data ? JSON.parse(cur.data) : {};
+            } catch {
+            }
+            data2.workever = { mos, uuid: j.uuid || "", cost: j.cost || 0, status: j.status, syncedAt: nowIso, runId };
+            await db.prepare("UPDATE sla_jobs SET status=?, closed_at=COALESCE(closed_at,?), updated_at=?, data=? WHERE tenant_id=? AND id=?").bind(m.portal, nowIso, nowIso, JSON.stringify(data2), tid, live.id).run();
+            counts.updatedLive++;
+            addLog("update-live", j, live.status, m.portal, j.name, live.id);
+            needPhotos.push({ mos, uuid: j.uuid || "", target: "live", portalId: live.id });
+            live.status = m.portal;
+          } else {
+            counts.skipped++;
+          }
+          continue;
+        }
+        if (mos && archById[mos] !== void 0) {
+          if (archById[mos] !== m.portal) {
+            await db.prepare("UPDATE sla_jobs_archive SET status=? WHERE tenant_id=? AND id=?").bind(m.portal, tid, mos).run();
+            counts.updatedArchive++;
+            addLog("update-archive", j, archById[mos], m.portal, j.name);
+            archById[mos] = m.portal;
+          } else {
+            counts.skipped++;
+          }
+          continue;
+        }
+        if (!mos) {
+          counts.errors++;
+          addLog("error", j, "", "", "no MOS identifier");
+          continue;
+        }
+        const siteName = String(j.siteName || j.customerName || "").trim();
+        const data = {
+          source: "workever",
+          mos,
+          uuid: j.uuid || "",
+          name: j.name || "",
+          description: "",
+          cost: j.cost || 0,
+          priority: j.priority || "",
+          customerName: j.customerName || "",
+          address: j.address || {},
+          workeverStatus: j.status || "",
+          syncedAt: nowIso,
+          runId
+        };
+        const search = `${mos} ${j.name || ""} ${siteName} ${j.postcode || ""} ${j.customerName || ""}`.toLowerCase().slice(0, 4e3);
+        await db.prepare(`INSERT INTO sla_jobs_archive
+          (tenant_id, id, ref, status, assigned_to, site_name, postcode, created_at, completed_at, search, data, site_code)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET status=excluded.status`).bind(tid, mos, mos, m.portal, j.assignedLabel || "", siteName, j.postcode || "", null, null, search, JSON.stringify(data), String(j.siteCode || "")).run();
+        counts.importedArchive++;
+        addLog("import-archive", j, "", m.portal, j.name);
+        needDetail.push(mos);
+        needPhotos.push({ mos, uuid: j.uuid || "", target: "archive" });
+      } catch (e) {
+        counts.errors++;
+        addLog("error", j, "", "", String(e && e.message || e));
+      }
+    }
+    for (let i = 0; i < logRows.length; i += 50) {
+      const chunk = logRows.slice(i, i + 50);
+      const values = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
+      await db.prepare(`INSERT INTO workever_sync_log
+        (tenant_id, run_id, at, action, mos, ref, portal_id, from_status, to_status, note) VALUES ${values}`).bind(...chunk.flat()).run();
+    }
+    ctx?.waitUntil?.(db.prepare(
+      "DELETE FROM workever_sync_log WHERE tenant_id=? AND rowid NOT IN (SELECT rowid FROM workever_sync_log WHERE tenant_id=? ORDER BY at DESC LIMIT 8000)"
+    ).bind(tid, tid).run().catch(() => {
+    }));
+    const prev = await loadKV2(db, LASTRUN_KEY) || {};
+    const acc = prev.runId === runId && prev.counts ? prev.counts : { updatedLive: 0, importedArchive: 0, updatedArchive: 0, skipped: 0, errors: 0 };
+    for (const k of Object.keys(counts)) acc[k] = (acc[k] || 0) + counts[k];
+    await saveKV2(db, LASTRUN_KEY, { runId, startedAt: prev.runId === runId ? prev.startedAt : nowIso, updatedAt: nowIso, counts: acc });
+    return json4({ ok: true, counts, needPhotos, needDetail });
+  }
+  return json4({ ok: false, error: "Not found: " + path }, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -25543,6 +25771,8 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle6],
   ["*", "/upload-asset-thumb", handle6],
   ["*", "/delete-asset-image", handle6],
+  ["*", "/sla/workever", handle35],
+  // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle8],
   ["*", "/stats", handle18],
   ["*", "/staff", handle19],

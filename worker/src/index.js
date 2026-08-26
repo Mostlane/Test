@@ -53,6 +53,7 @@ import * as projects from "./routes/projects-api.js"; // DONE (projects: wizard 
 import * as health from "./routes/health.js";      // DONE  (self-monitoring watchdog: probes, error capture, slow-endpoint tracking, alerts)
 import * as tuya from "./routes/tuya.js";          // DONE  (yard gate: Tuya Cloud open command + left-open watch)
 import * as fra from "./routes/fra.js";            // DONE  (FRA works tracker: office post-completion disposition + quote copy)
+import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reconcile portal jobs/archive to Workever, browser-driven)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
 
@@ -72,6 +73,7 @@ const ROUTES = [
   ["*", "/upload-asset-image", assets.handle],
   ["*", "/upload-asset-thumb", assets.handle],
   ["*", "/delete-asset-image", assets.handle],
+  ["*", "/sla/workever", workever.handle], // Workever sync (longest prefix wins over /sla)
   ["*", "/sla",        sla.handle],
   ["*", "/stats",      stats.handle],
   ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
