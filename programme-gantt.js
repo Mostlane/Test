@@ -74,7 +74,7 @@
     if (!Array.isArray(data.tasks)) data.tasks = [];
     if (Array.isArray(data.sections)) {
       for (const sec of data.sections) for (const r of (sec.rows || [])) {
-        data.tasks.push({ id: r.id || uid(), name: r.name || "", contractor: "", start: r.start || "", days: r.days || 1, wknd: false, progress: r.progress || 0, milestone: !!r.milestone });
+        data.tasks.push({ id: r.id || uid(), name: r.name || "", contractor: "", start: r.start || "", days: r.days || 1, wknd: false, progress: r.progress || 0, milestone: !!r.milestone, extra: !!r.extra });
       }
       delete data.sections;
     }
@@ -202,11 +202,11 @@
           while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
           const len = j - i + 1;
           const doneHere = Math.max(0, Math.min(len, progCut - done)); done += doneHere;
-          segs += `<div class="mlp-bar" style="left:${marked[i] * DAYW + 1}px;width:${len * DAYW - 2}px;background:${esc(colour)}" title="${esc(t.name)}${prog ? " — " + prog + "%" : ""}">
+          segs += `<div class="mlp-bar${t.extra ? " extra" : ""}" style="left:${marked[i] * DAYW + 1}px;width:${len * DAYW - 2}px;background:${esc(colour)}" title="${esc(t.name)}${t.extra ? " — extra works" : ""}${prog ? " — " + prog + "%" : ""}">
                      ${doneHere ? `<i style="width:${(doneHere / len) * 100}%"></i>` : ""}</div>`;
           i = j + 1;
         }
-        if (t.milestone && marked.length) segs = `<div class="mlp-dia" style="left:${marked[0] * DAYW + DAYW / 2 - 6}px;background:${esc(colour)}" title="${esc(t.name)}"></div>`;
+        if (t.milestone && marked.length) segs = `<div class="mlp-dia${t.extra ? " extra" : ""}" style="left:${marked[0] * DAYW + DAYW / 2 - 6}px;background:${esc(colour)}" title="${esc(t.name)}${t.extra ? " — extra works" : ""}"></div>`;
       }
       body += `<tr class="mlp-row" data-row="${t.id}">
         <td class="mlp-sticky mlp-actcol">${editable
@@ -228,6 +228,7 @@
           : (t.wknd ? "✓" : "")}</td>
         ${editable ? `<td class="mlp-small mlp-tools">
             <input type="number" min="0" max="100" step="5" class="mlp-num" data-op="progress" value="${prog}" title="Progress %">
+            <button type="button" data-op="extra" class="mlp-xtra ${t.extra ? "on" : ""}" title="Mark as extra works">✚</button>
             <button type="button" data-op="mile" class="${t.milestone ? "on" : ""}" title="Milestone">◆</button>
             <button type="button" data-op="rowup" title="Move up">↑</button>
             <button type="button" data-op="rowdown" title="Move down">↓</button>
@@ -248,10 +249,14 @@
     const sumLine = sum.start
       ? `<div class="mlp-sum"><b>Start</b> ${fmtFull(sum.start)} · <b>End</b> ${fmtFull(sum.end)} · <b>${sum.days} days on programme</b></div>`
       : "";
+    // Small key — only shown when the programme actually has extra works marked.
+    const keyLine = (tasks.some(t => t.extra))
+      ? `<div class="mlp-key"><span class="mlp-keyswatch"></span> Extra works</div>`
+      : "";
     const offWarn = (geo.offGrid && geo.offGrid.length)
       ? `<div class="mlp-warn">⚠ ${geo.offGrid.length} task${geo.offGrid.length === 1 ? "" : "s"} sit${geo.offGrid.length === 1 ? "s" : ""} far outside this programme's dates and ${geo.offGrid.length === 1 ? "isn't" : "aren't"} drawn — check the date${geo.offGrid.length === 1 ? "" : "s"}: ${geo.offGrid.slice(0, 3).map(o => esc(o.name) + " (" + esc(o.start) + ")").join(", ")}${geo.offGrid.length > 3 ? "…" : ""}</div>`
       : "";
-    host.innerHTML = sumLine + offWarn +
+    host.innerHTML = sumLine + keyLine + offWarn +
       `<div class="mlp-scroll"><table class="mlp-table" style="--maw:${worksW}px"><thead>${head}</thead><tbody>${body}</tbody></table></div>` +
       (opts.watermark ? `<div class="mlp-wm">${esc(opts.watermark)}</div>` : "");
 
@@ -293,7 +298,7 @@
       if (op === "addrow") {
         const last = tasks[tasks.length - 1];
         const defC = opts.contractor || (last ? last.contractor : ((data.contractors[0] || {}).id || ""));
-        tasks.push({ id: uid(), name: "", contractor: defC, start: last ? last.start : ymd(new Date()), days: 1, wknd: false, progress: 0, milestone: false });
+        tasks.push({ id: uid(), name: "", contractor: defC, start: last ? last.start : ymd(new Date()), days: 1, wknd: false, progress: 0, milestone: false, extra: false });
         rerender(); return;
       }
       const tr = btn.closest("tr");
@@ -303,6 +308,7 @@
       else if (op === "rowup" && i > 0) { tasks.splice(i, 1); tasks.splice(i - 1, 0, t); rerender(); }
       else if (op === "rowdown" && i < tasks.length - 1) { tasks.splice(i, 1); tasks.splice(i + 1, 0, t); rerender(); }
       else if (op === "mile") { t.milestone = !t.milestone; rerender(); }
+      else if (op === "extra") { t.extra = !t.extra; rerender(); }
     });
 
     // Drag the Works column edge to widen/narrow it. Live-updates the CSS var so
@@ -354,6 +360,7 @@
       if (!!o.wknd !== !!n.wknd) what.push(n.wknd ? "now works the weekend" : "no longer works the weekend");
       if (Number(o.progress || 0) !== Number(n.progress || 0)) what.push(`progress ${o.progress || 0}% → ${n.progress || 0}%`);
       if (!!o.milestone !== !!n.milestone) what.push(n.milestone ? "made a milestone" : "no longer a milestone");
+      if (!!o.extra !== !!n.extra) what.push(n.extra ? "marked as extra works" : "no longer extra works");
       if (what.length) changed.push({ name: n.name || o.name || "(unnamed)", what: what.join(", ") });
     }
     return { added, removed, changed };
@@ -397,7 +404,14 @@
   .mlp-bhbg{position:absolute;top:0;bottom:0;width:${DAYW}px;background:#fdf3e5;}
   .mlp-bar{position:absolute;top:50%;transform:translateY(-50%);height:20px;border-radius:999px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,58,.25);}
   .mlp-bar i{display:block;position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.4);}
+  /* Extra works: a bold dashed amber outline so it stands out from normal bars
+     without losing the contractor colour. Matches the PDF export's amber ring. */
+  .mlp-bar.extra{outline:2px dashed #b45309;outline-offset:1px;overflow:visible;}
+  .mlp-dia.extra{outline:2px dashed #b45309;outline-offset:2px;}
   .mlp-dia{position:absolute;top:calc(50% - 6px);width:12px;height:12px;transform:rotate(45deg);border-radius:2px;box-shadow:0 1px 2px rgba(16,32,58,.35);}
+  .mlp-xtra.on{background:#fff4e6 !important;border-color:#f0b775 !important;color:#b45309 !important;}
+  .mlp-key{display:inline-flex;align-items:center;gap:6px;font:600 12px 'Segoe UI';color:#8a4b0a;background:#fff7ed;border:1px solid #f4d8b4;border-radius:8px;padding:4px 10px;margin:2px 0 8px;}
+  .mlp-keyswatch{display:inline-block;width:20px;height:11px;border-radius:3px;background:#cbd5e1;outline:2px dashed #b45309;outline-offset:1px;}
   .mlp-today{position:absolute;top:0;bottom:0;width:2px;background:#e0344b;opacity:.65;z-index:1;}
   .mlp-wm{text-align:center;font:600 11.5px 'Segoe UI';color:#94a3b8;padding:8px 4px 2px;}
   @media print{.mlp-scroll{overflow:visible;border:none;} .mlp-tools,.mlp-addsec{display:none !important;}}

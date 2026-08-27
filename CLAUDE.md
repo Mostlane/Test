@@ -1808,6 +1808,22 @@ programme as **`data.worksW`** (px) and flows through to BOTH exports — progpd
 `applyWorksWidth()` scales it to PDF points (230px≈168pt), and programme-export.js
 scales it to Excel char-width (230px≈34). `programme-gantt.js?v=5`,
 `programme-export.js?v=2`.
+**Extra works highlighting + PDF date-overlap fix (Aug 2026):** (1) a task can be
+flagged **`task.extra`** (a ✚ toggle in the builder's row tools, `programme-gantt.js?v=7`)
+= "extra works"/variation. It renders with a **bold dashed amber ring** (#b45309) around
+its bar/milestone on screen (builder + client view) AND in the PDF (`lib/progpdf.js`,
+`EXTRA_COL`, a stroked amber rect around each bar segment), plus a small **"Extra works"
+key** — a grey swatch ringed amber — shown only when the programme has any (under the
+summary on screen; appended to the contractor legend in the PDF). `extra` rides the
+`data` JSON (no schema/worker-route change), is threaded through migrate/blank/addrow,
+and appears in the suggestion diff. Excel export ignores it (PDF is the locked format).
+(2) **PDF date-header overlap fixed:** the day scale printed the full `dd/mm` (~16pt
+wide at 5.8pt) on EVERY day once `dayW >= 15`, so ~15–16pt columns (a 5–6 week
+programme, or a widened Works column — e.g. the Manor House tender) overlapped adjacent
+dates. Now `dd/mm`-every-day needs `dayW >= 18`; 8–18pt shows the day NUMBER each day +
+`dd/mm` on Mondays/month-firsts; and a universal `lastLabelRight` guard suppresses any
+label that would touch the previous one. Verified 0 overlaps across 14–80-day
+programmes (scratchpad `progdates.mjs`).
 **Task text WRAPS everywhere (Aug 2026) — read in full, no truncation:** the Works
 column now wraps long task names in all three outputs with VARIABLE row heights.
 On screen (`programme-gantt.js?v=6`): the editable name field is a `<textarea>`
