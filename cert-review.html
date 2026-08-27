@@ -7,7 +7,7 @@
   <script src="/portal-config.js?v=19"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
-  <script src="cert-form.js?v=8"></script>
+  <script src="cert-form.js?v=9"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -37,8 +37,25 @@
   <header class="page">
     <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
     <h1>📄 Certificate review</h1>
+    <button class="btn ghost sm" id="remedBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">💷 EM remedials</button>
     <button class="btn ghost sm" id="notifyBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">🔔 Notify list</button>
   </header>
+
+  <!-- EM remedial charge log (£50 per failed fitting) -->
+  <div id="remedModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:680px;margin:32px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">💷 EM remedials — charge log</h2>
+        <button class="btn ghost sm" id="rmClose">Close</button>
+      </div>
+      <div style="display:flex;gap:6px;margin:6px 0 10px" id="rmTabs">
+        <button class="btn ghost sm rmtab" data-st="pending">To charge</button>
+        <button class="btn ghost sm rmtab" data-st="done">Done on site</button>
+        <button class="btn ghost sm rmtab" data-st="">All</button>
+      </div>
+      <div id="rmBody"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
 
   <!-- Who gets pushed when an engineer submits a cert for review -->
@@ -199,6 +216,39 @@
       } catch { g("nmMsg").textContent = "Couldn't save."; g("nmMsg").className = "msg err"; }
       this.disabled = false;
     };
+
+    // ── EM remedials charge log ────────────────────────────────────────────────
+    let RM_ST = "pending";
+    g("remedBtn").onclick = () => { g("remedModal").style.display = "block"; loadRemedials(); };
+    g("rmClose").onclick = () => g("remedModal").style.display = "none";
+    g("remedModal").onclick = e => { if (e.target === g("remedModal")) g("remedModal").style.display = "none"; };
+    [].forEach.call(document.querySelectorAll(".rmtab"), b => b.onclick = () => { RM_ST = b.dataset.st; loadRemedials(); });
+    const money = n => "£" + (Number(n) || 0).toFixed(0);
+    async function loadRemedials() {
+      [].forEach.call(document.querySelectorAll(".rmtab"), b => b.style.fontWeight = (b.dataset.st === RM_ST ? "800" : "600"));
+      g("rmBody").innerHTML = '<p class="muted">Loading…</p>';
+      let d;
+      try { d = await authFetch("/certs/remedials" + (RM_ST ? "?status=" + RM_ST : "")).then(r=>r.json()); }
+      catch { g("rmBody").innerHTML = '<p class="msg err">Couldn\'t load the remedial log.</p>'; return; }
+      const rows = (d && d.remedials) || [];
+      if (!rows.length) { g("rmBody").innerHTML = '<p class="muted">Nothing here'+(RM_ST==="pending"?" — no remedials outstanding to charge.":"")+'</p>'; return; }
+      let h = '<div class="muted" style="margin-bottom:8px">'+rows.length+' fitting'+(rows.length===1?"":"s")+' · total '+money(d.totalCharge)
+        + (d.pendingCharge ? ' · <b style="color:#b45309">'+money(d.pendingCharge)+' still to charge</b>' : '') + '</div>';
+      rows.forEach(r => {
+        const done = r.status === "done";
+        h += '<div style="border-top:1px solid #eef2f6;padding:9px 2px;display:flex;gap:10px;align-items:flex-start">'
+          + '<div style="flex:1;min-width:0">'
+            + '<div style="font-weight:600;font-size:14px">'+esc(r.site_name || r.site_code || "")+' <span class="muted">· '+esc(r.light_ref||"")+'</span></div>'
+            + '<div class="muted">Cert '+esc(r.cert_number||"")+(r.note?' · '+esc(r.note):"")+' · '+fmt(r.created_at)+(r.engineer?' · '+esc(r.engineer):"")+'</div>'
+            + (r.job_id ? '<div style="margin-top:3px"><a href="/job-view.html?jobId='+encodeURIComponent(r.job_id)+'" style="font-size:12.5px">Open remedial job →</a></div>' : '')
+          + '</div>'
+          + '<div style="text-align:right;white-space:nowrap">'
+            + '<div style="font-weight:700">'+money(r.charge)+'</div>'
+            + '<span class="badge" style="background:'+(done?"#e9f8ef":"#fff4e6")+';color:'+(done?"#0a7d33":"#b45309")+'">'+(done?"Replaced on site":"Remedial due")+'</span>'
+          + '</div></div>';
+      });
+      g("rmBody").innerHTML = h;
+    }
   </script>
 </body>
 </html>

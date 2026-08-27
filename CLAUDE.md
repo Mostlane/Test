@@ -2284,8 +2284,29 @@ it straight onto the compliance chart (rolling the next-due date).
   blocks others.
 - **Text colour:** cert-form inputs/textareas force `color:#0f2438 !important` (a
   personalised theme was rendering the extent/comments text near-white).
+- **EM remedials — mark a failed fitting + £50 charge (Aug 2026):** on an EM cert
+  each luminaire row (cert-form.js `?v=9`, EM only) has a **⚠ Mark fitting failed**
+  toggle → **Replaced on site? Yes/No** + a note. The light STAYS a Pass on the
+  cert (Mostlane's rule); it's a separate £50 remedial. Stored per row as
+  `row.remedial = {failed, replacedOnSite, note}`; validation blocks submit if a
+  failed fitting has no on-site answer. **Replaced on site** → the cert's
+  luminaire/location cell prints "… — Fitting failed, replaced on site"
+  (`lib/certpdf.js`, EM comments col). **Not replaced** → the light shows Pass and,
+  on FINALISE, a single **remedial SLA job** is raised (id `emrem:<certId>`,
+  idempotent, description lists the fittings + £N charge) for the office to
+  schedule. Both cases are logged to table **`em_remedials`** (self-migrating; one
+  row/fitting, `charge`=£50, status done|pending, links the cert + job). certs.js
+  `processEmRemedials` runs at finalise, pushes the office (FullAccess/SLAAdmin/
+  Compliance) "EM remedial to charge — N fittings (£N), M replaced on site, K job
+  raised", and `/certs/finalise` returns a `remedial` summary. **GET
+  /certs/remedials?status=&code=** is the charge log. Front-end: **cert-review.html**
+  "💷 EM remedials" button → a To-charge / Done-on-site / All log with per-fitting
+  £, totals, the outstanding-to-charge sum, and a link to each remedial job; the
+  office also sees the ⚠ remedial tags per row when reviewing the cert (read-only
+  MLCert renders them). `createOrUpdateJobFromPayload` imported from sla.js.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
-  navy). **TODO/next:** optional hub widget for the pending-review count; Help guide.
+  navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
+  PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF

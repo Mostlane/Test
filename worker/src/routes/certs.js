@@ -27,6 +27,7 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
+import { createOrUpdateJobFromPayload } from "./sla.js";
 
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
@@ -70,6 +71,61 @@ async function ensureTables(env) {
     data TEXT, engineer TEXT,
     created_at TEXT, updated_at TEXT, submitted_at TEXT,
     finalised_at TEXT, finalised_by TEXT, r2_final_key TEXT)`).run();
+  // EM remedial log — one row per failed fitting, £50 each. status: done (replaced
+  // on site) | pending (remedial job raised, awaiting the works).
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS em_remedials (
+    id TEXT PRIMARY KEY, tenant_id TEXT, cert_id TEXT, cert_number TEXT,
+    site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
+    replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
+    engineer TEXT, created_at TEXT)`).run();
+}
+const REMEDIAL_CHARGE = 50;   // £ per failed EM fitting (replaced on site OR remedial)
+
+// On finalise of an EM cert, log every failed fitting (£50 each) and — for the
+// ones NOT replaced on site — raise ONE remedial SLA job for the office to
+// schedule + charge. Idempotent per cert (safe to re-finalise). Returns a summary.
+async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) {
+  if (rec.type !== "em") return null;
+  const rows = Array.isArray(rec.rows) ? rec.rows : [];
+  const fails = rows.map((r, i) => ({
+    ref: (String(r.comments || "").trim()) || ("Light " + (i + 1)),
+    replaced: !!(r.remedial && r.remedial.replacedOnSite === true),
+    note: (r.remedial && r.remedial.note) || "",
+    failed: !!(r.remedial && r.remedial.failed),
+  })).filter(x => x.failed);
+  if (!fails.length) { try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {} return { count: 0 }; }
+
+  const siteName = (rec.installation && rec.installation.name) || (rec.client && rec.client.name) || siteCode;
+  const now = new Date().toISOString();
+  const pending = fails.filter(f => !f.replaced);
+  const onsite = fails.filter(f => f.replaced);
+
+  let jobId = null;
+  if (pending.length) {
+    const lines = pending.map(f => "• " + f.ref + (f.note ? " — " + f.note : "")).join("\n");
+    const desc = `EM remedial — replace ${pending.length} failed emergency light fitting${pending.length === 1 ? "" : "s"} at ${siteName} (from EM certificate ${certNumber}).\n\n${lines}\n\nCharge: £${pending.length * REMEDIAL_CHARGE} (£${REMEDIAL_CHARGE}/fitting).`;
+    try {
+      const job = await createOrUpdateJobFromPayload(env, tid, {
+        id: "emrem:" + certRow.id,               // stable id → idempotent per cert
+        reference: "EM remedial — " + (siteCode || siteName),
+        status: "Pending", priority: "Priority 4",
+        description: desc, siteName, siteCode: siteCode || "",
+        originator: "em-remedial",
+      });
+      jobId = job && job.id;
+    } catch {}
+  }
+
+  try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
+  const stmts = fails.map((f, i) => env.DB.prepare(
+    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(certRow.id + ":" + i, tid, certRow.id, certNumber, siteCode || "", siteName, f.ref, f.note,
+    f.replaced ? 1 : 0, REMEDIAL_CHARGE, f.replaced ? "done" : "pending", f.replaced ? null : jobId,
+    certRow.engineer || "", now));
+  try { for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20)); } catch {}
+
+  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: fails.length * REMEDIAL_CHARGE, jobId };
 }
 
 async function getConfig(env, tid) {
@@ -507,7 +563,33 @@ export async function handle(request, env, ctx, url, sess) {
     await env.DB.prepare("UPDATE certificates SET status='final', cert_number=?, r2_final_key=?, finalised_at=?, finalised_by=?, updated_at=? WHERE tenant_id=? AND id=?")
       .bind(number, filed.key, now, me, now, tid, cert.id).run();
     if (cert.engineer && cert.engineer !== me) ctx?.waitUntil?.(sendToUser(env, tid, cert.engineer, { title: "Certificate issued", body: `Your ${cert.type === "pat" ? "PAT" : "EM"} certificate ${number} has been reviewed and filed.`, url: "/eicr-portal.html", tag: "cert-final:" + cert.id }).catch(() => {}));
-    return json({ ok: true, number, key: filed.key }, {}, env, request);
+    // EM remedials: log the £50/fitting failures + raise a remedial job for the
+    // not-replaced ones, and tell the office so they can charge for the works.
+    let remedial = null;
+    try { remedial = await processEmRemedials(env, tid, rec, cert, number, code); } catch {}
+    if (remedial && remedial.count) {
+      const site = (rec.installation && rec.installation.name) || code;
+      const body = `EM cert ${number} — ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed (£${remedial.charge} to charge). ${remedial.onsite} replaced on site` + (remedial.pending ? `, ${remedial.pending} remedial job raised.` : ".");
+      const url = remedial.jobId ? ("/job-view.html?jobId=" + encodeURIComponent(remedial.jobId)) : "/cert-review.html";
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to charge", body, url, tag: "em-remedial:" + cert.id }).catch(() => {}));
+    }
+    return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
+  }
+
+  // GET /certs/remedials?status=&code= — the remedial charge log (office).
+  if (sub === "/remedials" && method === "GET") {
+    const st = String(q.get("status") || "").toLowerCase();
+    const code = String(q.get("code") || "").trim();
+    const where = ["tenant_id=?"]; const bind = [tid];
+    if (st === "done" || st === "pending") { where.push("status=?"); bind.push(st); }
+    if (code) { where.push("site_code=?"); bind.push(padCode(code)); }
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM em_remedials WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT 500`
+    ).bind(...bind).all();
+    const rows = results || [];
+    const total = rows.reduce((a, r) => a + (Number(r.charge) || 0), 0);
+    const pending = rows.filter(r => r.status === "pending").reduce((a, r) => a + (Number(r.charge) || 0), 0);
+    return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
   }
 
   // ── Office uploads a replacement PDF instead of generating ────────────────────

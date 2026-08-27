@@ -75,6 +75,16 @@
   .mlc .save{font-size:12.5px;color:#0a7d33;font-weight:600;}.mlc .save.err{color:#b00020;}
   .mlc .pill{display:inline-block;background:#eef4fb;color:#003468;border-radius:999px;padding:3px 10px;font:600 12px inherit;}
   .mlc .banner{background:#fff7e6;border:1px solid #f2d98a;border-radius:8px;padding:8px 10px;font-size:13px;color:#7a5b00;margin:6px 0;}
+  .mlc .mlrem{margin-top:9px;}
+  .mlc .mlrem.open{border-top:1px dashed #edd3a3;padding-top:9px;}
+  .mlc .mlrem-flag{background:#fff;border:1px solid #e2c4c4;color:#b45309;border-radius:8px;padding:7px 12px;font:700 13px inherit;cursor:pointer;}
+  .mlc .mlrem-flag.on{background:#fff4e6;border-color:#f0b775;color:#b45309;}
+  .mlc .mlrem-body{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:9px;}
+  .mlc .mlrem-q{font:700 12px inherit;color:#7a8595;text-transform:uppercase;letter-spacing:.03em;}
+  .mlc .mlrem-note{flex:1;min-width:150px;padding:8px;font-size:14px;}
+  .mlc .mlrem-hint{flex-basis:100%;font-size:12px;color:#8a5a0a;}
+  .mlc .mlrem.ro{margin-top:8px;}
+  .mlc .mlrem-tag{display:inline-block;background:#fff4e6;border:1px solid #f0c98a;color:#8a4b0a;border-radius:999px;padding:3px 10px;font:700 12px inherit;}
   .mlc .mlc-listhead{background:#fff;padding:9px 4px;margin:-4px -4px 8px;border-bottom:2px solid #eef2f6;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:#003468;}
   .mlc .mlc-listhead .cnt{margin-left:auto;font-size:13px;}
   .mlc .mlc-listhead .cnt .ok{color:#0a7d33;font-weight:700;}
@@ -237,11 +247,45 @@
         h += '</div>' + (editable ? '<button class="del" data-del="' + i + '">✕</button>' : '') + '</div>';
         h += '<div class="mlrow-fields">';
         fieldCols.forEach(c => { h += '<div class="mlf"><label>' + esc(c.label) + '</label>' + cellHtml(c, r[c.key], i) + '</div>'; });
-        h += '</div></div>';
+        h += '</div>';
+        if (type === "em") h += remedialHtml(r, i);   // EM only: mark a fitting failed + remedial
+        h += '</div>';
       });
       tb.innerHTML = h;
       wireRows();
       updateListHead();
+    }
+    // EM remedial: mark a fitting as failed, then whether it was replaced on site.
+    // The light STAYS a Pass on the certificate (per Mostlane's rule) — this is a
+    // separate £50 remedial log. Replaced-on-site rows print "Fitting failed,
+    // replaced on site" on the cert; not-replaced rows raise a remedial job for
+    // the office to schedule + charge.
+    function remedialHtml(r, i) {
+      const rem = r.remedial || {};
+      const on = !!rem.failed;
+      const onsite = rem.replacedOnSite === true ? "yes" : rem.replacedOnSite === false ? "no" : "";
+      if (!editable) {
+        if (!on) return "";
+        const txt = rem.replacedOnSite === true ? "Fitting failed — replaced on site (£50)"
+          : rem.replacedOnSite === false ? "Fitting failed — remedial required (£50)"
+          : "Fitting failed — outcome not set";
+        return '<div class="mlrem ro"><span class="mlrem-tag">⚠ ' + esc(txt) + '</span>'
+          + (rem.note ? ' <span class="muted">· ' + esc(rem.note) + '</span>' : '') + '</div>';
+      }
+      const hint = onsite === "no" ? 'Light stays a Pass — a remedial job is raised and the office charged £50.'
+        : onsite === "yes" ? 'Certificate will read "Fitting failed, replaced on site" — £50 charge.'
+        : 'Choose whether it was replaced on site.';
+      return '<div class="mlrem' + (on ? " open" : "") + '">'
+        + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed" : "Mark fitting failed") + '</button>'
+        + '<div class="mlrem-body" style="' + (on ? "" : "display:none") + '">'
+          + '<span class="mlrem-q">Replaced on site?</span>'
+          + '<div class="tg mlrem-onsite" data-rem="onsite" data-i="' + i + '">'
+            + '<button type="button" data-v="yes" class="' + (onsite === "yes" ? "on pass" : "") + '">Yes</button>'
+            + '<button type="button" data-v="no" class="' + (onsite === "no" ? "on na" : "") + '">No</button>'
+          + '</div>'
+          + '<input type="text" class="mlrem-note" data-rem="note" data-i="' + i + '" placeholder="Fault / fitting detail (optional)" value="' + esc(rem.note || "") + '">'
+          + '<div class="mlrem-hint">' + hint + '</div>'
+        + '</div></div>';
     }
     function titleInput(c, v, i) {
       const big = c.role === "title";
@@ -315,6 +359,22 @@
         queueSave();
       }));
       container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { rec.rows.splice(+b.dataset.del, 1); renderRows(); queueSave(); }));
+      // EM remedial controls
+      container.querySelectorAll('[data-rem="flag"]').forEach(b => b.addEventListener("click", () => {
+        const i = +b.dataset.i; rec.rows[i] = rec.rows[i] || {};
+        const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
+        rem.failed = !rem.failed; if (!rem.failed) rem.replacedOnSite = null;
+        renderRows(); queueSave();
+      }));
+      container.querySelectorAll('[data-rem="onsite"] button').forEach(btn => btn.addEventListener("click", () => {
+        const tg = btn.closest("[data-rem]"); const i = +tg.dataset.i;
+        const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
+        rem.replacedOnSite = btn.dataset.v === "yes";
+        renderRows(); queueSave();
+      }));
+      container.querySelectorAll('[data-rem="note"]').forEach(el => el.addEventListener("input", () => {
+        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).note = el.value; queueSave();
+      }));
     }
     function wire() {
       container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; el.classList.remove("err"); queueSave(); }));
@@ -404,13 +464,17 @@
       need('[data-c="date"]', "Certificate date");
       let badRows = 0;
       if (!rec.rows.length) missing.push("at least one " + (type === "pat" ? "appliance" : "light"));
+      let remOpen = 0;
       rec.rows.forEach((r, i) => {
         let bad = false;
         if (type === "em") { if (!r.normal || !r.led || !r.emergency || r.battery == null || String(r.battery).trim() === "") bad = true; }
         else { if (!String(r.appliance || "").trim() || !r.visual || !r.result) bad = true; }
+        // A failed fitting MUST say whether it was replaced on site (drives the charge + remedial job).
+        if (type === "em" && r.remedial && r.remedial.failed && r.remedial.replacedOnSite == null) { bad = true; remOpen++; }
         if (bad) { badRows++; const rowEl = container.querySelector('.mlrow[data-i="' + i + '"]'); if (rowEl) { rowEl.classList.add("err-row"); if (!firstEl) firstEl = rowEl; } }
       });
       if (badRows) missing.push(badRows + (type === "pat" ? " appliance" : " item") + (badRows === 1 ? "" : "s") + " not fully filled in");
+      if (remOpen) missing.push(remOpen + " failed fitting" + (remOpen === 1 ? "" : "s") + " — say if replaced on site");
       if (!rec.signature) { missing.push("signature"); const sc = container.querySelector("#mlcSig"); if (sc && !firstEl) firstEl = sc; }
       // expand any collapsed section that holds a flagged field so it's visible
       container.querySelectorAll("details.mlc-fold").forEach(d => { if (d.querySelector(".err")) d.open = true; });
