@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script src="/portal-config.js?v=22"></script>
+  <script src="/portal-config.js?v=23"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <title>Mostlane • Vehicles</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -877,7 +877,7 @@
     const driver=v.driver?pName(v.driver):"";
     const today=new Date().toISOString().slice(0,10);
     const gOpts=`<option value="">— none / to confirm —</option>`+GARAGES.map(g=>`<option value="${esc(g.id)}"${appt&&appt.garage&&g.name===appt.garage?" selected":""}>${esc(g.name)}${g.collectsFromHQ?" (collects from HQ)":(g.postcode?" · "+esc(g.postcode):"")}</option>`).join("");
-    const defDur=type==="mot"?60:120;
+    const defDurH=type==="mot"?1:2;
     const clashWarn = clash ? `<div style="background:#fee2e2;border:1px solid #dc2626;color:#991b1b;border-radius:9px;padding:8px 10px;font-size:13px;font-weight:600;margin-bottom:10px">⚠ ${esc(driver||"The driver")} is booked off on ${fmtDMY(clash.date)} — pick another day or driver.</div>` : "";
     pModal(`
       <h3 style="margin:0 0 4px">Book ${labels[type]} — ${esc(reg)}</h3>
@@ -887,7 +887,7 @@
       <input id="apDate" type="date" value="${appt&&appt.date?esc(appt.date):today}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:8px">
       <div style="display:flex;gap:8px">
         <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Time</label><input id="apTime" type="time" value="08:00" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
-        <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Mins on site</label><input id="apDur" type="number" value="${defDur}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
+        <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Hours on site</label><input id="apDur" type="number" step="0.5" min="0.25" value="${defDurH}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
       </div>
       <label class="hint" style="display:block;margin:8px 0 3px">Garage <a href="#" onclick="pClose();openGaragesModal();return false" style="font-size:12px">⚙ manage</a></label>
       <select id="apGarage" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:8px">${gOpts}</select>
@@ -916,7 +916,8 @@
     const date=($("apDate")||{}).value||"";
     if(!date){ alert("Pick an appointment date."); return; }
     const time=($("apTime")||{}).value||"08:00";
-    const dur=Number(($("apDur")||{}).value)||(type==="mot"?60:120);
+    const durH=Number(($("apDur")||{}).value)||(type==="mot"?1:2);
+    const dur=Math.max(15, Math.round(durH*60));   // hours → minutes for the job
     const garageId=($("apGarage")||{}).value||"";
     const note=($("renewNote")||{}).value||"";
     let scheduledAt; try{ scheduledAt=new Date(date+"T"+time+":00").toISOString(); }catch(e){ scheduledAt=new Date(date+"T08:00:00").toISOString(); }

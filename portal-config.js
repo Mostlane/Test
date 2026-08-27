@@ -2125,4 +2125,34 @@
       else build();
     } catch (e) {}
   })();
+
+  // ── 5-minute time pickers portal-wide ──────────────────────────────────
+  // Native <input type="time"> steps every 1 minute, which is fiddly on desktop.
+  // Default every time picker to 5-minute steps (a page opts out with its own
+  // step=… or data-ml-nostep). Runs on load + observes dynamically-added inputs.
+  (function () {
+    try {
+      var SEL = 'input[type="time"]:not([step]):not([data-ml-nostep])';
+      function applyStep(root) {
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll(SEL).forEach(function (el) { el.setAttribute("step", "300"); });
+      }
+      function run() {
+        applyStep(document);
+        try {
+          new MutationObserver(function (muts) {
+            muts.forEach(function (m) {
+              (m.addedNodes || []).forEach(function (n) {
+                if (n.nodeType !== 1) return;
+                if (n.matches && n.matches(SEL)) n.setAttribute("step", "300");
+                applyStep(n);
+              });
+            });
+          }).observe(document.documentElement, { childList: true, subtree: true });
+        } catch (e) {}
+      }
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run);
+      else run();
+    } catch (e) {}
+  })();
 })();
