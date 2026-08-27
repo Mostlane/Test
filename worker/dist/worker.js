@@ -24847,6 +24847,7 @@ function applyWorksWidth(worksW) {
   GRID_W = PW - M3 - GRID_X;
 }
 var MIN_DAY_W = 6.5;
+var EXTRA_COL = [0.706, 0.325, 0.035];
 var DAY = 864e5;
 var p2 = (n) => String(n).padStart(2, "0");
 var parse = (s) => {
@@ -24934,6 +24935,7 @@ function buildProgrammePdf(data, meta = {}) {
     t._lines = wrapLines(t.name || "", COLS2[0].w - 6, 8.5, MAX_NAME_LINES);
     t._h = Math.max(ROW_H2, t._lines.length * LINE_H + ROW_PAD);
   }
+  const hasExtra = tasks.some((t) => t.extra);
   const starts = tasks.map((t) => t._start).filter(Boolean).sort((a, b) => a - b);
   const anchor = starts.length ? starts[Math.floor(starts.length / 2)] : /* @__PURE__ */ new Date();
   const near = (t) => t._start && Math.abs(t._start - anchor) / DAY <= 550;
@@ -25037,6 +25039,19 @@ function buildProgrammePdf(data, meta = {}) {
         doc.text(lx + 11, ly, c.name, { size: 8.5 });
         lx += w;
       }
+      if (hasExtra) {
+        const w = 11 + textWidth("Extra works", 8.5) + 14;
+        const right = line === 0 ? legendRightL1 : PW - M3;
+        if (lx + w > right && line === 0) {
+          line = 1;
+          lx = M3;
+        }
+        const ly = y + line * LEG_LINE_H;
+        doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
+        doc.rect(lx - 0.4, ly - 7.4, 8.8, 8.8, { stroke: EXTRA_COL, lw: 1.1 });
+        doc.text(lx + 11, ly, "Extra works", { size: 8.5, color: [0.55, 0.28, 0.05] });
+        lx += w;
+      }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
       y = M3 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
@@ -25048,6 +25063,7 @@ function buildProgrammePdf(data, meta = {}) {
         cx += col.w;
       }
       const rightEdge = GRID_X + win.days * dayW;
+      let lastLabelRight = -Infinity;
       for (let i = 0; i < win.days; i++) {
         const d = addDays2(winStart, i);
         const x = GRID_X + i * dayW;
@@ -25055,14 +25071,21 @@ function buildProgrammePdf(data, meta = {}) {
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
         const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1, major = isMon || first2;
-        let label = "", minor = false;
-        if (dayW >= 15) label = fmtDM(d);
-        else if (dayW >= 8) {
+        let label = "", size = 5.8;
+        if (dayW >= 18) {
+          label = fmtDM(d);
+        } else if (dayW >= 8) {
           label = major ? fmtDM(d) : p2(d.getUTCDate());
-          minor = !major;
-        } else if (major) label = fmtDM(d);
-        if (label && x + 1 + textWidth(label, minor ? 5.4 : 5.8) > rightEdge) label = "";
-        if (label) doc.text(x + 1, gridTop + 9, label, { size: minor ? 5.4 : 5.8, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
+          size = major ? 5.8 : 5.4;
+        } else if (major) {
+          label = fmtDM(d);
+        }
+        if (label) {
+          const w = textWidth(label, size);
+          if (x + 1 + w > rightEdge || x + 1 < lastLabelRight + 1.5) label = "";
+          else lastLabelRight = x + 1 + w;
+        }
+        if (label) doc.text(x + 1, gridTop + 9, label, { size, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
         if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
         if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
       }
@@ -25090,6 +25113,7 @@ function buildProgrammePdf(data, meta = {}) {
           }
           if (t.milestone && marked.length) {
             const x = GRID_X + marked[0] * dayW + dayW / 2, cy = ry + rh / 2;
+            if (t.extra) doc.poly([[x, cy - 6.3], [x + 6.3, cy], [x, cy + 6.3], [x - 6.3, cy]], { fill: EXTRA_COL });
             doc.poly([[x, cy - 4.5], [x + 4.5, cy], [x, cy + 4.5], [x - 4.5, cy]], { fill: col });
           } else {
             const bh = ROW_H2 - 5;
@@ -25100,7 +25124,9 @@ function buildProgrammePdf(data, meta = {}) {
               while (j + 1 < marked.length && marked[j + 1] === marked[j] + 1) j++;
               const bw = (j - i + 1) * dayW - 1;
               const r = Math.max(1, Math.min(2.5, bh / 2, bw / 2));
-              doc.roundRect(GRID_X + marked[i] * dayW + 0.5, barTop, bw, bh, r, { fill: col });
+              const bx = GRID_X + marked[i] * dayW + 0.5;
+              doc.roundRect(bx, barTop, bw, bh, r, { fill: col });
+              if (t.extra) doc.rect(bx - 0.4, barTop - 0.4, bw + 0.8, bh + 0.8, { stroke: EXTRA_COL, lw: 1.2 });
               i = j + 1;
             }
           }
