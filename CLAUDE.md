@@ -504,8 +504,19 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   the live `listJobs` hot path (scheduler/day-view/dashboard load the whole
   sla_jobs table each request — the archive must never bloat that). Routes
   (FullAccess|SLAAdmin): **POST /sla/archive/import** (`{jobs:[…]}` upsert by
-  id), **GET /sla/archive?q=&limit=&offset=** (paged LIKE search), **GET
-  /sla/archive/count**, **POST /sla/archive/clear**. Front-end:
+  id), **GET /sla/archive?q=&limit=&offset=** (paged LIKE search — now merges the
+  row's MOS key onto each job as `id`, since Workever rows store it as `data.mos`
+  and xlsx rows as `data.id`; this is what reopen + photo-loading key off), **GET
+  /sla/archive/count**, **POST /sla/archive/clear**, **POST /sla/archive/reopen**
+  `{id}` (**re-open a completed job — a client sometimes sends one back**: builds a
+  LIVE sla_jobs row keyed by the archived MOS, status Pending, from the archived
+  ref/site/description/priority, so it shows on the board + shared editor to
+  allocate; idempotent — reopening twice re-opens the same live row, never a dupe;
+  the archive row is KEPT + stamped `reopenedAt`/`reopenedJobId`; the live job
+  carries `reopenedFromArchive`). Front-end: **job-archive.html** each card has a
+  **↩ Reopen to board** button (→ POST reopen → jumps to job-view.html to allocate);
+  a job already reopened shows **↩ On the board — open** linking to its live job.
+  Front-end:
   **sla-data-tools.html** (admin: review + bulk-delete live jobs, then import
   the spreadsheet) parses the .xlsx entirely in-browser via **xlsx-lite.js**
   (dependency-free ZIP+inflate+XML reader — customer data never touches the

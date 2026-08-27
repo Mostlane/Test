@@ -649,12 +649,53 @@ export async function handle(request, env, ctx, url, sess) {
         const where = terms.map(() => "search LIKE ?").join(" AND ");
         const likes = terms.map(t => "%" + t + "%");
         total = (await db.prepare(`SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND ${where}`).bind(tenantId, ...likes).first())?.n || 0;
-        ({ results: rows } = await db.prepare(`SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
+        ({ results: rows } = await db.prepare(`SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
       } else {
         total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).first())?.n || 0;
-        ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, limit, offset).all());
+        ({ results: rows } = await db.prepare("SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, limit, offset).all());
       }
-      return jsonResponse({ ok: true, total, limit, offset, jobs: (rows || []).map(r => JSON.parse(r.data)) }, headers);
+      // Merge the row's MOS key onto each job (Workever rows store it as data.mos,
+      // xlsx rows as data.id) so `id` is ALWAYS the archive key — reopen + files need it.
+      return jsonResponse({ ok: true, total, limit, offset, jobs: (rows || []).map(r => { const j = JSON.parse(r.data); j.id = r.id; return j; }) }, headers);
+    }
+
+    // POST /sla/archive/reopen — bring an archived job back onto the LIVE board so
+    // it can be allocated again (a client sometimes sends a completed job back).
+    // Creates/updates a live sla_jobs row keyed by the archived MOS (idempotent —
+    // reopening twice re-opens the same live job, never a duplicate), status
+    // Pending so it shows on the board and in the shared editor for allocation.
+    // The archive row is KEPT and stamped so the archive UI can flag "reopened".
+    if (subpath === "/archive/reopen" && method === "POST") {
+      const body = await readJson(request);
+      const mos = String(body.id || body.mos || "").trim();
+      if (!mos) return jsonResponse({ error: "Missing archive id" }, headers, 400);
+      const arow = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND id=?").bind(tenantId, mos).first();
+      if (!arow) return jsonResponse({ error: "Archived job not found" }, headers, 404);
+      let a = {}; try { a = JSON.parse(arow.data) || {}; } catch {}
+      // Address may be stored as a string OR the Workever {line1,city,postcode,state} object.
+      let addr = a.address;
+      if (addr && typeof addr === "object") addr = [addr.line1, addr.city, addr.postcode, addr.state].filter(Boolean).join(", ");
+      const desc = String(a.description || a.jobName || a.notes || "").trim();
+      const payload = {
+        id: mos,
+        reference: a.helpdeskRef || a.jobName || a.siteName || mos,
+        status: "Pending",
+        priority: a.priority || "Priority 4",
+        description: desc || ("Re-opened archived job " + mos),
+        siteName: a.siteName || (a.customer && a.customer.name) || "",
+        siteCode: a.siteCode || a.site_code || "",
+        address: String(addr || ""),
+        postcode: a.postcode || (a.customer && a.customer.postcode) || "",
+        originator: "reopen",
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      // Mark it as a re-opened job (so the office knows its history) + link the archive.
+      job.reopenedFromArchive = mos;
+      job.reopenedAt = new Date().toISOString();
+      await saveJob(env, tenantId, job);
+      a.reopenedAt = job.reopenedAt; a.reopenedJobId = job.id;
+      try { await db.prepare("UPDATE sla_jobs_archive SET data=? WHERE tenant_id=? AND id=?").bind(JSON.stringify(a), tenantId, mos).run(); } catch {}
+      return jsonResponse({ ok: true, jobId: job.id, job: decorateJobWithLiveSla(job) }, headers);
     }
 
     /* ===== Imported job FILES (photos/signatures/PDFs migrated from Workever) =====
