@@ -1157,11 +1157,18 @@ function init(){
       loadedRanges.add(rangeKey);
       $("statusBar").textContent = "Ready";
       // Open the list ON today — previous days scroll DOWN (history), upcoming
-      // days scroll up. Closed past jobs are greyed + read-only.
-      requestAnimationFrame(function(){
-        var tb = document.querySelector(".day-banner.today");
-        if(tb && tb.scrollIntoView) tb.scrollIntoView({ block:"start" });
-      });
+      // days scroll up. Closed past jobs are greyed + read-only. The day bar and
+      // the "not booked in" box render async ABOVE the list, so re-run the scroll a
+      // few times until the layout settles, and stop as soon as today is at the top.
+      (function landOnToday(){
+        var n = 0;
+        function go(){
+          var tb = document.querySelector(".day-banner.today");
+          if(tb && tb.scrollIntoView) tb.scrollIntoView({ block:"start" });
+          if(n++ < 6) setTimeout(go, n < 3 ? 150 : 350);   // re-correct as async top content renders
+        }
+        requestAnimationFrame(go);
+      })();
     }finally{
       loading = false;
     }
