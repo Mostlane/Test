@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Certificate Review</title>
-  <script src="/portal-config.js?v=19"></script>
+  <script src="/portal-config.js?v=20"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="cert-form.js?v=9"></script>
@@ -138,7 +138,12 @@
         this.disabled = true; setMsg("Finalising…");
         try {
           const d = await authFetch("/certs/finalise", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, certNumber:num, docDate:g("finDate").value.trim() }) }).then(r=>r.json());
-          if (d && d.ok) { setMsg("Issued as "+d.number+" and filed to compliance ✓"); setTimeout(loadList, 1100); }
+          if (d && d.ok) {
+            setMsg("Issued as "+d.number+" and filed to compliance ✓" + (d.remedial && d.remedial.count ? " — "+d.remedial.count+" fitting(s) failed, £"+d.remedial.charge+" to charge" : ""));
+            // Pop the charge/quote confirmation immediately for a cert with remedials.
+            if (d.remedial && d.remedial.count && window.mlRemedialCheck) setTimeout(window.mlRemedialCheck, 400);
+            setTimeout(loadList, 1300);
+          }
           else { setMsg((d && d.error) || "Couldn't finalise.", true); this.disabled = false; }
         } catch { setMsg("Couldn't finalise.", true); this.disabled = false; }
       };

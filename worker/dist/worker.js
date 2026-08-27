@@ -24617,7 +24617,9 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
         return;
       }
       if (c.kind === "dot") {
-        dot(doc, c.x + c.ww / 2, midY, 3.1, okColor(r[c.key]));
+        let dv = r[c.key];
+        if (titleType === "em" && c.key === "emergency" && r.remedial && r.remedial.failed && r.remedial.replacedOnSite === false) dv = "Fail";
+        dot(doc, c.x + c.ww / 2, midY, 3.1, okColor(dv));
         return;
       }
       if (c.kind === "pill") {
@@ -24626,8 +24628,9 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
         return;
       }
       let v = r[c.key] == null ? "" : r[c.key];
-      if (titleType === "em" && c.key === "comments" && r.remedial && r.remedial.replacedOnSite === true) {
-        v = (S(v).trim() ? S(v).trim() + " \u2014 " : "") + "Fitting failed, replaced on site";
+      if (titleType === "em" && c.key === "comments" && r.remedial && r.remedial.failed) {
+        const tag = r.remedial.replacedOnSite === true ? "Fitting failed, replaced on site" : r.remedial.replacedOnSite === false ? "FITTING FAILED \u2014 remedial required" : "";
+        if (tag) v = (S(v).trim() ? S(v).trim() + " \u2014 " : "") + tag;
       }
       const s = fit(v, 8, c.ww - 8);
       const tx = c.align === "r" ? c.x + c.ww - textWidth(s, 8) : c.x + 2;
@@ -24771,6 +24774,11 @@ async function ensureTables4(env) {
     site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
     replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
     engineer TEXT, created_at TEXT)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS em_remedial_acks (
+    cert_id TEXT PRIMARY KEY, tenant_id TEXT, cert_number TEXT,
+    site_code TEXT, site_name TEXT, fittings INTEGER, charge REAL,
+    onsite INTEGER, pending INTEGER, state TEXT, snooze_until TEXT,
+    created_at TEXT, done_at TEXT, done_by TEXT)`).run();
 }
 var REMEDIAL_CHARGE = 50;
 async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) {
@@ -24785,6 +24793,10 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   if (!fails.length) {
     try {
       await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run();
+    } catch {
+    }
+    try {
+      await env.DB.prepare("DELETE FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run();
     } catch {
     }
     return { count: 0 };
@@ -24842,6 +24854,27 @@ Charge: \xA3${pending.length * REMEDIAL_CHARGE} (\xA3${REMEDIAL_CHARGE}/fitting)
   ));
   try {
     for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20));
+  } catch {
+  }
+  try {
+    await env.DB.prepare(
+      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,state,snooze_until,created_at,done_at,done_by)
+       VALUES (?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
+       ON CONFLICT(cert_id) DO UPDATE SET cert_number=excluded.cert_number, site_code=excluded.site_code,
+         site_name=excluded.site_name, fittings=excluded.fittings, charge=excluded.charge,
+         onsite=excluded.onsite, pending=excluded.pending, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
+    ).bind(
+      certRow.id,
+      tid,
+      certNumber,
+      siteCode || "",
+      siteName,
+      fails.length,
+      fails.length * REMEDIAL_CHARGE,
+      onsite.length,
+      pending.length,
+      now
+    ).run();
   } catch {
   }
   return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: fails.length * REMEDIAL_CHARGE, jobId };
@@ -25341,6 +25374,48 @@ async function handle30(request, env, ctx, url, sess) {
     const total = rows.reduce((a, r) => a + (Number(r.charge) || 0), 0);
     const pending = rows.filter((r) => r.status === "pending").reduce((a, r) => a + (Number(r.charge) || 0), 0);
     return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
+  }
+  if (sub === "/remedials/outstanding" && method === "GET") {
+    if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND state='open' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
+    ).bind(tid, now).all();
+    return json({ ok: true, remedials: (results || []).map((r) => ({
+      certId: r.cert_id,
+      certNumber: r.cert_number,
+      siteName: r.site_name || r.site_code,
+      siteCode: r.site_code,
+      fittings: r.fittings,
+      charge: r.charge,
+      onsite: r.onsite,
+      pending: r.pending
+    })) }, {}, env, request);
+  }
+  if (sub === "/remedials/ack" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    if (!certId) return error("Missing certId", 400, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (String(b.action) === "later") {
+      const until = new Date(Date.now() + 4 * 3600 * 1e3).toISOString();
+      await env.DB.prepare("UPDATE em_remedial_acks SET snooze_until=? WHERE tenant_id=? AND cert_id=?").bind(until, tid, certId).run();
+      return json({ ok: true, snoozed: until }, {}, env, request);
+    }
+    await env.DB.prepare("UPDATE em_remedial_acks SET state='done', done_at=?, done_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    return json({ ok: true, done: true }, {}, env, request);
+  }
+  if (sub === "/remedials/flags" && method === "GET") {
+    const { results } = await env.DB.prepare(
+      "SELECT site_code, SUM(fittings) AS fittings, SUM(charge) AS charge FROM em_remedial_acks WHERE tenant_id=? AND state='open' GROUP BY site_code"
+    ).bind(tid).all();
+    const codes = {};
+    (results || []).forEach((r) => {
+      const c = padCode(r.site_code);
+      if (c) codes[c] = { fittings: r.fittings, charge: r.charge };
+    });
+    return json({ ok: true, codes }, {}, env, request);
   }
   if (sub === "/upload" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);

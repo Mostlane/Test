@@ -272,8 +272,8 @@
         return '<div class="mlrem ro"><span class="mlrem-tag">⚠ ' + esc(txt) + '</span>'
           + (rem.note ? ' <span class="muted">· ' + esc(rem.note) + '</span>' : '') + '</div>';
       }
-      const hint = onsite === "no" ? 'Light stays a Pass — a remedial job is raised and the office charged £50.'
-        : onsite === "yes" ? 'Certificate will read "Fitting failed, replaced on site" — £50 charge.'
+      const hint = onsite === "no" ? 'Shown as FAILED on the certificate — a remedial job is raised and the office quoted £50.'
+        : onsite === "yes" ? 'Certificate will read "Fitting failed, replaced on site" — the office charges the client £50.'
         : 'Choose whether it was replaced on site.';
       return '<div class="mlrem' + (on ? " open" : "") + '">'
         + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed" : "Mark fitting failed") + '</button>'

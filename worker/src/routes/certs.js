@@ -78,6 +78,13 @@ async function ensureTables(env) {
     site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
     replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
     engineer TEXT, created_at TEXT)`).run();
+  // Per-cert charge/quote acknowledgement — drives the office's blocking reminder
+  // ("Have remedials been charged/quoted?") that re-pops every 4h until confirmed.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS em_remedial_acks (
+    cert_id TEXT PRIMARY KEY, tenant_id TEXT, cert_number TEXT,
+    site_code TEXT, site_name TEXT, fittings INTEGER, charge REAL,
+    onsite INTEGER, pending INTEGER, state TEXT, snooze_until TEXT,
+    created_at TEXT, done_at TEXT, done_by TEXT)`).run();
 }
 const REMEDIAL_CHARGE = 50;   // £ per failed EM fitting (replaced on site OR remedial)
 
@@ -93,7 +100,11 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     note: (r.remedial && r.remedial.note) || "",
     failed: !!(r.remedial && r.remedial.failed),
   })).filter(x => x.failed);
-  if (!fails.length) { try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {} return { count: 0 }; }
+  if (!fails.length) {
+    try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
+    try { await env.DB.prepare("DELETE FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
+    return { count: 0 };
+  }
 
   const siteName = (rec.installation && rec.installation.name) || (rec.client && rec.client.name) || siteCode;
   const now = new Date().toISOString();
@@ -124,6 +135,19 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.replaced ? 1 : 0, REMEDIAL_CHARGE, f.replaced ? "done" : "pending", f.replaced ? null : jobId,
     certRow.engineer || "", now));
   try { for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20)); } catch {}
+
+  // Open (or re-open) the per-cert charge/quote reminder. Re-finalising resets it
+  // to open with fresh counts so the office is prompted again if the split changed.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,state,snooze_until,created_at,done_at,done_by)
+       VALUES (?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
+       ON CONFLICT(cert_id) DO UPDATE SET cert_number=excluded.cert_number, site_code=excluded.site_code,
+         site_name=excluded.site_name, fittings=excluded.fittings, charge=excluded.charge,
+         onsite=excluded.onsite, pending=excluded.pending, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
+    ).bind(certRow.id, tid, certNumber, siteCode || "", siteName, fails.length, fails.length * REMEDIAL_CHARGE,
+      onsite.length, pending.length, now).run();
+  } catch {}
 
   return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: fails.length * REMEDIAL_CHARGE, jobId };
 }
@@ -590,6 +614,48 @@ export async function handle(request, env, ctx, url, sess) {
     const total = rows.reduce((a, r) => a + (Number(r.charge) || 0), 0);
     const pending = rows.filter(r => r.status === "pending").reduce((a, r) => a + (Number(r.charge) || 0), 0);
     return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
+  }
+
+  // GET /certs/remedials/outstanding — open charge/quote acks that are DUE now
+  // (never snoozed, or the 4h snooze has passed). Drives the office blocking gate.
+  if (sub === "/remedials/outstanding" && method === "GET") {
+    if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
+    const now = new Date().toISOString();
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND state='open' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
+    ).bind(tid, now).all();
+    return json({ ok: true, remedials: (results || []).map(r => ({
+      certId: r.cert_id, certNumber: r.cert_number, siteName: r.site_name || r.site_code, siteCode: r.site_code,
+      fittings: r.fittings, charge: r.charge, onsite: r.onsite, pending: r.pending,
+    })) }, {}, env, request);
+  }
+
+  // POST /certs/remedials/ack {certId, action:"done"|"later"} — confirm charged/
+  // quoted (clears it), or snooze the reminder for 4 hours.
+  if (sub === "/remedials/ack" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || b.id || "").trim();
+    if (!certId) return error("Missing certId", 400, env, request);
+    const now = new Date().toISOString();
+    if (String(b.action) === "later") {
+      const until = new Date(Date.now() + 4 * 3600 * 1000).toISOString();
+      await env.DB.prepare("UPDATE em_remedial_acks SET snooze_until=? WHERE tenant_id=? AND cert_id=?").bind(until, tid, certId).run();
+      return json({ ok: true, snoozed: until }, {}, env, request);
+    }
+    await env.DB.prepare("UPDATE em_remedial_acks SET state='done', done_at=?, done_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    return json({ ok: true, done: true }, {}, env, request);
+  }
+
+  // GET /certs/remedials/flags — site codes with an OPEN ack, for the compliance
+  // chart's ⚠ triangle next to the EM date.
+  if (sub === "/remedials/flags" && method === "GET") {
+    const { results } = await env.DB.prepare(
+      "SELECT site_code, SUM(fittings) AS fittings, SUM(charge) AS charge FROM em_remedial_acks WHERE tenant_id=? AND state='open' GROUP BY site_code"
+    ).bind(tid).all();
+    const codes = {};
+    (results || []).forEach(r => { const c = padCode(r.site_code); if (c) codes[c] = { fittings: r.fittings, charge: r.charge }; });
+    return json({ ok: true, codes }, {}, env, request);
   }
 
   // ── Office uploads a replacement PDF instead of generating ────────────────────

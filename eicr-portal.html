@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=19"></script>
+  <script src="/portal-config.js?v=20"></script>
   <script src="auth.js"></script>
   <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
   <script src="docviewer.js?v=6"></script>
@@ -398,12 +398,23 @@ function authFetch(path, opts){
   const t = mlToken(); if (t) h['Authorization'] = 'Bearer ' + t;
   return fetch((window.MOSTLANE_API || '') + path, Object.assign({}, opts, { headers:h }));
 }
+let remedialFlags = {};   // store code → {fittings,charge} with an OPEN EM remedial
+async function loadRemedialFlags(){
+  try {
+    const r = await authFetch('/certs/remedials/flags');
+    if (!r.ok) return;
+    const j = await r.json();
+    remedialFlags = (j && j.codes) ? j.codes : {};
+    if (allData.length) applyFilters();
+  } catch(e){ /* non-critical */ }
+}
 async function loadComplianceIndex(){
   try {
     const r = await authFetch('/compliance/index');
     if (!r.ok) return;
     const j = await r.json();
     complianceIndex = (j && j.map) ? j.map : {};
+    loadRemedialFlags();
     // re-render so cells pick up their 📄 links (data may already be shown)
     if (allData.length) applyFilters();
   } catch(e){ /* certs are non-critical — table still works without them */ }
@@ -824,7 +835,13 @@ function dateCell(code, colKey, val){
   const t = CERT_TYPE[colKey];
   const has = t && complianceIndex[pad4(code)] && complianceIndex[pad4(code)][t];
   const link = has ? ` <a class="cert-link" href="#" data-code="${code}" data-type="${t}" title="Open certificate">📄</a>` : '';
-  return `${fmtDue(val)}${link}`;
+  // EM cell: flag an outstanding remedial (a fitting failed on the last EM cert).
+  let warn = '';
+  if (t === 'em' && remedialFlags[pad4(code)]) {
+    const f = remedialFlags[pad4(code)];
+    warn = ` <span class="rem-warn" title="EM remedial outstanding — ${f.fittings} fitting(s), £${Math.round(f.charge||0)} to charge/quote">⚠️</span>`;
+  }
+  return `${fmtDue(val)}${link}${warn}`;
 }
 
 /* ===== Helpers ===== */
