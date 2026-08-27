@@ -676,13 +676,47 @@ export async function handle(request, env, ctx, url, sess) {
       let addr = a.address;
       if (addr && typeof addr === "object") addr = [addr.line1, addr.city, addr.postcode, addr.state].filter(Boolean).join(", ");
       const desc = String(a.description || a.jobName || a.notes || "").trim();
+      const siteName = a.siteName || (a.customer && a.customer.name) || "";
+
+      // Duplicate guard: the same underlying job can sit in the archive under two
+      // MOS numbers (Workever dupes), so reopening BOTH makes two live jobs. Unless
+      // {force:true}, refuse when a live (non-finished) job under a DIFFERENT id
+      // already has the same site + description — and return that existing job so
+      // the caller can offer to open it instead. (This is exactly the David Molloy
+      // 0107 "wall above the sink" case.)
+      if (!body.force) {
+        const dkey = desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, "");
+        if (dkey) {
+          const { results } = await db.prepare(
+            "SELECT id, helpdesk_ref, status, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id<>? AND lower(data) LIKE ? LIMIT 30"
+          ).bind(tenantId, mos, "%" + dkey + "%").all();
+          const finished = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
+          for (const r of (results || [])) {
+            let d = {}; try { d = JSON.parse(r.data) || {}; } catch {}
+            const sameSite = String(d.siteName || "").toLowerCase() === String(siteName).toLowerCase()
+              || String(d.siteCode || "") === String(a.siteCode || a.site_code || "");
+            const sameDesc = String(d.description || "").toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80) === desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80);
+            if (sameSite && sameDesc && !finished(r.status)) {
+              return jsonResponse({
+                ok: false, duplicate: true,
+                existing: {
+                  id: r.id, ref: r.helpdesk_ref || d.helpdeskRef || "", status: r.status || d.status || "",
+                  siteName: d.siteName || "", scheduledAt: r.scheduled_at || d.scheduledAt || null,
+                  engineers: (Array.isArray(d.assignedEngineers) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : [])).join(", "),
+                },
+              }, headers);
+            }
+          }
+        }
+      }
+
       const payload = {
         id: mos,
         reference: a.helpdeskRef || a.jobName || a.siteName || mos,
         status: "Pending",
         priority: a.priority || "Priority 4",
         description: desc || ("Re-opened archived job " + mos),
-        siteName: a.siteName || (a.customer && a.customer.name) || "",
+        siteName,
         siteCode: a.siteCode || a.site_code || "",
         address: String(addr || ""),
         postcode: a.postcode || (a.customer && a.customer.postcode) || "",

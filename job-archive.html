@@ -81,6 +81,18 @@
     <div class="lb-cap" id="lbCap"></div>
   </div>
 
+  <div id="dupModal" style="display:none;position:fixed;inset:0;z-index:120;background:rgba(8,20,40,.5);align-items:center;justify-content:center;padding:16px">
+    <div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:18px">
+      <h3 style="margin:0 0 8px;font-size:16px;color:#92400e">⚠ Possible duplicate</h3>
+      <div id="dupBody" style="font-size:14px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn primary" id="dupOpen">Open existing job</button>
+        <button class="btn" id="dupAnyway" style="color:#b45309;border-color:#f0b775">Reopen anyway</button>
+        <button class="btn" id="dupCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 const SLA = "https://mostlane-sla.jamie-def.workers.dev";
 const $ = id => document.getElementById(id);
@@ -193,15 +205,43 @@ function render(jobs){
       if(!mos){ alert("This archived job has no reference to reopen."); return; }
       const ok = window.MLUI ? await MLUI.confirm("Reopen this job onto the live board so it can be allocated?", {okLabel:"Reopen"}) : confirm("Reopen this job onto the live board?");
       if(!ok) return;
-      b.disabled = true; b.textContent = "Reopening…";
-      try{
-        const r = await fetch(SLA + "/archive/reopen", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id: mos }) });
-        const d = await r.json();
-        if(d && d.ok && d.jobId){ location.href = "job-view.html?jobId=" + encodeURIComponent(d.jobId) + "&back=job-archive.html" + encodeURIComponent(location.search); }
-        else { b.disabled=false; b.textContent="↩ Reopen to board"; alert((d && d.error) || "Couldn't reopen this job."); }
-      }catch(err){ b.disabled=false; b.textContent="↩ Reopen to board"; alert("Couldn't reopen this job."); }
+      reopenJob(mos, b, false);
     });
   });
+}
+
+function goToJob(id){ location.href = "job-view.html?jobId=" + encodeURIComponent(id) + "&back=job-archive.html" + encodeURIComponent(location.search); }
+
+async function reopenJob(mos, btn, force){
+  if(btn){ btn.disabled = true; btn.textContent = "Reopening…"; }
+  const resetBtn = ()=>{ if(btn){ btn.disabled=false; btn.textContent="↩ Reopen to board"; } };
+  try{
+    const r = await fetch(SLA + "/archive/reopen", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id: mos, force: !!force }) });
+    const d = await r.json();
+    if(d && d.ok && d.jobId){ goToJob(d.jobId); return; }
+    if(d && d.duplicate && d.existing){ resetBtn(); showDupModal(mos, btn, d.existing); return; }
+    resetBtn(); alert((d && d.error) || "Couldn't reopen this job.");
+  }catch(err){ resetBtn(); alert("Couldn't reopen this job."); }
+}
+
+// Duplicate warning — this job already looks to be on the live board. Offer to
+// open the existing one, reopen a second copy anyway, or cancel.
+function showDupModal(mos, btn, ex){
+  const m = $("dupModal");
+  const bits = [];
+  if(ex.status) bits.push(esc(ex.status));
+  if(ex.engineers) bits.push("👷 " + esc(ex.engineers));
+  if(ex.scheduledAt){ const d=new Date(ex.scheduledAt); if(!isNaN(d)) bits.push("📅 " + d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"}) + " " + d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})); }
+  $("dupBody").innerHTML =
+    '<p style="margin:0 0 8px">This job already looks to be on the live board'
+    + (ex.ref ? ' as <b>' + esc(ex.ref) + '</b>' : '')
+    + (ex.siteName ? ' · ' + esc(ex.siteName) : '') + '.</p>'
+    + (bits.length ? '<p class="muted" style="margin:0 0 4px">' + bits.join(" · ") + '</p>' : '')
+    + '<p class="muted" style="margin:8px 0 0">Open that one, or reopen a second copy only if it\'s genuinely a different visit.</p>';
+  $("dupOpen").onclick = ()=>{ m.style.display="none"; goToJob(ex.id); };
+  $("dupAnyway").onclick = ()=>{ m.style.display="none"; reopenJob(mos, btn, true); };
+  $("dupCancel").onclick = ()=>{ m.style.display="none"; };
+  m.style.display = "flex";
 }
 
 /* ---- per-job files (photos / signatures / PDFs imported from Workever) ---- */
