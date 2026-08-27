@@ -85,6 +85,14 @@
   .mlc .mlrem-hint{flex-basis:100%;font-size:12px;color:#8a5a0a;}
   .mlc .mlrem.ro{margin-top:8px;}
   .mlc .mlrem-tag{display:inline-block;background:#fff4e6;border:1px solid #f0c98a;color:#8a4b0a;border-radius:999px;padding:3px 10px;font:700 12px inherit;}
+  .mlc .mlrem-batt{flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:2px;}
+  .mlc .mlrem-bspec{flex:1;min-width:180px;padding:8px;font-size:14px;}
+  .mlc .mlrem-bqty{width:74px;padding:8px;font-size:14px;}
+  .mlc .mlrem-addphoto{background:#eef4fb;border:1px solid #c7dbf3;color:#003468;border-radius:8px;padding:8px 12px;font:700 13px inherit;cursor:pointer;}
+  .mlc .mlrem-photos{display:flex;flex-wrap:wrap;gap:6px;flex-basis:100%;}
+  .mlc .mlrem-thw{position:relative;display:inline-block;}
+  .mlc .mlrem-th{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #d7dee6;background:#eef2f6;}
+  .mlc .mlrem-thx{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#b00020;color:#fff;border:none;font-size:11px;line-height:1;cursor:pointer;}
   .mlc .mlc-listhead{background:#fff;padding:9px 4px;margin:-4px -4px 8px;border-bottom:2px solid #eef2f6;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:#003468;}
   .mlc .mlc-listhead .cnt{margin-left:auto;font-size:13px;}
   .mlc .mlc-listhead .cnt .ok{color:#0a7d33;font-weight:700;}
@@ -264,26 +272,49 @@
       const rem = r.remedial || {};
       const on = !!rem.failed;
       const onsite = rem.replacedOnSite === true ? "yes" : rem.replacedOnSite === false ? "no" : "";
+      const kind = rem.kind === "battery" ? "battery" : "light";
+      const photos = Array.isArray(rem.photos) ? rem.photos : [];
       if (!editable) {
         if (!on) return "";
-        const txt = rem.replacedOnSite === true ? "Fitting failed — replaced on site (£50)"
-          : rem.replacedOnSite === false ? "Fitting failed — remedial required (£50)"
-          : "Fitting failed — outcome not set";
-        return '<div class="mlrem ro"><span class="mlrem-tag">⚠ ' + esc(txt) + '</span>'
-          + (rem.note ? ' <span class="muted">· ' + esc(rem.note) + '</span>' : '') + '</div>';
+        const what = kind === "battery"
+          ? "Batteries" + (rem.batterySpec ? " — " + esc(rem.batterySpec) : "") + (rem.batteryQty ? " ×" + esc(rem.batteryQty) : "")
+          : "Replacement light (£50)";
+        const where = rem.replacedOnSite === true ? "done on site" : rem.replacedOnSite === false ? "remedial required" : "outcome not set";
+        const thumbs = photos.map(p => '<img class="mlrem-th" src="' + esc((p && p.url) || "") + '">').join("");
+        return '<div class="mlrem ro"><span class="mlrem-tag">⚠ Fitting failed — ' + what + ' · ' + where + '</span>'
+          + (rem.note ? ' <span class="muted">· ' + esc(rem.note) + '</span>' : '')
+          + (thumbs ? '<div class="mlrem-photos">' + thumbs + '</div>' : '') + '</div>';
       }
-      const hint = onsite === "no" ? 'Shown as FAILED on the certificate — a remedial job is raised and the office quoted £50.'
-        : onsite === "yes" ? 'Certificate will read "Fitting failed, replaced on site" — the office charges the client £50.'
-        : 'Choose whether it was replaced on site.';
+      const hint = kind === "battery"
+        ? (onsite === "yes" ? 'Batteries replaced on site — NO £50 (supplier prices the batteries). Add spec, qty & photos.'
+          : onsite === "no" ? 'Shown as FAILED — batteries go on a supplier enquiry to price (NO £50). Add spec, qty & photos.'
+          : 'Add the battery spec, quantity and photos for the supplier.')
+        : (onsite === "no" ? 'Shown as FAILED on the certificate — a remedial job is raised and the office quoted £50.'
+          : onsite === "yes" ? 'Certificate reads "Fitting failed, replaced on site" — the office charges the client £50.'
+          : 'Choose whether it was replaced on site.');
+      const thumbs = photos.map((p, pi) => '<span class="mlrem-thw"><img class="mlrem-th" src="' + esc((p && p.url) || "") + '"><button type="button" class="mlrem-thx" data-rem="delphoto" data-i="' + i + '" data-p="' + pi + '">✕</button></span>').join("");
       return '<div class="mlrem' + (on ? " open" : "") + '">'
         + '<button type="button" class="mlrem-flag' + (on ? " on" : "") + '" data-rem="flag" data-i="' + i + '">⚠ ' + (on ? "Fitting failed" : "Mark fitting failed") + '</button>'
         + '<div class="mlrem-body" style="' + (on ? "" : "display:none") + '">'
-          + '<span class="mlrem-q">Replaced on site?</span>'
+          + '<span class="mlrem-q">Fault</span>'
+          + '<div class="tg mlrem-kind" data-rem="kind" data-i="' + i + '">'
+            + '<button type="button" data-v="light" class="' + (kind === "light" ? "on one" : "") + '">Replace light</button>'
+            + '<button type="button" data-v="battery" class="' + (kind === "battery" ? "on one" : "") + '">Batteries</button>'
+          + '</div>'
+          + '<span class="mlrem-q">Done on site?</span>'
           + '<div class="tg mlrem-onsite" data-rem="onsite" data-i="' + i + '">'
             + '<button type="button" data-v="yes" class="' + (onsite === "yes" ? "on pass" : "") + '">Yes</button>'
             + '<button type="button" data-v="no" class="' + (onsite === "no" ? "on na" : "") + '">No</button>'
           + '</div>'
           + '<input type="text" class="mlrem-note" data-rem="note" data-i="' + i + '" placeholder="Fault / fitting detail (optional)" value="' + esc(rem.note || "") + '">'
+          + (kind === "battery"
+            ? '<div class="mlrem-batt">'
+              + '<input type="text" class="mlrem-bspec" data-rem="bspec" data-i="' + i + '" placeholder="Battery type / spec (e.g. 4.8V 4Ah NiCd)" value="' + esc(rem.batterySpec || "") + '">'
+              + '<input type="number" inputmode="numeric" class="mlrem-bqty" data-rem="bqty" data-i="' + i + '" placeholder="Qty" value="' + esc(rem.batteryQty == null ? "" : rem.batteryQty) + '">'
+              + '<div class="mlrem-photos">' + thumbs + '</div>'
+              + '<button type="button" class="mlrem-addphoto" data-rem="addphoto" data-i="' + i + '">📷 Add photo</button>'
+              + '</div>'
+            : '')
           + '<div class="mlrem-hint">' + hint + '</div>'
         + '</div></div>';
     }
@@ -372,9 +403,64 @@
         rem.replacedOnSite = btn.dataset.v === "yes";
         renderRows(); queueSave();
       }));
+      container.querySelectorAll('[data-rem="kind"] button').forEach(btn => btn.addEventListener("click", () => {
+        const tg = btn.closest("[data-rem]"); const i = +tg.dataset.i;
+        const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
+        rem.kind = btn.dataset.v; renderRows(); queueSave();
+      }));
       container.querySelectorAll('[data-rem="note"]').forEach(el => el.addEventListener("input", () => {
         const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).note = el.value; queueSave();
       }));
+      container.querySelectorAll('[data-rem="bspec"]').forEach(el => el.addEventListener("input", () => {
+        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).batterySpec = el.value; queueSave();
+      }));
+      container.querySelectorAll('[data-rem="bqty"]').forEach(el => el.addEventListener("input", () => {
+        const i = +el.dataset.i; (rec.rows[i].remedial = rec.rows[i].remedial || {}).batteryQty = el.value === "" ? "" : (Number(el.value) || 0); queueSave();
+      }));
+      container.querySelectorAll('[data-rem="addphoto"]').forEach(b => b.addEventListener("click", () => pickRemedialPhoto(+b.dataset.i)));
+      container.querySelectorAll('[data-rem="delphoto"]').forEach(b => b.addEventListener("click", () => {
+        const i = +b.dataset.i, p = +b.dataset.p; const rem = rec.rows[i] && rec.rows[i].remedial;
+        if (rem && Array.isArray(rem.photos)) { rem.photos.splice(p, 1); renderRows(); queueSave(); }
+      }));
+    }
+    // Shrink a chosen image to a JPEG data-URL (max dimension), then upload to R2.
+    function shrinkImage(file, maxDim) {
+      return new Promise((resolve, reject) => {
+        const img = new Image(); const url = URL.createObjectURL(file);
+        img.onload = () => {
+          let w = img.width, h = img.height; const m = maxDim || 1400;
+          if (w > h && w > m) { h = Math.round(h * m / w); w = m; } else if (h > m) { w = Math.round(w * m / h); h = m; }
+          const c = document.createElement("canvas"); c.width = w; c.height = h;
+          c.getContext("2d").drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
+          resolve(c.toDataURL("image/jpeg", 0.82));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image")); };
+        img.src = url;
+      });
+    }
+    function pickRemedialPhoto(i) {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/*"; inp.setAttribute("capture", "environment"); inp.style.display = "none";
+      inp.onchange = async () => {
+        const file = inp.files && inp.files[0]; if (!file) return;
+        const btn = container.querySelector('[data-rem="addphoto"][data-i="' + i + '"]');
+        if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
+        try {
+          if (!rec.id) await doSave();
+          if (!rec.id) { alert("Save the certificate first, then add the photo."); return; }
+          const dataUrl = await shrinkImage(file, 1400);
+          const blob = await (await fetch(dataUrl)).blob();
+          const fd = new FormData(); fd.append("certId", rec.id); fd.append("file", blob, "battery.jpg");
+          const d = await fetch(api + "/certs/photo", { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd }).then(r => r.json());
+          if (d && d.ok && d.key) {
+            const rem = (rec.rows[i].remedial = rec.rows[i].remedial || {});
+            rem.photos = rem.photos || []; rem.photos.push({ key: d.key, url: d.url });
+            renderRows(); queueSave();
+          } else alert((d && d.error) || "Photo upload failed.");
+        } catch (e) { alert("Photo upload failed."); }
+        finally { if (btn) { btn.disabled = false; btn.textContent = "📷 Add photo"; } }
+      };
+      document.body.appendChild(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
     }
     function wire() {
       container.querySelectorAll("input[data-f],textarea[data-f]").forEach(el => el.addEventListener("input", () => { rec[el.dataset.f] = el.value; el.classList.remove("err"); queueSave(); }));
@@ -464,17 +550,25 @@
       need('[data-c="date"]', "Certificate date");
       let badRows = 0;
       if (!rec.rows.length) missing.push("at least one " + (type === "pat" ? "appliance" : "light"));
-      let remOpen = 0;
+      let remOpen = 0, battBad = 0;
       rec.rows.forEach((r, i) => {
         let bad = false;
         if (type === "em") { if (!r.normal || !r.led || !r.emergency || r.battery == null || String(r.battery).trim() === "") bad = true; }
         else { if (!String(r.appliance || "").trim() || !r.visual || !r.result) bad = true; }
-        // A failed fitting MUST say whether it was replaced on site (drives the charge + remedial job).
-        if (type === "em" && r.remedial && r.remedial.failed && r.remedial.replacedOnSite == null) { bad = true; remOpen++; }
+        // A failed fitting MUST say whether it was done on site (drives the charge + remedial job).
+        if (type === "em" && r.remedial && r.remedial.failed) {
+          const rem = r.remedial;
+          if (rem.replacedOnSite == null) { bad = true; remOpen++; }
+          // Batteries: spec + qty + at least one photo, so the supplier can quote.
+          if (rem.kind === "battery") {
+            if (!String(rem.batterySpec || "").trim() || !(Number(rem.batteryQty) > 0) || !(Array.isArray(rem.photos) && rem.photos.length)) { bad = true; battBad++; }
+          }
+        }
         if (bad) { badRows++; const rowEl = container.querySelector('.mlrow[data-i="' + i + '"]'); if (rowEl) { rowEl.classList.add("err-row"); if (!firstEl) firstEl = rowEl; } }
       });
       if (badRows) missing.push(badRows + (type === "pat" ? " appliance" : " item") + (badRows === 1 ? "" : "s") + " not fully filled in");
-      if (remOpen) missing.push(remOpen + " failed fitting" + (remOpen === 1 ? "" : "s") + " — say if replaced on site");
+      if (remOpen) missing.push(remOpen + " failed fitting" + (remOpen === 1 ? "" : "s") + " — say if done on site");
+      if (battBad) missing.push(battBad + " battery fault" + (battBad === 1 ? "" : "s") + " — add spec, quantity & a photo");
       if (!rec.signature) { missing.push("signature"); const sc = container.querySelector("#mlcSig"); if (sc && !firstEl) firstEl = sc; }
       // expand any collapsed section that holds a flagged field so it's visible
       container.querySelectorAll("details.mlc-fold").forEach(d => { if (d.querySelector(".err")) d.open = true; });

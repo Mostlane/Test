@@ -257,13 +257,13 @@ async function encryptPayload(payloadBytes, uaPublicRaw, authSecret, salt, asKey
   const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, plaintext));
   const rs = 4096;
-  const header = concat(
+  const header2 = concat(
     salt,
     new Uint8Array([rs >>> 24 & 255, rs >>> 16 & 255, rs >>> 8 & 255, rs & 255]),
     new Uint8Array([asPubRaw.length]),
     asPubRaw
   );
-  return concat(header, ciphertext);
+  return concat(header2, ciphertext);
 }
 async function importVapidPrivate(env) {
   const pub = b64urlToBytes(env.VAPID_PUBLIC);
@@ -280,10 +280,10 @@ async function importVapidPrivate(env) {
 }
 async function vapidAuth(env, endpoint) {
   const aud = new URL(endpoint).origin;
-  const header = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const header2 = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
   const exp = Math.floor(Date.now() / 1e3) + 12 * 3600;
   const payload = bytesToB64url(enc2.encode(JSON.stringify({ aud, exp, sub: env.PUSH_CONTACT || "mailto:admin@mostlane-portal.com" })));
-  const signingInput = header + "." + payload;
+  const signingInput = header2 + "." + payload;
   const key = await importVapidPrivate(env);
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc2.encode(signingInput)));
   return `vapid t=${signingInput}.${bytesToB64url(sig)}, k=${env.VAPID_PUBLIC}`;
@@ -1310,7 +1310,7 @@ async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
   ).bind(token, username, tenantId, expires).run();
   return token;
 }
-async function sendEmail(env, { to, subject, html, text, replyTo }) {
+async function sendEmail(env, { to, subject, html, text, replyTo, attachments }) {
   if (!to) return { ok: false, skipped: true, reason: "no recipient" };
   const body = text || stripHtml(html);
   if (env.RESEND_API_KEY) {
@@ -1318,6 +1318,7 @@ async function sendEmail(env, { to, subject, html, text, replyTo }) {
     try {
       const payload = { from, to, subject, html, text: body };
       if (replyTo) payload.reply_to = replyTo;
+      if (Array.isArray(attachments) && attachments.length) payload.attachments = attachments;
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
@@ -8563,11 +8564,11 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   }
   if (jobs.length < 2) return { ok: false, error: "Need at least two locatable jobs on this day to optimise a route.", warnings };
   const pts = [home.coord, ...jobs.map((j) => j.coord)];
-  const M4 = await driveMatrix(env, pts);
-  const baseSeq = solveRoute(M4.mins);
+  const M5 = await driveMatrix(env, pts);
+  const baseSeq = solveRoute(M5.mins);
   let order = baseSeq, aiUsed = false, aiReason = "";
   if (useAI && env.ANTHROPIC_API_KEY) {
-    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M4.mins, dayStart, notes, baseSeq });
+    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M5.mins, dayStart, notes, baseSeq });
     if (ai.ok) {
       const seq = ai.order.map(Number).filter((nn) => nn >= 1 && nn <= jobs.length);
       const uniq = [...new Set(seq)];
@@ -8586,7 +8587,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const legs = [];
   let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0;
   for (const p of order) {
-    const dMin = M4.mins[cur][p], dMi = M4.miles[cur][p];
+    const dMin = M5.mins[cur][p], dMi = M5.miles[cur][p];
     driveMins += dMin;
     driveMiles += dMi;
     const arrival = t + dMin;
@@ -8596,7 +8597,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     t = arrival + j.durationMin;
     cur = p;
   }
-  const homeMin = M4.mins[cur][0], homeMi = M4.miles[cur][0];
+  const homeMin = M5.mins[cur][0], homeMi = M5.miles[cur][0];
   driveMins += homeMin;
   driveMiles += homeMi;
   let lunch = null;
@@ -8616,7 +8617,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     dayStart,
     aiUsed,
     aiReason,
-    matrixSource: M4.source,
+    matrixSource: M5.source,
     home: { postcode: home.postcode },
     legs,
     lunch,
@@ -8629,7 +8630,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       dayLengthMins: Math.round(endOffset),
       homeDriveMins: homeMin,
       homeDriveMiles: Math.round(homeMi * 10) / 10,
-      source: M4.source
+      source: M5.source
     },
     warnings
   };
@@ -8726,23 +8727,23 @@ async function autoScheduleDay(env, tenantId, body) {
   }
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
   const NE = engs.length;
-  let M4;
-  if (pts.length <= 90) M4 = await roadMatrix(pts);
+  let M5;
+  if (pts.length <= 90) M5 = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
-    M4 = { mins, source: "estimate" };
+    M5 = { mins, source: "estimate" };
   }
   const pE = (i) => i, pJ = (k) => NE + k;
   const FERRY = 90, REMOTE = 75;
   const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
-  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M4.mins[i][k2] += FERRY;
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M5.mins[i][k2] += FERRY;
   const insertCost = (ei, k) => {
     const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
     let bDelta = Infinity, bPos = 1;
     for (let pos = 1; pos < route.length; pos++) {
       const a = route[pos - 1], b = route[pos];
-      const delta = M4.mins[a][p] + M4.mins[p][b] - M4.mins[a][b];
+      const delta = M5.mins[a][p] + M5.mins[p][b] - M5.mins[a][b];
       if (delta < bDelta) {
         bDelta = delta;
         bPos = pos;
@@ -8750,7 +8751,7 @@ async function autoScheduleDay(env, tenantId, body) {
     }
     return { pos: bPos, delta: bDelta };
   };
-  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M4.mins[pE(ei)][pJ(k)]));
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M5.mins[pE(ei)][pJ(k)]));
   const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
   const unassigned = [], handled = /* @__PURE__ */ new Set();
   const remoteByArea = {};
@@ -8760,13 +8761,13 @@ async function autoScheduleDay(env, tenantId, body) {
     const ks = remoteByArea[area];
     let bestE = -1, bestCost = Infinity;
     engs.forEach((_, ei) => {
-      const c = Math.min(...ks.map((k) => M4.mins[pE(ei)][pJ(k)]));
+      const c = Math.min(...ks.map((k) => M5.mins[pE(ei)][pJ(k)]));
       if (c < bestCost) {
         bestCost = c;
         bestE = ei;
       }
     });
-    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M4.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M5.mins[pE(bestE)][pJ(k)])) : Infinity;
     const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
     const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
     if (!justified) {
@@ -8812,13 +8813,13 @@ async function autoScheduleDay(env, tenantId, body) {
   const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
   const plan = engs.map((e, ei) => {
     const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
-    const subCost = sub.map((a) => sub.map((b) => M4.mins[a][b]));
+    const subCost = sub.map((a) => sub.map((b) => M5.mins[a][b]));
     const solved = solveRoute(subCost);
     const orderedK = solved.map((si) => e.seq[si - 1]);
     const legs = [];
     let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
     for (const k of orderedK) {
-      const p = pJ(k), dMin = M4.mins[cur][p];
+      const p = pJ(k), dMin = M5.mins[cur][p];
       drive += dMin;
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) {
@@ -8832,12 +8833,12 @@ async function autoScheduleDay(env, tenantId, body) {
       t = arrival + j.durationMin;
       cur = p;
     }
-    const homeMin = orderedK.length ? M4.mins[cur][pE(ei)] : 0;
+    const homeMin = orderedK.length ? M5.mins[cur][pE(ei)] : 0;
     drive += homeMin;
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
-  let matrixSource = M4.source;
-  if (M4.source !== "osrm" && plan.length) {
+  let matrixSource = M5.source;
+  if (M5.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
     let allReal = true;
@@ -10659,9 +10660,9 @@ async function handle9(request, env, ctx) {
   function isAdminAuthorised() {
     const secret = env.SITELOG_ADMIN_SECRET || "";
     if (!secret) return false;
-    const header = request.headers.get("x-admin-secret") ?? "";
-    if (!header) return false;
-    return constantTimeEqual(header, secret);
+    const header2 = request.headers.get("x-admin-secret") ?? "";
+    if (!header2) return false;
+    return constantTimeEqual(header2, secret);
   }
   function requireAdmin2() {
     if (!isAdminAuthorised()) {
@@ -21461,7 +21462,7 @@ function wrap2(str, size, maxW) {
 }
 function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   const doc = new PdfDoc();
-  const L = 56, R = 539, W3 = R - L;
+  const L = 56, R = 539, W4 = R - L;
   let y = 44;
   try {
     const lw = 150, lh = lw * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
@@ -21476,7 +21477,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label, val) => {
     doc.text(L, y, label, { size: 11, bold: true });
-    for (const ln of wrap2(val || "", 11, W3 - 70)) {
+    for (const ln of wrap2(val || "", 11, W4 - 70)) {
       doc.text(L + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -21495,7 +21496,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap2(para, 11, W3)) {
+    for (const ln of wrap2(para, 11, W4)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -21514,7 +21515,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap2("I confirm that I have read and understood the content of this memo.", 11, W3)) {
+  for (const ln of wrap2("I confirm that I have read and understood the content of this memo.", 11, W4)) {
     doc.text(L, y, ln, { size: 11 });
     y += 16;
   }
@@ -23900,9 +23901,9 @@ async function buildAuthHeader(wwwAuth, user, pass, methodHttp, uri) {
   h += extra;
   return h;
 }
-function parseAuthParams(header) {
+function parseAuthParams(header2) {
   const out = {};
-  const s = header.replace(/^\s*[A-Za-z]+\s+/, "");
+  const s = header2.replace(/^\s*[A-Za-z]+\s+/, "");
   const re = /(\w+)\s*=\s*(?:"([^"]*)"|([^,]*))/g;
   let m;
   while (m = re.exec(s)) out[m[1].toLowerCase()] = m[2] !== void 0 ? m[2] : (m[3] || "").trim();
@@ -24088,7 +24089,7 @@ function mondayOf5(ymd2) {
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
 function occurrence(task, now) {
   const today = lonYMD(now);
-  const [Y, M4] = today.split("-").map(Number);
+  const [Y, M5] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
   const pad = (n) => String(n).padStart(2, "0");
@@ -24109,7 +24110,7 @@ function occurrence(task, now) {
       break;
     }
     case "quarterly": {
-      const q = Math.floor((M4 - 1) / 3), qMonth = q * 3 + 1;
+      const q = Math.floor((M5 - 1) / 3), qMonth = q * 3 + 1;
       periodKey = "Q:" + Y + "-" + (q + 1);
       startYMD = `${Y}-${pad(qMonth)}-01`;
       dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
@@ -24629,7 +24630,8 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
       }
       let v = r[c.key] == null ? "" : r[c.key];
       if (titleType === "em" && c.key === "comments" && r.remedial && r.remedial.failed) {
-        const tag = r.remedial.replacedOnSite === true ? "Fitting failed, replaced on site" : r.remedial.replacedOnSite === false ? "FITTING FAILED \u2014 remedial required" : "";
+        const batt = r.remedial.kind === "battery";
+        const tag = r.remedial.replacedOnSite === true ? batt ? "Batteries replaced on site" : "Fitting failed, replaced on site" : r.remedial.replacedOnSite === false ? batt ? "FITTING FAILED \u2014 batteries required" : "FITTING FAILED \u2014 remedial required" : "";
         if (tag) v = (S(v).trim() ? S(v).trim() + " \u2014 " : "") + tag;
       }
       const s = fit(v, 8, c.ww - 8);
@@ -24730,6 +24732,114 @@ function buildCertPdf(record, meta = {}) {
 
 // src/routes/certs.js
 init_push();
+
+// src/lib/batterypdf.js
+var W3 = 595;
+var H2 = 842;
+var M3 = 36;
+var NAVY2 = [0, 0.204, 0.408];
+var INK2 = [0.09, 0.14, 0.22];
+var MUTE2 = [0.42, 0.48, 0.56];
+var HAIR2 = [0.85, 0.88, 0.92];
+var CARD2 = [0.972, 0.98, 0.988];
+var S2 = (s) => toWinAnsi(String(s == null ? "" : s));
+function fit2(str, size, maxW) {
+  let s = S2(str);
+  if (textWidth(s, size) <= maxW) return s;
+  while (s.length > 1 && textWidth(s + "...", size) > maxW) s = s.slice(0, -1);
+  return s + "...";
+}
+function wrapLines(str, size, maxW, maxLines) {
+  const words = S2(str).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const t = cur ? cur + " " + w : w;
+    if (textWidth(t, size) <= maxW) cur = t;
+    else {
+      if (cur) lines.push(cur);
+      cur = w;
+      if (lines.length >= (maxLines || 6) - 1) break;
+    }
+  }
+  if (cur && lines.length < (maxLines || 6)) lines.push(cur);
+  return lines.length ? lines : [""];
+}
+function header(doc, meta) {
+  doc.rect(0, 0, W3, 74, { fill: NAVY2 });
+  if (meta.logo) {
+    try {
+      const g = jpegInfo(meta.logo);
+      const hh = 26;
+      doc.image(meta.logo, M3, 24, hh * (g.w / g.h), hh);
+    } catch {
+    }
+  }
+  doc.text(W3 - M3, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W3 - M3, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
+  let y = 92;
+  const con = meta.contractor || {};
+  const bits = [con.tradingTitle, meta.site ? "Site: " + meta.site : "", meta.certNumber ? "EM cert " + meta.certNumber : ""].filter(Boolean);
+  doc.text(M3, y, S2(bits.join("   \xB7   ")), { size: 9.5, color: MUTE2 });
+  y += 8;
+  doc.line(M3, y, W3 - M3, y, { stroke: HAIR2, lw: 0.8 });
+  return y + 16;
+}
+function itemBlock(doc, it, idx, y) {
+  const photos = (it.photos || []).map((b) => {
+    try {
+      return { b, g: jpegInfo(b) };
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+  const photoH = photos.length ? 96 : 0;
+  const noteLines = it.note ? wrapLines(it.note, 8.5, W3 - M3 * 2 - 24, 2) : [];
+  const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + 14;
+  if (y + blockH > H2 - M3) {
+    doc.newPage(W3, H2);
+    y = M3 + 6;
+  }
+  doc.rect(M3, y, W3 - M3 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
+  const px = M3 + 12;
+  let ty = y + 18;
+  doc.text(px, ty, S2(idx + 1 + ".  " + (it.ref || "Fitting")), { size: 11, bold: true, color: INK2 });
+  if (it.site) doc.text(W3 - M3 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
+  ty += 18;
+  doc.text(px, ty, "Battery: ", { size: 9, bold: true, color: [0.3, 0.36, 0.44] });
+  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W3 - M3 * 2 - 120), { size: 9, color: INK2 });
+  doc.text(W3 - M3 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
+  ty += 15;
+  noteLines.forEach((l) => {
+    doc.text(px, ty, l, { size: 8.5, color: MUTE2 });
+    ty += 11;
+  });
+  if (photos.length) {
+    ty += 4;
+    let cx = px;
+    for (const p of photos) {
+      const w = Math.min(150, photoH * (p.g.w / p.g.h));
+      if (cx + w > W3 - M3 - 8) break;
+      try {
+        doc.image(p.b, cx, ty, w, photoH);
+      } catch {
+      }
+      cx += w + 8;
+    }
+  }
+  return y + blockH + 12;
+}
+function buildBatteryEnquiryPdf(items, meta = {}) {
+  const doc = new PdfDoc(W3, H2);
+  let y = header(doc, meta);
+  (items || []).forEach((it, idx) => {
+    y = itemBlock(doc, it, idx, y);
+  });
+  if (!(items || []).length) doc.text(M3, y, "No battery items.", { size: 10, color: MUTE2 });
+  return doc.bytes();
+}
+
+// src/routes/certs.js
 var T = (t) => t === "pat" ? "pat" : "em";
 var DEFAULT_CONFIG2 = {
   // Default client used to seed a NEW cert when the previous cert didn't supply one
@@ -24760,7 +24870,10 @@ var DEFAULT_CONFIG2 = {
   // Who gets the "certificate ready to review" push when an engineer submits one.
   // EMPTY = everyone with FullAccess / SLAAdmin / Compliance (the default fan-out).
   // A non-empty list = ONLY these usernames are notified.
-  reviewers: []
+  reviewers: [],
+  // Battery supplier — where the "please quote these batteries" enquiry PDF is emailed.
+  supplierName: "",
+  supplierEmail: ""
 };
 async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
@@ -24774,22 +24887,56 @@ async function ensureTables4(env) {
     site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
     replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
     engineer TEXT, created_at TEXT)`).run();
+  for (const col of ["kind TEXT", "battery_spec TEXT", "battery_qty INTEGER", "photos TEXT"]) {
+    try {
+      await env.DB.prepare(`ALTER TABLE em_remedials ADD COLUMN ${col}`).run();
+    } catch {
+    }
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS em_remedial_acks (
     cert_id TEXT PRIMARY KEY, tenant_id TEXT, cert_number TEXT,
     site_code TEXT, site_name TEXT, fittings INTEGER, charge REAL,
     onsite INTEGER, pending INTEGER, state TEXT, snooze_until TEXT,
     created_at TEXT, done_at TEXT, done_by TEXT)`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE em_remedial_acks ADD COLUMN batteries INTEGER").run();
+  } catch {
+  }
 }
 var REMEDIAL_CHARGE = 50;
+async function resignRemedialPhotos(env, origin, rec) {
+  if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
+  for (const r of rec.rows) {
+    const rem = r && r.remedial;
+    if (rem && Array.isArray(rem.photos)) {
+      for (const p of rem.photos) {
+        if (p && p.key) {
+          try {
+            p.url = await signedFileUrl(env, origin, "/certs/photo", p.key);
+          } catch {
+          }
+        }
+      }
+    }
+  }
+}
 async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) {
   if (rec.type !== "em") return null;
   const rows = Array.isArray(rec.rows) ? rec.rows : [];
-  const fails = rows.map((r, i) => ({
-    ref: String(r.comments || "").trim() || "Light " + (i + 1),
-    replaced: !!(r.remedial && r.remedial.replacedOnSite === true),
-    note: r.remedial && r.remedial.note || "",
-    failed: !!(r.remedial && r.remedial.failed)
-  })).filter((x) => x.failed);
+  const fails = rows.map((r, i) => {
+    const rem = r.remedial || {};
+    const kind = rem.kind === "battery" ? "battery" : "light";
+    return {
+      ref: String(r.comments || "").trim() || "Light " + (i + 1),
+      replaced: rem.replacedOnSite === true,
+      note: rem.note || "",
+      failed: !!rem.failed,
+      kind,
+      batterySpec: kind === "battery" ? String(rem.batterySpec || "") : "",
+      batteryQty: kind === "battery" ? Number(rem.batteryQty) || 0 : 0,
+      photos: kind === "battery" && Array.isArray(rem.photos) ? rem.photos.map((p) => p && p.key || (typeof p === "string" ? p : "")).filter(Boolean) : []
+    };
+  }).filter((x) => x.failed);
   if (!fails.length) {
     try {
       await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run();
@@ -24805,14 +24952,21 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const pending = fails.filter((f) => !f.replaced);
   const onsite = fails.filter((f) => f.replaced);
+  const isBatt = (f) => f.kind === "battery";
+  const lights = fails.filter((f) => !isBatt(f));
+  const batteries = fails.filter(isBatt);
+  const lightCharge = lights.length * REMEDIAL_CHARGE;
   let jobId = null;
   if (pending.length) {
-    const lines = pending.map((f) => "\u2022 " + f.ref + (f.note ? " \u2014 " + f.note : "")).join("\n");
-    const desc = `EM remedial \u2014 replace ${pending.length} failed emergency light fitting${pending.length === 1 ? "" : "s"} at ${siteName} (from EM certificate ${certNumber}).
+    const lPend = pending.filter((f) => !isBatt(f)), bPend = pending.filter(isBatt);
+    const parts = [];
+    if (lPend.length) parts.push(`Replace ${lPend.length} failed light fitting${lPend.length === 1 ? "" : "s"} (\xA3${lPend.length * REMEDIAL_CHARGE}):
+` + lPend.map((f) => "\u2022 " + f.ref + (f.note ? " \u2014 " + f.note : "")).join("\n"));
+    if (bPend.length) parts.push(`Replace batteries in ${bPend.length} fitting${bPend.length === 1 ? "" : "s"} \u2014 price from supplier (see battery enquiry PDF):
+` + bPend.map((f) => "\u2022 " + f.ref + (f.batterySpec ? " \u2014 " + f.batterySpec : "") + (f.batteryQty ? " \xD7" + f.batteryQty : "") + (f.note ? " \u2014 " + f.note : "")).join("\n"));
+    const desc = `EM remedial at ${siteName} (from EM certificate ${certNumber}).
 
-${lines}
-
-Charge: \xA3${pending.length * REMEDIAL_CHARGE} (\xA3${REMEDIAL_CHARGE}/fitting).`;
+` + parts.join("\n\n");
     try {
       const job = await createOrUpdateJobFromPayload(env, tid, {
         id: "emrem:" + certRow.id,
@@ -24834,8 +24988,8 @@ Charge: \xA3${pending.length * REMEDIAL_CHARGE} (\xA3${REMEDIAL_CHARGE}/fitting)
   } catch {
   }
   const stmts = fails.map((f, i) => env.DB.prepare(
-    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     certRow.id + ":" + i,
     tid,
@@ -24846,11 +25000,15 @@ Charge: \xA3${pending.length * REMEDIAL_CHARGE} (\xA3${REMEDIAL_CHARGE}/fitting)
     f.ref,
     f.note,
     f.replaced ? 1 : 0,
-    REMEDIAL_CHARGE,
+    isBatt(f) ? 0 : REMEDIAL_CHARGE,
     f.replaced ? "done" : "pending",
     f.replaced ? null : jobId,
     certRow.engineer || "",
-    now
+    now,
+    f.kind,
+    f.batterySpec,
+    f.batteryQty,
+    JSON.stringify(f.photos)
   ));
   try {
     for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20));
@@ -24858,11 +25016,11 @@ Charge: \xA3${pending.length * REMEDIAL_CHARGE} (\xA3${REMEDIAL_CHARGE}/fitting)
   }
   try {
     await env.DB.prepare(
-      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,state,snooze_until,created_at,done_at,done_by)
-       VALUES (?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
+      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,batteries,state,snooze_until,created_at,done_at,done_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
        ON CONFLICT(cert_id) DO UPDATE SET cert_number=excluded.cert_number, site_code=excluded.site_code,
          site_name=excluded.site_name, fittings=excluded.fittings, charge=excluded.charge,
-         onsite=excluded.onsite, pending=excluded.pending, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
+         onsite=excluded.onsite, pending=excluded.pending, batteries=excluded.batteries, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
     ).bind(
       certRow.id,
       tid,
@@ -24870,14 +25028,15 @@ Charge: \xA3${pending.length * REMEDIAL_CHARGE} (\xA3${REMEDIAL_CHARGE}/fitting)
       siteCode || "",
       siteName,
       fails.length,
-      fails.length * REMEDIAL_CHARGE,
+      lightCharge,
       onsite.length,
       pending.length,
+      batteries.length,
       now
     ).run();
   } catch {
   }
-  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: fails.length * REMEDIAL_CHARGE, jobId };
+  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length, jobId };
 }
 async function getConfig3(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
@@ -24892,7 +25051,9 @@ async function getConfig3(env, tid) {
     contractor: { ...DEFAULT_CONFIG2.contractor, ...c.contractor || {} },
     em: { ...DEFAULT_CONFIG2.em, ...c.em || {} },
     pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} },
-    reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : []
+    reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : [],
+    supplierName: typeof c.supplierName === "string" ? c.supplierName : "",
+    supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : ""
   };
 }
 async function saveConfig(env, tid, c) {
@@ -25120,6 +25281,14 @@ function shapeRow(cert) {
   };
 }
 async function handle30(request, env, ctx, url, sess) {
+  if (request.method === "GET" && url.pathname === "/certs/photo") {
+    const key = url.searchParams.get("key") || "";
+    if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
+    if (!await verifyFileSig(env, key, url.searchParams)) return new Response("Bad signature", { status: 403 });
+    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata && obj.httpMetadata.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
+  }
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
@@ -25140,11 +25309,31 @@ async function handle30(request, env, ctx, url, sess) {
         contractor: { ...cur.contractor, ...b.contractor || {} },
         em: { ...cur.em, ...b.em || {} },
         pat: { ...cur.pat, ...b.pat || {} },
-        reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers
+        reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers,
+        supplierName: typeof b.supplierName === "string" ? b.supplierName.slice(0, 120) : cur.supplierName,
+        supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail
       };
       await saveConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
     }
+  }
+  if (sub === "/photo" && method === "POST") {
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const certId = String(form && form.get("certId") || "").trim();
+    if (!certId || !file || typeof file === "string") return error("Missing certId or file", 400, env, request);
+    const cert = await loadCert(certId);
+    if (!cert) return error("Certificate not found", 404, env, request);
+    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    const ts = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const rand = Math.abs((Date.now() ^ certId.length * 2654435761) % 1e6);
+    const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
+    const buf = await file.arrayBuffer();
+    if (buf.byteLength > 6 * 1024 * 1024) return error("Photo too large", 413, env, request);
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const urlOut = await signedFileUrl(env, url.origin, "/certs/photo", key);
+    return json({ ok: true, key, url: urlOut }, {}, env, request);
   }
   if (sub === "/number" && method === "GET") {
     return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type"))) }, {}, env, request);
@@ -25167,7 +25356,11 @@ async function handle30(request, env, ctx, url, sess) {
       "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
     ).bind(tid, jobId, type).first();
     const config = await getConfig3(env, tid);
-    if (existing) return json({ ok: true, record: shapeRow(existing), config, seeded: false }, {}, env, request);
+    if (existing) {
+      const exRec = shapeRow(existing);
+      await resignRemedialPhotos(env, url.origin, exRec);
+      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
+    }
     const job = await getJob2(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
     const siteRow = code ? await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
@@ -25286,7 +25479,9 @@ async function handle30(request, env, ctx, url, sess) {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    return json({ ok: true, record: shapeRow(cert), config: await getConfig3(env, tid) }, {}, env, request);
+    const oneRec = shapeRow(cert);
+    await resignRemedialPhotos(env, url.origin, oneRec);
+    return json({ ok: true, record: oneRec, config: await getConfig3(env, tid) }, {}, env, request);
   }
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -25347,7 +25542,7 @@ async function handle30(request, env, ctx, url, sess) {
     }
     if (remedial && remedial.count) {
       const site = rec.installation && rec.installation.name || code;
-      const body = `EM cert ${number} \u2014 ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed (\xA3${remedial.charge} to charge). ${remedial.onsite} replaced on site` + (remedial.pending ? `, ${remedial.pending} remedial job raised.` : ".");
+      const body = `EM cert ${number} \u2014 ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (\xA3${remedial.charge} to charge)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries (send supplier enquiry)` : "") + `. ${remedial.onsite} replaced on site` + (remedial.pending ? `, remedial job raised.` : ".");
       const url2 = remedial.jobId ? "/job-view.html?jobId=" + encodeURIComponent(remedial.jobId) : "/cert-review.html";
       ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to charge", body, url: url2, tag: "em-remedial:" + cert.id }).catch(() => {
       }));
@@ -25389,7 +25584,8 @@ async function handle30(request, env, ctx, url, sess) {
       fittings: r.fittings,
       charge: r.charge,
       onsite: r.onsite,
-      pending: r.pending
+      pending: r.pending,
+      batteries: r.batteries || 0
     })) }, {}, env, request);
   }
   if (sub === "/remedials/ack" && method === "POST") {
@@ -25416,6 +25612,96 @@ async function handle30(request, env, ctx, url, sess) {
       if (c) codes[c] = { fittings: r.fittings, charge: r.charge };
     });
     return json({ ok: true, codes }, {}, env, request);
+  }
+  if (sub === "/remedials/supplier-pdf" || sub === "/remedials/supplier-email") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    let certId = "", code = "";
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      certId = String(b.certId || "").trim();
+      code = String(b.code || "").trim();
+    } else {
+      certId = String(q.get("certId") || "").trim();
+      code = String(q.get("code") || "").trim();
+    }
+    const loadImgs = async (keys) => {
+      const imgs = [];
+      for (const k of (keys || []).slice(0, 4)) {
+        const key = k && k.key || (typeof k === "string" ? k : "");
+        if (!key) continue;
+        try {
+          const o = env.JOB_FILES && await env.JOB_FILES.get(key);
+          if (o) imgs.push(new Uint8Array(await o.arrayBuffer()));
+        } catch {
+        }
+      }
+      return imgs;
+    };
+    const items = [];
+    let siteName = "", certNumber = "";
+    if (certId) {
+      const cert = await loadCert(certId);
+      if (!cert) return error("Certificate not found", 404, env, request);
+      const rec = shapeRow(cert);
+      siteName = rec.installation && rec.installation.name || cert.site_code || "";
+      certNumber = rec.certNumber || cert.cert_number || "";
+      const batt = (rec.rows || []).filter((r2) => r2.remedial && r2.remedial.failed && r2.remedial.kind === "battery");
+      for (const r2 of batt) {
+        const rem = r2.remedial;
+        items.push({ site: siteName, ref: String(r2.comments || "").trim() || "Fitting", spec: rem.batterySpec || "", qty: rem.batteryQty || 0, note: rem.note || "", photos: await loadImgs(rem.photos) });
+      }
+    } else if (code) {
+      const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND kind='battery' AND site_code=? ORDER BY created_at DESC LIMIT 300").bind(tid, padCode(code)).all();
+      for (const r2 of results || []) {
+        let ph = [];
+        try {
+          ph = JSON.parse(r2.photos || "[]");
+        } catch {
+        }
+        if (!siteName) {
+          siteName = r2.site_name || r2.site_code;
+          certNumber = r2.cert_number;
+        }
+        items.push({ site: r2.site_name || r2.site_code, ref: r2.light_ref, spec: r2.battery_spec || "", qty: r2.battery_qty || 0, note: r2.note || "", photos: await loadImgs(ph) });
+      }
+    } else return error("certId or code required", 400, env, request);
+    if (!items.length) return error("No battery remedials found for this " + (certId ? "certificate" : "site") + ".", 404, env, request);
+    const cfg = await getConfig3(env, tid);
+    let logo = null;
+    try {
+      logo = logoBytes();
+    } catch {
+    }
+    const bytes = buildBatteryEnquiryPdf(items, {
+      logo,
+      contractor: cfg.contractor,
+      supplierName: cfg.supplierName,
+      site: siteName,
+      certNumber
+    });
+    const fname = `Battery enquiry ${certNumber || code || certId}.pdf`;
+    if (method === "GET") {
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${fname}"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
+    }
+    if (!cfg.supplierEmail) return error("Set a supplier email first (cert-review \u2192 \u{1F4E7} Supplier).", 400, env, request);
+    let b64 = "";
+    try {
+      let s = "";
+      const CH = 32768;
+      for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      b64 = btoa(s);
+    } catch {
+    }
+    const site = siteName || "site";
+    const escH = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    const r = await sendEmail(env, {
+      to: cfg.supplierEmail,
+      subject: `Battery supply enquiry \u2014 ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
+      html: `<p>Hi${cfg.supplierName ? " " + escH(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH(site)}</b>. Details, quantities and photos are in the PDF.</p><p>Many thanks,<br>${escH(cfg.contractor && cfg.contractor.tradingTitle || "Mostlane")}</p>`,
+      attachments: [{ filename: fname, content: b64 }]
+    });
+    if (!r || r.ok === false) return error(r && r.error || "Couldn't send the email (check RESEND_API_KEY / supplier email).", 502, env, request);
+    return json({ ok: true, sentTo: cfg.supplierEmail, fittings: items.length }, {}, env, request);
   }
   if (sub === "/upload" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -25480,7 +25766,7 @@ var LOGO_W = 76;
 var LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
 var PW = 842;
 var PH = 595;
-var M3 = 26;
+var M4 = 26;
 var ROW_H2 = 14.5;
 var LINE_H = 10;
 var ROW_PAD = 4.5;
@@ -25495,16 +25781,16 @@ var COLS2 = [
   { key: "days", label: "Days", w: 26 }
 ];
 var LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-var GRID_X = M3 + LEFT_W;
-var GRID_W = PW - M3 - GRID_X;
+var GRID_X = M4 + LEFT_W;
+var GRID_W = PW - M4 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
   COLS2[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
   LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-  GRID_X = M3 + LEFT_W;
-  GRID_W = PW - M3 - GRID_X;
+  GRID_X = M4 + LEFT_W;
+  GRID_W = PW - M4 - GRID_X;
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
@@ -25548,7 +25834,7 @@ function fitText(str, w, size) {
   while (s.length > 1 && textWidth(s + "...", size) > w) s = s.slice(0, -1);
   return s + "...";
 }
-function wrapLines(str, w, size, maxLines) {
+function wrapLines2(str, w, size, maxLines) {
   const words = String(str || "").split(/\s+/).filter(Boolean);
   const lines = [];
   let line = "";
@@ -25593,7 +25879,7 @@ function buildProgrammePdf(data, meta = {}) {
     _c: byC[t.contractor] || null
   }));
   for (const t of tasks) {
-    t._lines = wrapLines(t.name || "", COLS2[0].w - 6, 8.5, MAX_NAME_LINES);
+    t._lines = wrapLines2(t.name || "", COLS2[0].w - 6, 8.5, MAX_NAME_LINES);
     t._h = Math.max(ROW_H2, t._lines.length * LINE_H + ROW_PAD);
   }
   const hasExtra = tasks.some((t) => t.extra);
@@ -25620,7 +25906,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const bodyH = PH - M3 - headerBlockH - HDR_H - footerH - M3;
+  const bodyH = PH - M4 - headerBlockH - HDR_H - footerH - M4;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -25648,7 +25934,7 @@ function buildProgrammePdf(data, meta = {}) {
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
-  let lastGridBot = M3 + 100;
+  let lastGridBot = M4 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
@@ -25657,39 +25943,39 @@ function buildProgrammePdf(data, meta = {}) {
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
-      let tx = M3;
+      let tx = M4;
       if (LOGO_BYTES) {
         try {
-          doc.image(LOGO_BYTES, M3, M3 - 2, LOGO_W, LOGO_H);
-          tx = M3 + LOGO_W + 12;
+          doc.image(LOGO_BYTES, M4, M4 - 2, LOGO_W, LOGO_H);
+          tx = M4 + LOGO_W + 12;
         } catch (e) {
         }
       }
-      let y = M3 + 14;
+      let y = M4 + 14;
       doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
       const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
-      doc.text(PW - M3, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
+      doc.text(PW - M4, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
       if (subBits) {
         doc.text(tx, y, subBits, { size: 9, grey: true });
       }
-      doc.text(PW - M3, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
+      doc.text(PW - M4, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
       const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays2(winStart, win.days - 1))})` : "";
-      if (rangeLbl) doc.text(PW - M3, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      if (rangeLbl) doc.text(PW - M4, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
-      const legendRightL1 = PW - M3 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M3, line = 0, dropped = 0;
+      const legendRightL1 = PW - M4 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M4, line = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M3;
+        const right = line === 0 ? legendRightL1 : PW - M4;
         if (lx + w > right) {
           if (line === 0) {
             line = 1;
-            lx = M3;
+            lx = M4;
           } else {
             dropped++;
             continue;
@@ -25702,10 +25988,10 @@ function buildProgrammePdf(data, meta = {}) {
       }
       if (hasExtra) {
         const w = 11 + textWidth("Extra works", 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M3;
+        const right = line === 0 ? legendRightL1 : PW - M4;
         if (lx + w > right && line === 0) {
           line = 1;
-          lx = M3;
+          lx = M4;
         }
         const ly = y + line * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
@@ -25714,11 +26000,11 @@ function buildProgrammePdf(data, meta = {}) {
         lx += w;
       }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
-      y = M3 + headerBlockH;
+      y = M4 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
-      doc.rect(M3, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
-      let cx = M3;
+      doc.rect(M4, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
+      let cx = M4;
       for (const col of COLS2) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
@@ -25750,21 +26036,21 @@ function buildProgrammePdf(data, meta = {}) {
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
       doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
-      doc.line(M3, gridTop, M3 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
-      doc.line(M3, gridTop + HDR_H, M3 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M4, gridTop, M4 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M4, gridTop + HDR_H, M4 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
       let ry = gridTop + HDR_H;
       rows.forEach((t) => {
         const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M3 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M4 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M3 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M3 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
+          doc.rect(M4 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M4 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M3 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M3 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
-        doc.text(M3 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M3, ry + rh, M3 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        if (t._start) doc.text(M4 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M4 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        doc.text(M4 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
+        doc.line(M4, ry + rh, M4 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
@@ -25794,23 +26080,23 @@ function buildProgrammePdf(data, meta = {}) {
         }
         ry += rh;
       });
-      doc.rect(M3, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M4, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
       lastGridBot = gridBot;
-      const fy = PH - M3 + 6;
+      const fy = PH - M4 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
-      doc.text(M3, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
-      doc.text(PW - M3, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
+      doc.text(M4, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
+      doc.text(PW - M4, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
     }
   }
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
     const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
-    const PAD = 10, LH = 12, contentW = PW - 2 * M3 - 2 * PAD;
-    const notesLines = notes ? wrapLines(notes, contentW, 10, 0) : [];
-    const plainW = plain.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
-    const discW = disc.map((n) => wrapLines(String(n.text).trim(), contentW - 12, 10, 0));
+    const PAD = 10, LH = 12, contentW = PW - 2 * M4 - 2 * PAD;
+    const notesLines = notes ? wrapLines2(notes, contentW, 10, 0) : [];
+    const plainW = plain.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
+    const discW = disc.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
     let adv = 16;
     if (notesLines.length) adv += notesLines.length * LH + 4;
     for (const w of plainW) adv += w.length * LH;
@@ -25820,15 +26106,15 @@ function buildProgrammePdf(data, meta = {}) {
     }
     const boxH = 2 * PAD + adv;
     let boxTop, ownPage = false;
-    if (lastGridBot + 14 + boxH <= PH - M3) {
+    if (lastGridBot + 14 + boxH <= PH - M4) {
       boxTop = lastGridBot + 14;
     } else {
       doc.newPage(PW, PH);
-      boxTop = M3 + 14;
+      boxTop = M4 + 14;
       ownPage = true;
     }
-    doc.roundRect(M3, boxTop, PW - 2 * M3, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
-    const x0 = M3 + PAD;
+    doc.roundRect(M4, boxTop, PW - 2 * M4, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M4 + PAD;
     let ny = boxTop + PAD + 10;
     const para = (lines, x) => {
       for (const ln of lines) {
@@ -25855,7 +26141,7 @@ function buildProgrammePdf(data, meta = {}) {
         para(w, x0 + 12);
       }
     }
-    if (ownPage) doc.text(M3, PH - M3 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    if (ownPage) doc.text(M4, PH - M4 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }
@@ -29352,6 +29638,8 @@ var PUBLIC_ROUTES = [
   ["POST", "/ledger/scan"],
   // Compliance certificates streamed inline — signed URL, verified in-handler.
   ["GET", "/compliance/file"],
+  // EM remedial battery photos streamed for <img> — signed URL, verified in-handler.
+  ["GET", "/certs/photo"],
   // Compliance batch import (SharePoint→R2 extractor) — COMPLIANCE_IMPORT_TOKEN
   // verified in-handler. POST /compliance/file = ingest, GET /compliance/has = dedupe.
   // (The handler re-resolves a real session for logged-in admins on these too.)

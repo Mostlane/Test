@@ -2315,6 +2315,27 @@ it straight onto the compliance chart (rolling the next-due date).
   Done / All with per-fitting £ + totals + links to each remedial job; the office
   also sees ⚠ tags per row when reviewing. `createOrUpdateJobFromPayload` imported
   from sla.js. portal-config `?v=20`, SW `mostlane-v84`.
+- **EM remedial BATTERIES (not a new light) — supplier enquiry (Aug 2026):** a failed
+  fitting's remedial can be **batteries** instead of a replacement light. On the cert
+  form (cert-form.js `?v=10`, EM only) a failed fitting picks **Fault: Replace light /
+  Batteries**; batteries reveal **spec + qty + photos** (client-shrunk JPEG →
+  **POST /certs/photo** multipart → R2 `certremedial/<tid>/<certId>/…`; served via
+  **GET /certs/photo** signed, PUBLIC_ROUTES). Row model `remedial = {failed,
+  replacedOnSite, note, kind:"light"|"battery", batterySpec, batteryQty, photos:[{key,url}]}`;
+  validation needs spec+qty+≥1 photo for a battery fault. **£50 does NOT apply to
+  batteries** — `processEmRemedials` charges £50 × LIGHT count only; batteries are
+  logged (em_remedials `kind/battery_spec/battery_qty/photos` cols, charge 0) and the
+  ack carries a `batteries` count. Cert PDF: battery rows read "Batteries replaced on
+  site" / "FITTING FAILED — batteries required". **Supplier enquiry PDF**
+  (`lib/batterypdf.js` — A4, embeds the photos): **GET /certs/remedials/supplier-pdf?
+  certId=** (reads the cert's rows so it works BEFORE finalise, when the price is
+  needed) and **POST /certs/remedials/supplier-email** (Resend attachment to
+  `cert:config.supplierEmail`; `lib/email.js sendEmail` gained `attachments`).
+  cert-review.html shows a **🔋 batteries** panel per cert with **📄 Preview enquiry
+  PDF** + **📧 Email supplier**, and a **📧 Battery supplier** email/name field in the
+  Notify modal (saved via /certs/config). The blocking gate's wording folds in
+  batteries ("N need batteries — supplier quote"). portal-config `?v=21`, cert-form
+  `?v=10`, SW `mostlane-v85`.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.

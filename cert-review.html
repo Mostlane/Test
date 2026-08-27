@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Certificate Review</title>
-  <script src="/portal-config.js?v=20"></script>
+  <script src="/portal-config.js?v=21"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
-  <script src="cert-form.js?v=9"></script>
+  <script src="cert-form.js?v=10"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -67,7 +67,13 @@
       </div>
       <p class="muted" style="margin:0 0 10px;">Choose who gets the push when an engineer submits an EM/PAT certificate for review. <b>Leave everyone unticked</b> to notify all Full Access, SLA Admin &amp; Compliance users (the default).</p>
       <input type="text" id="nmSearch" placeholder="Search people…" style="width:100%;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;margin-bottom:8px;">
-      <div id="nmList" style="max-height:44vh;overflow:auto;border:1px solid #eef2f6;border-radius:10px;padding:4px;"></div>
+      <div id="nmList" style="max-height:38vh;overflow:auto;border:1px solid #eef2f6;border-radius:10px;padding:4px;"></div>
+      <div style="border-top:1px solid #eef2f6;margin-top:12px;padding-top:12px;">
+        <h3 style="margin:0 0 6px;font-size:14px;">📧 Battery supplier</h3>
+        <p class="muted" style="margin:0 0 8px;">Where "Email supplier" sends the battery enquiry PDF for pricing.</p>
+        <input type="text" id="supName" placeholder="Supplier name (optional)" style="width:100%;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;margin-bottom:6px;">
+        <input type="email" id="supEmail" placeholder="supplier@example.com" style="width:100%;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;">
+      </div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
         <button class="btn green" id="nmSave">Save</button>
         <span class="msg" id="nmMsg"></span>
@@ -117,8 +123,11 @@
       let suggestion = cert.certNumber || "";
       try { const n = await authFetch("/certs/number?code="+encodeURIComponent(cert.siteCode||"")+"&type="+cert.type).then(r=>r.json()); if (n && n.number && !suggestion) suggestion = n.number; } catch {}
       const today = new Date().toISOString().slice(0,10);
+      const hasBattery = cert.type==="em" && (cert.rows||[]).some(r=>r.remedial && r.remedial.failed && r.remedial.kind==="battery");
+      const battCount = hasBattery ? (cert.rows||[]).filter(r=>r.remedial && r.remedial.failed && r.remedial.kind==="battery").length : 0;
       g("wrap").innerHTML =
         '<div style="margin-bottom:10px"><button class="btn ghost sm" id="backList">‹ All certificates</button></div>'
+        + (hasBattery ? '<div class="card" style="border-color:#f0c98a;background:#fffaf0"><h2 style="margin:0 0 6px;font-size:15px;color:#8a4b0a">🔋 '+battCount+' fitting'+(battCount===1?"":"s")+' need batteries</h2><p class="muted" style="margin:0 0 8px">Get a price from the supplier before quoting. £50/light does not apply to batteries.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="battPdf">📄 Preview enquiry PDF</button><button class="btn green sm" id="battEmail">📧 Email supplier</button></div><div class="msg" id="battMsg"></div></div>' : '')
         + '<div class="card"><div id="certHost"></div></div>'
         + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">Issue this certificate</h2>'
         + '<div class="finbar">'
@@ -132,6 +141,27 @@
         + '<div class="muted" style="margin-top:8px">Finalising draws the Mostlane PDF, files it under this store on the compliance chart and rolls the next-due date.</div></div>';
       g("backList").onclick = loadList;
       window.MLCert.mount(g("certHost"), { certId: id, type: cert.type, mode: "office", api: API, token: localStorage.getItem("mostlaneToken") });
+
+      if (hasBattery) {
+        g("battPdf").onclick = async function(){
+          const w = window.open("", "_blank");
+          try {
+            const r = await authFetch("/certs/remedials/supplier-pdf?certId="+encodeURIComponent(id));
+            if (!r.ok) { if(w) w.close(); const e = await r.json().catch(()=>({})); g("battMsg").textContent = e.error || "Couldn't build the PDF."; g("battMsg").className="msg err"; return; }
+            const blob = await r.blob(); const u = URL.createObjectURL(blob);
+            if (w) w.location = u; else window.location = u;
+          } catch { if(w) w.close(); g("battMsg").textContent = "Couldn't build the PDF."; g("battMsg").className="msg err"; }
+        };
+        g("battEmail").onclick = async function(){
+          this.disabled = true; g("battMsg").textContent = "Sending…"; g("battMsg").className="msg";
+          try {
+            const d = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: id }) }).then(r=>r.json());
+            if (d && d.ok) { g("battMsg").textContent = "Sent to "+d.sentTo+" ✓"; g("battMsg").className="msg ok"; }
+            else { g("battMsg").textContent = (d && d.error) || "Couldn't send."; g("battMsg").className="msg err"; }
+          } catch { g("battMsg").textContent = "Couldn't send."; g("battMsg").className="msg err"; }
+          this.disabled = false;
+        };
+      }
 
       g("finBtn").onclick = async function(){
         const num = g("finNum").value.trim(); if (!num) { setMsg("Enter a certificate number.", true); return; }
@@ -183,7 +213,7 @@
         // office staff first, then A–Z, so reviewers are easy to find
         NM_USERS.sort((a,b) => uName(a).localeCompare(uName(b)));
       }
-      try { const c = await authFetch("/certs/config").then(r=>r.json()); NM_SEL = new Set(((c.config && c.config.reviewers) || []).map(x => String(x).toLowerCase())); }
+      try { const c = await authFetch("/certs/config").then(r=>r.json()); const cf = (c && c.config) || {}; NM_SEL = new Set((cf.reviewers || []).map(x => String(x).toLowerCase())); g("supName").value = cf.supplierName || ""; g("supEmail").value = cf.supplierEmail || ""; }
       catch { NM_SEL = new Set(); }
       renderNmList();
     }
@@ -215,7 +245,7 @@
       const reviewers = NM_USERS.filter(u => NM_SEL.has(String(u.Username).toLowerCase())).map(u => u.Username);
       this.disabled = true; g("nmMsg").textContent = "Saving…"; g("nmMsg").className = "msg";
       try {
-        const d = await authFetch("/certs/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ reviewers }) }).then(r=>r.json());
+        const d = await authFetch("/certs/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ reviewers, supplierName: g("supName").value.trim(), supplierEmail: g("supEmail").value.trim() }) }).then(r=>r.json());
         if (d && d.ok) { g("nmMsg").textContent = reviewers.length ? "Saved — "+reviewers.length+" notified" : "Saved — everyone with permission"; g("nmMsg").className = "msg ok"; setTimeout(()=>{ g("notifyModal").style.display="none"; }, 900); }
         else { g("nmMsg").textContent = (d && d.error) || "Couldn't save."; g("nmMsg").className = "msg err"; }
       } catch { g("nmMsg").textContent = "Couldn't save."; g("nmMsg").className = "msg err"; }

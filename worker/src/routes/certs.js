@@ -28,6 +28,9 @@ import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
 import { createOrUpdateJobFromPayload } from "./sla.js";
+import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { sendEmail } from "../lib/email.js";
+import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
 
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
@@ -62,6 +65,9 @@ const DEFAULT_CONFIG = {
   // EMPTY = everyone with FullAccess / SLAAdmin / Compliance (the default fan-out).
   // A non-empty list = ONLY these usernames are notified.
   reviewers: [],
+  // Battery supplier — where the "please quote these batteries" enquiry PDF is emailed.
+  supplierName: "",
+  supplierEmail: "",
 };
 
 async function ensureTables(env) {
@@ -78,6 +84,11 @@ async function ensureTables(env) {
     site_code TEXT, site_name TEXT, light_ref TEXT, note TEXT,
     replaced_on_site INTEGER, charge REAL, status TEXT, job_id TEXT,
     engineer TEXT, created_at TEXT)`).run();
+  // Battery-fault columns (self-migrating): a failed fitting may need batteries,
+  // not a new light — capture spec + qty + photos, no £50 (supplier quotes it).
+  for (const col of ["kind TEXT", "battery_spec TEXT", "battery_qty INTEGER", "photos TEXT"]) {
+    try { await env.DB.prepare(`ALTER TABLE em_remedials ADD COLUMN ${col}`).run(); } catch {}
+  }
   // Per-cert charge/quote acknowledgement — drives the office's blocking reminder
   // ("Have remedials been charged/quoted?") that re-pops every 4h until confirmed.
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS em_remedial_acks (
@@ -85,8 +96,23 @@ async function ensureTables(env) {
     site_code TEXT, site_name TEXT, fittings INTEGER, charge REAL,
     onsite INTEGER, pending INTEGER, state TEXT, snooze_until TEXT,
     created_at TEXT, done_at TEXT, done_by TEXT)`).run();
+  try { await env.DB.prepare("ALTER TABLE em_remedial_acks ADD COLUMN batteries INTEGER").run(); } catch {}
 }
-const REMEDIAL_CHARGE = 50;   // £ per failed EM fitting (replaced on site OR remedial)
+const REMEDIAL_CHARGE = 50;   // £ per failed EM LIGHT (batteries are priced by the supplier, no £50)
+
+// Re-sign each remedial battery photo's URL when serving a cert (keys are stored,
+// URLs expire) so the form/office can show the thumbnails.
+async function resignRemedialPhotos(env, origin, rec) {
+  if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
+  for (const r of rec.rows) {
+    const rem = r && r.remedial;
+    if (rem && Array.isArray(rem.photos)) {
+      for (const p of rem.photos) {
+        if (p && p.key) { try { p.url = await signedFileUrl(env, origin, "/certs/photo", p.key); } catch {} }
+      }
+    }
+  }
+}
 
 // On finalise of an EM cert, log every failed fitting (£50 each) and — for the
 // ones NOT replaced on site — raise ONE remedial SLA job for the office to
@@ -94,12 +120,20 @@ const REMEDIAL_CHARGE = 50;   // £ per failed EM fitting (replaced on site OR r
 async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) {
   if (rec.type !== "em") return null;
   const rows = Array.isArray(rec.rows) ? rec.rows : [];
-  const fails = rows.map((r, i) => ({
-    ref: (String(r.comments || "").trim()) || ("Light " + (i + 1)),
-    replaced: !!(r.remedial && r.remedial.replacedOnSite === true),
-    note: (r.remedial && r.remedial.note) || "",
-    failed: !!(r.remedial && r.remedial.failed),
-  })).filter(x => x.failed);
+  const fails = rows.map((r, i) => {
+    const rem = r.remedial || {};
+    const kind = rem.kind === "battery" ? "battery" : "light";
+    return {
+      ref: (String(r.comments || "").trim()) || ("Light " + (i + 1)),
+      replaced: rem.replacedOnSite === true,
+      note: rem.note || "",
+      failed: !!rem.failed,
+      kind,
+      batterySpec: kind === "battery" ? String(rem.batterySpec || "") : "",
+      batteryQty: kind === "battery" ? (Number(rem.batteryQty) || 0) : 0,
+      photos: (kind === "battery" && Array.isArray(rem.photos)) ? rem.photos.map(p => (p && p.key) || (typeof p === "string" ? p : "")).filter(Boolean) : [],
+    };
+  }).filter(x => x.failed);
   if (!fails.length) {
     try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
     try { await env.DB.prepare("DELETE FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
@@ -110,11 +144,18 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   const now = new Date().toISOString();
   const pending = fails.filter(f => !f.replaced);
   const onsite = fails.filter(f => f.replaced);
+  const isBatt = f => f.kind === "battery";
+  const lights = fails.filter(f => !isBatt(f));
+  const batteries = fails.filter(isBatt);
+  const lightCharge = lights.length * REMEDIAL_CHARGE;   // £50/light; batteries priced by supplier
 
   let jobId = null;
   if (pending.length) {
-    const lines = pending.map(f => "• " + f.ref + (f.note ? " — " + f.note : "")).join("\n");
-    const desc = `EM remedial — replace ${pending.length} failed emergency light fitting${pending.length === 1 ? "" : "s"} at ${siteName} (from EM certificate ${certNumber}).\n\n${lines}\n\nCharge: £${pending.length * REMEDIAL_CHARGE} (£${REMEDIAL_CHARGE}/fitting).`;
+    const lPend = pending.filter(f => !isBatt(f)), bPend = pending.filter(isBatt);
+    const parts = [];
+    if (lPend.length) parts.push(`Replace ${lPend.length} failed light fitting${lPend.length === 1 ? "" : "s"} (£${lPend.length * REMEDIAL_CHARGE}):\n` + lPend.map(f => "• " + f.ref + (f.note ? " — " + f.note : "")).join("\n"));
+    if (bPend.length) parts.push(`Replace batteries in ${bPend.length} fitting${bPend.length === 1 ? "" : "s"} — price from supplier (see battery enquiry PDF):\n` + bPend.map(f => "• " + f.ref + (f.batterySpec ? " — " + f.batterySpec : "") + (f.batteryQty ? " ×" + f.batteryQty : "") + (f.note ? " — " + f.note : "")).join("\n"));
+    const desc = `EM remedial at ${siteName} (from EM certificate ${certNumber}).\n\n` + parts.join("\n\n");
     try {
       const job = await createOrUpdateJobFromPayload(env, tid, {
         id: "emrem:" + certRow.id,               // stable id → idempotent per cert
@@ -129,27 +170,27 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
 
   try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
   const stmts = fails.map((f, i) => env.DB.prepare(
-    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(certRow.id + ":" + i, tid, certRow.id, certNumber, siteCode || "", siteName, f.ref, f.note,
-    f.replaced ? 1 : 0, REMEDIAL_CHARGE, f.replaced ? "done" : "pending", f.replaced ? null : jobId,
-    certRow.engineer || "", now));
+    f.replaced ? 1 : 0, isBatt(f) ? 0 : REMEDIAL_CHARGE, f.replaced ? "done" : "pending", f.replaced ? null : jobId,
+    certRow.engineer || "", now, f.kind, f.batterySpec, f.batteryQty, JSON.stringify(f.photos)));
   try { for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20)); } catch {}
 
-  // Open (or re-open) the per-cert charge/quote reminder. Re-finalising resets it
-  // to open with fresh counts so the office is prompted again if the split changed.
+  // Open (or re-open) the per-cert charge/quote reminder — the £ is light charges;
+  // batteries are counted separately (priced by the supplier).
   try {
     await env.DB.prepare(
-      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,state,snooze_until,created_at,done_at,done_by)
-       VALUES (?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
+      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,batteries,state,snooze_until,created_at,done_at,done_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
        ON CONFLICT(cert_id) DO UPDATE SET cert_number=excluded.cert_number, site_code=excluded.site_code,
          site_name=excluded.site_name, fittings=excluded.fittings, charge=excluded.charge,
-         onsite=excluded.onsite, pending=excluded.pending, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
-    ).bind(certRow.id, tid, certNumber, siteCode || "", siteName, fails.length, fails.length * REMEDIAL_CHARGE,
-      onsite.length, pending.length, now).run();
+         onsite=excluded.onsite, pending=excluded.pending, batteries=excluded.batteries, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
+    ).bind(certRow.id, tid, certNumber, siteCode || "", siteName, fails.length, lightCharge,
+      onsite.length, pending.length, batteries.length, now).run();
   } catch {}
 
-  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: fails.length * REMEDIAL_CHARGE, jobId };
+  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length, jobId };
 }
 
 async function getConfig(env, tid) {
@@ -162,6 +203,8 @@ async function getConfig(env, tid) {
     em: { ...DEFAULT_CONFIG.em, ...(c.em || {}) },
     pat: { ...DEFAULT_CONFIG.pat, ...(c.pat || {}) },
     reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : [],
+    supplierName: typeof c.supplierName === "string" ? c.supplierName : "",
+    supplierEmail: typeof c.supplierEmail === "string" ? c.supplierEmail : "",
   };
 }
 async function saveConfig(env, tid, c) {
@@ -373,6 +416,16 @@ function shapeRow(cert) {
 }
 
 export async function handle(request, env, ctx, url, sess) {
+  // Public (signed) stream of an EM remedial battery photo — verified in-handler,
+  // so it precedes the auth gate (it's registered in index.js PUBLIC_ROUTES).
+  if (request.method === "GET" && url.pathname === "/certs/photo") {
+    const key = url.searchParams.get("key") || "";
+    if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
+    if (!(await verifyFileSig(env, key, url.searchParams))) return new Response("Bad signature", { status: 403 });
+    const obj = env.JOB_FILES && await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    return new Response(obj.body, { headers: { "Content-Type": (obj.httpMetadata && obj.httpMetadata.contentType) || "image/jpeg", "Cache-Control": "public, max-age=86400" } });
+  }
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId, me = sess.user.username;
   const method = request.method.toUpperCase();
@@ -398,10 +451,32 @@ export async function handle(request, env, ctx, url, sess) {
         em: { ...cur.em, ...(b.em || {}) },
         pat: { ...cur.pat, ...(b.pat || {}) },
         reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers,
+        supplierName: typeof b.supplierName === "string" ? b.supplierName.slice(0, 120) : cur.supplierName,
+        supplierEmail: typeof b.supplierEmail === "string" ? b.supplierEmail.slice(0, 160) : cur.supplierEmail,
       };
       await saveConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
     }
+  }
+
+  // ── EM remedial battery photo upload (engineer or office) ───────────────────
+  if (sub === "/photo" && method === "POST") {
+    if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const certId = String((form && form.get("certId")) || "").trim();
+    if (!certId || !file || typeof file === "string") return error("Missing certId or file", 400, env, request);
+    const cert = await loadCert(certId);
+    if (!cert) return error("Certificate not found", 404, env, request);
+    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const rand = Math.abs((Date.now() ^ (certId.length * 2654435761)) % 1e6);
+    const key = `certremedial/${tid}/${certId}/${ts}-${rand}.jpg`;
+    const buf = await file.arrayBuffer();
+    if (buf.byteLength > 6 * 1024 * 1024) return error("Photo too large", 413, env, request);
+    await env.JOB_FILES.put(key, buf, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const urlOut = await signedFileUrl(env, url.origin, "/certs/photo", key);
+    return json({ ok: true, key, url: urlOut }, {}, env, request);
   }
 
   // ── Suggested next number ────────────────────────────────────────────────────
@@ -428,7 +503,7 @@ export async function handle(request, env, ctx, url, sess) {
       "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
     ).bind(tid, jobId, type).first();
     const config = await getConfig(env, tid);
-    if (existing) return json({ ok: true, record: shapeRow(existing), config, seeded: false }, {}, env, request);
+    if (existing) { const exRec = shapeRow(existing); await resignRemedialPhotos(env, url.origin, exRec); return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request); }
 
     // seed a fresh draft from the job's site + config + prefill rows
     const job = await getJob(env, tid, jobId);
@@ -539,7 +614,8 @@ export async function handle(request, env, ctx, url, sess) {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    return json({ ok: true, record: shapeRow(cert), config: await getConfig(env, tid) }, {}, env, request);
+    const oneRec = shapeRow(cert); await resignRemedialPhotos(env, url.origin, oneRec);
+    return json({ ok: true, record: oneRec, config: await getConfig(env, tid) }, {}, env, request);
   }
 
   // ── Office review queue ──────────────────────────────────────────────────────
@@ -593,7 +669,7 @@ export async function handle(request, env, ctx, url, sess) {
     try { remedial = await processEmRemedials(env, tid, rec, cert, number, code); } catch {}
     if (remedial && remedial.count) {
       const site = (rec.installation && rec.installation.name) || code;
-      const body = `EM cert ${number} — ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed (£${remedial.charge} to charge). ${remedial.onsite} replaced on site` + (remedial.pending ? `, ${remedial.pending} remedial job raised.` : ".");
+      const body = `EM cert ${number} — ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (£${remedial.charge} to charge)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries (send supplier enquiry)` : "") + `. ${remedial.onsite} replaced on site` + (remedial.pending ? `, remedial job raised.` : ".");
       const url = remedial.jobId ? ("/job-view.html?jobId=" + encodeURIComponent(remedial.jobId)) : "/cert-review.html";
       ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to charge", body, url, tag: "em-remedial:" + cert.id }).catch(() => {}));
     }
@@ -626,7 +702,7 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(tid, now).all();
     return json({ ok: true, remedials: (results || []).map(r => ({
       certId: r.cert_id, certNumber: r.cert_number, siteName: r.site_name || r.site_code, siteCode: r.site_code,
-      fittings: r.fittings, charge: r.charge, onsite: r.onsite, pending: r.pending,
+      fittings: r.fittings, charge: r.charge, onsite: r.onsite, pending: r.pending, batteries: r.batteries || 0,
     })) }, {}, env, request);
   }
 
@@ -656,6 +732,68 @@ export async function handle(request, env, ctx, url, sess) {
     const codes = {};
     (results || []).forEach(r => { const c = padCode(r.site_code); if (c) codes[c] = { fittings: r.fittings, charge: r.charge }; });
     return json({ ok: true, codes }, {}, env, request);
+  }
+
+  // Battery-supply enquiry PDF (office): every battery remedial for a cert (or a
+  // whole site), with spec/qty/photos, to send the supplier for a price.
+  // GET  /certs/remedials/supplier-pdf?certId= | ?code=   → application/pdf
+  // POST /certs/remedials/supplier-email {certId|code}    → email it to the supplier
+  if (sub === "/remedials/supplier-pdf" || sub === "/remedials/supplier-email") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    let certId = "", code = "";
+    if (method === "POST") { const b = await request.json().catch(() => ({})); certId = String(b.certId || "").trim(); code = String(b.code || "").trim(); }
+    else { certId = String(q.get("certId") || "").trim(); code = String(q.get("code") || "").trim(); }
+    const loadImgs = async (keys) => {
+      const imgs = [];
+      for (const k of (keys || []).slice(0, 4)) { const key = (k && k.key) || (typeof k === "string" ? k : ""); if (!key) continue;
+        try { const o = env.JOB_FILES && await env.JOB_FILES.get(key); if (o) imgs.push(new Uint8Array(await o.arrayBuffer())); } catch {} }
+      return imgs;
+    };
+    const items = []; let siteName = "", certNumber = "";
+    if (certId) {
+      // Read the battery remedials straight off the cert — works BEFORE finalise
+      // (that's when the office needs a price to quote).
+      const cert = await loadCert(certId);
+      if (!cert) return error("Certificate not found", 404, env, request);
+      const rec = shapeRow(cert);
+      siteName = (rec.installation && rec.installation.name) || cert.site_code || "";
+      certNumber = rec.certNumber || cert.cert_number || "";
+      const batt = (rec.rows || []).filter(r => r.remedial && r.remedial.failed && r.remedial.kind === "battery");
+      for (const r of batt) {
+        const rem = r.remedial;
+        items.push({ site: siteName, ref: (String(r.comments || "").trim()) || "Fitting", spec: rem.batterySpec || "", qty: rem.batteryQty || 0, note: rem.note || "", photos: await loadImgs(rem.photos) });
+      }
+    } else if (code) {
+      const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND kind='battery' AND site_code=? ORDER BY created_at DESC LIMIT 300").bind(tid, padCode(code)).all();
+      for (const r of (results || [])) {
+        let ph = []; try { ph = JSON.parse(r.photos || "[]"); } catch {}
+        if (!siteName) { siteName = r.site_name || r.site_code; certNumber = r.cert_number; }
+        items.push({ site: r.site_name || r.site_code, ref: r.light_ref, spec: r.battery_spec || "", qty: r.battery_qty || 0, note: r.note || "", photos: await loadImgs(ph) });
+      }
+    } else return error("certId or code required", 400, env, request);
+    if (!items.length) return error("No battery remedials found for this " + (certId ? "certificate" : "site") + ".", 404, env, request);
+    const cfg = await getConfig(env, tid);
+    let logo = null; try { logo = logoBytes(); } catch {}
+    const bytes = buildBatteryEnquiryPdf(items, {
+      logo, contractor: cfg.contractor, supplierName: cfg.supplierName, site: siteName, certNumber,
+    });
+    const fname = `Battery enquiry ${certNumber || code || certId}.pdf`;
+    if (method === "GET") {
+      return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${fname}"`, "Cache-Control": "no-store", ...corsHeaders(env, request) } });
+    }
+    // POST → email to the supplier
+    if (!cfg.supplierEmail) return error("Set a supplier email first (cert-review → 📧 Supplier).", 400, env, request);
+    let b64 = ""; try { let s = ""; const CH = 0x8000; for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH)); b64 = btoa(s); } catch {}
+    const site = siteName || "site";
+    const escH = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const r = await sendEmail(env, {
+      to: cfg.supplierEmail,
+      subject: `Battery supply enquiry — ${site} (${items.length} fitting${items.length === 1 ? "" : "s"})`,
+      html: `<p>Hi${cfg.supplierName ? " " + escH(cfg.supplierName) : ""},</p><p>Please could you quote for the emergency-lighting batteries listed in the attached enquiry for <b>${escH(site)}</b>. Details, quantities and photos are in the PDF.</p><p>Many thanks,<br>${escH((cfg.contractor && cfg.contractor.tradingTitle) || "Mostlane")}</p>`,
+      attachments: [{ filename: fname, content: b64 }],
+    });
+    if (!r || r.ok === false) return error((r && r.error) || "Couldn't send the email (check RESEND_API_KEY / supplier email).", 502, env, request);
+    return json({ ok: true, sentTo: cfg.supplierEmail, fittings: items.length }, {}, env, request);
   }
 
   // ── Office uploads a replacement PDF instead of generating ────────────────────
