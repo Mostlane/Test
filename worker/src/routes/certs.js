@@ -57,6 +57,10 @@ const DEFAULT_CONFIG = {
     comments: "",
     declaration: "I certify that the portable appliances identified above have been inspected and tested in accordance with the IET Code of Practice for In-service Inspection and Testing of Electrical Equipment, and the results are as recorded.",
   },
+  // Who gets the "certificate ready to review" push when an engineer submits one.
+  // EMPTY = everyone with FullAccess / SLAAdmin / Compliance (the default fan-out).
+  // A non-empty list = ONLY these usernames are notified.
+  reviewers: [],
 };
 
 async function ensureTables(env) {
@@ -77,6 +81,7 @@ async function getConfig(env, tid) {
     contractor: { ...DEFAULT_CONFIG.contractor, ...(c.contractor || {}) },
     em: { ...DEFAULT_CONFIG.em, ...(c.em || {}) },
     pat: { ...DEFAULT_CONFIG.pat, ...(c.pat || {}) },
+    reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : [],
   };
 }
 async function saveConfig(env, tid, c) {
@@ -312,6 +317,7 @@ export async function handle(request, env, ctx, url, sess) {
         contractor: { ...cur.contractor, ...(b.contractor || {}) },
         em: { ...cur.em, ...(b.em || {}) },
         pat: { ...cur.pat, ...(b.pat || {}) },
+        reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers,
       };
       await saveConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
@@ -417,11 +423,20 @@ export async function handle(request, env, ctx, url, sess) {
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
     const now = new Date().toISOString();
     await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
-    // notify the office review queue
-    ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+    // Notify the office review queue. If specific reviewers are configured
+    // (cert:config.reviewers), notify ONLY them; otherwise fall back to everyone
+    // with FullAccess / SLAAdmin / Compliance (the default behaviour).
+    const payload = {
       title: (cert.type === "pat" ? "PAT" : "EM") + " certificate ready to review",
       body: `${me} submitted a certificate for review.`, url: "/cert-review.html", tag: "cert-review:" + cert.id,
-    }, me).catch(() => {}));
+    };
+    const cfg = await getConfig(env, tid);
+    const chosen = (cfg.reviewers || []).filter(u => String(u).toLowerCase() !== String(me).toLowerCase());
+    if (chosen.length) {
+      ctx?.waitUntil?.(Promise.all(chosen.map(u => sendToUser(env, tid, u, payload).catch(() => {}))));
+    } else {
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {}));
+    }
     return json({ ok: true }, {}, env, request);
   }
 

@@ -24280,7 +24280,11 @@ var DEFAULT_CONFIG2 = {
     extent: "In-service inspection and testing of portable electrical appliances.",
     comments: "",
     declaration: "I certify that the portable appliances identified above have been inspected and tested in accordance with the IET Code of Practice for In-service Inspection and Testing of Electrical Equipment, and the results are as recorded."
-  }
+  },
+  // Who gets the "certificate ready to review" push when an engineer submits one.
+  // EMPTY = everyone with FullAccess / SLAAdmin / Compliance (the default fan-out).
+  // A non-empty list = ONLY these usernames are notified.
+  reviewers: []
 };
 async function ensureTables4(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS certificates (
@@ -24302,7 +24306,8 @@ async function getConfig3(env, tid) {
     client: { ...DEFAULT_CONFIG2.client, ...c.client || {} },
     contractor: { ...DEFAULT_CONFIG2.contractor, ...c.contractor || {} },
     em: { ...DEFAULT_CONFIG2.em, ...c.em || {} },
-    pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} }
+    pat: { ...DEFAULT_CONFIG2.pat, ...c.pat || {} },
+    reviewers: Array.isArray(c.reviewers) ? c.reviewers.map(String).filter(Boolean).slice(0, 200) : []
   };
 }
 async function saveConfig(env, tid, c) {
@@ -24549,7 +24554,8 @@ async function handle30(request, env, ctx, url, sess) {
         client: { ...cur.client, ...b.client || {} },
         contractor: { ...cur.contractor, ...b.contractor || {} },
         em: { ...cur.em, ...b.em || {} },
-        pat: { ...cur.pat, ...b.pat || {} }
+        pat: { ...cur.pat, ...b.pat || {} },
+        reviewers: Array.isArray(b.reviewers) ? b.reviewers.map(String).filter(Boolean).slice(0, 200) : cur.reviewers
       };
       await saveConfig(env, tid, next);
       return json({ ok: true, config: next }, {}, env, request);
@@ -24660,13 +24666,21 @@ async function handle30(request, env, ctx, url, sess) {
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
-    ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], {
+    const payload = {
       title: (cert.type === "pat" ? "PAT" : "EM") + " certificate ready to review",
       body: `${me} submitted a certificate for review.`,
       url: "/cert-review.html",
       tag: "cert-review:" + cert.id
-    }, me).catch(() => {
-    }));
+    };
+    const cfg = await getConfig3(env, tid);
+    const chosen = (cfg.reviewers || []).filter((u) => String(u).toLowerCase() !== String(me).toLowerCase());
+    if (chosen.length) {
+      ctx?.waitUntil?.(Promise.all(chosen.map((u) => sendToUser(env, tid, u, payload).catch(() => {
+      }))));
+    } else {
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], payload, me).catch(() => {
+      }));
+    }
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/pdf" && method === "GET") {
