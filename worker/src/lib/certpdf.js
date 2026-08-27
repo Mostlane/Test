@@ -190,13 +190,21 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
     const midY = ry + ROW_H / 2, txtY = ry + 12.5;
     cols.forEach(c => {
       if (c.kind === "no") { const v = String(startIndex + i + 1).padStart(2, "0"); doc.text(c.x + c.ww / 2 - textWidth(v, 8) / 2, txtY, v, { size: 8, bold: true, color: FAINT }); return; }
-      if (c.kind === "dot") { dot(doc, c.x + c.ww / 2, midY, 3.1, okColor(r[c.key])); return; }
+      if (c.kind === "dot") {
+        let dv = r[c.key];
+        // A not-replaced EM remedial is a genuine failure — show the emergency dot red.
+        if (titleType === "em" && c.key === "emergency" && r.remedial && r.remedial.failed && r.remedial.replacedOnSite === false) dv = "Fail";
+        dot(doc, c.x + c.ww / 2, midY, 3.1, okColor(dv)); return;
+      }
       if (c.kind === "pill") { const v = r[c.key] || ""; if (v) pillC(doc, c.x + c.ww / 2, ry + (ROW_H - 12) / 2, /fail/i.test(v) ? "FAIL" : "PASS", { fill: okColor(v), size: 6.5, padX: 6, h: 12 }); return; }
       let v = r[c.key] == null ? "" : r[c.key];
-      // EM remedial replaced on site: annotate the luminaire/location cell so the
-      // certificate reads "Fitting failed, replaced on site" for that light.
-      if (titleType === "em" && c.key === "comments" && r.remedial && r.remedial.replacedOnSite === true) {
-        v = (S(v).trim() ? S(v).trim() + " — " : "") + "Fitting failed, replaced on site";
+      // EM remedial: annotate the luminaire/location cell so the certificate flags
+      // the fault to the client — replaced on site (fixed, still chargeable) or a
+      // genuine failure needing remedial works.
+      if (titleType === "em" && c.key === "comments" && r.remedial && r.remedial.failed) {
+        const tag = r.remedial.replacedOnSite === true ? "Fitting failed, replaced on site"
+          : r.remedial.replacedOnSite === false ? "FITTING FAILED — remedial required" : "";
+        if (tag) v = (S(v).trim() ? S(v).trim() + " — " : "") + tag;
       }
       const s = fit(v, 8, c.ww - 8);
       const tx = c.align === "r" ? c.x + c.ww - textWidth(s, 8) : c.x + 2;

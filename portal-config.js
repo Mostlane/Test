@@ -1607,6 +1607,78 @@
     } catch (e) {}
   })();
 
+  // ── EM remedial charge/quote gate (office) ─────────────────────────────────
+  // When an EM cert has failed fittings, the office MUST confirm the client has
+  // been charged (replaced on site) or quoted (remedial) — £50/fitting. Any
+  // unconfirmed cert re-pops this BLOCKING modal (press "Do later" to snooze 4h
+  // or confirm to clear); they stack. Office users only; field engineers skipped.
+  (function remedialGate() {
+    try {
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html", "memo-sign.html", "hs-sign.html", "programme-view.html"];
+      if (SKIP.indexOf(page) !== -1) return;
+      var token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return;
+      var perms = {};
+      try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+      var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
+      if (!(yes(perms.FullAccess) || yes(perms.SLAAdmin) || yes(perms.Compliance))) return;
+      if (typeof mlFieldUserLocal === "function" && mlFieldUserLocal()) return;   // office only
+      var esc = function (x) { return String(x == null ? "" : x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      var money = function (n) { return "£" + (Number(n) || 0).toFixed(0); };
+      function ack(certId, action, cb) {
+        nativeFetch(API + "/certs/remedials/ack", { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ certId: certId, action: action }) })
+          .then(function (r) { return r.json(); }).then(function () { cb && cb(); }).catch(function () { cb && cb(); });
+      }
+      function closeGate() { var o = document.getElementById("mlRemGate"); if (o) o.remove(); try { document.documentElement.style.overflow = ""; } catch (e) {} }
+      function render(list) {
+        closeGate();
+        if (!list.length) return;
+        var rows = list.map(function (m) {
+          var q = m.pending > 0 && m.onsite > 0 ? "Have these been quoted &amp; charged?"
+            : m.pending > 0 ? "Have the remedials been quoted?" : "Have the remedials been charged?";
+          return '<div class="mlrem-item" data-cert="' + esc(m.certId) + '" style="border:1px solid #f0d9a6;background:#fffaf0;border-radius:12px;padding:12px;margin-top:10px;">'
+            + '<div style="font-weight:700;color:#8a4b0a;">' + esc(m.siteName || m.siteCode || "Site") + ' · Cert ' + esc(m.certNumber || "") + '</div>'
+            + '<div style="font-size:13px;color:#7a5b00;margin-top:2px;">' + m.fittings + ' fitting' + (m.fittings === 1 ? "" : "s") + ' failed · <b>' + money(m.charge) + '</b> to charge'
+            + (m.onsite ? ' · ' + m.onsite + ' replaced on site' : '') + (m.pending ? ' · ' + m.pending + ' remedial' : '') + '</div>'
+            + '<div style="font-size:13px;color:#8a4b0a;margin-top:6px;font-weight:600;">' + q + '</div>'
+            + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
+            + '<button data-act="done" style="flex:1;min-width:130px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Charged / Quoted</button>'
+            + '<button data-act="later" style="flex:1;min-width:100px;background:#fff;color:#8a4b0a;border:1px solid #e6c98a;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">Do later</button>'
+            + '</div></div>';
+        }).join("");
+        var ov = document.createElement("div");
+        ov.id = "mlRemGate";
+        ov.style.cssText = "position:fixed;inset:0;z-index:100060;background:rgba(3,12,28,.82);display:flex;align-items:center;justify-content:center;padding:22px;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;overflow:auto;";
+        ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:470px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">'
+          + '<div style="background:linear-gradient(180deg,#b45309,#8a4b0a);color:#fff;padding:18px 20px;"><div style="font-size:30px;">&#9888;</div>'
+          + '<h2 style="margin:6px 0 0;font-size:18px;color:#fff;">EM remedials &mdash; charge check</h2>'
+          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Confirm the client has been charged or quoted so we don\'t miss the works.</p></div>'
+          + '<div style="padding:14px 18px 18px;max-height:70vh;overflow:auto;">' + rows
+          + '<p style="margin:12px 0 0;text-align:center;font-size:12px;color:#8a97a6;">&ldquo;Do later&rdquo; reminds you again in 4 hours.</p></div></div>';
+        ov.addEventListener("click", function (e) {
+          var b = e.target && e.target.closest ? e.target.closest("button[data-act]") : null; if (!b) return;
+          var item = b.closest(".mlrem-item"); var certId = item.getAttribute("data-cert");
+          b.disabled = true;
+          ack(certId, b.getAttribute("data-act"), function () { item.remove(); if (!ov.querySelector(".mlrem-item")) closeGate(); });
+        });
+        (document.body || document.documentElement).appendChild(ov);
+        try { document.documentElement.style.overflow = "hidden"; } catch (e) {}
+      }
+      function check() {
+        if (document.getElementById("mlRemGate")) return;   // don't stack overlays
+        nativeFetch(API + "/certs/remedials/outstanding", { headers: { Authorization: "Bearer " + token } })
+          .then(function (r) { return r.json(); }).then(function (d) {
+            if (d && d.ok && d.remedials && d.remedials.length) render(d.remedials);
+          }).catch(function () {});
+      }
+      window.mlRemedialCheck = check;        // let cert-review re-pop right after finalising
+      check();
+      setInterval(check, 15 * 60 * 1000);   // re-pop when a 4h snooze expires
+    } catch (e) {}
+  })();
+
   // ── Risk-assessment sign gate ───────────────────────────────────────────────
   // A risk assessment sent to this user MUST be read and signed. Push alone
   // isn't reliable (needs the PWA + permission), so — exactly like the memo gate

@@ -2286,24 +2286,35 @@ it straight onto the compliance chart (rolling the next-due date).
   personalised theme was rendering the extent/comments text near-white).
 - **EM remedials — mark a failed fitting + £50 charge (Aug 2026):** on an EM cert
   each luminaire row (cert-form.js `?v=9`, EM only) has a **⚠ Mark fitting failed**
-  toggle → **Replaced on site? Yes/No** + a note. The light STAYS a Pass on the
-  cert (Mostlane's rule); it's a separate £50 remedial. Stored per row as
+  toggle → **Replaced on site? Yes/No** + a note. Stored per row as
   `row.remedial = {failed, replacedOnSite, note}`; validation blocks submit if a
-  failed fitting has no on-site answer. **Replaced on site** → the cert's
-  luminaire/location cell prints "… — Fitting failed, replaced on site"
-  (`lib/certpdf.js`, EM comments col). **Not replaced** → the light shows Pass and,
-  on FINALISE, a single **remedial SLA job** is raised (id `emrem:<certId>`,
-  idempotent, description lists the fittings + £N charge) for the office to
-  schedule. Both cases are logged to table **`em_remedials`** (self-migrating; one
-  row/fitting, `charge`=£50, status done|pending, links the cert + job). certs.js
-  `processEmRemedials` runs at finalise, pushes the office (FullAccess/SLAAdmin/
-  Compliance) "EM remedial to charge — N fittings (£N), M replaced on site, K job
-  raised", and `/certs/finalise` returns a `remedial` summary. **GET
-  /certs/remedials?status=&code=** is the charge log. Front-end: **cert-review.html**
-  "💷 EM remedials" button → a To-charge / Done-on-site / All log with per-fitting
-  £, totals, the outstanding-to-charge sum, and a link to each remedial job; the
-  office also sees the ⚠ remedial tags per row when reviewing the cert (read-only
-  MLCert renders them). `createOrUpdateJobFromPayload` imported from sla.js.
+  failed fitting has no on-site answer. **£50 per fitting either way** (both are
+  chargeable — replaced-on-site is done+chargeable, not-replaced is a quote).
+  **Certificate (`lib/certpdf.js`, EM only):** replaced-on-site → luminaire cell
+  reads "… — Fitting failed, replaced on site" (flagged to the client, light OK);
+  **not replaced → the light shows as FAILED** (emergency dot red + "FITTING
+  FAILED — remedial required"), and on FINALISE a single **remedial SLA job** is
+  raised (id `emrem:<certId>`, idempotent) for the office to schedule. Both cases
+  log to **`em_remedials`** (one row/fitting, £50, status done|pending, links cert
+  +job). certs.js `processEmRemedials` (at finalise) also opens a per-cert
+  reminder in **`em_remedial_acks`** and pushes the office.
+  **Blocking office reminder ("Have remedials been charged/quoted?"):** every
+  finalised EM cert with failures opens an ack; **portal-config.js `remedialGate`**
+  shows an UNAVOIDABLE modal (office users only — FullAccess/SLAAdmin/Compliance,
+  field engineers skipped) listing each outstanding cert with the £ total and two
+  buttons — **✓ Charged/Quoted** (clears it) or **Do later** (snoozes **4h**).
+  They **stack**; the gate re-pops every 15 min so a lapsed 4h snooze reappears.
+  Endpoints: **GET /certs/remedials/outstanding** (due acks), **POST
+  /certs/remedials/ack** `{certId, action:"done"|"later"}`, **GET
+  /certs/remedials/flags** (site codes → open ack, for the chart ⚠).
+  cert-review.html's finalise calls `window.mlRemedialCheck()` so the modal pops
+  immediately after issuing. **Compliance chart (eicr-portal.html):** a **⚠
+  triangle next to the EM date** for any store with an open remedial ack (clears
+  when the office confirms charged/quoted). **GET /certs/remedials?status=&code=**
+  is the charge log; **cert-review.html "💷 EM remedials"** button → To-charge /
+  Done / All with per-fitting £ + totals + links to each remedial job; the office
+  also sees ⚠ tags per row when reviewing. `createOrUpdateJobFromPayload` imported
+  from sla.js. portal-config `?v=20`, SW `mostlane-v84`.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
