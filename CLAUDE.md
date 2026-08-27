@@ -1817,13 +1817,16 @@ key** — a grey swatch ringed amber — shown only when the programme has any (
 summary on screen; appended to the contractor legend in the PDF). `extra` rides the
 `data` JSON (no schema/worker-route change), is threaded through migrate/blank/addrow,
 and appears in the suggestion diff. Excel export ignores it (PDF is the locked format).
-(2) **PDF date-header overlap fixed:** the day scale printed the full `dd/mm` (~16pt
-wide at 5.8pt) on EVERY day once `dayW >= 15`, so ~15–16pt columns (a 5–6 week
-programme, or a widened Works column — e.g. the Manor House tender) overlapped adjacent
-dates. Now `dd/mm`-every-day needs `dayW >= 18`; 8–18pt shows the day NUMBER each day +
-`dd/mm` on Mondays/month-firsts; and a universal `lastLabelRight` guard suppresses any
-label that would touch the previous one. Verified 0 overlaps across 14–80-day
-programmes (scratchpad `progdates.mjs`).
+(2) **PDF date header is now a TWO-TIER month/day header** (was a single dd/mm-per-day
+scale). The old scale printed the full `dd/mm` (~16pt) on every day once `dayW>=15`, so
+~15pt columns overlapped; the interim fix put `dd/mm` on Mondays/month-firsts which was
+wider than a column and the overlap guard then dropped the NEXT day's number — a
+"missing day" after each month label (Manor House tender). Final design (`lib/progpdf.js`):
+**top tier = the month name ("Nov 2026") where each month begins** (+ a "BH" marker that
+rides the top tier so it never displaces a number), **bottom tier = the day number 1–31
+on EVERY day** (6.2pt wide, shown at `dayW>=8`, thinned to Mondays/1st below that), with a
+faint divider between tiers. A single dd/mm is never printed on a day, so nothing overlaps
+and no day is skipped. Verified widths + 0 overlaps.
 **Task text WRAPS everywhere (Aug 2026) — read in full, no truncation:** the Works
 column now wraps long task names in all three outputs with VARIABLE row heights.
 On screen (`programme-gantt.js?v=6`): the editable name field is a `<textarea>`
