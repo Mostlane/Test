@@ -24902,7 +24902,23 @@ async function ensureTables4(env) {
     await env.DB.prepare("ALTER TABLE em_remedial_acks ADD COLUMN batteries INTEGER").run();
   } catch {
   }
+  for (const col of [
+    "stage TEXT",
+    "job_id TEXT",
+    "quoted_at TEXT",
+    "quoted_by TEXT",
+    "approved_at TEXT",
+    "approved_by TEXT",
+    "invoiced_at TEXT",
+    "invoiced_by TEXT"
+  ]) {
+    try {
+      await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run();
+    } catch {
+    }
+  }
 }
+var STAGES = ["to_quote", "quoted", "approved", "invoiced"];
 var REMEDIAL_CHARGE = 50;
 async function resignRemedialPhotos(env, origin, rec) {
   if (!rec || rec.type !== "em" || !Array.isArray(rec.rows)) return;
@@ -24956,33 +24972,6 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   const lights = fails.filter((f) => !isBatt(f));
   const batteries = fails.filter(isBatt);
   const lightCharge = lights.length * REMEDIAL_CHARGE;
-  let jobId = null;
-  if (pending.length) {
-    const lPend = pending.filter((f) => !isBatt(f)), bPend = pending.filter(isBatt);
-    const parts = [];
-    if (lPend.length) parts.push(`Replace ${lPend.length} failed light fitting${lPend.length === 1 ? "" : "s"} (\xA3${lPend.length * REMEDIAL_CHARGE}):
-` + lPend.map((f) => "\u2022 " + f.ref + (f.note ? " \u2014 " + f.note : "")).join("\n"));
-    if (bPend.length) parts.push(`Replace batteries in ${bPend.length} fitting${bPend.length === 1 ? "" : "s"} \u2014 price from supplier (see battery enquiry PDF):
-` + bPend.map((f) => "\u2022 " + f.ref + (f.batterySpec ? " \u2014 " + f.batterySpec : "") + (f.batteryQty ? " \xD7" + f.batteryQty : "") + (f.note ? " \u2014 " + f.note : "")).join("\n"));
-    const desc = `EM remedial at ${siteName} (from EM certificate ${certNumber}).
-
-` + parts.join("\n\n");
-    try {
-      const job = await createOrUpdateJobFromPayload(env, tid, {
-        id: "emrem:" + certRow.id,
-        // stable id → idempotent per cert
-        reference: "EM remedial \u2014 " + (siteCode || siteName),
-        status: "Pending",
-        priority: "Priority 4",
-        description: desc,
-        siteName,
-        siteCode: siteCode || "",
-        originator: "em-remedial"
-      });
-      jobId = job && job.id;
-    } catch {
-    }
-  }
   try {
     await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run();
   } catch {
@@ -25002,7 +24991,7 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     f.replaced ? 1 : 0,
     isBatt(f) ? 0 : REMEDIAL_CHARGE,
     f.replaced ? "done" : "pending",
-    f.replaced ? null : jobId,
+    null,
     certRow.engineer || "",
     now,
     f.kind,
@@ -25016,11 +25005,13 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   }
   try {
     await env.DB.prepare(
-      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,batteries,state,snooze_until,created_at,done_at,done_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
+      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,batteries,state,stage,snooze_until,created_at,done_at,done_by,job_id,quoted_at,quoted_by,approved_at,approved_by,invoiced_at,invoiced_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'open','to_quote',NULL,?,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)
        ON CONFLICT(cert_id) DO UPDATE SET cert_number=excluded.cert_number, site_code=excluded.site_code,
          site_name=excluded.site_name, fittings=excluded.fittings, charge=excluded.charge,
-         onsite=excluded.onsite, pending=excluded.pending, batteries=excluded.batteries, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
+         onsite=excluded.onsite, pending=excluded.pending, batteries=excluded.batteries, state='open',
+         stage='to_quote', snooze_until=NULL, done_at=NULL, done_by=NULL, job_id=NULL,
+         quoted_at=NULL, quoted_by=NULL, approved_at=NULL, approved_by=NULL, invoiced_at=NULL, invoiced_by=NULL`
     ).bind(
       certRow.id,
       tid,
@@ -25036,7 +25027,38 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
     ).run();
   } catch {
   }
-  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length, jobId };
+  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length };
+}
+async function createRemedialJobForCert(env, tid, certId) {
+  const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id=? AND status='pending'").bind(tid, certId).all();
+  const pend = results || [];
+  if (!pend.length) return null;
+  const first = pend[0];
+  const siteName = first.site_name || first.site_code, siteCode = first.site_code || "";
+  const lights = pend.filter((r) => r.kind !== "battery"), batts = pend.filter((r) => r.kind === "battery");
+  const parts = [];
+  if (lights.length) parts.push(`Replace ${lights.length} failed light fitting${lights.length === 1 ? "" : "s"} (\xA3${lights.length * REMEDIAL_CHARGE}):
+` + lights.map((r) => "\u2022 " + r.light_ref + (r.note ? " \u2014 " + r.note : "")).join("\n"));
+  if (batts.length) parts.push(`Replace batteries in ${batts.length} fitting${batts.length === 1 ? "" : "s"}:
+` + batts.map((r) => "\u2022 " + r.light_ref + (r.battery_spec ? " \u2014 " + r.battery_spec : "") + (r.battery_qty ? " \xD7" + r.battery_qty : "") + (r.note ? " \u2014 " + r.note : "")).join("\n"));
+  const desc = `EM remedial at ${siteName} (from EM certificate ${first.cert_number}) \u2014 client ordered.
+
+` + parts.join("\n\n");
+  try {
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      id: "emrem:" + certId,
+      reference: "EM remedial \u2014 " + (siteCode || siteName),
+      status: "Pending",
+      priority: "Priority 4",
+      description: desc,
+      siteName,
+      siteCode,
+      originator: "em-remedial"
+    });
+    return job && job.id;
+  } catch {
+    return null;
+  }
 }
 async function getConfig3(env, tid) {
   const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "cert:config:" + tid).first();
@@ -25542,9 +25564,8 @@ async function handle30(request, env, ctx, url, sess) {
     }
     if (remedial && remedial.count) {
       const site = rec.installation && rec.installation.name || code;
-      const body = `EM cert ${number} \u2014 ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (\xA3${remedial.charge} to charge)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries (send supplier enquiry)` : "") + `. ${remedial.onsite} replaced on site` + (remedial.pending ? `, remedial job raised.` : ".");
-      const url2 = remedial.jobId ? "/job-view.html?jobId=" + encodeURIComponent(remedial.jobId) : "/cert-review.html";
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to charge", body, url: url2, tag: "em-remedial:" + cert.id }).catch(() => {
+      const body = `EM cert ${number} \u2014 ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (\xA3${remedial.charge} in lights)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries` : "") + `. Quote the client \u2014 track it on the EM remedials list.`;
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }).catch(() => {
       }));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
@@ -25570,23 +25591,38 @@ async function handle30(request, env, ctx, url, sess) {
     const pending = rows.filter((r) => r.status === "pending").reduce((a, r) => a + (Number(r.charge) || 0), 0);
     return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
   }
+  const shapeCase = (r) => ({
+    certId: r.cert_id,
+    certNumber: r.cert_number,
+    siteName: r.site_name || r.site_code,
+    siteCode: r.site_code,
+    fittings: r.fittings,
+    charge: r.charge,
+    onsite: r.onsite,
+    pending: r.pending,
+    batteries: r.batteries || 0,
+    stage: r.stage || "to_quote",
+    jobId: r.job_id || null,
+    createdAt: r.created_at,
+    quotedAt: r.quoted_at,
+    approvedAt: r.approved_at,
+    invoicedAt: r.invoiced_at
+  });
   if (sub === "/remedials/outstanding" && method === "GET") {
     if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const { results } = await env.DB.prepare(
-      "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND state='open' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
+      "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')='to_quote' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
     ).bind(tid, now).all();
-    return json({ ok: true, remedials: (results || []).map((r) => ({
-      certId: r.cert_id,
-      certNumber: r.cert_number,
-      siteName: r.site_name || r.site_code,
-      siteCode: r.site_code,
-      fittings: r.fittings,
-      charge: r.charge,
-      onsite: r.onsite,
-      pending: r.pending,
-      batteries: r.batteries || 0
-    })) }, {}, env, request);
+    return json({ ok: true, remedials: (results || []).map(shapeCase) }, {}, env, request);
+  }
+  if (sub === "/remedials/board" && method === "GET") {
+    if (!isOffice) return json({ ok: true, cases: [] }, {}, env, request);
+    const all = q.get("all") === "1";
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM em_remedial_acks WHERE tenant_id=?${all ? "" : " AND COALESCE(stage,'to_quote')<>'invoiced'"} ORDER BY created_at DESC LIMIT 400`
+    ).bind(tid).all();
+    return json({ ok: true, cases: (results || []).map(shapeCase) }, {}, env, request);
   }
   if (sub === "/remedials/ack" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
@@ -25599,12 +25635,33 @@ async function handle30(request, env, ctx, url, sess) {
       await env.DB.prepare("UPDATE em_remedial_acks SET snooze_until=? WHERE tenant_id=? AND cert_id=?").bind(until, tid, certId).run();
       return json({ ok: true, snoozed: until }, {}, env, request);
     }
-    await env.DB.prepare("UPDATE em_remedial_acks SET state='done', done_at=?, done_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
-    return json({ ok: true, done: true }, {}, env, request);
+    await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=?, quoted_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    return json({ ok: true, stage: "quoted" }, {}, env, request);
+  }
+  if (sub === "/remedials/stage" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || "").trim();
+    const to = String(b.to || "").trim();
+    if (!certId || STAGES.indexOf(to) < 0) return error("Missing certId or bad stage", 400, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let jobId = null;
+    if (to === "approved") {
+      jobId = await createRemedialJobForCert(env, tid, certId);
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, jobId, tid, certId).run();
+    } else if (to === "invoiced") {
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='invoiced', invoiced_at=?, invoiced_by=? WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    } else if (to === "to_quote") {
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='to_quote', snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(tid, certId).run();
+    } else {
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=COALESCE(quoted_at,?), quoted_by=COALESCE(quoted_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    }
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    return json({ ok: true, stage: to, jobId, case: row ? shapeCase(row) : null }, {}, env, request);
   }
   if (sub === "/remedials/flags" && method === "GET") {
     const { results } = await env.DB.prepare(
-      "SELECT site_code, SUM(fittings) AS fittings, SUM(charge) AS charge FROM em_remedial_acks WHERE tenant_id=? AND state='open' GROUP BY site_code"
+      "SELECT site_code, SUM(fittings) AS fittings, SUM(charge) AS charge FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')<>'invoiced' GROUP BY site_code"
     ).bind(tid).all();
     const codes = {};
     (results || []).forEach((r) => {
