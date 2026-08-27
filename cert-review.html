@@ -37,8 +37,26 @@
   <header class="page">
     <a class="ml-back" href="/sla-main.html" style="text-decoration:none;">‹ Back</a>
     <h1>📄 Certificate review</h1>
+    <button class="btn ghost sm" id="notifyBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">🔔 Notify list</button>
   </header>
   <div class="wrap" id="wrap"><p class="muted" style="padding:20px;">Loading…</p></div>
+
+  <!-- Who gets pushed when an engineer submits a cert for review -->
+  <div id="notifyModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">🔔 Who's notified for review</h2>
+        <button class="btn ghost sm" id="nmClose">Close</button>
+      </div>
+      <p class="muted" style="margin:0 0 10px;">Choose who gets the push when an engineer submits an EM/PAT certificate for review. <b>Leave everyone unticked</b> to notify all Full Access, SLA Admin &amp; Compliance users (the default).</p>
+      <input type="text" id="nmSearch" placeholder="Search people…" style="width:100%;padding:9px 11px;border:1px solid #ccd5dd;border-radius:9px;font-size:14px;margin-bottom:8px;">
+      <div id="nmList" style="max-height:44vh;overflow:auto;border:1px solid #eef2f6;border-radius:10px;padding:4px;"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
+        <button class="btn green" id="nmSave">Save</button>
+        <span class="msg" id="nmMsg"></span>
+      </div>
+    </div>
+  </div>
 
   <script>
     const API = window.MOSTLANE_API;
@@ -125,6 +143,62 @@
       };
     }
     function setMsg(t, err){ const m = g("finMsg"); if (m) { m.textContent = t; m.className = "msg" + (err?" err":" ok"); } }
+
+    // ── Review-notification recipient picker ───────────────────────────────────
+    let NM_USERS = [], NM_SEL = new Set();
+    const uName = u => ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
+    g("notifyBtn").onclick = openNotify;
+    g("nmClose").onclick = () => g("notifyModal").style.display = "none";
+    g("notifyModal").onclick = e => { if (e.target === g("notifyModal")) g("notifyModal").style.display = "none"; };
+    g("nmSearch").oninput = renderNmList;
+
+    async function openNotify() {
+      g("notifyModal").style.display = "block";
+      g("nmMsg").textContent = "";
+      if (!NM_USERS.length) {
+        try { const d = await authFetch("/users").then(r=>r.json()); NM_USERS = (d.Users || d.users || []).filter(u => u.Username); }
+        catch { g("nmList").innerHTML = '<p class="muted" style="padding:10px">Couldn\'t load people.</p>'; }
+        // office staff first, then A–Z, so reviewers are easy to find
+        NM_USERS.sort((a,b) => uName(a).localeCompare(uName(b)));
+      }
+      try { const c = await authFetch("/certs/config").then(r=>r.json()); NM_SEL = new Set(((c.config && c.config.reviewers) || []).map(x => String(x).toLowerCase())); }
+      catch { NM_SEL = new Set(); }
+      renderNmList();
+    }
+    function renderNmList() {
+      const q = (g("nmSearch").value || "").toLowerCase().trim();
+      const rows = NM_USERS.filter(u => !q || uName(u).toLowerCase().includes(q) || String(u.Username).toLowerCase().includes(q));
+      const n = NM_SEL.size;
+      let h = '<div style="padding:6px 8px;font-size:12.5px;color:'+(n?"#0a7d33":"#6b7a90")+';font-weight:600;">'
+        + (n ? (n + " selected — only these people are notified") : "Nobody selected — everyone with permission is notified") + '</div>';
+      rows.forEach(u => {
+        const un = String(u.Username), on = NM_SEL.has(un.toLowerCase());
+        h += '<label style="display:flex;align-items:center;gap:10px;padding:8px 8px;border-top:1px solid #f1f4f8;cursor:pointer;">'
+          + '<input type="checkbox" data-u="'+esc(un)+'" '+(on?"checked":"")+' style="width:18px;height:18px;">'
+          + '<span style="flex:1;min-width:0;"><span style="font-weight:600;font-size:14px;">'+esc(uName(u))+'</span>'
+          + (u.StaffType ? ' <span class="muted" style="font-size:12px;">· '+esc(u.StaffType)+'</span>' : '')+'</span></label>';
+      });
+      g("nmList").innerHTML = h || '<p class="muted" style="padding:10px">No matches.</p>';
+      [].forEach.call(g("nmList").querySelectorAll("input[type=checkbox]"), cb => cb.onchange = () => {
+        const u = cb.getAttribute("data-u").toLowerCase();
+        if (cb.checked) NM_SEL.add(u); else NM_SEL.delete(u);
+        // refresh only the count line (keep scroll/search)
+        const head = g("nmList").firstChild; if (head) { const k = NM_SEL.size;
+          head.textContent = k ? (k + " selected — only these people are notified") : "Nobody selected — everyone with permission is notified";
+          head.style.color = k ? "#0a7d33" : "#6b7a90"; }
+      });
+    }
+    g("nmSave").onclick = async function() {
+      // Send canonical usernames (match the picked rows' real Username casing).
+      const reviewers = NM_USERS.filter(u => NM_SEL.has(String(u.Username).toLowerCase())).map(u => u.Username);
+      this.disabled = true; g("nmMsg").textContent = "Saving…"; g("nmMsg").className = "msg";
+      try {
+        const d = await authFetch("/certs/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ reviewers }) }).then(r=>r.json());
+        if (d && d.ok) { g("nmMsg").textContent = reviewers.length ? "Saved — "+reviewers.length+" notified" : "Saved — everyone with permission"; g("nmMsg").className = "msg ok"; setTimeout(()=>{ g("notifyModal").style.display="none"; }, 900); }
+        else { g("nmMsg").textContent = (d && d.error) || "Couldn't save."; g("nmMsg").className = "msg err"; }
+      } catch { g("nmMsg").textContent = "Couldn't save."; g("nmMsg").className = "msg err"; }
+      this.disabled = false;
+    };
   </script>
 </body>
 </html>

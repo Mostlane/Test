@@ -2097,7 +2097,11 @@ it straight onto the compliance chart (rolling the next-due date).
   **GET /certs/for-job?jobId=&type=** (load existing or SEED from the job's site +
   config + prefill), **POST /certs/save** (upsert draft; engineer owns their draft,
   office any), **POST /certs/submit** (engineer → status review + push the office
-  queue), **GET /certs/pdf?id=** (render), **GET /certs/one?id=**, **GET /certs/review**
+  queue — **configurable recipients**: `cert:config.reviewers` = usernames; when
+  non-empty ONLY those users are pushed, else it falls back to everyone with
+  FullAccess/SLAAdmin/Compliance. Set on cert-review.html's **🔔 Notify list**
+  picker → POST /certs/config `{reviewers:[…]}`; empty = everyone),
+  **GET /certs/pdf?id=** (render), **GET /certs/one?id=**, **GET /certs/review**
   (office queue, Compliance|SLAAdmin|FullAccess), **GET /certs/list?code=&type=**,
   **GET /certs/number?code=&type=** (suggested next), **POST /certs/finalise**
   {id,certNumber?,docDate?} (issue → `compliance.js fileCertificatePdf()` files the PDF
