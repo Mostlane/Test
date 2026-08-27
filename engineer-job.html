@@ -113,7 +113,10 @@
     input.txt.big{font-size:17px;font-weight:600;padding:14px;border-width:2px}
     .shake{animation:sh .32s}@keyframes sh{0%,100%{transform:none}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
     .modal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:40}.modal.show{display:flex}
-    .sheet{background:var(--card);width:100%;max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:92%;overflow:auto}
+    /* Bottom sheet: fill the modal's height (JS sizes the modal to the space ABOVE
+       the on-screen keyboard via visualViewport) and scroll inside, with momentum +
+       contained overscroll so it never gets stuck or scrolls the page behind it. */
+    .sheet{background:var(--card);width:100%;max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
     .sheet h3{margin:0 0 4px}canvas{width:100%;height:180px;border:1px solid var(--line);border-radius:12px;touch-action:none;background:var(--card);margin-top:2px}canvas.err{border-color:var(--urgent)}
     .toast{position:fixed;left:16px;right:16px;bottom:16px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
     #loading{padding:60px 0;text-align:center;color:var(--muted)}
@@ -186,6 +189,23 @@
   function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function getUser(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
   function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  // Bottom-sheet + on-screen keyboard fix: size any open .modal to the VISIBLE
+  // area (above the keyboard) using visualViewport, so the sheet's scroll region
+  // ends above the keyboard and every field/button can be reached; and scroll the
+  // focused field into view when the keyboard opens over it.
+  var vv = window.visualViewport;
+  function fitModals(){
+    var h = vv ? Math.round(vv.height) : window.innerHeight;
+    var open = document.querySelectorAll(".modal.show");
+    for(var i=0;i<open.length;i++){ open[i].style.height = h + "px"; }
+  }
+  if(vv){ vv.addEventListener("resize", fitModals); vv.addEventListener("scroll", fitModals); }
+  document.addEventListener("focusin", function(e){
+    var t = e.target;
+    if(!t || !t.closest || !t.closest(".sheet")) return;
+    // let the keyboard animate in, then bring the field into the middle of the sheet
+    setTimeout(function(){ try{ t.scrollIntoView({ block:"center", behavior:"smooth" }); }catch(_){ } }, 280);
+  });
   // Device GPS snapshot for status changes. Works offline (no network needed);
   // a recent fix is reused so taps stay snappy, and it never blocks longer than
   // the timeout. The reading is stamped into the PATCH body, so when a change is
@@ -1028,7 +1048,7 @@
     decls().forEach(function(d){d.classList.remove("on","shake");});
     $("raNotes").value="";$("raNotes").classList.remove("err");$("raName").value=getUser()||"";$("raName").classList.remove("err");raPad.clear();
     if($("raSkipBtn")) $("raSkipBtn").style.display = isFullAccess() ? "block" : "none";   // discreet, all-access only
-    $("raModal").classList.add("show");setTimeout(raPad.size,50);
+    $("raModal").classList.add("show");fitModals();setTimeout(function(){ fitModals(); raPad.size(); },50);
   }
   $("raCancel").onclick=function(){ $("raModal").classList.remove("show"); };
   // Full-Access override: start the job WITHOUT the risk assessment. Recorded as

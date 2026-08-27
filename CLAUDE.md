@@ -3856,6 +3856,21 @@ files to this public repo.
   site-folder.html `.lb .x`; viewport-fit added to job-view/site-folder/
   my-documents/vehicle-maintenance/project-hub. docviewer bumped `?v=6`.
   Any NEW full-screen overlay close button needs the same treatment.
+- **Bottom-sheet modals + the on-screen keyboard (iOS, Aug 2026).** The engineer
+  **risk-assessment** modal (engineer-job.html `#raModal`, `.modal`/`.sheet`) is a
+  bottom sheet (`align-items:flex-end`) with a long form (photo · hazard checks ·
+  notes · declarations · name · signature · buttons). It was `max-height:92%;
+  overflow:auto` — 92% of the FULL layout viewport, which the keyboard doesn't
+  shrink on iOS. So tapping Name/Notes brought the keyboard up over the signature +
+  buttons and the sheet couldn't scroll them into view ("hard to fill out, doesn't
+  scroll"). Fix (any bottom-sheet form must do the same): (a) `.sheet{max-height:100%;
+  overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain}`
+  + safe-area `padding-bottom`; (b) **JS sizes the open `.modal` to
+  `visualViewport.height`** (`fitModals()`, re-run on vv resize/scroll + on open)
+  so the sheet's scroll region ends ABOVE the keyboard; (c) a **`focusin`** handler
+  on `.sheet` inputs `scrollIntoView({block:"center"})` after a ~280ms keyboard-
+  settle delay. The signature canvas keeps `touch-action:none` (draw, don't scroll)
+  — scroll happens on the rest of the sheet.
 - **NEVER put `transform`/`translateZ(0)` on a `position:fixed` bottom bar** (iOS
   Safari, Aug 2026). The field-app tabbar (route/engineer-jobs/inbox/you `.tabbar`)
   and the View As "Viewing as…" return bar (portal-config `mlVaBar`) carried
