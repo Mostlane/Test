@@ -1397,23 +1397,99 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     annual miles over allowedMiles × excessPence). Returned in /fleet/vehicles +
     /fleet/fuel/stats for FullAccess only; shown on the deep-dive ("Cost to run
     /year") and the fuel page's per-vehicle table with a `projected` badge.
-- **Van-check defects on the vehicle card (Aug 2026)** — a reported fault now
-  shows prominently on vehicles.html. `/fleet/vehicles` computes per-van
-  outstanding defects via **`vanCheckDefects(env,tid,resolved)`**: ANY van-check
-  answer of `defect`/`missing` OR the driver's `safe_to_drive=0`, aggregated per
-  reg (returns `defectItems`/`defectChecks`/`defectNotSafe`/`defectSince`). The
-  model is **explicit-resolve, not auto-clear** (Jamie's rule): a fault stays
-  flagged even after a later clean check until an admin taps **✓ Mark defects
-  resolved**, which stamps a per-reg "resolved as of now" time in app_config
-  **`fleet:defectsclear:<tid>`** (`{REGNORM:ISO}`) via **POST /fleet/defects-resolve**
-  `{reg}` (any Vehicles user) — checks completed on/before that time are treated
-  as dealt-with; a NEW defect reported afterwards re-flags the van. Front-end
-  (vehicles.html): a red **⚠ Defect reported** tag (+ **🚫 Not safe to drive**
-  when flagged) on the card + deep-dive, a **Vans with faults** summary tile
-  (hidden when zero), and the **✓ Mark defects resolved** button on the card and
-  in the deep-dive's red banner (which also links to vehicle-checks.html to see
-  what was reported). `hasDefect(v)`/`defectTags(v)`/`resolveDefects(reg)` are the
-  helpers; no schema change (app_config only).
+- **Van-check defects — PER-DEFECT tracking (Aug 2026 rework)** — each individual
+  reported fault is now tracked and resolved on its OWN, with a status
+  **open | pending | resolved** + an office **note** (e.g. "booked 5 Sep",
+  "awaiting part"). **`collectDefects(env,tid,{statusMap,clearMap,settings,names})`**
+  (fleet.js) is the single source: it walks `vehicle_checks`, enumerates every
+  "issue" answer (tone `issue` — `defect`/`missing` OR a custom answer-option
+  `answerMeta[id].tone==="issue"`) plus the driver's `safe_to_drive=0` flag, and
+  gives each a **STABLE key** `${REGNORM}::${checked_at}::${itemId}` (`__notsafe`
+  for the safe-to-drive flag). Per-defect statuses live in app_config
+  **`fleet:defectstatus:<tid>`** = `{ [key]:{status,note,by,at} }`; the legacy
+  per-reg bulk-clear timestamp **`fleet:defectsclear:<tid>`** still resolves
+  everything up to its time, but **an explicit per-defect status ALWAYS wins over
+  it** (so one fault can be reopened/marked pending after a bulk resolve). Item
+  labels come from `vancheck:settings` (checklist+equipment) or `items.custom` for
+  one-off checks. `defectSummary(list)` → per-reg `{open,pending,notSafe,since}`
+  drives the cards. Endpoints (any Vehicles user): **GET /fleet/defects?reg=&status=&includeResolved=1**
+  (flat list + summary — powers the panel + central table), **POST /fleet/defect-status**
+  `{key,status?,note?}` (set one), **POST /fleet/defects-resolve** `{reg}` (bulk:
+  stamps the legacy timestamp AND explicitly resolves each current defect on the van).
+  `/fleet/vehicles` now returns **`defectOpen`/`defectPending`/`defectNotSafe`/`defectSince`**
+  per card (was defectItems/defectChecks — REMOVED). Front-end (vehicles.html): red
+  **⚠ N defect** / amber **⏳ N pending** / **🚫 Not safe** chips (each TAPPABLE →
+  the van's defect panel), a **🔧 Manage defects** button on the card + deep-dive, a
+  clickable **Vans with faults** tile AND a red **#defectBanner** at the top — all
+  open **`openDefectsModal(reg?)`** (scoped to one van, or ALL vans grouped by reg
+  when no reg). The modal = Open/Pending/Resolved filter tabs (with counts), each
+  row shows the label + driver's note + Open/Pending/Resolved pills (tap to set,
+  auto-saves) + an office-note input (saves on blur), plus **✓ Resolve all on this
+  van** when scoped. Changes set `DEF_DIRTY` and re-flow the cards on close.
+  `hasDefect`/`hasOpenDefect`/`defectTags`/`resolveDefects`/`openDefectsModal`/
+  `setDefStatus`/`saveDefNote` are the helpers; no schema change (app_config only).
+- **MOT / tax / service "booked / in hand" (Aug 2026)** — the same pending idea now
+  covers renewals. A due MOT/tax/service tag on the card is **tappable** → a small
+  modal (`openRenewalModal(reg,type)` → `setRenewal`) marks it **booked / pending**
+  with a note ("booked 5 Sep") or clears it. Stored in app_config
+  **`fleet:renewalack:<tid>`** = `{ REGNORM:{ mot:{note,by,at}, tax:{}, service:{} } }`
+  via **POST /fleet/renewal-status** `{reg, type:"mot"|"tax"|"service", status:"pending"|"open", note}`.
+  **Auto-stale:** an ack is only honoured while the item is still due (mot/tax
+  `daysToDate<=30`, service status warn/bad) — a renewed date clears the amber on its
+  own; `/fleet/vehicles` returns `motPending`/`taxPending`/`servicePending` (the note,
+  or true) computed with that gate. A pending item shows an amber dashed **📌 booked**
+  tag. **Banners consolidated + calmed:** the separate red `#defectBanner` is retired;
+  `renderBanner()` (`#fleetBanner`) is now the ONE attention banner and is
+  pending-aware — RED only lists items that genuinely need action (open defects,
+  unbooked services/MOT/tax), while anything booked/in-hand drops to a calm amber
+  "📌 In hand" line (`.fleet-banner.pend` / `.fb-seg.pending`); when EVERYTHING
+  outstanding is in hand the whole banner is amber, not red. Fault segments open the
+  defect modal; renewal segments open the renewal modal.
+  **Renewals appear IN the "Manage defects" panel too (Aug 2026):** `buildRenewalRows`
+  folds each due MOT/tax/service into `openDefectsModal` as a row (kind `renewal`,
+  synthetic key `renewal::REG::type`) with **Open / Pending / ✅ Completed** controls
+  (no "Resolved" — completing renews it). Open/Pending post to /fleet/renewal-status;
+  **✅ Completed** opens `openRenewalComplete` → asks for the NEW date(s) (MOT expiry /
+  tax due; service = date serviced + mileage-at-service + optional next-due) → **POST
+  /fleet/renewal-complete** `{reg,type,date,miles?,nextDate?}` which writes the renewed
+  date onto the vehicle (mot_due / tax_due, or last_service_date+last_service_miles,
+  next_service recomputed) and clears the ack, so the item drops off. The card's quick
+  renewal prompt also has a ✅ Completed button. renewalRow/setDefStatus/saveDefNote
+  branch on `d.renewal`; the all-vans panel now surfaces renewals even for vans with no
+  van-check defect.
+- **Booking an MOT/service auto-makes a scheduler job (Aug 2026)** — marking an MOT or
+  service **booked** with a date now creates a real SLA job assigned to the van's
+  **current driver**, on the scheduler for that day, at the chosen **garage**.
+  - **Managed garages** in app_config **`fleet:garages:<tid>`** = `[{id,name,postcode,
+    lat,lng,collectsFromHQ}]` — GET **/fleet/garages**, POST **/fleet/garage**
+    (postcode geocoded via postcodes.io on save), POST **/fleet/garage-delete**. A
+    garage with **`collectsFromHQ`** sites the job at HQ (**PO15 5RQ**) since they
+    collect the van. Managed from vehicles.html "🔧 Garages".
+  - **The job** = `createOrUpdateJobFromPayload` with **`fleetRenewal:true`** (new: no
+    priority, no SLA target, all four gates OFF — like a project), stable id
+    `fleetsvc:<REGNORM>:<mot|service>`, `reference "MOT — <reg>"`, `vehicleReg`+
+    `renewalType` stamped, site = garage (or HQ). The client sends an absolute
+    `scheduledAt` (built from date+time in London) + `apptDate` + `durationMinutes` +
+    `garageId` on **/fleet/renewal-status** `status:"pending"`. The job id is stored on
+    the ack. Unbooking (open) or completing DELETES the appointment job
+    (`removeRenewalJob`). tax stays a plain booked flag (no job).
+  - **Auto-reassign on driver change**: `/fleet/assign` calls **`reassignRenewalJobs`**
+    → any FUTURE booked MOT/service job for that reg is re-assigned to the new driver
+    (via createOrUpdateJobFromPayload id-merge).
+  - **No driver → the whole office**: when the van has no assigned driver (at booking
+    OR after being unassigned), the appointment job is assigned to **all active office
+    users** (`officeUsernames` = profile.staffType==="office") so it's owned, not lost —
+    it drops to that single driver again the moment one is assigned. (`clearEngineers`
+    is only the fallback when there are zero office users.)
+  - **Holiday clash**: `/fleet/vehicles` overlays **`approvedLeaveInRange`** (imported
+    from holidays.js) — if the current driver is on approved leave on the appointment
+    day it returns **`motClash`/`serviceClash`** `{date,driver}`. Surfaced CLEARLY (not
+    a popup): a **red ⚠ "driver OFF"** tag on the card, a red clash line in the panel
+    renewal row, and a red **🚫 "<reg> — MOT <date>, driver OFF"** banner segment. Also
+    `motAppt`/`serviceAppt` `{date,garage,jobId}` for the "📌 booked <date> @ <garage>"
+    display. fleet.js imports `createOrUpdateJobFromPayload`+`reconcileRelease` (sla.js)
+    and `approvedLeaveInRange` (holidays.js). vehicles.html: openGaragesModal/garageForm,
+    openRenewalModal (rich date/time/garage for mot/service; simple for tax), bookRenewal.
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed

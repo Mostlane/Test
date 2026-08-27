@@ -19,6 +19,8 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
 import { evalAlerts, answerWord } from "./vancheck.js";
 import { loadRegister, resolveSite } from "./costing.js";
+import { createOrUpdateJobFromPayload, reconcileRelease } from "./sla.js";
+import { approvedLeaveInRange } from "./holidays.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -310,6 +312,200 @@ async function vanCheckDefects(env, tid, resolved) {
   } catch {}
   return out;
 }
+// ── Per-defect resolution (Aug 2026) ───────────────────────────────────────
+// Each individual reported fault can now be tracked/resolved on its own, with a
+// status (open | pending | resolved) and an office note (e.g. "booked 5 Sep",
+// "awaiting part"). Stored in app_config fleet:defectstatus:<tid> keyed by a
+// STABLE per-defect id  `${REGNORM}::${checked_at}::${itemId}`  (and `__notsafe`
+// for the driver's "not safe to drive" flag). The legacy per-reg bulk-clear
+// timestamp (fleet:defectsclear) still resolves everything up to its time, but
+// an explicit per-defect status ALWAYS wins over it (so one fault can be
+// reopened or marked pending after a bulk resolve).
+const DEFECTST_KEY = tid => `fleet:defectstatus:${tid}`;
+// Renewal "booked / in hand" acknowledgements (MOT, tax, service). Presence marks
+// a due item as PENDING (amber, with a note) instead of screaming red. Auto-stale:
+// only honoured while the item is actually due — once the date renews it's ignored.
+// app_config fleet:renewalack:<tid> = { REGNORM: { mot:{note,by,at}, tax:{}, service:{} } }.
+const RENEWALACK_KEY = tid => `fleet:renewalack:${tid}`;
+// Managed list of garages a service/MOT can be carried out at. Some garages COLLECT
+// the van from HQ (PO15 5RQ) — flagged per garage, so the job is sited at HQ.
+const GARAGES_KEY = tid => `fleet:garages:${tid}`;
+const HQ_POSTCODE = "PO15 5RQ";
+const HQ_NAME = "Mostlane HQ";
+async function geocodePostcode(pc) {
+  const p = String(pc || "").trim();
+  if (!p) return null;
+  try {
+    const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(p));
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j && j.result && j.result.latitude != null) return { lat: j.result.latitude, lng: j.result.longitude };
+  } catch {}
+  return null;
+}
+function daysToDate(s) { if (!s) return null; const d = new Date(s); if (isNaN(d)) return null; d.setHours(0, 0, 0, 0); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d - t) / 86400000); }
+// ── Auto-made MOT/service appointment jobs ─────────────────────────────────
+const RENEWAL_LABEL = { mot: "MOT", service: "Service" };
+const renewalJobId = (reg, type) => `fleetsvc:${regKey(reg)}:${type}`;
+// The portal user currently assigned to drive a reg (open assignment row, else
+// the legacy users.vehicle_assigned field).
+async function currentDriver(env, tid, reg) {
+  const rk = dnReg(reg);
+  try {
+    const r = await env.DB.prepare("SELECT username FROM vehicle_assignments WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND end_date IS NULL ORDER BY start_date DESC LIMIT 1").bind(tid, rk).first();
+    if (r && r.username) return r.username;
+  } catch {}
+  try {
+    const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND UPPER(REPLACE(vehicle_assigned,' ',''))=? LIMIT 1").bind(tid, rk).first();
+    if (r && r.username) return r.username;
+  } catch {}
+  return "";
+}
+async function garageById(env, tid, id) {
+  if (!id) return null;
+  const raw = await appConfigJson(env, GARAGES_KEY(tid));
+  return (Array.isArray(raw) ? raw : []).find(g => g.id === id) || null;
+}
+// Every ACTIVE office user (profile.staffType==="office") — a van appointment with
+// no assigned driver goes to all of them so it's owned, not lost.
+async function officeUsernames(env, tid) {
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile, status FROM users WHERE tenant_id=?").bind(tid).all();
+    const out = [];
+    for (const u of results || []) {
+      const t = String(u.status == null ? "" : u.status).trim().toLowerCase();
+      if (!(t === "" || t === "active")) continue;
+      let p = {}; try { p = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+      if (p.staffType === "office" && u.username) out.push(u.username);
+    }
+    return out;
+  } catch { return []; }
+}
+// Create (or update, by stable id) the SLA job for a booked MOT/service.
+async function makeRenewalJob(env, tid, o) {
+  const { reg, type, scheduledAt, durationMinutes, garage, driver, changedBy } = o;
+  const label = RENEWAL_LABEL[type] || "Service";
+  const collectHQ = !!(garage && garage.collectsFromHQ);
+  const siteName = collectHQ ? `${HQ_NAME} — collected by ${garage.name}` : (garage ? garage.name : label);
+  const postcode = collectHQ ? HQ_POSTCODE : (garage ? (garage.postcode || "") : "");
+  let lat = collectHQ ? null : (garage && garage.lat != null ? garage.lat : null);
+  let lng = collectHQ ? null : (garage && garage.lng != null ? garage.lng : null);
+  if (collectHQ) { const g = await geocodePostcode(HQ_POSTCODE); if (g) { lat = g.lat; lng = g.lng; } }
+  const where = garage ? (collectHQ ? ` · ${garage.name} collecting from HQ` : ` at ${garage.name}`) : "";
+  // No driver on the van → give it to the whole office so it's owned.
+  const engineers = driver ? [driver] : await officeUsernames(env, tid);
+  const payload = {
+    id: renewalJobId(reg, type),
+    reference: `${label} — ${reg}`,
+    description: `${label} appointment — ${reg}${where}`,
+    fleetRenewal: true, vehicleReg: reg, renewalType: type,
+    assignedEngineers: engineers,
+    siteName, postcode, lat, lon: lng, storeType: "fleet",
+    scheduledAt, durationMinutes: durationMinutes || (type === "mot" ? 60 : 120),
+    changedBy: changedBy || "fleet",
+  };
+  return createOrUpdateJobFromPayload(env, tid, payload);
+}
+async function removeRenewalJob(env, tid, jobId) {
+  if (!jobId) return;
+  try { await env.DB.prepare("DELETE FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).run(); } catch {}
+}
+// When a van's driver changes, move any FUTURE booked MOT/service appointment to
+// the new driver (or unassign if the van now has none).
+async function reassignRenewalJobs(env, tid, reg, newDriver) {
+  try {
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const entry = map[regKey(reg)]; if (!entry) return;
+    const now = Date.now();
+    for (const type of ["mot", "service"]) {
+      const e = entry[type];
+      if (!e || !e.jobId || !e.scheduledAt) continue;
+      if (Date.parse(e.scheduledAt) < now) continue;   // past appointments left alone
+      // New driver → them; no driver → the whole office (so it's owned, not lost).
+      const engineers = newDriver ? [newDriver] : await officeUsernames(env, tid);
+      await createOrUpdateJobFromPayload(env, tid, engineers.length
+        ? { id: e.jobId, assignedEngineers: engineers, fleetRenewal: true, changedBy: "driver-change" }
+        : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
+      ).catch(() => {});
+    }
+  } catch {}
+}
+async function appConfigJson(env, key) {
+  try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); return row && row.value ? (JSON.parse(row.value) || {}) : {}; }
+  catch { return {}; }
+}
+function prettyId(id) { return String(id || "").replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, c => c.toUpperCase()) || "Item"; }
+function defectLabelMap(settings) {
+  const m = {}; const add = arr => { (arr || []).forEach(it => { if (it && it.id) m[it.id] = it.label || it.id; }); };
+  add(settings && settings.checklist); add(settings && settings.equipment); return m;
+}
+// Flat list of EVERY reported defect across the fleet, each with its effective
+// status. Loads what it needs unless the caller pre-passes maps (the vehicles
+// hot path shares its already-fetched clear/status/settings reads).
+async function collectDefects(env, tid, opts = {}) {
+  const statusMap = opts.statusMap || await appConfigJson(env, DEFECTST_KEY(tid));
+  const clearMap = opts.clearMap || await appConfigJson(env, DEFECTCLR_KEY(tid));
+  const settings = opts.settings || await appConfigJson(env, "vancheck:settings");
+  const names = opts.names || null;
+  const baseLbl = defectLabelMap(settings);
+  const out = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle);
+      const at = r.checked_at || "";
+      const answers = items.answers || {};
+      const meta = items.answerMeta || {};
+      const notes = items.defectNotes || {};
+      const custLbl = items.custom ? defectLabelMap({ checklist: items.custom.checklist, equipment: items.custom.equipment }) : null;
+      const clearAt = clearMap[rk] || "";
+      const eff = key => {
+        const s = statusMap[key];
+        if (s && s.status) return { status: s.status, note: s.note || "", by: s.by || "", at: s.at || "" };
+        if (clearAt && at && new Date(at) <= new Date(clearAt)) return { status: "resolved", note: "", by: "", at: clearAt };
+        return { status: "open", note: "", by: "", at: "" };
+      };
+      const push = (itemId, kind, label, answerWord, driverNote) => {
+        const key = `${rk}::${at}::${itemId}`;
+        const e = eff(key);
+        out.push({
+          key, reg: r.vehicle, regNorm: rk, checkedAt: at, driver: r.username,
+          driverName: names ? (names[r.username] || r.username) : r.username,
+          itemId, kind, label, answer: answerWord, driverNote: driverNote || "",
+          status: e.status, officeNote: e.note, statusBy: e.by, statusAt: e.at,
+        });
+      };
+      for (const id of Object.keys(answers)) {
+        const v = answers[id]; const m = meta[id];
+        const tone = (m && m.tone) ? m.tone : ((v === "defect" || v === "missing") ? "issue" : "ok");
+        if (tone !== "issue") continue;
+        const label = (m && m.itemLabel) || (custLbl && custLbl[id]) || baseLbl[id] || prettyId(id);
+        const answerWord = (m && m.label) || (v === "missing" ? "Missing" : "Defect");
+        push(id, v === "missing" ? "missing" : "defect", label, answerWord, notes[id]);
+      }
+      if (r.safe_to_drive != null && Number(r.safe_to_drive) === 0) {
+        push("__notsafe", "notsafe", "Not safe to drive", "Not safe", items.notSafeNote || "");
+      }
+    }
+  } catch {}
+  return out;
+}
+// Per-reg summary of UNRESOLVED defects (for the vehicle cards).
+function defectSummary(list) {
+  const out = {};
+  for (const d of list) {
+    if (d.status === "resolved") continue;
+    const c = out[d.regNorm] || (out[d.regNorm] = { open: 0, pending: 0, notSafe: false, since: "" });
+    if (d.status === "pending") c.pending++; else c.open++;
+    if (d.kind === "notsafe") c.notSafe = true;
+    if (d.checkedAt && (!c.since || new Date(d.checkedAt) < new Date(c.since))) c.since = d.checkedAt;
+  }
+  return out;
+}
 // Newest van-check date per vehicle (any outcome — this is "was it checked",
 // not "did it pass"). Skipped weeks don't count as a real check.
 async function lastVanCheckMap(env, tid) {
@@ -562,6 +758,9 @@ export async function handle(request, env, ctx, url, sess) {
           .bind(tid, reg, username, from, null, sess.user.username, now).run();
         await env.DB.prepare("UPDATE users SET vehicle_assigned=? WHERE tenant_id=? AND username=?").bind(reg, tid, username).run();
       }
+      // Any FUTURE booked MOT/service appointment for this van follows the new
+      // driver automatically (or unassigns if the van now has none).
+      await reassignRenewalJobs(env, tid, reg, username);
       return jr({ ok: true }, headers);
     }
   }
@@ -578,7 +777,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Gather everything the cards need CONCURRENTLY — these lookups are
     // independent, so running them in parallel turns ~10 stacked round trips into
     // one, which is the main win for this page's speed.
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -586,15 +785,19 @@ export async function handle(request, env, ctx, url, sess) {
       lastVanCheckMap(env, tid),         // newest van-check date per reg (card bar)
       mpgByVehicle(env, tid),
       canMoney(env, tid, sess),
-      appCfg(DEFECTCLR_KEY(tid)),        // defects marked resolved by an admin
+      appCfg(DEFECTCLR_KEY(tid)),        // legacy per-reg bulk "resolved as of" mark
       appCfg(VCACK_KEY(tid)),
+      appCfg(DEFECTST_KEY(tid)),         // per-defect statuses (open/pending/resolved)
+      appCfg("vancheck:settings"),       // item labels for the defect list
+      appCfg(RENEWALACK_KEY(tid)),       // MOT/tax/service "booked / in hand" acks
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
       env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] })),
     ]);
     const pendVc = new Set((pendVcRes.results || []).map(r => dn(r.reg)));
-    const defects = await vanCheckDefects(env, tid, defResolved);
+    const defList = await collectDefects(env, tid, { statusMap: defStatus, clearMap: defResolved, settings: vcSettings });
+    const defects = defectSummary(defList);   // { REGNORM: {open,pending,notSafe,since} }
     // Handover state per reg: latest completed (card's direct link) + whether one
     // is still pending (a badge / "awaiting handover" hint).
     const hoRows = hoRes.results || [];
@@ -620,6 +823,14 @@ export async function handle(request, env, ctx, url, sess) {
         maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
       }
     }
+    // Approved leave over the booking horizon — to flag a driver who's off on the
+    // day of their van's MOT/service appointment.
+    let leaveMap = {};
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const horizon = new Date(Date.now() + 150 * 86400000).toISOString().slice(0, 10);
+      leaveMap = await approvedLeaveInRange(env, tid, today, horizon);
+    } catch {}
     const vehicles = await Promise.all((results || []).map(async v => {
       const cm = miles[dn(v.reg)] || null;
       const sv = serviceView(v, cm);
@@ -646,11 +857,28 @@ export async function handle(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
-        // Outstanding van-check defects (stay flagged until an admin resolves).
-        defectItems: (defects[dn(v.reg)] || {}).items || 0,
-        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
-        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
-        defectSince: (defects[dn(v.reg)] || {}).since || "",
+        // Outstanding van-check defects, now split by status (open needs sorting,
+        // pending = booked in / awaiting). Resolved individually or in bulk.
+        defectOpen: (defects[regKey(v.reg)] || {}).open || 0,
+        defectPending: (defects[regKey(v.reg)] || {}).pending || 0,
+        defectNotSafe: !!(defects[regKey(v.reg)] || {}).notSafe,
+        defectSince: (defects[regKey(v.reg)] || {}).since || "",
+        // Renewal "booked / in hand" acks — surfaced only while the item is still
+        // due (a renewed date auto-clears the amber). Value = the note (or true).
+        ...(() => {
+          const a = renewAck[regKey(v.reg)] || {};
+          const dm = daysToDate(v.mot_due), dt = daysToDate(v.tax_due);
+          const due = { mot: dm != null && dm <= 30, tax: dt != null && dt <= 30, service: sv.status === "warn" || sv.status === "bad" };
+          const driver = drv[dn(v.reg)] || "";
+          const pend = k => (due[k] && a[k]) ? (a[k].note || true) : "";
+          const appt = k => (due[k] && a[k] && a[k].apptDate) ? { date: a[k].apptDate, garage: a[k].garageName || "", jobId: a[k].jobId || "" } : null;
+          const clash = k => { const e = due[k] ? a[k] : null; if (!e || !e.apptDate || !driver) return null; return (leaveMap[driver] && leaveMap[driver][e.apptDate]) ? { date: e.apptDate, driver } : null; };
+          return {
+            motPending: pend("mot"), taxPending: pend("tax"), servicePending: pend("service"),
+            motAppt: appt("mot"), serviceAppt: appt("service"),
+            motClash: clash("mot"), serviceClash: clash("service"),
+          };
+        })(),
         lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),   // card status bar: ok | ack | due
         vanCheckRequested: pendVc.has(dn(v.reg)),  // a one-off check is pending — hide the Request button
@@ -1286,21 +1514,191 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true, reg, checks }, headers);
   }
 
-  // ── Mark a van's reported defects resolved (clears the card flag) ─────────
-  // Stamps a per-reg "resolved as of now" time; any van-check defect completed
-  // on/before it is treated as dealt-with. A NEW defect reported afterwards
-  // re-flags the van. Any Vehicles user can resolve.
+  // ── Every reported defect across the fleet (per-defect tracking) ──────────
+  // GET /fleet/defects?reg=&status=&includeResolved=1  (any Vehicles user).
+  // Powers the per-van defect panel and the central "all vans" defect table.
+  if (sub === "/defects" && method === "GET") {
+    const reg = q.get("reg") || "";
+    const statusF = q.get("status") || "";     // open | pending | resolved | all
+    const includeResolved = q.get("includeResolved") === "1" || statusF === "resolved" || statusF === "all";
+    const names = await nameMap(env, tid);
+    let list = await collectDefects(env, tid, { names });
+    if (reg) { const rk = regKey(reg); list = list.filter(d => d.regNorm === rk); }
+    const summary = { open: 0, pending: 0, resolved: 0 };
+    for (const d of list) summary[d.status] = (summary[d.status] || 0) + 1;
+    let rows = list;
+    if (statusF && statusF !== "all") rows = rows.filter(d => d.status === statusF);
+    else if (!includeResolved) rows = rows.filter(d => d.status !== "resolved");
+    rows.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
+    return jr({ ok: true, defects: rows, summary }, headers);
+  }
+
+  // ── Set ONE defect's status + office note ─────────────────────────────────
+  // POST /fleet/defect-status {key, status?, note?}  (any Vehicles user).
+  // status open|pending|resolved; an explicit status wins over any bulk clear.
+  if (sub === "/defect-status" && method === "POST") {
+    const b = await readJson(request);
+    const key = String(b.key || "").trim();
+    if (!key) return jr({ error: "key required" }, headers, 400);
+    const map = await appConfigJson(env, DEFECTST_KEY(tid));
+    const prev = map[key] || {};
+    const status = ["open", "pending", "resolved"].includes(b.status) ? b.status : (prev.status || "open");
+    const note = typeof b.note === "string" ? b.note.slice(0, 500) : (prev.note || "");
+    map[key] = { status, note, by: (sess && sess.user && sess.user.username) || "", at: new Date().toISOString() };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, DEFECTST_KEY(tid), JSON.stringify(map)).run();
+    return jr({ ok: true, key, status, note, by: map[key].by, at: map[key].at }, headers);
+  }
+
+  // ── Mark a renewal (MOT / tax / service) as booked / in hand ──────────────
+  // POST /fleet/renewal-status {reg, type, status:"pending"|"open", note}.
+  // "pending" = booked/awaiting (amber, note kept); "open" clears it back to red.
+  // Auto-clears itself when the underlying date renews (see /fleet/vehicles).
+  if (sub === "/renewal-status" && method === "POST") {
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr({ error: "reg + valid type required" }, headers, 400);
+    const rk = regKey(reg);
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const cur = map[rk] || (map[rk] = {});
+    const prevJobId = cur[type] && cur[type].jobId;
+    if (b.status === "pending") {
+      const entry = {
+        note: typeof b.note === "string" ? b.note.slice(0, 300) : "",
+        by: (sess && sess.user && sess.user.username) || "", at: new Date().toISOString(),
+        apptDate: /^\d{4}-\d{2}-\d{2}$/.test(b.apptDate || "") ? b.apptDate : "",
+        scheduledAt: (b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt))) ? new Date(b.scheduledAt).toISOString() : "",
+        durationMinutes: b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : (type === "mot" ? 60 : 120),
+        garageId: String(b.garageId || "") || "",
+      };
+      // MOT/service WITH a date → make (or update) the appointment job on the
+      // scheduler, assigned to the van's current driver.
+      if ((type === "mot" || type === "service") && entry.scheduledAt) {
+        const garage = await garageById(env, tid, entry.garageId);
+        const driver = await currentDriver(env, tid, reg);
+        const job = await makeRenewalJob(env, tid, { reg, type, scheduledAt: entry.scheduledAt, durationMinutes: entry.durationMinutes, garage, driver, changedBy: (sess && sess.user && sess.user.username) || "" });
+        entry.jobId = job.id;
+        entry.driver = driver || "";
+        entry.garageName = garage ? garage.name : "";
+        ctx?.waitUntil(reconcileRelease(env, tid, job).catch(() => {}));
+      } else if (prevJobId) {
+        entry.jobId = prevJobId;
+        if (cur[type]) { entry.driver = cur[type].driver || ""; entry.garageName = cur[type].garageName || ""; }
+      }
+      cur[type] = entry;
+    } else {
+      if (prevJobId) await removeRenewalJob(env, tid, prevJobId);   // unbook cancels the job
+      delete cur[type];
+    }
+    if (!Object.keys(map[rk]).length) delete map[rk];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    return jr({ ok: true, reg, type, status: b.status === "pending" ? "pending" : "open", note: (cur[type] && cur[type].note) || "", jobId: (cur[type] && cur[type].jobId) || null }, headers);
+  }
+
+  // ── Complete a renewal (MOT / tax / service) and set the NEW date(s) ───────
+  // POST /fleet/renewal-complete {reg, type, date, miles?, nextDate?}. Writes the
+  // renewed date onto the vehicle (so the next one is tracked) and clears the
+  // booked/in-hand ack for that type. Service also updates the last-service
+  // mileage; nextDate overrides the computed next-service (else it recomputes
+  // from the interval).
+  if (sub === "/renewal-complete" && method === "POST") {
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    const date = String(b.date || "").slice(0, 10);
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr({ error: "reg + valid type required" }, headers, 400);
+    if (!date) return jr({ error: "date required" }, headers, 400);
+    const rk = dnReg(reg);
+    if (type === "mot") {
+      await env.DB.prepare("UPDATE vehicles SET mot_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else if (type === "tax") {
+      await env.DB.prepare("UPDATE vehicles SET tax_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else {
+      const row = await env.DB.prepare("SELECT svc_interval_days, svc_interval_miles FROM vehicles WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, rk).first();
+      const miles = (b.miles != null && b.miles !== "" && !isNaN(Number(b.miles))) ? Math.round(Number(b.miles)) : null;
+      let next = "";
+      if (b.nextDate) next = String(b.nextDate).slice(0, 10);
+      else if (!(row && (row.svc_interval_days || row.svc_interval_miles))) next = date; // no interval → keep the entered next date if given, else the serviced date
+      await env.DB.prepare("UPDATE vehicles SET last_service_date=?, last_service_miles=COALESCE(?, last_service_miles), next_service=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?")
+        .bind(date, miles, next, tid, rk).run();
+    }
+    // clear the booked ack for this type + remove its appointment job (done now).
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const k = map[regKey(reg)] ? regKey(reg) : (map[dnReg(reg)] ? dnReg(reg) : "");
+    if (k && map[k]) {
+      const jobId = map[k][type] && map[k][type].jobId;
+      if (jobId) await removeRenewalJob(env, tid, jobId);
+      delete map[k][type];
+      if (!Object.keys(map[k]).length) delete map[k];
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    }
+    return jr({ ok: true, reg, type, date }, headers);
+  }
+
+  // ── Managed garages (where a service/MOT is carried out) ──────────────────
+  if (sub === "/garages" && method === "GET") {
+    const raw = await appConfigJson(env, GARAGES_KEY(tid));
+    return jr({ ok: true, garages: Array.isArray(raw) ? raw : [], hq: { name: HQ_NAME, postcode: HQ_POSTCODE } }, headers);
+  }
+  if (sub === "/garage" && method === "POST") {
+    const b = await readJson(request);
+    const name = String(b.name || "").trim();
+    if (!name) return jr({ error: "name required" }, headers, 400);
+    const raw = await appConfigJson(env, GARAGES_KEY(tid));
+    const list = Array.isArray(raw) ? raw : [];
+    const collectsFromHQ = !!b.collectsFromHQ;
+    const postcode = collectsFromHQ ? "" : String(b.postcode || "").trim().toUpperCase();
+    let lat = null, lng = null;
+    if (!collectsFromHQ && postcode) { const g = await geocodePostcode(postcode); if (g) { lat = g.lat; lng = g.lng; } }
+    const id = String(b.id || "").trim() || ("g" + crypto.randomUUID().slice(0, 8));
+    const garage = { id, name, postcode, lat, lng, collectsFromHQ };
+    const i = list.findIndex(x => x.id === id);
+    if (i >= 0) list[i] = garage; else list.push(garage);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, GARAGES_KEY(tid), JSON.stringify(list)).run();
+    return jr({ ok: true, garage, geocoded: lat != null }, headers);
+  }
+  if (sub === "/garage-delete" && method === "POST") {
+    const b = await readJson(request);
+    const id = String(b.id || "").trim();
+    const raw = await appConfigJson(env, GARAGES_KEY(tid));
+    const list = (Array.isArray(raw) ? raw : []).filter(x => x.id !== id);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, GARAGES_KEY(tid), JSON.stringify(list)).run();
+    return jr({ ok: true }, headers);
+  }
+
+  // ── Mark ALL of a van's reported defects resolved (bulk) ──────────────────
+  // Stamps the legacy per-reg "resolved as of now" time AND explicitly resolves
+  // each currently-outstanding defect (so nothing lingers), all in one tap.
   if (sub === "/defects-resolve" && method === "POST") {
     const b = await readJson(request);
     const reg = String(b.reg || "").trim();
     if (!reg) return jr({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
-    let map = {};
-    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) map = JSON.parse(row.value) || {}; } catch {}
-    map[rk] = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    const who = (sess && sess.user && sess.user.username) || "";
+    // 1) legacy timestamp (covers anything not individually enumerated)
+    const clr = await appConfigJson(env, DEFECTCLR_KEY(tid));
+    clr[rk] = nowIso;
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-      .bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
-    return jr({ ok: true, reg, resolvedAt: map[rk] }, headers);
+      .bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(clr)).run();
+    // 2) explicitly resolve each current open/pending defect on this van
+    const stMap = await appConfigJson(env, DEFECTST_KEY(tid));
+    const list = await collectDefects(env, tid, { clearMap: {}, statusMap: stMap });
+    let n = 0;
+    for (const d of list) {
+      if (d.regNorm === rk && d.status !== "resolved") {
+        stMap[d.key] = { status: "resolved", note: (stMap[d.key] && stMap[d.key].note) || "", by: who, at: nowIso };
+        n++;
+      }
+    }
+    if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, DEFECTST_KEY(tid), JSON.stringify(stMap)).run();
+    return jr({ ok: true, reg, resolvedAt: nowIso, resolved: n }, headers);
   }
 
   // ── Acknowledge a MISSED van check (waves the red bar for ~7 days) ──────────

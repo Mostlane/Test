@@ -78,6 +78,12 @@
   .tag.warn{background:#fef3c7;color:#92400e;}
   .tag.bad{background:#fee2e2;color:#b91c1c;}
   .tag.info{background:#e0f2fe;color:#075985;}
+  .tag.pending{background:#fef3c7;color:#92400e;border:1px dashed #d97706;}
+  .tag.renew-chip{cursor:pointer;}
+  .tag.renew-chip:hover{filter:brightness(.97);}
+  .fleet-banner.pend{background:#fffbeb;color:#92400e;border:1px solid #fcd34d;font-weight:600;}
+  .fleet-banner.pend .fb-title{color:#92400e;}
+  .fleet-banner .fb-seg.pending{background:#fef3c7;color:#92400e;border:1px solid #f0c674;border-radius:999px;padding:2px 9px;border-bottom-style:solid;}
   .card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px;border-top:1px dashed var(--line);}
   .grip{cursor:grab;color:var(--muted);font-size:18px;line-height:1;touch-action:none;user-select:none;padding:2px;}
   .grip:active{cursor:grabbing;}
@@ -91,6 +97,41 @@
   .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:2000;padding:14px;}
   .modal{background:#fff;width:100%;max-width:480px;max-height:88vh;overflow:auto;border-radius:14px;padding:18px;}
   .modal h3{margin:0 0 12px;font-size:17px;}
+  /* Defect chips (cards) */
+  .defect-chip{cursor:pointer;}
+  .defect-chip:hover{filter:brightness(.96);}
+  /* Defect management modal */
+  .deftabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;}
+  .deftab{border:1px solid #d7dee6;background:#f7fafc;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;color:#334155;}
+  .deftab.on{background:#003366;border-color:#003366;color:#fff;font-weight:600;}
+  .deftab span{opacity:.75;font-size:12px;margin-left:3px;}
+  .defgrp{margin:0 0 14px;}
+  .defgrphd{font-size:13px;font-weight:700;color:#003366;background:#eef4fb;border-radius:8px;padding:6px 10px;margin:0 0 8px;display:flex;justify-content:space-between;}
+  .defgrphd span{opacity:.7;font-weight:600;}
+  .defrow{border:1px solid #e2e8f0;border-left:4px solid #dc2626;border-radius:10px;padding:11px 12px;margin:0 0 9px;background:#fff;}
+  .defrow.pending{border-left-color:#d97706;background:#fffdf7;}
+  .defrow.resolved{border-left-color:#94a3b8;background:#f8fafc;opacity:.82;}
+  .defrow .deftop{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:14.5px;font-weight:600;color:#16202e;}
+  .defrow.resolved .deftop{text-decoration:line-through;color:#64748b;}
+  .defrow .defico{font-size:15px;}
+  .defrow .defans{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:1px 7px;}
+  .defrow.pending .defans{background:#fef3c7;color:#92400e;}
+  .defrow.resolved .defans{background:#e2e8f0;color:#475569;}
+  .defrow .defmeta{font-size:12px;color:#64748b;margin-top:3px;}
+  .defrow .defnote{font-size:12.5px;color:#475569;margin-top:5px;background:#f1f5f9;border-radius:7px;padding:5px 8px;}
+  .defrow .defctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;}
+  .stbtn{border:1px solid #d7dee6;background:#fff;border-radius:8px;padding:5px 11px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;color:#475569;}
+  .stbtn.complete{color:#166534;border-color:#bbf7d0;background:#f0fdf4;}
+  .stbtn.complete:hover{background:#dcfce7;}
+  .defrow.renewalrow{border-left-color:#dc2626;}
+  .defrow.renewalrow.pending{border-left-color:#d97706;}
+  .stbtn.open.on{background:#dc2626;border-color:#dc2626;color:#fff;}
+  .stbtn.pending.on{background:#d97706;border-color:#d97706;color:#fff;}
+  .stbtn.resolved.on{background:#16a34a;border-color:#16a34a;color:#fff;}
+  .defby{font-size:11.5px;color:#94a3b8;margin-left:2px;}
+  .defoffice{width:100%;margin-top:8px;padding:8px 10px;border:1px solid #d7dee6;border-radius:8px;font:inherit;font-size:13px;}
+  .defoffice:focus{outline:none;border-color:#1A4F8F;box-shadow:0 0 0 3px rgba(26,79,143,.12);}
+  .defempty{text-align:center;color:#64748b;padding:26px 10px;font-size:14px;}
   .mrow{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
   .mrow label{font-size:13px;font-weight:600;color:#334155;}
   .mrow input,.mrow select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
@@ -130,6 +171,7 @@
       <a class="btn small" id="insightsLink" href="vehicle-insights.html" style="display:none;">📊 Insights</a>
       <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
       <a class="btn small" href="van-timesheet.html" title="Door-to-door van timesheets">⏱️ Van Timesheet</a>
+      <button class="btn small" onclick="openGaragesModal()" title="Manage the garages a service/MOT is carried out at">🔧 Garages</button>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
     </div>
@@ -156,9 +198,12 @@
       <div class="scard"><div class="lbl">Active</div><div class="val" id="sumActive">0</div><div class="note">Currently in service</div></div>
       <div class="scard"><div class="lbl">Unassigned</div><div class="val" id="sumUnassigned">0</div><div class="note">No current driver</div></div>
       <div class="scard alert"><div class="lbl">Service due</div><div class="val" id="sumDue">0</div><div class="note">Due soon or overdue</div></div>
-      <div class="scard alert" id="sumFaultCard" style="display:none"><div class="lbl">Vans with faults</div><div class="val" id="sumFault">0</div><div class="note">Van-check defects to resolve</div></div>
+      <div class="scard alert" id="sumFaultCard" style="display:none;cursor:pointer" onclick="openDefectsModal()" title="Open the defect list for all vans"><div class="lbl">Vans with faults</div><div class="val" id="sumFault">0</div><div class="note">Tap to manage all defects →</div></div>
     </div>
 
+    <div id="defectBanner" style="display:none;background:#fef2f2;border:1px solid #dc2626;border-radius:12px;padding:11px 14px;margin:0 0 12px;color:#991b1b;font-size:13.5px;font-weight:600;cursor:pointer" onclick="openDefectsModal()">
+      🔧 <span id="defectBannerText">Defects reported</span> — <span style="text-decoration:underline">tap to view &amp; resolve them all in one place</span>
+    </div>
     <div class="reorder-hint" id="reorderHint">Tip: drag the <b>⠿</b> handle on a card to reorder the fleet — the order is saved and shared across the portal. (Clear the search/filter to reorder.)</div>
     <div id="attnBanner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:11px 14px;margin:0 0 12px;color:#92400e;font-size:13.5px;font-weight:600;">
       ⚠ Showing vans that <b>need attention</b> — MOT or tax due within 30 days (or overdue), a service due, or a handover still pending. The amber/red tags on each card show exactly why. <a href="#" onclick="document.getElementById('filterActive').value='all';renderFleet();return false;" style="color:#92400e;text-decoration:underline;">Show all vehicles</a>
@@ -264,6 +309,23 @@
     </div>
   </div>
 
+  <!-- DEFECTS MODAL -->
+  <div class="backdrop" id="defBackdrop">
+    <div class="modal" style="max-width:640px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <h3 id="defTitle" style="margin:0;flex:1">Defects</h3>
+        <button class="btn ghost small" onclick="closeDefectsModal()">✕ Close</button>
+      </div>
+      <div class="hint" style="margin-bottom:10px">Set each fault to <b style="color:#dc2626">Open</b> (needs sorting), <b style="color:#d97706">Pending</b> (booked in / awaiting a part) or <b style="color:#16a34a">Resolved</b>. Add a note so everyone knows what's happening.</div>
+      <div id="defScoped" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <a class="btn ghost small" id="defViewChecks" href="#">📋 View check history</a>
+        <button class="btn ghost small" id="defResolveAll" onclick="resolveAllOnVan()">✓ Resolve all on this van</button>
+      </div>
+      <div class="deftabs" id="defTabs"></div>
+      <div id="defBody"><span class="hint">Loading…</span></div>
+    </div>
+  </div>
+
   <!-- LIGHTBOX -->
   <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightboxImg" alt="Vehicle photo"></div>
 
@@ -345,7 +407,10 @@
     $("sumFault").textContent=faults;
     fc.classList.remove("alert","fault-bad","fault-ok");
     fc.classList.add(faults?"fault-bad":"fault-ok");
-    const note=fc.querySelector(".note"); if(note) note.textContent = faults ? "Van-check defects to resolve" : "No outstanding faults";
+    const note=fc.querySelector(".note"); if(note) note.textContent = faults ? "Tap to manage all defects →" : "No outstanding faults";
+    // One consolidated banner now covers faults + services + MOT/tax (renderBanner),
+    // pending-aware, so the separate red defect banner is retired.
+    const db=$("defectBanner"); if(db) db.style.display="none";
     renderBanner();
   }
   // Jump the grid to a filtered view (banner segments link here).
@@ -360,50 +425,265 @@
     if(v.pendingHandover) out.push("handover pending");
     return out;
   }
-  // Green "all clear" / red "needs attention" banner naming exactly what's
-  // outstanding across the fleet (faults, services due/overdue, MOT/tax/handover).
+  // ONE consolidated banner. RED only names things that genuinely need action;
+  // anything marked booked / in hand (a pending defect, or a booked MOT/tax/
+  // service) drops to a calm amber "in hand" line — so pending work no longer
+  // makes the whole banner red and in-your-face.
   function renderBanner(){
     const b=$("fleetBanner"); if(!b) return;
     const on=v=>v.active!==false;
-    const faults=FLEET.filter(v=>on(v)&&hasDefect(v));
-    const svc=FLEET.filter(v=>on(v)&&(v.serviceStatus==="warn"||v.serviceStatus==="bad"));
-    const other=FLEET.filter(v=>on(v)&&svc.indexOf(v)<0&&renewalReason(v).length);
     const regs=arr=>arr.map(v=>v.reg||"?").join(", ");
-    const parts=[];
-    if(faults.length) parts.push(`<a class="fb-seg" onclick="jumpFilter('faults')">🔧 ${faults.length} van${faults.length>1?"s":""} with a fault <small>(${esc(regs(faults))})</small></a>`);
-    if(svc.length){ const od=svc.filter(v=>v.serviceStatus==="bad").length; const lbl=od?`${svc.length} service${svc.length>1?"s":""} due — ${od} overdue`:`${svc.length} service${svc.length>1?"s":""} due`; parts.push(`<a class="fb-seg" onclick="jumpFilter('due')">🛠 ${lbl} <small>(${esc(regs(svc))})</small></a>`); }
-    // Renewals: one PINPOINTED segment per van naming its exact issue(s) — not a
-    // vague "MOT / tax / handover" that could be any of them.
-    other.forEach(v=>{ parts.push(`<a class="fb-seg" onclick="jumpFilter('attention')">📋 <b>${esc(v.reg||"?")}</b> — ${esc(renewalReason(v).join(", "))}</a>`); });
+    const open=[], pend=[];
+    // Faults (van checks) — open needs sorting, pending is booked/awaiting.
+    const fOpen=FLEET.filter(v=>on(v)&&hasOpenDefect(v));
+    const fPend=FLEET.filter(v=>on(v)&&!hasOpenDefect(v)&&v.defectPending>0);
+    if(fOpen.length) open.push(`<a class="fb-seg" onclick="openDefectsModal()">🔧 ${fOpen.length} van${fOpen.length>1?"s":""} with a fault <small>(${esc(regs(fOpen))})</small></a>`);
+    if(fPend.length) pend.push(`<a class="fb-seg pending" onclick="openDefectsModal()">🔧 ${fPend.length} fault${fPend.length>1?"s":""} in hand</a>`);
+    // Services.
+    const svcAll=FLEET.filter(v=>on(v)&&(v.serviceStatus==="warn"||v.serviceStatus==="bad"));
+    const svcOpen=svcAll.filter(v=>!v.servicePending), svcPend=svcAll.filter(v=>v.servicePending);
+    if(svcOpen.length){ const od=svcOpen.filter(v=>v.serviceStatus==="bad").length; const lbl=od?`${svcOpen.length} service${svcOpen.length>1?"s":""} due — ${od} overdue`:`${svcOpen.length} service${svcOpen.length>1?"s":""} due`; open.push(`<a class="fb-seg" onclick="jumpFilter('due')">🛠 ${lbl} <small>(${esc(regs(svcOpen))})</small></a>`); }
+    if(svcPend.length) pend.push(`<a class="fb-seg pending" onclick="jumpFilter('due')">🛠 ${svcPend.length} service${svcPend.length>1?"s":""} booked <small>(${esc(regs(svcPend))})</small></a>`);
+    // MOT + Tax, pinpointed per van — open (red) vs booked (amber).
+    FLEET.filter(on).forEach(v=>{
+      [["mot",v.motDue,v.motPending,"MOT"],["tax",v.taxDue,v.taxPending,"tax"]].forEach(([type,date,p,lbl])=>{
+        const d=daysTo(date); if(d==null||d>30) return;   // not due
+        if(p){ pend.push(`<a class="fb-seg pending" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📌 <b>${esc(v.reg||"?")}</b> — ${lbl} booked</a>`); }
+        else{ const txt=d<0?`${lbl} overdue`:(d===0?`${lbl} due today`:`${lbl} due in ${d} day${d===1?"":"s"}`); open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📋 <b>${esc(v.reg||"?")}</b> — ${txt}</a>`); }
+      });
+    });
+    // Holiday clash — the driver is booked off on their van's MOT/service day.
+    FLEET.filter(on).forEach(v=>{
+      [["mot",v.motClash,"MOT"],["service",v.serviceClash,"Service"]].forEach(([type,clash,lbl])=>{
+        if(!clash) return;
+        open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">🚫 <b>${esc(v.reg||"?")}</b> — ${lbl} ${fmtDMY(clash.date)}, driver OFF</a>`);
+      });
+    });
+    // Handover pending (kept as an amber "in hand" item — it's awaiting the driver).
+    FLEET.filter(v=>on(v)&&v.pendingHandover).forEach(v=>{ pend.push(`<a class="fb-seg pending" onclick="jumpFilter('attention')">🤝 <b>${esc(v.reg||"?")}</b> — handover pending</a>`); });
+
     b.style.display="";
-    if(!parts.length){ b.className="fleet-banner ok"; b.innerHTML="✓ Fleet all clear — no faults, services or renewals outstanding."; }
-    else { b.className="fleet-banner bad"; b.innerHTML=`<span class="fb-title">⚠ Fleet needs attention:</span>`+parts.join(""); }
+    if(!open.length && !pend.length){ b.className="fleet-banner ok"; b.innerHTML="✓ Fleet all clear — no faults, services or renewals outstanding."; return; }
+    if(!open.length){ b.className="fleet-banner pend"; b.innerHTML=`<span class="fb-title">📌 In hand — booked or awaiting:</span>`+pend.join(""); return; }
+    b.className="fleet-banner bad"; b.innerHTML=`<span class="fb-title">⚠ Fleet needs attention:</span>`+open.join("")+pend.join("");
   }
 
   // A van has an outstanding fault if a van-check reported a defect/missing item
-  // or the driver flagged it not-safe-to-drive, and it hasn't been resolved.
-  function hasDefect(v){ return (v.defectItems>0)||(v.defectChecks>0)||v.defectNotSafe; }
+  // or the driver flagged it not-safe-to-drive, and it isn't fully resolved.
+  function hasDefect(v){ return (v.defectOpen>0)||(v.defectPending>0)||v.defectNotSafe; }
+  function hasOpenDefect(v){ return (v.defectOpen>0)||v.defectNotSafe; }
+  // Card chips — red for defects that still need sorting, amber for ones that are
+  // in hand (booked in / awaiting a part). Tap any to manage that van's defects.
   function defectTags(v){
     if(!hasDefect(v)) return "";
+    const r=v.reg||"";
+    const open=v.defectNotSafe?"tap to manage":(v.defectSince?"since "+fmtDMY(v.defectSince):"tap to manage");
     let out="";
-    if(v.defectNotSafe) out+=`<span class="tag bad">🚫 Not safe to drive<em>reported in a van check</em></span>`;
-    const n=v.defectItems||0;
-    const sub=(n?`${n} item${n>1?"s":""}`:"reported")+(v.defectSince?` · since ${fmtDMY(v.defectSince)}`:"");
-    out+=`<span class="tag bad">⚠ Defect reported<em>${esc(sub)}</em></span>`;
+    if(v.defectNotSafe) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">🚫 Not safe to drive<em>tap to manage</em></span>`;
+    if(v.defectOpen>0) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""}<em>${esc(open)}</em></span>`;
+    if(v.defectPending>0) out+=`<span class="tag warn defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">⏳ ${v.defectPending} pending<em>booked in / awaiting</em></span>`;
     return out;
   }
-  // Mark all of a van's reported defects resolved (clears the card flag).
+  // Mark ALL of a van's reported defects resolved (bulk — used inside the panel).
   async function resolveDefects(reg){
-    const msg="Mark all reported defects for "+reg+" as resolved?\n\nThe warning clears until a new defect is reported in a future van check.";
-    const ok=window.MLUI?await MLUI.confirm(msg,{title:"Resolve defects",okLabel:"✓ Mark resolved"}):confirm(msg);
+    const msg="Mark ALL current defects for "+reg+" as resolved?\n\nUse this only when everything on this van is sorted. You can resolve them one at a time instead.";
+    const ok=window.MLUI?await MLUI.confirm(msg,{title:"Resolve all defects",okLabel:"✓ Resolve all",danger:true}):confirm(msg);
     if(!ok) return;
     try{
       const r=await aFetch("/fleet/defects-resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg})}).then(r=>r.json());
       if(!r||!r.ok){ alert((r&&r.error)||"Could not mark resolved."); return; }
-      const v=FLEET.find(x=>(x.reg||"")===reg);
-      if(v){ v.defectItems=0; v.defectChecks=0; v.defectNotSafe=false; v.defectSince=""; }
-      pClose(); renderFleet(); updateSummary();
+      DEF_DIRTY=true;
+      await loadDefects();      // refresh the open panel
     }catch(e){ alert("Could not mark resolved."); }
+  }
+
+  // ── Defect management modal ───────────────────────────────────────────────
+  // Scoped to one van (reg given) or every van (no reg). Each fault can be set
+  // Open / Pending / Resolved individually, with a note. Links up: card chips,
+  // card button, deep-dive banner, the "Vans with faults" tile and the red top
+  // banner all open this. Changes re-flow the cards + summary on close.
+  let DEF_ALL=[], DEF_REG="", DEF_FILTER="open", DEF_DIRTY=false;
+  window.openDefectsModal=function(reg){
+    DEF_REG=reg||""; DEF_FILTER="open"; DEF_DIRTY=false;
+    $("defTitle").textContent=reg?("Defects & renewals — "+reg):"All vehicle issues";
+    $("defScoped").style.display=reg?"flex":"none";
+    if(reg) $("defViewChecks").href="vehicle-checks.html?reg="+encodeURIComponent(reg);
+    $("defTabs").innerHTML=""; $("defBody").innerHTML='<span class="hint">Loading…</span>';
+    $("defBackdrop").style.display="flex";
+    loadDefects();
+  };
+  // MOT / tax / service that are due appear as rows too — so they're managed in
+  // one place: set Pending (booked) or ✅ Completed (which asks for the new date).
+  function buildRenewalRows(reg){
+    const rows=[];
+    const vans = reg ? FLEET.filter(v=>(v.reg||"")===reg) : FLEET.filter(v=>v.active!==false);
+    vans.forEach(v=>{
+      const items=[];
+      const dMot=daysTo(v.motDue), dTax=daysTo(v.taxDue);
+      if(dMot!=null&&dMot<=30) items.push({type:"mot",label:"MOT",date:v.motDue,days:dMot,pend:v.motPending});
+      if(dTax!=null&&dTax<=30) items.push({type:"tax",label:"Road tax",date:v.taxDue,days:dTax,pend:v.taxPending});
+      if(v.serviceStatus==="warn"||v.serviceStatus==="bad") items.push({type:"service",label:"Service",date:v.nextServiceDate,pend:v.servicePending,reason:v.serviceReason,bad:v.serviceStatus==="bad"});
+      items.forEach(it=>{
+        const overdue = it.type==="service" ? it.bad : (it.days!=null&&it.days<0);
+        const dueText = it.type==="service"
+          ? (it.reason || (overdue?"overdue":"due soon"))
+          : (it.days<0?("overdue · was "+fmtDMY(it.date)):(it.days===0?"due today":`due in ${it.days}d · ${fmtDMY(it.date)}`));
+        rows.push({
+          renewal:true, reg:v.reg||"", type:it.type, kind:"renewal",
+          key:`renewal::${(v.reg||"").replace(/\s+/g,"").toUpperCase()}::${it.type}`,
+          label:it.label, answer:overdue?"OVERDUE":"DUE", dueText,
+          status: it.pend?"pending":"open",
+          officeNote:(it.pend&&it.pend!==true)?it.pend:"",
+          appt: v[it.type+"Appt"]||null, clash: v[it.type+"Clash"]||null,
+          checkedAt:"", driverName:"", driverNote:""
+        });
+      });
+    });
+    return rows;
+  }
+  function closeDefectsModal(){
+    $("defBackdrop").style.display="none";
+    if(DEF_DIRTY){ DEF_DIRTY=false; loadFleet(); }   // refresh chips/tiles/banner
+  }
+  window.closeDefectsModal=closeDefectsModal;
+  $("defBackdrop").addEventListener("click",e=>{ if(e.target===$("defBackdrop")) closeDefectsModal(); });
+  async function loadDefects(){
+    try{
+      const u="/fleet/defects?includeResolved=1"+(DEF_REG?("&reg="+encodeURIComponent(DEF_REG)):"");
+      const d=await aFetch(u).then(r=>r.json());
+      DEF_ALL=(d&&d.defects)||[];
+    }catch(e){ DEF_ALL=[]; }
+    DEF_ALL=DEF_ALL.concat(buildRenewalRows(DEF_REG));   // fold in due MOT/tax/service
+    renderDefects();
+  }
+  window.setDefFilter=function(f){ DEF_FILTER=f; renderDefects(); };
+  window.resolveAllOnVan=function(){ if(DEF_REG) resolveDefects(DEF_REG); };
+  function renderDefects(){
+    const c={open:0,pending:0,resolved:0}; DEF_ALL.forEach(d=>c[d.status]=(c[d.status]||0)+1);
+    $("defTabs").innerHTML=[["open","Open",c.open],["pending","Pending",c.pending],["resolved","Resolved",c.resolved],["all","All",DEF_ALL.length]]
+      .map(([k,l,n])=>`<button class="deftab${DEF_FILTER===k?" on":""}" onclick="setDefFilter('${k}')">${l}<span>${n}</span></button>`).join("");
+    // "Resolve all" only applies to van-check defects (not renewals).
+    if(DEF_REG){ const out=DEF_ALL.some(d=>!d.renewal && d.status!=="resolved"); $("defResolveAll").style.display=out?"":"none"; }
+    let rows=DEF_FILTER==="all"?DEF_ALL:DEF_ALL.filter(d=>d.status===DEF_FILTER);
+    if(!rows.length){ $("defBody").innerHTML=`<div class="defempty">${DEF_FILTER==="open"?"🎉 Nothing open — all in hand.":"Nothing here."}</div>`; return; }
+    if(DEF_REG){ $("defBody").innerHTML=rows.map(defRow).join(""); return; }
+    // group by van when showing the whole fleet
+    const byReg={}; rows.forEach(d=>{ (byReg[d.reg]=byReg[d.reg]||[]).push(d); });
+    $("defBody").innerHTML=Object.keys(byReg).sort().map(reg=>
+      `<div class="defgrp"><div class="defgrphd"><span>${esc(reg)}</span><span>${byReg[reg].length}</span></div>${byReg[reg].map(defRow).join("")}</div>`
+    ).join("");
+  }
+  function defRow(d){
+    if(d.renewal) return renewalRow(d);
+    const icon=d.kind==="notsafe"?"🚫":d.kind==="missing"?"📦":"⚠";
+    const st=d.status;
+    const btn=(k,l)=>`<button class="stbtn ${k}${st===k?" on":""}" onclick="setDefStatus(this,'${k}')">${l}</button>`;
+    const meta=`Reported ${fmtDMY(d.checkedAt)}${d.driverName?" · "+esc(d.driverName):""}`;
+    const dnote=d.driverNote?`<div class="defnote">🗣 Driver: ${esc(d.driverNote)}</div>`:"";
+    const by=d.statusBy?`<span class="defby">${st==="resolved"?"resolved":st} by ${esc(d.statusBy)}${d.statusAt?" · "+fmtDMY(d.statusAt):""}</span>`:"";
+    return `<div class="defrow ${st}" data-key="${esc(d.key)}">
+      <div class="deftop"><span class="defico">${icon}</span><span class="deflbl">${esc(d.label)}</span><span class="defans">${esc(d.answer||"")}</span></div>
+      <div class="defmeta">${meta}</div>${dnote}
+      <div class="defctl">${btn("open","Open")}${btn("pending","Pending")}${btn("resolved","Resolved")}${by}</div>
+      <input class="defoffice" placeholder="Add a note — e.g. booked in 5 Sep, awaiting part" value="${esc(d.officeNote||"")}" onblur="saveDefNote(this)" onkeydown="if(event.key==='Enter')this.blur()">
+    </div>`;
+  }
+  // A due MOT / tax / service, shown as a manageable row. Open / Pending (booked)
+  // or ✅ Completed (enter the new date). No "Resolved" — completing renews it.
+  function renewalRow(d){
+    const icon=d.type==="mot"?"📋":d.type==="tax"?"💷":"🛠";
+    const st=d.status;
+    const pendLbl=(d.type==="tax")?"Pending":"📅 Book…";
+    const btn=(k,l)=>`<button class="stbtn ${k}${st===k?" on":""}" onclick="setDefStatus(this,'${k}')">${l}</button>`;
+    const apptLine = d.appt&&d.appt.date ? `<div class="defmeta">📅 Booked ${fmtDMY(d.appt.date)}${d.appt.garage?" · "+esc(d.appt.garage):""}</div>` : "";
+    const clashLine = d.clash ? `<div class="defnote" style="background:#fee2e2;color:#991b1b;font-weight:600">⚠ Driver off on ${fmtDMY(d.clash.date)} — reassign or rebook</div>` : "";
+    return `<div class="defrow renewalrow ${d.clash?"":(st==="pending"?"pending":"open")}" data-key="${esc(d.key)}">
+      <div class="deftop"><span class="defico">${icon}</span><span class="deflbl">${esc(d.label)}</span><span class="defans">${esc(d.answer||"")}</span></div>
+      <div class="defmeta">${esc(d.dueText||"")}</div>${apptLine}${clashLine}
+      <div class="defctl">${btn("open","Open")}<button class="stbtn pending${st==="pending"?" on":""}" onclick="setDefStatus(this,'pending')">${pendLbl}</button><button class="stbtn complete" onclick="setDefStatus(this,'complete')">✅ Completed…</button></div>
+      ${d.type==="tax"?`<input class="defoffice" placeholder="Note — e.g. renewed, awaiting" value="${esc(d.officeNote||"")}" onblur="saveDefNote(this)" onkeydown="if(event.key==='Enter')this.blur()">`:""}
+    </div>`;
+  }
+  window.setDefStatus=async function(btnEl,status){
+    const row=btnEl.closest(".defrow"); if(!row) return;
+    const key=row.dataset.key;
+    const d=DEF_ALL.find(x=>x.key===key); if(!d) return;
+    const note=(row.querySelector(".defoffice")||{}).value;
+    if(d.renewal){
+      if(status==="complete"){ openRenewalComplete(d.reg,d.type); return; }
+      // MOT/service "Pending" means BOOK an appointment (date + garage + driver job).
+      if(status==="pending" && (d.type==="mot"||d.type==="service")){ openRenewalModal(d.reg,d.type); return; }
+      DEF_DIRTY=true;
+      try{ await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg:d.reg,type:d.type,status,note})}).then(r=>r.json()); }catch(e){}
+      const v=FLEET.find(x=>(x.reg||"")===d.reg); if(v) v[d.type+"Pending"]= status==="pending"?(note||true):"";
+      // MOT/service "open" cancels the appointment job → refresh from server.
+      if(d.type==="mot"||d.type==="service"){ await loadFleet(); await loadDefects(); }
+      else { d.status=status; d.officeNote = status==="pending"?(note||""):d.officeNote; renderDefects(); }
+      return;
+    }
+    d.status=status; if(note!=null) d.officeNote=note;
+    await postDefStatus(key,status,note);
+    renderDefects();
+  };
+  window.saveDefNote=async function(inp){
+    const row=inp.closest(".defrow"); if(!row) return;
+    const key=row.dataset.key; const d=DEF_ALL.find(x=>x.key===key); if(!d) return;
+    if((d.officeNote||"")===(inp.value||"")) return;
+    d.officeNote=inp.value;
+    if(d.renewal){
+      if(d.status==="pending"){
+        DEF_DIRTY=true;
+        try{ await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg:d.reg,type:d.type,status:"pending",note:inp.value})}).then(r=>r.json()); }catch(e){}
+        const v=FLEET.find(x=>(x.reg||"")===d.reg); if(v) v[d.type+"Pending"]=inp.value||true;
+      }
+      return;
+    }
+    await postDefStatus(key,d.status,inp.value);
+  };
+  // Complete a renewal → collect the new date(s), update the vehicle, drop it off.
+  window.openRenewalComplete=function(reg,type){
+    const v=FLEET.find(x=>(x.reg||"")===reg);
+    const labels={mot:"MOT",tax:"Road tax",service:"Service"};
+    const today=new Date().toISOString().slice(0,10);
+    const fld=(id,label,attrs,val)=>`<label class="hint" style="display:block;margin:9px 0 3px">${label}</label><input id="${id}" ${attrs} value="${esc(String(val==null?"":val))}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px">`;
+    let fields;
+    if(type==="service"){
+      fields=fld("rcDate","Date serviced","type=\"date\"",today)
+        + fld("rcMiles","Mileage at service (optional)","type=\"number\" placeholder=\"current mileage\"", (v&&v.currentMiles!=null)?v.currentMiles:"")
+        + fld("rcNext","Next service due (optional — leave blank to auto-calculate)","type=\"date\"","");
+    } else {
+      fields=fld("rcDate", type==="mot"?"New MOT expiry date":"New tax due date","type=\"date\"","");
+    }
+    pModal(`
+      <h3 style="margin:0 0 4px">✅ ${labels[type]} completed — ${esc(reg)}</h3>
+      <div class="hint" style="margin-bottom:2px">Enter the new date${type==="service"?"s":""} so the next one is tracked. This updates the vehicle and clears it from the list.</div>
+      ${fields}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn ghost small" onclick="pClose()">Cancel</button>
+        <button class="btn primary small" onclick="completeRenewal('${esc(reg)}','${type}')">✅ Save &amp; complete</button>
+      </div>`);
+    setTimeout(()=>{const el=document.getElementById("rcDate"); if(el) el.focus();},50);
+  };
+  window.completeRenewal=async function(reg,type){
+    const date=($("rcDate")||{}).value||"";
+    if(!date){ alert("Please enter the new date."); return; }
+    const body={reg,type,date};
+    if(type==="service"){ const m=($("rcMiles")||{}).value; if(m) body.miles=m; const n=($("rcNext")||{}).value; if(n) body.nextDate=n; }
+    try{
+      const r=await aFetch("/fleet/renewal-complete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not save."); return; }
+      pClose(); DEF_DIRTY=true;
+      await loadFleet();
+      if($("defBackdrop").style.display!=="none") await loadDefects();
+      else { renderFleet(); updateSummary(); }
+    }catch(e){ alert("Could not save."); }
+  };
+  async function postDefStatus(key,status,note){
+    DEF_DIRTY=true;
+    try{
+      const r=await aFetch("/fleet/defect-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,status,note})}).then(r=>r.json());
+      if(r&&r.ok){ const d=DEF_ALL.find(x=>x.key===key); if(d){ d.statusBy=r.by; d.statusAt=r.at; } }
+    }catch(e){}
   }
 
   // Request a van check for this vehicle's assigned driver: a modal to confirm
@@ -477,26 +757,177 @@
   }
 
   // date tag with countdown (MOT / Tax)
-  function dateTag(dateStr,label){
+  // A tag that, when the item is due (or booked), becomes tappable to mark it
+  // booked / in hand. reg+type drive the click → openRenewalModal.
+  function tagWrap(cls,clickable,reg,type,inner){
+    const oc=clickable?` onclick="openRenewalModal('${esc(reg)}','${type}')"`:"";
+    return `<span class="tag ${clickable?cls+" renew-chip":cls}"${oc}>${inner}</span>`;
+  }
+  // MOT / Tax date tag (v+type make it renewal-aware: amber "booked" when pending,
+  // tappable when due). Falls back to a plain tag when called without v.
+  function dateTag(dateStr,label,v,type){
     if(!dateStr) return `<span class="tag info">${label}<em>not set</em></span>`;
-    const d=new Date(dateStr); d.setHours(0,0,0,0);
-    const today=new Date(); today.setHours(0,0,0,0);
-    const days=Math.ceil((d-today)/86400000);
+    const days=daysTo(dateStr), due=days!=null&&days<=30, overdue=days!=null&&days<0;
+    const pend=(v&&type)?v[type+"Pending"]:"";
+    const reg=v?(v.reg||""):"";
+    const clickable=!!(v&&type&&(due||pend));
+    if(due&&pend){
+      const appt=v[type+"Appt"], clash=v[type+"Clash"];
+      const when = appt&&appt.date ? fmtDMY(appt.date)+(appt.garage?" @ "+appt.garage:"") : ((pend&&pend!==true)?pend:fmtDMY(dateStr));
+      if(clash) return tagWrap("bad",clickable,reg,type,`⚠ ${label}<em>booked ${esc(when)} · driver OFF</em>`);
+      return tagWrap("pending",clickable,reg,type,`📌 ${label}<em>booked ${esc(when)}</em>`);
+    }
     let cls="ok",note=fmtDMY(dateStr);
-    if(days<0){ cls="bad"; note=fmtDMY(dateStr)+" · overdue"; }
-    else if(days<=30){ cls="warn"; note=fmtDMY(dateStr)+" · "+days+"d"; }
-    return `<span class="tag ${cls}">${label}<em>${esc(note)}</em></span>`;
+    if(overdue){ cls="bad"; note=fmtDMY(dateStr)+" · overdue"; }
+    else if(due){ cls="warn"; note=fmtDMY(dateStr)+" · "+days+"d"; }
+    return tagWrap(cls,clickable,reg,type,`${label}<em>${esc(note)}</em>`);
   }
   function serviceTag(v){
     const st=v.serviceStatus;
     if(!st||st==="none") return `<span class="tag info">Service<em>not scheduled</em></span>`;
-    const cls=st==="bad"?"bad":st==="warn"?"warn":"ok";
+    const due=st==="warn"||st==="bad";
+    const pend=v.servicePending;
+    if(due&&pend){
+      const appt=v.serviceAppt, clash=v.serviceClash;
+      const when = appt&&appt.date ? fmtDMY(appt.date)+(appt.garage?" @ "+appt.garage:"") : ((pend&&pend!==true)?pend:"");
+      if(clash) return tagWrap("bad",true,v.reg||"","service",`⚠ Service<em>booked ${esc(when)} · driver OFF</em>`);
+      return tagWrap("pending",true,v.reg||"","service",`📌 Service<em>booked${when?" "+esc(when):""}</em>`);
+    }
     let bits=[];
     if(v.nextServiceDate) bits.push(fmtDMY(v.nextServiceDate));
     if(v.serviceDueMiles!=null) bits.push(fmtMiles(v.serviceDueMiles)+" mi");
     const sub=v.serviceReason||bits.join(" / ")||"scheduled";
-    return `<span class="tag ${cls}">Service<em>${esc(sub)}</em></span>`;
+    const cls=st==="bad"?"bad":st==="warn"?"warn":"ok";
+    return tagWrap(cls,due,v.reg||"","service",`Service<em>${esc(sub)}</em>`);
   }
+  // Open the "mark this renewal booked / in hand" prompt.
+  // ── Garages (where a service/MOT is carried out) ──────────────────────────
+  let GARAGES=[], GARAGES_HQ={name:"Mostlane HQ",postcode:"PO15 5RQ"};
+  async function loadGarages(){ try{ const d=await aFetch("/fleet/garages").then(r=>r.json()); GARAGES=(d&&d.garages)||[]; if(d&&d.hq) GARAGES_HQ=d.hq; }catch(e){ GARAGES=[]; } }
+  window.openGaragesModal=async function(){ await loadGarages(); renderGaragesModal(); };
+  function renderGaragesModal(){
+    const rows = GARAGES.length ? GARAGES.map(g=>`
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #eef2f7">
+        <div style="flex:1"><b>${esc(g.name)}</b><div class="hint">${g.collectsFromHQ?("🚚 Collects from HQ ("+esc(GARAGES_HQ.postcode)+")"):(g.postcode?esc(g.postcode):"<i>no postcode</i>")}</div></div>
+        <button class="btn ghost small" onclick="editGarage('${esc(g.id)}')">Edit</button>
+        <button class="btn ghost small" style="color:#b91c1c" onclick="deleteGarage('${esc(g.id)}')">Delete</button>
+      </div>`).join("") : '<div class="hint" style="padding:10px 0">No garages yet — add your first below.</div>';
+    pModal(`
+      <h3 style="margin:0 0 4px">🔧 Garages</h3>
+      <div class="hint" style="margin-bottom:6px">Where services &amp; MOTs are carried out. Tick “collects from HQ” for garages that pick the van up from ${esc(GARAGES_HQ.postcode)}.</div>
+      <div id="garList">${rows}</div>
+      <div style="border-top:2px solid #e2e8f0;margin-top:10px;padding-top:10px"><div id="garForm"></div></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost small" onclick="pClose()">Close</button></div>`);
+    garageForm();
+  }
+  function garageForm(g){
+    g=g||{id:"",name:"",postcode:"",collectsFromHQ:false};
+    const el=$("garForm"); if(!el) return;
+    el.innerHTML=`
+      <label class="hint" style="display:block;margin:2px 0 3px">${g.id?"Edit garage":"Add a garage"}</label>
+      <input id="garName" placeholder="Garage name" value="${esc(g.name)}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:6px">
+      <input id="garPc" placeholder="Postcode" value="${esc(g.postcode||"")}" ${g.collectsFromHQ?"disabled":""} style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:6px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:8px"><input type="checkbox" id="garHQ" ${g.collectsFromHQ?"checked":""} style="width:auto" onchange="var p=document.getElementById('garPc');p.disabled=this.checked;"> 🚚 This garage collects the van from HQ (${esc(GARAGES_HQ.postcode)})</label>
+      <input type="hidden" id="garId" value="${esc(g.id)}">
+      <div style="display:flex;gap:8px;justify-content:flex-end">${g.id?`<button class="btn ghost small" onclick="garageForm()">＋ New</button>`:""}<button class="btn primary small" onclick="saveGarage()">${g.id?"Save":"Add"}</button></div>`;
+  }
+  window.editGarage=function(id){ const g=GARAGES.find(x=>x.id===id); if(g) garageForm(g); };
+  window.saveGarage=async function(){
+    const name=($("garName")||{}).value.trim(); if(!name){ alert("Enter a garage name."); return; }
+    const body={ id:($("garId")||{}).value||"", name, postcode:($("garPc")||{}).value.trim(), collectsFromHQ:($("garHQ")||{}).checked };
+    try{ const r=await aFetch("/fleet/garage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not save."); return; }
+      await loadGarages(); renderGaragesModal();
+    }catch(e){ alert("Could not save."); }
+  };
+  window.deleteGarage=async function(id){
+    const g=GARAGES.find(x=>x.id===id);
+    const ok=window.MLUI?await MLUI.confirm("Delete "+((g&&g.name)||"this garage")+"?",{title:"Delete garage",danger:true}):confirm("Delete this garage?");
+    if(!ok) return;
+    try{ await aFetch("/fleet/garage-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
+      await loadGarages(); renderGaragesModal();
+    }catch(e){}
+  };
+
+  // ── Book / manage a renewal ───────────────────────────────────────────────
+  window.openRenewalModal=function(reg,type){
+    const v=FLEET.find(x=>(x.reg||"")===reg); if(!v) return;
+    const labels={mot:"MOT",tax:"Road tax",service:"Service"};
+    const dueStr=type==="mot"?v.motDue:type==="tax"?v.taxDue:v.nextServiceDate;
+    const pend=v[type+"Pending"];
+    const curNote=(pend&&pend!==true)?pend:"";
+    // Tax is online — a simple booked flag, no garage/job.
+    if(type==="tax"){
+      pModal(`
+        <h3 style="margin:0 0 4px">Road tax — ${esc(reg)}</h3>
+        <div class="hint" style="margin-bottom:12px">${dueStr?("Due "+fmtDMY(dueStr)+". "):""}Mark it <b>booked / in hand</b> so it turns amber and stops the banner going red.</div>
+        <label class="hint" style="display:block;margin-bottom:4px">Note (optional)</label>
+        <input id="renewNote" value="${esc(curNote)}" placeholder="renewed / awaiting" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+          <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete('${esc(reg)}','tax')">✅ Completed…</button>
+          ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','tax','open')">↩ Not booked</button>`:""}
+          <button class="btn ghost small" onclick="pClose()">Cancel</button>
+          <button class="btn primary small" onclick="setRenewal('${esc(reg)}','tax','pending')">📌 Mark booked</button>
+        </div>`);
+      setTimeout(()=>{const el=$("renewNote"); if(el) el.focus();},50);
+      return;
+    }
+    // MOT / service — book an appointment (creates a scheduler job for the driver).
+    const appt=v[type+"Appt"], clash=v[type+"Clash"];
+    const driver=v.driver?pName(v.driver):"";
+    const today=new Date().toISOString().slice(0,10);
+    const gOpts=`<option value="">— none / to confirm —</option>`+GARAGES.map(g=>`<option value="${esc(g.id)}"${appt&&appt.garage&&g.name===appt.garage?" selected":""}>${esc(g.name)}${g.collectsFromHQ?" (collects from HQ)":(g.postcode?" · "+esc(g.postcode):"")}</option>`).join("");
+    const defDur=type==="mot"?60:120;
+    const clashWarn = clash ? `<div style="background:#fee2e2;border:1px solid #dc2626;color:#991b1b;border-radius:9px;padding:8px 10px;font-size:13px;font-weight:600;margin-bottom:10px">⚠ ${esc(driver||"The driver")} is booked off on ${fmtDMY(clash.date)} — pick another day or driver.</div>` : "";
+    pModal(`
+      <h3 style="margin:0 0 4px">Book ${labels[type]} — ${esc(reg)}</h3>
+      <div class="hint" style="margin-bottom:10px">${dueStr?("Due "+fmtDMY(dueStr)+". "):""}This makes a job on the scheduler for <b>${driver?esc(driver):"the van's driver"}</b> on the day, at the garage. It follows the driver if that changes.</div>
+      ${clashWarn}
+      <label class="hint" style="display:block;margin:2px 0 3px">Appointment date</label>
+      <input id="apDate" type="date" value="${appt&&appt.date?esc(appt.date):today}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:8px">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Time</label><input id="apTime" type="time" value="08:00" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
+        <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Mins on site</label><input id="apDur" type="number" value="${defDur}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
+      </div>
+      <label class="hint" style="display:block;margin:8px 0 3px">Garage <a href="#" onclick="pClose();openGaragesModal();return false" style="font-size:12px">⚙ manage</a></label>
+      <select id="apGarage" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:8px">${gOpts}</select>
+      <label class="hint" style="display:block;margin:2px 0 3px">Note (optional)</label>
+      <input id="renewNote" value="${esc(curNote)}" placeholder="e.g. drop off 8am" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+        <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete('${esc(reg)}','${type}')">✅ Completed…</button>
+        ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','${type}','open')">↩ Cancel booking</button>`:""}
+        <button class="btn ghost small" onclick="pClose()">Close</button>
+        <button class="btn primary small" onclick="bookRenewal('${esc(reg)}','${type}')">📌 Book it</button>
+      </div>`);
+  };
+  // Simple pending/open toggle (tax) or cancel-booking (mot/service).
+  window.setRenewal=async function(reg,type,status){
+    const note=($("renewNote")||{}).value||"";
+    try{
+      const r=await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg,type,status,note})}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not save."); return; }
+      pClose();
+      if(type!=="tax"){ await loadFleet(); if($("defBackdrop").style.display!=="none"){ DEF_DIRTY=true; await loadDefects(); } }
+      else{ const v=FLEET.find(x=>(x.reg||"")===reg); if(v) v.taxPending = status==="pending"?(note||true):""; renderFleet(); updateSummary(); if($("defBackdrop").style.display!=="none"){ DEF_DIRTY=true; await loadDefects(); } }
+    }catch(e){ alert("Could not save."); }
+  };
+  // Book an MOT/service appointment → creates the driver's scheduler job.
+  window.bookRenewal=async function(reg,type){
+    const date=($("apDate")||{}).value||"";
+    if(!date){ alert("Pick an appointment date."); return; }
+    const time=($("apTime")||{}).value||"08:00";
+    const dur=Number(($("apDur")||{}).value)||(type==="mot"?60:120);
+    const garageId=($("apGarage")||{}).value||"";
+    const note=($("renewNote")||{}).value||"";
+    let scheduledAt; try{ scheduledAt=new Date(date+"T"+time+":00").toISOString(); }catch(e){ scheduledAt=new Date(date+"T08:00:00").toISOString(); }
+    try{
+      const r=await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg,type,status:"pending",note,apptDate:date,scheduledAt,durationMinutes:dur,garageId})}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not book."); return; }
+      pClose(); await loadFleet();
+      if($("defBackdrop").style.display!=="none"){ DEF_DIRTY=true; await loadDefects(); }
+      if(window.toast) toast("Booked — job added to the scheduler"); else if(window.MLUI&&MLUI.toast) MLUI.toast("Booked — job added to the scheduler");
+    }catch(e){ alert("Could not book."); }
+  };
 
   // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = none).
   function daysTo(s){ if(!s) return null; const d=new Date(s); if(isNaN(d)) return null; d.setHours(0,0,0,0); const t=new Date(); t.setHours(0,0,0,0); return Math.round((d-t)/86400000); }
@@ -578,9 +1009,9 @@
           <span>${v.active===false?"Inactive":"Active"}</span>
         </div>
         <div>${odo}${v.currentMpg!=null?`<span class="odo" style="margin-left:14px">⛽ ${Number(v.currentMpg).toFixed(1)} <small>Current MPG</small></span>`:""}</div>
-        <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
+        <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT",v,"mot")}${dateTag(v.taxDue,"Tax",v,"tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
         <div class="card-actions">
-          ${hasDefect(v)?`<button class="btn small" style="background:#dc2626;border-color:#dc2626;color:#fff" onclick="resolveDefects('${esc(reg)}')">✓ Mark defects resolved</button>`:""}
+          ${hasDefect(v)?`<button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button>`:""}
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
           <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
@@ -648,8 +1079,8 @@
         <button class="btn ghost small" onclick="pClose()">✕ Close</button>
       </div>
       ${photo}
-      <div class="tags" style="margin-bottom:6px">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${svc}</div>
-      ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid #dc2626;background:#fef2f2"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:#991b1b;font-weight:650">⚠ ${v.defectItems||"Defects"} reported in van check${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:#dc2626;border-color:#dc2626;color:#fff" onclick="resolveDefects('${esc(reg)}')">✓ Mark resolved</button></div></div></div>`:""}
+      <div class="tags" style="margin-bottom:6px">${defectTags(v)}${dateTag(v.motDue,"MOT",v,"mot")}${dateTag(v.taxDue,"Tax",v,"tax")}${svc}</div>
+      ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid ${hasOpenDefect(v)?"#dc2626":"#d97706"};background:${hasOpenDefect(v)?"#fef2f2":"#fffbeb"}"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:${hasOpenDefect(v)?"#991b1b":"#92400e"};font-weight:650">${v.defectOpen>0?`⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""} to sort`:""}${v.defectOpen>0&&v.defectPending>0?" · ":""}${v.defectPending>0?`⏳ ${v.defectPending} pending`:""}${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button></div></div></div>`:""}
       ${svcReason}
       <div>
         ${detailRow("Status", v.active===false?"Inactive":"Active")}
@@ -1045,6 +1476,7 @@
   document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);
+  window.addEventListener("DOMContentLoaded", loadGarages);
 
   // Red badge on the "Van Checks" button = outstanding weekly checks (same count
   // as the Vehicles menu tile). Clears once the van-checks page has been opened

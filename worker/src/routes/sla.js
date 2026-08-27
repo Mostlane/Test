@@ -2601,8 +2601,13 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // else keeps the priority-driven SLA target.
   const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) ||
     /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
-  const priority = isProjJob ? "" : (body.priority || existing?.priority || "Priority 4");
-  const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
+  // Fleet renewal jobs (auto-made MOT/service appointments) carry NO priority and
+  // NO SLA target — like projects — so a garage booking weeks out never shows an
+  // SLA "breached" badge.
+  const isFleetRenewal = body.fleetRenewal === true || existing?.fleetRenewal === true;
+  const noSla = isProjJob || isFleetRenewal;
+  const priority = noSla ? "" : (body.priority || existing?.priority || "Priority 4");
+  const targetAt = noSla ? null : computeSlaTarget(raisedAt, priority, cfg);
 
   // Resolve the site NAME so a project job reads its real name (e.g. "Yard"),
   // not the bare P-number — even when the job was raised before the site was
@@ -2617,10 +2622,13 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     } catch {}
   }
 
-  const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
-    ? body.assignedEngineers.filter(Boolean)
-    : (body.assignedTo ? [body.assignedTo]
-       : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : [])));
+  // `clearEngineers:true` explicitly unassigns (an empty assignedEngineers array is
+  // otherwise treated as "leave as-is" so a partial re-save can't wipe the roster).
+  const assignedEngineers = body.clearEngineers ? []
+    : (Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
+       ? body.assignedEngineers.filter(Boolean)
+       : (body.assignedTo ? [body.assignedTo]
+          : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []))));
 
   // Assigned + still Pending = it's been sent to someone: mark it Scheduled.
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";
@@ -2650,7 +2658,7 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   // Site-audit job: completion is per-item (each checklist item needs one photo),
   // so the standard whole-job gates default OFF (an explicit value still wins).
   const isAudit = Array.isArray(body.auditItems) ? body.auditItems.length > 0 : isAuditJob(existing);
-  const gateDefault = !isProjJob && !isAudit;
+  const gateDefault = !noSla && !isAudit;
   const requiresRA = body.requiresRA !== undefined ? !!body.requiresRA
     : (existing?.requiresRA !== undefined ? !!existing.requiresRA : gateDefault);
   const requiresSignature = body.requiresSignature !== undefined ? !!body.requiresSignature
@@ -2741,6 +2749,11 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     seriesSkipped: body.seriesSkipped !== undefined ? !!body.seriesSkipped : (existing?.seriesSkipped || false),
     // Auto-assigned fallback "at least a job for tomorrow" day (cron). Preserved.
     fallback: body.fallback !== undefined ? !!body.fallback : (existing?.fallback || false),
+    // Fleet renewal appointment (auto-made MOT/service booking) — links back to the
+    // vehicle so the fleet page can find/reassign/cancel it. Preserved across saves.
+    fleetRenewal: body.fleetRenewal !== undefined ? !!body.fleetRenewal : (existing?.fleetRenewal || false),
+    vehicleReg: body.vehicleReg !== undefined ? (String(body.vehicleReg || "") || null) : (existing?.vehicleReg ?? null),
+    renewalType: body.renewalType !== undefined ? (String(body.renewalType || "") || null) : (existing?.renewalType ?? null),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,

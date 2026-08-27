@@ -7873,8 +7873,10 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   let status = normalizeStatus(body.status || existing?.status, catNames);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
   const isProjJob = /^p\d/i.test(String(body.siteCode || existing?.siteCode || "")) || /project/i.test(String(body.storeType || existing?.storeType || body.client || ""));
-  const priority = isProjJob ? "" : body.priority || existing?.priority || "Priority 4";
-  const targetAt = isProjJob ? null : computeSlaTarget(raisedAt, priority, cfg);
+  const isFleetRenewal = body.fleetRenewal === true || existing?.fleetRenewal === true;
+  const noSla = isProjJob || isFleetRenewal;
+  const priority = noSla ? "" : body.priority || existing?.priority || "Priority 4";
+  const targetAt = noSla ? null : computeSlaTarget(raisedAt, priority, cfg);
   let siteNameResolved = String(body.siteName ?? existing?.siteName ?? "").trim();
   const siteCodeVal = String(body.siteCode || existing?.siteCode || "").trim();
   if (!siteNameResolved && siteCodeVal) {
@@ -7885,7 +7887,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     } catch {
     }
   }
-  const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
+  const assignedEngineers = body.clearEngineers ? [] : Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
   let scheduledEnd = body.scheduledEnd || existing?.scheduledEnd || null;
@@ -7899,7 +7901,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   }
   const durationMinutes = Number.isFinite(Number(body.durationMinutes)) ? Math.max(15, Math.round(Number(body.durationMinutes))) : existing?.durationMinutes ?? null;
   const isAudit = Array.isArray(body.auditItems) ? body.auditItems.length > 0 : isAuditJob(existing);
-  const gateDefault = !isProjJob && !isAudit;
+  const gateDefault = !noSla && !isAudit;
   const requiresRA = body.requiresRA !== void 0 ? !!body.requiresRA : existing?.requiresRA !== void 0 ? !!existing.requiresRA : gateDefault;
   const requiresSignature = body.requiresSignature !== void 0 ? !!body.requiresSignature : existing?.requiresSignature !== void 0 ? !!existing.requiresSignature : gateDefault;
   const requiresPhoto = body.requiresPhoto !== void 0 ? !!body.requiresPhoto : existing?.requiresPhoto !== void 0 ? !!existing.requiresPhoto : gateDefault;
@@ -7974,6 +7976,11 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     seriesSkipped: body.seriesSkipped !== void 0 ? !!body.seriesSkipped : existing?.seriesSkipped || false,
     // Auto-assigned fallback "at least a job for tomorrow" day (cron). Preserved.
     fallback: body.fallback !== void 0 ? !!body.fallback : existing?.fallback || false,
+    // Fleet renewal appointment (auto-made MOT/service booking) — links back to the
+    // vehicle so the fleet page can find/reassign/cancel it. Preserved across saves.
+    fleetRenewal: body.fleetRenewal !== void 0 ? !!body.fleetRenewal : existing?.fleetRenewal || false,
+    vehicleReg: body.vehicleReg !== void 0 ? String(body.vehicleReg || "") || null : existing?.vehicleReg ?? null,
+    renewalType: body.renewalType !== void 0 ? String(body.renewalType || "") || null : existing?.renewalType ?? null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
@@ -17931,6 +17938,7 @@ function timingSafeEq(a, b) {
 }
 
 // src/routes/fleet.js
+init_holidays();
 function jr3(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
@@ -18205,8 +18213,165 @@ function vanCheckState(lastAt, ack) {
   if (ack && ack.at && Date.now() - new Date(ack.at).getTime() <= VC_WINDOW_MS) return { state: "ack", at: lastAt || "", ackBy: ack.by || "" };
   return { state: "due", at: lastAt || "", ackBy: "" };
 }
-async function vanCheckDefects(env, tid, resolved) {
-  const out = {};
+var DEFECTST_KEY = (tid) => `fleet:defectstatus:${tid}`;
+var RENEWALACK_KEY = (tid) => `fleet:renewalack:${tid}`;
+var GARAGES_KEY = (tid) => `fleet:garages:${tid}`;
+var HQ_POSTCODE = "PO15 5RQ";
+var HQ_NAME = "Mostlane HQ";
+async function geocodePostcode(pc) {
+  const p = String(pc || "").trim();
+  if (!p) return null;
+  try {
+    const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(p));
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j && j.result && j.result.latitude != null) return { lat: j.result.latitude, lng: j.result.longitude };
+  } catch {
+  }
+  return null;
+}
+function daysToDate(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d)) return null;
+  d.setHours(0, 0, 0, 0);
+  const t = /* @__PURE__ */ new Date();
+  t.setHours(0, 0, 0, 0);
+  return Math.round((d - t) / 864e5);
+}
+var RENEWAL_LABEL = { mot: "MOT", service: "Service" };
+var renewalJobId = (reg, type) => `fleetsvc:${regKey(reg)}:${type}`;
+async function currentDriver(env, tid, reg) {
+  const rk = dnReg(reg);
+  try {
+    const r = await env.DB.prepare("SELECT username FROM vehicle_assignments WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=? AND end_date IS NULL ORDER BY start_date DESC LIMIT 1").bind(tid, rk).first();
+    if (r && r.username) return r.username;
+  } catch {
+  }
+  try {
+    const r = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND UPPER(REPLACE(vehicle_assigned,' ',''))=? LIMIT 1").bind(tid, rk).first();
+    if (r && r.username) return r.username;
+  } catch {
+  }
+  return "";
+}
+async function garageById(env, tid, id) {
+  if (!id) return null;
+  const raw = await appConfigJson(env, GARAGES_KEY(tid));
+  return (Array.isArray(raw) ? raw : []).find((g) => g.id === id) || null;
+}
+async function officeUsernames(env, tid) {
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile, status FROM users WHERE tenant_id=?").bind(tid).all();
+    const out = [];
+    for (const u of results || []) {
+      const t = String(u.status == null ? "" : u.status).trim().toLowerCase();
+      if (!(t === "" || t === "active")) continue;
+      let p = {};
+      try {
+        p = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      if (p.staffType === "office" && u.username) out.push(u.username);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+async function makeRenewalJob(env, tid, o) {
+  const { reg, type, scheduledAt, durationMinutes, garage, driver, changedBy } = o;
+  const label = RENEWAL_LABEL[type] || "Service";
+  const collectHQ = !!(garage && garage.collectsFromHQ);
+  const siteName = collectHQ ? `${HQ_NAME} \u2014 collected by ${garage.name}` : garage ? garage.name : label;
+  const postcode = collectHQ ? HQ_POSTCODE : garage ? garage.postcode || "" : "";
+  let lat = collectHQ ? null : garage && garage.lat != null ? garage.lat : null;
+  let lng = collectHQ ? null : garage && garage.lng != null ? garage.lng : null;
+  if (collectHQ) {
+    const g = await geocodePostcode(HQ_POSTCODE);
+    if (g) {
+      lat = g.lat;
+      lng = g.lng;
+    }
+  }
+  const where = garage ? collectHQ ? ` \xB7 ${garage.name} collecting from HQ` : ` at ${garage.name}` : "";
+  const engineers = driver ? [driver] : await officeUsernames(env, tid);
+  const payload = {
+    id: renewalJobId(reg, type),
+    reference: `${label} \u2014 ${reg}`,
+    description: `${label} appointment \u2014 ${reg}${where}`,
+    fleetRenewal: true,
+    vehicleReg: reg,
+    renewalType: type,
+    assignedEngineers: engineers,
+    siteName,
+    postcode,
+    lat,
+    lon: lng,
+    storeType: "fleet",
+    scheduledAt,
+    durationMinutes: durationMinutes || (type === "mot" ? 60 : 120),
+    changedBy: changedBy || "fleet"
+  };
+  return createOrUpdateJobFromPayload(env, tid, payload);
+}
+async function removeRenewalJob(env, tid, jobId) {
+  if (!jobId) return;
+  try {
+    await env.DB.prepare("DELETE FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).run();
+  } catch {
+  }
+}
+async function reassignRenewalJobs(env, tid, reg, newDriver) {
+  try {
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const entry = map[regKey(reg)];
+    if (!entry) return;
+    const now = Date.now();
+    for (const type of ["mot", "service"]) {
+      const e = entry[type];
+      if (!e || !e.jobId || !e.scheduledAt) continue;
+      if (Date.parse(e.scheduledAt) < now) continue;
+      const engineers = newDriver ? [newDriver] : await officeUsernames(env, tid);
+      await createOrUpdateJobFromPayload(
+        env,
+        tid,
+        engineers.length ? { id: e.jobId, assignedEngineers: engineers, fleetRenewal: true, changedBy: "driver-change" } : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
+      ).catch(() => {
+      });
+    }
+  } catch {
+  }
+}
+async function appConfigJson(env, key) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+    return row && row.value ? JSON.parse(row.value) || {} : {};
+  } catch {
+    return {};
+  }
+}
+function prettyId(id) {
+  return String(id || "").replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase()) || "Item";
+}
+function defectLabelMap(settings) {
+  const m = {};
+  const add = (arr) => {
+    (arr || []).forEach((it) => {
+      if (it && it.id) m[it.id] = it.label || it.id;
+    });
+  };
+  add(settings && settings.checklist);
+  add(settings && settings.equipment);
+  return m;
+}
+async function collectDefects(env, tid, opts = {}) {
+  const statusMap = opts.statusMap || await appConfigJson(env, DEFECTST_KEY(tid));
+  const clearMap = opts.clearMap || await appConfigJson(env, DEFECTCLR_KEY(tid));
+  const settings = opts.settings || await appConfigJson(env, "vancheck:settings");
+  const names = opts.names || null;
+  const baseLbl = defectLabelMap(settings);
+  const out = [];
   try {
     const { results } = await env.DB.prepare(
       "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
@@ -18219,23 +18384,65 @@ async function vanCheckDefects(env, tid, resolved) {
       }
       if (items.skipped) continue;
       const rk = regKey(r.vehicle);
-      const clearAt = resolved && resolved[rk] || "";
-      if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
-      const answers = items.answers || {};
-      const defItems = (Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing")).length;
-      const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
-      if (!defItems && !notSafe) continue;
-      const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
-      cur.items += defItems;
-      cur.checks += 1;
-      if (notSafe) cur.notSafe = true;
       const at = r.checked_at || "";
-      if (at) {
-        if (!cur.since || new Date(at) < new Date(cur.since)) cur.since = at;
-        if (!cur.latest || new Date(at) > new Date(cur.latest)) cur.latest = at;
+      const answers = items.answers || {};
+      const meta = items.answerMeta || {};
+      const notes = items.defectNotes || {};
+      const custLbl = items.custom ? defectLabelMap({ checklist: items.custom.checklist, equipment: items.custom.equipment }) : null;
+      const clearAt = clearMap[rk] || "";
+      const eff = (key) => {
+        const s = statusMap[key];
+        if (s && s.status) return { status: s.status, note: s.note || "", by: s.by || "", at: s.at || "" };
+        if (clearAt && at && new Date(at) <= new Date(clearAt)) return { status: "resolved", note: "", by: "", at: clearAt };
+        return { status: "open", note: "", by: "", at: "" };
+      };
+      const push = (itemId, kind, label, answerWord2, driverNote) => {
+        const key = `${rk}::${at}::${itemId}`;
+        const e = eff(key);
+        out.push({
+          key,
+          reg: r.vehicle,
+          regNorm: rk,
+          checkedAt: at,
+          driver: r.username,
+          driverName: names ? names[r.username] || r.username : r.username,
+          itemId,
+          kind,
+          label,
+          answer: answerWord2,
+          driverNote: driverNote || "",
+          status: e.status,
+          officeNote: e.note,
+          statusBy: e.by,
+          statusAt: e.at
+        });
+      };
+      for (const id of Object.keys(answers)) {
+        const v = answers[id];
+        const m = meta[id];
+        const tone = m && m.tone ? m.tone : v === "defect" || v === "missing" ? "issue" : "ok";
+        if (tone !== "issue") continue;
+        const label = m && m.itemLabel || custLbl && custLbl[id] || baseLbl[id] || prettyId(id);
+        const answerWord2 = m && m.label || (v === "missing" ? "Missing" : "Defect");
+        push(id, v === "missing" ? "missing" : "defect", label, answerWord2, notes[id]);
+      }
+      if (r.safe_to_drive != null && Number(r.safe_to_drive) === 0) {
+        push("__notsafe", "notsafe", "Not safe to drive", "Not safe", items.notSafeNote || "");
       }
     }
   } catch {
+  }
+  return out;
+}
+function defectSummary(list) {
+  const out = {};
+  for (const d of list) {
+    if (d.status === "resolved") continue;
+    const c = out[d.regNorm] || (out[d.regNorm] = { open: 0, pending: 0, notSafe: false, since: "" });
+    if (d.status === "pending") c.pending++;
+    else c.open++;
+    if (d.kind === "notsafe") c.notSafe = true;
+    if (d.checkedAt && (!c.since || new Date(d.checkedAt) < new Date(c.since))) c.since = d.checkedAt;
   }
   return out;
 }
@@ -18485,6 +18692,7 @@ async function handle22(request, env, ctx, url, sess) {
         await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, username, from, null, sess.user.username, now).run();
         await env.DB.prepare("UPDATE users SET vehicle_assigned=? WHERE tenant_id=? AND username=?").bind(reg, tid, username).run();
       }
+      await reassignRenewalJobs(env, tid, reg, username);
       return jr3({ ok: true }, headers);
     }
   }
@@ -18506,7 +18714,7 @@ async function handle22(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -18517,15 +18725,22 @@ async function handle22(request, env, ctx, url, sess) {
       mpgByVehicle(env, tid),
       canMoney(env, tid, sess),
       appCfg(DEFECTCLR_KEY(tid)),
-      // defects marked resolved by an admin
+      // legacy per-reg bulk "resolved as of" mark
       appCfg(VCACK_KEY(tid)),
+      appCfg(DEFECTST_KEY(tid)),
+      // per-defect statuses (open/pending/resolved)
+      appCfg("vancheck:settings"),
+      // item labels for the defect list
+      appCfg(RENEWALACK_KEY(tid)),
+      // MOT/tax/service "booked / in hand" acks
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
       env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] }))
     ]);
     const pendVc = new Set((pendVcRes.results || []).map((r) => dn(r.reg)));
-    const defects = await vanCheckDefects(env, tid, defResolved);
+    const defList = await collectDefects(env, tid, { statusMap: defStatus, clearMap: defResolved, settings: vcSettings });
+    const defects = defectSummary(defList);
     const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
     for (const h of hoRows) {
@@ -18550,6 +18765,13 @@ async function handle22(request, env, ctx, url, sess) {
         const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
         maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
       }
+    }
+    let leaveMap = {};
+    try {
+      const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+      const horizon = new Date(Date.now() + 150 * 864e5).toISOString().slice(0, 10);
+      leaveMap = await approvedLeaveInRange(env, tid, today, horizon);
+    } catch {
     }
     const vehicles = await Promise.all((results || []).map(async (v) => {
       const cm = miles[dn(v.reg)] || null;
@@ -18587,11 +18809,36 @@ async function handle22(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
-        // Outstanding van-check defects (stay flagged until an admin resolves).
-        defectItems: (defects[dn(v.reg)] || {}).items || 0,
-        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
-        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
-        defectSince: (defects[dn(v.reg)] || {}).since || "",
+        // Outstanding van-check defects, now split by status (open needs sorting,
+        // pending = booked in / awaiting). Resolved individually or in bulk.
+        defectOpen: (defects[regKey(v.reg)] || {}).open || 0,
+        defectPending: (defects[regKey(v.reg)] || {}).pending || 0,
+        defectNotSafe: !!(defects[regKey(v.reg)] || {}).notSafe,
+        defectSince: (defects[regKey(v.reg)] || {}).since || "",
+        // Renewal "booked / in hand" acks — surfaced only while the item is still
+        // due (a renewed date auto-clears the amber). Value = the note (or true).
+        ...(() => {
+          const a = renewAck[regKey(v.reg)] || {};
+          const dm = daysToDate(v.mot_due), dt = daysToDate(v.tax_due);
+          const due = { mot: dm != null && dm <= 30, tax: dt != null && dt <= 30, service: sv.status === "warn" || sv.status === "bad" };
+          const driver = drv[dn(v.reg)] || "";
+          const pend = (k) => due[k] && a[k] ? a[k].note || true : "";
+          const appt = (k) => due[k] && a[k] && a[k].apptDate ? { date: a[k].apptDate, garage: a[k].garageName || "", jobId: a[k].jobId || "" } : null;
+          const clash = (k) => {
+            const e = due[k] ? a[k] : null;
+            if (!e || !e.apptDate || !driver) return null;
+            return leaveMap[driver] && leaveMap[driver][e.apptDate] ? { date: e.apptDate, driver } : null;
+          };
+          return {
+            motPending: pend("mot"),
+            taxPending: pend("tax"),
+            servicePending: pend("service"),
+            motAppt: appt("mot"),
+            serviceAppt: appt("service"),
+            motClash: clash("mot"),
+            serviceClash: clash("service")
+          };
+        })(),
         lastVanCheckAt: lastVc[dn(v.reg)] || "",
         // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
@@ -19285,20 +19532,168 @@ async function handle22(request, env, ctx, url, sess) {
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
     return jr3({ ok: true, reg, checks }, headers);
   }
+  if (sub === "/defects" && method === "GET") {
+    const reg = q.get("reg") || "";
+    const statusF = q.get("status") || "";
+    const includeResolved = q.get("includeResolved") === "1" || statusF === "resolved" || statusF === "all";
+    const names = await nameMap2(env, tid);
+    let list = await collectDefects(env, tid, { names });
+    if (reg) {
+      const rk = regKey(reg);
+      list = list.filter((d) => d.regNorm === rk);
+    }
+    const summary = { open: 0, pending: 0, resolved: 0 };
+    for (const d of list) summary[d.status] = (summary[d.status] || 0) + 1;
+    let rows = list;
+    if (statusF && statusF !== "all") rows = rows.filter((d) => d.status === statusF);
+    else if (!includeResolved) rows = rows.filter((d) => d.status !== "resolved");
+    rows.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
+    return jr3({ ok: true, defects: rows, summary }, headers);
+  }
+  if (sub === "/defect-status" && method === "POST") {
+    const b = await readJson4(request);
+    const key = String(b.key || "").trim();
+    if (!key) return jr3({ error: "key required" }, headers, 400);
+    const map = await appConfigJson(env, DEFECTST_KEY(tid));
+    const prev = map[key] || {};
+    const status = ["open", "pending", "resolved"].includes(b.status) ? b.status : prev.status || "open";
+    const note = typeof b.note === "string" ? b.note.slice(0, 500) : prev.note || "";
+    map[key] = { status, note, by: sess && sess.user && sess.user.username || "", at: (/* @__PURE__ */ new Date()).toISOString() };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTST_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, key, status, note, by: map[key].by, at: map[key].at }, headers);
+  }
+  if (sub === "/renewal-status" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr3({ error: "reg + valid type required" }, headers, 400);
+    const rk = regKey(reg);
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const cur = map[rk] || (map[rk] = {});
+    const prevJobId = cur[type] && cur[type].jobId;
+    if (b.status === "pending") {
+      const entry = {
+        note: typeof b.note === "string" ? b.note.slice(0, 300) : "",
+        by: sess && sess.user && sess.user.username || "",
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        apptDate: /^\d{4}-\d{2}-\d{2}$/.test(b.apptDate || "") ? b.apptDate : "",
+        scheduledAt: b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : "",
+        durationMinutes: b.durationMinutes ? Math.max(15, Number(b.durationMinutes)) : type === "mot" ? 60 : 120,
+        garageId: String(b.garageId || "") || ""
+      };
+      if ((type === "mot" || type === "service") && entry.scheduledAt) {
+        const garage = await garageById(env, tid, entry.garageId);
+        const driver = await currentDriver(env, tid, reg);
+        const job = await makeRenewalJob(env, tid, { reg, type, scheduledAt: entry.scheduledAt, durationMinutes: entry.durationMinutes, garage, driver, changedBy: sess && sess.user && sess.user.username || "" });
+        entry.jobId = job.id;
+        entry.driver = driver || "";
+        entry.garageName = garage ? garage.name : "";
+        ctx?.waitUntil(reconcileRelease(env, tid, job).catch(() => {
+        }));
+      } else if (prevJobId) {
+        entry.jobId = prevJobId;
+        if (cur[type]) {
+          entry.driver = cur[type].driver || "";
+          entry.garageName = cur[type].garageName || "";
+        }
+      }
+      cur[type] = entry;
+    } else {
+      if (prevJobId) await removeRenewalJob(env, tid, prevJobId);
+      delete cur[type];
+    }
+    if (!Object.keys(map[rk]).length) delete map[rk];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, reg, type, status: b.status === "pending" ? "pending" : "open", note: cur[type] && cur[type].note || "", jobId: cur[type] && cur[type].jobId || null }, headers);
+  }
+  if (sub === "/renewal-complete" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    const date = String(b.date || "").slice(0, 10);
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr3({ error: "reg + valid type required" }, headers, 400);
+    if (!date) return jr3({ error: "date required" }, headers, 400);
+    const rk = dnReg(reg);
+    if (type === "mot") {
+      await env.DB.prepare("UPDATE vehicles SET mot_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else if (type === "tax") {
+      await env.DB.prepare("UPDATE vehicles SET tax_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else {
+      const row = await env.DB.prepare("SELECT svc_interval_days, svc_interval_miles FROM vehicles WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, rk).first();
+      const miles = b.miles != null && b.miles !== "" && !isNaN(Number(b.miles)) ? Math.round(Number(b.miles)) : null;
+      let next = "";
+      if (b.nextDate) next = String(b.nextDate).slice(0, 10);
+      else if (!(row && (row.svc_interval_days || row.svc_interval_miles))) next = date;
+      await env.DB.prepare("UPDATE vehicles SET last_service_date=?, last_service_miles=COALESCE(?, last_service_miles), next_service=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, miles, next, tid, rk).run();
+    }
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const k = map[regKey(reg)] ? regKey(reg) : map[dnReg(reg)] ? dnReg(reg) : "";
+    if (k && map[k]) {
+      const jobId = map[k][type] && map[k][type].jobId;
+      if (jobId) await removeRenewalJob(env, tid, jobId);
+      delete map[k][type];
+      if (!Object.keys(map[k]).length) delete map[k];
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    }
+    return jr3({ ok: true, reg, type, date }, headers);
+  }
+  if (sub === "/garages" && method === "GET") {
+    const raw = await appConfigJson(env, GARAGES_KEY(tid));
+    return jr3({ ok: true, garages: Array.isArray(raw) ? raw : [], hq: { name: HQ_NAME, postcode: HQ_POSTCODE } }, headers);
+  }
+  if (sub === "/garage" && method === "POST") {
+    const b = await readJson4(request);
+    const name = String(b.name || "").trim();
+    if (!name) return jr3({ error: "name required" }, headers, 400);
+    const raw = await appConfigJson(env, GARAGES_KEY(tid));
+    const list = Array.isArray(raw) ? raw : [];
+    const collectsFromHQ = !!b.collectsFromHQ;
+    const postcode = collectsFromHQ ? "" : String(b.postcode || "").trim().toUpperCase();
+    let lat = null, lng = null;
+    if (!collectsFromHQ && postcode) {
+      const g = await geocodePostcode(postcode);
+      if (g) {
+        lat = g.lat;
+        lng = g.lng;
+      }
+    }
+    const id = String(b.id || "").trim() || "g" + crypto.randomUUID().slice(0, 8);
+    const garage = { id, name, postcode, lat, lng, collectsFromHQ };
+    const i = list.findIndex((x) => x.id === id);
+    if (i >= 0) list[i] = garage;
+    else list.push(garage);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, GARAGES_KEY(tid), JSON.stringify(list)).run();
+    return jr3({ ok: true, garage, geocoded: lat != null }, headers);
+  }
+  if (sub === "/garage-delete" && method === "POST") {
+    const b = await readJson4(request);
+    const id = String(b.id || "").trim();
+    const raw = await appConfigJson(env, GARAGES_KEY(tid));
+    const list = (Array.isArray(raw) ? raw : []).filter((x) => x.id !== id);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, GARAGES_KEY(tid), JSON.stringify(list)).run();
+    return jr3({ ok: true }, headers);
+  }
   if (sub === "/defects-resolve" && method === "POST") {
     const b = await readJson4(request);
     const reg = String(b.reg || "").trim();
     if (!reg) return jr3({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
-    let map = {};
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
-      if (row && row.value) map = JSON.parse(row.value) || {};
-    } catch {
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const who = sess && sess.user && sess.user.username || "";
+    const clr = await appConfigJson(env, DEFECTCLR_KEY(tid));
+    clr[rk] = nowIso;
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(clr)).run();
+    const stMap = await appConfigJson(env, DEFECTST_KEY(tid));
+    const list = await collectDefects(env, tid, { clearMap: {}, statusMap: stMap });
+    let n = 0;
+    for (const d of list) {
+      if (d.regNorm === rk && d.status !== "resolved") {
+        stMap[d.key] = { status: "resolved", note: stMap[d.key] && stMap[d.key].note || "", by: who, at: nowIso };
+        n++;
+      }
     }
-    map[rk] = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
-    return jr3({ ok: true, reg, resolvedAt: map[rk] }, headers);
+    if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTST_KEY(tid), JSON.stringify(stMap)).run();
+    return jr3({ ok: true, reg, resolvedAt: nowIso, resolved: n }, headers);
   }
   if (sub === "/vancheck-ack" && method === "POST") {
     const b = await readJson4(request);
