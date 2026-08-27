@@ -1465,6 +1465,11 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   - **Auto-reassign on driver change**: `/fleet/assign` calls **`reassignRenewalJobs`**
     → any FUTURE booked MOT/service job for that reg is re-assigned to the new driver
     (via createOrUpdateJobFromPayload id-merge).
+  - **No driver → the whole office**: when the van has no assigned driver (at booking
+    OR after being unassigned), the appointment job is assigned to **all active office
+    users** (`officeUsernames` = profile.staffType==="office") so it's owned, not lost —
+    it drops to that single driver again the moment one is assigned. (`clearEngineers`
+    is only the fallback when there are zero office users.)
   - **Holiday clash**: `/fleet/vehicles` overlays **`approvedLeaveInRange`** (imported
     from holidays.js) — if the current driver is on approved leave on the appointment
     day it returns **`motClash`/`serviceClash`** `{date,driver}`. Surfaced CLEARLY (not

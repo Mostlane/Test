@@ -366,6 +366,21 @@ async function garageById(env, tid, id) {
   const raw = await appConfigJson(env, GARAGES_KEY(tid));
   return (Array.isArray(raw) ? raw : []).find(g => g.id === id) || null;
 }
+// Every ACTIVE office user (profile.staffType==="office") — a van appointment with
+// no assigned driver goes to all of them so it's owned, not lost.
+async function officeUsernames(env, tid) {
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile, status FROM users WHERE tenant_id=?").bind(tid).all();
+    const out = [];
+    for (const u of results || []) {
+      const t = String(u.status == null ? "" : u.status).trim().toLowerCase();
+      if (!(t === "" || t === "active")) continue;
+      let p = {}; try { p = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+      if (p.staffType === "office" && u.username) out.push(u.username);
+    }
+    return out;
+  } catch { return []; }
+}
 // Create (or update, by stable id) the SLA job for a booked MOT/service.
 async function makeRenewalJob(env, tid, o) {
   const { reg, type, scheduledAt, durationMinutes, garage, driver, changedBy } = o;
@@ -377,12 +392,14 @@ async function makeRenewalJob(env, tid, o) {
   let lng = collectHQ ? null : (garage && garage.lng != null ? garage.lng : null);
   if (collectHQ) { const g = await geocodePostcode(HQ_POSTCODE); if (g) { lat = g.lat; lng = g.lng; } }
   const where = garage ? (collectHQ ? ` · ${garage.name} collecting from HQ` : ` at ${garage.name}`) : "";
+  // No driver on the van → give it to the whole office so it's owned.
+  const engineers = driver ? [driver] : await officeUsernames(env, tid);
   const payload = {
     id: renewalJobId(reg, type),
     reference: `${label} — ${reg}`,
     description: `${label} appointment — ${reg}${where}`,
     fleetRenewal: true, vehicleReg: reg, renewalType: type,
-    assignedEngineers: driver ? [driver] : [],
+    assignedEngineers: engineers,
     siteName, postcode, lat, lon: lng, storeType: "fleet",
     scheduledAt, durationMinutes: durationMinutes || (type === "mot" ? 60 : 120),
     changedBy: changedBy || "fleet",
@@ -404,8 +421,10 @@ async function reassignRenewalJobs(env, tid, reg, newDriver) {
       const e = entry[type];
       if (!e || !e.jobId || !e.scheduledAt) continue;
       if (Date.parse(e.scheduledAt) < now) continue;   // past appointments left alone
-      await createOrUpdateJobFromPayload(env, tid, newDriver
-        ? { id: e.jobId, assignedEngineers: [newDriver], fleetRenewal: true, changedBy: "driver-change" }
+      // New driver → them; no driver → the whole office (so it's owned, not lost).
+      const engineers = newDriver ? [newDriver] : await officeUsernames(env, tid);
+      await createOrUpdateJobFromPayload(env, tid, engineers.length
+        ? { id: e.jobId, assignedEngineers: engineers, fleetRenewal: true, changedBy: "driver-change" }
         : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
       ).catch(() => {});
     }

@@ -18218,6 +18218,25 @@ async function garageById(env, tid, id) {
   const raw = await appConfigJson(env, GARAGES_KEY(tid));
   return (Array.isArray(raw) ? raw : []).find((g) => g.id === id) || null;
 }
+async function officeUsernames(env, tid) {
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile, status FROM users WHERE tenant_id=?").bind(tid).all();
+    const out = [];
+    for (const u of results || []) {
+      const t = String(u.status == null ? "" : u.status).trim().toLowerCase();
+      if (!(t === "" || t === "active")) continue;
+      let p = {};
+      try {
+        p = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      if (p.staffType === "office" && u.username) out.push(u.username);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 async function makeRenewalJob(env, tid, o) {
   const { reg, type, scheduledAt, durationMinutes, garage, driver, changedBy } = o;
   const label = RENEWAL_LABEL[type] || "Service";
@@ -18234,6 +18253,7 @@ async function makeRenewalJob(env, tid, o) {
     }
   }
   const where = garage ? collectHQ ? ` \xB7 ${garage.name} collecting from HQ` : ` at ${garage.name}` : "";
+  const engineers = driver ? [driver] : await officeUsernames(env, tid);
   const payload = {
     id: renewalJobId(reg, type),
     reference: `${label} \u2014 ${reg}`,
@@ -18241,7 +18261,7 @@ async function makeRenewalJob(env, tid, o) {
     fleetRenewal: true,
     vehicleReg: reg,
     renewalType: type,
-    assignedEngineers: driver ? [driver] : [],
+    assignedEngineers: engineers,
     siteName,
     postcode,
     lat,
@@ -18270,10 +18290,11 @@ async function reassignRenewalJobs(env, tid, reg, newDriver) {
       const e = entry[type];
       if (!e || !e.jobId || !e.scheduledAt) continue;
       if (Date.parse(e.scheduledAt) < now) continue;
+      const engineers = newDriver ? [newDriver] : await officeUsernames(env, tid);
       await createOrUpdateJobFromPayload(
         env,
         tid,
-        newDriver ? { id: e.jobId, assignedEngineers: [newDriver], fleetRenewal: true, changedBy: "driver-change" } : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
+        engineers.length ? { id: e.jobId, assignedEngineers: engineers, fleetRenewal: true, changedBy: "driver-change" } : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
       ).catch(() => {
       });
     }
