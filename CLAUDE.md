@@ -1434,6 +1434,18 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   "📌 In hand" line (`.fleet-banner.pend` / `.fb-seg.pending`); when EVERYTHING
   outstanding is in hand the whole banner is amber, not red. Fault segments open the
   defect modal; renewal segments open the renewal modal.
+  **Renewals appear IN the "Manage defects" panel too (Aug 2026):** `buildRenewalRows`
+  folds each due MOT/tax/service into `openDefectsModal` as a row (kind `renewal`,
+  synthetic key `renewal::REG::type`) with **Open / Pending / ✅ Completed** controls
+  (no "Resolved" — completing renews it). Open/Pending post to /fleet/renewal-status;
+  **✅ Completed** opens `openRenewalComplete` → asks for the NEW date(s) (MOT expiry /
+  tax due; service = date serviced + mileage-at-service + optional next-due) → **POST
+  /fleet/renewal-complete** `{reg,type,date,miles?,nextDate?}` which writes the renewed
+  date onto the vehicle (mot_due / tax_due, or last_service_date+last_service_miles,
+  next_service recomputed) and clears the ack, so the item drops off. The card's quick
+  renewal prompt also has a ✅ Completed button. renewalRow/setDefStatus/saveDefNote
+  branch on `d.renewal`; the all-vans panel now surfaces renewals even for vans with no
+  van-check defect.
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed

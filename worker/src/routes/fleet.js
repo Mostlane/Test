@@ -1451,6 +1451,44 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true, reg, type, status: b.status === "pending" ? "pending" : "open", note: (cur[type] && cur[type].note) || "" }, headers);
   }
 
+  // ── Complete a renewal (MOT / tax / service) and set the NEW date(s) ───────
+  // POST /fleet/renewal-complete {reg, type, date, miles?, nextDate?}. Writes the
+  // renewed date onto the vehicle (so the next one is tracked) and clears the
+  // booked/in-hand ack for that type. Service also updates the last-service
+  // mileage; nextDate overrides the computed next-service (else it recomputes
+  // from the interval).
+  if (sub === "/renewal-complete" && method === "POST") {
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    const date = String(b.date || "").slice(0, 10);
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr({ error: "reg + valid type required" }, headers, 400);
+    if (!date) return jr({ error: "date required" }, headers, 400);
+    const rk = dnReg(reg);
+    if (type === "mot") {
+      await env.DB.prepare("UPDATE vehicles SET mot_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else if (type === "tax") {
+      await env.DB.prepare("UPDATE vehicles SET tax_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else {
+      const row = await env.DB.prepare("SELECT svc_interval_days, svc_interval_miles FROM vehicles WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, rk).first();
+      const miles = (b.miles != null && b.miles !== "" && !isNaN(Number(b.miles))) ? Math.round(Number(b.miles)) : null;
+      let next = "";
+      if (b.nextDate) next = String(b.nextDate).slice(0, 10);
+      else if (!(row && (row.svc_interval_days || row.svc_interval_miles))) next = date; // no interval → keep the entered next date if given, else the serviced date
+      await env.DB.prepare("UPDATE vehicles SET last_service_date=?, last_service_miles=COALESCE(?, last_service_miles), next_service=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?")
+        .bind(date, miles, next, tid, rk).run();
+    }
+    // clear the booked ack for this type
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    if (map[dnReg(reg)] || map[regKey(reg)]) {
+      const k = map[regKey(reg)] ? regKey(reg) : dnReg(reg);
+      if (map[k]) { delete map[k][type]; if (!Object.keys(map[k]).length) delete map[k]; }
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    }
+    return jr({ ok: true, reg, type, date }, headers);
+  }
+
   // ── Mark ALL of a van's reported defects resolved (bulk) ──────────────────
   // Stamps the legacy per-reg "resolved as of now" time AND explicitly resolves
   // each currently-outstanding defect (so nothing lingers), all in one tap.

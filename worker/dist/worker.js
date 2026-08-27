@@ -19387,6 +19387,37 @@ async function handle22(request, env, ctx, url, sess) {
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
     return jr3({ ok: true, reg, type, status: b.status === "pending" ? "pending" : "open", note: cur[type] && cur[type].note || "" }, headers);
   }
+  if (sub === "/renewal-complete" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    const date = String(b.date || "").slice(0, 10);
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr3({ error: "reg + valid type required" }, headers, 400);
+    if (!date) return jr3({ error: "date required" }, headers, 400);
+    const rk = dnReg(reg);
+    if (type === "mot") {
+      await env.DB.prepare("UPDATE vehicles SET mot_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else if (type === "tax") {
+      await env.DB.prepare("UPDATE vehicles SET tax_due=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, tid, rk).run();
+    } else {
+      const row = await env.DB.prepare("SELECT svc_interval_days, svc_interval_miles FROM vehicles WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(tid, rk).first();
+      const miles = b.miles != null && b.miles !== "" && !isNaN(Number(b.miles)) ? Math.round(Number(b.miles)) : null;
+      let next = "";
+      if (b.nextDate) next = String(b.nextDate).slice(0, 10);
+      else if (!(row && (row.svc_interval_days || row.svc_interval_miles))) next = date;
+      await env.DB.prepare("UPDATE vehicles SET last_service_date=?, last_service_miles=COALESCE(?, last_service_miles), next_service=? WHERE tenant_id=? AND UPPER(REPLACE(reg,' ',''))=?").bind(date, miles, next, tid, rk).run();
+    }
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    if (map[dnReg(reg)] || map[regKey(reg)]) {
+      const k = map[regKey(reg)] ? regKey(reg) : dnReg(reg);
+      if (map[k]) {
+        delete map[k][type];
+        if (!Object.keys(map[k]).length) delete map[k];
+      }
+      await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    }
+    return jr3({ ok: true, reg, type, date }, headers);
+  }
   if (sub === "/defects-resolve" && method === "POST") {
     const b = await readJson4(request);
     const reg = String(b.reg || "").trim();
