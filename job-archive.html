@@ -151,7 +151,12 @@ function render(jobs){
         ${j.postcode?`<span>📍 ${esc(j.postcode)}</span>`:""}
         ${j.createdAt?`<span>📅 ${fmtDate(j.createdAt)}</span>`:""}
       </div>
-      ${(()=>{ const s = siteInfo(j); return s.code ? `<div style="margin-top:6px"><button class="doclink sitedocs" data-site="${esc(s.code)}" data-name="${esc(s.name)}">🗂️ Site Documents</button></div>` : ""; })()}
+      <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${(()=>{ const s = siteInfo(j); return s.code ? `<button class="doclink sitedocs" data-site="${esc(s.code)}" data-name="${esc(s.name)}">🗂️ Site Documents</button>` : ""; })()}
+        ${j.reopenedJobId
+          ? `<button class="doclink openlive" data-jobid="${esc(j.reopenedJobId)}" style="background:#e7f7ec;border-color:#a6dcbd;color:#166534">↩ On the board — open</button>`
+          : `<button class="doclink reopen" data-mos="${esc(j.id||j.mos||j.helpdeskRef)}" style="background:#eef4ff;border-color:#c7dbfd;color:#1d4ed8">↩ Reopen to board</button>`}
+      </div>
       ${detailHtml(j)}
       <div class="files" data-mos="${esc(j.helpdeskRef||j.id)}" data-loaded="0"></div>
     </div>`;
@@ -171,6 +176,30 @@ function render(jobs){
       e.stopPropagation();
       const p = new URLSearchParams({ site: b.dataset.site, name: b.dataset.name, back: "job-archive.html" + location.search });
       location.href = "site-folder.html?" + p.toString();
+    });
+  });
+  // Open an archived job that's already been reopened → its live job card.
+  document.querySelectorAll("#results .openlive").forEach(b=>{
+    b.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      location.href = "job-view.html?jobId=" + encodeURIComponent(b.dataset.jobid) + "&back=job-archive.html" + encodeURIComponent(location.search);
+    });
+  });
+  // Reopen an archived job onto the live board, then jump to it to allocate.
+  document.querySelectorAll("#results .reopen").forEach(b=>{
+    b.addEventListener("click", async (e)=>{
+      e.stopPropagation();
+      const mos = b.dataset.mos;
+      if(!mos){ alert("This archived job has no reference to reopen."); return; }
+      const ok = window.MLUI ? await MLUI.confirm("Reopen this job onto the live board so it can be allocated?", {okLabel:"Reopen"}) : confirm("Reopen this job onto the live board?");
+      if(!ok) return;
+      b.disabled = true; b.textContent = "Reopening…";
+      try{
+        const r = await fetch(SLA + "/archive/reopen", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id: mos }) });
+        const d = await r.json();
+        if(d && d.ok && d.jobId){ location.href = "job-view.html?jobId=" + encodeURIComponent(d.jobId) + "&back=job-archive.html" + encodeURIComponent(location.search); }
+        else { b.disabled=false; b.textContent="↩ Reopen to board"; alert((d && d.error) || "Couldn't reopen this job."); }
+      }catch(err){ b.disabled=false; b.textContent="↩ Reopen to board"; alert("Couldn't reopen this job."); }
     });
   });
 }
