@@ -56,6 +56,17 @@
     .tabbar a{flex:1;text-align:center;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
     .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
     .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+    /* Desktop only (>=1000px) AND only when the portal sidebar is present
+       (body.pnav-on): this page is a mobile field-app layout clamped to 520px,
+       which looks tiny/broken on a PC. Beside the sidebar, drop the phone clamp
+       for a comfortable left-aligned desktop column and hide the bottom tab bar
+       (the sidebar is the nav on desktop). Scoped entirely to desktop + pnav-on,
+       so mobile/PWA engineers are UNAFFECTED. */
+    @media (min-width:1000px){
+      body.pnav-on{ max-width:960px; margin:0; padding-bottom:28px; }
+      body.pnav-on .tabbar{ display:none !important; }
+      body.pnav-on .toast{ left:280px; right:auto; max-width:600px; margin:0; bottom:24px; }
+    }
   </style>
 </head>
 <body>
