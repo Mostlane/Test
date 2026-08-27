@@ -78,6 +78,12 @@
   .tag.warn{background:#fef3c7;color:#92400e;}
   .tag.bad{background:#fee2e2;color:#b91c1c;}
   .tag.info{background:#e0f2fe;color:#075985;}
+  .tag.pending{background:#fef3c7;color:#92400e;border:1px dashed #d97706;}
+  .tag.renew-chip{cursor:pointer;}
+  .tag.renew-chip:hover{filter:brightness(.97);}
+  .fleet-banner.pend{background:#fffbeb;color:#92400e;border:1px solid #fcd34d;font-weight:600;}
+  .fleet-banner.pend .fb-title{color:#92400e;}
+  .fleet-banner .fb-seg.pending{background:#fef3c7;color:#92400e;border:1px solid #f0c674;border-radius:999px;padding:2px 9px;border-bottom-style:solid;}
   .card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px;border-top:1px dashed var(--line);}
   .grip{cursor:grab;color:var(--muted);font-size:18px;line-height:1;touch-action:none;user-select:none;padding:2px;}
   .grip:active{cursor:grabbing;}
@@ -391,29 +397,15 @@
     $("sumActive").textContent=FLEET.filter(v=>v.active!==false).length;
     $("sumUnassigned").textContent=FLEET.filter(v=>!v.driver).length;
     $("sumDue").textContent=FLEET.filter(v=>v.serviceStatus==="warn"||v.serviceStatus==="bad").length;
-    const faultVans=FLEET.filter(v=>hasDefect(v));
-    const faults=faultVans.length;
-    const openVans=FLEET.filter(v=>hasOpenDefect(v)).length;
-    const openCount=FLEET.reduce((s,v)=>s+(v.defectOpen||0)+(v.defectNotSafe?0:0),0);
-    const pendCount=FLEET.reduce((s,v)=>s+(v.defectPending||0),0);
+    const faults=FLEET.filter(v=>hasDefect(v)).length;
     const fc=$("sumFaultCard"); fc.style.display="";       // always shown now (green when clear)
     $("sumFault").textContent=faults;
     fc.classList.remove("alert","fault-bad","fault-ok");
     fc.classList.add(faults?"fault-bad":"fault-ok");
     const note=fc.querySelector(".note"); if(note) note.textContent = faults ? "Tap to manage all defects →" : "No outstanding faults";
-    // Red top banner — only when something still needs sorting.
-    const db=$("defectBanner");
-    if(db){
-      if(faults){
-        const parts=[];
-        if(openCount) parts.push(`<b>${openCount}</b> defect${openCount>1?"s":""} to sort`);
-        if(pendCount) parts.push(`<b>${pendCount}</b> pending`);
-        const vanTxt=`${openVans||faults} van${(openVans||faults)>1?"s":""}`;
-        $("defectBannerText").innerHTML=`${parts.join(" · ")||"Defects reported"} across ${vanTxt}`;
-        db.style.display="";
-        db.style.background=openVans?"#fef2f2":"#fffbeb"; db.style.borderColor=openVans?"#dc2626":"#d97706"; db.style.color=openVans?"#991b1b":"#92400e";
-      } else db.style.display="none";
-    }
+    // One consolidated banner now covers faults + services + MOT/tax (renderBanner),
+    // pending-aware, so the separate red defect banner is retired.
+    const db=$("defectBanner"); if(db) db.style.display="none";
     renderBanner();
   }
   // Jump the grid to a filtered view (banner segments link here).
@@ -428,24 +420,40 @@
     if(v.pendingHandover) out.push("handover pending");
     return out;
   }
-  // Green "all clear" / red "needs attention" banner naming exactly what's
-  // outstanding across the fleet (faults, services due/overdue, MOT/tax/handover).
+  // ONE consolidated banner. RED only names things that genuinely need action;
+  // anything marked booked / in hand (a pending defect, or a booked MOT/tax/
+  // service) drops to a calm amber "in hand" line — so pending work no longer
+  // makes the whole banner red and in-your-face.
   function renderBanner(){
     const b=$("fleetBanner"); if(!b) return;
     const on=v=>v.active!==false;
-    const faults=FLEET.filter(v=>on(v)&&hasDefect(v));
-    const svc=FLEET.filter(v=>on(v)&&(v.serviceStatus==="warn"||v.serviceStatus==="bad"));
-    const other=FLEET.filter(v=>on(v)&&svc.indexOf(v)<0&&renewalReason(v).length);
     const regs=arr=>arr.map(v=>v.reg||"?").join(", ");
-    const parts=[];
-    if(faults.length) parts.push(`<a class="fb-seg" onclick="jumpFilter('faults')">🔧 ${faults.length} van${faults.length>1?"s":""} with a fault <small>(${esc(regs(faults))})</small></a>`);
-    if(svc.length){ const od=svc.filter(v=>v.serviceStatus==="bad").length; const lbl=od?`${svc.length} service${svc.length>1?"s":""} due — ${od} overdue`:`${svc.length} service${svc.length>1?"s":""} due`; parts.push(`<a class="fb-seg" onclick="jumpFilter('due')">🛠 ${lbl} <small>(${esc(regs(svc))})</small></a>`); }
-    // Renewals: one PINPOINTED segment per van naming its exact issue(s) — not a
-    // vague "MOT / tax / handover" that could be any of them.
-    other.forEach(v=>{ parts.push(`<a class="fb-seg" onclick="jumpFilter('attention')">📋 <b>${esc(v.reg||"?")}</b> — ${esc(renewalReason(v).join(", "))}</a>`); });
+    const open=[], pend=[];
+    // Faults (van checks) — open needs sorting, pending is booked/awaiting.
+    const fOpen=FLEET.filter(v=>on(v)&&hasOpenDefect(v));
+    const fPend=FLEET.filter(v=>on(v)&&!hasOpenDefect(v)&&v.defectPending>0);
+    if(fOpen.length) open.push(`<a class="fb-seg" onclick="openDefectsModal()">🔧 ${fOpen.length} van${fOpen.length>1?"s":""} with a fault <small>(${esc(regs(fOpen))})</small></a>`);
+    if(fPend.length) pend.push(`<a class="fb-seg pending" onclick="openDefectsModal()">🔧 ${fPend.length} fault${fPend.length>1?"s":""} in hand</a>`);
+    // Services.
+    const svcAll=FLEET.filter(v=>on(v)&&(v.serviceStatus==="warn"||v.serviceStatus==="bad"));
+    const svcOpen=svcAll.filter(v=>!v.servicePending), svcPend=svcAll.filter(v=>v.servicePending);
+    if(svcOpen.length){ const od=svcOpen.filter(v=>v.serviceStatus==="bad").length; const lbl=od?`${svcOpen.length} service${svcOpen.length>1?"s":""} due — ${od} overdue`:`${svcOpen.length} service${svcOpen.length>1?"s":""} due`; open.push(`<a class="fb-seg" onclick="jumpFilter('due')">🛠 ${lbl} <small>(${esc(regs(svcOpen))})</small></a>`); }
+    if(svcPend.length) pend.push(`<a class="fb-seg pending" onclick="jumpFilter('due')">🛠 ${svcPend.length} service${svcPend.length>1?"s":""} booked <small>(${esc(regs(svcPend))})</small></a>`);
+    // MOT + Tax, pinpointed per van — open (red) vs booked (amber).
+    FLEET.filter(on).forEach(v=>{
+      [["mot",v.motDue,v.motPending,"MOT"],["tax",v.taxDue,v.taxPending,"tax"]].forEach(([type,date,p,lbl])=>{
+        const d=daysTo(date); if(d==null||d>30) return;   // not due
+        if(p){ pend.push(`<a class="fb-seg pending" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📌 <b>${esc(v.reg||"?")}</b> — ${lbl} booked</a>`); }
+        else{ const txt=d<0?`${lbl} overdue`:(d===0?`${lbl} due today`:`${lbl} due in ${d} day${d===1?"":"s"}`); open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📋 <b>${esc(v.reg||"?")}</b> — ${txt}</a>`); }
+      });
+    });
+    // Handover pending (kept as an amber "in hand" item — it's awaiting the driver).
+    FLEET.filter(v=>on(v)&&v.pendingHandover).forEach(v=>{ pend.push(`<a class="fb-seg pending" onclick="jumpFilter('attention')">🤝 <b>${esc(v.reg||"?")}</b> — handover pending</a>`); });
+
     b.style.display="";
-    if(!parts.length){ b.className="fleet-banner ok"; b.innerHTML="✓ Fleet all clear — no faults, services or renewals outstanding."; }
-    else { b.className="fleet-banner bad"; b.innerHTML=`<span class="fb-title">⚠ Fleet needs attention:</span>`+parts.join(""); }
+    if(!open.length && !pend.length){ b.className="fleet-banner ok"; b.innerHTML="✓ Fleet all clear — no faults, services or renewals outstanding."; return; }
+    if(!open.length){ b.className="fleet-banner pend"; b.innerHTML=`<span class="fb-title">📌 In hand — booked or awaiting:</span>`+pend.join(""); return; }
+    b.className="fleet-banner bad"; b.innerHTML=`<span class="fb-title">⚠ Fleet needs attention:</span>`+open.join("")+pend.join("");
   }
 
   // A van has an outstanding fault if a van-check reported a defect/missing item
@@ -632,26 +640,74 @@
   }
 
   // date tag with countdown (MOT / Tax)
-  function dateTag(dateStr,label){
+  // A tag that, when the item is due (or booked), becomes tappable to mark it
+  // booked / in hand. reg+type drive the click → openRenewalModal.
+  function tagWrap(cls,clickable,reg,type,inner){
+    const oc=clickable?` onclick="openRenewalModal('${esc(reg)}','${type}')"`:"";
+    return `<span class="tag ${clickable?cls+" renew-chip":cls}"${oc}>${inner}</span>`;
+  }
+  // MOT / Tax date tag (v+type make it renewal-aware: amber "booked" when pending,
+  // tappable when due). Falls back to a plain tag when called without v.
+  function dateTag(dateStr,label,v,type){
     if(!dateStr) return `<span class="tag info">${label}<em>not set</em></span>`;
-    const d=new Date(dateStr); d.setHours(0,0,0,0);
-    const today=new Date(); today.setHours(0,0,0,0);
-    const days=Math.ceil((d-today)/86400000);
+    const days=daysTo(dateStr), due=days!=null&&days<=30, overdue=days!=null&&days<0;
+    const pend=(v&&type)?v[type+"Pending"]:"";
+    const reg=v?(v.reg||""):"";
+    const clickable=!!(v&&type&&(due||pend));
+    if(due&&pend){
+      const nt=(pend&&pend!==true)?" · "+pend:"";
+      return tagWrap("pending",clickable,reg,type,`📌 ${label}<em>booked${esc(nt)} · ${fmtDMY(dateStr)}</em>`);
+    }
     let cls="ok",note=fmtDMY(dateStr);
-    if(days<0){ cls="bad"; note=fmtDMY(dateStr)+" · overdue"; }
-    else if(days<=30){ cls="warn"; note=fmtDMY(dateStr)+" · "+days+"d"; }
-    return `<span class="tag ${cls}">${label}<em>${esc(note)}</em></span>`;
+    if(overdue){ cls="bad"; note=fmtDMY(dateStr)+" · overdue"; }
+    else if(due){ cls="warn"; note=fmtDMY(dateStr)+" · "+days+"d"; }
+    return tagWrap(cls,clickable,reg,type,`${label}<em>${esc(note)}</em>`);
   }
   function serviceTag(v){
     const st=v.serviceStatus;
     if(!st||st==="none") return `<span class="tag info">Service<em>not scheduled</em></span>`;
-    const cls=st==="bad"?"bad":st==="warn"?"warn":"ok";
+    const due=st==="warn"||st==="bad";
+    const pend=v.servicePending;
+    if(due&&pend){
+      const nt=(pend&&pend!==true)?" · "+pend:"";
+      return tagWrap("pending",true,v.reg||"","service",`📌 Service<em>booked${esc(nt)}</em>`);
+    }
     let bits=[];
     if(v.nextServiceDate) bits.push(fmtDMY(v.nextServiceDate));
     if(v.serviceDueMiles!=null) bits.push(fmtMiles(v.serviceDueMiles)+" mi");
     const sub=v.serviceReason||bits.join(" / ")||"scheduled";
-    return `<span class="tag ${cls}">Service<em>${esc(sub)}</em></span>`;
+    const cls=st==="bad"?"bad":st==="warn"?"warn":"ok";
+    return tagWrap(cls,due,v.reg||"","service",`Service<em>${esc(sub)}</em>`);
   }
+  // Open the "mark this renewal booked / in hand" prompt.
+  window.openRenewalModal=function(reg,type){
+    const v=FLEET.find(x=>(x.reg||"")===reg); if(!v) return;
+    const labels={mot:"MOT",tax:"Road tax",service:"Service"};
+    const dateStr=type==="mot"?v.motDue:type==="tax"?v.taxDue:v.nextServiceDate;
+    const pend=v[type+"Pending"];
+    const curNote=(pend&&pend!==true)?pend:"";
+    pModal(`
+      <h3 style="margin:0 0 4px">${labels[type]} — ${esc(reg)}</h3>
+      <div class="hint" style="margin-bottom:12px">${dateStr?("Due "+fmtDMY(dateStr)+". "):""}Mark it <b>booked / in hand</b> so it turns amber and stops the banner going red — until it's done and the date is updated.</div>
+      <label class="hint" style="display:block;margin-bottom:4px">Note (optional) — e.g. “booked in 5 Sep”, “awaiting slot”</label>
+      <input id="renewNote" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px" value="${esc(curNote)}" placeholder="booked in 5 Sep">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','${type}','open')">↩ Not booked</button>`:""}
+        <button class="btn ghost small" onclick="pClose()">Cancel</button>
+        <button class="btn primary small" onclick="setRenewal('${esc(reg)}','${type}','pending')">📌 Mark booked</button>
+      </div>`);
+    setTimeout(()=>{const el=document.getElementById("renewNote"); if(el) el.focus();},50);
+  };
+  window.setRenewal=async function(reg,type,status){
+    const note=(document.getElementById("renewNote")||{}).value||"";
+    try{
+      const r=await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg,type,status,note})}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not save."); return; }
+      const v=FLEET.find(x=>(x.reg||"")===reg);
+      if(v) v[type+"Pending"] = status==="pending" ? (note||true) : "";
+      pClose(); renderFleet(); updateSummary();
+    }catch(e){ alert("Could not save."); }
+  };
 
   // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = none).
   function daysTo(s){ if(!s) return null; const d=new Date(s); if(isNaN(d)) return null; d.setHours(0,0,0,0); const t=new Date(); t.setHours(0,0,0,0); return Math.round((d-t)/86400000); }
@@ -733,7 +789,7 @@
           <span>${v.active===false?"Inactive":"Active"}</span>
         </div>
         <div>${odo}${v.currentMpg!=null?`<span class="odo" style="margin-left:14px">⛽ ${Number(v.currentMpg).toFixed(1)} <small>Current MPG</small></span>`:""}</div>
-        <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
+        <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT",v,"mot")}${dateTag(v.taxDue,"Tax",v,"tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
         <div class="card-actions">
           ${hasDefect(v)?`<button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button>`:""}
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
@@ -803,7 +859,7 @@
         <button class="btn ghost small" onclick="pClose()">✕ Close</button>
       </div>
       ${photo}
-      <div class="tags" style="margin-bottom:6px">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${svc}</div>
+      <div class="tags" style="margin-bottom:6px">${defectTags(v)}${dateTag(v.motDue,"MOT",v,"mot")}${dateTag(v.taxDue,"Tax",v,"tax")}${svc}</div>
       ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid ${hasOpenDefect(v)?"#dc2626":"#d97706"};background:${hasOpenDefect(v)?"#fef2f2":"#fffbeb"}"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:${hasOpenDefect(v)?"#991b1b":"#92400e"};font-weight:650">${v.defectOpen>0?`⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""} to sort`:""}${v.defectOpen>0&&v.defectPending>0?" · ":""}${v.defectPending>0?`⏳ ${v.defectPending} pending`:""}${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button></div></div></div>`:""}
       ${svcReason}
       <div>

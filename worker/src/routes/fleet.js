@@ -320,6 +320,12 @@ async function vanCheckDefects(env, tid, resolved) {
 // an explicit per-defect status ALWAYS wins over it (so one fault can be
 // reopened or marked pending after a bulk resolve).
 const DEFECTST_KEY = tid => `fleet:defectstatus:${tid}`;
+// Renewal "booked / in hand" acknowledgements (MOT, tax, service). Presence marks
+// a due item as PENDING (amber, with a note) instead of screaming red. Auto-stale:
+// only honoured while the item is actually due — once the date renews it's ignored.
+// app_config fleet:renewalack:<tid> = { REGNORM: { mot:{note,by,at}, tax:{}, service:{} } }.
+const RENEWALACK_KEY = tid => `fleet:renewalack:${tid}`;
+function daysToDate(s) { if (!s) return null; const d = new Date(s); if (isNaN(d)) return null; d.setHours(0, 0, 0, 0); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d - t) / 86400000); }
 async function appConfigJson(env, key) {
   try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); return row && row.value ? (JSON.parse(row.value) || {}) : {}; }
   catch { return {}; }
@@ -664,7 +670,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Gather everything the cards need CONCURRENTLY — these lookups are
     // independent, so running them in parallel turns ~10 stacked round trips into
     // one, which is the main win for this page's speed.
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, defStatus, vcSettings, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -676,6 +682,7 @@ export async function handle(request, env, ctx, url, sess) {
       appCfg(VCACK_KEY(tid)),
       appCfg(DEFECTST_KEY(tid)),         // per-defect statuses (open/pending/resolved)
       appCfg("vancheck:settings"),       // item labels for the defect list
+      appCfg(RENEWALACK_KEY(tid)),       // MOT/tax/service "booked / in hand" acks
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
@@ -741,6 +748,15 @@ export async function handle(request, env, ctx, url, sess) {
         defectPending: (defects[regKey(v.reg)] || {}).pending || 0,
         defectNotSafe: !!(defects[regKey(v.reg)] || {}).notSafe,
         defectSince: (defects[regKey(v.reg)] || {}).since || "",
+        // Renewal "booked / in hand" acks — surfaced only while the item is still
+        // due (a renewed date auto-clears the amber). Value = the note (or true).
+        ...(() => {
+          const a = renewAck[regKey(v.reg)] || {};
+          const dm = daysToDate(v.mot_due), dt = daysToDate(v.tax_due);
+          const due = { mot: dm != null && dm <= 30, tax: dt != null && dt <= 30, service: sv.status === "warn" || sv.status === "bad" };
+          const pend = k => (due[k] && a[k]) ? (a[k].note || true) : "";
+          return { motPending: pend("mot"), taxPending: pend("tax"), servicePending: pend("service") };
+        })(),
         lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),   // card status bar: ok | ack | due
         vanCheckRequested: pendVc.has(dn(v.reg)),  // a one-off check is pending — hide the Request button
@@ -1410,6 +1426,29 @@ export async function handle(request, env, ctx, url, sess) {
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(tid, DEFECTST_KEY(tid), JSON.stringify(map)).run();
     return jr({ ok: true, key, status, note, by: map[key].by, at: map[key].at }, headers);
+  }
+
+  // ── Mark a renewal (MOT / tax / service) as booked / in hand ──────────────
+  // POST /fleet/renewal-status {reg, type, status:"pending"|"open", note}.
+  // "pending" = booked/awaiting (amber, note kept); "open" clears it back to red.
+  // Auto-clears itself when the underlying date renews (see /fleet/vehicles).
+  if (sub === "/renewal-status" && method === "POST") {
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr({ error: "reg + valid type required" }, headers, 400);
+    const rk = regKey(reg);
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const cur = map[rk] || (map[rk] = {});
+    if (b.status === "pending") {
+      cur[type] = { note: typeof b.note === "string" ? b.note.slice(0, 300) : "", by: (sess && sess.user && sess.user.username) || "", at: new Date().toISOString() };
+    } else {
+      delete cur[type];
+    }
+    if (!Object.keys(map[rk]).length) delete map[rk];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    return jr({ ok: true, reg, type, status: b.status === "pending" ? "pending" : "open", note: (cur[type] && cur[type].note) || "" }, headers);
   }
 
   // ── Mark ALL of a van's reported defects resolved (bulk) ──────────────────

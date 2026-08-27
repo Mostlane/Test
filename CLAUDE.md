@@ -1417,6 +1417,23 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   van** when scoped. Changes set `DEF_DIRTY` and re-flow the cards on close.
   `hasDefect`/`hasOpenDefect`/`defectTags`/`resolveDefects`/`openDefectsModal`/
   `setDefStatus`/`saveDefNote` are the helpers; no schema change (app_config only).
+- **MOT / tax / service "booked / in hand" (Aug 2026)** — the same pending idea now
+  covers renewals. A due MOT/tax/service tag on the card is **tappable** → a small
+  modal (`openRenewalModal(reg,type)` → `setRenewal`) marks it **booked / pending**
+  with a note ("booked 5 Sep") or clears it. Stored in app_config
+  **`fleet:renewalack:<tid>`** = `{ REGNORM:{ mot:{note,by,at}, tax:{}, service:{} } }`
+  via **POST /fleet/renewal-status** `{reg, type:"mot"|"tax"|"service", status:"pending"|"open", note}`.
+  **Auto-stale:** an ack is only honoured while the item is still due (mot/tax
+  `daysToDate<=30`, service status warn/bad) — a renewed date clears the amber on its
+  own; `/fleet/vehicles` returns `motPending`/`taxPending`/`servicePending` (the note,
+  or true) computed with that gate. A pending item shows an amber dashed **📌 booked**
+  tag. **Banners consolidated + calmed:** the separate red `#defectBanner` is retired;
+  `renderBanner()` (`#fleetBanner`) is now the ONE attention banner and is
+  pending-aware — RED only lists items that genuinely need action (open defects,
+  unbooked services/MOT/tax), while anything booked/in-hand drops to a calm amber
+  "📌 In hand" line (`.fleet-banner.pend` / `.fb-seg.pending`); when EVERYTHING
+  outstanding is in hand the whole banner is amber, not red. Fault segments open the
+  defect modal; renewal segments open the renewal modal.
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed

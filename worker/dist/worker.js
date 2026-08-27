@@ -18164,6 +18164,16 @@ function vanCheckState(lastAt, ack) {
   return { state: "due", at: lastAt || "", ackBy: "" };
 }
 var DEFECTST_KEY = (tid) => `fleet:defectstatus:${tid}`;
+var RENEWALACK_KEY = (tid) => `fleet:renewalack:${tid}`;
+function daysToDate(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d)) return null;
+  d.setHours(0, 0, 0, 0);
+  const t = /* @__PURE__ */ new Date();
+  t.setHours(0, 0, 0, 0);
+  return Math.round((d - t) / 864e5);
+}
 async function appConfigJson(env, key) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
@@ -18534,7 +18544,7 @@ async function handle22(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, defStatus, vcSettings, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, defStatus, vcSettings, renewAck, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -18551,6 +18561,8 @@ async function handle22(request, env, ctx, url, sess) {
       // per-defect statuses (open/pending/resolved)
       appCfg("vancheck:settings"),
       // item labels for the defect list
+      appCfg(RENEWALACK_KEY(tid)),
+      // MOT/tax/service "booked / in hand" acks
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
@@ -18626,6 +18638,15 @@ async function handle22(request, env, ctx, url, sess) {
         defectPending: (defects[regKey(v.reg)] || {}).pending || 0,
         defectNotSafe: !!(defects[regKey(v.reg)] || {}).notSafe,
         defectSince: (defects[regKey(v.reg)] || {}).since || "",
+        // Renewal "booked / in hand" acks — surfaced only while the item is still
+        // due (a renewed date auto-clears the amber). Value = the note (or true).
+        ...(() => {
+          const a = renewAck[regKey(v.reg)] || {};
+          const dm = daysToDate(v.mot_due), dt = daysToDate(v.tax_due);
+          const due = { mot: dm != null && dm <= 30, tax: dt != null && dt <= 30, service: sv.status === "warn" || sv.status === "bad" };
+          const pend = (k) => due[k] && a[k] ? a[k].note || true : "";
+          return { motPending: pend("mot"), taxPending: pend("tax"), servicePending: pend("service") };
+        })(),
         lastVanCheckAt: lastVc[dn(v.reg)] || "",
         // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
@@ -19348,6 +19369,23 @@ async function handle22(request, env, ctx, url, sess) {
     map[key] = { status, note, by: sess && sess.user && sess.user.username || "", at: (/* @__PURE__ */ new Date()).toISOString() };
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTST_KEY(tid), JSON.stringify(map)).run();
     return jr3({ ok: true, key, status, note, by: map[key].by, at: map[key].at }, headers);
+  }
+  if (sub === "/renewal-status" && method === "POST") {
+    const b = await readJson4(request);
+    const reg = String(b.reg || "").trim();
+    const type = String(b.type || "");
+    if (!reg || !["mot", "tax", "service"].includes(type)) return jr3({ error: "reg + valid type required" }, headers, 400);
+    const rk = regKey(reg);
+    const map = await appConfigJson(env, RENEWALACK_KEY(tid));
+    const cur = map[rk] || (map[rk] = {});
+    if (b.status === "pending") {
+      cur[type] = { note: typeof b.note === "string" ? b.note.slice(0, 300) : "", by: sess && sess.user && sess.user.username || "", at: (/* @__PURE__ */ new Date()).toISOString() };
+    } else {
+      delete cur[type];
+    }
+    if (!Object.keys(map[rk]).length) delete map[rk];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, RENEWALACK_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, reg, type, status: b.status === "pending" ? "pending" : "open", note: cur[type] && cur[type].note || "" }, headers);
   }
   if (sub === "/defects-resolve" && method === "POST") {
     const b = await readJson4(request);
