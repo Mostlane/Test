@@ -111,6 +111,15 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   its own fallback copies — must work against a stale portal-config).
 - **Page-view beacon**: POST /audit/pageview once per page open (logged-in
   only; login/reset/onboard pages excluded).
+- **5-minute time pickers (portal-wide, Aug 2026)**: an IIFE defaults every
+  `input[type="time"]` to `step="300"` (5-min steps — desktop native pickers are
+  fiddly at 1-min) on load + via a MutationObserver for injected inputs. A page
+  opts out with its own `step=` or `data-ml-nostep`.
+- **Job durations are entered/shown in HOURS, never minutes** (Jamie's rule):
+  the shared editor (sla-jobedit.js — `hrLabel()`), add-job.html and the fleet
+  MOT/service booking use hour labels (¼/½/¾/1/1½…); still stored as
+  `durationMinutes` on the job (UI converts h↔min). The editor's **Raised date &
+  time** is now a collapsed `<details>` (rarely edited).
 - **Busy mark — the spinning Mostlane "M"** (`mlLoading()` IIFE, 17 Aug):
   EVERY busy state in the portal shows `/icons/icon-192.png` (the M tile)
   animating `mlSpinStop` — one eased revolution in ~0.9s, then a ~0.8s rest,

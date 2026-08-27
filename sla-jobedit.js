@@ -192,8 +192,10 @@
         </div>
       </div>
 
-      <label for="mljeRaised">Raised (date &amp; time)</label>
-      <input id="mljeRaised" type="datetime-local">
+      <details class="mlje-raised" style="margin:2px 0 6px;">
+        <summary style="cursor:pointer;font-size:12.5px;color:#64748b;list-style:none;">⌄ Raised date &amp; time <span style="font-weight:400;">(rarely needed)</span></summary>
+        <input id="mljeRaised" type="datetime-local" style="margin-top:6px;">
+      </details>
 
       <div class="mlje-site">
         <h3>Schedule &amp; engineers</h3>
@@ -212,15 +214,18 @@
 
         <label for="mljeDuration">Expected duration <small style="font-weight:400;color:#64748b;">(time on site — used to predict the route/day)</small></label>
         <select id="mljeDuration" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;">
-          <option value="30">30 minutes</option>
-          <option value="45">45 minutes</option>
+          <option value="15">¼ hour</option>
+          <option value="30">½ hour</option>
+          <option value="45">¾ hour</option>
           <option value="60" selected>1 hour</option>
           <option value="90">1½ hours</option>
           <option value="120">2 hours</option>
+          <option value="150">2½ hours</option>
           <option value="180">3 hours</option>
           <option value="240">4 hours</option>
           <option value="300">5 hours</option>
-          <option value="480">Full day</option>
+          <option value="360">6 hours</option>
+          <option value="480">Full day (8 hours)</option>
         </select>
         <div class="mlje-hint">If you set a finish time above, that wins; otherwise this sets it.</div>
 
@@ -465,6 +470,14 @@
     $("mljeSiteTel").value = s.telephone;
   }
 
+  // Duration always reads in HOURS (never minutes) — e.g. 90 → "1½ hours".
+  function hrLabel(min) {
+    const h = min / 60, w = Math.floor(h), f = Math.round((h - w) * 100) / 100;
+    const fr = { 0.25: "¼", 0.5: "½", 0.75: "¾" }[f];
+    if (fr) return (w ? w + fr : fr) + " hour" + (w ? "s" : "");
+    if (Number.isInteger(h)) return h + " hour" + (h === 1 ? "" : "s");
+    return (Math.round(h * 100) / 100) + " hours";
+  }
   function toLocalInput(iso) {
     const d = iso ? new Date(iso) : null;
     if (!d || isNaN(d)) return "";
@@ -521,7 +534,7 @@
       if (sel) {
         if (![...sel.options].some(o => o.value === v)) {
           const o = document.createElement("option");
-          o.value = v; o.textContent = (Number(v) % 60 === 0 ? (Number(v) / 60 + " hour" + (Number(v) === 60 ? "" : "s")) : v + " minutes");
+          o.value = v; o.textContent = hrLabel(Number(v));
           sel.insertBefore(o, sel.firstChild);
         }
         sel.value = v;

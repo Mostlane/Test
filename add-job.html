@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=22"></script>
+  <script src="/portal-config.js?v=23"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Add Job</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -260,15 +260,18 @@
       <div class="field-group">
         <label for="expectedDuration">Expected duration <span class="hint">(time on site)</span></label>
         <select id="expectedDuration" name="expectedDuration">
-          <option value="30">30 minutes</option>
-          <option value="45">45 minutes</option>
+          <option value="15">¼ hour</option>
+          <option value="30">½ hour</option>
+          <option value="45">¾ hour</option>
           <option value="60" selected>1 hour</option>
           <option value="90">1½ hours</option>
           <option value="120">2 hours</option>
+          <option value="150">2½ hours</option>
           <option value="180">3 hours</option>
           <option value="240">4 hours</option>
           <option value="300">5 hours</option>
-          <option value="480">Full day</option>
+          <option value="360">6 hours</option>
+          <option value="480">Full day (8 hours)</option>
         </select>
         <div class="hint">Used to predict the engineer's day length when optimising routes.</div>
       </div>
