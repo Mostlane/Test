@@ -171,6 +171,7 @@
       <a class="btn small" id="insightsLink" href="vehicle-insights.html" style="display:none;">📊 Insights</a>
       <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
       <a class="btn small" href="van-timesheet.html" title="Door-to-door van timesheets">⏱️ Van Timesheet</a>
+      <button class="btn small" onclick="openGaragesModal()" title="Manage the garages a service/MOT is carried out at">🔧 Garages</button>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
     </div>
@@ -451,6 +452,13 @@
         else{ const txt=d<0?`${lbl} overdue`:(d===0?`${lbl} due today`:`${lbl} due in ${d} day${d===1?"":"s"}`); open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">📋 <b>${esc(v.reg||"?")}</b> — ${txt}</a>`); }
       });
     });
+    // Holiday clash — the driver is booked off on their van's MOT/service day.
+    FLEET.filter(on).forEach(v=>{
+      [["mot",v.motClash,"MOT"],["service",v.serviceClash,"Service"]].forEach(([type,clash,lbl])=>{
+        if(!clash) return;
+        open.push(`<a class="fb-seg" onclick="openRenewalModal('${esc(v.reg||"")}','${type}')">🚫 <b>${esc(v.reg||"?")}</b> — ${lbl} ${fmtDMY(clash.date)}, driver OFF</a>`);
+      });
+    });
     // Handover pending (kept as an amber "in hand" item — it's awaiting the driver).
     FLEET.filter(v=>on(v)&&v.pendingHandover).forEach(v=>{ pend.push(`<a class="fb-seg pending" onclick="jumpFilter('attention')">🤝 <b>${esc(v.reg||"?")}</b> — handover pending</a>`); });
 
@@ -526,6 +534,7 @@
           label:it.label, answer:overdue?"OVERDUE":"DUE", dueText,
           status: it.pend?"pending":"open",
           officeNote:(it.pend&&it.pend!==true)?it.pend:"",
+          appt: v[it.type+"Appt"]||null, clash: v[it.type+"Clash"]||null,
           checkedAt:"", driverName:"", driverNote:""
         });
       });
@@ -584,12 +593,15 @@
   function renewalRow(d){
     const icon=d.type==="mot"?"📋":d.type==="tax"?"💷":"🛠";
     const st=d.status;
+    const pendLbl=(d.type==="tax")?"Pending":"📅 Book…";
     const btn=(k,l)=>`<button class="stbtn ${k}${st===k?" on":""}" onclick="setDefStatus(this,'${k}')">${l}</button>`;
-    return `<div class="defrow renewalrow ${st==="pending"?"pending":"open"}" data-key="${esc(d.key)}">
+    const apptLine = d.appt&&d.appt.date ? `<div class="defmeta">📅 Booked ${fmtDMY(d.appt.date)}${d.appt.garage?" · "+esc(d.appt.garage):""}</div>` : "";
+    const clashLine = d.clash ? `<div class="defnote" style="background:#fee2e2;color:#991b1b;font-weight:600">⚠ Driver off on ${fmtDMY(d.clash.date)} — reassign or rebook</div>` : "";
+    return `<div class="defrow renewalrow ${d.clash?"":(st==="pending"?"pending":"open")}" data-key="${esc(d.key)}">
       <div class="deftop"><span class="defico">${icon}</span><span class="deflbl">${esc(d.label)}</span><span class="defans">${esc(d.answer||"")}</span></div>
-      <div class="defmeta">${esc(d.dueText||"")}</div>
-      <div class="defctl">${btn("open","Open")}${btn("pending","Pending")}<button class="stbtn complete" onclick="setDefStatus(this,'complete')">✅ Completed…</button></div>
-      <input class="defoffice" placeholder="Note — e.g. booked in 5 Sep, awaiting slot" value="${esc(d.officeNote||"")}" onblur="saveDefNote(this)" onkeydown="if(event.key==='Enter')this.blur()">
+      <div class="defmeta">${esc(d.dueText||"")}</div>${apptLine}${clashLine}
+      <div class="defctl">${btn("open","Open")}<button class="stbtn pending${st==="pending"?" on":""}" onclick="setDefStatus(this,'pending')">${pendLbl}</button><button class="stbtn complete" onclick="setDefStatus(this,'complete')">✅ Completed…</button></div>
+      ${d.type==="tax"?`<input class="defoffice" placeholder="Note — e.g. renewed, awaiting" value="${esc(d.officeNote||"")}" onblur="saveDefNote(this)" onkeydown="if(event.key==='Enter')this.blur()">`:""}
     </div>`;
   }
   window.setDefStatus=async function(btnEl,status){
@@ -599,11 +611,15 @@
     const note=(row.querySelector(".defoffice")||{}).value;
     if(d.renewal){
       if(status==="complete"){ openRenewalComplete(d.reg,d.type); return; }
-      d.status=status; d.officeNote = status==="pending" ? (note||"") : d.officeNote;
+      // MOT/service "Pending" means BOOK an appointment (date + garage + driver job).
+      if(status==="pending" && (d.type==="mot"||d.type==="service")){ openRenewalModal(d.reg,d.type); return; }
       DEF_DIRTY=true;
       try{ await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg:d.reg,type:d.type,status,note})}).then(r=>r.json()); }catch(e){}
       const v=FLEET.find(x=>(x.reg||"")===d.reg); if(v) v[d.type+"Pending"]= status==="pending"?(note||true):"";
-      renderDefects(); return;
+      // MOT/service "open" cancels the appointment job → refresh from server.
+      if(d.type==="mot"||d.type==="service"){ await loadFleet(); await loadDefects(); }
+      else { d.status=status; d.officeNote = status==="pending"?(note||""):d.officeNote; renderDefects(); }
+      return;
     }
     d.status=status; if(note!=null) d.officeNote=note;
     await postDefStatus(key,status,note);
@@ -756,8 +772,10 @@
     const reg=v?(v.reg||""):"";
     const clickable=!!(v&&type&&(due||pend));
     if(due&&pend){
-      const nt=(pend&&pend!==true)?" · "+pend:"";
-      return tagWrap("pending",clickable,reg,type,`📌 ${label}<em>booked${esc(nt)} · ${fmtDMY(dateStr)}</em>`);
+      const appt=v[type+"Appt"], clash=v[type+"Clash"];
+      const when = appt&&appt.date ? fmtDMY(appt.date)+(appt.garage?" @ "+appt.garage:"") : ((pend&&pend!==true)?pend:fmtDMY(dateStr));
+      if(clash) return tagWrap("bad",clickable,reg,type,`⚠ ${label}<em>booked ${esc(when)} · driver OFF</em>`);
+      return tagWrap("pending",clickable,reg,type,`📌 ${label}<em>booked ${esc(when)}</em>`);
     }
     let cls="ok",note=fmtDMY(dateStr);
     if(overdue){ cls="bad"; note=fmtDMY(dateStr)+" · overdue"; }
@@ -770,8 +788,10 @@
     const due=st==="warn"||st==="bad";
     const pend=v.servicePending;
     if(due&&pend){
-      const nt=(pend&&pend!==true)?" · "+pend:"";
-      return tagWrap("pending",true,v.reg||"","service",`📌 Service<em>booked${esc(nt)}</em>`);
+      const appt=v.serviceAppt, clash=v.serviceClash;
+      const when = appt&&appt.date ? fmtDMY(appt.date)+(appt.garage?" @ "+appt.garage:"") : ((pend&&pend!==true)?pend:"");
+      if(clash) return tagWrap("bad",true,v.reg||"","service",`⚠ Service<em>booked ${esc(when)} · driver OFF</em>`);
+      return tagWrap("pending",true,v.reg||"","service",`📌 Service<em>booked${when?" "+esc(when):""}</em>`);
     }
     let bits=[];
     if(v.nextServiceDate) bits.push(fmtDMY(v.nextServiceDate));
@@ -781,34 +801,132 @@
     return tagWrap(cls,due,v.reg||"","service",`Service<em>${esc(sub)}</em>`);
   }
   // Open the "mark this renewal booked / in hand" prompt.
+  // ── Garages (where a service/MOT is carried out) ──────────────────────────
+  let GARAGES=[], GARAGES_HQ={name:"Mostlane HQ",postcode:"PO15 5RQ"};
+  async function loadGarages(){ try{ const d=await aFetch("/fleet/garages").then(r=>r.json()); GARAGES=(d&&d.garages)||[]; if(d&&d.hq) GARAGES_HQ=d.hq; }catch(e){ GARAGES=[]; } }
+  window.openGaragesModal=async function(){ await loadGarages(); renderGaragesModal(); };
+  function renderGaragesModal(){
+    const rows = GARAGES.length ? GARAGES.map(g=>`
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #eef2f7">
+        <div style="flex:1"><b>${esc(g.name)}</b><div class="hint">${g.collectsFromHQ?("🚚 Collects from HQ ("+esc(GARAGES_HQ.postcode)+")"):(g.postcode?esc(g.postcode):"<i>no postcode</i>")}</div></div>
+        <button class="btn ghost small" onclick="editGarage('${esc(g.id)}')">Edit</button>
+        <button class="btn ghost small" style="color:#b91c1c" onclick="deleteGarage('${esc(g.id)}')">Delete</button>
+      </div>`).join("") : '<div class="hint" style="padding:10px 0">No garages yet — add your first below.</div>';
+    pModal(`
+      <h3 style="margin:0 0 4px">🔧 Garages</h3>
+      <div class="hint" style="margin-bottom:6px">Where services &amp; MOTs are carried out. Tick “collects from HQ” for garages that pick the van up from ${esc(GARAGES_HQ.postcode)}.</div>
+      <div id="garList">${rows}</div>
+      <div style="border-top:2px solid #e2e8f0;margin-top:10px;padding-top:10px"><div id="garForm"></div></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn ghost small" onclick="pClose()">Close</button></div>`);
+    garageForm();
+  }
+  function garageForm(g){
+    g=g||{id:"",name:"",postcode:"",collectsFromHQ:false};
+    const el=$("garForm"); if(!el) return;
+    el.innerHTML=`
+      <label class="hint" style="display:block;margin:2px 0 3px">${g.id?"Edit garage":"Add a garage"}</label>
+      <input id="garName" placeholder="Garage name" value="${esc(g.name)}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:6px">
+      <input id="garPc" placeholder="Postcode" value="${esc(g.postcode||"")}" ${g.collectsFromHQ?"disabled":""} style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:6px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:8px"><input type="checkbox" id="garHQ" ${g.collectsFromHQ?"checked":""} style="width:auto" onchange="var p=document.getElementById('garPc');p.disabled=this.checked;"> 🚚 This garage collects the van from HQ (${esc(GARAGES_HQ.postcode)})</label>
+      <input type="hidden" id="garId" value="${esc(g.id)}">
+      <div style="display:flex;gap:8px;justify-content:flex-end">${g.id?`<button class="btn ghost small" onclick="garageForm()">＋ New</button>`:""}<button class="btn primary small" onclick="saveGarage()">${g.id?"Save":"Add"}</button></div>`;
+  }
+  window.editGarage=function(id){ const g=GARAGES.find(x=>x.id===id); if(g) garageForm(g); };
+  window.saveGarage=async function(){
+    const name=($("garName")||{}).value.trim(); if(!name){ alert("Enter a garage name."); return; }
+    const body={ id:($("garId")||{}).value||"", name, postcode:($("garPc")||{}).value.trim(), collectsFromHQ:($("garHQ")||{}).checked };
+    try{ const r=await aFetch("/fleet/garage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not save."); return; }
+      await loadGarages(); renderGaragesModal();
+    }catch(e){ alert("Could not save."); }
+  };
+  window.deleteGarage=async function(id){
+    const g=GARAGES.find(x=>x.id===id);
+    const ok=window.MLUI?await MLUI.confirm("Delete "+((g&&g.name)||"this garage")+"?",{title:"Delete garage",danger:true}):confirm("Delete this garage?");
+    if(!ok) return;
+    try{ await aFetch("/fleet/garage-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(r=>r.json());
+      await loadGarages(); renderGaragesModal();
+    }catch(e){}
+  };
+
+  // ── Book / manage a renewal ───────────────────────────────────────────────
   window.openRenewalModal=function(reg,type){
     const v=FLEET.find(x=>(x.reg||"")===reg); if(!v) return;
     const labels={mot:"MOT",tax:"Road tax",service:"Service"};
-    const dateStr=type==="mot"?v.motDue:type==="tax"?v.taxDue:v.nextServiceDate;
+    const dueStr=type==="mot"?v.motDue:type==="tax"?v.taxDue:v.nextServiceDate;
     const pend=v[type+"Pending"];
     const curNote=(pend&&pend!==true)?pend:"";
+    // Tax is online — a simple booked flag, no garage/job.
+    if(type==="tax"){
+      pModal(`
+        <h3 style="margin:0 0 4px">Road tax — ${esc(reg)}</h3>
+        <div class="hint" style="margin-bottom:12px">${dueStr?("Due "+fmtDMY(dueStr)+". "):""}Mark it <b>booked / in hand</b> so it turns amber and stops the banner going red.</div>
+        <label class="hint" style="display:block;margin-bottom:4px">Note (optional)</label>
+        <input id="renewNote" value="${esc(curNote)}" placeholder="renewed / awaiting" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+          <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete('${esc(reg)}','tax')">✅ Completed…</button>
+          ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','tax','open')">↩ Not booked</button>`:""}
+          <button class="btn ghost small" onclick="pClose()">Cancel</button>
+          <button class="btn primary small" onclick="setRenewal('${esc(reg)}','tax','pending')">📌 Mark booked</button>
+        </div>`);
+      setTimeout(()=>{const el=$("renewNote"); if(el) el.focus();},50);
+      return;
+    }
+    // MOT / service — book an appointment (creates a scheduler job for the driver).
+    const appt=v[type+"Appt"], clash=v[type+"Clash"];
+    const driver=v.driver?pName(v.driver):"";
+    const today=new Date().toISOString().slice(0,10);
+    const gOpts=`<option value="">— none / to confirm —</option>`+GARAGES.map(g=>`<option value="${esc(g.id)}"${appt&&appt.garage&&g.name===appt.garage?" selected":""}>${esc(g.name)}${g.collectsFromHQ?" (collects from HQ)":(g.postcode?" · "+esc(g.postcode):"")}</option>`).join("");
+    const defDur=type==="mot"?60:120;
+    const clashWarn = clash ? `<div style="background:#fee2e2;border:1px solid #dc2626;color:#991b1b;border-radius:9px;padding:8px 10px;font-size:13px;font-weight:600;margin-bottom:10px">⚠ ${esc(driver||"The driver")} is booked off on ${fmtDMY(clash.date)} — pick another day or driver.</div>` : "";
     pModal(`
-      <h3 style="margin:0 0 4px">${labels[type]} — ${esc(reg)}</h3>
-      <div class="hint" style="margin-bottom:12px">${dateStr?("Due "+fmtDMY(dateStr)+". "):""}Mark it <b>booked / in hand</b> so it turns amber and stops the banner going red — until it's done and the date is updated.</div>
-      <label class="hint" style="display:block;margin-bottom:4px">Note (optional) — e.g. “booked in 5 Sep”, “awaiting slot”</label>
-      <input id="renewNote" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px" value="${esc(curNote)}" placeholder="booked in 5 Sep">
+      <h3 style="margin:0 0 4px">Book ${labels[type]} — ${esc(reg)}</h3>
+      <div class="hint" style="margin-bottom:10px">${dueStr?("Due "+fmtDMY(dueStr)+". "):""}This makes a job on the scheduler for <b>${driver?esc(driver):"the van's driver"}</b> on the day, at the garage. It follows the driver if that changes.</div>
+      ${clashWarn}
+      <label class="hint" style="display:block;margin:2px 0 3px">Appointment date</label>
+      <input id="apDate" type="date" value="${appt&&appt.date?esc(appt.date):today}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:8px">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Time</label><input id="apTime" type="time" value="08:00" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
+        <div style="flex:1"><label class="hint" style="display:block;margin:2px 0 3px">Mins on site</label><input id="apDur" type="number" value="${defDur}" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px"></div>
+      </div>
+      <label class="hint" style="display:block;margin:8px 0 3px">Garage <a href="#" onclick="pClose();openGaragesModal();return false" style="font-size:12px">⚙ manage</a></label>
+      <select id="apGarage" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:8px">${gOpts}</select>
+      <label class="hint" style="display:block;margin:2px 0 3px">Note (optional)</label>
+      <input id="renewNote" value="${esc(curNote)}" placeholder="e.g. drop off 8am" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;margin-bottom:14px">
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
         <button class="btn ghost small" style="margin-right:auto;color:#166534" onclick="openRenewalComplete('${esc(reg)}','${type}')">✅ Completed…</button>
-        ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','${type}','open')">↩ Not booked</button>`:""}
-        <button class="btn ghost small" onclick="pClose()">Cancel</button>
-        <button class="btn primary small" onclick="setRenewal('${esc(reg)}','${type}','pending')">📌 Mark booked</button>
+        ${pend?`<button class="btn ghost small" onclick="setRenewal('${esc(reg)}','${type}','open')">↩ Cancel booking</button>`:""}
+        <button class="btn ghost small" onclick="pClose()">Close</button>
+        <button class="btn primary small" onclick="bookRenewal('${esc(reg)}','${type}')">📌 Book it</button>
       </div>`);
-    setTimeout(()=>{const el=document.getElementById("renewNote"); if(el) el.focus();},50);
   };
+  // Simple pending/open toggle (tax) or cancel-booking (mot/service).
   window.setRenewal=async function(reg,type,status){
-    const note=(document.getElementById("renewNote")||{}).value||"";
+    const note=($("renewNote")||{}).value||"";
     try{
       const r=await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg,type,status,note})}).then(r=>r.json());
       if(!r||!r.ok){ alert((r&&r.error)||"Could not save."); return; }
-      const v=FLEET.find(x=>(x.reg||"")===reg);
-      if(v) v[type+"Pending"] = status==="pending" ? (note||true) : "";
-      pClose(); renderFleet(); updateSummary();
+      pClose();
+      if(type!=="tax"){ await loadFleet(); if($("defBackdrop").style.display!=="none"){ DEF_DIRTY=true; await loadDefects(); } }
+      else{ const v=FLEET.find(x=>(x.reg||"")===reg); if(v) v.taxPending = status==="pending"?(note||true):""; renderFleet(); updateSummary(); if($("defBackdrop").style.display!=="none"){ DEF_DIRTY=true; await loadDefects(); } }
     }catch(e){ alert("Could not save."); }
+  };
+  // Book an MOT/service appointment → creates the driver's scheduler job.
+  window.bookRenewal=async function(reg,type){
+    const date=($("apDate")||{}).value||"";
+    if(!date){ alert("Pick an appointment date."); return; }
+    const time=($("apTime")||{}).value||"08:00";
+    const dur=Number(($("apDur")||{}).value)||(type==="mot"?60:120);
+    const garageId=($("apGarage")||{}).value||"";
+    const note=($("renewNote")||{}).value||"";
+    let scheduledAt; try{ scheduledAt=new Date(date+"T"+time+":00").toISOString(); }catch(e){ scheduledAt=new Date(date+"T08:00:00").toISOString(); }
+    try{
+      const r=await aFetch("/fleet/renewal-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg,type,status:"pending",note,apptDate:date,scheduledAt,durationMinutes:dur,garageId})}).then(r=>r.json());
+      if(!r||!r.ok){ alert((r&&r.error)||"Could not book."); return; }
+      pClose(); await loadFleet();
+      if($("defBackdrop").style.display!=="none"){ DEF_DIRTY=true; await loadDefects(); }
+      if(window.toast) toast("Booked — job added to the scheduler"); else if(window.MLUI&&MLUI.toast) MLUI.toast("Booked — job added to the scheduler");
+    }catch(e){ alert("Could not book."); }
   };
 
   // Whole days from today to a YYYY-MM-DD date (negative = overdue, null = none).
@@ -1358,6 +1476,7 @@
   document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);
+  window.addEventListener("DOMContentLoaded", loadGarages);
 
   // Red badge on the "Van Checks" button = outstanding weekly checks (same count
   // as the Vehicles menu tile). Clears once the van-checks page has been opened

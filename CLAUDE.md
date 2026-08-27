@@ -1446,6 +1446,34 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   renewal prompt also has a ✅ Completed button. renewalRow/setDefStatus/saveDefNote
   branch on `d.renewal`; the all-vans panel now surfaces renewals even for vans with no
   van-check defect.
+- **Booking an MOT/service auto-makes a scheduler job (Aug 2026)** — marking an MOT or
+  service **booked** with a date now creates a real SLA job assigned to the van's
+  **current driver**, on the scheduler for that day, at the chosen **garage**.
+  - **Managed garages** in app_config **`fleet:garages:<tid>`** = `[{id,name,postcode,
+    lat,lng,collectsFromHQ}]` — GET **/fleet/garages**, POST **/fleet/garage**
+    (postcode geocoded via postcodes.io on save), POST **/fleet/garage-delete**. A
+    garage with **`collectsFromHQ`** sites the job at HQ (**PO15 5RQ**) since they
+    collect the van. Managed from vehicles.html "🔧 Garages".
+  - **The job** = `createOrUpdateJobFromPayload` with **`fleetRenewal:true`** (new: no
+    priority, no SLA target, all four gates OFF — like a project), stable id
+    `fleetsvc:<REGNORM>:<mot|service>`, `reference "MOT — <reg>"`, `vehicleReg`+
+    `renewalType` stamped, site = garage (or HQ). The client sends an absolute
+    `scheduledAt` (built from date+time in London) + `apptDate` + `durationMinutes` +
+    `garageId` on **/fleet/renewal-status** `status:"pending"`. The job id is stored on
+    the ack. Unbooking (open) or completing DELETES the appointment job
+    (`removeRenewalJob`). tax stays a plain booked flag (no job).
+  - **Auto-reassign on driver change**: `/fleet/assign` calls **`reassignRenewalJobs`**
+    → any FUTURE booked MOT/service job for that reg is re-assigned to the new driver
+    (via createOrUpdateJobFromPayload id-merge).
+  - **Holiday clash**: `/fleet/vehicles` overlays **`approvedLeaveInRange`** (imported
+    from holidays.js) — if the current driver is on approved leave on the appointment
+    day it returns **`motClash`/`serviceClash`** `{date,driver}`. Surfaced CLEARLY (not
+    a popup): a **red ⚠ "driver OFF"** tag on the card, a red clash line in the panel
+    renewal row, and a red **🚫 "<reg> — MOT <date>, driver OFF"** banner segment. Also
+    `motAppt`/`serviceAppt` `{date,garage,jobId}` for the "📌 booked <date> @ <garage>"
+    display. fleet.js imports `createOrUpdateJobFromPayload`+`reconcileRelease` (sla.js)
+    and `approvedLeaveInRange` (holidays.js). vehicles.html: openGaragesModal/garageForm,
+    openRenewalModal (rich date/time/garage for mot/service; simple for tax), bookRenewal.
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed
