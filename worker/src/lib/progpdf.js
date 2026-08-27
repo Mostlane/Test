@@ -52,6 +52,7 @@ function applyWorksWidth(worksW) {
 }
 const MIN_DAY_W = 6.5;                    // never squeeze below this — split pages instead
 const EXTRA_COL = [0.706, 0.325, 0.035];  // amber ring marking "extra works" bars
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const DAY = 86400000;
 const p2 = n => String(n).padStart(2, "0");
@@ -272,43 +273,44 @@ export function buildProgrammePdf(data, meta = {}) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
       }
-      // Day header: weekend/BH shading + a date label on every Monday (or
-      // every day if the columns are wide enough).
+      // Day header — TWO tiers so nothing overlaps and NO day is ever skipped:
+      //   top   = the month name where each month begins (spans freely; a BH marker
+      //           rides here too so it never displaces a day number),
+      //   bottom = the day number 1–31 on EVERY day (thinned to Mondays/1st only
+      //            when columns are tiny).
+      // A single dd/mm is never printed on a day, so a wide month label can no
+      // longer "eat" the following day's number (the reported missing day).
       const rightEdge = GRID_X + win.days * dayW;
-      // Right edge of the last date label we drew — a new label is suppressed if it
-      // would start before this (+ a small gap). This is what stops the reported
-      // "overlapping dates": a dd/mm is ~16pt wide, so on ~15pt-wide day columns
-      // adjacent labels used to print on top of each other.
-      let lastLabelRight = -Infinity;
+      let lastMonR = -Infinity;
       for (let i = 0; i < win.days; i++) {
         const d = addDays(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
-        // Date scale — show EVERY day so the daily grid never disappears: the full
-        // dd/mm only when a column can actually HOLD it without touching its
-        // neighbour (~18pt), otherwise just the day NUMBER on each day with dd/mm
-        // kept on Mondays + month-firsts for orientation. Truly cramped (<8pt)
-        // columns drop to majors only.
-        const isMon = d.getUTCDay() === 1, first = d.getUTCDate() === 1, major = isMon || first;
-        let label = "", size = 5.8;
-        if (dayW >= 18) { label = fmtDM(d); }
-        else if (dayW >= 8) { label = major ? fmtDM(d) : p2(d.getUTCDate()); size = major ? 5.8 : 5.4; }
-        else if (major) { label = fmtDM(d); }
-        // Suppress a label that would spill past the right frame OR overlap the
-        // one before it.
-        if (label) {
-          const w = textWidth(label, size);
-          if (x + 1 + w > rightEdge || x + 1 < lastLabelRight + 1.5) label = "";
-          else lastLabelRight = x + 1 + w;
+        const isMon = d.getUTCDay() === 1, first = d.getUTCDate() === 1;
+        // Top tier: month name at the window start and at each month change.
+        if (i === 0 || first) {
+          const full = MONTHS[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          const lbl = (x + 1 + textWidth(full, 6) <= rightEdge) ? full : MONTHS[d.getUTCMonth()];
+          if (x + 1 >= lastMonR + 3 && x + 1 + textWidth(lbl, 6) <= rightEdge) {
+            doc.text(x + 1, gridTop + 8, lbl, { size: 6, bold: true, color: [0.28, 0.36, 0.46] });
+            lastMonR = x + 1 + textWidth(lbl, 6);
+          }
+        } else if (bh && dayW >= 9) {
+          doc.text(x + 1, gridTop + 8, "BH", { size: 5.4, color: [0.7, 0.45, 0.05] });
         }
-        if (label) doc.text(x + 1, gridTop + 9, label, { size, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
-        // Vertical gridline on the major columns (Mondays / month starts), plus
-        // every day when columns are wide — structure without clutter.
-        if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
-        if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
+        // Bottom tier: the day number on EVERY day (Mondays/1st only when tiny).
+        if (dayW >= 8 || isMon || first) {
+          const num = p2(d.getUTCDate());
+          if (x + 1 + textWidth(num, 5.6) <= rightEdge)
+            doc.text(x + 1, gridTop + 17.5, num, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
+        }
+        // Vertical gridline: every day when roomy, else Mondays / month starts.
+        if (dayW >= 15 || isMon || first) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
+      // Faint divider between the month tier and the day-number tier.
+      doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
       doc.line(M, gridTop, M + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
       doc.line(M, gridTop + HDR_H, M + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
 

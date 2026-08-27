@@ -24848,6 +24848,7 @@ function applyWorksWidth(worksW) {
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var DAY = 864e5;
 var p2 = (n) => String(n).padStart(2, "0");
 var parse = (s) => {
@@ -25063,32 +25064,32 @@ function buildProgrammePdf(data, meta = {}) {
         cx += col.w;
       }
       const rightEdge = GRID_X + win.days * dayW;
-      let lastLabelRight = -Infinity;
+      let lastMonR = -Infinity;
       for (let i = 0; i < win.days; i++) {
         const d = addDays2(winStart, i);
         const x = GRID_X + i * dayW;
         const we = isWeekend(d), bh = !we && hs.has(ymd(d));
         if (we) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.937, 0.949, 0.963] });
         if (bh) doc.rect(x, gridTop, dayW, HDR_H + pageRowsH, { fill: [0.992, 0.953, 0.898] });
-        const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1, major = isMon || first2;
-        let label = "", size = 5.8;
-        if (dayW >= 18) {
-          label = fmtDM(d);
-        } else if (dayW >= 8) {
-          label = major ? fmtDM(d) : p2(d.getUTCDate());
-          size = major ? 5.8 : 5.4;
-        } else if (major) {
-          label = fmtDM(d);
+        const isMon = d.getUTCDay() === 1, first2 = d.getUTCDate() === 1;
+        if (i === 0 || first2) {
+          const full = MONTHS[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          const lbl = x + 1 + textWidth(full, 6) <= rightEdge ? full : MONTHS[d.getUTCMonth()];
+          if (x + 1 >= lastMonR + 3 && x + 1 + textWidth(lbl, 6) <= rightEdge) {
+            doc.text(x + 1, gridTop + 8, lbl, { size: 6, bold: true, color: [0.28, 0.36, 0.46] });
+            lastMonR = x + 1 + textWidth(lbl, 6);
+          }
+        } else if (bh && dayW >= 9) {
+          doc.text(x + 1, gridTop + 8, "BH", { size: 5.4, color: [0.7, 0.45, 0.05] });
         }
-        if (label) {
-          const w = textWidth(label, size);
-          if (x + 1 + w > rightEdge || x + 1 < lastLabelRight + 1.5) label = "";
-          else lastLabelRight = x + 1 + w;
+        if (dayW >= 8 || isMon || first2) {
+          const num2 = p2(d.getUTCDate());
+          if (x + 1 + textWidth(num2, 5.6) <= rightEdge)
+            doc.text(x + 1, gridTop + 17.5, num2, { size: 5.6, color: bh ? [0.7, 0.45, 0.05] : [0.34, 0.42, 0.52] });
         }
-        if (label) doc.text(x + 1, gridTop + 9, label, { size, color: bh ? [0.7, 0.45, 0.05] : [0.32, 0.4, 0.5] });
-        if (dayW >= 15 || major) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
-        if (bh) doc.text(x + 1, gridTop + 17, "BH", { size: 5.5, color: [0.7, 0.45, 0.05] });
+        if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
+      doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
       doc.line(M3, gridTop, M3 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
       doc.line(M3, gridTop + HDR_H, M3 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
       let ry = gridTop + HDR_H;
