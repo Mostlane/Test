@@ -408,6 +408,26 @@
     h+='<div id="editWrap" style="display:none;text-align:center;margin-top:6px"><button class="btn line" id="editBtn">✏️ Edit details (office)</button></div>';
     $("app").innerHTML=h;
     wire();
+    lockIfClosed();
+  }
+
+  // A CLOSED / INVOICED job is history — the engineer can view it (photos, notes,
+  // signature, activity) but can't edit or change its status. "Complete" is left
+  // editable (the engineer's own final state, until the office closes it).
+  function isClosedJob(){ return /closed|invoiced/i.test((job&&job.status)||""); }
+  function lockIfClosed(){
+    if(!isClosedJob()) return;
+    var app=$("app"); if(!app) return;
+    var b=document.createElement("div");
+    b.className="card";
+    b.style.cssText="background:#eef1f5;border:1px solid #d7dee6;color:#475569;text-align:center;font-weight:700;font-size:14px;padding:12px;margin-bottom:10px";
+    b.innerHTML="🔒 This job is closed — view only";
+    app.insertBefore(b, app.firstChild);
+    ["statusCard","completeWrap","seg","hqRow","addPhoto","sigBtn","poBtn","editWrap","emTimerCard"].forEach(function(id){ var el=$(id); if(el) el.style.display="none"; });
+    var note=$("note"); if(note){ note.readOnly=true; note.style.opacity=".7"; }
+    // Belt-and-braces: neutralise any leftover edit controls inside the cert/firestop
+    // panels for a closed job (they're already submitted/final).
+    ["certHost","firestopHost","panelHost"].forEach(function(id){ var el=$(id); if(el) el.style.pointerEvents="none"; });
   }
 
   function drawPhotos(){
