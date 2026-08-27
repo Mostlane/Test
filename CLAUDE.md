@@ -509,8 +509,12 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   and xlsx rows as `data.id`; this is what reopen + photo-loading key off), **GET
   /sla/archive/count**, **POST /sla/archive/clear**, **POST /sla/archive/reopen**
   `{id}` (**re-open a completed job — a client sometimes sends one back**: builds a
-  LIVE sla_jobs row keyed by the archived MOS, status Pending, from the archived
-  ref/site/description/priority, so it shows on the board + shared editor to
+  LIVE sla_jobs row keyed by the archived MOS, status Pending, **named CORRECTLY** —
+  the incident number is the part before " - " in the archive **Job Name**
+  (`"<incident> - <site>"`), NOT the Commusoft `MOS…` id in `helpdeskRef` nor the
+  bare store code in `siteName`; the real site name is resolved from the store code
+  against `sites.site_number`; the previous visit notes carry into the description —
+  so it shows on the board + shared editor to
   allocate; idempotent — reopening twice re-opens the same live row, never a dupe;
   the archive row is KEPT + stamped `reopenedAt`/`reopenedJobId`; the live job
   carries `reopenedFromArchive`. **Duplicate guard:** the SAME job can sit in the
