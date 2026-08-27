@@ -1636,10 +1636,7 @@
         closeGate();
         if (!list.length) return;
         var rows = list.map(function (m) {
-          var q = m.batteries > 0
-            ? (m.charge > 0 ? "Charged/quoted the works AND sent the battery enquiry?" : "Sent the battery enquiry to price?")
-            : (m.pending > 0 && m.onsite > 0 ? "Have these been quoted &amp; charged?"
-              : m.pending > 0 ? "Have the remedials been quoted?" : "Have the remedials been charged?");
+          var q = m.batteries > 0 ? "Priced the batteries with the supplier &amp; quoted the client?" : "Has the client been quoted for these works?";
           return '<div class="mlrem-item" data-cert="' + esc(m.certId) + '" style="border:1px solid #f0d9a6;background:#fffaf0;border-radius:12px;padding:12px;margin-top:10px;">'
             + '<div style="font-weight:700;color:#8a4b0a;">' + esc(m.siteName || m.siteCode || "Site") + ' · Cert ' + esc(m.certNumber || "") + '</div>'
             + '<div style="font-size:13px;color:#7a5b00;margin-top:2px;">' + m.fittings + ' fitting' + (m.fittings === 1 ? "" : "s") + ' failed'
@@ -1647,7 +1644,7 @@
             + (m.onsite ? ' · ' + m.onsite + ' on site' : '') + '</div>'
             + '<div style="font-size:13px;color:#8a4b0a;margin-top:6px;font-weight:600;">' + q + '</div>'
             + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-            + '<button data-act="done" style="flex:1;min-width:130px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Charged / Quoted</button>'
+            + '<button data-act="done" style="flex:1;min-width:130px;background:#0a7d33;color:#fff;border:none;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">&#10003; Quote sent</button>'
             + '<button data-act="later" style="flex:1;min-width:100px;background:#fff;color:#8a4b0a;border:1px solid #e6c98a;border-radius:9px;padding:11px;font-weight:700;font-size:14px;cursor:pointer;">Do later</button>'
             + '</div></div>';
         }).join("");
@@ -1656,8 +1653,8 @@
         ov.style.cssText = "position:fixed;inset:0;z-index:100060;background:rgba(3,12,28,.82);display:flex;align-items:center;justify-content:center;padding:22px;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;overflow:auto;";
         ov.innerHTML = '<div style="background:#fff;border-radius:18px;max-width:470px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;">'
           + '<div style="background:linear-gradient(180deg,#b45309,#8a4b0a);color:#fff;padding:18px 20px;"><div style="font-size:30px;">&#9888;</div>'
-          + '<h2 style="margin:6px 0 0;font-size:18px;color:#fff;">EM remedials &mdash; charge check</h2>'
-          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Confirm the client has been charged or quoted so we don\'t miss the works.</p></div>'
+          + '<h2 style="margin:6px 0 0;font-size:18px;color:#fff;">EM remedials &mdash; quote check</h2>'
+          + '<p style="margin:6px 0 0;font-size:13px;color:#ffe9cf;">Quote the client for these works, then track them on the EM remedials list so nothing is missed.</p></div>'
           + '<div style="padding:14px 18px 18px;max-height:70vh;overflow:auto;">' + rows
           + '<p style="margin:12px 0 0;text-align:center;font-size:12px;color:#8a97a6;">&ldquo;Do later&rdquo; reminds you again in 4 hours.</p></div></div>';
         ov.addEventListener("click", function (e) {

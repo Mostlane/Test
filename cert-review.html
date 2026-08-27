@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Certificate Review</title>
-  <script src="/portal-config.js?v=21"></script>
+  <script src="/portal-config.js?v=22"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <script src="cert-form.js?v=10"></script>
@@ -41,17 +41,17 @@
     <button class="btn ghost sm" id="notifyBtn" style="background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.4);">🔔 Notify list</button>
   </header>
 
-  <!-- EM remedial charge log (£50 per failed fitting) -->
+  <!-- EM remedials tracker — the continuous pipeline list (quote → order/approve → invoice) -->
   <div id="remedModal" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
-    <div style="max-width:680px;margin:32px auto;background:#fff;border-radius:16px;padding:18px;">
+    <div style="max-width:720px;margin:24px auto;background:#fff;border-radius:16px;padding:18px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-        <h2 style="margin:0;font-size:17px;flex:1;">💷 EM remedials — charge log</h2>
+        <h2 style="margin:0;font-size:17px;flex:1;">💷 EM remedials tracker</h2>
         <button class="btn ghost sm" id="rmClose">Close</button>
       </div>
+      <p class="muted" style="margin:0 0 8px;">Every failed-fitting remedial and where it's up to — quote → order/approve → invoice — so none get forgotten.</p>
       <div style="display:flex;gap:6px;margin:6px 0 10px" id="rmTabs">
-        <button class="btn ghost sm rmtab" data-st="pending">To charge</button>
-        <button class="btn ghost sm rmtab" data-st="done">Done on site</button>
-        <button class="btn ghost sm rmtab" data-st="">All</button>
+        <button class="btn ghost sm rmtab" data-view="open">Open</button>
+        <button class="btn ghost sm rmtab" data-view="all">All (incl. invoiced)</button>
       </div>
       <div id="rmBody"><p class="muted">Loading…</p></div>
     </div>
@@ -252,37 +252,70 @@
       this.disabled = false;
     };
 
-    // ── EM remedials charge log ────────────────────────────────────────────────
-    let RM_ST = "pending";
-    g("remedBtn").onclick = () => { g("remedModal").style.display = "block"; loadRemedials(); };
+    // ── EM remedials tracker (pipeline) ────────────────────────────────────────
+    let RM_VIEW = "open";
+    const money = n => "£" + (Number(n) || 0).toFixed(0);
+    const STAGE_LABEL = { to_quote:"To quote", quoted:"Quoted", approved:"Approved / ordered", invoiced:"Invoiced ✓" };
+    const STAGE_COL = { to_quote:["#fff4e6","#b45309"], quoted:["#eef4ff","#1d4ed8"], approved:["#eef9f0","#0a7d33"], invoiced:["#f1f5f9","#475569"] };
+    g("remedBtn").onclick = () => { g("remedModal").style.display = "block"; loadTracker(); };
     g("rmClose").onclick = () => g("remedModal").style.display = "none";
     g("remedModal").onclick = e => { if (e.target === g("remedModal")) g("remedModal").style.display = "none"; };
-    [].forEach.call(document.querySelectorAll(".rmtab"), b => b.onclick = () => { RM_ST = b.dataset.st; loadRemedials(); });
-    const money = n => "£" + (Number(n) || 0).toFixed(0);
-    async function loadRemedials() {
-      [].forEach.call(document.querySelectorAll(".rmtab"), b => b.style.fontWeight = (b.dataset.st === RM_ST ? "800" : "600"));
+    [].forEach.call(document.querySelectorAll(".rmtab"), b => b.onclick = () => { RM_VIEW = b.dataset.view; loadTracker(); });
+
+    function caseRow(c) {
+      const [bg, fg] = STAGE_COL[c.stage] || STAGE_COL.to_quote;
+      const bits = [];
+      if (c.charge) bits.push(money(c.charge) + " in lights");
+      if (c.batteries) bits.push(c.batteries + " battery" + (c.batteries === 1 ? "" : " sets"));
+      if (c.onsite) bits.push(c.onsite + " done on site");
+      if (c.pending) bits.push(c.pending + " to attend");
+      let acts = '';
+      if (c.stage === "to_quote") acts += '<button class="btn green sm" data-adv="quoted" data-c="'+esc(c.certId)+'">✓ Quote sent</button>';
+      else if (c.stage === "quoted") acts += '<button class="btn sm" data-adv="approved" data-c="'+esc(c.certId)+'">'+(c.pending ? "📦 Order received → raise job" : "✓ Approved")+'</button>';
+      else if (c.stage === "approved") acts += '<button class="btn green sm" data-adv="invoiced" data-c="'+esc(c.certId)+'">🧾 Invoiced</button>';
+      if (c.batteries && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-battpdf="'+esc(c.certId)+'">📄 Enquiry</button><button class="btn ghost sm" data-battmail="'+esc(c.certId)+'">📧 Supplier</button>';
+      if (c.jobId) acts += ' <a class="btn ghost sm" href="/job-view.html?jobId='+encodeURIComponent(c.jobId)+'" style="text-decoration:none">Open job →</a>';
+      if (c.stage !== "to_quote" && c.stage !== "invoiced") acts += ' <button class="btn ghost sm" data-adv="to_quote" data-c="'+esc(c.certId)+'" title="Re-open">↩</button>';
+      return '<div class="rcase" style="border:1px solid #e6ebf2;border-radius:12px;padding:11px;margin-bottom:8px;">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          + '<b style="font-size:14.5px">'+esc(c.siteName||c.siteCode||"Site")+'</b> <span class="muted">Cert '+esc(c.certNumber||"")+'</span>'
+          + '<span class="badge" style="background:'+bg+';color:'+fg+';margin-left:auto">'+(STAGE_LABEL[c.stage]||c.stage)+'</span></div>'
+        + '<div class="muted" style="margin:4px 0 8px">'+c.fittings+' fitting'+(c.fittings===1?"":"s")+' failed'+(bits.length?' · '+bits.join(" · "):"")+'</div>'
+        + '<div class="rcase-msg msg" data-msg="'+esc(c.certId)+'"></div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap">'+acts+'</div></div>';
+    }
+    async function loadTracker() {
+      [].forEach.call(document.querySelectorAll(".rmtab"), b => b.style.fontWeight = (b.dataset.view === RM_VIEW ? "800" : "600"));
       g("rmBody").innerHTML = '<p class="muted">Loading…</p>';
       let d;
-      try { d = await authFetch("/certs/remedials" + (RM_ST ? "?status=" + RM_ST : "")).then(r=>r.json()); }
-      catch { g("rmBody").innerHTML = '<p class="msg err">Couldn\'t load the remedial log.</p>'; return; }
-      const rows = (d && d.remedials) || [];
-      if (!rows.length) { g("rmBody").innerHTML = '<p class="muted">Nothing here'+(RM_ST==="pending"?" — no remedials outstanding to charge.":"")+'</p>'; return; }
-      let h = '<div class="muted" style="margin-bottom:8px">'+rows.length+' fitting'+(rows.length===1?"":"s")+' · total '+money(d.totalCharge)
-        + (d.pendingCharge ? ' · <b style="color:#b45309">'+money(d.pendingCharge)+' still to charge</b>' : '') + '</div>';
-      rows.forEach(r => {
-        const done = r.status === "done";
-        h += '<div style="border-top:1px solid #eef2f6;padding:9px 2px;display:flex;gap:10px;align-items:flex-start">'
-          + '<div style="flex:1;min-width:0">'
-            + '<div style="font-weight:600;font-size:14px">'+esc(r.site_name || r.site_code || "")+' <span class="muted">· '+esc(r.light_ref||"")+'</span></div>'
-            + '<div class="muted">Cert '+esc(r.cert_number||"")+(r.note?' · '+esc(r.note):"")+' · '+fmt(r.created_at)+(r.engineer?' · '+esc(r.engineer):"")+'</div>'
-            + (r.job_id ? '<div style="margin-top:3px"><a href="/job-view.html?jobId='+encodeURIComponent(r.job_id)+'" style="font-size:12.5px">Open remedial job →</a></div>' : '')
-          + '</div>'
-          + '<div style="text-align:right;white-space:nowrap">'
-            + '<div style="font-weight:700">'+money(r.charge)+'</div>'
-            + '<span class="badge" style="background:'+(done?"#e9f8ef":"#fff4e6")+';color:'+(done?"#0a7d33":"#b45309")+'">'+(done?"Replaced on site":"Remedial due")+'</span>'
-          + '</div></div>';
+      try { d = await authFetch("/certs/remedials/board" + (RM_VIEW === "all" ? "?all=1" : "")).then(r=>r.json()); }
+      catch { g("rmBody").innerHTML = '<p class="msg err">Couldn\'t load the tracker.</p>'; return; }
+      const cases = (d && d.cases) || [];
+      if (!cases.length) { g("rmBody").innerHTML = '<p class="muted">Nothing here — no open EM remedials. 🎉</p>'; return; }
+      const order = { to_quote:0, quoted:1, approved:2, invoiced:3 };
+      cases.sort((a,b) => (order[a.stage]||0) - (order[b.stage]||0));
+      g("rmBody").innerHTML = cases.map(caseRow).join("");
+      const setMsg = (cid, t, err) => { const m = g("rmBody").querySelector('[data-msg="'+CSS.escape(cid)+'"]'); if (m) { m.textContent = t; m.className = "rcase-msg msg" + (err?" err":" ok"); } };
+      g("rmBody").querySelectorAll("[data-adv]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.c, to = b.dataset.adv;
+        b.disabled = true; setMsg(cid, "Updating…");
+        try { const r = await authFetch("/certs/remedials/stage", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid, to }) }).then(x=>x.json());
+          if (r && r.ok) loadTracker(); else { setMsg(cid, (r&&r.error)||"Couldn't update.", true); b.disabled=false; } }
+        catch { setMsg(cid, "Couldn't update.", true); b.disabled=false; }
       });
-      g("rmBody").innerHTML = h;
+      g("rmBody").querySelectorAll("[data-battpdf]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.battpdf; const w = window.open("", "_blank");
+        try { const r = await authFetch("/certs/remedials/supplier-pdf?certId="+encodeURIComponent(cid));
+          if (!r.ok) { if(w) w.close(); const e = await r.json().catch(()=>({})); setMsg(cid, e.error||"Couldn't build the PDF.", true); return; }
+          const u = URL.createObjectURL(await r.blob()); if (w) w.location = u; else window.location = u;
+        } catch { if(w) w.close(); setMsg(cid, "Couldn't build the PDF.", true); }
+      });
+      g("rmBody").querySelectorAll("[data-battmail]").forEach(b => b.onclick = async () => {
+        const cid = b.dataset.battmail; b.disabled = true; setMsg(cid, "Sending…");
+        try { const r = await authFetch("/certs/remedials/supplier-email", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ certId: cid }) }).then(x=>x.json());
+          if (r && r.ok) setMsg(cid, "Sent to "+r.sentTo+" ✓"); else setMsg(cid, (r&&r.error)||"Couldn't send.", true); }
+        catch { setMsg(cid, "Couldn't send.", true); } b.disabled = false;
+      });
     }
   </script>
 </body>

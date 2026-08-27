@@ -97,7 +97,13 @@ async function ensureTables(env) {
     onsite INTEGER, pending INTEGER, state TEXT, snooze_until TEXT,
     created_at TEXT, done_at TEXT, done_by TEXT)`).run();
   try { await env.DB.prepare("ALTER TABLE em_remedial_acks ADD COLUMN batteries INTEGER").run(); } catch {}
+  // Pipeline: to_quote → quoted → approved (job raised if any not-replaced) → invoiced.
+  for (const col of ["stage TEXT", "job_id TEXT", "quoted_at TEXT", "quoted_by TEXT",
+    "approved_at TEXT", "approved_by TEXT", "invoiced_at TEXT", "invoiced_by TEXT"]) {
+    try { await env.DB.prepare(`ALTER TABLE em_remedial_acks ADD COLUMN ${col}`).run(); } catch {}
+  }
 }
+const STAGES = ["to_quote", "quoted", "approved", "invoiced"];
 const REMEDIAL_CHARGE = 50;   // £ per failed EM LIGHT (batteries are priced by the supplier, no £50)
 
 // Re-sign each remedial battery photo's URL when serving a cert (keys are stored,
@@ -149,48 +155,55 @@ async function processEmRemedials(env, tid, rec, certRow, certNumber, siteCode) 
   const batteries = fails.filter(isBatt);
   const lightCharge = lights.length * REMEDIAL_CHARGE;   // £50/light; batteries priced by supplier
 
-  let jobId = null;
-  if (pending.length) {
-    const lPend = pending.filter(f => !isBatt(f)), bPend = pending.filter(isBatt);
-    const parts = [];
-    if (lPend.length) parts.push(`Replace ${lPend.length} failed light fitting${lPend.length === 1 ? "" : "s"} (£${lPend.length * REMEDIAL_CHARGE}):\n` + lPend.map(f => "• " + f.ref + (f.note ? " — " + f.note : "")).join("\n"));
-    if (bPend.length) parts.push(`Replace batteries in ${bPend.length} fitting${bPend.length === 1 ? "" : "s"} — price from supplier (see battery enquiry PDF):\n` + bPend.map(f => "• " + f.ref + (f.batterySpec ? " — " + f.batterySpec : "") + (f.batteryQty ? " ×" + f.batteryQty : "") + (f.note ? " — " + f.note : "")).join("\n"));
-    const desc = `EM remedial at ${siteName} (from EM certificate ${certNumber}).\n\n` + parts.join("\n\n");
-    try {
-      const job = await createOrUpdateJobFromPayload(env, tid, {
-        id: "emrem:" + certRow.id,               // stable id → idempotent per cert
-        reference: "EM remedial — " + (siteCode || siteName),
-        status: "Pending", priority: "Priority 4",
-        description: desc, siteName, siteCode: siteCode || "",
-        originator: "em-remedial",
-      });
-      jobId = job && job.id;
-    } catch {}
-  }
-
+  // Log every fitting. NOTE: the remedial SLA JOB is NOT raised here — it's raised
+  // when the client's ORDER comes in (the "approved" stage), listing what to do.
   try { await env.DB.prepare("DELETE FROM em_remedials WHERE tenant_id=? AND cert_id=?").bind(tid, certRow.id).run(); } catch {}
   const stmts = fails.map((f, i) => env.DB.prepare(
     `INSERT INTO em_remedials (id,tenant_id,cert_id,cert_number,site_code,site_name,light_ref,note,replaced_on_site,charge,status,job_id,engineer,created_at,kind,battery_spec,battery_qty,photos)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(certRow.id + ":" + i, tid, certRow.id, certNumber, siteCode || "", siteName, f.ref, f.note,
-    f.replaced ? 1 : 0, isBatt(f) ? 0 : REMEDIAL_CHARGE, f.replaced ? "done" : "pending", f.replaced ? null : jobId,
+    f.replaced ? 1 : 0, isBatt(f) ? 0 : REMEDIAL_CHARGE, f.replaced ? "done" : "pending", null,
     certRow.engineer || "", now, f.kind, f.batterySpec, f.batteryQty, JSON.stringify(f.photos)));
   try { for (let i = 0; i < stmts.length; i += 20) await env.DB.batch(stmts.slice(i, i + 20)); } catch {}
 
-  // Open (or re-open) the per-cert charge/quote reminder — the £ is light charges;
-  // batteries are counted separately (priced by the supplier).
+  // Open (or re-open) the per-cert case at stage `to_quote` (the one blocking
+  // stage). Re-finalising resets it so the office is prompted again if it changed.
   try {
     await env.DB.prepare(
-      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,batteries,state,snooze_until,created_at,done_at,done_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,'open',NULL,?,NULL,NULL)
+      `INSERT INTO em_remedial_acks (cert_id,tenant_id,cert_number,site_code,site_name,fittings,charge,onsite,pending,batteries,state,stage,snooze_until,created_at,done_at,done_by,job_id,quoted_at,quoted_by,approved_at,approved_by,invoiced_at,invoiced_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'open','to_quote',NULL,?,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)
        ON CONFLICT(cert_id) DO UPDATE SET cert_number=excluded.cert_number, site_code=excluded.site_code,
          site_name=excluded.site_name, fittings=excluded.fittings, charge=excluded.charge,
-         onsite=excluded.onsite, pending=excluded.pending, batteries=excluded.batteries, state='open', snooze_until=NULL, done_at=NULL, done_by=NULL`
+         onsite=excluded.onsite, pending=excluded.pending, batteries=excluded.batteries, state='open',
+         stage='to_quote', snooze_until=NULL, done_at=NULL, done_by=NULL, job_id=NULL,
+         quoted_at=NULL, quoted_by=NULL, approved_at=NULL, approved_by=NULL, invoiced_at=NULL, invoiced_by=NULL`
     ).bind(certRow.id, tid, certNumber, siteCode || "", siteName, fails.length, lightCharge,
       onsite.length, pending.length, batteries.length, now).run();
   } catch {}
 
-  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length, jobId };
+  return { count: fails.length, onsite: onsite.length, pending: pending.length, charge: lightCharge, batteries: batteries.length, lights: lights.length };
+}
+
+// Raise the remedial SLA job for a cert (called when the client's order lands).
+// Lists the NOT-replaced fittings — lights to replace + batteries to fit.
+async function createRemedialJobForCert(env, tid, certId) {
+  const { results } = await env.DB.prepare("SELECT * FROM em_remedials WHERE tenant_id=? AND cert_id=? AND status='pending'").bind(tid, certId).all();
+  const pend = results || [];
+  if (!pend.length) return null;
+  const first = pend[0];
+  const siteName = first.site_name || first.site_code, siteCode = first.site_code || "";
+  const lights = pend.filter(r => r.kind !== "battery"), batts = pend.filter(r => r.kind === "battery");
+  const parts = [];
+  if (lights.length) parts.push(`Replace ${lights.length} failed light fitting${lights.length === 1 ? "" : "s"} (£${lights.length * REMEDIAL_CHARGE}):\n` + lights.map(r => "• " + r.light_ref + (r.note ? " — " + r.note : "")).join("\n"));
+  if (batts.length) parts.push(`Replace batteries in ${batts.length} fitting${batts.length === 1 ? "" : "s"}:\n` + batts.map(r => "• " + r.light_ref + (r.battery_spec ? " — " + r.battery_spec : "") + (r.battery_qty ? " ×" + r.battery_qty : "") + (r.note ? " — " + r.note : "")).join("\n"));
+  const desc = `EM remedial at ${siteName} (from EM certificate ${first.cert_number}) — client ordered.\n\n` + parts.join("\n\n");
+  try {
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      id: "emrem:" + certId, reference: "EM remedial — " + (siteCode || siteName),
+      status: "Pending", priority: "Priority 4", description: desc, siteName, siteCode, originator: "em-remedial",
+    });
+    return job && job.id;
+  } catch { return null; }
 }
 
 async function getConfig(env, tid) {
@@ -669,9 +682,8 @@ export async function handle(request, env, ctx, url, sess) {
     try { remedial = await processEmRemedials(env, tid, rec, cert, number, code); } catch {}
     if (remedial && remedial.count) {
       const site = (rec.installation && rec.installation.name) || code;
-      const body = `EM cert ${number} — ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (£${remedial.charge} to charge)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries (send supplier enquiry)` : "") + `. ${remedial.onsite} replaced on site` + (remedial.pending ? `, remedial job raised.` : ".");
-      const url = remedial.jobId ? ("/job-view.html?jobId=" + encodeURIComponent(remedial.jobId)) : "/cert-review.html";
-      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to charge", body, url, tag: "em-remedial:" + cert.id }).catch(() => {}));
+      const body = `EM cert ${number} — ${site}: ${remedial.count} fitting${remedial.count === 1 ? "" : "s"} failed` + (remedial.charge ? ` (£${remedial.charge} in lights)` : "") + (remedial.batteries ? `, ${remedial.batteries} needing batteries` : "") + `. Quote the client — track it on the EM remedials list.`;
+      ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }).catch(() => {}));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
   }
@@ -692,22 +704,37 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, remedials: rows, count: rows.length, totalCharge: total, pendingCharge: pending }, {}, env, request);
   }
 
-  // GET /certs/remedials/outstanding — open charge/quote acks that are DUE now
-  // (never snoozed, or the 4h snooze has passed). Drives the office blocking gate.
+  const shapeCase = r => ({
+    certId: r.cert_id, certNumber: r.cert_number, siteName: r.site_name || r.site_code, siteCode: r.site_code,
+    fittings: r.fittings, charge: r.charge, onsite: r.onsite, pending: r.pending, batteries: r.batteries || 0,
+    stage: r.stage || "to_quote", jobId: r.job_id || null, createdAt: r.created_at,
+    quotedAt: r.quoted_at, approvedAt: r.approved_at, invoicedAt: r.invoiced_at,
+  });
+
+  // GET /certs/remedials/outstanding — cases still at the BLOCKING `to_quote` stage
+  // that are due now (never snoozed, or the 4h snooze has passed). Drives the gate.
   if (sub === "/remedials/outstanding" && method === "GET") {
     if (!isOffice) return json({ ok: true, remedials: [] }, {}, env, request);
     const now = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND state='open' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
+      "SELECT * FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')='to_quote' AND (snooze_until IS NULL OR snooze_until<=?) ORDER BY created_at ASC LIMIT 50"
     ).bind(tid, now).all();
-    return json({ ok: true, remedials: (results || []).map(r => ({
-      certId: r.cert_id, certNumber: r.cert_number, siteName: r.site_name || r.site_code, siteCode: r.site_code,
-      fittings: r.fittings, charge: r.charge, onsite: r.onsite, pending: r.pending, batteries: r.batteries || 0,
-    })) }, {}, env, request);
+    return json({ ok: true, remedials: (results || []).map(shapeCase) }, {}, env, request);
   }
 
-  // POST /certs/remedials/ack {certId, action:"done"|"later"} — confirm charged/
-  // quoted (clears it), or snooze the reminder for 4 hours.
+  // GET /certs/remedials/board — the continuous tracking list. Every OPEN case
+  // (not yet invoiced) with its stage, so nothing is forgotten. ?all=1 includes invoiced.
+  if (sub === "/remedials/board" && method === "GET") {
+    if (!isOffice) return json({ ok: true, cases: [] }, {}, env, request);
+    const all = q.get("all") === "1";
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM em_remedial_acks WHERE tenant_id=?${all ? "" : " AND COALESCE(stage,'to_quote')<>'invoiced'"} ORDER BY created_at DESC LIMIT 400`
+    ).bind(tid).all();
+    return json({ ok: true, cases: (results || []).map(shapeCase) }, {}, env, request);
+  }
+
+  // POST /certs/remedials/ack {certId, action:"done"|"later"} — the blocking modal:
+  // "done" = quote sent (→ stage `quoted`, out of the gate); "later" = snooze 4h.
   if (sub === "/remedials/ack" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
@@ -719,15 +746,42 @@ export async function handle(request, env, ctx, url, sess) {
       await env.DB.prepare("UPDATE em_remedial_acks SET snooze_until=? WHERE tenant_id=? AND cert_id=?").bind(until, tid, certId).run();
       return json({ ok: true, snoozed: until }, {}, env, request);
     }
-    await env.DB.prepare("UPDATE em_remedial_acks SET state='done', done_at=?, done_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
-    return json({ ok: true, done: true }, {}, env, request);
+    await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=?, quoted_by=?, snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    return json({ ok: true, stage: "quoted" }, {}, env, request);
   }
 
-  // GET /certs/remedials/flags — site codes with an OPEN ack, for the compliance
-  // chart's ⚠ triangle next to the EM date.
+  // POST /certs/remedials/stage {certId, to} — advance a case along the pipeline.
+  //   quoted   → approved  : client approved / order received. If there are
+  //                          not-replaced fittings, RAISE the remedial SLA job now.
+  //   approved → invoiced  : done (drops off the board + clears the ⚠).
+  //   any      → to_quote  : re-open (undo).
+  if (sub === "/remedials/stage" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const certId = String(b.certId || "").trim();
+    const to = String(b.to || "").trim();
+    if (!certId || STAGES.indexOf(to) < 0) return error("Missing certId or bad stage", 400, env, request);
+    const now = new Date().toISOString();
+    let jobId = null;
+    if (to === "approved") {
+      jobId = await createRemedialJobForCert(env, tid, certId);   // null when nothing to schedule (all on site)
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='approved', approved_at=?, approved_by=?, job_id=COALESCE(?,job_id) WHERE tenant_id=? AND cert_id=?").bind(now, me, jobId, tid, certId).run();
+    } else if (to === "invoiced") {
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='invoiced', invoiced_at=?, invoiced_by=? WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    } else if (to === "to_quote") {
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='to_quote', snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(tid, certId).run();
+    } else { // quoted
+      await env.DB.prepare("UPDATE em_remedial_acks SET stage='quoted', quoted_at=COALESCE(quoted_at,?), quoted_by=COALESCE(quoted_by,?), snooze_until=NULL WHERE tenant_id=? AND cert_id=?").bind(now, me, tid, certId).run();
+    }
+    const row = await env.DB.prepare("SELECT * FROM em_remedial_acks WHERE tenant_id=? AND cert_id=?").bind(tid, certId).first();
+    return json({ ok: true, stage: to, jobId, case: row ? shapeCase(row) : null }, {}, env, request);
+  }
+
+  // GET /certs/remedials/flags — site codes with an OPEN case (not yet invoiced),
+  // for the compliance chart's ⚠ triangle next to the EM date.
   if (sub === "/remedials/flags" && method === "GET") {
     const { results } = await env.DB.prepare(
-      "SELECT site_code, SUM(fittings) AS fittings, SUM(charge) AS charge FROM em_remedial_acks WHERE tenant_id=? AND state='open' GROUP BY site_code"
+      "SELECT site_code, SUM(fittings) AS fittings, SUM(charge) AS charge FROM em_remedial_acks WHERE tenant_id=? AND COALESCE(stage,'to_quote')<>'invoiced' GROUP BY site_code"
     ).bind(tid).all();
     const codes = {};
     (results || []).forEach(r => { const c = padCode(r.site_code); if (c) codes[c] = { fittings: r.fittings, charge: r.charge }; });

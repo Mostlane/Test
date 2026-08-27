@@ -2336,6 +2336,25 @@ it straight onto the compliance chart (rolling the next-due date).
   Notify modal (saved via /certs/config). The blocking gate's wording folds in
   batteries ("N need batteries — supplier quote"). portal-config `?v=21`, cert-form
   `?v=10`, SW `mostlane-v85`.
+- **EM remedial PIPELINE + continuous tracker (Aug 2026):** a finalised EM cert
+  with failures opens a **case** (`em_remedial_acks`, `stage` col) that moves
+  **to_quote → quoted → approved → invoiced**, so nothing is forgotten. The
+  **remedial SLA job is NO LONGER raised at finalise** — it's raised when the
+  client's ORDER lands (the `quoted→approved` transition, `createRemedialJobForCert`
+  lists the not-replaced lights + batteries). Only **to_quote** is BLOCKING (the
+  portal-config gate, now "Quote sent" / "Do later" 4h); once quoted it drops off
+  the gate and lives on the tracker. Endpoints (office): **GET
+  /certs/remedials/board** (`?all=1` incl. invoiced — the continuous list), **POST
+  /certs/remedials/stage** `{certId, to:to_quote|quoted|approved|invoiced}` (on
+  `approved` raises the job if any not-replaced; `↩` re-opens), **GET
+  /certs/remedials/outstanding** (to_quote only), **/ack** (`done`=quote sent).
+  Replaced-on-site cases have no job — they run quote→approved→invoiced; not-replaced
+  raise the job at `approved`. The ⚠ chart flag shows until **invoiced** (`flags`
+  filters `stage<>'invoiced'`). Front-end: cert-review **💷 EM remedials tracker**
+  = Open / All(incl. invoiced) list, each case showing site·cert·fittings·£/batteries
+  + a stage badge + the next-stage button (✓ Quote sent → 📦 Order received (raise
+  job) / ✓ Approved → 🧾 Invoiced), plus 📄/📧 battery enquiry + Open-job links.
+  portal-config `?v=22`, SW `mostlane-v86`.
 - Design brief: "our own spin — keep similar but sleeker/more impressive" (Mostlane
   navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
