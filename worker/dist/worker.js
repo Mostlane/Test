@@ -18163,8 +18163,36 @@ function vanCheckState(lastAt, ack) {
   if (ack && ack.at && Date.now() - new Date(ack.at).getTime() <= VC_WINDOW_MS) return { state: "ack", at: lastAt || "", ackBy: ack.by || "" };
   return { state: "due", at: lastAt || "", ackBy: "" };
 }
-async function vanCheckDefects(env, tid, resolved) {
-  const out = {};
+var DEFECTST_KEY = (tid) => `fleet:defectstatus:${tid}`;
+async function appConfigJson(env, key) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+    return row && row.value ? JSON.parse(row.value) || {} : {};
+  } catch {
+    return {};
+  }
+}
+function prettyId(id) {
+  return String(id || "").replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, (c) => c.toUpperCase()) || "Item";
+}
+function defectLabelMap(settings) {
+  const m = {};
+  const add = (arr) => {
+    (arr || []).forEach((it) => {
+      if (it && it.id) m[it.id] = it.label || it.id;
+    });
+  };
+  add(settings && settings.checklist);
+  add(settings && settings.equipment);
+  return m;
+}
+async function collectDefects(env, tid, opts = {}) {
+  const statusMap = opts.statusMap || await appConfigJson(env, DEFECTST_KEY(tid));
+  const clearMap = opts.clearMap || await appConfigJson(env, DEFECTCLR_KEY(tid));
+  const settings = opts.settings || await appConfigJson(env, "vancheck:settings");
+  const names = opts.names || null;
+  const baseLbl = defectLabelMap(settings);
+  const out = [];
   try {
     const { results } = await env.DB.prepare(
       "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
@@ -18177,23 +18205,65 @@ async function vanCheckDefects(env, tid, resolved) {
       }
       if (items.skipped) continue;
       const rk = regKey(r.vehicle);
-      const clearAt = resolved && resolved[rk] || "";
-      if (clearAt && r.checked_at && new Date(r.checked_at) <= new Date(clearAt)) continue;
-      const answers = items.answers || {};
-      const defItems = (Array.isArray(items.issues) ? items.issues : Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing")).length;
-      const notSafe = r.safe_to_drive != null && Number(r.safe_to_drive) === 0;
-      if (!defItems && !notSafe) continue;
-      const cur = out[rk] || (out[rk] = { items: 0, checks: 0, notSafe: false, since: "", latest: "" });
-      cur.items += defItems;
-      cur.checks += 1;
-      if (notSafe) cur.notSafe = true;
       const at = r.checked_at || "";
-      if (at) {
-        if (!cur.since || new Date(at) < new Date(cur.since)) cur.since = at;
-        if (!cur.latest || new Date(at) > new Date(cur.latest)) cur.latest = at;
+      const answers = items.answers || {};
+      const meta = items.answerMeta || {};
+      const notes = items.defectNotes || {};
+      const custLbl = items.custom ? defectLabelMap({ checklist: items.custom.checklist, equipment: items.custom.equipment }) : null;
+      const clearAt = clearMap[rk] || "";
+      const eff = (key) => {
+        const s = statusMap[key];
+        if (s && s.status) return { status: s.status, note: s.note || "", by: s.by || "", at: s.at || "" };
+        if (clearAt && at && new Date(at) <= new Date(clearAt)) return { status: "resolved", note: "", by: "", at: clearAt };
+        return { status: "open", note: "", by: "", at: "" };
+      };
+      const push = (itemId, kind, label, answerWord2, driverNote) => {
+        const key = `${rk}::${at}::${itemId}`;
+        const e = eff(key);
+        out.push({
+          key,
+          reg: r.vehicle,
+          regNorm: rk,
+          checkedAt: at,
+          driver: r.username,
+          driverName: names ? names[r.username] || r.username : r.username,
+          itemId,
+          kind,
+          label,
+          answer: answerWord2,
+          driverNote: driverNote || "",
+          status: e.status,
+          officeNote: e.note,
+          statusBy: e.by,
+          statusAt: e.at
+        });
+      };
+      for (const id of Object.keys(answers)) {
+        const v = answers[id];
+        const m = meta[id];
+        const tone = m && m.tone ? m.tone : v === "defect" || v === "missing" ? "issue" : "ok";
+        if (tone !== "issue") continue;
+        const label = m && m.itemLabel || custLbl && custLbl[id] || baseLbl[id] || prettyId(id);
+        const answerWord2 = m && m.label || (v === "missing" ? "Missing" : "Defect");
+        push(id, v === "missing" ? "missing" : "defect", label, answerWord2, notes[id]);
+      }
+      if (r.safe_to_drive != null && Number(r.safe_to_drive) === 0) {
+        push("__notsafe", "notsafe", "Not safe to drive", "Not safe", items.notSafeNote || "");
       }
     }
   } catch {
+  }
+  return out;
+}
+function defectSummary(list) {
+  const out = {};
+  for (const d of list) {
+    if (d.status === "resolved") continue;
+    const c = out[d.regNorm] || (out[d.regNorm] = { open: 0, pending: 0, notSafe: false, since: "" });
+    if (d.status === "pending") c.pending++;
+    else c.open++;
+    if (d.kind === "notsafe") c.notSafe = true;
+    if (d.checkedAt && (!c.since || new Date(d.checkedAt) < new Date(c.since))) c.since = d.checkedAt;
   }
   return out;
 }
@@ -18464,7 +18534,7 @@ async function handle22(request, env, ctx, url, sess) {
         return {};
       }
     };
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money2, defResolved, vcAck, defStatus, vcSettings, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -18475,15 +18545,20 @@ async function handle22(request, env, ctx, url, sess) {
       mpgByVehicle(env, tid),
       canMoney(env, tid, sess),
       appCfg(DEFECTCLR_KEY(tid)),
-      // defects marked resolved by an admin
+      // legacy per-reg bulk "resolved as of" mark
       appCfg(VCACK_KEY(tid)),
+      appCfg(DEFECTST_KEY(tid)),
+      // per-defect statuses (open/pending/resolved)
+      appCfg("vancheck:settings"),
+      // item labels for the defect list
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
       env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] }))
     ]);
     const pendVc = new Set((pendVcRes.results || []).map((r) => dn(r.reg)));
-    const defects = await vanCheckDefects(env, tid, defResolved);
+    const defList = await collectDefects(env, tid, { statusMap: defStatus, clearMap: defResolved, settings: vcSettings });
+    const defects = defectSummary(defList);
     const hoRows = hoRes.results || [];
     const lastHo = {}, pendHo = {};
     for (const h of hoRows) {
@@ -18545,11 +18620,12 @@ async function handle22(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
-        // Outstanding van-check defects (stay flagged until an admin resolves).
-        defectItems: (defects[dn(v.reg)] || {}).items || 0,
-        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
-        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
-        defectSince: (defects[dn(v.reg)] || {}).since || "",
+        // Outstanding van-check defects, now split by status (open needs sorting,
+        // pending = booked in / awaiting). Resolved individually or in bulk.
+        defectOpen: (defects[regKey(v.reg)] || {}).open || 0,
+        defectPending: (defects[regKey(v.reg)] || {}).pending || 0,
+        defectNotSafe: !!(defects[regKey(v.reg)] || {}).notSafe,
+        defectSince: (defects[regKey(v.reg)] || {}).since || "",
         lastVanCheckAt: lastVc[dn(v.reg)] || "",
         // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),
@@ -19243,20 +19319,57 @@ async function handle22(request, env, ctx, url, sess) {
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
     return jr3({ ok: true, reg, checks }, headers);
   }
+  if (sub === "/defects" && method === "GET") {
+    const reg = q.get("reg") || "";
+    const statusF = q.get("status") || "";
+    const includeResolved = q.get("includeResolved") === "1" || statusF === "resolved" || statusF === "all";
+    const names = await nameMap2(env, tid);
+    let list = await collectDefects(env, tid, { names });
+    if (reg) {
+      const rk = regKey(reg);
+      list = list.filter((d) => d.regNorm === rk);
+    }
+    const summary = { open: 0, pending: 0, resolved: 0 };
+    for (const d of list) summary[d.status] = (summary[d.status] || 0) + 1;
+    let rows = list;
+    if (statusF && statusF !== "all") rows = rows.filter((d) => d.status === statusF);
+    else if (!includeResolved) rows = rows.filter((d) => d.status !== "resolved");
+    rows.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
+    return jr3({ ok: true, defects: rows, summary }, headers);
+  }
+  if (sub === "/defect-status" && method === "POST") {
+    const b = await readJson4(request);
+    const key = String(b.key || "").trim();
+    if (!key) return jr3({ error: "key required" }, headers, 400);
+    const map = await appConfigJson(env, DEFECTST_KEY(tid));
+    const prev = map[key] || {};
+    const status = ["open", "pending", "resolved"].includes(b.status) ? b.status : prev.status || "open";
+    const note = typeof b.note === "string" ? b.note.slice(0, 500) : prev.note || "";
+    map[key] = { status, note, by: sess && sess.user && sess.user.username || "", at: (/* @__PURE__ */ new Date()).toISOString() };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTST_KEY(tid), JSON.stringify(map)).run();
+    return jr3({ ok: true, key, status, note, by: map[key].by, at: map[key].at }, headers);
+  }
   if (sub === "/defects-resolve" && method === "POST") {
     const b = await readJson4(request);
     const reg = String(b.reg || "").trim();
     if (!reg) return jr3({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
-    let map = {};
-    try {
-      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first();
-      if (row && row.value) map = JSON.parse(row.value) || {};
-    } catch {
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const who = sess && sess.user && sess.user.username || "";
+    const clr = await appConfigJson(env, DEFECTCLR_KEY(tid));
+    clr[rk] = nowIso;
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(clr)).run();
+    const stMap = await appConfigJson(env, DEFECTST_KEY(tid));
+    const list = await collectDefects(env, tid, { clearMap: {}, statusMap: stMap });
+    let n = 0;
+    for (const d of list) {
+      if (d.regNorm === rk && d.status !== "resolved") {
+        stMap[d.key] = { status: "resolved", note: stMap[d.key] && stMap[d.key].note || "", by: who, at: nowIso };
+        n++;
+      }
     }
-    map[rk] = (/* @__PURE__ */ new Date()).toISOString();
-    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
-    return jr3({ ok: true, reg, resolvedAt: map[rk] }, headers);
+    if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DEFECTST_KEY(tid), JSON.stringify(stMap)).run();
+    return jr3({ ok: true, reg, resolvedAt: nowIso, resolved: n }, headers);
   }
   if (sub === "/vancheck-ack" && method === "POST") {
     const b = await readJson4(request);

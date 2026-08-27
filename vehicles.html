@@ -91,6 +91,37 @@
   .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:2000;padding:14px;}
   .modal{background:#fff;width:100%;max-width:480px;max-height:88vh;overflow:auto;border-radius:14px;padding:18px;}
   .modal h3{margin:0 0 12px;font-size:17px;}
+  /* Defect chips (cards) */
+  .defect-chip{cursor:pointer;}
+  .defect-chip:hover{filter:brightness(.96);}
+  /* Defect management modal */
+  .deftabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;}
+  .deftab{border:1px solid #d7dee6;background:#f7fafc;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;color:#334155;}
+  .deftab.on{background:#003366;border-color:#003366;color:#fff;font-weight:600;}
+  .deftab span{opacity:.75;font-size:12px;margin-left:3px;}
+  .defgrp{margin:0 0 14px;}
+  .defgrphd{font-size:13px;font-weight:700;color:#003366;background:#eef4fb;border-radius:8px;padding:6px 10px;margin:0 0 8px;display:flex;justify-content:space-between;}
+  .defgrphd span{opacity:.7;font-weight:600;}
+  .defrow{border:1px solid #e2e8f0;border-left:4px solid #dc2626;border-radius:10px;padding:11px 12px;margin:0 0 9px;background:#fff;}
+  .defrow.pending{border-left-color:#d97706;background:#fffdf7;}
+  .defrow.resolved{border-left-color:#94a3b8;background:#f8fafc;opacity:.82;}
+  .defrow .deftop{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:14.5px;font-weight:600;color:#16202e;}
+  .defrow.resolved .deftop{text-decoration:line-through;color:#64748b;}
+  .defrow .defico{font-size:15px;}
+  .defrow .defans{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:1px 7px;}
+  .defrow.pending .defans{background:#fef3c7;color:#92400e;}
+  .defrow.resolved .defans{background:#e2e8f0;color:#475569;}
+  .defrow .defmeta{font-size:12px;color:#64748b;margin-top:3px;}
+  .defrow .defnote{font-size:12.5px;color:#475569;margin-top:5px;background:#f1f5f9;border-radius:7px;padding:5px 8px;}
+  .defrow .defctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;}
+  .stbtn{border:1px solid #d7dee6;background:#fff;border-radius:8px;padding:5px 11px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;color:#475569;}
+  .stbtn.open.on{background:#dc2626;border-color:#dc2626;color:#fff;}
+  .stbtn.pending.on{background:#d97706;border-color:#d97706;color:#fff;}
+  .stbtn.resolved.on{background:#16a34a;border-color:#16a34a;color:#fff;}
+  .defby{font-size:11.5px;color:#94a3b8;margin-left:2px;}
+  .defoffice{width:100%;margin-top:8px;padding:8px 10px;border:1px solid #d7dee6;border-radius:8px;font:inherit;font-size:13px;}
+  .defoffice:focus{outline:none;border-color:#1A4F8F;box-shadow:0 0 0 3px rgba(26,79,143,.12);}
+  .defempty{text-align:center;color:#64748b;padding:26px 10px;font-size:14px;}
   .mrow{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
   .mrow label{font-size:13px;font-weight:600;color:#334155;}
   .mrow input,.mrow select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
@@ -156,9 +187,12 @@
       <div class="scard"><div class="lbl">Active</div><div class="val" id="sumActive">0</div><div class="note">Currently in service</div></div>
       <div class="scard"><div class="lbl">Unassigned</div><div class="val" id="sumUnassigned">0</div><div class="note">No current driver</div></div>
       <div class="scard alert"><div class="lbl">Service due</div><div class="val" id="sumDue">0</div><div class="note">Due soon or overdue</div></div>
-      <div class="scard alert" id="sumFaultCard" style="display:none"><div class="lbl">Vans with faults</div><div class="val" id="sumFault">0</div><div class="note">Van-check defects to resolve</div></div>
+      <div class="scard alert" id="sumFaultCard" style="display:none;cursor:pointer" onclick="openDefectsModal()" title="Open the defect list for all vans"><div class="lbl">Vans with faults</div><div class="val" id="sumFault">0</div><div class="note">Tap to manage all defects →</div></div>
     </div>
 
+    <div id="defectBanner" style="display:none;background:#fef2f2;border:1px solid #dc2626;border-radius:12px;padding:11px 14px;margin:0 0 12px;color:#991b1b;font-size:13.5px;font-weight:600;cursor:pointer" onclick="openDefectsModal()">
+      🔧 <span id="defectBannerText">Defects reported</span> — <span style="text-decoration:underline">tap to view &amp; resolve them all in one place</span>
+    </div>
     <div class="reorder-hint" id="reorderHint">Tip: drag the <b>⠿</b> handle on a card to reorder the fleet — the order is saved and shared across the portal. (Clear the search/filter to reorder.)</div>
     <div id="attnBanner" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:11px 14px;margin:0 0 12px;color:#92400e;font-size:13.5px;font-weight:600;">
       ⚠ Showing vans that <b>need attention</b> — MOT or tax due within 30 days (or overdue), a service due, or a handover still pending. The amber/red tags on each card show exactly why. <a href="#" onclick="document.getElementById('filterActive').value='all';renderFleet();return false;" style="color:#92400e;text-decoration:underline;">Show all vehicles</a>
@@ -264,6 +298,23 @@
     </div>
   </div>
 
+  <!-- DEFECTS MODAL -->
+  <div class="backdrop" id="defBackdrop">
+    <div class="modal" style="max-width:640px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <h3 id="defTitle" style="margin:0;flex:1">Defects</h3>
+        <button class="btn ghost small" onclick="closeDefectsModal()">✕ Close</button>
+      </div>
+      <div class="hint" style="margin-bottom:10px">Set each fault to <b style="color:#dc2626">Open</b> (needs sorting), <b style="color:#d97706">Pending</b> (booked in / awaiting a part) or <b style="color:#16a34a">Resolved</b>. Add a note so everyone knows what's happening.</div>
+      <div id="defScoped" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <a class="btn ghost small" id="defViewChecks" href="#">📋 View check history</a>
+        <button class="btn ghost small" id="defResolveAll" onclick="resolveAllOnVan()">✓ Resolve all on this van</button>
+      </div>
+      <div class="deftabs" id="defTabs"></div>
+      <div id="defBody"><span class="hint">Loading…</span></div>
+    </div>
+  </div>
+
   <!-- LIGHTBOX -->
   <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightboxImg" alt="Vehicle photo"></div>
 
@@ -340,12 +391,29 @@
     $("sumActive").textContent=FLEET.filter(v=>v.active!==false).length;
     $("sumUnassigned").textContent=FLEET.filter(v=>!v.driver).length;
     $("sumDue").textContent=FLEET.filter(v=>v.serviceStatus==="warn"||v.serviceStatus==="bad").length;
-    const faults=FLEET.filter(v=>hasDefect(v)).length;
+    const faultVans=FLEET.filter(v=>hasDefect(v));
+    const faults=faultVans.length;
+    const openVans=FLEET.filter(v=>hasOpenDefect(v)).length;
+    const openCount=FLEET.reduce((s,v)=>s+(v.defectOpen||0)+(v.defectNotSafe?0:0),0);
+    const pendCount=FLEET.reduce((s,v)=>s+(v.defectPending||0),0);
     const fc=$("sumFaultCard"); fc.style.display="";       // always shown now (green when clear)
     $("sumFault").textContent=faults;
     fc.classList.remove("alert","fault-bad","fault-ok");
     fc.classList.add(faults?"fault-bad":"fault-ok");
-    const note=fc.querySelector(".note"); if(note) note.textContent = faults ? "Van-check defects to resolve" : "No outstanding faults";
+    const note=fc.querySelector(".note"); if(note) note.textContent = faults ? "Tap to manage all defects →" : "No outstanding faults";
+    // Red top banner — only when something still needs sorting.
+    const db=$("defectBanner");
+    if(db){
+      if(faults){
+        const parts=[];
+        if(openCount) parts.push(`<b>${openCount}</b> defect${openCount>1?"s":""} to sort`);
+        if(pendCount) parts.push(`<b>${pendCount}</b> pending`);
+        const vanTxt=`${openVans||faults} van${(openVans||faults)>1?"s":""}`;
+        $("defectBannerText").innerHTML=`${parts.join(" · ")||"Defects reported"} across ${vanTxt}`;
+        db.style.display="";
+        db.style.background=openVans?"#fef2f2":"#fffbeb"; db.style.borderColor=openVans?"#dc2626":"#d97706"; db.style.color=openVans?"#991b1b":"#92400e";
+      } else db.style.display="none";
+    }
     renderBanner();
   }
   // Jump the grid to a filtered view (banner segments link here).
@@ -381,29 +449,116 @@
   }
 
   // A van has an outstanding fault if a van-check reported a defect/missing item
-  // or the driver flagged it not-safe-to-drive, and it hasn't been resolved.
-  function hasDefect(v){ return (v.defectItems>0)||(v.defectChecks>0)||v.defectNotSafe; }
+  // or the driver flagged it not-safe-to-drive, and it isn't fully resolved.
+  function hasDefect(v){ return (v.defectOpen>0)||(v.defectPending>0)||v.defectNotSafe; }
+  function hasOpenDefect(v){ return (v.defectOpen>0)||v.defectNotSafe; }
+  // Card chips — red for defects that still need sorting, amber for ones that are
+  // in hand (booked in / awaiting a part). Tap any to manage that van's defects.
   function defectTags(v){
     if(!hasDefect(v)) return "";
+    const r=v.reg||"";
+    const open=v.defectNotSafe?"tap to manage":(v.defectSince?"since "+fmtDMY(v.defectSince):"tap to manage");
     let out="";
-    if(v.defectNotSafe) out+=`<span class="tag bad">🚫 Not safe to drive<em>reported in a van check</em></span>`;
-    const n=v.defectItems||0;
-    const sub=(n?`${n} item${n>1?"s":""}`:"reported")+(v.defectSince?` · since ${fmtDMY(v.defectSince)}`:"");
-    out+=`<span class="tag bad">⚠ Defect reported<em>${esc(sub)}</em></span>`;
+    if(v.defectNotSafe) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">🚫 Not safe to drive<em>tap to manage</em></span>`;
+    if(v.defectOpen>0) out+=`<span class="tag bad defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""}<em>${esc(open)}</em></span>`;
+    if(v.defectPending>0) out+=`<span class="tag warn defect-chip" onclick="event.stopPropagation();openDefectsModal('${esc(r)}')">⏳ ${v.defectPending} pending<em>booked in / awaiting</em></span>`;
     return out;
   }
-  // Mark all of a van's reported defects resolved (clears the card flag).
+  // Mark ALL of a van's reported defects resolved (bulk — used inside the panel).
   async function resolveDefects(reg){
-    const msg="Mark all reported defects for "+reg+" as resolved?\n\nThe warning clears until a new defect is reported in a future van check.";
-    const ok=window.MLUI?await MLUI.confirm(msg,{title:"Resolve defects",okLabel:"✓ Mark resolved"}):confirm(msg);
+    const msg="Mark ALL current defects for "+reg+" as resolved?\n\nUse this only when everything on this van is sorted. You can resolve them one at a time instead.";
+    const ok=window.MLUI?await MLUI.confirm(msg,{title:"Resolve all defects",okLabel:"✓ Resolve all",danger:true}):confirm(msg);
     if(!ok) return;
     try{
       const r=await aFetch("/fleet/defects-resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reg})}).then(r=>r.json());
       if(!r||!r.ok){ alert((r&&r.error)||"Could not mark resolved."); return; }
-      const v=FLEET.find(x=>(x.reg||"")===reg);
-      if(v){ v.defectItems=0; v.defectChecks=0; v.defectNotSafe=false; v.defectSince=""; }
-      pClose(); renderFleet(); updateSummary();
+      DEF_DIRTY=true;
+      await loadDefects();      // refresh the open panel
     }catch(e){ alert("Could not mark resolved."); }
+  }
+
+  // ── Defect management modal ───────────────────────────────────────────────
+  // Scoped to one van (reg given) or every van (no reg). Each fault can be set
+  // Open / Pending / Resolved individually, with a note. Links up: card chips,
+  // card button, deep-dive banner, the "Vans with faults" tile and the red top
+  // banner all open this. Changes re-flow the cards + summary on close.
+  let DEF_ALL=[], DEF_REG="", DEF_FILTER="open", DEF_DIRTY=false;
+  window.openDefectsModal=function(reg){
+    DEF_REG=reg||""; DEF_FILTER="open"; DEF_DIRTY=false;
+    $("defTitle").textContent=reg?("Defects — "+reg):"All van defects";
+    $("defScoped").style.display=reg?"flex":"none";
+    if(reg) $("defViewChecks").href="vehicle-checks.html?reg="+encodeURIComponent(reg);
+    $("defTabs").innerHTML=""; $("defBody").innerHTML='<span class="hint">Loading…</span>';
+    $("defBackdrop").style.display="flex";
+    loadDefects();
+  };
+  function closeDefectsModal(){
+    $("defBackdrop").style.display="none";
+    if(DEF_DIRTY){ DEF_DIRTY=false; loadFleet(); }   // refresh chips/tiles/banner
+  }
+  window.closeDefectsModal=closeDefectsModal;
+  $("defBackdrop").addEventListener("click",e=>{ if(e.target===$("defBackdrop")) closeDefectsModal(); });
+  async function loadDefects(){
+    try{
+      const u="/fleet/defects?includeResolved=1"+(DEF_REG?("&reg="+encodeURIComponent(DEF_REG)):"");
+      const d=await aFetch(u).then(r=>r.json());
+      DEF_ALL=(d&&d.defects)||[];
+    }catch(e){ DEF_ALL=[]; }
+    renderDefects();
+  }
+  window.setDefFilter=function(f){ DEF_FILTER=f; renderDefects(); };
+  window.resolveAllOnVan=function(){ if(DEF_REG) resolveDefects(DEF_REG); };
+  function renderDefects(){
+    const c={open:0,pending:0,resolved:0}; DEF_ALL.forEach(d=>c[d.status]=(c[d.status]||0)+1);
+    $("defTabs").innerHTML=[["open","Open",c.open],["pending","Pending",c.pending],["resolved","Resolved",c.resolved],["all","All",DEF_ALL.length]]
+      .map(([k,l,n])=>`<button class="deftab${DEF_FILTER===k?" on":""}" onclick="setDefFilter('${k}')">${l}<span>${n}</span></button>`).join("");
+    // hide "resolve all" once nothing is outstanding on this van
+    if(DEF_REG){ const out=DEF_ALL.some(d=>d.status!=="resolved"); $("defResolveAll").style.display=out?"":"none"; }
+    let rows=DEF_FILTER==="all"?DEF_ALL:DEF_ALL.filter(d=>d.status===DEF_FILTER);
+    if(!rows.length){ $("defBody").innerHTML=`<div class="defempty">${DEF_FILTER==="open"?"🎉 No open defects — all sorted.":"Nothing here."}</div>`; return; }
+    if(DEF_REG){ $("defBody").innerHTML=rows.map(defRow).join(""); return; }
+    // group by van when showing the whole fleet
+    const byReg={}; rows.forEach(d=>{ (byReg[d.reg]=byReg[d.reg]||[]).push(d); });
+    $("defBody").innerHTML=Object.keys(byReg).sort().map(reg=>
+      `<div class="defgrp"><div class="defgrphd"><span>${esc(reg)}</span><span>${byReg[reg].length}</span></div>${byReg[reg].map(defRow).join("")}</div>`
+    ).join("");
+  }
+  function defRow(d){
+    const icon=d.kind==="notsafe"?"🚫":d.kind==="missing"?"📦":"⚠";
+    const st=d.status;
+    const btn=(k,l)=>`<button class="stbtn ${k}${st===k?" on":""}" onclick="setDefStatus(this,'${k}')">${l}</button>`;
+    const meta=`Reported ${fmtDMY(d.checkedAt)}${d.driverName?" · "+esc(d.driverName):""}`;
+    const dnote=d.driverNote?`<div class="defnote">🗣 Driver: ${esc(d.driverNote)}</div>`:"";
+    const by=d.statusBy?`<span class="defby">${st==="resolved"?"resolved":st} by ${esc(d.statusBy)}${d.statusAt?" · "+fmtDMY(d.statusAt):""}</span>`:"";
+    return `<div class="defrow ${st}" data-key="${esc(d.key)}">
+      <div class="deftop"><span class="defico">${icon}</span><span class="deflbl">${esc(d.label)}</span><span class="defans">${esc(d.answer||"")}</span></div>
+      <div class="defmeta">${meta}</div>${dnote}
+      <div class="defctl">${btn("open","Open")}${btn("pending","Pending")}${btn("resolved","Resolved")}${by}</div>
+      <input class="defoffice" placeholder="Add a note — e.g. booked in 5 Sep, awaiting part" value="${esc(d.officeNote||"")}" onblur="saveDefNote(this)" onkeydown="if(event.key==='Enter')this.blur()">
+    </div>`;
+  }
+  window.setDefStatus=async function(btnEl,status){
+    const row=btnEl.closest(".defrow"); if(!row) return;
+    const key=row.dataset.key;
+    const d=DEF_ALL.find(x=>x.key===key); if(!d) return;
+    const note=(row.querySelector(".defoffice")||{}).value;
+    d.status=status; if(note!=null) d.officeNote=note;
+    await postDefStatus(key,status,note);
+    renderDefects();
+  };
+  window.saveDefNote=async function(inp){
+    const row=inp.closest(".defrow"); if(!row) return;
+    const key=row.dataset.key; const d=DEF_ALL.find(x=>x.key===key); if(!d) return;
+    if((d.officeNote||"")===(inp.value||"")) return;
+    d.officeNote=inp.value;
+    await postDefStatus(key,d.status,inp.value);
+  };
+  async function postDefStatus(key,status,note){
+    DEF_DIRTY=true;
+    try{
+      const r=await aFetch("/fleet/defect-status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,status,note})}).then(r=>r.json());
+      if(r&&r.ok){ const d=DEF_ALL.find(x=>x.key===key); if(d){ d.statusBy=r.by; d.statusAt=r.at; } }
+    }catch(e){}
   }
 
   // Request a van check for this vehicle's assigned driver: a modal to confirm
@@ -580,7 +735,7 @@
         <div>${odo}${v.currentMpg!=null?`<span class="odo" style="margin-left:14px">⛽ ${Number(v.currentMpg).toFixed(1)} <small>Current MPG</small></span>`:""}</div>
         <div class="tags">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
         <div class="card-actions">
-          ${hasDefect(v)?`<button class="btn small" style="background:#dc2626;border-color:#dc2626;color:#fff" onclick="resolveDefects('${esc(reg)}')">✓ Mark defects resolved</button>`:""}
+          ${hasDefect(v)?`<button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button>`:""}
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
           <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
@@ -649,7 +804,7 @@
       </div>
       ${photo}
       <div class="tags" style="margin-bottom:6px">${defectTags(v)}${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${svc}</div>
-      ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid #dc2626;background:#fef2f2"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:#991b1b;font-weight:650">⚠ ${v.defectItems||"Defects"} reported in van check${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:#dc2626;border-color:#dc2626;color:#fff" onclick="resolveDefects('${esc(reg)}')">✓ Mark resolved</button></div></div></div>`:""}
+      ${hasDefect(v)?`<div class="grp" style="margin:2px 0 10px;border:1px solid ${hasOpenDefect(v)?"#dc2626":"#d97706"};background:${hasOpenDefect(v)?"#fef2f2":"#fffbeb"}"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="color:${hasOpenDefect(v)?"#991b1b":"#92400e"};font-weight:650">${v.defectOpen>0?`⚠ ${v.defectOpen} defect${v.defectOpen>1?"s":""} to sort`:""}${v.defectOpen>0&&v.defectPending>0?" · ":""}${v.defectPending>0?`⏳ ${v.defectPending} pending`:""}${v.defectSince?` · since ${fmtDMY(v.defectSince)}`:""}</div><div style="display:flex;gap:8px"><a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">View checks</a><button class="btn small" style="background:${hasOpenDefect(v)?"#dc2626":"#d97706"};border-color:${hasOpenDefect(v)?"#dc2626":"#d97706"};color:#fff" onclick="openDefectsModal('${esc(reg)}')">🔧 Manage defects</button></div></div></div>`:""}
       ${svcReason}
       <div>
         ${detailRow("Status", v.active===false?"Inactive":"Active")}

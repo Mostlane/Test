@@ -310,6 +310,92 @@ async function vanCheckDefects(env, tid, resolved) {
   } catch {}
   return out;
 }
+// ── Per-defect resolution (Aug 2026) ───────────────────────────────────────
+// Each individual reported fault can now be tracked/resolved on its own, with a
+// status (open | pending | resolved) and an office note (e.g. "booked 5 Sep",
+// "awaiting part"). Stored in app_config fleet:defectstatus:<tid> keyed by a
+// STABLE per-defect id  `${REGNORM}::${checked_at}::${itemId}`  (and `__notsafe`
+// for the driver's "not safe to drive" flag). The legacy per-reg bulk-clear
+// timestamp (fleet:defectsclear) still resolves everything up to its time, but
+// an explicit per-defect status ALWAYS wins over it (so one fault can be
+// reopened or marked pending after a bulk resolve).
+const DEFECTST_KEY = tid => `fleet:defectstatus:${tid}`;
+async function appConfigJson(env, key) {
+  try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); return row && row.value ? (JSON.parse(row.value) || {}) : {}; }
+  catch { return {}; }
+}
+function prettyId(id) { return String(id || "").replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b\w/g, c => c.toUpperCase()) || "Item"; }
+function defectLabelMap(settings) {
+  const m = {}; const add = arr => { (arr || []).forEach(it => { if (it && it.id) m[it.id] = it.label || it.id; }); };
+  add(settings && settings.checklist); add(settings && settings.equipment); return m;
+}
+// Flat list of EVERY reported defect across the fleet, each with its effective
+// status. Loads what it needs unless the caller pre-passes maps (the vehicles
+// hot path shares its already-fetched clear/status/settings reads).
+async function collectDefects(env, tid, opts = {}) {
+  const statusMap = opts.statusMap || await appConfigJson(env, DEFECTST_KEY(tid));
+  const clearMap = opts.clearMap || await appConfigJson(env, DEFECTCLR_KEY(tid));
+  const settings = opts.settings || await appConfigJson(env, "vancheck:settings");
+  const names = opts.names || null;
+  const baseLbl = defectLabelMap(settings);
+  const out = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, username, checked_at, safe_to_drive, items FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      if (items.skipped) continue;
+      const rk = regKey(r.vehicle);
+      const at = r.checked_at || "";
+      const answers = items.answers || {};
+      const meta = items.answerMeta || {};
+      const notes = items.defectNotes || {};
+      const custLbl = items.custom ? defectLabelMap({ checklist: items.custom.checklist, equipment: items.custom.equipment }) : null;
+      const clearAt = clearMap[rk] || "";
+      const eff = key => {
+        const s = statusMap[key];
+        if (s && s.status) return { status: s.status, note: s.note || "", by: s.by || "", at: s.at || "" };
+        if (clearAt && at && new Date(at) <= new Date(clearAt)) return { status: "resolved", note: "", by: "", at: clearAt };
+        return { status: "open", note: "", by: "", at: "" };
+      };
+      const push = (itemId, kind, label, answerWord, driverNote) => {
+        const key = `${rk}::${at}::${itemId}`;
+        const e = eff(key);
+        out.push({
+          key, reg: r.vehicle, regNorm: rk, checkedAt: at, driver: r.username,
+          driverName: names ? (names[r.username] || r.username) : r.username,
+          itemId, kind, label, answer: answerWord, driverNote: driverNote || "",
+          status: e.status, officeNote: e.note, statusBy: e.by, statusAt: e.at,
+        });
+      };
+      for (const id of Object.keys(answers)) {
+        const v = answers[id]; const m = meta[id];
+        const tone = (m && m.tone) ? m.tone : ((v === "defect" || v === "missing") ? "issue" : "ok");
+        if (tone !== "issue") continue;
+        const label = (m && m.itemLabel) || (custLbl && custLbl[id]) || baseLbl[id] || prettyId(id);
+        const answerWord = (m && m.label) || (v === "missing" ? "Missing" : "Defect");
+        push(id, v === "missing" ? "missing" : "defect", label, answerWord, notes[id]);
+      }
+      if (r.safe_to_drive != null && Number(r.safe_to_drive) === 0) {
+        push("__notsafe", "notsafe", "Not safe to drive", "Not safe", items.notSafeNote || "");
+      }
+    }
+  } catch {}
+  return out;
+}
+// Per-reg summary of UNRESOLVED defects (for the vehicle cards).
+function defectSummary(list) {
+  const out = {};
+  for (const d of list) {
+    if (d.status === "resolved") continue;
+    const c = out[d.regNorm] || (out[d.regNorm] = { open: 0, pending: 0, notSafe: false, since: "" });
+    if (d.status === "pending") c.pending++; else c.open++;
+    if (d.kind === "notsafe") c.notSafe = true;
+    if (d.checkedAt && (!c.since || new Date(d.checkedAt) < new Date(c.since))) c.since = d.checkedAt;
+  }
+  return out;
+}
 // Newest van-check date per vehicle (any outcome — this is "was it checked",
 // not "did it pass"). Skipped weeks don't count as a real check.
 async function lastVanCheckMap(env, tid) {
@@ -578,7 +664,7 @@ export async function handle(request, env, ctx, url, sess) {
     // Gather everything the cards need CONCURRENTLY — these lookups are
     // independent, so running them in parallel turns ~10 stacked round trips into
     // one, which is the main win for this page's speed.
-    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, hoRes, pendVcRes] = await Promise.all([
+    const [miles, photos, covers, vcCounts, lastVc, mpg, money, defResolved, vcAck, defStatus, vcSettings, hoRes, pendVcRes] = await Promise.all([
       latestMileage(env, tid),
       photoIndex(env, tid),
       coverMap(env, tid),
@@ -586,15 +672,18 @@ export async function handle(request, env, ctx, url, sess) {
       lastVanCheckMap(env, tid),         // newest van-check date per reg (card bar)
       mpgByVehicle(env, tid),
       canMoney(env, tid, sess),
-      appCfg(DEFECTCLR_KEY(tid)),        // defects marked resolved by an admin
+      appCfg(DEFECTCLR_KEY(tid)),        // legacy per-reg bulk "resolved as of" mark
       appCfg(VCACK_KEY(tid)),
+      appCfg(DEFECTST_KEY(tid)),         // per-defect statuses (open/pending/resolved)
+      appCfg("vancheck:settings"),       // item labels for the defect list
       env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all(),
       // Pending one-off van-check REQUESTS per reg (so the card shows "requested"
       // and can't re-request until it's done). Fails soft if the table is absent.
       env.DB.prepare("SELECT DISTINCT reg FROM custom_van_checks WHERE tenant_id IN (?, '1', '1.0') AND status='pending' AND reg IS NOT NULL AND reg!=''").bind(String(tid)).all().catch(() => ({ results: [] })),
     ]);
     const pendVc = new Set((pendVcRes.results || []).map(r => dn(r.reg)));
-    const defects = await vanCheckDefects(env, tid, defResolved);
+    const defList = await collectDefects(env, tid, { statusMap: defStatus, clearMap: defResolved, settings: vcSettings });
+    const defects = defectSummary(defList);   // { REGNORM: {open,pending,notSafe,since} }
     // Handover state per reg: latest completed (card's direct link) + whether one
     // is still pending (a badge / "awaiting handover" hint).
     const hoRows = hoRes.results || [];
@@ -646,11 +735,12 @@ export async function handle(request, env, ctx, url, sess) {
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
         pendingHandover: pendHo[dn(v.reg)] || 0,
         currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
-        // Outstanding van-check defects (stay flagged until an admin resolves).
-        defectItems: (defects[dn(v.reg)] || {}).items || 0,
-        defectChecks: (defects[dn(v.reg)] || {}).checks || 0,
-        defectNotSafe: !!(defects[dn(v.reg)] || {}).notSafe,
-        defectSince: (defects[dn(v.reg)] || {}).since || "",
+        // Outstanding van-check defects, now split by status (open needs sorting,
+        // pending = booked in / awaiting). Resolved individually or in bulk.
+        defectOpen: (defects[regKey(v.reg)] || {}).open || 0,
+        defectPending: (defects[regKey(v.reg)] || {}).pending || 0,
+        defectNotSafe: !!(defects[regKey(v.reg)] || {}).notSafe,
+        defectSince: (defects[regKey(v.reg)] || {}).since || "",
         lastVanCheckAt: lastVc[dn(v.reg)] || "",   // newest van check date
         vanCheck: vanCheckState(lastVc[dn(v.reg)] || "", vcAck[dn(v.reg)]),   // card status bar: ok | ack | due
         vanCheckRequested: pendVc.has(dn(v.reg)),  // a one-off check is pending — hide the Request button
@@ -1286,21 +1376,70 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true, reg, checks }, headers);
   }
 
-  // ── Mark a van's reported defects resolved (clears the card flag) ─────────
-  // Stamps a per-reg "resolved as of now" time; any van-check defect completed
-  // on/before it is treated as dealt-with. A NEW defect reported afterwards
-  // re-flags the van. Any Vehicles user can resolve.
+  // ── Every reported defect across the fleet (per-defect tracking) ──────────
+  // GET /fleet/defects?reg=&status=&includeResolved=1  (any Vehicles user).
+  // Powers the per-van defect panel and the central "all vans" defect table.
+  if (sub === "/defects" && method === "GET") {
+    const reg = q.get("reg") || "";
+    const statusF = q.get("status") || "";     // open | pending | resolved | all
+    const includeResolved = q.get("includeResolved") === "1" || statusF === "resolved" || statusF === "all";
+    const names = await nameMap(env, tid);
+    let list = await collectDefects(env, tid, { names });
+    if (reg) { const rk = regKey(reg); list = list.filter(d => d.regNorm === rk); }
+    const summary = { open: 0, pending: 0, resolved: 0 };
+    for (const d of list) summary[d.status] = (summary[d.status] || 0) + 1;
+    let rows = list;
+    if (statusF && statusF !== "all") rows = rows.filter(d => d.status === statusF);
+    else if (!includeResolved) rows = rows.filter(d => d.status !== "resolved");
+    rows.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
+    return jr({ ok: true, defects: rows, summary }, headers);
+  }
+
+  // ── Set ONE defect's status + office note ─────────────────────────────────
+  // POST /fleet/defect-status {key, status?, note?}  (any Vehicles user).
+  // status open|pending|resolved; an explicit status wins over any bulk clear.
+  if (sub === "/defect-status" && method === "POST") {
+    const b = await readJson(request);
+    const key = String(b.key || "").trim();
+    if (!key) return jr({ error: "key required" }, headers, 400);
+    const map = await appConfigJson(env, DEFECTST_KEY(tid));
+    const prev = map[key] || {};
+    const status = ["open", "pending", "resolved"].includes(b.status) ? b.status : (prev.status || "open");
+    const note = typeof b.note === "string" ? b.note.slice(0, 500) : (prev.note || "");
+    map[key] = { status, note, by: (sess && sess.user && sess.user.username) || "", at: new Date().toISOString() };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, DEFECTST_KEY(tid), JSON.stringify(map)).run();
+    return jr({ ok: true, key, status, note, by: map[key].by, at: map[key].at }, headers);
+  }
+
+  // ── Mark ALL of a van's reported defects resolved (bulk) ──────────────────
+  // Stamps the legacy per-reg "resolved as of now" time AND explicitly resolves
+  // each currently-outstanding defect (so nothing lingers), all in one tap.
   if (sub === "/defects-resolve" && method === "POST") {
     const b = await readJson(request);
     const reg = String(b.reg || "").trim();
     if (!reg) return jr({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
-    let map = {};
-    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DEFECTCLR_KEY(tid)).first(); if (row && row.value) map = JSON.parse(row.value) || {}; } catch {}
-    map[rk] = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    const who = (sess && sess.user && sess.user.username) || "";
+    // 1) legacy timestamp (covers anything not individually enumerated)
+    const clr = await appConfigJson(env, DEFECTCLR_KEY(tid));
+    clr[rk] = nowIso;
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-      .bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(map)).run();
-    return jr({ ok: true, reg, resolvedAt: map[rk] }, headers);
+      .bind(tid, DEFECTCLR_KEY(tid), JSON.stringify(clr)).run();
+    // 2) explicitly resolve each current open/pending defect on this van
+    const stMap = await appConfigJson(env, DEFECTST_KEY(tid));
+    const list = await collectDefects(env, tid, { clearMap: {}, statusMap: stMap });
+    let n = 0;
+    for (const d of list) {
+      if (d.regNorm === rk && d.status !== "resolved") {
+        stMap[d.key] = { status: "resolved", note: (stMap[d.key] && stMap[d.key].note) || "", by: who, at: nowIso };
+        n++;
+      }
+    }
+    if (n) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, DEFECTST_KEY(tid), JSON.stringify(stMap)).run();
+    return jr({ ok: true, reg, resolvedAt: nowIso, resolved: n }, headers);
   }
 
   // ── Acknowledge a MISSED van check (waves the red bar for ~7 days) ──────────

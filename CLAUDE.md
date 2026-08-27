@@ -1386,23 +1386,37 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     annual miles over allowedMiles × excessPence). Returned in /fleet/vehicles +
     /fleet/fuel/stats for FullAccess only; shown on the deep-dive ("Cost to run
     /year") and the fuel page's per-vehicle table with a `projected` badge.
-- **Van-check defects on the vehicle card (Aug 2026)** — a reported fault now
-  shows prominently on vehicles.html. `/fleet/vehicles` computes per-van
-  outstanding defects via **`vanCheckDefects(env,tid,resolved)`**: ANY van-check
-  answer of `defect`/`missing` OR the driver's `safe_to_drive=0`, aggregated per
-  reg (returns `defectItems`/`defectChecks`/`defectNotSafe`/`defectSince`). The
-  model is **explicit-resolve, not auto-clear** (Jamie's rule): a fault stays
-  flagged even after a later clean check until an admin taps **✓ Mark defects
-  resolved**, which stamps a per-reg "resolved as of now" time in app_config
-  **`fleet:defectsclear:<tid>`** (`{REGNORM:ISO}`) via **POST /fleet/defects-resolve**
-  `{reg}` (any Vehicles user) — checks completed on/before that time are treated
-  as dealt-with; a NEW defect reported afterwards re-flags the van. Front-end
-  (vehicles.html): a red **⚠ Defect reported** tag (+ **🚫 Not safe to drive**
-  when flagged) on the card + deep-dive, a **Vans with faults** summary tile
-  (hidden when zero), and the **✓ Mark defects resolved** button on the card and
-  in the deep-dive's red banner (which also links to vehicle-checks.html to see
-  what was reported). `hasDefect(v)`/`defectTags(v)`/`resolveDefects(reg)` are the
-  helpers; no schema change (app_config only).
+- **Van-check defects — PER-DEFECT tracking (Aug 2026 rework)** — each individual
+  reported fault is now tracked and resolved on its OWN, with a status
+  **open | pending | resolved** + an office **note** (e.g. "booked 5 Sep",
+  "awaiting part"). **`collectDefects(env,tid,{statusMap,clearMap,settings,names})`**
+  (fleet.js) is the single source: it walks `vehicle_checks`, enumerates every
+  "issue" answer (tone `issue` — `defect`/`missing` OR a custom answer-option
+  `answerMeta[id].tone==="issue"`) plus the driver's `safe_to_drive=0` flag, and
+  gives each a **STABLE key** `${REGNORM}::${checked_at}::${itemId}` (`__notsafe`
+  for the safe-to-drive flag). Per-defect statuses live in app_config
+  **`fleet:defectstatus:<tid>`** = `{ [key]:{status,note,by,at} }`; the legacy
+  per-reg bulk-clear timestamp **`fleet:defectsclear:<tid>`** still resolves
+  everything up to its time, but **an explicit per-defect status ALWAYS wins over
+  it** (so one fault can be reopened/marked pending after a bulk resolve). Item
+  labels come from `vancheck:settings` (checklist+equipment) or `items.custom` for
+  one-off checks. `defectSummary(list)` → per-reg `{open,pending,notSafe,since}`
+  drives the cards. Endpoints (any Vehicles user): **GET /fleet/defects?reg=&status=&includeResolved=1**
+  (flat list + summary — powers the panel + central table), **POST /fleet/defect-status**
+  `{key,status?,note?}` (set one), **POST /fleet/defects-resolve** `{reg}` (bulk:
+  stamps the legacy timestamp AND explicitly resolves each current defect on the van).
+  `/fleet/vehicles` now returns **`defectOpen`/`defectPending`/`defectNotSafe`/`defectSince`**
+  per card (was defectItems/defectChecks — REMOVED). Front-end (vehicles.html): red
+  **⚠ N defect** / amber **⏳ N pending** / **🚫 Not safe** chips (each TAPPABLE →
+  the van's defect panel), a **🔧 Manage defects** button on the card + deep-dive, a
+  clickable **Vans with faults** tile AND a red **#defectBanner** at the top — all
+  open **`openDefectsModal(reg?)`** (scoped to one van, or ALL vans grouped by reg
+  when no reg). The modal = Open/Pending/Resolved filter tabs (with counts), each
+  row shows the label + driver's note + Open/Pending/Resolved pills (tap to set,
+  auto-saves) + an office-note input (saves on blur), plus **✓ Resolve all on this
+  van** when scoped. Changes set `DEF_DIRTY` and re-flow the cards on close.
+  `hasDefect`/`hasOpenDefect`/`defectTags`/`resolveDefects`/`openDefectsModal`/
+  `setDefStatus`/`saveDefNote` are the helpers; no schema change (app_config only).
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed
