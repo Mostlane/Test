@@ -202,8 +202,12 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
       // the fault to the client — replaced on site (fixed, still chargeable) or a
       // genuine failure needing remedial works.
       if (titleType === "em" && c.key === "comments" && r.remedial && r.remedial.failed) {
-        const tag = r.remedial.replacedOnSite === true ? "Fitting failed, replaced on site"
-          : r.remedial.replacedOnSite === false ? "FITTING FAILED — remedial required" : "";
+        const batt = r.remedial.kind === "battery";
+        const tag = r.remedial.replacedOnSite === true
+          ? (batt ? "Batteries replaced on site" : "Fitting failed, replaced on site")
+          : r.remedial.replacedOnSite === false
+            ? (batt ? "FITTING FAILED — batteries required" : "FITTING FAILED — remedial required")
+            : "";
         if (tag) v = (S(v).trim() ? S(v).trim() + " — " : "") + tag;
       }
       const s = fit(v, 8, c.ww - 8);
