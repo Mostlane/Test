@@ -513,9 +513,18 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   ref/site/description/priority, so it shows on the board + shared editor to
   allocate; idempotent — reopening twice re-opens the same live row, never a dupe;
   the archive row is KEPT + stamped `reopenedAt`/`reopenedJobId`; the live job
-  carries `reopenedFromArchive`). Front-end: **job-archive.html** each card has a
-  **↩ Reopen to board** button (→ POST reopen → jumps to job-view.html to allocate);
-  a job already reopened shows **↩ On the board — open** linking to its live job.
+  carries `reopenedFromArchive`. **Duplicate guard:** the SAME job can sit in the
+  archive under two MOS numbers (Workever dupes), so reopening both makes two live
+  jobs — reopen without `{force:true}` REFUSES when a live non-finished job under a
+  different id already has the same site + description, returning
+  `{duplicate:true, existing:{id,ref,status,siteName,scheduledAt,engineers}}` so the
+  UI can offer to open it. This is the real David Molloy 0107 "wall above the sink"
+  case — two office users each reopened a different archived MOS of the same job
+  minutes apart). Front-end: **job-archive.html** each card has a
+  **↩ Reopen to board** button (→ POST reopen → jumps to job-view.html to allocate;
+  a `duplicate` reply opens a modal: **Open existing job** / **Reopen anyway**
+  (force) / Cancel); a job already reopened shows **↩ On the board — open** linking
+  to its live job.
   Front-end:
   **sla-data-tools.html** (admin: review + bulk-delete live jobs, then import
   the spreadsheet) parses the .xlsx entirely in-browser via **xlsx-lite.js**
