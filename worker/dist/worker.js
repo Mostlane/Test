@@ -7845,7 +7845,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     } catch {
     }
   }
-  const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
+  const assignedEngineers = body.clearEngineers ? [] : Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";
   const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
   let scheduledEnd = body.scheduledEnd || existing?.scheduledEnd || null;
@@ -18270,12 +18270,11 @@ async function reassignRenewalJobs(env, tid, reg, newDriver) {
       const e = entry[type];
       if (!e || !e.jobId || !e.scheduledAt) continue;
       if (Date.parse(e.scheduledAt) < now) continue;
-      await createOrUpdateJobFromPayload(env, tid, {
-        id: e.jobId,
-        assignedEngineers: newDriver ? [newDriver] : [],
-        fleetRenewal: true,
-        changedBy: "driver-change"
-      }).catch(() => {
+      await createOrUpdateJobFromPayload(
+        env,
+        tid,
+        newDriver ? { id: e.jobId, assignedEngineers: [newDriver], fleetRenewal: true, changedBy: "driver-change" } : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
+      ).catch(() => {
       });
     }
   } catch {

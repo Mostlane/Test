@@ -2581,10 +2581,13 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     } catch {}
   }
 
-  const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
-    ? body.assignedEngineers.filter(Boolean)
-    : (body.assignedTo ? [body.assignedTo]
-       : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : [])));
+  // `clearEngineers:true` explicitly unassigns (an empty assignedEngineers array is
+  // otherwise treated as "leave as-is" so a partial re-save can't wipe the roster).
+  const assignedEngineers = body.clearEngineers ? []
+    : (Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
+       ? body.assignedEngineers.filter(Boolean)
+       : (body.assignedTo ? [body.assignedTo]
+          : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []))));
 
   // Assigned + still Pending = it's been sent to someone: mark it Scheduled.
   if (assignedEngineers.length && status === "Pending") status = "Scheduled";

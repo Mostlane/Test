@@ -404,10 +404,10 @@ async function reassignRenewalJobs(env, tid, reg, newDriver) {
       const e = entry[type];
       if (!e || !e.jobId || !e.scheduledAt) continue;
       if (Date.parse(e.scheduledAt) < now) continue;   // past appointments left alone
-      await createOrUpdateJobFromPayload(env, tid, {
-        id: e.jobId, assignedEngineers: newDriver ? [newDriver] : [],
-        fleetRenewal: true, changedBy: "driver-change",
-      }).catch(() => {});
+      await createOrUpdateJobFromPayload(env, tid, newDriver
+        ? { id: e.jobId, assignedEngineers: [newDriver], fleetRenewal: true, changedBy: "driver-change" }
+        : { id: e.jobId, clearEngineers: true, fleetRenewal: true, changedBy: "driver-change" }
+      ).catch(() => {});
     }
   } catch {}
 }
