@@ -6142,7 +6142,29 @@ async function handle8(request, env, ctx, url, sess) {
       let addr = a.address;
       if (addr && typeof addr === "object") addr = [addr.line1, addr.city, addr.postcode, addr.state].filter(Boolean).join(", ");
       const desc = String(a.description || a.jobName || a.notes || "").trim();
-      const siteName = a.siteName || a.customer && a.customer.name || "";
+      const jn = String(a.jobName || a.job_name || "").trim();
+      let incident = jn ? jn.split(" - ")[0].trim() : "";
+      if (!incident) {
+        const rr = String(a.helpdeskRef || "").trim();
+        if (rr && !/^mos\d/i.test(rr)) incident = rr;
+      }
+      const codeRaw = String(a.siteCode || a.site_code || a.siteName || "").trim();
+      const digits = codeRaw.replace(/\D/g, "");
+      let siteName = "", siteCodeR = "";
+      if (digits) {
+        const forms = [.../* @__PURE__ */ new Set([codeRaw, digits, String(Number(digits)), digits.padStart(4, "0")])].filter(Boolean);
+        const ph = forms.map(() => "?").join(",");
+        const srow = await db.prepare(`SELECT site_number, site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph}) ORDER BY LENGTH(site_number) DESC LIMIT 1`).bind(tenantId, ...forms).first();
+        if (srow) {
+          siteName = String(srow.site_name || "");
+          siteCodeR = String(srow.site_number || "");
+        }
+      }
+      if (!siteName) {
+        const sn0 = String(a.siteName || a.customer && a.customer.name || "").trim();
+        if (sn0 && !/^\d+$/.test(sn0)) siteName = sn0;
+      }
+      if (!siteCodeR && digits) siteCodeR = digits.padStart(4, "0");
       if (!body.force) {
         const dkey = desc.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 80).replace(/[%_]/g, "");
         if (dkey) {
@@ -6175,16 +6197,23 @@ async function handle8(request, env, ctx, url, sess) {
           }
         }
       }
+      const prevDate = String(a.signed && a.signed.date || a.completionDate || a.createdAt || "").slice(0, 10);
+      const prevNotes = String(a.notes || "").trim();
+      let description = desc || "Re-opened archived job " + mos;
+      if (prevNotes && prevNotes !== desc) description += `
+
+\u2014 Reopened from archive${prevDate ? ` (previously attended ${prevDate})` : ""}. Previous notes: ${prevNotes}`;
       const payload = {
         id: mos,
-        reference: a.helpdeskRef || a.jobName || a.siteName || mos,
+        reference: incident || a.jobName || siteName || mos,
         status: "Pending",
         priority: a.priority || "Priority 4",
-        description: desc || "Re-opened archived job " + mos,
+        description,
         siteName,
-        siteCode: a.siteCode || a.site_code || "",
+        siteCode: siteCodeR || a.siteCode || a.site_code || "",
         address: String(addr || ""),
         postcode: a.postcode || a.customer && a.customer.postcode || "",
+        reopenedFromArchive: mos,
         originator: "reopen"
       };
       const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
@@ -8015,6 +8044,8 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     fleetRenewal: body.fleetRenewal !== void 0 ? !!body.fleetRenewal : existing?.fleetRenewal || false,
     vehicleReg: body.vehicleReg !== void 0 ? String(body.vehicleReg || "") || null : existing?.vehicleReg ?? null,
     renewalType: body.renewalType !== void 0 ? String(body.renewalType || "") || null : existing?.renewalType ?? null,
+    // Set when a historical archive job is pulled back onto the live board.
+    reopenedFromArchive: body.reopenedFromArchive !== void 0 ? String(body.reopenedFromArchive || "") || null : existing?.reopenedFromArchive ?? null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
