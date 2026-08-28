@@ -25785,10 +25785,14 @@ PAT: Import certificate number ${num2}-${yr}`;
         if (isFinite(lat)) data.lat = lat;
         if (isFinite(lng)) data.lon = lng;
         if (words) data.fbcWhat3Words = "///" + words;
-        const hasPc = site.postcode && String(site.postcode).trim();
-        if (pc && !hasPc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
-        else await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
-        out.push({ name: it.name, site: site.site_number, ok: true, postcode: hasPc ? String(site.postcode).trim() : pc, kept: !!hasPc });
+        const existingPc = site.postcode && String(site.postcode).trim() || data.postcode && String(data.postcode).trim() || "";
+        if (pc && !existingPc) {
+          data.postcode = pc;
+          await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
+        } else {
+          await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
+        }
+        out.push({ name: it.name, site: site.site_number, ok: true, postcode: existingPc || pc, kept: !!existingPc });
       } catch (e) {
         out.push({ name: it.name, site: site.site_number, ok: false, error: String(e && e.message || e) });
       }
