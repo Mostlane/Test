@@ -1519,7 +1519,9 @@ export async function handle(request, env, ctx, url, sess) {
         showSignoff: shown("signature"),
       }, { logo });
 
-      const filename = `Job_${safeRef(j, id)}.pdf`;
+      // Filename is the job number only (e.g. "28246-3.pdf"; a slash can't be in a
+      // filename so it becomes a dash).
+      const filename = String(jobNo || safeRef(j, id)).replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") + ".pdf";
       return new Response(pdf, { status: 200, headers: {
         ...headers, "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store"
