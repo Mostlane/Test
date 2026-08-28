@@ -9801,11 +9801,29 @@ function londonNow() {
   const dowMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   return { dow: dowMap[p.weekday], hour: Number(p.hour === "24" ? 0 : p.hour), minute: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
 }
-function nextWorkingDay(dateStr) {
+async function fallbackHolidaySet(env, tid, year) {
+  const db = tenantDB(env, tid);
+  const set = /* @__PURE__ */ new Set();
+  for (const key of [`holiday:bankholidays:${year}`, `holiday:shutdown:${year}`, `holiday:bankholidays:${year + 1}`, `holiday:shutdown:${year + 1}`]) {
+    try {
+      const r = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      if (r && r.value) {
+        const arr = JSON.parse(r.value);
+        if (Array.isArray(arr)) arr.forEach((x) => {
+          const d = x && x.date || x;
+          if (d) set.add(String(d).slice(0, 10));
+        });
+      }
+    } catch {
+    }
+  }
+  return set;
+}
+function nextWorkingDay(dateStr, holidays) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   do {
     d.setUTCDate(d.getUTCDate() + 1);
-  } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  } while (d.getUTCDay() === 0 || d.getUTCDay() === 6 || holidays && holidays.has(d.toISOString().slice(0, 10)));
   return d.toISOString().slice(0, 10);
 }
 function londonAtHour(dateStr, hour) {
@@ -9833,7 +9851,9 @@ async function sweepFallbacks(env, tid = 1) {
   else if (now.hour === 18 && now.minute < 5) slot = "warn2";
   else if (now.hour === 19 && now.minute < 5) slot = "assign";
   if (!slot) return;
-  const target = nextWorkingDay(now.date);
+  const holidays = await fallbackHolidaySet(env, tid, Number(now.date.slice(0, 4)));
+  if (holidays.has(now.date)) return;
+  const target = nextWorkingDay(now.date, holidays);
   const db = tenantDB(env, tid);
   const dedupKey = "sla:fallbackswept:" + tid;
   let swept = {};
