@@ -516,11 +516,16 @@
       <button type="button" class="btn" id="fbClose">✕</button>
     </div>
     <p style="margin:0 0 10px;color:#5b6b78;font-size:13px;line-height:1.5;">
-      Each field engineer can have a fallback job — somewhere to head if nothing else is booked.
-      The system <b>warns the office at 3:30pm &amp; 6pm</b> about anyone with no job for the next working day,
-      then <b>auto-assigns their fallback at 7pm</b> (Friday covers Monday). Fallback jobs appear to the
-      engineer at <b>5pm the evening before</b>, and are dropped automatically if they get a real job that day.
+      Build <b>standby jobs</b> like any other job (tick “🛟 Standby / fallback job” on Add Job) — they stay
+      <b>dormant</b> and don't show on the board, scheduler or any engineer's list. Then <b>pick one as each
+      engineer's fallback</b> below. The office is <b>warned at 3:30pm &amp; 6pm</b> about anyone with no job for
+      the next working day, and at <b>7pm</b> each still-empty engineer's fallback is made live (Friday covers
+      Monday). It appears to them at <b>5pm the evening before</b>, and drops automatically if they get a real job.
     </p>
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap;">
+      <a class="btn" href="add-job.html?fallback=1" style="text-decoration:none;">➕ Create a standby / fallback job</a>
+      <span id="fbPoolCount" style="font-size:12.5px;color:#5b6b78;"></span>
+    </div>
     <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin:8px 0;cursor:pointer;">
       <input type="checkbox" id="fbEnabled"> Turn on automatic fallback assignment
     </label>
@@ -1871,52 +1876,47 @@ function openJobCard(id){
 $("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.display = "none"; });
 $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
 
-// ── Fallback jobs config ──────────────────────────────────────────────────
+// ── Fallback jobs config (pick a dormant standby job per engineer) ──────────
 function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
-let FB_PROJECTS = [];
+let FB_TEMPLATES = [];
+function fbTmplLabel(t){
+  const bits = [t.ref || t.id];
+  if(t.siteName && t.siteName !== t.ref) bits.push(t.siteName);
+  let s = bits.join(" · ");
+  if(t.description){ const d = String(t.description).replace(/\s+/g," ").trim(); s += " — " + (d.length>50 ? d.slice(0,50)+"…" : d); }
+  return s;
+}
 async function openFallbacks(){
   $("fbBackdrop").style.display = "flex"; $("fbMsg").textContent = "Loading…";
   let cfg = { enabled:false, startHour:8, byEngineer:{} };
-  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok){ cfg = d.config || cfg; FB_PROJECTS = d.projects || []; } } catch(e){}
+  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok){ cfg = d.config || cfg; FB_TEMPLATES = d.templates || []; } } catch(e){}
   $("fbEnabled").checked = !!cfg.enabled;
   $("fbStart").value = String(cfg.startHour!=null?cfg.startHour:8).padStart(2,"0") + ":00";
+  $("fbPoolCount").textContent = FB_TEMPLATES.length + " standby job" + (FB_TEMPLATES.length===1?"":"s") + " in the pool";
   const fields = (engineers||[]).filter(isFieldEng);
-  const projOpts = function(sel){ return '<option value="">— Generic (site + task below) —</option>'
-    + FB_PROJECTS.map(function(p){ return '<option value="'+escapeHtml(p.id)+'" '+(p.id===sel?"selected":"")+'>📁 '+escapeHtml((p.number?p.number+" · ":"")+p.name)+'</option>'; }).join(''); };
-  $("fbRows").innerHTML = fields.map(function(e){
-    const fb = (cfg.byEngineer||{})[fbNorm(e.username)] || {};
-    return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">'
-      + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b style="flex:1;">'+escapeHtml(e.name)+'</b>'
-      + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label></div>'
-      + '<div style="margin-bottom:6px;"><select class="fb-proj" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;">'+projOpts(fb.projectId||"")+'</select></div>'
-      + '<div class="fb-generic" style="'+(fb.projectId?"display:none;":"")+'"><div style="display:flex;gap:8px;flex-wrap:wrap;">'
-      + '<input class="fb-site" placeholder="Site / where to head (e.g. Yard)" value="'+escapeHtml(fb.siteName||"")+'" style="flex:2 1 180px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
-      + '<input class="fb-pc" placeholder="Postcode" value="'+escapeHtml(fb.postcode||"")+'" style="flex:1 1 90px;padding:8px;border:1px solid var(--border);border-radius:8px;"></div></div>'
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">'
-      + '<input class="fb-desc" placeholder="Task note (optional for a project)" value="'+escapeHtml(fb.description||"")+'" style="flex:2 1 220px;padding:8px;border:1px solid var(--border);border-radius:8px;">'
-      + '<input class="fb-dur" type="number" min="15" step="15" value="'+(fb.durationMinutes||480)+'" title="Minutes on site" style="flex:0 0 80px;padding:8px;border:1px solid var(--border);border-radius:8px;"><span style="align-self:center;font-size:12px;color:#5b6b78;">mins</span></div>'
-      + '</div>';
-  }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
+  const jobOpts = function(sel){ return '<option value="">— No fallback set —</option>'
+    + FB_TEMPLATES.map(function(t){ return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>🛟 '+escapeHtml(fbTmplLabel(t))+'</option>'; }).join(''); };
+  if(!FB_TEMPLATES.length){
+    $("fbRows").innerHTML = '<p style="color:#5b6b78;font-size:13px;">No standby jobs yet. Press <b>“➕ Create a standby / fallback job”</b> above to make one, then come back to assign it.</p>';
+  } else {
+    $("fbRows").innerHTML = fields.map(function(e){
+      const fb = (cfg.byEngineer||{})[fbNorm(e.username)] || {};
+      return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:8px;">'
+        + '<b style="flex:0 0 130px;">'+escapeHtml(e.name)+'</b>'
+        + '<select class="fb-job" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">'+jobOpts(fb.jobId||"")+'</select>'
+        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label>'
+        + '</div>';
+    }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
+  }
   $("fbMsg").textContent = "";
 }
-// Hide the generic site fields when a project is chosen (the project provides them).
-$("fbRows").addEventListener("change", function(e){
-  const sel = e.target.closest(".fb-proj"); if(!sel) return;
-  const row = sel.closest(".fb-row"); if(!row) return;
-  const g = row.querySelector(".fb-generic"); if(g) g.style.display = sel.value ? "none" : "";
-});
 async function saveFallbacks(){
   const byEngineer = {};
   document.querySelectorAll("#fbRows .fb-row").forEach(function(row){
-    const projSel = row.querySelector(".fb-proj");
-    const projectId = projSel ? projSel.value : "";
-    const proj = projectId ? FB_PROJECTS.find(function(p){ return p.id===projectId; }) : null;
-    const siteName = row.querySelector(".fb-site").value.trim();
-    const description = row.querySelector(".fb-desc").value.trim();
-    if(!projectId && !siteName && !description) return;
-    byEngineer[row.dataset.user] = { siteName, postcode: row.querySelector(".fb-pc").value.trim(), description,
-      durationMinutes: Number(row.querySelector(".fb-dur").value)||480, active: row.querySelector(".fb-active").checked,
-      projectId: projectId||null, projectName: proj?proj.name:null, projectNumber: proj?proj.number:null };
+    const sel = row.querySelector(".fb-job");
+    const jobId = sel ? sel.value : "";
+    if(!jobId) return;
+    byEngineer[row.dataset.user] = { jobId, active: row.querySelector(".fb-active").checked };
   });
   const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
   $("fbMsg").textContent = "Saving…";
