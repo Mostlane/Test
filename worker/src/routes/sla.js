@@ -4507,6 +4507,16 @@ function londonAtHour(dateStr, hour) {
 // Cron: warn the office (15:30 & 18:00) about field engineers with no job for the
 // next working day, and at 19:00 assign each still-empty engineer their fallback.
 // Runs every 5-min tick; self-gates on London time, deduped per slot per day.
+// Fallback notifications (warnings + the auto-assign summary) go ONLY to these
+// three (Jamie/Joe/Greg) — no other office user needs to know.
+const FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
+async function notifyFallbackAdmins(env, tid, payload) {
+  const seen = new Set();
+  for (const u of FALLBACK_NOTIFY) {
+    const k = normId(u); if (seen.has(k)) continue; seen.add(k);
+    await sendToUser(env, tid, u, payload).catch(() => {});
+  }
+}
 export async function sweepFallbacks(env, tid = 1) {
   const cfg = await getFallbacks(env, tid);
   if (!cfg.enabled) return;
@@ -4546,14 +4556,13 @@ export async function sweepFallbacks(env, tid = 1) {
       const names = empties.map(u => (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username);
       const dayTxt = new Date(target + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
       const body = names.join(", ") + " — no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
-      const owner = env.OWNER_USERNAME || "";
       const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
-      if (owner) await sendToUser(env, tid, owner, payload).catch(() => {});
-      await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], payload, owner || "").catch(() => {});
+      await notifyFallbackAdmins(env, tid, payload);
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
     const finishedRe = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
+    const assigned = [];   // {name, ref} — for the auto-assign summary push
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
@@ -4605,7 +4614,17 @@ export async function sweepFallbacks(env, tid = 1) {
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {});
+        const engName = (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username;
+        assigned.push({ name: engName, ref: job.helpdeskRef || job.siteName || job.description || "fallback job" });
       } catch (e) { console.error("fallback assign failed for", u.username, e && e.message); }
+    }
+    if (assigned.length) {
+      const dayTxt = new Date(target + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
+      const body = assigned.map(a => a.name + " → " + a.ref).join("\n");
+      await notifyFallbackAdmins(env, tid, {
+        title: assigned.length + " fallback" + (assigned.length === 1 ? "" : "s") + " auto-assigned for " + dayTxt,
+        body, url: "/sla-scheduler.html", tag: "fallback-assigned",
+      });
     }
   }
   swept[stamp] = true;

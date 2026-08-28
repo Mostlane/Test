@@ -685,11 +685,15 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   an added existing job (keeps it). (Old lightweight
   siteName/description/project rows are gone.)
   Cron **`sla.sweepFallbacks`** (every
-  5-min tick, self-gates on Europe/London): **warns** the office (owner +
-  FullAccess/SLAAdmin push) at **15:30 & 18:00** about field engineers with no job
-  for the **next working day**, and at **19:00 auto-assigns** each still-empty
-  engineer their fallback for that day (Mon–Fri; **Friday's run targets Monday**,
-  skipping the weekend — so no Sat/Sun run). The fallback job is created with
+  5-min tick, self-gates on Europe/London): **warns** at **15:30 & 18:00** about
+  field engineers with no job for the **next working day**, and at **19:00
+  auto-assigns** each still-empty engineer their fallback for that day (Mon–Fri;
+  **Friday's run targets Monday**, skipping the weekend — so no Sat/Sun run). The
+  **19:00 run also sends a summary push** listing who got which fallback. **All
+  fallback notifications (both warnings AND the assign summary) go ONLY to
+  `FALLBACK_NOTIFY` = Jamie Line / Joe Line / Greg Line** (`notifyFallbackAdmins`,
+  deduped by normId) — no other office/SLAAdmin user is told (was owner +
+  FullAccess/SLAAdmin push). The fallback job is created with
   `release:{mode:"dayBefore",hour:17}` (visible at **5pm the evening before**;
   since a Monday fallback is created Friday it stays hidden until Sunday 5pm) and
   **`job.fallback=true`**. `nextWorkingDay`/`londonNow`/`londonAtHour` are the
