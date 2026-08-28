@@ -570,11 +570,41 @@ export async function handle(request, env, ctx, url, sess) {
     };
     const beforeId = payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
+    // Auto-assign a NEW incoming job to the engineer set in SLA Settings, when the
+    // sender (Zap) didn't set one — so P1s (or all, per config) land on someone
+    // automatically without a Zap step. Only on first intake; a re-sent email
+    // updating an existing job never re-assigns (the office may have moved it).
+    if (!before && !payload.assignedTo && !(payload.assignedEngineers && payload.assignedEngineers.length)) {
+      const ia = await getInboundAssign(env, tenantId);
+      if (ia && ia.engineer && (!ia.priorities || !ia.priorities.length || (priority && ia.priorities.includes(priority)))) {
+        payload.assignedTo = ia.engineer;
+        payload.assignedEngineers = [ia.engineer];
+      }
+    }
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     // reconcileRelease is the single per-engineer push path (it pushes each newly
     // assigned / newly-visible engineer, so notifyNewlyAssigned is no longer needed).
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
     return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+
+    /* fallthrough guard (never reached) */
+  }
+  /* GET/POST /sla/inbound-assign — the SLA-Settings control for auto-assigning
+     incoming jobs to an engineer (optionally only certain priorities). SLA admin. */
+  if (subpath === "/inbound-assign" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const cfg = await getInboundAssign(env, tenantId);
+    return jsonResponse({ ok: true, engineer: (cfg && cfg.engineer) || "", priorities: (cfg && cfg.priorities) || [] }, headers);
+  }
+  if (subpath === "/inbound-assign" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
+    const b = await readJson(request);
+    const engineer = String(b.engineer || "").trim();
+    const priorities = Array.isArray(b.priorities) ? b.priorities.filter(p => PRIORITY_SET.has(p)) : [];
+    try { await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:inboundAssign:" + tenantId, JSON.stringify({ engineer, priorities })).run(); } catch {}
+    return jsonResponse({ ok: true, engineer, priorities }, headers);
   }
 
   /* POST /sla/jobs */
@@ -4266,6 +4296,14 @@ const DEFAULT_CONFIG = {
     "Priority 4": { hours: 168 }
   }
 };
+
+// Auto-assign config for INCOMING jobs (set on SLA Settings): { engineer, priorities }.
+async function getInboundAssign(env, tid) {
+  try {
+    const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:inboundAssign:" + tid).first();
+    return row ? JSON.parse(row.value) : null;
+  } catch { return null; }
+}
 
 async function getConfig(env, tenantId) {
   const db = tenantDB(env, tenantId);

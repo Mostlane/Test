@@ -171,6 +171,24 @@
     </div>
   </details>
 
+  <!-- Auto-assign incoming jobs -->
+  <details class="sect">
+    <summary>📥 Auto-assign incoming jobs</summary>
+    <div class="sect-body">
+      <p class="muted">When a job arrives automatically (the email / Zapier intake), send it straight to an engineer — or leave it unallocated for the office to place. This only applies when the intake didn't already set an engineer, so you can drop the assign step from the Zap and control it here.</p>
+      <label for="iaEngineer" style="font-weight:600;font-size:14px;display:block;">Assign new incoming jobs to</label>
+      <select id="iaEngineer" style="margin-top:6px;"><option value="">— Leave unallocated —</option></select>
+      <div style="margin-top:14px;font-weight:600;font-size:14px;">Only for these priorities <span class="muted" style="font-weight:400;">(leave all unticked = every incoming job)</span></div>
+      <div id="iaPriorities" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;">
+        <label style="display:flex;gap:5px;align-items:center;font-weight:400;"><input type="checkbox" class="iaPri" value="Priority 1" style="width:auto;"> P1</label>
+        <label style="display:flex;gap:5px;align-items:center;font-weight:400;"><input type="checkbox" class="iaPri" value="Priority 2" style="width:auto;"> P2</label>
+        <label style="display:flex;gap:5px;align-items:center;font-weight:400;"><input type="checkbox" class="iaPri" value="Priority 3" style="width:auto;"> P3</label>
+        <label style="display:flex;gap:5px;align-items:center;font-weight:400;"><input type="checkbox" class="iaPri" value="Priority 4" style="width:auto;"> P4</label>
+      </div>
+      <div class="actions"><button class="btn primary" id="iaSave">Save</button> <span id="iaMsg" class="muted"></span></div>
+    </div>
+  </details>
+
   <!-- Job categories -->
   <details class="sect">
     <summary>🏷️ Job categories</summary>
@@ -625,6 +643,41 @@ document.getElementById("wkReset").addEventListener("click", async ()=>{
 });
 
 wkLoadConfig();
+
+/* ── Auto-assign incoming jobs ─────────────────────────────────────────── */
+(async function initInboundAssign(){
+  const sel=document.getElementById("iaEngineer"), msg=document.getElementById("iaMsg"), saveBtn=document.getElementById("iaSave");
+  if(!sel) return;
+  // Field/office staff into the dropdown.
+  try{
+    const u=await (await pFetch("/users")).json();
+    const users=(u.Users||u||[]).filter(x=>x && x.Username);
+    users.sort((a,b)=> String(a.FirstName||a.Username).localeCompare(String(b.FirstName||b.Username)));
+    users.forEach(x=>{
+      const name=[x.FirstName,x.LastName].map(v=>(v==null?"":String(v)).trim()).filter(Boolean).join(" ")||x.Username;
+      const o=document.createElement("option"); o.value=x.Username; o.textContent=name+(x.StaffType==="office"?" (office)":"");
+      sel.appendChild(o);
+    });
+  }catch(e){}
+  // Current setting.
+  try{
+    const c=await (await pFetch("/sla/inbound-assign")).json();
+    if(c && c.ok){
+      sel.value=c.engineer||"";
+      const set=new Set(c.priorities||[]);
+      document.querySelectorAll(".iaPri").forEach(cb=>{ cb.checked=set.has(cb.value); });
+    }
+  }catch(e){}
+  if(saveBtn) saveBtn.addEventListener("click", async ()=>{
+    msg.textContent="Saving…";
+    const engineer=sel.value;
+    const priorities=[...document.querySelectorAll(".iaPri:checked")].map(cb=>cb.value);
+    try{
+      const r=await (await pFetch("/sla/inbound-assign",{method:"POST",body:JSON.stringify({engineer,priorities})})).json();
+      msg.textContent = (r&&r.ok) ? "✔ Saved — new incoming jobs will follow this." : ((r&&r.error)||"Save failed.");
+    }catch(e){ msg.textContent="Save failed."; }
+  });
+})();
 </script>
 </body>
 </html>
