@@ -3195,6 +3195,15 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     job.status = "Scheduled";
     job.statusHistory.push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
   }
+  // An ALLOCATED job is never "Pending". The editor always re-sends the current
+  // status, so assigning someone via the editor takes the explicit-status branch
+  // above and skips the flip — catch it here: an assigned job left Pending is
+  // promoted to Scheduled (idempotent).
+  if (assignedList(job).length && String(job.status).toLowerCase() === "pending") {
+    job.status = "Scheduled";
+    if (!(job.statusHistory || []).some(h => h.status === "Scheduled" && h.at === now))
+      (job.statusHistory ||= []).push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
+  }
   if (patch.note) {
     job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });
   }
