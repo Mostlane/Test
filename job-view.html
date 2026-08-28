@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=24"></script>
+  <script src="/portal-config.js?v=25"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=24"></script>
+  <script src="sla-jobedit.js?v=25"></script>
   <script src="firestop-form.js?v=1"></script>
   <script src="cert-form.js?v=14"></script>
   <style>
@@ -894,7 +894,8 @@ function renderJob(){
     if (/^[0-9][0-9./-]*\s+-\s+\S/.test(ref)) return d; // clean ref → works is the description
     return (ref.length >= d.length) ? ref : d;          // legacy → works is the longer field
   };
-  $("jobDesc").textContent = worksText() || "—";
+  if (window.MLUI && MLUI.rich) $("jobDesc").innerHTML = MLUI.rich(worksText() || "—");
+  else $("jobDesc").textContent = worksText() || "—";
 
   // Projects have no priority level and no SLA — hide both for everyone.
   const projJob = /^p\d/i.test(String(job.siteCode || "")) || /project/i.test(String(job.storeType || job.client || ""));
@@ -928,9 +929,14 @@ function renderJob(){
   if (engs.length > 1 && job.engStatus) {
     const jvEsc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const nrm = s => (s||"").toLowerCase().replace(/\s+/g,".").trim();
+    // Each engineer can carry their OWN scheduled time on a shared job (engSchedule),
+    // else the shared time. Show it beside their status.
+    const fmtT = iso => { if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); };
     $("jobAssigned").innerHTML = engs.map(e => {
       const st = (job.engStatus[nrm(e)] || {}).status || job.status || "";
-      return `${jvEsc(e)} — <b>${jvEsc(st)}</b>`;
+      const es = (job.engSchedule && job.engSchedule[nrm(e)]) || null;
+      const when = fmtT(es && es.scheduledAt ? es.scheduledAt : job.scheduledAt);
+      return `${jvEsc(e)} — <b>${jvEsc(st)}</b>${when ? ` · <span style="color:#475569;font-weight:400;">🕒 ${jvEsc(when)}</span>` : ""}`;
     }).join("<br>");
   } else {
     $("jobAssigned").textContent = engs.length ? engs.join(", ") : "Unassigned";

@@ -399,6 +399,21 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   has ONE edit entry, **✏️ Edit → `window.MLJobEdit` (sla-jobedit.js)**, which does
   engineers + schedule + visibility + status/priority/site in one save. (The orphaned
   inline `updateBackdrop` modal is left in the HTML but never opened.)
+  **Multi-engineer PER-ENGINEER SCHEDULING (Aug 2026):** a shared job can give EACH
+  engineer their OWN scheduled slot — `job.engSchedule[normId] = {scheduledAt,scheduledEnd}`;
+  **`effSchedule(job,eng)`** returns the engineer's slice else the shared top-level
+  `scheduledAt`/`scheduledEnd` (single-engineer + legacy jobs unchanged). Set via
+  patch: **`scheduleForEngineer:{engineer,scheduledAt,scheduledEnd}`** sets ONE slice
+  (the scheduler drag — moving a multi-eng block moves only that engineer, never the
+  others), while **`engSchedule:{…}`** REPLACES the whole map (the editor is
+  authoritative; `{}` clears it). `createOrUpdateJobFromPayload` MERGES `body.engSchedule`
+  (used by the fallback add) + preserves it; `pruneEngSchedule` drops slices for
+  engineers no longer on the job. **GET /sla/jobs/for-engineer overwrites scheduledAt/
+  scheduledEnd with the engineer's OWN** (like it does status), so route/jobs/inbox/
+  my-day/engineer-job show the right slot; the scheduler day+week place each engineer's
+  block at their own time; **sla-jobedit.js** shows a "Per-engineer times" date/start/
+  finish row per engineer when 2+ ticked (`renderEngSched`, `?v=24`); job-view lists each
+  engineer's 🕒 time.
   **Multi-engineer = ONE job, status per engineer ("only status per engineer", Aug 2026):**
   a job worked by 2+ engineers stays a SINGLE job (no clutter) but each engineer runs
   their own day. Everything is SHARED (RA, photos, signature, notes) EXCEPT status:

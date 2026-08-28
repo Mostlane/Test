@@ -8158,8 +8158,8 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     seedEngStatus(job, prevEngs, prevStatus, now);
     pruneEngSchedule(job);
   }
-  if (patch.engSchedule && typeof patch.engSchedule === "object") {
-    job.engSchedule = { ...job.engSchedule || {}, ...patch.engSchedule };
+  if (patch.engSchedule !== void 0) {
+    job.engSchedule = patch.engSchedule && typeof patch.engSchedule === "object" && Object.keys(patch.engSchedule).length ? { ...patch.engSchedule } : void 0;
   }
   if (patch.scheduleForEngineer && patch.scheduleForEngineer.engineer) {
     const k = normId(patch.scheduleForEngineer.engineer);
