@@ -2155,4 +2155,83 @@
       else run();
     } catch (e) {}
   })();
+
+  // ── Desktop time picker: a clean scrollable dropdown ───────────────────
+  // The native <input type="time"> on desktop is fiddly (spinner arrows, no
+  // easy scroll-to-select). On non-touch devices we overlay a scrollable list
+  // of times (respecting the input's step, default 5 min) that you click. The
+  // input itself is unchanged (still type=time, same .value) — mobile keeps its
+  // own good native picker. Opt out with data-ml-nostep on the input.
+  (function () {
+    try {
+      if (window.matchMedia && window.matchMedia("(pointer:coarse)").matches) return; // touch → native
+      var TSEL = 'input[type="time"]:not([data-ml-nostep])';
+      var css = document.createElement("style");
+      css.textContent =
+        ".mltp-menu{position:fixed;z-index:2147483600;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(6,24,54,.22);max-height:240px;overflow-y:auto;padding:4px;font:inherit;-webkit-overflow-scrolling:touch;}" +
+        ".mltp-menu button{display:block;width:100%;text-align:left;border:none;background:none;padding:7px 14px;font:inherit;font-size:14px;border-radius:7px;cursor:pointer;color:#1f2937;white-space:nowrap;}" +
+        ".mltp-menu button:hover{background:#eef4ff;}" +
+        ".mltp-menu button.cur{background:#003468;color:#fff;font-weight:600;}" +
+        'input[type="time"]:not([data-ml-nostep])::-webkit-calendar-picker-indicator{opacity:0;display:none;}';
+      (document.head || document.documentElement).appendChild(css);
+
+      var menu = null, active = null;
+      function close() {
+        if (menu) { menu.remove(); menu = null; }
+        active = null;
+        document.removeEventListener("mousedown", onDoc, true);
+        document.removeEventListener("keydown", onKey, true);
+        window.removeEventListener("scroll", onScroll, true);
+        window.removeEventListener("resize", close);
+      }
+      function onDoc(e) { if (menu && !menu.contains(e.target) && e.target !== active) close(); }
+      // Close on PAGE scroll, but NOT when scrolling inside the dropdown itself.
+      function onScroll(e) { if (menu && e.target && menu.contains && menu.contains(e.target)) return; close(); }
+      function onKey(e) { if (e.key === "Escape") close(); }
+      function stepMin(inp) { var s = parseInt(inp.getAttribute("step") || "300", 10); if (!s || s < 60) s = 300; return Math.max(1, Math.round(s / 60)); }
+      function open(inp) {
+        close(); active = inp; inp.classList.add("mltp-on");
+        var step = stepMin(inp), cur = inp.value;
+        menu = document.createElement("div"); menu.className = "mltp-menu";
+        for (var m = 0; m < 24 * 60; m += step) {
+          var h = Math.floor(m / 60), mm = m % 60;
+          var t = (h < 10 ? "0" : "") + h + ":" + (mm < 10 ? "0" : "") + mm;
+          var b = document.createElement("button"); b.type = "button"; b.textContent = t; b.setAttribute("data-v", t);
+          if (t === cur) b.className = "cur";
+          menu.appendChild(b);
+        }
+        document.body.appendChild(menu);
+        var r = inp.getBoundingClientRect();
+        var mw = menu.offsetWidth, mh = menu.offsetHeight;
+        var left = Math.min(r.left, window.innerWidth - mw - 8);
+        var top = r.bottom + 4;
+        if (top + mh > window.innerHeight - 8 && r.top - mh - 4 > 0) top = r.top - mh - 4;
+        menu.style.left = Math.max(8, left) + "px"; menu.style.top = top + "px"; menu.style.minWidth = Math.max(90, r.width) + "px";
+        // scroll the current (or 08:00, or first) into view
+        var focusEl = menu.querySelector("button.cur");
+        if (!focusEl) { var arr = menu.querySelectorAll("button"); for (var i = 0; i < arr.length; i++) { if (arr[i].getAttribute("data-v") === "08:00") { focusEl = arr[i]; break; } } }
+        if (!focusEl) focusEl = menu.firstChild;
+        if (focusEl) focusEl.scrollIntoView({ block: "center" });
+        menu.addEventListener("mousedown", function (e) {
+          var b = e.target.closest ? e.target.closest("button") : null; if (!b) return;
+          e.preventDefault();
+          inp.value = b.getAttribute("data-v");
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+          close(); try { inp.focus(); } catch (e2) {}
+        });
+        setTimeout(function () {
+          document.addEventListener("mousedown", onDoc, true);
+          document.addEventListener("keydown", onKey, true);
+          window.addEventListener("scroll", onScroll, true);
+          window.addEventListener("resize", close);
+        }, 0);
+      }
+      // Open on click (a fresh click on the same field re-opens after selecting).
+      document.addEventListener("mousedown", function (e) {
+        var inp = e.target;
+        if (inp && inp.matches && inp.matches(TSEL)) { if (active !== inp) { setTimeout(function () { open(inp); }, 0); } }
+      }, true);
+    } catch (e) {}
+  })();
 })();
