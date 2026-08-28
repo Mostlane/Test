@@ -25711,6 +25711,65 @@ PAT: Import certificate number ${num2}-${yr}`;
     await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num2, row.client).run();
     return json({ ok: true, minutes: mins }, {}, env, request);
   }
+  if (sub === "/w3w-postcodes" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const key = env.W3W_KEY;
+    if (!key) return error("Add the W3W_KEY secret to mostlane-api (Settings \u2192 Variables and Secrets) and Deploy, then try again.", 400, env, request);
+    const b = await request.json().catch(() => ({}));
+    const items = Array.isArray(b.items) ? b.items.slice(0, 60) : [];
+    if (!items.length) return error("No items", 400, env, request);
+    const rows = (await env.DB.prepare("SELECT site_number, site_name, client, postcode, data FROM sites WHERE tenant_id=? AND client='fbc'").bind(tid).all()).results || [];
+    const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const byName = {};
+    rows.forEach((r) => {
+      byName[norm(r.site_name)] = r;
+    });
+    const out = [];
+    for (const it of items) {
+      const words = String(it.words || "").replace(/^\/+/, "").trim();
+      const site = byName[norm(it.name)];
+      if (!site) {
+        out.push({ name: it.name, ok: false, error: "no matching FBC site" });
+        continue;
+      }
+      if (!words) {
+        out.push({ name: it.name, site: site.site_number, ok: false, error: "no words" });
+        continue;
+      }
+      try {
+        const w = await fetch(
+          "https://api.what3words.com/v3/convert-to-coordinates?words=" + encodeURIComponent(words) + "&key=" + encodeURIComponent(key),
+          { headers: { "Referer": "https://mostlane-portal.com/", "Accept": "application/json" } }
+        ).then((r) => r.json());
+        const lat = w && w.coordinates && w.coordinates.lat, lng = w && w.coordinates && w.coordinates.lng;
+        if (typeof lat !== "number" || typeof lng !== "number") {
+          out.push({ name: it.name, site: site.site_number, ok: false, error: w && w.error && (w.error.message || w.error.code) || "what3words lookup failed" });
+        } else {
+          let pc = "";
+          try {
+            const p = await fetch("https://api.postcodes.io/postcodes?lon=" + lng + "&lat=" + lat).then((r) => r.json());
+            pc = p && p.result && p.result[0] && p.result[0].postcode || "";
+          } catch {
+          }
+          let data = {};
+          try {
+            data = site.data ? JSON.parse(site.data) : {};
+          } catch {
+          }
+          data.lat = lat;
+          data.lon = lng;
+          data.fbcWhat3Words = "///" + words;
+          if (pc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
+          else await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
+          out.push({ name: it.name, site: site.site_number, ok: true, postcode: pc, lat, lng });
+        }
+      } catch (e) {
+        out.push({ name: it.name, site: site.site_number, ok: false, error: String(e && e.message || e) });
+      }
+      await new Promise((r) => setTimeout(r, 180));
+    }
+    return json({ ok: true, results: out }, {}, env, request);
+  }
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
     const form = await request.formData().catch(() => null);
