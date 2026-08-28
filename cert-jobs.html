@@ -217,10 +217,10 @@
         BK_SITES.sort(function(a,b){ return a.num.localeCompare(b.num,undefined,{numeric:true}); });
         $("bkList").innerHTML = BK_SITES.length ? BK_SITES.map(function(s,i){
           return '<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #f0f3f7;font-size:13.5px;cursor:pointer">'
-            +'<input type="checkbox" class="bkck" data-i="'+i+'" checked style="width:auto"> <b>'+esc(s.num)+'</b> <span style="color:#3a536e">'+esc(s.name)+'</span>'
+            +'<input type="checkbox" class="bkck" data-i="'+i+'" style="width:auto"> <b>'+esc(s.num)+'</b> <span style="color:#3a536e">'+esc(s.name)+'</span>'
             +'<span style="margin-left:auto;color:#8a97a6">'+esc(s.pc)+'</span></label>';
         }).join("") : '<div class="muted" style="padding:10px">No sites found for '+esc(g.label)+'.</div>';
-        $("bkAll").checked=true; updBkCount();
+        $("bkAll").checked=false; updBkCount();
         [].forEach.call($("bkList").querySelectorAll(".bkck"),function(c){ c.addEventListener("change", updBkCount); });
       }).catch(function(){ $("bkList").textContent="Couldn't load sites."; });
   }
