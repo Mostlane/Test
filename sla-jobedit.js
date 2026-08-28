@@ -229,6 +229,12 @@
         </select>
         <div class="mlje-hint">If you set a finish time above, that wins; otherwise this sets it.</div>
 
+        <div id="mljeEngSchedWrap" style="display:none;margin-top:12px;border:1px solid #e2e8f0;border-radius:10px;padding:10px;background:#f8fafc;">
+          <div style="font-weight:600;font-size:13.5px;color:#003366;margin-bottom:2px;">Per-engineer times <small style="font-weight:400;color:#64748b;">(each can be a different day/time — the shared date/time above is the default)</small></div>
+          <div class="mlje-hint" style="margin-bottom:8px;">They all work the same job &amp; shared list; only their own slot differs. Leave a row blank to follow the shared time.</div>
+          <div id="mljeEngSched"></div>
+        </div>
+
         <label style="margin-top:12px;">When the engineer sees this job</label>
         <button type="button" id="mljeVisBtn" class="mlje-visbtn">👁 Visible now ▾</button>
         <div id="mljeVisPanel" class="mlje-vispanel" style="display:none;">
@@ -350,6 +356,34 @@
      Hover a box and scroll: times step 15 min (hold Shift for 1 h), dates step
      1 day, numbers step by their step attribute. Beats the tiny spinner arrows. */
   const p2 = n => String(n).padStart(2, "0");
+  // Per-engineer scheduling (multi-engineer jobs): each ticked engineer gets a
+  // row (date · start · finish) so they can sit at a different day/time — the
+  // shared date/time is the default for anyone left blank.
+  function mljeNorm(s) { return String(s || "").toLowerCase().replace(/\s+/g, ".").trim(); }
+  function engNameFor(username) { const e = (engineers || []).find(x => x.username && x.username.toLowerCase() === String(username).toLowerCase()); return e ? e.name : username; }
+  function renderEngSched() {
+    const wrap = $("mljeEngSchedWrap"), host = $("mljeEngSched"); if (!wrap || !host) return;
+    const checked = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
+    if (checked.length < 2) { wrap.style.display = "none"; host.innerHTML = ""; return; }
+    wrap.style.display = "";
+    // keep any values already typed for still-ticked engineers on a re-render
+    const prev = {};
+    host.querySelectorAll(".mlje-es-row").forEach(r => { prev[r.dataset.user.toLowerCase()] = { d: r.querySelector(".es-d").value, s: r.querySelector(".es-s").value, f: r.querySelector(".es-f").value }; });
+    const es = (currentJob && currentJob.engSchedule) || {};
+    host.innerHTML = checked.map(u => {
+      let d = "", s = "", f = "";
+      const p = prev[u.toLowerCase()];
+      if (p) { d = p.d; s = p.s; f = p.f; }
+      else { const o = es[mljeNorm(u)]; if (o && o.scheduledAt) { const a = new Date(o.scheduledAt); if (!isNaN(a)) { d = a.getFullYear() + "-" + p2(a.getMonth() + 1) + "-" + p2(a.getDate()); s = p2(a.getHours()) + ":" + p2(a.getMinutes()); } if (o.scheduledEnd) { const b = new Date(o.scheduledEnd); if (!isNaN(b)) f = p2(b.getHours()) + ":" + p2(b.getMinutes()); } } }
+      return '<div class="mlje-es-row" data-user="' + esc(u) + '" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">'
+        + '<span style="flex:0 0 120px;font-size:13px;font-weight:600;">' + esc(engNameFor(u)) + '</span>'
+        + '<input class="es-d" type="date" value="' + esc(d) + '" style="flex:1;min-width:130px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
+        + '<input class="es-s" type="time" step="300" value="' + esc(s) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
+        + '<span style="font-size:12px;color:#64748b;">to</span>'
+        + '<input class="es-f" type="time" step="300" value="' + esc(f) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
+        + '</div>';
+    }).join("");
+  }
   function stepTime(v, mins, fallback) {
     const m = /^(\d{2}):(\d{2})/.exec(v || "");
     let t = m ? (Number(m[1]) * 60 + Number(m[2])) : fallback;
@@ -596,8 +630,11 @@
       if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
     }
     const showOfficeTog = $("mljeShowOffice");
-    if (showOfficeTog) { showOfficeTog.checked = false; showOfficeTog.onchange = () => paintEngineers(showOfficeTog.checked); }
+    if (showOfficeTog) { showOfficeTog.checked = false; showOfficeTog.onchange = () => { paintEngineers(showOfficeTog.checked); renderEngSched(); }; }
     paintEngineers(false);
+    // Per-engineer time rows appear when 2+ engineers are ticked (re-render on tick).
+    if (!box._esHooked) { box.addEventListener("change", renderEngSched); box._esHooked = true; }
+    renderEngSched();
     // Deleting is for SLA admins only (the server enforces this too). This
     // server-confirmed check only ever ADDS the button (e.g. first login on a
     // new device before the permission cache exists) — it never removes it,
@@ -698,6 +735,31 @@
     }
     const assignedEngineers = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
 
+    // Per-engineer schedule (multi-engineer only). Each row that has a date/start
+    // becomes that engineer's own slot; blank rows follow the shared time above.
+    // Sent as a full REPLACE ({} clears it) so single-engineer jobs use the shared
+    // time. If the shared schedule is blank, the earliest per-engineer slot seeds
+    // the job's top-level time (so the board/release still have one).
+    const engSchedule = {};
+    if (assignedEngineers.length >= 2) {
+      document.querySelectorAll("#mljeEngSched .mlje-es-row").forEach(row => {
+        const u = row.dataset.user;
+        if (!assignedEngineers.some(a => a.toLowerCase() === String(u).toLowerCase())) return;
+        const d = row.querySelector(".es-d").value, s = row.querySelector(".es-s").value, f = row.querySelector(".es-f").value;
+        if (!d && !s) return;   // blank → follow the shared time
+        const dateStr = d || schedDate || (() => { const x = new Date(); return `${x.getFullYear()}-${p2(x.getMonth() + 1)}-${p2(x.getDate())}`; })();
+        const st = new Date(dateStr + "T" + (s || "08:00") + ":00");
+        if (isNaN(st)) return;
+        let en = null;
+        if (f) { const e = new Date(dateStr + "T" + f + ":00"); if (!isNaN(e)) { if (e <= st) e.setDate(e.getDate() + 1); en = e.toISOString(); } }
+        engSchedule[mljeNorm(u)] = { scheduledAt: st.toISOString(), scheduledEnd: en };
+      });
+    }
+    if (!scheduledAt && Object.keys(engSchedule).length) {
+      const arr = Object.values(engSchedule).filter(x => x.scheduledAt).sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt));
+      if (arr[0]) { scheduledAt = arr[0].scheduledAt; if (!scheduledEnd) scheduledEnd = arr[0].scheduledEnd; }
+    }
+
     // Visibility ("release"): null = visible now, else the chosen mode.
     let release = null;
     const vm = visMode();
@@ -730,6 +792,7 @@
       durationMinutes: durationMinutes || undefined,
       assignedEngineers: assignedEngineers,
       assignedTo: assignedEngineers[0] || "",
+      engSchedule: engSchedule,   // full replace ({} clears — single-engineer uses the shared time)
       requiresRA: $("mljeReqRA").checked,
       requiresSignature: $("mljeReqSig").checked,
       requiresPhoto: $("mljeReqPhoto").checked,

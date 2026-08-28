@@ -2932,11 +2932,14 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     seedEngStatus(job, prevEngs, prevStatus, now);
     pruneEngSchedule(job);   // clear per-engineer times for anyone dropped
   }
-  // Per-engineer scheduling: set ONE engineer's own time (scheduleForEngineer)
-  // or merge several (engSchedule) WITHOUT moving anyone else's. Clearing a slice
-  // makes that engineer fall back to the shared time again.
-  if (patch.engSchedule && typeof patch.engSchedule === "object") {
-    job.engSchedule = { ...(job.engSchedule || {}), ...patch.engSchedule };
+  // Per-engineer scheduling. `engSchedule` REPLACES the whole per-engineer map
+  // (the editor is authoritative — an empty object clears it, so a single-engineer
+  // job falls back to the shared time). `scheduleForEngineer` sets ONE slice
+  // without touching the others (the scheduler drag). Clearing a slice makes that
+  // engineer fall back to the shared time again.
+  if (patch.engSchedule !== undefined) {
+    job.engSchedule = (patch.engSchedule && typeof patch.engSchedule === "object" && Object.keys(patch.engSchedule).length)
+      ? { ...patch.engSchedule } : undefined;
   }
   if (patch.scheduleForEngineer && patch.scheduleForEngineer.engineer) {
     const k = normId(patch.scheduleForEngineer.engineer);
