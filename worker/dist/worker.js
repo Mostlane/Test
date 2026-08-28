@@ -25609,11 +25609,13 @@ async function handle30(request, env, ctx, url, sess) {
   if (sub === "/jobs/bulk-create" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
     const b = await request.json().catch(() => ({}));
-    const sites = Array.isArray(b.sites) ? b.sites.slice(0, 120) : [];
+    const sites = Array.isArray(b.sites) ? b.sites.slice(0, 200) : [];
     if (!sites.length) return error("No sites selected", 400, env, request);
-    const type = b.type === "pat" ? "pat" : "em";
-    const emKind = type === "em" ? b.emKind === "monthly" ? "monthly" : "yearly" : "";
-    const dur = Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : type === "em" ? emKind === "monthly" ? 30 : 180 : 45;
+    const em = b.em !== void 0 ? !!b.em : b.type !== "pat";
+    const pat = b.pat !== void 0 ? !!b.pat : b.type === "pat";
+    if (!em && !pat) return error("Pick EM and/or PAT", 400, env, request);
+    const emKind = em ? b.emKind === "monthly" ? "monthly" : "yearly" : "";
+    const dur = Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : em && pat ? 180 : em ? emKind === "monthly" ? 30 : 180 : 45;
     const engineers = Array.isArray(b.engineers) ? b.engineers.filter(Boolean).slice(0, 20) : [];
     const nums = [...new Set(sites.map((s) => String(s.siteNumber || "")).filter(Boolean))];
     const ph = nums.map(() => "?").join(",");
@@ -25637,8 +25639,12 @@ async function handle30(request, env, ctx, url, sess) {
         addr = dd.address || "";
       } catch {
       }
-      const setNum = type === "em" && emKind !== "monthly" ? await emSetFor(env, tid, num2) : "";
-      const desc = type === "em" ? emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num2}` : `Import certificate number ${setNum || num2}-${yr}` : `Import certificate number ${num2}-${yr}`;
+      const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num2) : "";
+      let desc;
+      if (em && pat) desc = `EM: Import certificate number ${setNum || num2}-${yr}
+PAT: Import certificate number ${num2}-${yr}`;
+      else if (em) desc = emKind === "monthly" ? `Monthly emergency lighting flick test \u2014 ${s.site_name || num2}` : `Import certificate number ${setNum || num2}-${yr}`;
+      else desc = `Import certificate number ${num2}-${yr}`;
       const sched = /^\d{4}-\d{2}-\d{2}T/.test(String(it.scheduledAt || "")) ? it.scheduledAt : void 0;
       const job = await createOrUpdateJobFromPayload(env, tid, {
         reference: s.site_name || num2,
@@ -25647,8 +25653,8 @@ async function handle30(request, env, ctx, url, sess) {
         siteCode: num2,
         address: addr,
         postcode: s.postcode || "",
-        emTest: type === "em",
-        pat: type === "pat",
+        emTest: em,
+        pat,
         emKind,
         durationMinutes: dur,
         scheduledAt: sched,
