@@ -400,6 +400,18 @@ Fob – Main Gate
 
   <label>What3Words Location</label>
   <input id="fbcWhat3Words" placeholder="e.g. flame.tiger.rock">
+
+  <label>Access Arrangement</label>
+  <input id="accessArrangement" placeholder="e.g. By appointment / Collect key">
+
+  <label>Access Timing</label>
+  <input id="accessTiming" placeholder="e.g. Mon-Fri 8am-5pm">
+
+  <label>Access Instructions</label>
+  <textarea id="accessInstructions" placeholder="Gate codes, who to contact, key arrangements…" style="height:90px; resize:vertical;"></textarea>
+
+  <label>No. of EM Fittings</label>
+  <input id="emFittings" type="number" placeholder="e.g. 44">
 </div>
 
       <div id="map" class="map"></div>
@@ -1031,6 +1043,10 @@ document.getElementById("fbcExtraFields").style.display = isFBC ? "block" : "non
   fbcKeys.value = (currentEditing.fbcKeys || []).join("\n");
   fbcGateCodes.value = currentEditing.fbcGateCodes || "";
   fbcWhat3Words.value = currentEditing.fbcWhat3Words || "";
+  document.getElementById("accessArrangement").value = currentEditing.accessArrangement || "";
+  document.getElementById("accessTiming").value = currentEditing.accessTiming || "";
+  document.getElementById("accessInstructions").value = currentEditing.accessInstructions || "";
+  document.getElementById("emFittings").value = currentEditing.emFittings ?? "";
     uploadStatus.textContent = "";
 
     editModal.classList.add("active");
@@ -1119,6 +1135,11 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
 
         currentEditing.fbcGateCodes  = document.getElementById("fbcGateCodes").value.trim() || undefined;
         currentEditing.fbcWhat3Words = document.getElementById("fbcWhat3Words").value.trim() || undefined;
+        currentEditing.accessArrangement  = document.getElementById("accessArrangement").value.trim() || undefined;
+        currentEditing.accessTiming       = document.getElementById("accessTiming").value.trim() || undefined;
+        currentEditing.accessInstructions = document.getElementById("accessInstructions").value.trim() || undefined;
+        const _emF = document.getElementById("emFittings").value.trim();
+        currentEditing.emFittings   = _emF === "" ? undefined : Number(_emF);
       } else {
         // Remove FBC fields if switching client away from FBC
         delete currentEditing.fbcContactName;
@@ -1230,8 +1251,13 @@ btnRecalc.onclick = async () => {
   statusEl.textContent = "Recalculating… this may take a moment";
   let updatedCount = 0;
 
+  let geocoded = 0, noPin = 0;
   for (const s of list) {
-    if (!s.lat || !s.lon) continue;
+    // No pin yet but we have a postcode → geocode it first, so it isn't skipped.
+    if ((!s.lat || !s.lon) && cleanPostcode(s)) {
+      try { const loc = await geocodePostcode(cleanPostcode(s)); if (loc) { s.lat = loc.lat; s.lon = loc.lng; geocoded++; } } catch (_) {}
+    }
+    if (!s.lat || !s.lon) { noPin++; continue; }
 
     const miles = await calcMileage(s.lat, s.lon);
     if (!miles) continue;
@@ -1250,7 +1276,7 @@ btnRecalc.onclick = async () => {
   }
 
   await fetchAllSites();
-  statusEl.textContent = `Recalculated ${updatedCount} site(s)`;
+  statusEl.textContent = `Recalculated ${updatedCount} site(s)` + (geocoded ? ` (${geocoded} pinned from postcode)` : "") + (noPin ? ` — ${noPin} skipped (no postcode/pin)` : "");
   alert(`Mileage updated for ${updatedCount} sites`);
 };
   // Photo lightbox

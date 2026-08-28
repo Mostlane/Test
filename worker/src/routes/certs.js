@@ -674,11 +674,17 @@ export async function handle(request, env, ctx, url, sess) {
         let data = {}; try { data = site.data ? JSON.parse(site.data) : {}; } catch {}
         if (isFinite(lat)) data.lat = lat; if (isFinite(lng)) data.lon = lng;
         if (words) data.fbcWhat3Words = "///" + words;   // always keep the words on the site
-        // NEVER overwrite an existing postcode — only fill a blank one.
-        const hasPc = site.postcode && String(site.postcode).trim();
-        if (pc && !hasPc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
-        else await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
-        out.push({ name: it.name, site: site.site_number, ok: true, postcode: hasPc ? String(site.postcode).trim() : pc, kept: !!hasPc });
+        // Postcode lives in BOTH the column and data.postcode (the Sites page shows
+        // the latter). NEVER overwrite a postcode already set in either — only fill
+        // a genuinely blank one, and keep the two in step.
+        const existingPc = (site.postcode && String(site.postcode).trim()) || (data.postcode && String(data.postcode).trim()) || "";
+        if (pc && !existingPc) {
+          data.postcode = pc;
+          await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
+        } else {
+          await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
+        }
+        out.push({ name: it.name, site: site.site_number, ok: true, postcode: existingPc || pc, kept: !!existingPc });
       } catch (e) { out.push({ name: it.name, site: site.site_number, ok: false, error: String((e && e.message) || e) }); }
     }
     return json({ ok: true, results: out }, {}, env, request);
