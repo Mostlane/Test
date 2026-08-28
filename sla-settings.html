@@ -185,6 +185,21 @@
         <label style="display:flex;gap:5px;align-items:center;font-weight:400;"><input type="checkbox" class="iaPri" value="Priority 3" style="width:auto;"> P3</label>
         <label style="display:flex;gap:5px;align-items:center;font-weight:400;"><input type="checkbox" class="iaPri" value="Priority 4" style="width:auto;"> P4</label>
       </div>
+
+      <div style="margin-top:14px;font-weight:600;font-size:14px;">When should auto-assign run?</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">
+        <label style="display:flex;gap:8px;align-items:center;font-weight:400;"><input type="radio" name="iaMode" class="iaMode" value="always" style="width:auto;" checked> <span>Always — the engineer above gets every matching job</span></label>
+        <label style="display:flex;gap:8px;align-items:center;font-weight:400;"><input type="radio" name="iaMode" class="iaMode" value="windows" style="width:auto;"> <span>Only at set days / times (a schedule)</span></label>
+      </div>
+
+      <div id="iaSchedWrap" style="display:none;margin-top:12px;border:1px solid var(--ml-border,#d7dee6);border-radius:10px;padding:12px;background:#f8fafc;">
+        <p class="muted" style="margin-top:0;">Add one or more time windows. An incoming job is auto-assigned only when it arrives inside a window (UK time); outside every window it's left unallocated for the office. Each window can go to a different engineer — leave a window's engineer blank to use the main one above.</p>
+        <div id="iaWindows" style="display:flex;flex-direction:column;gap:10px;"></div>
+        <button class="btn" id="iaAddWin" type="button" style="margin-top:10px;">＋ Add a time window</button>
+      </div>
+
+      <p class="muted" style="margin-top:12px;">Auto-assigned jobs are scheduled onto the engineer's day <strong>straight away</strong> (today, at the time they arrive), so they show immediately rather than sitting in "needs scheduling".</p>
+
       <div class="actions"><button class="btn primary" id="iaSave">Save</button> <span id="iaMsg" class="muted"></span></div>
     </div>
   </details>
@@ -647,18 +662,50 @@ wkLoadConfig();
 /* ── Auto-assign incoming jobs ─────────────────────────────────────────── */
 (async function initInboundAssign(){
   const sel=document.getElementById("iaEngineer"), msg=document.getElementById("iaMsg"), saveBtn=document.getElementById("iaSave");
+  const schedWrap=document.getElementById("iaSchedWrap"), winBox=document.getElementById("iaWindows"), addWin=document.getElementById("iaAddWin");
   if(!sel) return;
-  // Field/office staff into the dropdown.
+  const DAYS=[["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
+  let engOpts=[{value:"",label:"— Use main engineer —"}]; // for per-window dropdowns
+
+  // Field/office staff into the dropdowns.
   try{
     const u=await (await pFetch("/users")).json();
     const users=(u.Users||u||[]).filter(x=>x && x.Username);
     users.sort((a,b)=> String(a.FirstName||a.Username).localeCompare(String(b.FirstName||b.Username)));
     users.forEach(x=>{
       const name=[x.FirstName,x.LastName].map(v=>(v==null?"":String(v)).trim()).filter(Boolean).join(" ")||x.Username;
-      const o=document.createElement("option"); o.value=x.Username; o.textContent=name+(x.StaffType==="office"?" (office)":"");
-      sel.appendChild(o);
+      const label=name+(x.StaffType==="office"?" (office)":"");
+      const o=document.createElement("option"); o.value=x.Username; o.textContent=label; sel.appendChild(o);
+      engOpts.push({value:x.Username,label});
     });
   }catch(e){}
+
+  function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+  function winRow(w){
+    w=w||{days:[1,2,3,4,5],from:"08:00",to:"17:00",engineer:""};
+    const row=document.createElement("div");
+    row.className="iaWin";
+    row.style.cssText="border:1px solid var(--ml-border,#d7dee6);border-radius:8px;padding:10px;background:#fff;";
+    const dayHtml=DAYS.map(([lbl,n])=>`<label style="display:inline-flex;gap:4px;align-items:center;font-weight:400;margin-right:10px;"><input type="checkbox" class="iaWinDay" value="${n}" style="width:auto;" ${w.days.includes(n)?"checked":""}> ${lbl}</label>`).join("");
+    const engHtml=engOpts.map(o=>`<option value="${esc(o.value)}" ${o.value===(w.engineer||"")?"selected":""}>${esc(o.label)}</option>`).join("");
+    row.innerHTML=`
+      <div style="display:flex;flex-wrap:wrap;align-items:center;">${dayHtml}</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+        <label style="font-weight:400;">From <input type="time" class="iaWinFrom" value="${esc(w.from||"08:00")}" step="300" style="width:auto;"></label>
+        <label style="font-weight:400;">to <input type="time" class="iaWinTo" value="${esc(w.to||"17:00")}" step="300" style="width:auto;"></label>
+        <label style="font-weight:400;">→ <select class="iaWinEng" style="width:auto;">${engHtml}</select></label>
+        <button type="button" class="btn iaWinDel" style="margin-left:auto;">Remove</button>
+      </div>`;
+    row.querySelector(".iaWinDel").addEventListener("click",()=>row.remove());
+    return row;
+  }
+  function setMode(m){
+    document.querySelectorAll(".iaMode").forEach(r=>{ r.checked=(r.value===m); });
+    if(schedWrap) schedWrap.style.display = (m==="windows") ? "" : "none";
+  }
+  document.querySelectorAll(".iaMode").forEach(r=> r.addEventListener("change",()=>{ if(r.checked) setMode(r.value); }));
+  if(addWin) addWin.addEventListener("click",()=> winBox.appendChild(winRow()));
+
   // Current setting.
   try{
     const c=await (await pFetch("/sla/inbound-assign")).json();
@@ -666,14 +713,25 @@ wkLoadConfig();
       sel.value=c.engineer||"";
       const set=new Set(c.priorities||[]);
       document.querySelectorAll(".iaPri").forEach(cb=>{ cb.checked=set.has(cb.value); });
-    }
-  }catch(e){}
+      setMode(c.mode==="windows"?"windows":"always");
+      (c.windows||[]).forEach(w=> winBox.appendChild(winRow(w)));
+    } else { setMode("always"); }
+  }catch(e){ setMode("always"); }
+
   if(saveBtn) saveBtn.addEventListener("click", async ()=>{
     msg.textContent="Saving…";
     const engineer=sel.value;
     const priorities=[...document.querySelectorAll(".iaPri:checked")].map(cb=>cb.value);
+    const mode=(document.querySelector(".iaMode:checked")||{}).value==="windows"?"windows":"always";
+    const windows=[...document.querySelectorAll(".iaWin")].map(row=>({
+      days:[...row.querySelectorAll(".iaWinDay:checked")].map(cb=>Number(cb.value)),
+      from:row.querySelector(".iaWinFrom").value,
+      to:row.querySelector(".iaWinTo").value,
+      engineer:row.querySelector(".iaWinEng").value
+    })).filter(w=>w.days.length && w.from && w.to);
+    if(mode==="windows" && !windows.length){ msg.textContent="Add at least one time window (or choose Always)."; return; }
     try{
-      const r=await (await pFetch("/sla/inbound-assign",{method:"POST",body:JSON.stringify({engineer,priorities})})).json();
+      const r=await (await pFetch("/sla/inbound-assign",{method:"POST",body:JSON.stringify({engineer,priorities,mode,windows})})).json();
       msg.textContent = (r&&r.ok) ? "✔ Saved — new incoming jobs will follow this." : ((r&&r.error)||"Save failed.");
     }catch(e){ msg.textContent="Save failed."; }
   });
