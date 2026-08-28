@@ -5621,7 +5621,17 @@ async function handle8(request, env, ctx, url, sess) {
         workArea: j.workArea || null
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
       const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
-      const openJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.scheduledAt && !j.fallback && !(Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", description: j.description || "" })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      const openJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.fallback).map((j) => {
+        const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+        return {
+          id: j.id,
+          ref: j.helpdeskRef || j.id,
+          siteName: j.siteName || "",
+          description: j.description || "",
+          assignedTo: engs.join(", "),
+          audit: Array.isArray(j.auditItems) && j.auditItems.length > 0
+        };
+      }).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
       return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
@@ -8096,10 +8106,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     order: existing?.order,
     signature: existing?.signature,
     travelStartMileage: existing?.travelStartMileage,
+    // Per-engineer status on a multi-engineer job — PRESERVED across a re-save, so
+    // adding an engineer (e.g. a fallback continuing a shared audit) keeps everyone
+    // else's progress + the shared item list intact.
+    engStatus: existing?.engStatus,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  seedEngStatus(job, new Set(assignedList(existing || {}).map(normId)), existing?.status, now);
   await saveJob(env, tenantId, job);
   return job;
 }
@@ -9717,15 +9732,16 @@ async function sweepFallbacks(env, tid = 1) {
           changedBy: "auto-fallback"
         };
       } else {
-        if (finishedRe(src.status) || src.scheduledAt || assignedList(src).length) continue;
-        payload = {
-          id: src.id,
-          assignedEngineers: [u.username],
-          scheduledAt,
-          release: { mode: "dayBefore", hour: 17 },
-          fallback: true,
-          changedBy: "auto-fallback"
-        };
+        if (finishedRe(src.status)) continue;
+        const roster = assignedList(src);
+        if (roster.some((a) => normId(a) === normId(u.username))) continue;
+        if (roster.length) {
+          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), changedBy: "auto-fallback" };
+          if (!src.scheduledAt) payload.scheduledAt = scheduledAt;
+        } else {
+          if (src.scheduledAt) continue;
+          payload = { id: src.id, assignedEngineers: [u.username], scheduledAt, release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback" };
+        }
       }
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
