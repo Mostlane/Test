@@ -4578,9 +4578,24 @@ function londonNow() {
   return { dow: dowMap[p.weekday], hour: Number(p.hour === "24" ? 0 : p.hour), minute: Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
 }
 // The next WORKING day (Mon–Fri) strictly after `dateStr` (YYYY-MM-DD, London).
-function nextWorkingDay(dateStr) {
+// Non-working dates (bank holidays + company shutdown days) around a year, from
+// the Holidays admin's app_config lists. Used so the fallback sweep skips them
+// like it skips weekends.
+async function fallbackHolidaySet(env, tid, year) {
+  const db = tenantDB(env, tid);
+  const set = new Set();
+  for (const key of [`holiday:bankholidays:${year}`, `holiday:shutdown:${year}`, `holiday:bankholidays:${year + 1}`, `holiday:shutdown:${year + 1}`]) {
+    try {
+      const r = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+      if (r && r.value) { const arr = JSON.parse(r.value); if (Array.isArray(arr)) arr.forEach(x => { const d = (x && x.date) || x; if (d) set.add(String(d).slice(0, 10)); }); }
+    } catch {}
+  }
+  return set;
+}
+function nextWorkingDay(dateStr, holidays) {
   const d = new Date(dateStr + "T12:00:00Z");
-  do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  do { d.setUTCDate(d.getUTCDate() + 1); }
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6 || (holidays && holidays.has(d.toISOString().slice(0, 10))));
   return d.toISOString().slice(0, 10);
 }
 // London-local ISO instant for a date + hour (minute 0).
@@ -4612,7 +4627,11 @@ export async function sweepFallbacks(env, tid = 1) {
   else if (now.hour === 18 && now.minute < 5) slot = "warn2";
   else if (now.hour === 19 && now.minute < 5) slot = "assign";
   if (!slot) return;
-  const target = nextWorkingDay(now.date);             // the day we're checking
+  // Skip bank holidays + shutdown days: don't run ON one, and step OVER them when
+  // finding the next working day (so a bank-holiday Monday isn't flagged).
+  const holidays = await fallbackHolidaySet(env, tid, Number(now.date.slice(0, 4)));
+  if (holidays.has(now.date)) return;
+  const target = nextWorkingDay(now.date, holidays);   // the day we're checking
   const db = tenantDB(env, tid);
   // Dedup: one run per slot per target day.
   const dedupKey = "sla:fallbackswept:" + tid;
