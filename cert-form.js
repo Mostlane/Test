@@ -381,6 +381,7 @@
           id: rec.id || undefined, type, jobId: rec.jobId || jobId, siteCode: rec.siteCode || "",
           client: rec.client, installation: rec.installation, extent: rec.extent || "", comments: rec.comments || "",
           declaration: rec.declaration || "", contractor: rec.contractor, rows: rec.rows, signature: rec.signature || "",
+          emKind: rec.emKind || "",
         };
         const d = await authFetch("/certs/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
         if (d && d.ok) { rec.id = d.id; setSave("Saved ✓"); if (opts.onChange) opts.onChange(rec.id); }

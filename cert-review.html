@@ -7,7 +7,7 @@
   <script src="/portal-config.js?v=25"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
-  <script src="cert-form.js?v=13"></script>
+  <script src="cert-form.js?v=14"></script>
   <style>
     :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
     *{box-sizing:border-box;}
@@ -122,7 +122,7 @@
       try { const d = await authFetch("/certs/one?id="+encodeURIComponent(id)).then(r=>r.json()); cert = d && d.record; } catch {}
       if (!cert) { alert("Couldn't open that certificate."); return; }
       let suggestion = cert.certNumber || "";
-      try { const n = await authFetch("/certs/number?code="+encodeURIComponent(cert.siteCode||"")+"&type="+cert.type).then(r=>r.json()); if (n && n.number && !suggestion) suggestion = n.number; } catch {}
+      try { const n = await authFetch("/certs/number?code="+encodeURIComponent(cert.siteCode||"")+"&type="+cert.type+"&kind="+encodeURIComponent(cert.emKind||"")+"&date="+encodeURIComponent((cert.contractor&&cert.contractor.date)||"")).then(r=>r.json()); if (n && n.number && !suggestion) suggestion = n.number; } catch {}
       const today = new Date().toISOString().slice(0,10);
       const hasBattery = cert.type==="em" && (cert.rows||[]).some(r=>r.remedial && r.remedial.failed && r.remedial.kind==="battery");
       const battCount = hasBattery ? (cert.rows||[]).filter(r=>r.remedial && r.remedial.failed && r.remedial.kind==="battery").length : 0;

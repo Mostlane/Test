@@ -25450,12 +25450,19 @@ async function nextPatNumber(env, tid) {
   }
   return maxN + 1;
 }
-async function suggestNumber(env, tid, code, type) {
+function monthYY(date) {
+  const d = date ? new Date(date) : /* @__PURE__ */ new Date();
+  const x = isNaN(d) ? /* @__PURE__ */ new Date() : d;
+  return String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getFullYear()).slice(-2);
+}
+async function suggestNumber(env, tid, code, type, opts = {}) {
   if (type === "pat") {
     const n = await nextPatNumber(env, tid);
     return String(n).padStart(4, "0") + "-" + yy();
   }
-  return await emSetFor(env, tid, code) + "-" + yy();
+  const set = await emSetFor(env, tid, code);
+  if (opts.kind === "monthly") return set + "-" + monthYY(opts.date);
+  return set + "-" + yy();
 }
 function shapeRow(cert) {
   let d = {};
@@ -25614,7 +25621,7 @@ async function handle30(request, env, ctx, url, sess) {
     return json({ ok: true, key, url: urlOut }, {}, env, request);
   }
   if (sub === "/number" && method === "GET") {
-    return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type"))) }, {}, env, request);
+    return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type")), { kind: q.get("kind") || "", date: q.get("date") || "" }) }, {}, env, request);
   }
   if (sub === "/prefill" && method === "GET") {
     const type = T(q.get("type"));
@@ -25658,6 +25665,9 @@ async function handle30(request, env, ctx, url, sess) {
       jobId,
       siteCode: code,
       certNumber: "",
+      // EM test kind (monthly flick / yearly 3-hour) carried from the job so the
+      // number + compliance filing know which it is.
+      emKind: job && job.emKind || "",
       // Client: the SITE's client type is authoritative for known estates; else the
       // previous cert; else the config default.
       client: mappedClient || h && h.client || (config.client || { name: "", address: "", postcode: "" }),
@@ -25688,6 +25698,11 @@ async function handle30(request, env, ctx, url, sess) {
     let existing = id ? await loadCert(id) : null;
     if (existing && !isOffice && existing.engineer !== me) return error("Not your certificate", 403, env, request);
     if (existing && existing.status === "final" && !isOffice) return error("This certificate is finalised", 409, env, request);
+    let prevData = {};
+    try {
+      prevData = existing ? JSON.parse(existing.data) : {};
+    } catch {
+    }
     const data = {
       client: b.client || {},
       installation: b.installation || {},
@@ -25696,6 +25711,8 @@ async function handle30(request, env, ctx, url, sess) {
       declaration: b.declaration || "",
       contractor: b.contractor || {},
       rows: Array.isArray(b.rows) ? b.rows.slice(0, 500) : [],
+      // Carry the EM test kind (monthly/yearly) so numbering + filing know it.
+      emKind: b.emKind === "monthly" || b.emKind === "yearly" ? b.emKind : prevData.emKind || "",
       signature: typeof b.signature === "string" ? b.signature.slice(0, 4e5) : existing ? void 0 : ""
     };
     if (data.signature === void 0) {
@@ -25789,8 +25806,16 @@ async function handle30(request, env, ctx, url, sess) {
     await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code \u2014 set the site first.", 400, env, request);
-    const number = String(b.certNumber || cert.cert_number || await suggestNumber(env, tid, code, cert.type)).trim();
     const docDate = String(b.docDate || rec.contractor && rec.contractor.date || "").trim() || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    let emKind = cert.type === "em" ? rec.emKind || "" : "";
+    if (cert.type === "em" && !emKind) {
+      try {
+        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+        emKind = jb && jb.emKind || "";
+      } catch {
+      }
+    }
+    const number = String(b.certNumber || cert.cert_number || await suggestNumber(env, tid, code, cert.type, { kind: emKind, date: docDate })).trim();
     rec.certNumber = number;
     rec.status = "final";
     const sig = dataUrlToBytes(rec.signature);
@@ -25805,15 +25830,7 @@ async function handle30(request, env, ctx, url, sess) {
       const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
       if (String(srow && srow.client || "").toLowerCase() === "fbc") {
         fileScheme = "fareham";
-        if (cert.type === "em") {
-          let kind = "";
-          try {
-            const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
-            kind = jb && jb.emKind || "";
-          } catch {
-          }
-          fileType = kind === "monthly" ? "emMonthly" : "emYearly";
-        }
+        if (cert.type === "em") fileType = emKind === "monthly" ? "emMonthly" : "emYearly";
       }
     } catch {
     }
