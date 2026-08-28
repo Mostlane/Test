@@ -444,9 +444,14 @@ async function nextPatNumber(env, tid) {
   } catch {}
   return maxN + 1;
 }
-async function suggestNumber(env, tid, code, type) {
+// MM-YY from a date (else now) — for monthly EM numbers so each month is unique.
+function monthYY(date) { const d = date ? new Date(date) : new Date(); const x = isNaN(d) ? new Date() : d; return String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getFullYear()).slice(-2); }
+async function suggestNumber(env, tid, code, type, opts = {}) {
   if (type === "pat") { const n = await nextPatNumber(env, tid); return String(n).padStart(4, "0") + "-" + yy(); }
-  return (await emSetFor(env, tid, code)) + "-" + yy();
+  const set = await emSetFor(env, tid, code);
+  // Monthly EM (Fareham flick test): <set/code>-<MM>-<YY> so all 12 in a year differ.
+  if (opts.kind === "monthly") return set + "-" + monthYY(opts.date);
+  return set + "-" + yy();
 }
 
 function shapeRow(cert) {
@@ -590,7 +595,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Suggested next number ────────────────────────────────────────────────────
   if (sub === "/number" && method === "GET") {
-    return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type"))) }, {}, env, request);
+    return json({ ok: true, number: await suggestNumber(env, tid, q.get("code"), T(q.get("type")), { kind: q.get("kind") || "", date: q.get("date") || "" }) }, {}, env, request);
   }
 
   // ── Re-pull the previous certificate's details on demand (into an existing
@@ -633,6 +638,9 @@ export async function handle(request, env, ctx, url, sess) {
     const h = pre.header;
     const record = {
       id: null, type, status: "draft", jobId, siteCode: code, certNumber: "",
+      // EM test kind (monthly flick / yearly 3-hour) carried from the job so the
+      // number + compliance filing know which it is.
+      emKind: (job && job.emKind) || "",
       // Client: the SITE's client type is authoritative for known estates; else the
       // previous cert; else the config default.
       client: mappedClient || (h && h.client) || (config.client || { name: "", address: "", postcode: "" }),
@@ -667,10 +675,13 @@ export async function handle(request, env, ctx, url, sess) {
     if (existing && !isOffice && existing.engineer !== me) return error("Not your certificate", 403, env, request);
     if (existing && existing.status === "final" && !isOffice) return error("This certificate is finalised", 409, env, request);
 
+    let prevData = {}; try { prevData = existing ? JSON.parse(existing.data) : {}; } catch {}
     const data = {
       client: b.client || {}, installation: b.installation || {},
       extent: b.extent || "", comments: b.comments || "", declaration: b.declaration || "",
       contractor: b.contractor || {}, rows: Array.isArray(b.rows) ? b.rows.slice(0, 500) : [],
+      // Carry the EM test kind (monthly/yearly) so numbering + filing know it.
+      emKind: (b.emKind === "monthly" || b.emKind === "yearly") ? b.emKind : (prevData.emKind || ""),
       signature: typeof b.signature === "string" ? b.signature.slice(0, 400000) : (existing ? undefined : ""),
     };
     if (data.signature === undefined) { // keep the stored signature if not re-sent
@@ -765,24 +776,25 @@ export async function handle(request, env, ctx, url, sess) {
     const rec = shapeRow(cert); await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code — set the site first.", 400, env, request);
-    const number = String(b.certNumber || cert.cert_number || (await suggestNumber(env, tid, code, cert.type))).trim();
     const docDate = String(b.docDate || (rec.contractor && rec.contractor.date) || "").trim() || new Date().toISOString().slice(0, 10);
+    // EM test kind: from the cert (persisted), else the job (covers older certs).
+    let emKind = (cert.type === "em") ? (rec.emKind || "") : "";
+    if (cert.type === "em" && !emKind) { try { const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null; emKind = (jb && jb.emKind) || ""; } catch {} }
+    // Number: monthly EM → <set>-<MM>-<YY> (unique per month); else <set>-<YY>.
+    const number = String(b.certNumber || cert.cert_number || (await suggestNumber(env, tid, code, cert.type, { kind: emKind, date: docDate }))).trim();
     rec.certNumber = number; rec.status = "final";
     const sig = dataUrlToBytes(rec.signature);
     let logo = null; try { logo = logoBytes(); } catch {}
     const bytes = buildCertPdf(rec, { logo, signature: sig });
     // Which compliance chart? An FBC site files onto the FAREHAM chart (its code is
     // the site number, 3001-3024, so it tallies), and an EM cert files as emMonthly
-    // or emYearly by the job's test kind. Everyone else → the Co-op chart (em/pat).
+    // or emYearly by the test kind. Everyone else → the Co-op chart (em/pat).
     let fileScheme = "coop", fileType = cert.type;
     try {
       const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
       if (String((srow && srow.client) || "").toLowerCase() === "fbc") {
         fileScheme = "fareham";
-        if (cert.type === "em") {
-          let kind = ""; try { const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null; kind = (jb && jb.emKind) || ""; } catch {}
-          fileType = kind === "monthly" ? "emMonthly" : "emYearly";
-        }
+        if (cert.type === "em") fileType = emKind === "monthly" ? "emMonthly" : "emYearly";
       }
     } catch {}
     const filed = await fileCertificatePdf(env, tid, {
