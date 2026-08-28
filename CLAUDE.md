@@ -3476,8 +3476,13 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
   summary + allowedNow), GET /tuya/gate/log (entries `{user,action,device,at}`,
   action open|close|mark-open|mark-closed, kept 100), config GET/POST,
   device-status/devices setup tools. `checkGateLeftOpen` on the 5-min cron reads
-  the TRACKED state and pushes the owner+YardGate holders if left open past
-  `thresholdMins`.
+  the TRACKED state and pushes if left open past `thresholdMins`, re-nudging every
+  `repeatMins`. **Recipients (Aug 2026): `cfg.alertUsers` — a specific username
+  list if set, ELSE all FullAccess admins** (was owner+YardGate; YardGate-only
+  holders are no longer alerted). Managed on the page's **🔔 Left-open alerts** card
+  (FullAccess only): threshold + repeat mins + a searchable recipient picker (empty
+  = all admins); POST /tuya/config accepts `{alertUsers:[…], thresholdMins,
+  repeatMins}`.
 - **Geofence — must be AT the yard (Aug 2026):** non-Full-Access users must
   share their location AND be within `tuya:config.geo.radiusM` of
   `geo.lat/geo.lng` to operate — stops accidental remote operation. Enforced

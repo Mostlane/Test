@@ -28929,6 +28929,19 @@ async function handle34(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === void 0) cfg.thresholdMins = 10;
     if (b.repeatMins !== void 0) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === void 0) cfg.repeatMins = 30;
+    if (b.alertUsers !== void 0) {
+      const arr = Array.isArray(b.alertUsers) ? b.alertUsers : [];
+      const seen = /* @__PURE__ */ new Set(), clean = [];
+      for (const u of arr) {
+        const name = String(u || "").trim();
+        const k = normU(name);
+        if (!name || seen.has(k)) continue;
+        seen.add(k);
+        clean.push(name);
+        if (clean.length >= 50) break;
+      }
+      cfg.alertUsers = clean;
+    }
     if (b.accessUser !== void 0 || Array.isArray(b.accessUsers)) {
       if (!cfg.access || !cfg.access.byUser) cfg.access = { byUser: {} };
       const win = sanitiseWindows(b.accessWindows || []);
@@ -29103,13 +29116,26 @@ async function checkGateLeftOpen(env, tenantId) {
     let newLastAlert = watch.lastAlertAt || null;
     if (openMins >= threshold && (!lastAlertAt || now - lastAlertAt >= repeat * 6e4)) {
       const who = openedBy ? `${openedBy} opened the yard gate and it's still open` : `The yard gate has been open (opened without the portal \u2014 check emergency access)`;
-      await sendToPermission(env, tenantId, ["FullAccess", "YardGate"], {
+      const payload = {
         title: "\u26A0\uFE0F Yard gate left open",
         body: `${who} \u2014 ${openMins} min.`,
         url: "/yard-gate.html",
         tag: "yardgate-open"
-      }).catch(() => {
-      });
+      };
+      const list = Array.isArray(cfg.alertUsers) ? cfg.alertUsers.filter(Boolean) : [];
+      if (list.length) {
+        const seen = /* @__PURE__ */ new Set();
+        for (const u of list) {
+          const k = normU(u);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          await sendToUser(env, tenantId, u, payload).catch(() => {
+          });
+        }
+      } else {
+        await sendToPermission(env, tenantId, ["FullAccess"], payload).catch(() => {
+        });
+      }
       newLastAlert = new Date(now).toISOString();
     }
     await saveKV(db, WATCH_KEY, { open: true, since, openedBy, lastAlertAt: newLastAlert });
