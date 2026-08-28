@@ -304,6 +304,8 @@
       <div class="tray-jobs" id="trayJobs"><span class="tray-empty">Nothing waiting 🎉</span></div>
     </div>
 
+    <div id="schedDayHeading" style="font-size:clamp(20px,4.5vw,28px);font-weight:800;color:#003468;margin:8px 2px 10px;letter-spacing:.2px;line-height:1.1;"></div>
+
     <div class="scheduler-wrapper" id="schedulerWrapper">
       <div id="schedulerLoading" style="padding:14px;font-size:13px;color:var(--muted);">Loading engineers and jobs…</div>
     </div>
@@ -750,9 +752,32 @@ function populateEngineerFilter(){
 }
 
 /* ============== RENDER ============== */
+// Big obvious "what day am I looking at" heading (e.g. "Monday 1st Sep").
+function ordinalDay(n){ const s=["th","st","nd","rd"], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
+function fmtDayHeading(d){
+  const wd = d.toLocaleDateString("en-GB",{weekday:"long"});
+  const mon = d.toLocaleDateString("en-GB",{month:"short"});
+  const yr = d.getFullYear(), thisYr = new Date().getFullYear();
+  return wd + " " + ordinalDay(d.getDate()) + " " + mon + (yr!==thisYr ? " " + yr : "");
+}
+function isToday(d){ const t=new Date(); return d.getFullYear()===t.getFullYear() && d.getMonth()===t.getMonth() && d.getDate()===t.getDate(); }
+function updateSchedHeading(){
+  const el = $("schedDayHeading"); if(!el) return;
+  if(viewMode === "week"){
+    const s = new Date(selectedDate); const day = s.getDay();
+    const monday = new Date(s); monday.setDate(s.getDate() - day + (day===0 ? -6 : 1)); monday.setHours(0,0,0,0);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+    const mo = monday.toLocaleDateString("en-GB",{month:"short"}), so = sunday.toLocaleDateString("en-GB",{month:"short"});
+    const range = ordinalDay(monday.getDate()) + (mo!==so ? " "+mo : "") + " – " + ordinalDay(sunday.getDate()) + " " + so;
+    el.innerHTML = '<span style="opacity:.6;font-weight:700;">Week of</span> ' + range;
+  } else {
+    el.innerHTML = fmtDayHeading(selectedDate) + (isToday(selectedDate) ? ' <span style="font-size:.6em;background:#2563eb;color:#fff;border-radius:999px;padding:2px 9px;vertical-align:middle;font-weight:700;">TODAY</span>' : '');
+  }
+}
 function render(){
   const loadingEl = $("schedulerLoading");
   if(loadingEl) loadingEl.style.display = "none";
+  updateSchedHeading();
   const wrapper = $("schedulerWrapper");
   if(!wrapper) return;
   ensureHolidays();   // refetch + re-render if the visible date moved outside the window
