@@ -266,6 +266,11 @@
 
       <!-- VEHICLE -->
       <div class="section" data-sec="vehicle">
+        <div style="margin-bottom:8px;">
+          <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;color:#334155;cursor:pointer;">
+            <input type="checkbox" id="p_noVehicle" style="width:auto;"> No company van <small style="font-weight:400;color:#64748b;">(uses own vehicle / not applicable — stops the "vehicle to set up" flag)</small>
+          </label>
+        </div>
         <div class="grid2">
           <div><label>Linked vehicle (reg)</label><input id="f_vehicle" /></div>
           <div><label>Fuel card number</label><input id="p_fuelCard" /></div>
@@ -647,7 +652,7 @@
       const selfEmp = /self/i.test(u.EmploymentType || "");
       const m = [];
       if ((field || selfEmp) && !(p.hourlyRate || p.dayRate)) m.push("pay rate");
-      if (field && !u.VehicleAssigned) m.push("vehicle");
+      if (field && !u.VehicleAssigned && !p.noVehicle) m.push("vehicle");
       if (field && !p.homePostcode) m.push("home postcode");
       return m;
     }
@@ -819,6 +824,7 @@
       const prof = user?.Profile || {};
       editingProfile = Object.assign({}, prof);
       PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
+      g("p_noVehicle").checked = !!prof.noVehicle;
       renderHomePin();
       // Clear any prior lock, set every switch from the user, then re-lock if
       // this user has Full access so all areas show on + locked.
@@ -898,6 +904,7 @@
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
       profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
+      if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
       body.Profile = profile;
