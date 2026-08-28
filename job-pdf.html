@@ -224,6 +224,35 @@ const emojiFor = s => STATUS_EMOJI[String(s||"").toLowerCase()] || "•";
 
 function closeMe(){ try{ window.close(); }catch(e){} if(!window.closed) history.back(); }
 
+// Draw the signature onto a canvas and, if it's a drawn signature (mostly
+// transparent), re-ink it dark navy by its alpha — so a pale/white pen colour
+// (an engineer's theme could make the stroke near-white) is still visible on the
+// white sheet. Opaque images (scanned/imported) are shown as-is. Falls back to a
+// plain <img> if the image can't be read cross-origin.
+function renderSignature(url, fallback, signedBy, signedAt){
+  const box = document.getElementById("signature");
+  const meta = `<div class="meta">Signed<br><b>${esc(signedBy)}</b><br>${esc(fmtDateTime(signedAt||""))}</div>`;
+  if(!url){ box.innerHTML = `<div class="muted">Signature captured.</div>` + meta; return; }
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = function(){
+    try{
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth || 300; c.height = img.naturalHeight || 120;
+      const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, c.width, c.height), p = d.data, n = c.width*c.height;
+      let transparent = 0; for(let i=3;i<p.length;i+=4){ if(p[i] < 250) transparent++; }
+      if(transparent > n*0.02){ for(let i=0;i<p.length;i+=4){ p[i]=15; p[i+1]=36; p[i+2]=56; } ctx.putImageData(d, 0, 0); }
+      box.innerHTML = `<img src="${c.toDataURL('image/png')}">` + meta;
+    }catch(e){ box.innerHTML = `<img src="${esc(url)}">` + meta; }
+  };
+  img.onerror = function(){
+    if(fallback && fallback !== url){ box.innerHTML = `<img src="${esc(fallback)}">` + meta; }
+    else box.innerHTML = `<div class="muted">Signature captured (image couldn't load).</div>` + meta;
+  };
+  img.src = url;
+}
+
 // Real one-tap download: the worker builds a proper vector PDF (photos + sign-off
 // baked in) and returns it as a file, so it downloads on any device instead of the
 // print-only route iOS forces on a web page.
@@ -372,10 +401,7 @@ async function load(){
     const primary = (sigMeta && sigMeta.url) || "";
     const fallback = (sigMeta && sigMeta.publicURL) ||
       (job.signature.fileKey !== "local" ? `${R2_PUBLIC}/${encodeURIComponent(job.signature.fileKey).replace(/%2F/g,'/')}` : "");
-    const src = primary || fallback;
-    document.getElementById("signature").innerHTML =
-      (src ? `<img src="${esc(src)}"${fallback && primary ? ` onerror="this.onerror=null;this.src='${esc(fallback)}'"` : ""}>` : "") +
-      `<div class="meta">Signed<br><b>${esc(signedBy)}</b><br>${esc(fmtDateTime(signedAt))}</div>`;
+    renderSignature(primary || fallback, fallback, signedBy, signedAt);
   } else {
     document.getElementById("signature").innerHTML = '<div class="muted">Not signed.</div>';
   }
