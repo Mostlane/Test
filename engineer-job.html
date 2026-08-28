@@ -1034,7 +1034,7 @@
   }
 
   function makeSigPad(canvas){ var cx,drawing=false,stroke=false;
-    function size(){canvas.width=canvas.offsetWidth*2;canvas.height=canvas.offsetHeight*2;cx=canvas.getContext("2d");cx.scale(2,2);cx.lineWidth=2.2;cx.lineCap="round";cx.strokeStyle=getComputedStyle(document.body).color;}
+    function size(){canvas.width=canvas.offsetWidth*2;canvas.height=canvas.offsetHeight*2;cx=canvas.getContext("2d");cx.scale(2,2);cx.lineWidth=2.2;cx.lineCap="round";cx.strokeStyle="#0f2438";/* fixed dark ink — a themed body colour could be near-white and vanish on the white job sheet */}
     function pos(e){var r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
     canvas.addEventListener("pointerdown",function(e){drawing=true;stroke=true;canvas.classList.remove("err");var p=pos(e);cx.beginPath();cx.moveTo(p.x,p.y);});
     canvas.addEventListener("pointermove",function(e){if(!drawing)return;var p=pos(e);cx.lineTo(p.x,p.y);cx.stroke();});

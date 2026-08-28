@@ -1485,7 +1485,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (env.JOB_FILES) {
           try {
             const o = await env.JOB_FILES.get(j.signature.fileKey);
-            if (o) { const dec = await decodePngToRgb(new Uint8Array(await o.arrayBuffer())); if (dec) signature.image = dec; }
+            if (o) { const dec = await decodePngToRgb(new Uint8Array(await o.arrayBuffer()), { signature: true }); if (dec) signature.image = dec; }
           } catch {}
         }
       }
@@ -1542,8 +1542,8 @@ export async function handle(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
       // Admin recategorisations live in job.photoStages (overrides the R2 tag set at
       // upload) so a photo can be re-stamped without rewriting the R2 object.
-      let overrides = {};
-      try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; } catch {}
+      let overrides = {}, jobSig = null;
+      try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; jobSig = j && j.signature; } catch {}
       // A small <key>.thumb rides alongside each photo (client-generated on upload,
       // or backfilled). The grid loads the thumb, not the full-res original, so it
       // stays fast even with many photos. Filter out the .thumb objects themselves.
@@ -1561,7 +1561,19 @@ export async function handle(request, env, ctx, url, sess) {
           stage: overrides[name] || (o.customMetadata && o.customMetadata.stage) || ""
         });
       }
-      return jsonResponse({ files }, headers);
+      // The customer signature (PNG) — serve it through the signed worker route
+      // too, so it loads even where the raw R2 public URL is blocked (the on-screen
+      // sheet was showing an empty box because it used the public URL directly).
+      const out = { files };
+      if (jobSig && jobSig.fileKey && jobSig.fileKey !== "local") {
+        out.signature = {
+          signedBy: jobSig.signedBy || "",
+          signedAt: jobSig.signedAt || "",
+          url: await signedFileUrl(env, url.origin, "/sla/site/thumb", jobSig.fileKey),
+          publicURL: r2Url(env, jobSig.fileKey),
+        };
+      }
+      return jsonResponse(out, headers);
     }
 
     // POST /sla/jobs/{id}/audit-photo  -> attach a photo to a site-audit checklist

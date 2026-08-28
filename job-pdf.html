@@ -363,11 +363,19 @@ async function load(){
     `<div class="ph"><img src="${esc(f.thumb || f.publicURL || f.url)}" loading="eager">${f.stage?`<div class="ph-cap">${esc(f.stage)}</div>`:""}</div>`
   ).join("") : '<div class="muted">No photos.</div>';
 
-  // Signature
+  // Signature — prefer the signed worker URL from /files (loads even where the raw
+  // R2 public URL is blocked), falling back to the public URL, then to the fileKey.
+  const sigMeta = files.signature || null;
   if(job.signature && job.signature.fileKey){
+    const signedBy = (sigMeta && sigMeta.signedBy) || job.signature.signedBy || "";
+    const signedAt = (sigMeta && sigMeta.signedAt) || job.signature.signedAt;
+    const primary = (sigMeta && sigMeta.url) || "";
+    const fallback = (sigMeta && sigMeta.publicURL) ||
+      (job.signature.fileKey !== "local" ? `${R2_PUBLIC}/${encodeURIComponent(job.signature.fileKey).replace(/%2F/g,'/')}` : "");
+    const src = primary || fallback;
     document.getElementById("signature").innerHTML =
-      `<img src="${R2_PUBLIC}/${encodeURIComponent(job.signature.fileKey).replace(/%2F/g,'/')}">` +
-      `<div class="meta">Signed<br><b>${esc(job.signature.signedBy || "")}</b><br>${esc(fmtDateTime(job.signature.signedAt))}</div>`;
+      (src ? `<img src="${esc(src)}"${fallback && primary ? ` onerror="this.onerror=null;this.src='${esc(fallback)}'"` : ""}>` : "") +
+      `<div class="meta">Signed<br><b>${esc(signedBy)}</b><br>${esc(fmtDateTime(signedAt))}</div>`;
   } else {
     document.getElementById("signature").innerHTML = '<div class="muted">Not signed.</div>';
   }

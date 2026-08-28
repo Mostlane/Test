@@ -5346,7 +5346,8 @@ function buildJobSheetPdf(data = {}, meta = {}) {
 
 // src/lib/pngdecode.js
 var MAX_PIXELS = 4e6;
-async function decodePngToRgb(bytes) {
+var INK = [15, 36, 56];
+async function decodePngToRgb(bytes, opts = {}) {
   try {
     const v = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     if (v.length < 8 || v[0] !== 137 || v[1] !== 80 || v[2] !== 78 || v[3] !== 71) return null;
@@ -5427,9 +5428,8 @@ async function decodePngToRgb(bytes) {
         out[rowOff + x] = val & 255;
       }
     }
-    const rgb = new Uint8Array(width * height * 3);
-    let o = 0;
-    for (let pix = 0; pix < width * height; pix++) {
+    const npx = width * height;
+    const px = (pix) => {
       let r, g, bl, al = 255;
       if (colorType === 0) {
         r = g = bl = out[pix];
@@ -5452,10 +5452,31 @@ async function decodePngToRgb(bytes) {
         bl = palette[idx * 3 + 2];
         if (trns && idx < trns.length) al = trns[idx];
       }
-      const inv = 255 - al;
-      rgb[o++] = (r * al + 255 * inv) / 255 | 0;
-      rgb[o++] = (g * al + 255 * inv) / 255 | 0;
-      rgb[o++] = (bl * al + 255 * inv) / 255 | 0;
+      return [r, g, bl, al];
+    };
+    let inkMode = false;
+    if (opts.signature) {
+      let transparent = 0;
+      for (let pix = 0; pix < npx; pix++) {
+        if (px(pix)[3] < 250) transparent++;
+      }
+      inkMode = transparent > npx * 0.02;
+    }
+    const rgb = new Uint8Array(npx * 3);
+    let o = 0;
+    for (let pix = 0; pix < npx; pix++) {
+      const [r, g, bl, al] = px(pix);
+      if (inkMode) {
+        const k = al / 255, inv = 1 - k;
+        rgb[o++] = INK[0] * k + 255 * inv | 0;
+        rgb[o++] = INK[1] * k + 255 * inv | 0;
+        rgb[o++] = INK[2] * k + 255 * inv | 0;
+      } else {
+        const inv = 255 - al;
+        rgb[o++] = (r * al + 255 * inv) / 255 | 0;
+        rgb[o++] = (g * al + 255 * inv) / 255 | 0;
+        rgb[o++] = (bl * al + 255 * inv) / 255 | 0;
+      }
     }
     return { width, height, rgb };
   } catch {
@@ -7247,7 +7268,7 @@ async function handle8(request, env, ctx, url, sess) {
           try {
             const o = await env.JOB_FILES.get(j.signature.fileKey);
             if (o) {
-              const dec = await decodePngToRgb(new Uint8Array(await o.arrayBuffer()));
+              const dec = await decodePngToRgb(new Uint8Array(await o.arrayBuffer()), { signature: true });
               if (dec) signature.image = dec;
             }
           } catch {
@@ -7310,10 +7331,11 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (parts[2] === "files" && method === "GET") {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
-      let overrides = {};
+      let overrides = {}, jobSig = null;
       try {
         const j = await getJob(env, tenantId, id);
         overrides = j && j.photoStages || {};
+        jobSig = j && j.signature;
       } catch {
       }
       const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
@@ -7330,7 +7352,16 @@ async function handle8(request, env, ctx, url, sess) {
           stage: overrides[name] || o.customMetadata && o.customMetadata.stage || ""
         });
       }
-      return jsonResponse({ files }, headers);
+      const out = { files };
+      if (jobSig && jobSig.fileKey && jobSig.fileKey !== "local") {
+        out.signature = {
+          signedBy: jobSig.signedBy || "",
+          signedAt: jobSig.signedAt || "",
+          url: await signedFileUrl(env, url.origin, "/sla/site/thumb", jobSig.fileKey),
+          publicURL: r2Url(env, jobSig.fileKey)
+        };
+      }
+      return jsonResponse(out, headers);
     }
     if (parts[2] === "audit-photo" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -25141,7 +25172,7 @@ var M3 = 40;
 var CW = W2 - M3 * 2;
 var NAVY = [0, 0.204, 0.408];
 var NAVY_D = [0, 0.145, 0.29];
-var INK = [0.1, 0.13, 0.18];
+var INK2 = [0.1, 0.13, 0.18];
 var MUTE = [0.46, 0.51, 0.58];
 var FAINT = [0.62, 0.66, 0.72];
 var BG = [0.953, 0.965, 0.977];
@@ -25308,7 +25339,7 @@ function infoCard(doc, x, y, w, label, o) {
   const h = infoCardH(o);
   cardBox(doc, x, y, w, h);
   tracked(doc, x + CARD_PAD, y + 18, label, { size: 6.5, color: ACCENT });
-  doc.text(x + CARD_PAD, y + 34, fit(o && o.name || "\u2014", 10.5, w - CARD_PAD * 2), { size: 10.5, bold: true, color: INK });
+  doc.text(x + CARD_PAD, y + 34, fit(o && o.name || "\u2014", 10.5, w - CARD_PAD * 2), { size: 10.5, bold: true, color: INK2 });
   let yy2 = y + 48;
   addrLines(o).forEach((a) => {
     doc.text(x + CARD_PAD, yy2, fit(a, 8.5, w - CARD_PAD * 2), { size: 8.5, color: MUTE });
@@ -25322,7 +25353,7 @@ function detailsCard(doc, y, rec) {
   tracked(doc, M3 + CARD_PAD, y + 18, "Extent & limitations", { size: 6.5, color: ACCENT });
   let yy2 = y + 32;
   wrap4(rec.extent || "\u2014", 9, CW - 28, 3).forEach((l) => {
-    doc.text(M3 + CARD_PAD, yy2, l, { size: 9, color: INK });
+    doc.text(M3 + CARD_PAD, yy2, l, { size: 9, color: INK2 });
     yy2 += 12;
   });
   if (rec.comments) {
@@ -25388,7 +25419,7 @@ function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
       }
       const s = fit(v, 8, c.ww - 8);
       const tx = c.align === "r" ? c.x + c.ww - textWidth(s, 8) : c.x + 2;
-      doc.text(tx, txtY, s, { size: 8, color: c.key === "comments" ? MUTE : INK });
+      doc.text(tx, txtY, s, { size: 8, color: c.key === "comments" ? MUTE : INK2 });
     });
     ry += ROW_H;
   });
@@ -25419,7 +25450,7 @@ function signatureCard(doc, y, rec, meta) {
     }
   }
   doc.line(sigX, y + 60, sigX + 170, y + 60, { stroke: BORDER, lw: 0.7 });
-  doc.text(sigX, y + 72, S([con.name, con.position].filter(Boolean).join("  \xB7  ") || "Engineer"), { size: 9, bold: true, color: INK });
+  doc.text(sigX, y + 72, S([con.name, con.position].filter(Boolean).join("  \xB7  ") || "Engineer"), { size: 9, bold: true, color: INK2 });
   doc.text(sigX, y + 84, S(con.date ? "Signed " + con.date : ""), { size: 7.5, color: MUTE });
   doc.text(M3 + CARD_PAD, y + h - 12, S([con.tradingTitle || "Mostlane", con.address, con.postcode].filter(Boolean).join(" \xB7 ")), { size: 7.5, color: FAINT });
   return h;
@@ -25490,7 +25521,7 @@ var W3 = 595;
 var H2 = 842;
 var M4 = 36;
 var NAVY2 = [0, 0.204, 0.408];
-var INK2 = [0.09, 0.14, 0.22];
+var INK3 = [0.09, 0.14, 0.22];
 var MUTE2 = [0.42, 0.48, 0.56];
 var HAIR2 = [0.85, 0.88, 0.92];
 var CARD2 = [0.972, 0.98, 0.988];
@@ -25555,11 +25586,11 @@ function itemBlock(doc, it, idx, y) {
   doc.rect(M4, y, W3 - M4 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
   const px = M4 + 12;
   let ty = y + 18;
-  doc.text(px, ty, S2(idx + 1 + ".  " + (it.ref || "Fitting")), { size: 11, bold: true, color: INK2 });
+  doc.text(px, ty, S2(idx + 1 + ".  " + (it.ref || "Fitting")), { size: 11, bold: true, color: INK3 });
   if (it.site) doc.text(W3 - M4 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
   ty += 18;
   doc.text(px, ty, "Battery: ", { size: 9, bold: true, color: [0.3, 0.36, 0.44] });
-  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W3 - M4 * 2 - 120), { size: 9, color: INK2 });
+  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W3 - M4 * 2 - 120), { size: 9, color: INK3 });
   doc.text(W3 - M4 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
   ty += 15;
   noteLines.forEach((l) => {

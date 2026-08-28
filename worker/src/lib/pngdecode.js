@@ -6,11 +6,19 @@
 // every canvas.toDataURL("image/png"). Returns null for anything else so the
 // caller can fall back gracefully.
 //
-//   await decodePngToRgb(bytes) -> { width, height, rgb } | null
+//   await decodePngToRgb(bytes, opts) -> { width, height, rgb } | null
+//
+// opts.signature:true — for drawn signatures. Many are captured with a pen colour
+// taken from the page theme, so a light/white stroke on a transparent background
+// comes out invisible on white. When the image is largely transparent (a drawn
+// signature), the alpha channel is rendered as DARK INK over white instead of the
+// stroke's own colour, so every signature is legible regardless of pen colour.
+// A fully-opaque image (e.g. a scanned/imported signature) is flattened normally.
 
 const MAX_PIXELS = 4_000_000; // guard the uncompressed buffer (a signature is tiny)
+const INK = [15, 36, 56];     // Mostlane navy ink for alpha-rendered signatures
 
-export async function decodePngToRgb(bytes) {
+export async function decodePngToRgb(bytes, opts = {}) {
   try {
     const v = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     if (v.length < 8 || v[0] !== 0x89 || v[1] !== 0x50 || v[2] !== 0x4E || v[3] !== 0x47) return null;
@@ -81,20 +89,42 @@ export async function decodePngToRgb(bytes) {
       }
     }
 
-    // Flatten to RGB over white.
-    const rgb = new Uint8Array(width * height * 3);
-    let o = 0;
-    for (let pix = 0; pix < width * height; pix++) {
+    const npx = width * height;
+    const px = (pix) => {
       let r, g, bl, al = 255;
       if (colorType === 0) { r = g = bl = out[pix]; }
       else if (colorType === 2) { r = out[pix * 3]; g = out[pix * 3 + 1]; bl = out[pix * 3 + 2]; }
       else if (colorType === 4) { r = g = bl = out[pix * 2]; al = out[pix * 2 + 1]; }
       else if (colorType === 6) { r = out[pix * 4]; g = out[pix * 4 + 1]; bl = out[pix * 4 + 2]; al = out[pix * 4 + 3]; }
       else { const idx = out[pix]; r = palette[idx * 3]; g = palette[idx * 3 + 1]; bl = palette[idx * 3 + 2]; if (trns && idx < trns.length) al = trns[idx]; }
-      const inv = 255 - al;
-      rgb[o++] = ((r * al) + 255 * inv) / 255 | 0;
-      rgb[o++] = ((g * al) + 255 * inv) / 255 | 0;
-      rgb[o++] = ((bl * al) + 255 * inv) / 255 | 0;
+      return [r, g, bl, al];
+    };
+
+    // A drawn signature is mostly transparent — render its alpha as dark ink so a
+    // light pen colour still shows. Only if genuinely transparent (else flatten).
+    let inkMode = false;
+    if (opts.signature) {
+      let transparent = 0;
+      for (let pix = 0; pix < npx; pix++) { if (px(pix)[3] < 250) transparent++; }
+      inkMode = transparent > npx * 0.02;
+    }
+
+    // Flatten to RGB over white.
+    const rgb = new Uint8Array(npx * 3);
+    let o = 0;
+    for (let pix = 0; pix < npx; pix++) {
+      const [r, g, bl, al] = px(pix);
+      if (inkMode) {
+        const k = al / 255, inv = 1 - k;
+        rgb[o++] = (INK[0] * k + 255 * inv) | 0;
+        rgb[o++] = (INK[1] * k + 255 * inv) | 0;
+        rgb[o++] = (INK[2] * k + 255 * inv) | 0;
+      } else {
+        const inv = 255 - al;
+        rgb[o++] = ((r * al) + 255 * inv) / 255 | 0;
+        rgb[o++] = ((g * al) + 255 * inv) / 255 | 0;
+        rgb[o++] = ((bl * al) + 255 * inv) / 255 | 0;
+      }
     }
     return { width, height, rgb };
   } catch { return null; }
