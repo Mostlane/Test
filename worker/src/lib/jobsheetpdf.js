@@ -148,6 +148,32 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
     });
   }
 
+  // ── Risk assessment ─────────────────────────────────────────────────────
+  if (data.ra) {
+    const r = data.ra;
+    heading("Risk assessment");
+    if (r.skipped) {
+      ensure(16);
+      doc.text(M, y + 10, "Skipped (Full-Access override)" + (r.by ? " - " + r.by : ""), { size: 9.5, color: BAD });
+      y += 16;
+    } else {
+      (r.hazards || []).forEach(h => {
+        ensure(13);
+        const tag = h.ok ? "OK" : "REVIEW";
+        doc.text(M, y + 9, tag, { size: 8.5, bold: true, color: h.ok ? OK : BAD });
+        doc.text(M + 44, y + 9, String(h.item || ""), { size: 9.5 });
+        y += 12;
+      });
+      ensure(14);
+      doc.text(M, y + 10, "Safe to proceed: ", { size: 9.5, color: GREY });
+      doc.text(M + textWidth("Safe to proceed: ", 9.5), y + 10, r.safe ? "Yes" : "No",
+        { size: 9.5, bold: true, color: r.safe ? OK : BAD });
+      y += 15;
+      if (r.notes) wrap(r.notes, 9.5, CONTENT_W).forEach(ln => { ensure(13); doc.text(M, y + 9, ln, { size: 9.5 }); y += 12; });
+      if (r.by) { ensure(12); doc.text(M, y + 8, "Assessed by " + r.by + (r.at ? " · " + r.at : ""), { size: 8, color: GREY }); y += 12; }
+    }
+  }
+
   // ── Photos (3-up grid) ──────────────────────────────────────────────────
   const photos = (data.photos || []).filter(p => p && p.bytes);
   if (photos.length) {

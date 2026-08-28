@@ -1458,6 +1458,25 @@ export async function handle(request, env, ctx, url, sess) {
         .sort((a, b) => new Date(a.at) - new Date(b.at))
         .map(n => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" })) : [];
 
+      // Risk assessment (mirrors the on-screen sheet's #ra render).
+      let ra = null;
+      if (shown("riskAssessment") && j.riskAssessment) {
+        const r = j.riskAssessment;
+        if (r.skipped) ra = { skipped: true, by: nm(r.by) };
+        else {
+          const okRe = /^(ok|yes|safe|n\/?a|na|none|controlled)$/i;
+          const safe = (r.declarations && r.declarations.safeToProceed !== undefined) ? r.declarations.safeToProceed
+            : (r.safeToProceed !== undefined ? r.safeToProceed : r.safe);
+          ra = {
+            hazards: Array.isArray(r.hazards) ? r.hazards.map(h => ({ item: h.item, ok: okRe.test(String(h.answer || "")) })) : [],
+            safe: !!safe,
+            notes: r.notes || r.note || "",
+            by: nm(r.name || r.by || ""),
+            at: r.at ? fmtDT(r.at) : "",
+          };
+        }
+      }
+
       // Photos — fetch the small thumbnail bytes (fallback full-res), with stage.
       let photos = [];
       if (env.JOB_FILES && shown("photos")) {
@@ -1496,7 +1515,7 @@ export async function handle(request, env, ctx, url, sess) {
         jobNo, copyType, title: shown("jobName") ? name : "", showJobNo: shown("jobId"),
         subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
         details, description: shown("description") ? (j.description || j.summary || j.title || "") : "",
-        sla, time, timeline, notes, photos, signature,
+        sla, time, timeline, notes, ra, photos, signature,
         showSignoff: shown("signature"),
       }, { logo });
 

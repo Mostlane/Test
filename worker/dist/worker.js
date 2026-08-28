@@ -5268,6 +5268,42 @@ function buildJobSheetPdf(data = {}, meta = {}) {
       y += 14;
     });
   }
+  if (data.ra) {
+    const r = data.ra;
+    heading("Risk assessment");
+    if (r.skipped) {
+      ensure6(16);
+      doc.text(M2, y + 10, "Skipped (Full-Access override)" + (r.by ? " - " + r.by : ""), { size: 9.5, color: BAD });
+      y += 16;
+    } else {
+      (r.hazards || []).forEach((h) => {
+        ensure6(13);
+        const tag = h.ok ? "OK" : "REVIEW";
+        doc.text(M2, y + 9, tag, { size: 8.5, bold: true, color: h.ok ? OK : BAD });
+        doc.text(M2 + 44, y + 9, String(h.item || ""), { size: 9.5 });
+        y += 12;
+      });
+      ensure6(14);
+      doc.text(M2, y + 10, "Safe to proceed: ", { size: 9.5, color: GREY2 });
+      doc.text(
+        M2 + textWidth("Safe to proceed: ", 9.5),
+        y + 10,
+        r.safe ? "Yes" : "No",
+        { size: 9.5, bold: true, color: r.safe ? OK : BAD }
+      );
+      y += 15;
+      if (r.notes) wrap2(r.notes, 9.5, CONTENT_W2).forEach((ln) => {
+        ensure6(13);
+        doc.text(M2, y + 9, ln, { size: 9.5 });
+        y += 12;
+      });
+      if (r.by) {
+        ensure6(12);
+        doc.text(M2, y + 8, "Assessed by " + r.by + (r.at ? " \xB7 " + r.at : ""), { size: 8, color: GREY2 });
+        y += 12;
+      }
+    }
+  }
   const photos = (data.photos || []).filter((p) => p && p.bytes);
   if (photos.length) {
     heading("Photos");
@@ -7241,6 +7277,22 @@ async function handle8(request, env, ctx, url, sess) {
       const time = total && shown("timeSpent") ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
       const timeline = shown("timeline") ? hist.map((e) => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) })) : [];
       const notes = shown("notes") ? (j.events || []).filter((e) => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined").sort((a, b) => new Date(a.at) - new Date(b.at)).map((n) => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" })) : [];
+      let ra = null;
+      if (shown("riskAssessment") && j.riskAssessment) {
+        const r = j.riskAssessment;
+        if (r.skipped) ra = { skipped: true, by: nm(r.by) };
+        else {
+          const okRe = /^(ok|yes|safe|n\/?a|na|none|controlled)$/i;
+          const safe = r.declarations && r.declarations.safeToProceed !== void 0 ? r.declarations.safeToProceed : r.safeToProceed !== void 0 ? r.safeToProceed : r.safe;
+          ra = {
+            hazards: Array.isArray(r.hazards) ? r.hazards.map((h) => ({ item: h.item, ok: okRe.test(String(h.answer || "")) })) : [],
+            safe: !!safe,
+            notes: r.notes || r.note || "",
+            by: nm(r.name || r.by || ""),
+            at: r.at ? fmtDT(r.at) : ""
+          };
+        }
+      }
       let photos = [];
       if (env.JOB_FILES && shown("photos")) {
         try {
@@ -7295,6 +7347,7 @@ async function handle8(request, env, ctx, url, sess) {
         time,
         timeline,
         notes,
+        ra,
         photos,
         signature,
         showSignoff: shown("signature")
