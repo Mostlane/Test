@@ -9739,6 +9739,17 @@ function londonAtHour(dateStr, hour) {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(londonInstant(y, m, d, hour, 0)).toISOString();
 }
+var FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
+async function notifyFallbackAdmins(env, tid, payload) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const u of FALLBACK_NOTIFY) {
+    const k = normId(u);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    await sendToUser(env, tid, u, payload).catch(() => {
+    });
+  }
+}
 async function sweepFallbacks(env, tid = 1) {
   const cfg = await getFallbacks(env, tid);
   if (!cfg.enabled) return;
@@ -9787,16 +9798,13 @@ async function sweepFallbacks(env, tid = 1) {
       const names = empties.map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
       const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
       const body = names.join(", ") + " \u2014 no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
-      const owner = env.OWNER_USERNAME || "";
       const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
-      if (owner) await sendToUser(env, tid, owner, payload).catch(() => {
-      });
-      await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], payload, owner || "").catch(() => {
-      });
+      await notifyFallbackAdmins(env, tid, payload);
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
     const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
+    const assigned = [];
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
@@ -9855,9 +9863,21 @@ async function sweepFallbacks(env, tid = 1) {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {
         });
+        const engName = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
+        assigned.push({ name: engName, ref: job.helpdeskRef || job.siteName || job.description || "fallback job" });
       } catch (e) {
         console.error("fallback assign failed for", u.username, e && e.message);
       }
+    }
+    if (assigned.length) {
+      const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
+      const body = assigned.map((a) => a.name + " \u2192 " + a.ref).join("\n");
+      await notifyFallbackAdmins(env, tid, {
+        title: assigned.length + " fallback" + (assigned.length === 1 ? "" : "s") + " auto-assigned for " + dayTxt,
+        body,
+        url: "/sla-scheduler.html",
+        tag: "fallback-assigned"
+      });
     }
   }
   swept[stamp] = true;
