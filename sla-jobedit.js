@@ -334,6 +334,9 @@
     buildStatusOptions();
     // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
     try { if (window.MLUI && MLUI.richBar) MLUI.richBar("mljeDesc"); } catch (e) {}
+    // Auto-grow the description to fit its text (capped ~50% of the screen, then
+    // it scrolls) — so an edited job's full description shows without an inner scroll.
+    $("mljeDesc").addEventListener("input", autosizeDesc);
 
     $("mljeCancel").addEventListener("click", close);
     back.addEventListener("click", e => { if (e.target === back) close(); });
@@ -406,6 +409,11 @@
         + '<input class="es-f" type="time" step="300" value="' + esc(f) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
         + '</div>';
     }).join("");
+  }
+  function autosizeDesc() {
+    const t = document.getElementById("mljeDesc"); if (!t) return;
+    t.style.height = "auto";
+    t.style.height = Math.min(t.scrollHeight + 2, Math.round(window.innerHeight * 0.5)) + "px";
   }
   function relOpt(v, l, cur) { return '<option value="' + v + '"' + (v === cur ? " selected" : "") + '>' + l + '</option>'; }
   // Per-engineer visibility ("release"): each engineer defaults to the job-level
@@ -587,6 +595,7 @@
     $("mljeTitle").textContent = "Edit job — " + (mlJobName(job) || job.helpdeskRef || job.id);
     $("mljeRef").value = job.helpdeskRef || "";
     $("mljeDesc").value = job.description || "";
+    autosizeDesc();
     $("mljePriority").value = job.priority || "Priority 4";
     // Status list = built-ins + custom categories. Show the job's own value even
     // before the category fetch returns; refresh the list once it does.

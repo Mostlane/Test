@@ -753,6 +753,9 @@ async function init(){
   $("jobForm").addEventListener("submit", handleSubmit);
   // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
   try{ if(window.MLUI && MLUI.richBar) MLUI.richBar("description"); }catch(e){}
+  // Auto-grow the description to fit its content (capped ~50% of the screen).
+  var _desc=$("description");
+  if(_desc){ var _az=function(){ _desc.style.height="auto"; _desc.style.height=Math.min(_desc.scrollHeight+2, Math.round(window.innerHeight*0.5))+"px"; }; _desc.addEventListener("input", _az); setTimeout(_az, 0); }
   // Arrived from Scheduler → 🛟 Fallbacks "Create a fallback job": pre-tick it.
   try{ if(new URLSearchParams(location.search).get("fallback")==="1" && $("fallbackTemplate")){ $("fallbackTemplate").checked = true; } }catch(e){}
   $("siteType").addEventListener("change", populateSites);
