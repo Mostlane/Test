@@ -7371,7 +7371,7 @@ async function handle8(request, env, ctx, url, sess) {
         signature,
         showSignoff: shown("signature")
       }, { logo });
-      const filename = `Job_${safeRef(j, id)}.pdf`;
+      const filename = String(jobNo || safeRef(j, id)).replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") + ".pdf";
       return new Response(pdf, { status: 200, headers: {
         ...headers,
         "Content-Type": "application/pdf",
