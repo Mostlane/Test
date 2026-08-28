@@ -8,7 +8,7 @@
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=23"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=11"></script>
+  <script src="cert-form.js?v=12"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -557,7 +557,7 @@
 
   <!-- EM / PAT certificate — a live read-only view of what the engineer sees -->
   <div class="card" id="certCard" style="display:none;">
-    <h2 class="section-title">📄 EM / PAT certificate <span class="sub" style="font-weight:400;font-size:12px;color:#8a97a6;">· live view</span></h2>
+    <h2 class="section-title">📄 EM / PAT certificate <span class="sub" style="font-weight:400;font-size:12px;color:#8a97a6;">· edit &amp; autosave</span></h2>
     <div id="certViewHost"></div>
   </div>
 
@@ -1057,25 +1057,43 @@ function mountFirestopView(){
 // item exactly as they see it, updating as they autosave. A combined EM+PAT job
 // shows both. Re-drawn on a light poll while the tab is visible (read-only, so
 // there's nothing to lose on a refresh).
-let certViewTimer = null;
+// Mounted ONCE (office mode = fully editable + autosaving): the admin can do
+// everything the engineer can — add/edit items, All Pass, Set-all, bulk change,
+// fix the header — straight from the job card. NO polling/re-mount (that was
+// what made the list flicker and reload); office edits autosave live.
+let certViewMounted = false;
 function mountCertView(){
   const card = $("certCard"); if(!card || !job) return;
   const isCert = !!(job.emTest || job.pat) && !job.firestopping;
   card.style.display = isCert ? "" : "none";
-  if(certViewTimer){ clearInterval(certViewTimer); certViewTimer = null; }
-  if(!isCert || !window.MLCert) return;
-  const draw = () => {
-    const host = $("certViewHost"); if(!host) return;
-    host.innerHTML = "";
-    const types = []; if(job.emTest) types.push("em"); if(job.pat) types.push("pat");
-    types.forEach(t => {
-      if(types.length > 1){ const hh = document.createElement("div"); hh.style.cssText="font-weight:800;color:#003468;margin:10px 0 4px;font-size:14px"; hh.textContent = (t==="pat"?"🔌 PAT":"💡 EM"); host.appendChild(hh); }
-      const h = document.createElement("div"); host.appendChild(h);
-      window.MLCert.mount(h, { jobId: job.id, type: t, mode: "view", api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken") });
+  if(!isCert || !window.MLCert || certViewMounted) return;
+  certViewMounted = true;
+  const host = $("certViewHost"); if(!host) return;
+  host.innerHTML = "";
+  const types = []; if(job.emTest) types.push("em"); if(job.pat) types.push("pat");
+  const label = t => t==="pat" ? "🔌 PAT" : "💡 EM";
+  const panels = {};
+  // Combined EM+PAT → a toggle between the two certs, not one long stacked list.
+  if(types.length > 1){
+    const tabs = document.createElement("div");
+    tabs.style.cssText = "display:flex;gap:6px;margin-bottom:12px";
+    host.appendChild(tabs);
+    const paint = active => types.forEach((tt,ix) => { const on = tt===active; const b = tabs.children[ix]; b.style.background = on?"#003468":"#fff"; b.style.color = on?"#fff":"#003468"; panels[tt].style.display = on?"":"none"; });
+    types.forEach((t,i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = label(t);
+      b.style.cssText = "flex:0 0 auto;padding:8px 16px;border-radius:999px;border:1px solid #cfd8e3;font-weight:700;cursor:pointer;font-family:inherit;font-size:14px";
+      b.onclick = () => paint(t);
+      tabs.appendChild(b);
     });
-  };
-  draw();
-  certViewTimer = setInterval(() => { if(document.visibilityState === "visible") draw(); }, 15000);
+    types.forEach((t,i) => { const p = document.createElement("div"); if(i>0) p.style.display="none"; host.appendChild(p); panels[t]=p; });
+    paint(types[0]);
+  } else {
+    const p = document.createElement("div"); host.appendChild(p); panels[types[0]] = p;
+  }
+  types.forEach(t => {
+    window.MLCert.mount(panels[t], { jobId: job.id, type: t, mode: "office", api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken") });
+  });
 }
 
 /* Materials cost: the POs raised against THIS job (office/admin only). Reads

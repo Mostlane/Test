@@ -35,13 +35,39 @@ import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
 
+// The certificate CLIENT is decided by the SITE's client type (Jamie's rule):
+// every Southern Co-op estate (Retail / ELS / ELS Private / Cobra) bills to the
+// Co-op head office; Fareham Borough Council sites bill to the council. Returns a
+// {name,address,postcode} block for a known client type, else null (fall back to
+// the previous cert / config default).
+function clientForSiteClient(sc) {
+  sc = String(sc || "").toLowerCase().trim();
+  if (sc === "retail" || sc === "els" || sc === "els_private" || sc === "cobra")
+    return { name: "The Southern Co-op", address: "1000 Lakeside, Western Road, Portsmouth", postcode: "PO6 3FE" };
+  if (sc === "fbc")
+    return { name: "Fareham Borough Council", address: "Civic Offices, Civic Way, Fareham", postcode: "PO16 7AZ" };
+  return null;
+}
+// Fill a BLANK client on a cert record from its site's client type (never
+// overwrites a client someone has typed). Used wherever a cert is read/rendered
+// so the office and the PDF always carry the right client.
+async function backfillClient(env, tid, rec) {
+  if (!rec || (rec.client && String(rec.client.name || "").trim())) return rec;
+  const code = rec.siteCode || "";
+  if (!code) return rec;
+  const sr = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first().catch(() => null);
+  const m = clientForSiteClient(sr && sr.client);
+  if (m) rec.client = { ...m };
+  return rec;
+}
+
 const DEFAULT_CONFIG = {
   // Default client used to seed a NEW cert when the previous cert didn't supply one
   // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
   // wins over this, and it's never applied over a value the office has typed.
   client: {
     name: "The Southern Co-op",
-    address: "1000 Lakeside, Portsmouth",
+    address: "1000 Lakeside, Western Road, Portsmouth",
     postcode: "PO6 3FE",
   },
   contractor: {
@@ -512,24 +538,36 @@ export async function handle(request, env, ctx, url, sess) {
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
+    const config = await getConfig(env, tid);
+    // Resolve the job's site + its CLIENT TYPE up front, so we can auto-fill the
+    // certificate's Client block from the site (Co-op estates → Co-op head office,
+    // FBC → the council) for both a fresh seed AND back-filling a blank existing draft.
+    const job = await getJob(env, tid, jobId);
+    const code = job ? (job.siteCode || "") : "";
+    const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
+    let siteData = {}; try { siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {}; } catch {}
+    const mappedClient = clientForSiteClient(siteRow && siteRow.client);
+
     const existing = await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
     ).bind(tid, jobId, type).first();
-    const config = await getConfig(env, tid);
-    if (existing) { const exRec = shapeRow(existing); await resignRemedialPhotos(env, url.origin, exRec); return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request); }
+    if (existing) {
+      const exRec = shapeRow(existing);
+      // Back-fill a BLANK client on an existing draft from the site mapping (never
+      // overwrite a client the office has already typed).
+      if (mappedClient && (!exRec.client || !String(exRec.client.name || "").trim())) exRec.client = { ...mappedClient };
+      await resignRemedialPhotos(env, url.origin, exRec);
+      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
+    }
 
     // seed a fresh draft from the job's site + config + prefill rows
-    const job = await getJob(env, tid, jobId);
-    const code = job ? (job.siteCode || "") : "";
-    const siteRow = code ? await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
-    let siteData = {}; try { siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {}; } catch {}
     const pre = await prefillFromPrevious(env, tid, code, type);
     const h = pre.header;
     const record = {
       id: null, type, status: "draft", jobId, siteCode: code, certNumber: "",
-      // Client: transfer from the previous cert; NEVER invented. Blank until the
-      // office fills it once (then it chains forward on every future cert).
-      client: (h && h.client) ? h.client : (config.client || { name: "", address: "", postcode: "" }),
+      // Client: the SITE's client type is authoritative for known estates; else the
+      // previous cert; else the config default.
+      client: mappedClient || (h && h.client) || (config.client || { name: "", address: "", postcode: "" }),
       // Installation: previous cert → else the REAL portal site record.
       installation: (h && h.installation) ? h.installation : {
         name: (job && job.siteName) || (siteRow && siteRow.site_name) || "",
@@ -613,7 +651,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow(cert); await backfillClient(env, tid, rec);
     const sig = dataUrlToBytes(rec.signature);
     let logo = null; try { logo = logoBytes(); } catch {}
     const bytes = buildCertPdf(rec, { logo, signature: sig });
@@ -627,7 +665,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const oneRec = shapeRow(cert); await resignRemedialPhotos(env, url.origin, oneRec);
+    const oneRec = shapeRow(cert); await backfillClient(env, tid, oneRec); await resignRemedialPhotos(env, url.origin, oneRec);
     return json({ ok: true, record: oneRec, config: await getConfig(env, tid) }, {}, env, request);
   }
 
@@ -655,7 +693,7 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow(cert); await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code — set the site first.", 400, env, request);
     const number = String(b.certNumber || cert.cert_number || (await suggestNumber(env, tid, code, cert.type))).trim();
