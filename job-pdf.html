@@ -74,9 +74,9 @@
   .ra-row{ font-size:13px; margin:3px 0; }
   .ra-verdict{ font-weight:800; }
 
-  .photos{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  .photos .ph{ border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--soft); }
-  .photos .ph img{ width:100%; height:auto; display:block; break-inside:avoid; }
+  .photos{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .photos .ph{ border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--soft); break-inside:avoid; }
+  .photos .ph img{ width:100%; height:52mm; object-fit:contain; display:block; background:#fff; }
   .ph-cap{ font-size:10.5px; color:var(--grey); padding:3px 6px; }
 
   .sig{ display:flex; align-items:flex-end; gap:18px; }
@@ -95,7 +95,8 @@
     .no-print{ display:none !important; }
     .sheet{ width:auto; min-height:auto; margin:0; padding:0; box-shadow:none; }
     .sec, .note, .photos .ph, .tl-item{ break-inside:avoid; }
-    .photos .ph img{ max-height:120mm; object-fit:contain; }
+    .photos .ph img{ height:52mm; object-fit:contain; }
+    .toolbar{ display:none !important; }
   }
 </style>
 </head>
@@ -330,8 +331,11 @@ async function load(){
 
   // Photos
   const photoList = (files.files || []).filter(f => f && (f.publicURL || f.url));
+  // Use the small signed THUMBNAIL, not the full-res original — a job with many
+  // photos was producing a 16MB / 150-page file. Falls back to full-res if a
+  // photo has no thumbnail.
   document.getElementById("photos").innerHTML = photoList.length ? photoList.map(f =>
-    `<div class="ph"><img src="${esc(f.publicURL || f.url)}" loading="eager">${f.stage?`<div class="ph-cap">${esc(f.stage)}</div>`:""}</div>`
+    `<div class="ph"><img src="${esc(f.thumb || f.publicURL || f.url)}" loading="eager">${f.stage?`<div class="ph-cap">${esc(f.stage)}</div>`:""}</div>`
   ).join("") : '<div class="muted">No photos.</div>';
 
   // Signature
