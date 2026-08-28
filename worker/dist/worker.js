@@ -9739,6 +9739,17 @@ function londonAtHour(dateStr, hour) {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(londonInstant(y, m, d, hour, 0)).toISOString();
 }
+var FALLBACK_NOTIFY = ["Jamie Line", "Joe Line", "Greg Line"];
+async function notifyFallbackAdmins(env, tid, payload) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const u of FALLBACK_NOTIFY) {
+    const k = normId(u);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    await sendToUser(env, tid, u, payload).catch(() => {
+    });
+  }
+}
 async function sweepFallbacks(env, tid = 1) {
   const cfg = await getFallbacks(env, tid);
   if (!cfg.enabled) return;
@@ -9787,16 +9798,13 @@ async function sweepFallbacks(env, tid = 1) {
       const names = empties.map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
       const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
       const body = names.join(", ") + " \u2014 no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
-      const owner = env.OWNER_USERNAME || "";
       const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
-      if (owner) await sendToUser(env, tid, owner, payload).catch(() => {
-      });
-      await sendToPermission(env, tid, ["FullAccess", "SLAAdmin"], payload, owner || "").catch(() => {
-      });
+      await notifyFallbackAdmins(env, tid, payload);
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
     const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
+    const assigned = [];
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
@@ -9855,9 +9863,21 @@ async function sweepFallbacks(env, tid = 1) {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {
         });
+        const engName = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
+        assigned.push({ name: engName, ref: job.helpdeskRef || job.siteName || job.description || "fallback job" });
       } catch (e) {
         console.error("fallback assign failed for", u.username, e && e.message);
       }
+    }
+    if (assigned.length) {
+      const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
+      const body = assigned.map((a) => a.name + " \u2192 " + a.ref).join("\n");
+      await notifyFallbackAdmins(env, tid, {
+        title: assigned.length + " fallback" + (assigned.length === 1 ? "" : "s") + " auto-assigned for " + dayTxt,
+        body,
+        url: "/sla-scheduler.html",
+        tag: "fallback-assigned"
+      });
     }
   }
   swept[stamp] = true;
@@ -25638,12 +25658,14 @@ async function handle30(request, env, ctx, url, sess) {
         if (num2) skipped.push(num2);
         continue;
       }
-      let addr = "";
+      let addr = "", siteDur = 0;
       try {
         const dd = s.data ? JSON.parse(s.data) : {};
         addr = dd.address || "";
+        siteDur = Number(dd.expectedDurationMinutes) || 0;
       } catch {
       }
+      const sdur = Number(it.durationMinutes) > 0 ? Number(it.durationMinutes) : siteDur > 0 ? siteDur : dur;
       const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num2) : "";
       let desc;
       if (em && pat) desc = `EM: Import certificate number ${setNum || num2}-${yr}
@@ -25661,7 +25683,7 @@ PAT: Import certificate number ${num2}-${yr}`;
         emTest: em,
         pat,
         emKind,
-        durationMinutes: dur,
+        durationMinutes: sdur,
         scheduledAt: sched,
         status: "Pending",
         assignedEngineers: engineers,
@@ -25670,6 +25692,24 @@ PAT: Import certificate number ${num2}-${yr}`;
       created.push({ id: job.id, site: s.site_name || num2 });
     }
     return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
+  }
+  if (sub === "/site-duration" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const num2 = String(b.siteNumber || "").trim();
+    const mins = Math.max(0, Math.min(1440, Number(b.minutes) || 0));
+    if (!num2) return error("siteNumber required", 400, env, request);
+    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num2).first();
+    if (!row) return error("Site not found", 404, env, request);
+    let data = {};
+    try {
+      data = row.data ? JSON.parse(row.data) : {};
+    } catch {
+    }
+    if (mins > 0) data.expectedDurationMinutes = mins;
+    else delete data.expectedDurationMinutes;
+    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num2, row.client).run();
+    return json({ ok: true, minutes: mins }, {}, env, request);
   }
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
