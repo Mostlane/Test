@@ -662,21 +662,33 @@
       if (typeof ta === "string") ta = document.getElementById(ta);
       if (!ta || ta._mlRichBar) return; ta._mlRichBar = true;
       function fire() { try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch (e) {} }
+      // Preserve the scroll position so inserting an emoji / bold marker never
+      // jumps the box to the bottom.
+      function withScroll(fn) { var top = ta.scrollTop; fn(); ta.scrollTop = top; }
       function wrap(pre, post) {
-        var s = ta.selectionStart || 0, en = ta.selectionEnd || 0, v = ta.value, sel = v.slice(s, en) || "text";
-        ta.value = v.slice(0, s) + pre + sel + post + v.slice(en);
-        ta.focus(); ta.selectionStart = s + pre.length; ta.selectionEnd = s + pre.length + sel.length; fire();
+        withScroll(function () {
+          var s = ta.selectionStart || 0, en = ta.selectionEnd || 0, v = ta.value, sel = v.slice(s, en) || "text";
+          ta.value = v.slice(0, s) + pre + sel + post + v.slice(en);
+          ta.focus(); ta.selectionStart = s + pre.length; ta.selectionEnd = s + pre.length + sel.length;
+        });
+        fire(); updatePrev();
       }
       function ins(txt) {
-        var s = ta.selectionStart || 0, v = ta.value;
-        ta.value = v.slice(0, s) + txt + v.slice(ta.selectionEnd || s);
-        ta.focus(); ta.selectionStart = ta.selectionEnd = s + txt.length; fire();
+        withScroll(function () {
+          var s = ta.selectionStart || 0, v = ta.value;
+          ta.value = v.slice(0, s) + txt + v.slice(ta.selectionEnd || s);
+          ta.focus(); ta.selectionStart = ta.selectionEnd = s + txt.length;
+        });
+        fire(); updatePrev();
       }
       var bar = document.createElement("div");
       bar.style.cssText = "display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:5px;";
       function mkBtn(html, title, fn, extra) {
         var b = document.createElement("button"); b.type = "button"; b.innerHTML = html; b.title = title || "";
         b.style.cssText = "width:auto;padding:3px 9px;border:1px solid #cdd6e0;background:#fff;border-radius:7px;font-size:14px;cursor:pointer;line-height:1.2;" + (extra || "");
+        // Keep the textarea's focus + selection (and its scroll) when a button is
+        // pressed — this is what stops the caret/scroll jumping on each click.
+        b.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
         b.addEventListener("click", function (ev) { ev.preventDefault(); fn(); });
         bar.appendChild(b);
       }
@@ -684,7 +696,19 @@
       Object.keys(RICH_COLS).forEach(function (c) { mkBtn("A", c + " text", function () { wrap("{" + c + "}", "{/}"); }, "color:" + RICH_COLS[c] + ";font-weight:700;"); });
       var sep = document.createElement("span"); sep.style.cssText = "width:1px;height:18px;background:#e2e8f0;margin:0 3px;"; bar.appendChild(sep);
       ["⚠️", "🚨", "🔴", "🟠", "✅", "🔧", "📍", "🕒"].forEach(function (em) { mkBtn(em, "Insert " + em, function () { ins(em + " "); }); });
-      if (ta.parentNode) ta.parentNode.insertBefore(bar, ta);
+      // Live preview — shows the REAL bold/colour result under the box (a textarea
+      // itself can only ever show the **markers**). Only appears when there's formatting.
+      var prev = document.createElement("div");
+      prev.style.cssText = "margin-top:5px;background:#f8fafc;border:1px solid #e6eaf0;border-radius:8px;padding:7px 9px;font-size:13.5px;color:#0f1720;display:none;";
+      var PREV_LBL = "<div style='font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;'>Preview — how the engineer sees it</div>";
+      function updatePrev() {
+        var v = ta.value || "";
+        if (/\*\*|\{(?:red|amber|green|blue)\}/.test(v)) { prev.style.display = "block"; prev.innerHTML = PREV_LBL + window.MLUI.rich(v); }
+        else { prev.style.display = "none"; }
+      }
+      ta.addEventListener("input", updatePrev);
+      if (ta.parentNode) { ta.parentNode.insertBefore(bar, ta); ta.parentNode.insertBefore(prev, ta.nextSibling); }
+      updatePrev();
     };
   })();
 
