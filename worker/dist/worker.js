@@ -5621,7 +5621,7 @@ async function handle8(request, env, ctx, url, sess) {
         workArea: j.workArea || null
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
       const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
-      const openJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.fallback).map((j) => {
+      const allJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.fallback).map((j) => {
         const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
         return {
           id: j.id,
@@ -5632,7 +5632,7 @@ async function handle8(request, env, ctx, url, sess) {
           audit: Array.isArray(j.auditItems) && j.auditItems.length > 0
         };
       }).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, allJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
   }
@@ -9690,7 +9690,10 @@ async function getFallbacks(env, tenantId) {
   return {
     enabled: !!c.enabled,
     startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
-    byEngineer: c.byEngineer && typeof c.byEngineer === "object" ? c.byEngineer : {}
+    byEngineer: c.byEngineer && typeof c.byEngineer === "object" ? c.byEngineer : {},
+    // Existing jobs the office has ADDED to the fallback list (job ids). The pool
+    // the per-engineer dropdown offers = these + the dormant standby templates.
+    pool: Array.isArray(c.pool) ? c.pool.map(String) : []
   };
 }
 async function setFallbacks(env, tenantId, body) {
@@ -9698,7 +9701,8 @@ async function setFallbacks(env, tenantId, body) {
   const out = {
     enabled: body.enabled !== void 0 ? !!body.enabled : cur.enabled,
     startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
-    byEngineer: {}
+    byEngineer: {},
+    pool: Array.isArray(body.pool) ? [...new Set(body.pool.map(String).filter(Boolean))] : cur.pool
   };
   const src = body.byEngineer && typeof body.byEngineer === "object" ? body.byEngineer : cur.byEngineer;
   for (const k of Object.keys(src || {})) {

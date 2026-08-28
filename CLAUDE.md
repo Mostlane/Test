@@ -676,9 +676,13 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   up-to-date shared item list (never a copy); **(3) a loose unscheduled/unassigned job is
   MOVED** to the free engineer as a standalone fallback. `createOrUpdateJobFromPayload` now
   **preserves `engStatus`** + `seedEngStatus`-seeds any newly-added engineer, so adding an
-  engineer keeps everyone else's per-engineer progress + the shared audit items. GET
-  `/sla/fallbacks` returns `openJobs` (all open non-fallback jobs, with `assignedTo`/`audit`);
-  the picker groups them 🛟 Standby jobs / 📋 Existing jobs. (Old lightweight
+  engineer keeps everyone else's per-engineer progress + the shared audit items. **The
+  per-engineer dropdown lists ONLY the fallback LIST** = the standby templates + existing
+  jobs the office has explicitly ADDED (config **`pool`** = job ids); GET `/sla/fallbacks`
+  returns `templates` + `allJobs` (all open non-fallback, lightweight — the panel
+  TYPE-SEARCHES these via "🔎 Add an existing job" to add one to `pool`, and resolves
+  `pool` ids to labels). The panel's remove list DELETES a standby job but only UN-LISTS
+  an added existing job (keeps it). (Old lightweight
   siteName/description/project rows are gone.)
   Cron **`sla.sweepFallbacks`** (every
   5-min tick, self-gates on Europe/London): **warns** the office (owner +
