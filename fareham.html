@@ -231,7 +231,7 @@
       <button id="editBtn" class="btn">✏️ Edit</button>
       <button id="saveBtn" class="btn" style="display:none;">Save Changes</button>
       <button id="addFromSitesBtn" class="btn" style="display:none;">🔗 Add from Sites</button>
-      <button id="w3wPcBtn" class="btn" style="display:none;" title="Set each FBC site's postcode + pin from its what3words">📍 Set postcodes (w3w)</button>
+      <button id="w3wPcBtn" class="btn" style="display:none;" title="Look up each FBC site's postcode by name (OpenStreetMap) — approximate, review after">📍 Set postcodes (auto)</button>
       <button id="addSiteBtn" class="btn" style="display:none;">＋ Add Site</button>
       <button id="deleteSiteBtn" class="btn" style="display:none;">🗑 Delete Site</button>
     </div>
@@ -1838,47 +1838,67 @@ document.addEventListener('DOMContentLoaded', () => {
   if (w3wBtn) {
     if (canEditCompliance()) w3wBtn.style.display = "inline-flex";
     const W3W_ITEMS = [
-      {name:"Amenity Building", words:"tasty.jumpy.gone"},
-      {name:"Bellman 4", words:"laminate.cult.popular"},
-      {name:"Broadcut Depot", words:"tasty.jumpy.gone"},
-      {name:"Burridge Changing Rooms", words:"spacing.pods.firmer"},
-      {name:"Civic Offices", words:"noon.cleansed.pastime"},
-      {name:"Civic Way Shoppers Car Park", words:"deduct.absorb.dairies"},
-      {name:"Control Tower", words:"ulterior.movements.breezy"},
-      {name:"Crofton Community Centre", words:"crunch.scorching.loving"},
-      {name:"Grounds Maintenance Building", words:"rival.hotel.desire"},
-      {name:"Hangar 15", words:"slower.truly.bikes"},
-      {name:"Holly Hill WC", words:"remembers.script.adverbs"},
-      {name:"Locks Heath Pavilion", words:"soothing.articulated.stirs"},
-      {name:"Lockswood", words:"pursuing.enacted.scrolled"},
-      {name:"Mill Lane Pavilion", words:"mimic.terminal.pizzeria"},
-      {name:"Portchester Castle Toilets", words:"news.mini.risky"},
-      {name:"Portchester Crematorium", words:"jokes.pranced.skewing"},
-      {name:"Saribsury Green Changing Rooms", words:"brimmed.bloodshot.case"},
-      {name:"Seafield Park", words:"slicer.quote.rescue"},
-      {name:"Stubbington Toilets", words:"policy.shared.sparkles"},
-      {name:"Titchfield Community Centre", words:"angers.burglars.tortoises"},
-      {name:"Westbury Museum", words:"parade.stiffly.conned"},
-      {name:"Wicor Pavilion", words:"blink.took.worms"}
+      {name:"Amenity Building", words:"tasty.jumpy.gone", area:"Solent Airport, Lee-on-the-Solent"},
+      {name:"Bellman 4", words:"laminate.cult.popular", area:"Solent Airport, Lee-on-the-Solent"},
+      {name:"Broadcut Depot", words:"tasty.jumpy.gone", area:"Broadcut, Fareham"},
+      {name:"Burridge Changing Rooms", words:"spacing.pods.firmer", area:"Burridge, Southampton"},
+      {name:"Civic Offices", words:"noon.cleansed.pastime", area:"Fareham"},
+      {name:"Civic Way Shoppers Car Park", words:"deduct.absorb.dairies", area:"Fareham"},
+      {name:"Control Tower", words:"ulterior.movements.breezy", area:"Solent Airport, Lee-on-the-Solent"},
+      {name:"Crofton Community Centre", words:"crunch.scorching.loving", area:"Stubbington, Fareham"},
+      {name:"Grounds Maintenance Building", words:"rival.hotel.desire", area:"Solent Airport, Lee-on-the-Solent"},
+      {name:"Hangar 15", words:"slower.truly.bikes", area:"Solent Airport, Lee-on-the-Solent"},
+      {name:"Holly Hill WC", words:"remembers.script.adverbs", area:"Sarisbury Green, Southampton"},
+      {name:"Locks Heath Pavilion", words:"soothing.articulated.stirs", area:"Locks Heath, Southampton"},
+      {name:"Lockswood", words:"pursuing.enacted.scrolled", area:"Locks Heath, Southampton"},
+      {name:"Mill Lane Pavilion", words:"mimic.terminal.pizzeria", area:"Fareham"},
+      {name:"Portchester Castle Toilets", words:"news.mini.risky", area:"Portchester, Fareham"},
+      {name:"Portchester Crematorium", words:"jokes.pranced.skewing", area:"Portchester, Fareham"},
+      {name:"Saribsury Green Changing Rooms", words:"brimmed.bloodshot.case", area:"Sarisbury Green, Southampton"},
+      {name:"Seafield Park", words:"slicer.quote.rescue", area:"Hill Head, Fareham"},
+      {name:"Stubbington Toilets", words:"policy.shared.sparkles", area:"Stubbington, Fareham"},
+      {name:"Titchfield Community Centre", words:"angers.burglars.tortoises", area:"Titchfield, Fareham"},
+      {name:"Westbury Museum", words:"parade.stiffly.conned", area:"Fareham"},
+      {name:"Wicor Pavilion", words:"blink.took.worms", area:"Portchester, Fareham"}
     ];
+    // what3words' free plan can't convert words→coordinates, so we geocode each
+    // site by NAME within the Fareham area via OpenStreetMap (free, no key) →
+    // postcode. Approximate (esp. the airfield buildings, which fall back to the
+    // Solent Airport point) — the office reviews the results.
+    const OSM_VIEW = "-1.36,50.93,-1.02,50.78"; // minLon,maxLat,maxLon,minLat around Fareham/Gosport/Lee-on-Solent
+    const osmSearch = async (q) => {
+      try {
+        const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=gb&bounded=1&viewbox="+OSM_VIEW+"&q="+encodeURIComponent(q), { headers:{ Accept:"application/json" } }).then(x=>x.json());
+        return (r && r[0]) ? { lat:parseFloat(r[0].lat), lng:parseFloat(r[0].lon) } : null;
+      } catch (e) { return null; }
+    };
     w3wBtn.onclick = async () => {
       if (!canEditCompliance()) return;
-      if (!confirm("Resolve postcodes from what3words for "+W3W_ITEMS.length+" Fareham sites? This sets each site's postcode + map pin.")) return;
-      const old = w3wBtn.textContent; w3wBtn.disabled = true; w3wBtn.textContent = "Resolving…";
+      if (!confirm("Look up postcodes for "+W3W_ITEMS.length+" Fareham sites by name (OpenStreetMap)? This is approximate — please review afterwards and fix any flagged ones.")) return;
+      const old = w3wBtn.textContent; w3wBtn.disabled = true;
+      const sleep = ms => new Promise(r=>setTimeout(r,ms));
       try {
-        // Server-side: the worker converts each what3words with the secret key.
-        // (Needs the key to have NO HTTP-referrer restriction — see the note.)
-        const d = await authFetch("/certs/w3w-postcodes", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ items: W3W_ITEMS }) }).then(r=>r.json());
-        if (!d || !d.ok) { alert((d && d.error) || "Couldn't resolve postcodes."); }
-        else {
-          const saved = d.results.filter(r=>r.ok);
-          const okLines = saved.map(r=>"• "+r.name+" → "+(r.postcode||"(no postcode)")).join("\n");
-          const fails = d.results.filter(r=>!r.ok);
-          let msg = "Set "+saved.length+" of "+d.results.length+" sites.\n\n"+okLines;
-          if (fails.length) msg += "\n\nCouldn't do:\n"+fails.map(r=>"• "+r.name+" — "+(r.error||"")).join("\n");
-          alert(msg);
-          if (typeof loadFromPortal === "function") loadFromPortal();
+        const resolved = [];
+        for (let i=0;i<W3W_ITEMS.length;i++){
+          const it = W3W_ITEMS[i];
+          w3wBtn.textContent = "Looking up "+(i+1)+"/"+W3W_ITEMS.length+"…";
+          let hit = await osmSearch(it.name+", "+it.area);
+          if (!hit) { await sleep(1100); hit = await osmSearch(it.area); }   // fall back to the area centroid
+          let pc = "";
+          if (hit) { try { const p = await fetch("https://api.postcodes.io/postcodes?lon="+hit.lng+"&lat="+hit.lat).then(r=>r.json()); pc = (p&&p.result&&p.result[0]&&p.result[0].postcode)||""; } catch(_){} }
+          resolved.push({ name:it.name, words:it.words, lat:hit?hit.lat:null, lng:hit?hit.lng:null, postcode:pc });
+          await sleep(1100);   // OpenStreetMap policy: max 1 request/second
         }
+        w3wBtn.textContent = "Saving…";
+        const items = resolved.filter(r=>r.lat!=null);
+        const d = items.length ? await authFetch("/certs/w3w-postcodes", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ items }) }).then(r=>r.json()) : { ok:true, results:[] };
+        const saved = (d && d.results) ? d.results.filter(r=>r.ok) : [];
+        const okLines = saved.map(r=>"• "+r.name+" → "+(r.postcode||"(no postcode)")).join("\n");
+        const fails = resolved.filter(r=>r.lat==null);
+        let msg = "Set "+saved.length+" of "+W3W_ITEMS.length+" sites (approx, from OpenStreetMap).\n\n"+okLines;
+        if (fails.length) msg += "\n\nCouldn't place (enter by hand):\n"+fails.map(r=>"• "+r.name).join("\n");
+        alert(msg+"\n\n⚠ Name lookups are approximate — please sanity-check these on the chart.");
+        if (typeof loadFromPortal === "function") loadFromPortal();
       } catch (e) { alert("Failed: "+e); }
       w3wBtn.disabled = false; w3wBtn.textContent = old;
     };
