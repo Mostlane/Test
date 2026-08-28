@@ -235,10 +235,8 @@
           <div class="hint">When the engineer should do it.</div>
         </div>
         <div class="col field-group">
-          <label for="assignedTo">Assign to</label>
-          <select id="assignedTo" name="assignedTo">
-            <option value="">Select engineer…</option>
-          </select>
+          <label>Assign to <span class="hint">(tick one or more — they all see it at the same time)</span></label>
+          <div id="assignList" style="max-height:210px;overflow:auto;border:1px solid #cdd6e0;border-radius:10px;padding:4px 8px;background:#fff;">Loading…</div>
           <label style="display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px;color:#475569;margin-top:6px;cursor:pointer;"><input type="checkbox" id="showOfficeAssign" style="width:auto;"> Show office / admin staff too</label>
         </div>
       </div>
@@ -435,47 +433,54 @@ function buildRelease(){
    FETCH PORTAL USERS
 ------------------------ */
 let allAssignUsers = [];
+// Currently-ticked engineers (usernames). Multiple engineers can be assigned —
+// they all see the job at the same time.
+function selectedEngineers() {
+  return [...document.querySelectorAll("#assignList .assignChk:checked")].map(c => c.value);
+}
 function paintAssignUsers() {
-  const sel = $("assignedTo");
-  const keep = sel.value;
+  const host = $("assignList");
+  if (!host) return;
+  const checked = new Set(selectedEngineers());
   const showOffice = $("showOfficeAssign") && $("showOfficeAssign").checked;
   const sorted = allAssignUsers.slice().sort(window.mlUserCmp);   // office first, then field, in the portal order
-  sel.innerHTML = `<option value="">Select engineer…</option>`;
+  host.innerHTML = "";
   sorted.forEach(u => {
     const uname = u.Username || "";
-    // Office/admin staff are hidden unless the tick is on OR they're the one
-    // already picked — engineers are who jobs go to.
-    // Office/admin staff are hidden unless the tick is on OR they're the one
-    // already picked — engineers are who jobs go to.
+    // Office/admin staff are hidden unless the tick is on OR they're already picked.
     const isOffice = u.StaffType === "office";
-    if (isOffice && !showOffice && uname !== keep) return;
+    if (isOffice && !showOffice && !checked.has(uname)) return;
     // Build the name from real parts only — a null first/last must never render
     // as the literal "null null". Fall back to the username, then skip empties.
     const name = [u.FirstName, u.LastName]
       .map(x => (x == null ? "" : String(x)).trim())
       .filter(Boolean).join(" ");
-    const label = (name || uname) + (isOffice ? " (office)" : "");
-    if(!label.trim()) return;
-    const opt = document.createElement("option");
-    opt.value = uname;
-    opt.textContent = label;
-    sel.appendChild(opt);
+    if (!(name || uname).trim()) return;
+    const row = document.createElement("label");
+    row.style.cssText = "display:flex;gap:8px;align-items:center;padding:5px 2px;font-weight:400;cursor:pointer;font-size:14px;";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.className = "assignChk"; cb.value = uname; cb.checked = checked.has(uname);
+    cb.style.width = "auto";
+    row.appendChild(cb);
+    const span = document.createElement("span");
+    span.textContent = (name || uname);
+    if (isOffice) { const o = document.createElement("span"); o.textContent = " (office)"; o.style.color = "#94a3b8"; span.appendChild(o); }
+    row.appendChild(span);
+    host.appendChild(row);
   });
-  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  if (!host.children.length) host.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:4px;">No engineers to show.</div>';
 }
 async function populateUsersDropdown() {
-  const sel = $("assignedTo");
-  sel.innerHTML = `<option value="">Loading users…</option>`;
-
+  const host = $("assignList");
+  if (host) host.innerHTML = "Loading users…";
   try {
     const res = await fetchJSON(USERS_API);
     allAssignUsers = res.Users || [];
     if ($("showOfficeAssign")) $("showOfficeAssign").addEventListener("change", paintAssignUsers);
     paintAssignUsers();
-
   } catch (err) {
     console.error("User list failed:", err);
-    sel.innerHTML = `<option value="">(Could not load users)</option>`;
+    if (host) host.innerHTML = '<div style="color:#b91c1c;font-size:13px;padding:4px;">Could not load users.</div>';
   }
 }
   /* -------------------------------------------
@@ -665,7 +670,8 @@ async function handleSubmit(evt){
     // A dormant fallback template is never scheduled or assigned — it just sits
     // in the pool until it's an engineer's fallback and comes into play.
     fallbackTemplate: ($("fallbackTemplate") && $("fallbackTemplate").checked) || undefined,
-    assignedTo: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : ($("assignedTo").value.trim() || undefined),
+    assignedTo: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : (selectedEngineers()[0] || undefined),
+    assignedEngineers: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : (selectedEngineers().length ? selectedEngineers() : undefined),
     scheduledAt: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : toIsoOrNull($("scheduledAt").value),
     durationMinutes: Number($("expectedDuration").value) || 60,
     workArea: ($("workArea") && $("workArea").value) || undefined,
