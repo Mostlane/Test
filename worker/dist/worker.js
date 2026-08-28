@@ -5620,7 +5620,9 @@ async function handle8(request, env, ctx, url, sess) {
         durationMinutes: j.durationMinutes || null,
         workArea: j.workArea || null
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates }, headers);
+      const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
+      const openJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.scheduledAt && !j.fallback && !(Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", description: j.description || "" })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
   }
@@ -9676,51 +9678,61 @@ async function sweepFallbacks(env, tid = 1) {
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
-    const tById = {};
-    (await listFallbackTemplates(env, tid)).forEach((t) => {
-      tById[t.id] = t;
-    });
+    const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
-      const tmpl = tById[fb.jobId];
-      if (!tmpl) continue;
-      const payload = {
-        id: "fb:" + normId(u.username) + ":" + target,
-        reference: tmpl.helpdeskRef || void 0,
-        description: tmpl.description || "Standby job",
-        siteCode: tmpl.siteCode || "",
-        siteName: tmpl.siteName || "",
-        storeType: tmpl.storeType || "",
-        address: tmpl.address || "",
-        postcode: tmpl.postcode || "",
-        telephone: tmpl.telephone || "",
-        lat: tmpl.lat != null ? tmpl.lat : void 0,
-        lon: tmpl.lon != null ? tmpl.lon : void 0,
-        projectId: tmpl.projectId || void 0,
-        workArea: tmpl.workArea || void 0,
-        priority: tmpl.priority || void 0,
-        requiresRA: tmpl.requiresRA,
-        requiresSignature: tmpl.requiresSignature,
-        requiresPhoto: tmpl.requiresPhoto,
-        requiresNote: tmpl.requiresNote,
-        emTest: tmpl.emTest,
-        pat: tmpl.pat,
-        firestopping: tmpl.firestopping,
-        assignedEngineers: [u.username],
-        scheduledAt,
-        durationMinutes: tmpl.durationMinutes || 480,
-        release: { mode: "dayBefore", hour: 17 },
-        fallback: true,
-        fallbackTemplate: false,
-        changedBy: "auto-fallback"
-      };
+      const src = await getJob(env, tid, fb.jobId);
+      if (!src) continue;
+      let payload = null;
+      if (src.fallbackTemplate) {
+        payload = {
+          id: "fb:" + normId(u.username) + ":" + target,
+          reference: src.helpdeskRef || void 0,
+          description: src.description || "Standby job",
+          siteCode: src.siteCode || "",
+          siteName: src.siteName || "",
+          storeType: src.storeType || "",
+          address: src.address || "",
+          postcode: src.postcode || "",
+          telephone: src.telephone || "",
+          lat: src.lat != null ? src.lat : void 0,
+          lon: src.lon != null ? src.lon : void 0,
+          projectId: src.projectId || void 0,
+          workArea: src.workArea || void 0,
+          priority: src.priority || void 0,
+          requiresRA: src.requiresRA,
+          requiresSignature: src.requiresSignature,
+          requiresPhoto: src.requiresPhoto,
+          requiresNote: src.requiresNote,
+          emTest: src.emTest,
+          pat: src.pat,
+          firestopping: src.firestopping,
+          assignedEngineers: [u.username],
+          scheduledAt,
+          durationMinutes: src.durationMinutes || 480,
+          release: { mode: "dayBefore", hour: 17 },
+          fallback: true,
+          fallbackTemplate: false,
+          changedBy: "auto-fallback"
+        };
+      } else {
+        if (finishedRe(src.status) || src.scheduledAt || assignedList(src).length) continue;
+        payload = {
+          id: src.id,
+          assignedEngineers: [u.username],
+          scheduledAt,
+          release: { mode: "dayBefore", hour: 17 },
+          fallback: true,
+          changedBy: "auto-fallback"
+        };
+      }
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {
         });
       } catch (e) {
-        console.error("fallback clone failed for", u.username, e && e.message);
+        console.error("fallback assign failed for", u.username, e && e.message);
       }
     }
   }
