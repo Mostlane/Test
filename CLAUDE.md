@@ -645,14 +645,20 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   dashboard); `listJobs(env,tid,{includeDormant:true})` + **`listFallbackTemplates()`**
   expose them for the manager + cron. They form a **POOL**: config in app_config
   **`sla:fallbacks:<tid>`** = `{enabled, startHour, byEngineer:{<normId>:{jobId,active}}}`
-  — each field engineer picks one pool job as their fallback. **GET/POST /sla/fallbacks**
-  (SLA admin; GET returns `config` + the `templates` pool + live `projects`); managed on
-  **sla-scheduler.html → 🛟 Fallbacks** (master enable + start time + a per-engineer
-  dropdown of the pool + a "➕ Create a standby/fallback job" link → `add-job.html?fallback=1`).
-  On activation the cron **CLONES** the chosen dormant template into a LIVE job
-  (id `fb:<normId>:<target>`, idempotent per engineer/day; `fallback:true`,
-  `fallbackTemplate:false`, dayBefore release) copying its description/site/requirements/
-  workArea/duration/job-type. (Old lightweight siteName/description/project rows are gone.)
+  — each field engineer picks one pool job as their fallback. **An EXISTING loose job
+  can also be a fallback** — GET returns `openJobs` (open + unscheduled + unassigned)
+  alongside the `templates` pool, and the picker groups them (🛟 Standby jobs / 📋
+  Existing jobs). **GET/POST /sla/fallbacks** (SLA admin; GET returns `config` +
+  `templates` + `openJobs` + live `projects`); managed on **sla-scheduler.html → 🛟
+  Fallbacks** (master enable + start time + a per-engineer dropdown + a "➕ Create a
+  standby/fallback job" link → `add-job.html?fallback=1` + a **standby pool list with
+  ✕ Remove** = DELETE /sla/jobs/{id}). On activation the cron looks up the chosen job by
+  id (`getJob`): a **dormant template is CLONED** into a live job (id `fb:<normId>:<target>`,
+  idempotent per engineer/day; copies description/site/requirements/workArea/duration/
+  job-type), while an **existing loose job is MOVED** to the free engineer (assigned +
+  scheduled in place, no duplicate) — but only while it's still open/unscheduled/unassigned,
+  so a second engineer sharing it finds it taken and skips. All get `fallback:true` +
+  dayBefore release. (Old lightweight siteName/description/project rows are gone.)
   Cron **`sla.sweepFallbacks`** (every
   5-min tick, self-gates on Europe/London): **warns** the office (owner +
   FullAccess/SLAAdmin push) at **15:30 & 18:00** about field engineers with no job

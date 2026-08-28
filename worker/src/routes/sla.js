@@ -118,7 +118,15 @@ export async function handle(request, env, ctx, url, sess) {
         durationMinutes: j.durationMinutes || null,
         workArea: j.workArea || null,
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates }, headers);
+      // Existing LOOSE jobs (open, unscheduled, unassigned) can also be a fallback —
+      // on activation the real job is MOVED to the free engineer (not cloned).
+      const finishedRe = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
+      const openJobs = (await listJobs(env, tenantId))
+        .filter(j => !finishedRe(j.status) && !j.scheduledAt && !j.fallback
+          && !(Array.isArray(j.assignedEngineers) && j.assignedEngineers.length))
+        .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", description: j.description || "" }))
+        .sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson(request)) }, headers);
   }
@@ -4362,35 +4370,46 @@ export async function sweepFallbacks(env, tid = 1) {
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
-    // Load the dormant fallback pool once; each empty engineer's chosen template
-    // is CLONED into a live job for the target day (idempotent per engineer/day).
-    const tById = {}; (await listFallbackTemplates(env, tid)).forEach(t => { tById[t.id] = t; });
+    const finishedRe = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
       if (!fb || fb.active === false || !fb.jobId) continue;
-      const tmpl = tById[fb.jobId];
-      if (!tmpl) continue;   // the chosen fallback job no longer exists
-      const payload = {
-        id: "fb:" + normId(u.username) + ":" + target,
-        reference: tmpl.helpdeskRef || undefined,
-        description: tmpl.description || "Standby job",
-        siteCode: tmpl.siteCode || "", siteName: tmpl.siteName || "", storeType: tmpl.storeType || "",
-        address: tmpl.address || "", postcode: tmpl.postcode || "", telephone: tmpl.telephone || "",
-        lat: tmpl.lat != null ? tmpl.lat : undefined, lon: tmpl.lon != null ? tmpl.lon : undefined,
-        projectId: tmpl.projectId || undefined, workArea: tmpl.workArea || undefined,
-        priority: tmpl.priority || undefined,
-        requiresRA: tmpl.requiresRA, requiresSignature: tmpl.requiresSignature,
-        requiresPhoto: tmpl.requiresPhoto, requiresNote: tmpl.requiresNote,
-        emTest: tmpl.emTest, pat: tmpl.pat, firestopping: tmpl.firestopping,
-        assignedEngineers: [u.username],
-        scheduledAt, durationMinutes: tmpl.durationMinutes || 480,
-        release: { mode: "dayBefore", hour: 17 }, fallback: true, fallbackTemplate: false,
-        changedBy: "auto-fallback",
-      };
+      const src = await getJob(env, tid, fb.jobId);
+      if (!src) continue;   // the chosen fallback job no longer exists
+      let payload = null;
+      if (src.fallbackTemplate) {
+        // Dormant standby → CLONE into a live job for this engineer/day (reusable).
+        payload = {
+          id: "fb:" + normId(u.username) + ":" + target,
+          reference: src.helpdeskRef || undefined,
+          description: src.description || "Standby job",
+          siteCode: src.siteCode || "", siteName: src.siteName || "", storeType: src.storeType || "",
+          address: src.address || "", postcode: src.postcode || "", telephone: src.telephone || "",
+          lat: src.lat != null ? src.lat : undefined, lon: src.lon != null ? src.lon : undefined,
+          projectId: src.projectId || undefined, workArea: src.workArea || undefined,
+          priority: src.priority || undefined,
+          requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
+          requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
+          emTest: src.emTest, pat: src.pat, firestopping: src.firestopping,
+          assignedEngineers: [u.username],
+          scheduledAt, durationMinutes: src.durationMinutes || 480,
+          release: { mode: "dayBefore", hour: 17 }, fallback: true, fallbackTemplate: false,
+          changedBy: "auto-fallback",
+        };
+      } else {
+        // An EXISTING real job → only usable while it's still a LOOSE backlog job
+        // (open, unscheduled, unassigned). MOVE it to this engineer (no duplicate);
+        // a second empty engineer sharing the same fallback finds it taken → skips.
+        if (finishedRe(src.status) || src.scheduledAt || assignedList(src).length) continue;
+        payload = {
+          id: src.id, assignedEngineers: [u.username], scheduledAt,
+          release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback",
+        };
+      }
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {});
-      } catch (e) { console.error("fallback clone failed for", u.username, e && e.message); }
+      } catch (e) { console.error("fallback assign failed for", u.username, e && e.message); }
     }
   }
   swept[stamp] = true;
