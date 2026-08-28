@@ -595,7 +595,6 @@
     $("mljeTitle").textContent = "Edit job — " + (mlJobName(job) || job.helpdeskRef || job.id);
     $("mljeRef").value = job.helpdeskRef || "";
     $("mljeDesc").value = job.description || "";
-    autosizeDesc();
     $("mljePriority").value = job.priority || "Priority 4";
     // Status list = built-ins + custom categories. Show the job's own value even
     // before the category fetch returns; refresh the list once it does.
@@ -659,6 +658,9 @@
     $("mljeMsg").textContent = "";
     $("mljeSitePick").innerHTML = `<option value="">Loading sites…</option>`;
     $("mljeBack").classList.add("show");
+    // Size the description AFTER the modal is visible + laid out (scrollHeight is
+    // 0 while it's display:none), so it opens at the full height of its text.
+    requestAnimationFrame(() => requestAnimationFrame(autosizeDesc));
 
     await ensureData();
     fillSitePicker("");
