@@ -84,6 +84,21 @@
     .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
     .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
     .tabbar a .badge{display:inline-block;min-width:16px;background:var(--urgent);color:#fff;border-radius:999px;font-size:10px;padding:0 4px;margin-left:2px}
+    /* Desktop (sidebar showing): centre a tidy column in the space to the right
+       of the sidebar (the calc cancels the 248px sidebar inset so it reads as
+       centred), drop the mobile tabbar, and make the white cards faintly
+       translucent so the embossed background shows through (the navy .hero
+       stays solid). Scoped ENTIRELY to min-width:1000px + pnav-on → mobile
+       and installed PWAs are UNAFFECTED. */
+    @media (min-width:1000px){
+      body.pnav-on{ max-width:calc(248px + 780px); margin:0 auto; padding-bottom:28px; }
+      html.pnav-collapsed body.pnav-on{ max-width:calc(64px + 780px); }
+      body.pnav-on .tabbar{ display:none !important; }
+      body.pnav-on .card:not(.hero), body.pnav-on .stopcard{
+        background:color-mix(in srgb, var(--card) 86%, transparent) !important;
+        backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+      }
+    }
   </style>
 </head>
 <body>
