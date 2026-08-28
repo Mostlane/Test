@@ -120,11 +120,12 @@ export async function handle(request, env, ctx, url, sess) {
         durationMinutes: j.durationMinutes || null,
         workArea: j.workArea || null,
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      // Any EXISTING open job can also be a fallback. A job that already has
-      // engineer(s) — e.g. a staged site audit — gets the free engineer ADDED to
-      // the SAME job on activation (shared, up-to-date list); a loose one is moved.
+      // ALL open jobs (lightweight) — the client TYPE-SEARCHES these to add one to
+      // the fallback list, and resolves the config.pool ids to labels. A job that
+      // already has engineer(s) — e.g. a staged site audit — gets the free engineer
+      // ADDED to the SAME job on activation (shared list); a loose one is moved.
       const finishedRe = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
-      const openJobs = (await listJobs(env, tenantId))
+      const allJobs = (await listJobs(env, tenantId))
         .filter(j => !finishedRe(j.status) && !j.fallback)
         .map(j => {
           const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
@@ -132,7 +133,7 @@ export async function handle(request, env, ctx, url, sess) {
             assignedTo: engs.join(", "), audit: Array.isArray(j.auditItems) && j.auditItems.length > 0 };
         })
         .sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, allJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson(request)) }, headers);
   }
@@ -570,8 +571,9 @@ export async function handle(request, env, ctx, url, sess) {
     const beforeId = payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
+    // reconcileRelease is the single per-engineer push path (it pushes each newly
+    // assigned / newly-visible engineer, so notifyNewlyAssigned is no longer needed).
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
-    if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
   }
 
@@ -582,7 +584,6 @@ export async function handle(request, env, ctx, url, sess) {
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
-    if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
 
@@ -979,7 +980,7 @@ export async function handle(request, env, ctx, url, sess) {
     let jobs = all.filter(j => assignedList(j).some(a => normId(a) === engineer));
     // Hide jobs whose release time hasn't arrived / whose turn in the queue
     // hasn't come — the engineer simply doesn't see them yet.
-    jobs = jobs.filter(j => releaseVisibleNow(j, all));
+    jobs = jobs.filter(j => releaseVisibleNowFor(j, engineer, all));
     if (date) {
       jobs = jobs.filter(j => {
         const s = effSchedule(j, engineer).scheduledAt;   // THIS engineer's own slot
@@ -1186,7 +1187,7 @@ export async function handle(request, env, ctx, url, sess) {
         const outstanding = [];
         for (const j of all) {
           if (!assignedList(j).some(a => normId(a) === engNorm)) continue;
-          if (!releaseVisibleNow(j, all)) continue;
+          if (!releaseVisibleNowFor(j, engNorm, all)) continue;
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
@@ -1297,7 +1298,6 @@ export async function handle(request, env, ctx, url, sess) {
     const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
-    if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
@@ -1751,7 +1751,6 @@ export async function handle(request, env, ctx, url, sess) {
       // Release-aware notify: announce a gated job when it first becomes visible;
       // only push "newly added engineer" for an already-announced job.
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {}));
-      if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       // Stacked queue: when a job is finished, the engineer's NEXT same-day
       // "after previous" job unlocks — announce it (fires its assignment push).
       if (updated && jobIsFinished(updated) && !jobIsFinished(before || {})) {
@@ -2473,6 +2472,73 @@ function releaseGatedNow(job) {
   if (!r || !r.mode || r.mode === "now") return false;
   return true;   // any explicit non-'now' release is gated until reconcile clears it
 }
+// ── Per-engineer release override ───────────────────────────────────────────
+// job.engRelease = { normId: {mode,at?,hour?} } overrides job.release FOR that
+// engineer, so each engineer on a shared job can be shown it at their own time.
+// job.releaseNotifiedBy = { normId: true } tracks who's already had the push.
+// Every helper falls back to the whole-job release/flag when there's no override,
+// so a job with a single (or uniform) release behaves EXACTLY as before.
+function releaseForEng(job, eng) {
+  const m = job && job.engRelease, nid = normId(eng);
+  if (m && (nid in m)) return m[nid];
+  return job && job.release;
+}
+function releaseInstantFor(job, r) {
+  if (!r || !r.mode || r.mode === "now") return null;
+  if (r.mode === "at") { const t = Date.parse(r.at); return Number.isFinite(t) ? t : null; }
+  if (r.mode === "dayBefore") return job.scheduledAt ? londonHourDayBefore(job.scheduledAt, r.hour) : null;
+  return null;
+}
+function releaseVisibleNowFor(job, eng, allJobs) {
+  if (job && job.seriesSkipped) return false;
+  if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
+  const r = releaseForEng(job, eng);
+  if (!r || !r.mode || r.mode === "now") return true;
+  if (r.mode === "at" || r.mode === "dayBefore") { const t = releaseInstantFor(job, r); return t == null || t <= Date.now(); }
+  if (r.mode === "afterPrev") return !hasEarlierOpenJob(job, [eng], allJobs || []);
+  return true;
+}
+function engNotified(job, eng) {
+  const nid = normId(eng);
+  if (job && job.releaseNotifiedBy) return !!job.releaseNotifiedBy[nid];   // authoritative once present
+  return !!(job && job.releaseNotified);                                   // legacy whole-job flag
+}
+function markEngNotified(job, engs) {
+  job.releaseNotifiedBy = job.releaseNotifiedBy || {};
+  for (const e of engs) job.releaseNotifiedBy[normId(e)] = true;
+  if (assignedList(job).every(e => engNotified(job, e))) job.releaseNotified = true;
+}
+function releaseGatedForEng(job, eng) {
+  const r = releaseForEng(job, eng);
+  return !!(r && r.mode && r.mode !== "now");
+}
+// Keep only overrides for currently-assigned engineers, with a valid mode.
+function sanitizeEngRelease(raw, engineers) {
+  if (!raw || typeof raw !== "object") return undefined;
+  const engSet = new Set((engineers || []).map(normId));
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const nid = normId(k);
+    if (engSet.size && !engSet.has(nid)) continue;
+    if (!v || !v.mode) continue;
+    if (v.mode === "at") { if (!v.at) continue; out[nid] = { mode: "at", at: v.at }; }
+    else if (v.mode === "dayBefore") { out[nid] = v.hour != null ? { mode: "dayBefore", hour: Number(v.hour) } : { mode: "dayBefore" }; }
+    else if (v.mode === "now" || v.mode === "afterPrev") { out[nid] = { mode: v.mode }; }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+// When a job was announced under the legacy whole-job flag but has no per-engineer
+// map yet, freeze the PRIOR engineers as notified — so a newly-added engineer is
+// correctly treated as not-yet-notified (and gets their own push at their time).
+function carryReleaseNotifiedBy(existing, releaseChanged) {
+  if (releaseChanged) return undefined;   // re-arm everyone at the new time
+  if (existing && existing.releaseNotifiedBy) return { ...existing.releaseNotifiedBy };
+  if (existing && existing.releaseNotified) {
+    const m = {}; for (const e of assignedList(existing)) m[normId(e)] = true;
+    return Object.keys(m).length ? m : undefined;
+  }
+  return undefined;
+}
 function releaseLabel(job) {
   const r = job && job.release; if (!r || !r.mode || r.mode === "now") return "";
   if (r.mode === "afterPrev") return "Shown after the previous job that day is done";
@@ -2542,23 +2608,29 @@ export async function stopSeries(env, tenantId, seriesId) {
   return { removed, total: inSeries.length };
 }
 
+// Announce the job to each assigned engineer whose OWN release is visible now and
+// who hasn't been pushed yet (per-engineer). This is the single push path — it
+// covers both a first announcement and a newly-added engineer, so the handlers no
+// longer also call notifyNewlyAssigned. Uniform-release jobs behave as before:
+// all engineers are pushed at once the moment the job becomes visible.
 export async function reconcileRelease(env, tid, job, allJobs) {
-  if (!job || job.releaseNotified) return false;
+  if (!job) return false;
   const engs = assignedList(job);
   if (!engs.length) return false;
-  if (!releaseVisibleNow(job, allJobs || await listJobs(env, tid))) return false;
-  await pushJobToEngineers(env, tid, job, engs);
-  job.releaseNotified = true;
+  const all = allJobs || await listJobs(env, tid);
+  const toPush = engs.filter(e => !engNotified(job, e) && releaseVisibleNowFor(job, e, all));
+  if (!toPush.length) return false;
+  await pushJobToEngineers(env, tid, job, toPush);
+  markEngNotified(job, toPush);
   await saveJob(env, tid, job);
   return true;
 }
-// Cron sweep: announce any timed job whose release has now passed, and re-check
-// afterPrev queues (fallback in case a completion happened while offline).
+// Cron sweep: announce any timed job whose release has now passed (per engineer),
+// and re-check afterPrev queues (fallback in case a completion happened offline).
 export async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
-    if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
-    const r = j.release; if (!r || !r.mode || r.mode === "now") continue;
+    if (j.seriesSkipped || !assignedList(j).length) continue;
     // Series / fallback safeguard: when a drip/fallback day's release time has
     // arrived but the engineer already has another job that day, permanently DROP
     // it (skip) rather than announcing it — so it never double-books.
@@ -2570,6 +2642,10 @@ export async function sweepJobReleases(env, tid = 1) {
       }
       continue;
     }
+    // Any engineer whose gated (non-'now') release has passed but hasn't been
+    // notified yet? Then reconcile pushes just them.
+    const pending = assignedList(j).some(e => !engNotified(j, e) && releaseGatedForEng(j, e));
+    if (!pending) continue;
     await reconcileRelease(env, tid, j, jobs).catch(() => {});
   }
 }
@@ -2863,6 +2939,12 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
       : existing?.release),
     releaseNotified: (body.release !== undefined && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null))
       ? false : (existing?.releaseNotified || false),
+    // Per-engineer release overrides + who's already been pushed. When the
+    // job-level release changed, releaseNotifiedBy resets so everyone re-arms;
+    // otherwise it carries forward (seeding from the prior engineers if legacy),
+    // so a newly-added engineer is treated as not-yet-notified.
+    engRelease: sanitizeEngRelease(body.engRelease !== undefined ? body.engRelease : existing?.engRelease, assignedEngineers),
+    releaseNotifiedBy: carryReleaseNotifiedBy(existing, body.release !== undefined && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null)),
     // Project multi-day drip "series": seriesId links the days; seriesSkipped
     // permanently drops a day (clash safeguard). Both preserved across re-saves.
     seriesId: body.seriesId !== undefined ? (String(body.seriesId || "") || null) : (existing?.seriesId ?? null),
@@ -2931,6 +3013,20 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.assignedEngineers !== undefined || patch.assignedTo !== undefined) {
     seedEngStatus(job, prevEngs, prevStatus, now);
     pruneEngSchedule(job);   // clear per-engineer times for anyone dropped
+    // If the job was announced under the legacy whole-job flag, freeze the PRIOR
+    // engineers as notified so a newly-added engineer isn't falsely "notified"
+    // (they then get their own push at their own release time).
+    if (job.releaseNotified && !job.releaseNotifiedBy) {
+      job.releaseNotifiedBy = {};
+      for (const e of prevEngs) job.releaseNotifiedBy[normId(e)] = true;
+    }
+    // Drop release overrides + notified flags for anyone no longer on the job.
+    if (job.engRelease || job.releaseNotifiedBy) {
+      const engSet = new Set(assignedList(job).map(normId));
+      for (const k of Object.keys(job.engRelease || {})) if (!engSet.has(k)) delete job.engRelease[k];
+      for (const k of Object.keys(job.releaseNotifiedBy || {})) if (!engSet.has(k)) delete job.releaseNotifiedBy[k];
+      if (job.engRelease && !Object.keys(job.engRelease).length) job.engRelease = undefined;
+    }
   }
   // Per-engineer scheduling. `engSchedule` REPLACES the whole per-engineer map
   // (the editor is authoritative — an empty object clears it, so a single-engineer
@@ -2955,7 +3051,23 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     const prev = job.release ? JSON.stringify(job.release) : "";
     if (!patch.release || !patch.release.mode || patch.release.mode === "now") job.release = undefined;
     else job.release = { mode: patch.release.mode, at: patch.release.at || undefined, hour: (patch.release.hour != null ? Number(patch.release.hour) : undefined) };
-    if ((job.release ? JSON.stringify(job.release) : "") !== prev) job.releaseNotified = false;
+    if ((job.release ? JSON.stringify(job.release) : "") !== prev) { job.releaseNotified = false; job.releaseNotifiedBy = undefined; }
+  }
+  // Per-engineer release overrides (editor is authoritative — replaces the map).
+  // An engineer whose release actually changed is re-armed (their notified flag
+  // cleared) so they get re-announced at the new time.
+  if (patch.engRelease !== undefined) {
+    const newEr = sanitizeEngRelease(patch.engRelease, assignedList(job)) || {};
+    const oldEr = job.engRelease || {};
+    const changed = new Set();
+    for (const nid of new Set([...Object.keys(oldEr), ...Object.keys(newEr)])) {
+      const oldEff = (nid in oldEr) ? oldEr[nid] : (job.release || null);
+      const newEff = (nid in newEr) ? newEr[nid] : (job.release || null);
+      if (JSON.stringify(oldEff) !== JSON.stringify(newEff)) changed.add(nid);
+    }
+    job.engRelease = Object.keys(newEr).length ? newEr : undefined;
+    if (changed.size && job.releaseNotifiedBy) for (const nid of changed) delete job.releaseNotifiedBy[nid];
+    if (changed.size) job.releaseNotified = assignedList(job).length ? assignedList(job).every(e => engNotified(job, e)) : job.releaseNotified;
   }
   // Every job gets a finish time. If the start moves and no explicit end came
   // with it, slide the end to keep the same duration (default 1 hour).
@@ -4341,13 +4453,17 @@ async function getFallbacks(env, tenantId) {
   let c; try { c = row ? JSON.parse(row.value) : null; } catch { c = null; }
   if (!c || typeof c !== "object") c = {};
   return { enabled: !!c.enabled, startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
-    byEngineer: (c.byEngineer && typeof c.byEngineer === "object") ? c.byEngineer : {} };
+    byEngineer: (c.byEngineer && typeof c.byEngineer === "object") ? c.byEngineer : {},
+    // Existing jobs the office has ADDED to the fallback list (job ids). The pool
+    // the per-engineer dropdown offers = these + the dormant standby templates.
+    pool: Array.isArray(c.pool) ? c.pool.map(String) : [] };
 }
 async function setFallbacks(env, tenantId, body) {
   const cur = await getFallbacks(env, tenantId);
   const out = { enabled: body.enabled !== undefined ? !!body.enabled : cur.enabled,
     startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
-    byEngineer: {} };
+    byEngineer: {},
+    pool: Array.isArray(body.pool) ? [...new Set(body.pool.map(String).filter(Boolean))] : cur.pool };
   // Each field engineer's fallback is now a reference to a DORMANT fallback job
   // (from the pool) — pick one per engineer, cloned live when they've no work.
   const src = (body.byEngineer && typeof body.byEngineer === "object") ? body.byEngineer : cur.byEngineer;
