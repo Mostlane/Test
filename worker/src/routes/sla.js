@@ -71,10 +71,12 @@ export async function handle(request, env, ctx, url, sess) {
     if (!engineer || !date) return jsonResponse({ clash: null }, headers);
     const eid = normId(engineer);
     const all = await listJobs(env, tenantId);
-    const hit = all.find(j => j.seriesId && !j.seriesSkipped && j.id !== excludeId
+    // An AUTO-placed day — a project drip SERIES day OR a "fallback"/filler day —
+    // is the kind the office should be asked about when a real job clashes with it.
+    const hit = all.find(j => (j.seriesId || j.fallback) && !j.seriesSkipped && j.id !== excludeId
       && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date
       && assignedList(j).some(a => normId(a) === eid));
-    return jsonResponse({ clash: hit ? { id: hit.id, description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
+    return jsonResponse({ clash: hit ? { id: hit.id, kind: (hit.seriesId ? "series" : "fallback"), description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
   }
 
   // Every job an engineer already has on a given day (office safeguard: warn
