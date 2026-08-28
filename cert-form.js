@@ -52,6 +52,10 @@
   .mlc .btn.green{background:#0a7d33;}.mlc .btn.grey{background:#5b6b7b;}.mlc .btn.red{background:#b00020;}
   .mlc .btn.sm{padding:7px 11px;font-size:13px;}
   .mlc .mlrows{display:flex;flex-direction:column;gap:8px;}
+  /* Desktop (office/admin): pack the appliance/light cards into a compact grid so
+     a long list uses the screen width instead of scrolling one column. Phones keep
+     the single column. */
+  @media (min-width:820px){ .mlc .mlrows{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;align-items:start;} }
   .mlc .mlrow{border:1px solid #e6ebf1;border-radius:11px;padding:9px 10px;background:#fff;}
   .mlc .mlrow-top{display:flex;align-items:flex-start;gap:8px;}
   .mlc .mlrow-n{font-weight:700;color:#8b97a6;font-size:12px;min-width:22px;text-align:center;padding-top:9px;}
