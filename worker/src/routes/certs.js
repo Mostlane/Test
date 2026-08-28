@@ -666,23 +666,19 @@ export async function handle(request, env, ctx, url, sess) {
       const site = byName[norm(it.name)];
       if (!site) { out.push({ name: it.name, ok: false, error: "no matching FBC site" }); continue; }
       try {
-        let lat = Number(it.lat), lng = Number(it.lng), pc = String(it.postcode || "").trim();
-        if (!(isFinite(lat) && isFinite(lng))) {
-          // Fallback: server-side conversion (only works if the key isn't referrer-restricted).
-          if (!env.W3W_KEY) { out.push({ name: it.name, site: site.site_number, ok: false, error: "not resolved in the browser and no server key" }); continue; }
-          if (!words) { out.push({ name: it.name, site: site.site_number, ok: false, error: "no words" }); continue; }
-          const w = await fetch("https://api.what3words.com/v3/convert-to-coordinates?words=" + encodeURIComponent(words) + "&key=" + encodeURIComponent(env.W3W_KEY), { headers: { "Accept": "application/json" } }).then(r => r.json());
-          lat = w && w.coordinates && w.coordinates.lat; lng = w && w.coordinates && w.coordinates.lng;
-          if (typeof lat !== "number" || typeof lng !== "number") { out.push({ name: it.name, site: site.site_number, ok: false, error: (w && w.error && (w.error.message || w.error.code)) || "what3words lookup failed" }); continue; }
-        }
+        const lat = Number(it.lat), lng = Number(it.lng);
+        let pc = String(it.postcode || "").trim();
         if (!pc && isFinite(lat) && isFinite(lng)) {
           try { const p = await fetch("https://api.postcodes.io/postcodes?lon=" + lng + "&lat=" + lat).then(r => r.json()); pc = (p && p.result && p.result[0] && p.result[0].postcode) || ""; } catch {}
         }
         let data = {}; try { data = site.data ? JSON.parse(site.data) : {}; } catch {}
-        if (isFinite(lat)) data.lat = lat; if (isFinite(lng)) data.lon = lng; if (words) data.fbcWhat3Words = "///" + words;
-        if (pc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
+        if (isFinite(lat)) data.lat = lat; if (isFinite(lng)) data.lon = lng;
+        if (words) data.fbcWhat3Words = "///" + words;   // always keep the words on the site
+        // NEVER overwrite an existing postcode — only fill a blank one.
+        const hasPc = site.postcode && String(site.postcode).trim();
+        if (pc && !hasPc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
         else await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
-        out.push({ name: it.name, site: site.site_number, ok: true, postcode: pc, lat, lng });
+        out.push({ name: it.name, site: site.site_number, ok: true, postcode: hasPc ? String(site.postcode).trim() : pc, kept: !!hasPc });
       } catch (e) { out.push({ name: it.name, site: site.site_number, ok: false, error: String((e && e.message) || e) }); }
     }
     return json({ ok: true, results: out }, {}, env, request);

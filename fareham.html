@@ -1890,14 +1890,17 @@ document.addEventListener('DOMContentLoaded', () => {
           await sleep(1100);   // OpenStreetMap policy: max 1 request/second
         }
         w3wBtn.textContent = "Saving…";
-        const items = resolved.filter(r=>r.lat!=null);
-        const d = items.length ? await authFetch("/certs/w3w-postcodes", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ items }) }).then(r=>r.json()) : { ok:true, results:[] };
-        const saved = (d && d.results) ? d.results.filter(r=>r.ok) : [];
-        const okLines = saved.map(r=>"• "+r.name+" → "+(r.postcode||"(no postcode)")).join("\n");
-        const fails = resolved.filter(r=>r.lat==null);
-        let msg = "Set "+saved.length+" of "+W3W_ITEMS.length+" sites (approx, from OpenStreetMap).\n\n"+okLines;
-        if (fails.length) msg += "\n\nCouldn't place (enter by hand):\n"+fails.map(r=>"• "+r.name).join("\n");
-        alert(msg+"\n\n⚠ Name lookups are approximate — please sanity-check these on the chart.");
+        // Send them all — the words are stored on every site; a postcode is only
+        // filled where OpenStreetMap found one AND the site had no postcode yet
+        // (existing postcodes are never overwritten).
+        const d = await authFetch("/certs/w3w-postcodes", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ items: resolved }) }).then(r=>r.json());
+        const results = (d && d.results) ? d.results : [];
+        const withPc = results.filter(r=>r.ok && r.postcode);
+        const noPc = results.filter(r=>r.ok && !r.postcode);
+        const pcLines = withPc.map(r=>"• "+r.name+" → "+r.postcode+(r.kept?" (kept existing)":"")).join("\n");
+        let msg = "Words saved to all "+results.filter(r=>r.ok).length+" sites.\nPostcodes set/kept on "+withPc.length+".\n\n"+pcLines;
+        if (noPc.length) msg += "\n\nStill need a postcode (enter by hand):\n"+noPc.map(r=>"• "+r.name).join("\n");
+        alert(msg+"\n\n⚠ Auto postcodes are approximate — please sanity-check them on the chart.");
         if (typeof loadFromPortal === "function") loadFromPortal();
       } catch (e) { alert("Failed: "+e); }
       w3wBtn.disabled = false; w3wBtn.textContent = old;
