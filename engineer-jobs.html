@@ -30,10 +30,14 @@
        cards made faintly translucent so the embossed background shows through.
        Scoped ENTIRELY to min-width:1000px + pnav-on → mobile/PWA UNAFFECTED. */
     @media (min-width:1000px){
-      body.pnav-on{ max-width:calc(248px + 1000px); margin:0 auto; padding-bottom:28px; }
+      html{ background:transparent !important; }   /* let the fixed emboss layer show through the column too (this page sets html bg) */
+      body.pnav-on{ max-width:calc(248px + 1000px); margin:0 auto; padding-bottom:28px; background:transparent !important; }
       html.pnav-collapsed body.pnav-on{ max-width:calc(64px + 1000px); }
       body.pnav-on .tabbar{ display:none !important; }
-      body.pnav-on .card, body.pnav-on .job-card{
+      /* The whole page is wrapped in ONE .card — keep it see-through so it isn't a
+         solid white slab; only the inner job cards are (translucent) white. */
+      body.pnav-on .card{ background:transparent !important; border:0 !important; box-shadow:none !important; }
+      body.pnav-on .job-card{
         background:color-mix(in srgb, var(--card) 86%, transparent) !important;
         backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
       }
