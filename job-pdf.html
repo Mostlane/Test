@@ -106,10 +106,11 @@
   <div class="left">
     <button class="tb-btn ghost" onclick="closeMe()">✕ Close</button>
     <span class="tb-type" id="tbType">Job Sheet</span>
-    <span class="tb-hint">In the print dialog choose <b>“Save as PDF”</b> to download.</span>
+    <span class="tb-hint">Downloads as a proper PDF file — no print dialog.</span>
   </div>
   <div class="tb-actions">
-    <button class="tb-btn primary" onclick="window.print()">⬇ Download / Print PDF</button>
+    <button class="tb-btn primary" onclick="downloadPdf(this)">⬇ Download PDF</button>
+    <button class="tb-btn ghost" onclick="window.print()">🖨 Print</button>
   </div>
 </div>
 
@@ -222,6 +223,30 @@ const STATUS_EMOJI = {
 const emojiFor = s => STATUS_EMOJI[String(s||"").toLowerCase()] || "•";
 
 function closeMe(){ try{ window.close(); }catch(e){} if(!window.closed) history.back(); }
+
+// Real one-tap download: the worker builds a proper vector PDF (photos + sign-off
+// baked in) and returns it as a file, so it downloads on any device instead of the
+// print-only route iOS forces on a web page.
+async function downloadPdf(btn){
+  const orig = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = "Preparing…"; }
+  try{
+    const r = await authFetch(`${MOSTLANE_API}/sla/jobs/${encodeURIComponent(jobId)}/sheet.pdf?type=${copyType}`, {cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const blob = await r.blob();
+    const num = (document.getElementById("hdJobId").textContent || jobId || "job").trim();
+    const fname = "Job_" + String(num).replace(/[^\w\-]+/g,"_") + (copyType==="client"?"_client":"") + ".pdf";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    // iOS Safari ignores the download attribute on a blob: URL, so open it — the
+    // viewer then offers Share → Save to Files.
+    if(/iP(hone|ad|od)/.test(navigator.userAgent)) setTimeout(()=>{ try{ window.open(url,"_blank"); }catch(_){} }, 150);
+    setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(_){} }, 60000);
+  }catch(e){
+    alert("Couldn't build the PDF just now — you can still use 🖨 Print → “Save as PDF”. (" + e.message + ")");
+  }finally{ if(btn){ btn.disabled = false; btn.textContent = orig; } }
+}
 
 function kv(field, label, value){
   if(value == null || value === "") return "";

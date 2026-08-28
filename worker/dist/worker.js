@@ -5112,6 +5112,211 @@ function buildFirestopPdf(record, meta = {}) {
   return doc.bytes();
 }
 
+// src/lib/jobsheetpdf.js
+var M2 = 40;
+var PAGE_W3 = 595;
+var PAGE_H3 = 842;
+var CONTENT_W2 = PAGE_W3 - M2 * 2;
+var BLUE2 = [0, 0.23, 0.51];
+var GREY2 = [0.45, 0.45, 0.45];
+var LINE2 = [0.8, 0.82, 0.86];
+var OK = [0.09, 0.55, 0.24];
+var BAD = [0.78, 0.11, 0.15];
+function wrap2(str, size, maxW) {
+  const paras = String(str == null ? "" : str).replace(/\r/g, "").split(/\n/);
+  const out = [];
+  for (const para of paras) {
+    const w = para.split(/\s+/).filter(Boolean);
+    if (!w.length) {
+      out.push("");
+      continue;
+    }
+    let line = w[0];
+    for (let i = 1; i < w.length; i++) {
+      if (textWidth(line + " " + w[i], size) <= maxW) line += " " + w[i];
+      else {
+        out.push(line);
+        line = w[i];
+      }
+    }
+    out.push(line);
+  }
+  return out;
+}
+function buildJobSheetPdf(data = {}, meta = {}) {
+  const doc = new PdfDoc();
+  let y = M2;
+  const ensure6 = (need) => {
+    if (y + need > PAGE_H3 - M2) {
+      doc.newPage();
+      y = M2;
+    }
+  };
+  const label = (x, yy2, s) => doc.text(x, yy2, s, { size: 7.5, bold: true, color: GREY2 });
+  const heading = (s) => {
+    ensure6(26);
+    y += 6;
+    doc.text(M2, y + 9, s, { size: 10.5, bold: true, color: BLUE2 });
+    y += 15;
+    doc.line(M2, y, PAGE_W3 - M2, y, { stroke: LINE2 });
+    y += 8;
+  };
+  if (meta.logo) {
+    try {
+      const d = jpegInfo(meta.logo);
+      const h = 30;
+      doc.image(meta.logo, M2, y, h * (d.w / d.h), h);
+    } catch {
+    }
+  }
+  doc.text(M2 + 130, y + 11, "Job Sheet", { size: 15, bold: true, color: BLUE2 });
+  doc.text(M2 + 130, y + 26, "Job " + (data.jobNo || "\u2014"), { size: 10, color: GREY2 });
+  const copyTxt = data.copyType === "client" ? "Client copy" : "Mostlane copy";
+  doc.text(PAGE_W3 - M2 - textWidth(copyTxt, 8.5), y + 11, copyTxt, { size: 8.5, color: GREY2 });
+  y += 40;
+  if (data.title) {
+    doc.text(M2, y + 10, data.title, { size: 12, bold: true });
+    y += 16;
+  }
+  if (data.subtitle) {
+    doc.text(M2, y + 9, data.subtitle, { size: 9, color: GREY2 });
+    y += 14;
+  }
+  y += 2;
+  doc.line(M2, y, PAGE_W3 - M2, y, { stroke: LINE2 });
+  y += 6;
+  const colW = CONTENT_W2 / 2;
+  const details = (data.details || []).filter((p) => p && p[1] != null && String(p[1]).trim() !== "");
+  for (let i = 0; i < details.length; i += 2) {
+    const rows = [details[i], details[i + 1]].filter(Boolean);
+    let rowH = 0;
+    ensure6(30);
+    rows.forEach((pair, c) => {
+      const x = M2 + c * colW;
+      label(x, y + 8, String(pair[0]).toUpperCase());
+      const lines = wrap2(pair[1], 9.5, colW - 14);
+      lines.forEach((ln, li) => doc.text(x, y + 20 + li * 12, ln, { size: 9.5 }));
+      rowH = Math.max(rowH, 20 + lines.length * 12);
+    });
+    y += rowH + 4;
+  }
+  if (data.description) {
+    heading("Description");
+    wrap2(data.description, 9.5, CONTENT_W2).forEach((ln) => {
+      ensure6(14);
+      doc.text(M2, y + 9, ln, { size: 9.5 });
+      y += 12;
+    });
+  }
+  if (data.sla) {
+    heading("SLA");
+    ensure6(18);
+    const pill2 = data.sla.met ? "SLA achieved" : "SLA not achieved";
+    doc.text(M2, y + 9, pill2, { size: 9.5, bold: true, color: data.sla.met ? OK : BAD });
+    if (data.sla.target) doc.text(M2 + textWidth(pill2, 9.5) + 16, y + 9, "Target: " + data.sla.target, { size: 9, color: GREY2 });
+    y += 16;
+  }
+  if (data.time && data.time.total) {
+    heading("Time on job");
+    ensure6(18);
+    const parts = [];
+    if (data.time.travelling) parts.push(["Travelling", data.time.travelling]);
+    if (data.time.onsite) parts.push(["On site", data.time.onsite]);
+    parts.push(["Total", data.time.total]);
+    let x = M2;
+    parts.forEach(([k, v]) => {
+      const seg = k + ": " + v;
+      doc.text(x, y + 9, k + ": ", { size: 9, color: GREY2 });
+      doc.text(x + textWidth(k + ": ", 9), y + 9, v, { size: 9.5, bold: true });
+      x += textWidth(seg, 9.5) + 20;
+    });
+    y += 16;
+  }
+  if (data.timeline && data.timeline.length) {
+    heading("Activity");
+    data.timeline.forEach((e) => {
+      ensure6(13);
+      doc.text(M2, y + 9, String(e.status || ""), { size: 9, bold: true });
+      const meta2 = "\u2014 " + (e.at || "") + (e.by ? " \xB7 " + e.by : "");
+      doc.text(M2 + 120, y + 9, meta2, { size: 8.5, color: GREY2 });
+      y += 12;
+    });
+  }
+  if (data.notes && data.notes.length) {
+    heading("Notes");
+    data.notes.forEach((n2) => {
+      wrap2(n2.note || "", 9.5, CONTENT_W2).forEach((ln) => {
+        ensure6(13);
+        doc.text(M2, y + 9, ln, { size: 9.5 });
+        y += 12;
+      });
+      ensure6(12);
+      doc.text(M2, y + 8, (n2.by || "Engineer") + (n2.at ? " \xB7 " + n2.at : ""), { size: 8, color: GREY2 });
+      y += 14;
+    });
+  }
+  const photos = (data.photos || []).filter((p) => p && p.bytes);
+  if (photos.length) {
+    heading("Photos");
+    const cols = 3, gap = 8;
+    const cellW = (CONTENT_W2 - gap * (cols - 1)) / cols;
+    const cellH = cellW * 0.72;
+    let col = 0, rowTop = y;
+    photos.forEach((p, i) => {
+      if (col === 0) {
+        ensure6(cellH + 16);
+        rowTop = y;
+      }
+      const x = M2 + col * (cellW + gap);
+      let iw = cellW, ih = cellH;
+      try {
+        const d = jpegInfo(p.bytes);
+        const r = d.w / d.h;
+        if (r > cellW / cellH) {
+          iw = cellW;
+          ih = cellW / r;
+        } else {
+          ih = cellH;
+          iw = cellH * r;
+        }
+      } catch {
+      }
+      const ix = x + (cellW - iw) / 2, iy = rowTop + (cellH - ih) / 2;
+      try {
+        doc.image(p.bytes, ix, iy, iw, ih);
+      } catch {
+      }
+      doc.rect(x, rowTop, cellW, cellH, { stroke: LINE2, lw: 0.5 });
+      if (p.stage) doc.text(x + 3, rowTop + cellH + 9, p.stage, { size: 7.5, color: GREY2 });
+      col++;
+      if (col >= cols) {
+        col = 0;
+        y = rowTop + cellH + 16;
+      }
+    });
+    if (col !== 0) y = rowTop + cellH + 16;
+  }
+  heading("Sign-off");
+  ensure6(40);
+  if (data.signature && data.signature.signedBy) {
+    doc.text(M2, y + 11, "Signed by", { size: 8, color: GREY2 });
+    doc.text(M2, y + 26, data.signature.signedBy, { size: 11, bold: true });
+    if (data.signature.signedAt) doc.text(M2, y + 40, data.signature.signedAt, { size: 9, color: GREY2 });
+    doc.text(M2 + 240, y + 40, "(customer signature on file)", { size: 8, color: GREY2 });
+    y += 48;
+  } else {
+    doc.text(M2, y + 11, "Not signed.", { size: 9.5, color: GREY2 });
+    y += 20;
+  }
+  const n = doc.pages.length;
+  for (let i = 0; i < n; i++) {
+    const pg = doc.pages[i];
+    pg.ops.push(`0.45 g BT /F1 8 Tf 1 0 0 1 ${PAGE_W3 - M2 - 70} ${M2 / 2} Tm (Page ${i + 1} of ${n}) Tj ET 0 g`);
+    pg.ops.push(`0.45 g BT /F1 8 Tf 1 0 0 1 ${M2} ${M2 / 2} Tm (Mostlane ${copyTxt}) Tj ET 0 g`);
+  }
+  return doc.bytes();
+}
+
 // src/lib/zip.js
 var CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -6802,6 +7007,116 @@ async function handle8(request, env, ctx, url, sess) {
       const pdf = await htmlToPdf(env, html);
       if (!pdf.ok) return jsonResponse({ error: "PDF generation failed" }, headers, 500);
       return new Response(pdf.buffer, { status: 200, headers: {
+        ...headers,
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store"
+      } });
+    }
+    if (method === "GET" && parts[2] === "sheet.pdf") {
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const j = decorateJobWithLiveSla(job);
+      const copyType = searchParams.get("type") === "client" ? "client" : "mostlane";
+      const cfg = {};
+      try {
+        (await getSheetConfig(env, tenantId)).forEach((f) => {
+          cfg[f.key] = f;
+        });
+      } catch {
+      }
+      const shown = (key) => !(cfg[key] && cfg[key][copyType] === false);
+      const fmtDT = (v) => {
+        if (!v) return "";
+        const d = new Date(v);
+        return isNaN(d) ? String(v) : d.toLocaleString("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      };
+      const fmtD = (v) => {
+        if (!v) return "";
+        const d = new Date(v);
+        return isNaN(d) ? String(v) : d.toLocaleDateString("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "short", year: "numeric" });
+      };
+      const nm = (s) => String(s || "").replace(/\./g, " ").replace(/\s+/g, " ").trim();
+      const fmtDur = (min) => {
+        min = Math.round(min || 0);
+        const h = Math.floor(min / 60), m = min % 60;
+        return h ? `${h}h ${m}m` : `${m}m`;
+      };
+      const jobNo = (String(j.id || "").match(/^([A-Za-z]?\d+(?:\/\d+)?)-/) || [])[1] || j.helpdeskRef || j.id;
+      const engs = Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers.map(nm).join(", ") : nm(j.assignedTo);
+      const siteAddr = [j.address, j.postcode].filter(Boolean).join(", ");
+      const allRows = [
+        ["jobDate", "Job date", j.scheduledAt ? fmtD(j.scheduledAt) : fmtD(j.raisedAt)],
+        ["priority", "Priority", j.priority],
+        ["status", "Status", j.status],
+        ["engineer", "Engineer", engs],
+        ["customer", "Customer", j.customer || j.client || j.siteName],
+        ["contactPerson", "Site contact", j.contactPerson || j.contact || ""],
+        ["contactPhone", "Telephone", j.telephone || j.phone || ""],
+        ["contactEmail", "Email", j.email || ""],
+        ["siteAddress", "Site address", siteAddr]
+      ];
+      const details = allRows.filter((r) => shown(r[0])).map((r) => [r[1], r[2]]);
+      const isProject = /^p\d/i.test(String(j.siteCode || "")) || /project/i.test(String(j.storeType || "") + String(j.client || ""));
+      const sla = !isProject && j.targetAt && shown("sla") ? { met: j.sla ? j.sla.state !== "BREACHED" : true, target: fmtDT(j.targetAt) } : null;
+      let travelling = 0, onsite = 0;
+      const hist = (Array.isArray(j.statusHistory) ? j.statusHistory : []).slice().filter((e) => e && e.at).sort((a, b) => new Date(a.at) - new Date(b.at));
+      for (let i = 0; i < hist.length - 1; i++) {
+        const mins = (new Date(hist[i + 1].at) - new Date(hist[i].at)) / 6e4;
+        if (!(mins > 0) || mins > 24 * 60) continue;
+        const st = String(hist[i].status || "").toLowerCase();
+        if (st.includes("travel")) travelling += mins;
+        else if (st.includes("progress")) onsite += mins;
+      }
+      const total = travelling + onsite;
+      const time = total ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
+      const timeline = hist.map((e) => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) }));
+      const notes = (j.events || []).filter((e) => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined").sort((a, b) => new Date(a.at) - new Date(b.at)).map((n) => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" }));
+      let photos = [];
+      if (env.JOB_FILES) {
+        try {
+          const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
+          const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
+          const thumbSet = new Set((listed.objects || []).filter((o) => o.key.endsWith(".thumb")).map((o) => o.key));
+          const overrides = j && j.photoStages || {};
+          for (const o of objs) {
+            const fn = o.key.split("/").pop();
+            const stage = overrides[fn] || o.customMetadata && o.customMetadata.stage || "";
+            const srcKey = thumbSet.has(o.key + ".thumb") ? o.key + ".thumb" : o.key;
+            let bytes = null;
+            try {
+              const r = await env.JOB_FILES.get(srcKey);
+              if (r) bytes = new Uint8Array(await r.arrayBuffer());
+            } catch {
+            }
+            if (bytes) photos.push({ bytes, stage });
+          }
+        } catch {
+        }
+      }
+      const signature = j.signature && j.signature.fileKey && j.signature.signedBy ? { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt) } : null;
+      const name = j.siteName || j.siteCode || "Job";
+      let logo = null;
+      try {
+        logo = logoBytes();
+      } catch {
+      }
+      const pdf = buildJobSheetPdf({
+        jobNo,
+        copyType,
+        title: name,
+        subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
+        details,
+        description: j.description || j.summary || j.title || "",
+        sla,
+        time,
+        timeline,
+        notes,
+        photos,
+        signature
+      }, { logo });
+      const filename = `Job_${safeRef(j, id)}.pdf`;
+      return new Response(pdf, { status: 200, headers: {
         ...headers,
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
@@ -8796,11 +9111,11 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   }
   if (jobs.length < 2) return { ok: false, error: "Need at least two locatable jobs on this day to optimise a route.", warnings };
   const pts = [home.coord, ...jobs.map((j) => j.coord)];
-  const M5 = await driveMatrix(env, pts);
-  const baseSeq = solveRoute(M5.mins);
+  const M6 = await driveMatrix(env, pts);
+  const baseSeq = solveRoute(M6.mins);
   let order = baseSeq, aiUsed = false, aiReason = "";
   if (useAI && env.ANTHROPIC_API_KEY) {
-    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M5.mins, dayStart, notes, baseSeq });
+    const ai = await anthropicRouteOrder(env, { jobs, matrixMins: M6.mins, dayStart, notes, baseSeq });
     if (ai.ok) {
       const seq = ai.order.map(Number).filter((nn) => nn >= 1 && nn <= jobs.length);
       const uniq = [...new Set(seq)];
@@ -8819,7 +9134,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const legs = [];
   let cur = 0, t = 0, driveMins = 0, driveMiles = 0, siteMins = 0;
   for (const p of order) {
-    const dMin = M5.mins[cur][p], dMi = M5.miles[cur][p];
+    const dMin = M6.mins[cur][p], dMi = M6.miles[cur][p];
     driveMins += dMin;
     driveMiles += dMi;
     const arrival = t + dMin;
@@ -8829,7 +9144,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     t = arrival + j.durationMin;
     cur = p;
   }
-  const homeMin = M5.mins[cur][0], homeMi = M5.miles[cur][0];
+  const homeMin = M6.mins[cur][0], homeMi = M6.miles[cur][0];
   driveMins += homeMin;
   driveMiles += homeMi;
   let lunch = null;
@@ -8849,7 +9164,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     dayStart,
     aiUsed,
     aiReason,
-    matrixSource: M5.source,
+    matrixSource: M6.source,
     home: { postcode: home.postcode },
     legs,
     lunch,
@@ -8862,7 +9177,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
       dayLengthMins: Math.round(endOffset),
       homeDriveMins: homeMin,
       homeDriveMiles: Math.round(homeMi * 10) / 10,
-      source: M5.source
+      source: M6.source
     },
     warnings
   };
@@ -8959,23 +9274,23 @@ async function autoScheduleDay(env, tenantId, body) {
   }
   const pts = [...engs.map((e) => e.coord), ...jobs.map((j) => j.coord)];
   const NE = engs.length;
-  let M5;
-  if (pts.length <= 90) M5 = await roadMatrix(pts);
+  let M6;
+  if (pts.length <= 90) M6 = await roadMatrix(pts);
   else {
     const n = pts.length, mins = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) for (let k = 0; k < n; k++) if (i !== k) mins[i][k] = Math.max(1, Math.round(haversineMi(pts[i], pts[k]) * 1.25 / 30 * 60));
-    M5 = { mins, source: "estimate" };
+    M6 = { mins, source: "estimate" };
   }
   const pE = (i) => i, pJ = (k) => NE + k;
   const FERRY = 90, REMOTE = 75;
   const isIow = [...engs.map(() => false), ...jobs.map((j) => !!j.iow)];
-  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M5.mins[i][k2] += FERRY;
+  for (let i = 0; i < pts.length; i++) for (let k2 = 0; k2 < pts.length; k2++) if (i !== k2 && isIow[i] !== isIow[k2]) M6.mins[i][k2] += FERRY;
   const insertCost = (ei, k) => {
     const route = [pE(ei), ...engs[ei].seq.map((x) => pJ(x)), pE(ei)], p = pJ(k);
     let bDelta = Infinity, bPos = 1;
     for (let pos = 1; pos < route.length; pos++) {
       const a = route[pos - 1], b = route[pos];
-      const delta = M5.mins[a][p] + M5.mins[p][b] - M5.mins[a][b];
+      const delta = M6.mins[a][p] + M6.mins[p][b] - M6.mins[a][b];
       if (delta < bDelta) {
         bDelta = delta;
         bPos = pos;
@@ -8983,7 +9298,7 @@ async function autoScheduleDay(env, tenantId, body) {
     }
     return { pos: bPos, delta: bDelta };
   };
-  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M5.mins[pE(ei)][pJ(k)]));
+  const nearestHome = (k) => Math.min(...engs.map((_, ei) => M6.mins[pE(ei)][pJ(k)]));
   const order = jobs.map((_, k) => k).sort((a, b) => normPrio(jobs[a].priority) - normPrio(jobs[b].priority) || jobs[b].durationMin - jobs[a].durationMin);
   const unassigned = [], handled = /* @__PURE__ */ new Set();
   const remoteByArea = {};
@@ -8993,13 +9308,13 @@ async function autoScheduleDay(env, tenantId, body) {
     const ks = remoteByArea[area];
     let bestE = -1, bestCost = Infinity;
     engs.forEach((_, ei) => {
-      const c = Math.min(...ks.map((k) => M5.mins[pE(ei)][pJ(k)]));
+      const c = Math.min(...ks.map((k) => M6.mins[pE(ei)][pJ(k)]));
       if (c < bestCost) {
         bestCost = c;
         bestE = ei;
       }
     });
-    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M5.mins[pE(bestE)][pJ(k)])) : Infinity;
+    const oneWay = bestE >= 0 ? Math.min(...ks.map((k) => M6.mins[pE(bestE)][pJ(k)])) : Infinity;
     const areaSite2 = ks.reduce((s, k) => s + jobs[k].durationMin, 0);
     const justified = bestE >= 0 && areaSite2 >= oneWay * 2;
     if (!justified) {
@@ -9045,13 +9360,13 @@ async function autoScheduleDay(env, tenantId, body) {
   const lunchTarget = Math.max(0, 13 * 60 - (sh * 60 + sm));
   const plan = engs.map((e, ei) => {
     const sub = [pE(ei), ...e.seq.map((x) => pJ(x))];
-    const subCost = sub.map((a) => sub.map((b) => M5.mins[a][b]));
+    const subCost = sub.map((a) => sub.map((b) => M6.mins[a][b]));
     const solved = solveRoute(subCost);
     const orderedK = solved.map((si) => e.seq[si - 1]);
     const legs = [];
     let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
     for (const k of orderedK) {
-      const p = pJ(k), dMin = M5.mins[cur][p];
+      const p = pJ(k), dMin = M6.mins[cur][p];
       drive += dMin;
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) {
@@ -9065,12 +9380,12 @@ async function autoScheduleDay(env, tenantId, body) {
       t = arrival + j.durationMin;
       cur = p;
     }
-    const homeMin = orderedK.length ? M5.mins[cur][pE(ei)] : 0;
+    const homeMin = orderedK.length ? M6.mins[cur][pE(ei)] : 0;
     drive += homeMin;
     return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
-  let matrixSource = M5.source;
-  if (M5.source !== "osrm" && plan.length) {
+  let matrixSource = M6.source;
+  if (M6.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
     let allReal = true;
@@ -21725,7 +22040,7 @@ function fmtWhen2(iso) {
     return iso;
   }
 }
-function wrap2(str, size, maxW) {
+function wrap3(str, size, maxW) {
   const words = String(str || "").split(/\s+/), lines = [];
   let cur = "";
   for (const w of words) {
@@ -21755,7 +22070,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 28;
   const row = (label, val) => {
     doc.text(L, y, label, { size: 11, bold: true });
-    for (const ln of wrap2(val || "", 11, W4 - 70)) {
+    for (const ln of wrap3(val || "", 11, W4 - 70)) {
       doc.text(L + 70, y, ln, { size: 11 });
       y += 16;
     }
@@ -21774,7 +22089,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
       y += 10;
       continue;
     }
-    for (const ln of wrap2(para, 11, W4)) {
+    for (const ln of wrap3(para, 11, W4)) {
       if (y > 770) {
         doc.newPage();
         y = 60;
@@ -21793,7 +22108,7 @@ function buildMemoPdf(memo, signerName, signedAtISO, opts = {}) {
   y += 22;
   doc.text(L, y, "Acknowledgement", { size: 12, bold: true });
   y += 18;
-  for (const ln of wrap2("I confirm that I have read and understood the content of this memo.", 11, W4)) {
+  for (const ln of wrap3("I confirm that I have read and understood the content of this memo.", 11, W4)) {
     doc.text(L, y, ln, { size: 11 });
     y += 16;
   }
@@ -24367,7 +24682,7 @@ function mondayOf5(ymd2) {
 var clampDom = (dom) => Math.min(28, Math.max(1, Number(dom) || 1));
 function occurrence(task, now) {
   const today = lonYMD(now);
-  const [Y, M5] = today.split("-").map(Number);
+  const [Y, M6] = today.split("-").map(Number);
   const hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(task.due_time || "") ? task.due_time : "17:00";
   let periodKey, startYMD, dueYMD;
   const pad = (n) => String(n).padStart(2, "0");
@@ -24388,7 +24703,7 @@ function occurrence(task, now) {
       break;
     }
     case "quarterly": {
-      const q = Math.floor((M5 - 1) / 3), qMonth = q * 3 + 1;
+      const q = Math.floor((M6 - 1) / 3), qMonth = q * 3 + 1;
       periodKey = "Q:" + Y + "-" + (q + 1);
       startYMD = `${Y}-${pad(qMonth)}-01`;
       dueYMD = `${Y}-${pad(qMonth)}-${pad(clampDom(task.due_dom))}`;
@@ -24663,8 +24978,8 @@ init_auth();
 // src/lib/certpdf.js
 var W2 = 595;
 var H = 842;
-var M2 = 40;
-var CW = W2 - M2 * 2;
+var M3 = 40;
+var CW = W2 - M3 * 2;
 var NAVY = [0, 0.204, 0.408];
 var NAVY_D = [0, 0.145, 0.29];
 var INK = [0.1, 0.13, 0.18];
@@ -24678,10 +24993,10 @@ var ZEBRA = [0.972, 0.98, 0.99];
 var ACCENT = [0.04, 0.42, 0.52];
 var GREEN = [0.09, 0.63, 0.29];
 var RED = [0.83, 0.16, 0.16];
-var GREY2 = [0.6, 0.64, 0.7];
+var GREY3 = [0.6, 0.64, 0.7];
 var HEADSUB = [0.78, 0.85, 0.93];
 var S = (v) => toWinAnsi(String(v == null ? "" : v));
-var okColor = (v) => /fail/i.test(v) ? RED : /(n\/?a|^—$|^$)/i.test(String(v || "").trim()) ? GREY2 : GREEN;
+var okColor = (v) => /fail/i.test(v) ? RED : /(n\/?a|^—$|^$)/i.test(String(v || "").trim()) ? GREY3 : GREEN;
 var COLS = {
   em: [
     { key: "no", label: "#", w: 0.06, align: "c", kind: "no" },
@@ -24711,7 +25026,7 @@ function fit(str, size, maxW) {
   while (s.length > 1 && textWidth(s + "\u2026", size) > maxW) s = s.slice(0, -1);
   return s + "\u2026";
 }
-function wrap3(str, size, maxW, maxLines) {
+function wrap4(str, size, maxW, maxLines) {
   const words = S(str).split(/\s+/).filter(Boolean);
   const lines = [];
   let cur = "";
@@ -24787,8 +25102,8 @@ function infoCardH(o) {
   return CARD_PAD + 14 + 14 + addrLines(o).length * 12 + 6;
 }
 function detailsH(rec) {
-  let h = CARD_PAD + 14 + wrap3(rec.extent || "\u2014", 9, CW - 28, 3).length * 12;
-  if (rec.comments) h += 10 + 12 + wrap3(rec.comments, 8, CW - 28, 5).length * 10.5;
+  let h = CARD_PAD + 14 + wrap4(rec.extent || "\u2014", 9, CW - 28, 3).length * 12;
+  if (rec.comments) h += 10 + 12 + wrap4(rec.comments, 8, CW - 28, 5).length * 10.5;
   return h + CARD_PAD;
 }
 function pageBg(doc) {
@@ -24796,38 +25111,38 @@ function pageBg(doc) {
 }
 function headerFull(doc, rec, meta) {
   const y = 30, h = HEADER_H;
-  cardBox(doc, M2, y, CW, h, 14, NAVY);
-  doc.roundRect(M2, y, CW, 5, 2.5, { fill: NAVY_D });
+  cardBox(doc, M3, y, CW, h, 14, NAVY);
+  doc.roundRect(M3, y, CW, 5, 2.5, { fill: NAVY_D });
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = 26;
-      doc.image(meta.logo, M2 + 20, y + 20, hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M3 + 20, y + 20, hh * (g.w / g.h), hh);
     } catch {
     }
   }
   const st = statusOf(rec);
-  pill(doc, M2 + 20, y + 58, st.label, { fill: st.color, size: 7 });
-  tracked(doc, W2 - M2 - 20, y + 26, TITLES[rec.type] + " Certificate", { size: 7.5, color: HEADSUB, track: 1.5, alignRight: true });
-  doc.text(W2 - M2 - 20, y + 50, rec.certNumber ? "No. " + S(rec.certNumber) : "Draft \u2014 number on issue", { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
+  pill(doc, M3 + 20, y + 58, st.label, { fill: st.color, size: 7 });
+  tracked(doc, W2 - M3 - 20, y + 26, TITLES[rec.type] + " Certificate", { size: 7.5, color: HEADSUB, track: 1.5, alignRight: true });
+  doc.text(W2 - M3 - 20, y + 50, rec.certNumber ? "No. " + S(rec.certNumber) : "Draft \u2014 number on issue", { size: 15, bold: true, color: [1, 1, 1], alignRight: true });
   const dt = rec.contractor && rec.contractor.date ? rec.contractor.date : "";
-  if (dt) doc.text(W2 - M2 - 20, y + 68, "Tested " + S(dt), { size: 9, color: HEADSUB, alignRight: true });
-  if (rec.status === "draft" || rec.status === "review") doc.text(W2 - M2 - 20, y + 84, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
+  if (dt) doc.text(W2 - M3 - 20, y + 68, "Tested " + S(dt), { size: 9, color: HEADSUB, alignRight: true });
+  if (rec.status === "draft" || rec.status === "review") doc.text(W2 - M3 - 20, y + 84, rec.status === "review" ? "Awaiting office review" : "Draft", { size: 7.5, color: [0.72, 0.8, 0.9], alignRight: true });
   return y + h;
 }
 function headerSlim(doc, rec, meta) {
   const y = 30, h = 40;
-  cardBox(doc, M2, y, CW, h, 12, NAVY);
+  cardBox(doc, M3, y, CW, h, 12, NAVY);
   if (meta.logo) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = 18;
-      doc.image(meta.logo, M2 + 16, y + 11, hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M3 + 16, y + 11, hh * (g.w / g.h), hh);
     } catch {
     }
   }
-  tracked(doc, W2 - M2 - 16, y + 17, TITLES[rec.type] + " \u2014 continued", { size: 7, color: HEADSUB, alignRight: true });
-  if (rec.certNumber) doc.text(W2 - M2 - 16, y + 31, "No. " + S(rec.certNumber), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
+  tracked(doc, W2 - M3 - 16, y + 17, TITLES[rec.type] + " \u2014 continued", { size: 7, color: HEADSUB, alignRight: true });
+  if (rec.certNumber) doc.text(W2 - M3 - 16, y + 31, "No. " + S(rec.certNumber), { size: 9, bold: true, color: [1, 1, 1], alignRight: true });
   return y + h;
 }
 function infoCard(doc, x, y, w, label, o) {
@@ -24844,19 +25159,19 @@ function infoCard(doc, x, y, w, label, o) {
 }
 function detailsCard(doc, y, rec) {
   const h = detailsH(rec);
-  cardBox(doc, M2, y, CW, h);
-  tracked(doc, M2 + CARD_PAD, y + 18, "Extent & limitations", { size: 6.5, color: ACCENT });
+  cardBox(doc, M3, y, CW, h);
+  tracked(doc, M3 + CARD_PAD, y + 18, "Extent & limitations", { size: 6.5, color: ACCENT });
   let yy2 = y + 32;
-  wrap3(rec.extent || "\u2014", 9, CW - 28, 3).forEach((l) => {
-    doc.text(M2 + CARD_PAD, yy2, l, { size: 9, color: INK });
+  wrap4(rec.extent || "\u2014", 9, CW - 28, 3).forEach((l) => {
+    doc.text(M3 + CARD_PAD, yy2, l, { size: 9, color: INK });
     yy2 += 12;
   });
   if (rec.comments) {
     yy2 += 8;
-    tracked(doc, M2 + CARD_PAD, yy2, "Additional comments", { size: 6.5, color: ACCENT });
+    tracked(doc, M3 + CARD_PAD, yy2, "Additional comments", { size: 6.5, color: ACCENT });
     yy2 += 13;
-    wrap3(rec.comments, 8, CW - 28, 5).forEach((l) => {
-      doc.text(M2 + CARD_PAD, yy2, l, { size: 8, color: MUTE });
+    wrap4(rec.comments, 8, CW - 28, 5).forEach((l) => {
+      doc.text(M3 + CARD_PAD, yy2, l, { size: 8, color: MUTE });
       yy2 += 10.5;
     });
   }
@@ -24865,10 +25180,10 @@ function detailsCard(doc, y, rec) {
 function resultsCard(doc, layout, rows, startIndex, y, titleType, count) {
   const bodyH = rows.length * ROW_H;
   const h = 20 + THEAD_H + bodyH + 12;
-  cardBox(doc, M2, y, CW, h);
-  tracked(doc, M2 + CARD_PAD, y + 18, titleType === "pat" ? "Appliances tested" : "Emergency lighting tests", { size: 6.5, color: ACCENT });
-  if (count != null) doc.text(W2 - M2 - CARD_PAD, y + 18, String(count) + (titleType === "pat" ? " appliances" : " luminaires"), { size: 7.5, color: FAINT, alignRight: true });
-  const x0 = M2 + CARD_PAD, tw = CW - CARD_PAD * 2;
+  cardBox(doc, M3, y, CW, h);
+  tracked(doc, M3 + CARD_PAD, y + 18, titleType === "pat" ? "Appliances tested" : "Emergency lighting tests", { size: 6.5, color: ACCENT });
+  if (count != null) doc.text(W2 - M3 - CARD_PAD, y + 18, String(count) + (titleType === "pat" ? " appliances" : " luminaires"), { size: 7.5, color: FAINT, alignRight: true });
+  const x0 = M3 + CARD_PAD, tw = CW - CARD_PAD * 2;
   let cx = x0;
   const cols = layout.map((c) => {
     const ww = tw * c.w;
@@ -24926,16 +25241,16 @@ function trackedWidth(str, size, track) {
 }
 function signatureCard(doc, y, rec, meta) {
   const con = rec.contractor || {};
-  const declLines = wrap3(rec.declaration || (rec.type === "em" ? "I certify that the emergency lighting installation identified above has been inspected and tested to BS 5266-1:2016 and the results are as recorded." : "I certify that the portable appliances identified above have been inspected and tested in accordance with the IET Code of Practice, and the results are as recorded."), 8.5, CW - 200, 3);
+  const declLines = wrap4(rec.declaration || (rec.type === "em" ? "I certify that the emergency lighting installation identified above has been inspected and tested to BS 5266-1:2016 and the results are as recorded." : "I certify that the portable appliances identified above have been inspected and tested in accordance with the IET Code of Practice, and the results are as recorded."), 8.5, CW - 200, 3);
   const h = Math.max(96, CARD_PAD + 14 + declLines.length * 11 + 58);
-  cardBox(doc, M2, y, CW, h);
-  tracked(doc, M2 + CARD_PAD, y + 18, "Declaration", { size: 6.5, color: ACCENT });
+  cardBox(doc, M3, y, CW, h);
+  tracked(doc, M3 + CARD_PAD, y + 18, "Declaration", { size: 6.5, color: ACCENT });
   let yy2 = y + 32;
   declLines.forEach((l) => {
-    doc.text(M2 + CARD_PAD, yy2, l, { size: 8.5, color: MUTE });
+    doc.text(M3 + CARD_PAD, yy2, l, { size: 8.5, color: MUTE });
     yy2 += 11;
   });
-  const sigX = W2 - M2 - 190;
+  const sigX = W2 - M3 - 190;
   if (meta.signature) {
     try {
       const g = jpegInfo(meta.signature);
@@ -24947,13 +25262,13 @@ function signatureCard(doc, y, rec, meta) {
   doc.line(sigX, y + 60, sigX + 170, y + 60, { stroke: BORDER, lw: 0.7 });
   doc.text(sigX, y + 72, S([con.name, con.position].filter(Boolean).join("  \xB7  ") || "Engineer"), { size: 9, bold: true, color: INK });
   doc.text(sigX, y + 84, S(con.date ? "Signed " + con.date : ""), { size: 7.5, color: MUTE });
-  doc.text(M2 + CARD_PAD, y + h - 12, S([con.tradingTitle || "Mostlane", con.address, con.postcode].filter(Boolean).join(" \xB7 ")), { size: 7.5, color: FAINT });
+  doc.text(M3 + CARD_PAD, y + h - 12, S([con.tradingTitle || "Mostlane", con.address, con.postcode].filter(Boolean).join(" \xB7 ")), { size: 7.5, color: FAINT });
   return h;
 }
 function footer(doc, rec, pageNo, pageCount) {
   const note = rec.type === "em" ? "Tested to BS 5266-1:2016." : "Tested to the IET Code of Practice for In-service Inspection & Testing.";
-  doc.text(M2, H - 22, note + "  Generated by the Mostlane Portal.", { size: 7, color: FAINT });
-  doc.text(W2 - M2, H - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT, alignRight: true });
+  doc.text(M3, H - 22, note + "  Generated by the Mostlane Portal.", { size: 7, color: FAINT });
+  doc.text(W2 - M3, H - 22, `Page ${pageNo} of ${pageCount}`, { size: 7, color: FAINT, alignRight: true });
 }
 function buildCertPdf(record, meta = {}) {
   const rec = record || {};
@@ -24987,8 +25302,8 @@ function buildCertPdf(record, meta = {}) {
       headerFull(doc, rec, meta);
       const iy = 30 + HEADER_H + GAP;
       const colW = (CW - GAP) / 2;
-      infoCard(doc, M2, iy, colW, "Client", cl);
-      infoCard(doc, M2 + colW + GAP, iy, colW, "Installation address", inst);
+      infoCard(doc, M3, iy, colW, "Client", cl);
+      infoCard(doc, M3 + colW + GAP, iy, colW, "Installation address", inst);
       detailsCard(doc, iy + infoH + GAP, rec);
     } else {
       headerSlim(doc, rec, meta);
@@ -25014,7 +25329,7 @@ init_push();
 // src/lib/batterypdf.js
 var W3 = 595;
 var H2 = 842;
-var M3 = 36;
+var M4 = 36;
 var NAVY2 = [0, 0.204, 0.408];
 var INK2 = [0.09, 0.14, 0.22];
 var MUTE2 = [0.42, 0.48, 0.56];
@@ -25049,18 +25364,18 @@ function header(doc, meta) {
     try {
       const g = jpegInfo(meta.logo);
       const hh = 26;
-      doc.image(meta.logo, M3, 24, hh * (g.w / g.h), hh);
+      doc.image(meta.logo, M4, 24, hh * (g.w / g.h), hh);
     } catch {
     }
   }
-  doc.text(W3 - M3, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
-  doc.text(W3 - M3, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
+  doc.text(W3 - M4, 32, "Battery Supply Enquiry", { size: 17, bold: true, color: [1, 1, 1], alignRight: true });
+  doc.text(W3 - M4, 50, "Please quote \u2014 emergency lighting batteries", { size: 9.5, color: [0.75, 0.83, 0.92], alignRight: true });
   let y = 92;
   const con = meta.contractor || {};
   const bits = [con.tradingTitle, meta.site ? "Site: " + meta.site : "", meta.certNumber ? "EM cert " + meta.certNumber : ""].filter(Boolean);
-  doc.text(M3, y, S2(bits.join("   \xB7   ")), { size: 9.5, color: MUTE2 });
+  doc.text(M4, y, S2(bits.join("   \xB7   ")), { size: 9.5, color: MUTE2 });
   y += 8;
-  doc.line(M3, y, W3 - M3, y, { stroke: HAIR2, lw: 0.8 });
+  doc.line(M4, y, W3 - M4, y, { stroke: HAIR2, lw: 0.8 });
   return y + 16;
 }
 function itemBlock(doc, it, idx, y) {
@@ -25072,21 +25387,21 @@ function itemBlock(doc, it, idx, y) {
     }
   }).filter(Boolean);
   const photoH = photos.length ? 96 : 0;
-  const noteLines = it.note ? wrapLines(it.note, 8.5, W3 - M3 * 2 - 24, 2) : [];
+  const noteLines = it.note ? wrapLines(it.note, 8.5, W3 - M4 * 2 - 24, 2) : [];
   const blockH = 26 + 18 + 18 + noteLines.length * 11 + (photoH ? photoH + 12 : 0) + 14;
-  if (y + blockH > H2 - M3) {
+  if (y + blockH > H2 - M4) {
     doc.newPage(W3, H2);
-    y = M3 + 6;
+    y = M4 + 6;
   }
-  doc.rect(M3, y, W3 - M3 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
-  const px = M3 + 12;
+  doc.rect(M4, y, W3 - M4 * 2, blockH, { fill: CARD2, stroke: HAIR2, lw: 0.8 });
+  const px = M4 + 12;
   let ty = y + 18;
   doc.text(px, ty, S2(idx + 1 + ".  " + (it.ref || "Fitting")), { size: 11, bold: true, color: INK2 });
-  if (it.site) doc.text(W3 - M3 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
+  if (it.site) doc.text(W3 - M4 - 12, ty, fit2(it.site, 8.5, 180), { size: 8.5, color: MUTE2, alignRight: true });
   ty += 18;
   doc.text(px, ty, "Battery: ", { size: 9, bold: true, color: [0.3, 0.36, 0.44] });
-  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W3 - M3 * 2 - 120), { size: 9, color: INK2 });
-  doc.text(W3 - M3 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
+  doc.text(px + textWidth("Battery: ", 9), ty, fit2(it.spec || "(spec to confirm)", 9, W3 - M4 * 2 - 120), { size: 9, color: INK2 });
+  doc.text(W3 - M4 - 12, ty, "Qty: " + (it.qty || "?"), { size: 9.5, bold: true, color: NAVY2, alignRight: true });
   ty += 15;
   noteLines.forEach((l) => {
     doc.text(px, ty, l, { size: 8.5, color: MUTE2 });
@@ -25097,7 +25412,7 @@ function itemBlock(doc, it, idx, y) {
     let cx = px;
     for (const p of photos) {
       const w = Math.min(150, photoH * (p.g.w / p.g.h));
-      if (cx + w > W3 - M3 - 8) break;
+      if (cx + w > W3 - M4 - 8) break;
       try {
         doc.image(p.b, cx, ty, w, photoH);
       } catch {
@@ -25113,7 +25428,7 @@ function buildBatteryEnquiryPdf(items, meta = {}) {
   (items || []).forEach((it, idx) => {
     y = itemBlock(doc, it, idx, y);
   });
-  if (!(items || []).length) doc.text(M3, y, "No battery items.", { size: 10, color: MUTE2 });
+  if (!(items || []).length) doc.text(M4, y, "No battery items.", { size: 10, color: MUTE2 });
   return doc.bytes();
 }
 
@@ -26376,7 +26691,7 @@ var LOGO_W = 76;
 var LOGO_H = LOGO_W * (MOSTLANE_LOGO_H / MOSTLANE_LOGO_W);
 var PW = 842;
 var PH = 595;
-var M4 = 26;
+var M5 = 26;
 var ROW_H2 = 14.5;
 var LINE_H = 10;
 var ROW_PAD = 4.5;
@@ -26391,16 +26706,16 @@ var COLS2 = [
   { key: "days", label: "Days", w: 26 }
 ];
 var LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-var GRID_X = M4 + LEFT_W;
-var GRID_W = PW - M4 - GRID_X;
+var GRID_X = M5 + LEFT_W;
+var GRID_W = PW - M5 - GRID_X;
 var WORKS_DEFAULT_PX = 230;
 var PX_TO_PT = 168 / WORKS_DEFAULT_PX;
 function applyWorksWidth(worksW) {
   const px = Math.max(120, Math.min(560, Number(worksW) || WORKS_DEFAULT_PX));
   COLS2[0].w = Math.max(90, Math.min(380, Math.round(px * PX_TO_PT)));
   LEFT_W = COLS2.reduce((a, c) => a + c.w, 0);
-  GRID_X = M4 + LEFT_W;
-  GRID_W = PW - M4 - GRID_X;
+  GRID_X = M5 + LEFT_W;
+  GRID_W = PW - M5 - GRID_X;
 }
 var MIN_DAY_W = 6.5;
 var EXTRA_COL = [0.706, 0.325, 0.035];
@@ -26516,7 +26831,7 @@ function buildProgrammePdf(data, meta = {}) {
   }
   const headerBlockH = 89;
   const footerH = 18;
-  const bodyH = PH - M4 - headerBlockH - HDR_H - footerH - M4;
+  const bodyH = PH - M5 - headerBlockH - HDR_H - footerH - M5;
   const inWindow = (t, win) => {
     if (!t._start || !t._end) return false;
     const from = Math.round((t._start - s0) / DAY);
@@ -26544,7 +26859,7 @@ function buildProgrammePdf(data, meta = {}) {
   let first = true;
   const totalPages = pages.length;
   let pageNo = 0;
-  let lastGridBot = M4 + 100;
+  let lastGridBot = M5 + 100;
   {
     for (const page of pages) {
       const win = page.win, rows = page.rows;
@@ -26553,39 +26868,39 @@ function buildProgrammePdf(data, meta = {}) {
       pageNo++;
       if (!first) doc.newPage(PW, PH);
       first = false;
-      let tx = M4;
+      let tx = M5;
       if (LOGO_BYTES) {
         try {
-          doc.image(LOGO_BYTES, M4, M4 - 2, LOGO_W, LOGO_H);
-          tx = M4 + LOGO_W + 12;
+          doc.image(LOGO_BYTES, M5, M5 - 2, LOGO_W, LOGO_H);
+          tx = M5 + LOGO_W + 12;
         } catch (e) {
         }
       }
-      let y = M4 + 14;
+      let y = M5 + 14;
       doc.text(tx, y, meta.title || data.title || "Programme of works", { size: 15, bold: true });
       const revLbl = meta.rev ? `Rev ${meta.rev}` : "DRAFT \u2014 not issued";
       const issued = meta.issuedAt ? ` \xB7 issued ${fmtFull(new Date(meta.issuedAt))}` : "";
-      doc.text(PW - M4, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
+      doc.text(PW - M5, y, revLbl + issued, { size: 9.5, bold: true, alignRight: true, color: meta.rev ? [0.09, 0.4, 0.2] : [0.72, 0.4, 0.05] });
       y += 13;
       const subBits = [meta.client, meta.site, meta.ref ? "Ref " + meta.ref : ""].filter(Boolean).join(" \xB7 ");
       if (subBits) {
         doc.text(tx, y, subBits, { size: 9, grey: true });
       }
-      doc.text(PW - M4, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
+      doc.text(PW - M5, y, `Start ${fmtFull(s0)} \xB7 End ${fmtFull(e0)} \xB7 ${Math.round((e0 - s0) / DAY) + 1} days on programme`, { size: 9, alignRight: true, grey: true });
       y += 15;
       const rangeLbl = windows.length > 1 ? `Days ${win.from + 1}\u2013${win.from + win.days} of ${totalDays}  (${fmtDM(winStart)}\u2013${fmtDM(addDays2(winStart, win.days - 1))})` : "";
-      if (rangeLbl) doc.text(PW - M4, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
+      if (rangeLbl) doc.text(PW - M5, y, rangeLbl, { size: 8.5, alignRight: true, grey: true });
       const LEG_LINE_H = 11;
-      const legendRightL1 = PW - M4 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
-      let lx = M4, line = 0, dropped = 0;
+      const legendRightL1 = PW - M5 - (rangeLbl ? textWidth(rangeLbl, 8.5) + 14 : 0);
+      let lx = M5, line = 0, dropped = 0;
       for (const c of contractors) {
         if (!c.name) continue;
         const w = 11 + textWidth(c.name, 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M4;
+        const right = line === 0 ? legendRightL1 : PW - M5;
         if (lx + w > right) {
           if (line === 0) {
             line = 1;
-            lx = M4;
+            lx = M5;
           } else {
             dropped++;
             continue;
@@ -26598,10 +26913,10 @@ function buildProgrammePdf(data, meta = {}) {
       }
       if (hasExtra) {
         const w = 11 + textWidth("Extra works", 8.5) + 14;
-        const right = line === 0 ? legendRightL1 : PW - M4;
+        const right = line === 0 ? legendRightL1 : PW - M5;
         if (lx + w > right && line === 0) {
           line = 1;
-          lx = M4;
+          lx = M5;
         }
         const ly = y + line * LEG_LINE_H;
         doc.rect(lx, ly - 7, 8, 8, { fill: [0.85, 0.87, 0.9] });
@@ -26610,11 +26925,11 @@ function buildProgrammePdf(data, meta = {}) {
         lx += w;
       }
       if (dropped) doc.text(lx, y + line * LEG_LINE_H, `+${dropped} more`, { size: 8, grey: true });
-      y = M4 + headerBlockH;
+      y = M5 + headerBlockH;
       const pageRowsH = rows.reduce((a, t) => a + t._h, 0);
       const gridTop = y, gridBot = gridTop + HDR_H + pageRowsH;
-      doc.rect(M4, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
-      let cx = M4;
+      doc.rect(M5, gridTop, LEFT_W + win.days * dayW, HDR_H, { fill: [0.945, 0.958, 0.975] });
+      let cx = M5;
       for (const col of COLS2) {
         doc.text(cx + 3, gridTop + 14, col.label, { size: 8, bold: true, color: [0.2, 0.28, 0.38] });
         cx += col.w;
@@ -26646,21 +26961,21 @@ function buildProgrammePdf(data, meta = {}) {
         if (dayW >= 15 || isMon || first2) doc.line(x, gridTop, x, gridBot, { stroke: [0.78, 0.82, 0.87], lw: 0.5 });
       }
       doc.line(GRID_X, gridTop + 11, GRID_X + win.days * dayW, gridTop + 11, { stroke: [0.86, 0.89, 0.93], lw: 0.4 });
-      doc.line(M4, gridTop, M4 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
-      doc.line(M4, gridTop + HDR_H, M4 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M5, gridTop, M5 + LEFT_W + win.days * dayW, gridTop, { stroke: [0.7, 0.75, 0.8] });
+      doc.line(M5, gridTop + HDR_H, M5 + LEFT_W + win.days * dayW, gridTop + HDR_H, { stroke: [0.7, 0.75, 0.8] });
       let ry = gridTop + HDR_H;
       rows.forEach((t) => {
         const rh = t._h;
         const col = t._c ? hex2rgb(t._c.colour) : [0.55, 0.62, 0.7];
-        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M4 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
+        (t._lines || [t.name || ""]).forEach((ln, li) => doc.text(M5 + 3, ry + 10.5 + li * LINE_H, ln, { size: 8.5 }));
         if (t._c) {
-          doc.rect(M4 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
-          doc.text(M4 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
+          doc.rect(M5 + COLS2[0].w + 2, ry + 3.5, 7, 7, { fill: col });
+          doc.text(M5 + COLS2[0].w + 12, ry + 10.5, fitText(t._c.name, COLS2[1].w - 16, 8), { size: 8 });
         }
-        if (t._start) doc.text(M4 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
-        if (t._end) doc.text(M4 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
-        doc.text(M4 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
-        doc.line(M4, ry + rh, M4 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
+        if (t._start) doc.text(M5 + COLS2[0].w + COLS2[1].w + 3, ry + 10.5, fmtDM(t._start), { size: 8 });
+        if (t._end) doc.text(M5 + COLS2[0].w + COLS2[1].w + COLS2[2].w + 3, ry + 10.5, fmtDM(t._end), { size: 8, color: [0.05, 0.45, 0.42] });
+        doc.text(M5 + LEFT_W - 5, ry + 10.5, String(Math.max(1, Number(t.days) || 1)) + (t.wknd ? "*" : ""), { size: 8, alignRight: true });
+        doc.line(M5, ry + rh, M5 + LEFT_W + win.days * dayW, ry + rh, { stroke: [0.9, 0.92, 0.95], lw: 0.4 });
         if (t._start && t._end) {
           const marked = [];
           for (let d = t._start; d <= t._end; d = addDays2(d, 1)) {
@@ -26690,20 +27005,20 @@ function buildProgrammePdf(data, meta = {}) {
         }
         ry += rh;
       });
-      doc.rect(M4, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
+      doc.rect(M5, gridTop, LEFT_W + win.days * dayW, HDR_H + pageRowsH, { stroke: [0.7, 0.75, 0.8], lw: 0.8 });
       doc.line(GRID_X, gridTop, GRID_X, gridBot, { stroke: [0.7, 0.75, 0.8] });
       lastGridBot = gridBot;
-      const fy = PH - M4 + 6;
+      const fy = PH - M5 + 6;
       const wm = `Prepared by Mostlane Construction \xB7 ${revLbl}${issued}${meta.sharedWith ? " \xB7 shared with " + meta.sharedWith : ""}`;
-      doc.text(M4, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
-      doc.text(PW - M4, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
+      doc.text(M5, fy, wm + (tasks.some((t) => t.wknd) ? "   (* works weekends & bank holidays)" : ""), { size: 7.5, grey: true });
+      doc.text(PW - M5, fy, `Page ${pageNo} of ${totalPages}`, { size: 7.5, alignRight: true, grey: true });
     }
   }
   const notes = String(data.notes || meta.notes || "").trim();
   const items = Array.isArray(data.noteItems) ? data.noteItems.filter((n) => n && String(n.text || "").trim()) : [];
   if (notes || items.length) {
     const plain = items.filter((n) => !n.discuss), disc = items.filter((n) => n.discuss);
-    const PAD = 10, LH = 12, contentW = PW - 2 * M4 - 2 * PAD;
+    const PAD = 10, LH = 12, contentW = PW - 2 * M5 - 2 * PAD;
     const notesLines = notes ? wrapLines2(notes, contentW, 10, 0) : [];
     const plainW = plain.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
     const discW = disc.map((n) => wrapLines2(String(n.text).trim(), contentW - 12, 10, 0));
@@ -26716,15 +27031,15 @@ function buildProgrammePdf(data, meta = {}) {
     }
     const boxH = 2 * PAD + adv;
     let boxTop, ownPage = false;
-    if (lastGridBot + 14 + boxH <= PH - M4) {
+    if (lastGridBot + 14 + boxH <= PH - M5) {
       boxTop = lastGridBot + 14;
     } else {
       doc.newPage(PW, PH);
-      boxTop = M4 + 14;
+      boxTop = M5 + 14;
       ownPage = true;
     }
-    doc.roundRect(M4, boxTop, PW - 2 * M4, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
-    const x0 = M4 + PAD;
+    doc.roundRect(M5, boxTop, PW - 2 * M5, boxH, 6, { fill: [0.953, 0.965, 0.98], stroke: [0.7, 0.75, 0.8] });
+    const x0 = M5 + PAD;
     let ny = boxTop + PAD + 10;
     const para = (lines, x) => {
       for (const ln of lines) {
@@ -26751,7 +27066,7 @@ function buildProgrammePdf(data, meta = {}) {
         para(w, x0 + 12);
       }
     }
-    if (ownPage) doc.text(M4, PH - M4 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
+    if (ownPage) doc.text(M5, PH - M5 + 6, `Prepared by Mostlane Construction`, { size: 7.5, grey: true });
   }
   return doc.bytes();
 }

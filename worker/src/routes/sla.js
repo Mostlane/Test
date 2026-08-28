@@ -22,6 +22,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { sendToUser, sendToPermission, resolveNotificationsByTag, remindPermission } from "./push.js";
 import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
+import { buildJobSheetPdf } from "../lib/jobsheetpdf.js";
 import { buildZip } from "../lib/zip.js";
 import { logoBytes } from "../lib/logo.js";
 import { pdfExtractText, certNumberFromText } from "../lib/pdftext.js";
@@ -1391,6 +1392,104 @@ export async function handle(request, env, ctx, url, sess) {
       const pdf = await htmlToPdf(env, html);
       if (!pdf.ok) return jsonResponse({ error: "PDF generation failed" }, headers, 500);
       return new Response(pdf.buffer, { status: 200, headers: {
+        ...headers, "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store"
+      }});
+    }
+
+    // GET /sla/jobs/{id}/sheet.pdf?type=mostlane|client
+    //   A real, downloadable vector Job Sheet PDF built server-side (no external
+    //   HTML-to-PDF service, no browser print). Photos are embedded as the small
+    //   JPEG thumbnails so the file stays lean; the drawn signature is a PNG so it
+    //   can't be embedded — the sign-off (who + when) is rendered as text.
+    if (method === "GET" && parts[2] === "sheet.pdf") {
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const j = decorateJobWithLiveSla(job);
+      const copyType = (searchParams.get("type") === "client") ? "client" : "mostlane";
+      const cfg = {}; try { (await getSheetConfig(env, tenantId)).forEach(f => { cfg[f.key] = f; }); } catch {}
+      const shown = (key) => !(cfg[key] && cfg[key][copyType] === false);
+
+      const fmtDT = (v) => { if (!v) return ""; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
+      const fmtD = (v) => { if (!v) return ""; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleDateString("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "short", year: "numeric" }); };
+      const nm = (s) => String(s || "").replace(/\./g, " ").replace(/\s+/g, " ").trim();
+      const fmtDur = (min) => { min = Math.round(min || 0); const h = Math.floor(min / 60), m = min % 60; return h ? `${h}h ${m}m` : `${m}m`; };
+
+      const jobNo = (String(j.id || "").match(/^([A-Za-z]?\d+(?:\/\d+)?)-/) || [])[1] || j.helpdeskRef || j.id;
+      const engs = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
+        ? j.assignedEngineers.map(nm).join(", ") : nm(j.assignedTo);
+      const siteAddr = [j.address, j.postcode].filter(Boolean).join(", ");
+      const allRows = [
+        ["jobDate", "Job date", j.scheduledAt ? fmtD(j.scheduledAt) : fmtD(j.raisedAt)],
+        ["priority", "Priority", j.priority],
+        ["status", "Status", j.status],
+        ["engineer", "Engineer", engs],
+        ["customer", "Customer", j.customer || j.client || j.siteName],
+        ["contactPerson", "Site contact", j.contactPerson || j.contact || ""],
+        ["contactPhone", "Telephone", j.telephone || j.phone || ""],
+        ["contactEmail", "Email", j.email || ""],
+        ["siteAddress", "Site address", siteAddr],
+      ];
+      const details = allRows.filter(r => shown(r[0])).map(r => [r[1], r[2]]);
+
+      // SLA (hidden for projects / no target).
+      const isProject = /^p\d/i.test(String(j.siteCode || "")) || /project/i.test(String(j.storeType || "") + String(j.client || ""));
+      const sla = (!isProject && j.targetAt && shown("sla"))
+        ? { met: j.sla ? j.sla.state !== "BREACHED" : true, target: fmtDT(j.targetAt) } : null;
+
+      // Time on job from status history (Travelling / In Progress intervals).
+      let travelling = 0, onsite = 0;
+      const hist = (Array.isArray(j.statusHistory) ? j.statusHistory : []).slice()
+        .filter(e => e && e.at).sort((a, b) => new Date(a.at) - new Date(b.at));
+      for (let i = 0; i < hist.length - 1; i++) {
+        const mins = (new Date(hist[i + 1].at) - new Date(hist[i].at)) / 60000;
+        if (!(mins > 0) || mins > 24 * 60) continue;
+        const st = String(hist[i].status || "").toLowerCase();
+        if (st.includes("travel")) travelling += mins;
+        else if (st.includes("progress")) onsite += mins;
+      }
+      const total = travelling + onsite;
+      const time = total ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
+
+      const timeline = hist.map(e => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) }));
+      const notes = (j.events || [])
+        .filter(e => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined")
+        .sort((a, b) => new Date(a.at) - new Date(b.at))
+        .map(n => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" }));
+
+      // Photos — fetch the small thumbnail bytes (fallback full-res), with stage.
+      let photos = [];
+      if (env.JOB_FILES) {
+        try {
+          const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
+          const objs = (listed.objects || []).filter(o => !o.key.endsWith(".thumb"));
+          const thumbSet = new Set((listed.objects || []).filter(o => o.key.endsWith(".thumb")).map(o => o.key));
+          const overrides = (j && j.photoStages) || {};
+          for (const o of objs) {
+            const fn = o.key.split("/").pop();
+            const stage = overrides[fn] || (o.customMetadata && o.customMetadata.stage) || "";
+            const srcKey = thumbSet.has(o.key + ".thumb") ? o.key + ".thumb" : o.key;
+            let bytes = null;
+            try { const r = await env.JOB_FILES.get(srcKey); if (r) bytes = new Uint8Array(await r.arrayBuffer()); } catch {}
+            if (bytes) photos.push({ bytes, stage });
+          }
+        } catch {}
+      }
+
+      const signature = (j.signature && j.signature.fileKey && j.signature.signedBy)
+        ? { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt) } : null;
+
+      const name = j.siteName || j.siteCode || "Job";
+      let logo = null; try { logo = logoBytes(); } catch {}
+      const pdf = buildJobSheetPdf({
+        jobNo, copyType, title: name,
+        subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
+        details, description: j.description || j.summary || j.title || "",
+        sla, time, timeline, notes, photos, signature,
+      }, { logo });
+
+      const filename = `Job_${safeRef(j, id)}.pdf`;
+      return new Response(pdf, { status: 200, headers: {
         ...headers, "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store"
       }});
