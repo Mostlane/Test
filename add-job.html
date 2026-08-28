@@ -332,6 +332,18 @@
         <div class="hint" id="reqHint">Projects default to none — a project job can be completed with nothing. Tick any to require it on this job.</div>
       </div>
 
+      <!-- Photos (optional) -->
+      <div class="field-group" id="photoGroup">
+        <label>Photos <span class="hint">(optional — attach photos of the fault / site)</span></label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:2px">
+          <input type="file" id="jobPhotos" accept="image/*" multiple capture="environment" style="display:none">
+          <button type="button" class="btn" id="addPhotosBtn">📷 Add photos</button>
+          <span class="hint" id="photoCount"></span>
+        </div>
+        <div id="photoPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+        <div class="hint">These upload to the job once it's created, and show on the job card for the office and the engineer.</div>
+      </div>
+
       <!-- Site details captured from the picker (not shown) -->
       <input type="hidden" id="siteCode" name="siteCode">
       <input type="hidden" id="siteName" name="siteName">
@@ -648,6 +660,77 @@ function applyReqDefaults(){
    FORM SUBMIT
 ------------------------------ */
 
+/* ---------------------------
+   PHOTOS (optional attach on create)
+--------------------------- */
+var selectedPhotos = [];
+function shrinkImage(file, maxDim, quality){
+  return new Promise(function(resolve){
+    if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
+    var img=new Image(), u=URL.createObjectURL(file);
+    img.onload=function(){
+      URL.revokeObjectURL(u);
+      var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+      w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+      var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+      cv.getContext("2d").drawImage(img,0,0,w,h);
+      cv.toBlob(function(b){ resolve(b); },"image/jpeg",quality||0.7);
+    };
+    img.onerror=function(){ URL.revokeObjectURL(u); resolve(null); };
+    img.src=u;
+  });
+}
+function renderPhotoPreview(){
+  var box=$("photoPreview"), cnt=$("photoCount");
+  if(cnt) cnt.textContent = selectedPhotos.length ? (selectedPhotos.length + " selected") : "";
+  if(!box) return;
+  box.innerHTML="";
+  selectedPhotos.forEach(function(f, i){
+    var wrap=document.createElement("div");
+    wrap.style.cssText="position:relative;width:76px;height:76px;border-radius:8px;overflow:hidden;border:1px solid #d7dee6";
+    var im=document.createElement("img");
+    im.style.cssText="width:100%;height:100%;object-fit:cover";
+    try{ im.src=URL.createObjectURL(f); }catch(e){}
+    var x=document.createElement("button");
+    x.type="button"; x.textContent="✕";
+    x.style.cssText="position:absolute;top:2px;right:2px;width:20px;height:20px;line-height:18px;padding:0;border:none;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;cursor:pointer";
+    x.addEventListener("click", function(){ selectedPhotos.splice(i,1); renderPhotoPreview(); });
+    wrap.appendChild(im); wrap.appendChild(x); box.appendChild(wrap);
+  });
+}
+function initPhotoPicker(){
+  var input=$("jobPhotos"), btn=$("addPhotosBtn");
+  if(!input || !btn) return;
+  btn.addEventListener("click", function(){ input.click(); });
+  input.addEventListener("change", function(){
+    Array.prototype.forEach.call(input.files||[], function(f){ if(/^image\//.test(f.type)) selectedPhotos.push(f); });
+    input.value="";
+    renderPhotoPreview();
+  });
+}
+// Upload the chosen photos to the freshly-created job (full + thumb), stage
+// "Before" so they sit as reference/fault photos on the job card. Best-effort:
+// a failed photo never fails the job (it's already created).
+async function uploadJobPhotos(jobId, statusEl){
+  if(!selectedPhotos.length || !jobId) return;
+  var ok=0;
+  for(var i=0;i<selectedPhotos.length;i++){
+    var f=selectedPhotos[i];
+    if(statusEl) statusEl.textContent = "Uploading photo " + (i+1) + " of " + selectedPhotos.length + "…";
+    try{
+      var full = await shrinkImage(f, 1600, 0.85) || f;
+      var thumb = await shrinkImage(f, 400, 0.7);
+      var fn = (f.name || ("photo-"+(i+1)+".jpg")).replace(/[^\w.\-]+/g,"_");
+      var form = new FormData();
+      form.append("file", full, fn);
+      if(thumb) form.append("thumb", thumb, "thumb.jpg");
+      var r = await fetch(API_BASE + "/jobs/" + encodeURIComponent(jobId) + "/files?filename=" + encodeURIComponent(fn) + "&stage=Before", { method:"POST", body:form });
+      if(r.ok) ok++;
+    }catch(e){ /* keep going */ }
+  }
+  return ok;
+}
+
 async function handleSubmit(evt){
   evt.preventDefault();
   const statusEl = $("statusText");
@@ -718,6 +801,14 @@ async function handleSubmit(evt){
       throw new Error(data.error || ("HTTP " + res.status));
     }
 
+    // Attach any chosen photos to the new job before showing success.
+    let photoNote = "";
+    if(selectedPhotos.length && data.id){
+      const up = await uploadJobPhotos(data.id, statusEl);
+      photoNote = up ? ` · ${up} photo${up===1?"":"s"} attached` : "";
+      selectedPhotos = []; renderPhotoPreview();
+    }
+
     const ref = data.helpdeskRef || data.id;
     const isFb = $("fallbackTemplate") && $("fallbackTemplate").checked;
     statusEl.textContent = "";
@@ -727,7 +818,7 @@ async function handleSubmit(evt){
       $("viewJobLink").href = `sla-scheduler.html`;
       $("viewJobLink").textContent = "Open Scheduler →";
     } else {
-      $("successMsg").textContent = `Job created: ${ref}`;
+      $("successMsg").textContent = `Job created: ${ref}${photoNote}`;
       $("viewJobLink").href = `job-view.html?jobId=${encodeURIComponent(data.id)}`;
     }
 
@@ -753,6 +844,7 @@ async function init(){
   if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
 
   $("jobForm").addEventListener("submit", handleSubmit);
+  initPhotoPicker();
   // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
   try{ if(window.MLUI && MLUI.richBar) MLUI.richBar("description"); }catch(e){}
   // Auto-grow the description to fit its content (capped ~50% of the screen).
