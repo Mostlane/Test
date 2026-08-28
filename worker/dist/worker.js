@@ -5174,44 +5174,51 @@ function buildJobSheetPdf(data = {}, meta = {}) {
     doc.line(M2, y, PAGE_W3 - M2, y, { stroke: LINE2 });
     y += 8;
   };
+  const logoH = 44;
   if (meta.logo) {
     try {
       const d = jpegInfo(meta.logo);
-      const h = 30;
-      doc.image(meta.logo, M2, y, h * (d.w / d.h), h);
+      doc.image(meta.logo, M2, y, logoH * (d.w / d.h), logoH);
     } catch {
     }
   }
-  doc.text(M2 + 130, y + 11, "Job Sheet", { size: 15, bold: true, color: BLUE2 });
-  if (data.showJobNo !== false) doc.text(M2 + 130, y + 26, "Job " + (data.jobNo || "\u2014"), { size: 10, color: GREY2 });
+  doc.text((PAGE_W3 - textWidth("Job Sheet", 18)) / 2, y + 18, "Job Sheet", { size: 18, bold: true, color: BLUE2 });
+  if (data.showJobNo !== false) {
+    const jn = "Job " + (data.jobNo || "\u2014");
+    doc.text((PAGE_W3 - textWidth(jn, 9.5)) / 2, y + 33, jn, { size: 9.5, color: GREY2 });
+  }
   const copyTxt = data.copyType === "client" ? "Client copy" : "Mostlane copy";
-  doc.text(PAGE_W3 - M2 - textWidth(copyTxt, 8.5), y + 11, copyTxt, { size: 8.5, color: GREY2 });
-  y += 40;
-  if (data.title) {
-    doc.text(M2, y + 10, data.title, { size: 12, bold: true });
-    y += 16;
-  }
-  if (data.subtitle) {
-    doc.text(M2, y + 9, data.subtitle, { size: 9, color: GREY2 });
-    y += 14;
-  }
-  y += 2;
+  doc.text(PAGE_W3 - M2 - textWidth(copyTxt, 8.5), y + 12, copyTxt, { size: 8.5, color: GREY2 });
+  y += logoH + 6;
   doc.line(M2, y, PAGE_W3 - M2, y, { stroke: LINE2 });
-  y += 6;
+  y += 13;
+  if (data.title) {
+    doc.text(M2, y, data.title, { size: 13, bold: true });
+    if (data.subtitle) doc.text(PAGE_W3 - M2 - textWidth(data.subtitle, 9), y, data.subtitle, { size: 9, color: GREY2 });
+    y += 10;
+  }
   const colW = CONTENT_W2 / 2;
+  const RH = 10.5;
   const details = (data.details || []).filter((p) => p && p[1] != null && String(p[1]).trim() !== "");
   for (let i = 0; i < details.length; i += 2) {
     const rows = [details[i], details[i + 1]].filter(Boolean);
     let rowH = 0;
-    ensure6(30);
+    ensure6(24);
     rows.forEach((pair, c) => {
       const x = M2 + c * colW;
-      label(x, y + 8, String(pair[0]).toUpperCase());
-      const lines = wrap2(pair[1], 9.5, colW - 14);
-      lines.forEach((ln, li) => doc.text(x, y + 20 + li * 12, ln, { size: 9.5 }));
-      rowH = Math.max(rowH, 20 + lines.length * 12);
+      label(x, y + 7, String(pair[0]).toUpperCase());
+      const lines = wrap2(pair[1], 9, colW - 12);
+      lines.forEach((ln, li) => doc.text(x, y + 17 + li * RH, ln, { size: 9 }));
+      rowH = Math.max(rowH, 17 + lines.length * RH);
     });
-    y += rowH + 4;
+    y += rowH + 2;
+  }
+  if (data.siteAddress) {
+    const parts = String(data.siteAddress).split(",").map((s) => s.trim()).filter(Boolean);
+    ensure6(17 + parts.length * RH);
+    label(M2, y + 7, "SITE ADDRESS");
+    parts.forEach((ln, li) => doc.text(M2, y + 17 + li * RH, ln, { size: 9 }));
+    y += 17 + parts.length * RH + 2;
   }
   if (data.description) {
     heading("Description");
@@ -5276,26 +5283,37 @@ function buildJobSheetPdf(data = {}, meta = {}) {
       doc.text(M2, y + 10, "Skipped (Full-Access override)" + (r.by ? " - " + r.by : ""), { size: 9.5, color: BAD });
       y += 16;
     } else {
-      (r.hazards || []).forEach((h) => {
-        ensure6(13);
-        const tag = h.ok ? "OK" : "REVIEW";
-        doc.text(M2, y + 9, tag, { size: 8.5, bold: true, color: h.ok ? OK : BAD });
-        doc.text(M2 + 44, y + 9, String(h.item || ""), { size: 9.5 });
-        y += 12;
-      });
+      const haz = r.hazards || [];
+      const cw = CONTENT_W2 / 2;
+      for (let i = 0; i < haz.length; i += 2) {
+        const pair = [haz[i], haz[i + 1]].filter(Boolean);
+        ensure6(14);
+        pair.forEach((h, c) => {
+          const x = M2 + c * cw;
+          const tag = h.ok ? "OK" : "REVIEW";
+          const tw = textWidth(tag, 8);
+          let item = String(h.item || "");
+          const maxW = cw - tw - 22;
+          while (textWidth(item, 9) > maxW && item.length > 4) item = item.slice(0, -2);
+          doc.text(x, y + 9, item, { size: 9 });
+          doc.text(x + cw - tw - 12, y + 9, tag, { size: 8, bold: true, color: h.ok ? OK : BAD });
+        });
+        y += 13;
+      }
+      y += 3;
       ensure6(14);
-      doc.text(M2, y + 10, "Safe to proceed: ", { size: 9.5, color: GREY2 });
+      doc.text(M2, y + 9, "Safe to proceed: ", { size: 9.5, color: GREY2 });
       doc.text(
         M2 + textWidth("Safe to proceed: ", 9.5),
-        y + 10,
+        y + 9,
         r.safe ? "Yes" : "No",
         { size: 9.5, bold: true, color: r.safe ? OK : BAD }
       );
       y += 15;
-      if (r.notes) wrap2(r.notes, 9.5, CONTENT_W2).forEach((ln) => {
-        ensure6(13);
-        doc.text(M2, y + 9, ln, { size: 9.5 });
-        y += 12;
+      if (r.notes) wrap2(r.notes, 9, CONTENT_W2).forEach((ln) => {
+        ensure6(12);
+        doc.text(M2, y + 9, ln, { size: 9 });
+        y += 11;
       });
       if (r.by) {
         ensure6(12);
@@ -7250,7 +7268,7 @@ async function handle8(request, env, ctx, url, sess) {
       const jobNo = (String(j.id || "").match(/^([A-Za-z]?\d+(?:\/\d+)?)-/) || [])[1] || j.helpdeskRef || j.id;
       const engs = Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers.map(nm).join(", ") : nm(j.assignedTo);
       const siteAddr = [j.address, j.postcode].filter(Boolean).join(", ");
-      const customerName = await resolveCustomerName(env, tenantId, j);
+      const { customer: customerName, siteName: fullSiteName } = await resolveSiteMeta(env, tenantId, j);
       const allRows = [
         ["jobDate", "Job date", j.scheduledAt ? fmtD(j.scheduledAt) : fmtD(j.raisedAt)],
         ["priority", "Priority", j.priority],
@@ -7259,10 +7277,10 @@ async function handle8(request, env, ctx, url, sess) {
         ["customer", "Customer", customerName],
         ["contactPerson", "Site contact", j.contactPerson || j.contact || ""],
         ["contactPhone", "Telephone", j.telephone || j.phone || ""],
-        ["contactEmail", "Email", j.email || ""],
-        ["siteAddress", "Site address", siteAddr]
+        ["contactEmail", "Email", j.email || ""]
       ];
       const details = allRows.filter((r) => shown(r[0])).map((r) => [r[1], r[2]]);
+      const siteAddress = shown("siteAddress") ? siteAddr : "";
       const isProject = /^p\d/i.test(String(j.siteCode || "")) || /project/i.test(String(j.storeType || "") + String(j.client || ""));
       const sla = !isProject && j.targetAt && shown("sla") ? { met: j.sla ? j.sla.state !== "BREACHED" : true, target: fmtDT(j.targetAt) } : null;
       let travelling = 0, onsite = 0;
@@ -7330,7 +7348,6 @@ async function handle8(request, env, ctx, url, sess) {
           }
         }
       }
-      const name = j.siteName || j.siteCode || "Job";
       let logo = null;
       try {
         logo = logoBytes();
@@ -7339,10 +7356,11 @@ async function handle8(request, env, ctx, url, sess) {
       const pdf = buildJobSheetPdf({
         jobNo,
         copyType,
-        title: shown("jobName") ? name : "",
+        title: shown("jobName") ? fullSiteName || "Job" : "",
         showJobNo: shown("jobId"),
         subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
         details,
+        siteAddress,
         description: shown("description") ? j.description || j.summary || j.title || "" : "",
         sla,
         time,
@@ -10752,21 +10770,29 @@ function customerForClient(c) {
   if (c === "chapplins") return "Chapplins Lettings";
   return "";
 }
-async function resolveCustomerName(env, tenantId, job) {
-  if (job.customer && String(job.customer).trim()) return job.customer;
+async function resolveSiteMeta(env, tenantId, job) {
   let cl = job.client || job.storeType || "";
+  let sname = "";
   const code = String(job.siteCode || "").trim();
-  if (!cl && code) {
+  if (code) {
     try {
       const padded = /^\d+$/.test(code) ? code.padStart(4, "0") : code;
       const row = await env.DB.prepare(
-        "SELECT client FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
+        "SELECT client, site_name FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
       ).bind(tenantId, code, padded, code).first();
-      cl = row && row.client || "";
+      if (row) {
+        if (!cl) cl = row.client || "";
+        sname = row.site_name || "";
+      }
     } catch {
     }
   }
-  return customerForClient(cl) || job.client && String(job.client).trim() || job.siteName || job.siteCode || "";
+  const customer = job.customer && String(job.customer).trim() || customerForClient(cl) || job.client && String(job.client).trim() || job.siteName || job.siteCode || "";
+  const siteName = sname || job.siteName || job.siteCode || "";
+  return { customer, siteName };
+}
+async function resolveCustomerName(env, tenantId, job) {
+  return (await resolveSiteMeta(env, tenantId, job)).customer;
 }
 function decorateAuditItems(env, items) {
   if (!Array.isArray(items)) return items;

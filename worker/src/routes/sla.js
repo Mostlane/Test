@@ -1420,7 +1420,7 @@ export async function handle(request, env, ctx, url, sess) {
       const engs = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
         ? j.assignedEngineers.map(nm).join(", ") : nm(j.assignedTo);
       const siteAddr = [j.address, j.postcode].filter(Boolean).join(", ");
-      const customerName = await resolveCustomerName(env, tenantId, j);
+      const { customer: customerName, siteName: fullSiteName } = await resolveSiteMeta(env, tenantId, j);
       const allRows = [
         ["jobDate", "Job date", j.scheduledAt ? fmtD(j.scheduledAt) : fmtD(j.raisedAt)],
         ["priority", "Priority", j.priority],
@@ -1430,9 +1430,9 @@ export async function handle(request, env, ctx, url, sess) {
         ["contactPerson", "Site contact", j.contactPerson || j.contact || ""],
         ["contactPhone", "Telephone", j.telephone || j.phone || ""],
         ["contactEmail", "Email", j.email || ""],
-        ["siteAddress", "Site address", siteAddr],
       ];
       const details = allRows.filter(r => shown(r[0])).map(r => [r[1], r[2]]);
+      const siteAddress = shown("siteAddress") ? siteAddr : "";
 
       // SLA (hidden for projects / no target).
       const isProject = /^p\d/i.test(String(j.siteCode || "")) || /project/i.test(String(j.storeType || "") + String(j.client || ""));
@@ -1510,12 +1510,11 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
 
-      const name = j.siteName || j.siteCode || "Job";
       let logo = null; try { logo = logoBytes(); } catch {}
       const pdf = buildJobSheetPdf({
-        jobNo, copyType, title: shown("jobName") ? name : "", showJobNo: shown("jobId"),
+        jobNo, copyType, title: shown("jobName") ? (fullSiteName || "Job") : "", showJobNo: shown("jobId"),
         subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
-        details, description: shown("description") ? (j.description || j.summary || j.title || "") : "",
+        details, siteAddress, description: shown("description") ? (j.description || j.summary || j.title || "") : "",
         sla, time, timeline, notes, ra, photos, signature,
         showSignoff: shown("signature"),
       }, { logo });
@@ -5056,24 +5055,27 @@ function customerForClient(c) {
   return "";
 }
 
-// Resolve a job's customer name: a typed job.customer wins, else derive it from the
-// site's client group (looked up numerically — the site is "0414" but a job carries
-// "414"), else fall back to the site name.
-async function resolveCustomerName(env, tenantId, job) {
-  if (job.customer && String(job.customer).trim()) return job.customer;
+// Resolve a job's billing customer name AND full site name from the site record
+// (looked up numerically — the site is "0414" but a job carries "414"). A typed
+// job.customer wins for the customer; the site record's name wins for the title.
+async function resolveSiteMeta(env, tenantId, job) {
   let cl = job.client || job.storeType || "";
+  let sname = "";
   const code = String(job.siteCode || "").trim();
-  if (!cl && code) {
+  if (code) {
     try {
       const padded = /^\d+$/.test(code) ? code.padStart(4, "0") : code;
       const row = await env.DB.prepare(
-        "SELECT client FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
+        "SELECT client, site_name FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
       ).bind(tenantId, code, padded, code).first();
-      cl = (row && row.client) || "";
+      if (row) { if (!cl) cl = row.client || ""; sname = row.site_name || ""; }
     } catch {}
   }
-  return customerForClient(cl) || (job.client && String(job.client).trim()) || job.siteName || job.siteCode || "";
+  const customer = (job.customer && String(job.customer).trim()) || customerForClient(cl) || (job.client && String(job.client).trim()) || job.siteName || job.siteCode || "";
+  const siteName = sname || job.siteName || job.siteCode || "";
+  return { customer, siteName };
 }
+async function resolveCustomerName(env, tenantId, job) { return (await resolveSiteMeta(env, tenantId, job)).customer; }
 // Attach public view URLs to a site-audit job's checklist items (their photos
 // live in the public JOB_FILES bucket). Response-only — never stored.
 function decorateAuditItems(env, items) {

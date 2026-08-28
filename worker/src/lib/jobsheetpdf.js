@@ -62,33 +62,52 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
   };
 
   // ── Header ──────────────────────────────────────────────────────────────
+  const logoH = 44;
   if (meta.logo) {
-    try { const d = jpegInfo(meta.logo); const h = 30; doc.image(meta.logo, M, y, h * (d.w / d.h), h); } catch {}
+    try { const d = jpegInfo(meta.logo); doc.image(meta.logo, M, y, logoH * (d.w / d.h), logoH); } catch {}
   }
-  doc.text(M + 130, y + 11, "Job Sheet", { size: 15, bold: true, color: BLUE });
-  if (data.showJobNo !== false) doc.text(M + 130, y + 26, "Job " + (data.jobNo || "—"), { size: 10, color: GREY });
+  // "Job Sheet" centred across the page.
+  doc.text((PAGE_W - textWidth("Job Sheet", 18)) / 2, y + 18, "Job Sheet", { size: 18, bold: true, color: BLUE });
+  if (data.showJobNo !== false) {
+    const jn = "Job " + (data.jobNo || "—");
+    doc.text((PAGE_W - textWidth(jn, 9.5)) / 2, y + 33, jn, { size: 9.5, color: GREY });
+  }
   const copyTxt = data.copyType === "client" ? "Client copy" : "Mostlane copy";
-  doc.text(PAGE_W - M - textWidth(copyTxt, 8.5), y + 11, copyTxt, { size: 8.5, color: GREY });
-  y += 40;
-  if (data.title) { doc.text(M, y + 10, data.title, { size: 12, bold: true }); y += 16; }
-  if (data.subtitle) { doc.text(M, y + 9, data.subtitle, { size: 9, color: GREY }); y += 14; }
-  y += 2; doc.line(M, y, PAGE_W - M, y, { stroke: LINE }); y += 6;
+  doc.text(PAGE_W - M - textWidth(copyTxt, 8.5), y + 12, copyTxt, { size: 8.5, color: GREY });
+  y += logoH + 6;
+  doc.line(M, y, PAGE_W - M, y, { stroke: LINE }); y += 13;
 
-  // ── Details grid (two columns) ──────────────────────────────────────────
+  // Site name (bold) with the date on the same line, right-aligned.
+  if (data.title) {
+    doc.text(M, y, data.title, { size: 13, bold: true });
+    if (data.subtitle) doc.text(PAGE_W - M - textWidth(data.subtitle, 9), y, data.subtitle, { size: 9, color: GREY });
+    y += 10;
+  }
+
+  // ── Details grid (two columns, compact) ─────────────────────────────────
   const colW = CONTENT_W / 2;
+  const RH = 10.5;   // value line height
   const details = (data.details || []).filter(p => p && p[1] != null && String(p[1]).trim() !== "");
   for (let i = 0; i < details.length; i += 2) {
     const rows = [details[i], details[i + 1]].filter(Boolean);
     let rowH = 0;
-    ensure(30);
+    ensure(24);
     rows.forEach((pair, c) => {
       const x = M + c * colW;
-      label(x, y + 8, String(pair[0]).toUpperCase());
-      const lines = wrap(pair[1], 9.5, colW - 14);
-      lines.forEach((ln, li) => doc.text(x, y + 20 + li * 12, ln, { size: 9.5 }));
-      rowH = Math.max(rowH, 20 + lines.length * 12);
+      label(x, y + 7, String(pair[0]).toUpperCase());
+      const lines = wrap(pair[1], 9, colW - 12);
+      lines.forEach((ln, li) => doc.text(x, y + 17 + li * RH, ln, { size: 9 }));
+      rowH = Math.max(rowH, 17 + lines.length * RH);
     });
-    y += rowH + 4;
+    y += rowH + 2;
+  }
+  // Site address — full width, each part stacked on its own line.
+  if (data.siteAddress) {
+    const parts = String(data.siteAddress).split(",").map(s => s.trim()).filter(Boolean);
+    ensure(17 + parts.length * RH);
+    label(M, y + 7, "SITE ADDRESS");
+    parts.forEach((ln, li) => doc.text(M, y + 17 + li * RH, ln, { size: 9 }));
+    y += 17 + parts.length * RH + 2;
   }
 
   // ── Description ─────────────────────────────────────────────────────────
@@ -157,19 +176,31 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
       doc.text(M, y + 10, "Skipped (Full-Access override)" + (r.by ? " - " + r.by : ""), { size: 9.5, color: BAD });
       y += 16;
     } else {
-      (r.hazards || []).forEach(h => {
-        ensure(13);
-        const tag = h.ok ? "OK" : "REVIEW";
-        doc.text(M, y + 9, tag, { size: 8.5, bold: true, color: h.ok ? OK : BAD });
-        doc.text(M + 44, y + 9, String(h.item || ""), { size: 9.5 });
-        y += 12;
-      });
-      ensure(14);
-      doc.text(M, y + 10, "Safe to proceed: ", { size: 9.5, color: GREY });
-      doc.text(M + textWidth("Safe to proceed: ", 9.5), y + 10, r.safe ? "Yes" : "No",
+      // Two-column checklist: hazard on the left, an aligned OK / REVIEW tag on
+      // the right of each column.
+      const haz = r.hazards || [];
+      const cw = CONTENT_W / 2;
+      for (let i = 0; i < haz.length; i += 2) {
+        const pair = [haz[i], haz[i + 1]].filter(Boolean);
+        ensure(14);
+        pair.forEach((h, c) => {
+          const x = M + c * cw;
+          const tag = h.ok ? "OK" : "REVIEW";
+          const tw = textWidth(tag, 8);
+          let item = String(h.item || "");
+          const maxW = cw - tw - 22;
+          while (textWidth(item, 9) > maxW && item.length > 4) item = item.slice(0, -2);
+          doc.text(x, y + 9, item, { size: 9 });
+          doc.text(x + cw - tw - 12, y + 9, tag, { size: 8, bold: true, color: h.ok ? OK : BAD });
+        });
+        y += 13;
+      }
+      y += 3; ensure(14);
+      doc.text(M, y + 9, "Safe to proceed: ", { size: 9.5, color: GREY });
+      doc.text(M + textWidth("Safe to proceed: ", 9.5), y + 9, r.safe ? "Yes" : "No",
         { size: 9.5, bold: true, color: r.safe ? OK : BAD });
       y += 15;
-      if (r.notes) wrap(r.notes, 9.5, CONTENT_W).forEach(ln => { ensure(13); doc.text(M, y + 9, ln, { size: 9.5 }); y += 12; });
+      if (r.notes) wrap(r.notes, 9, CONTENT_W).forEach(ln => { ensure(12); doc.text(M, y + 9, ln, { size: 9 }); y += 11; });
       if (r.by) { ensure(12); doc.text(M, y + 8, "Assessed by " + r.by + (r.at ? " · " + r.at : ""), { size: 8, color: GREY }); y += 12; }
     }
   }
