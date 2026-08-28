@@ -573,6 +573,46 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, id: job.id, scheduledAt: next.toISOString(), months }, {}, env, request);
   }
 
+  // POST /certs/jobs/bulk-create — create an EM (or PAT) job for MANY sites in one
+  // go (built for the FBC monthly round). The client sends each site with its
+  // pre-computed scheduledAt (it owns the London-time spread). {type, emKind,
+  // engineers[], durationMinutes, sites:[{siteNumber, scheduledAt}]}.
+  if (sub === "/jobs/bulk-create" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const sites = Array.isArray(b.sites) ? b.sites.slice(0, 120) : [];
+    if (!sites.length) return error("No sites selected", 400, env, request);
+    const type = b.type === "pat" ? "pat" : "em";
+    const emKind = type === "em" ? (b.emKind === "monthly" ? "monthly" : "yearly") : "";
+    const dur = Number(b.durationMinutes) > 0 ? Number(b.durationMinutes) : (type === "em" ? (emKind === "monthly" ? 30 : 180) : 45);
+    const engineers = Array.isArray(b.engineers) ? b.engineers.filter(Boolean).slice(0, 20) : [];
+    const nums = [...new Set(sites.map(s => String(s.siteNumber || "")).filter(Boolean))];
+    const ph = nums.map(() => "?").join(",");
+    const rows = nums.length ? ((await env.DB.prepare(`SELECT site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number IN (${ph})`).bind(tid, ...nums).all()).results || []) : [];
+    const byNum = {}; rows.forEach(r => { byNum[String(r.site_number)] = r; });
+    const yr = String(new Date().getFullYear()).slice(-2);
+    const created = [], skipped = [];
+    for (const it of sites) {
+      const num = String(it.siteNumber || ""); const s = byNum[num];
+      if (!num || !s) { if (num) skipped.push(num); continue; }
+      let addr = ""; try { const dd = s.data ? JSON.parse(s.data) : {}; addr = dd.address || ""; } catch {}
+      const setNum = (type === "em" && emKind !== "monthly") ? await emSetFor(env, tid, num) : "";
+      const desc = type === "em"
+        ? (emKind === "monthly" ? `Monthly emergency lighting flick test — ${s.site_name || num}` : `Import certificate number ${setNum || num}-${yr}`)
+        : `Import certificate number ${num}-${yr}`;
+      const sched = /^\d{4}-\d{2}-\d{2}T/.test(String(it.scheduledAt || "")) ? it.scheduledAt : undefined;
+      const job = await createOrUpdateJobFromPayload(env, tid, {
+        reference: s.site_name || num, description: desc,
+        siteName: s.site_name || "", siteCode: num, address: addr, postcode: s.postcode || "",
+        emTest: type === "em", pat: type === "pat", emKind,
+        durationMinutes: dur, scheduledAt: sched, status: "Pending",
+        assignedEngineers: engineers, originator: "bulk-em",
+      });
+      created.push({ id: job.id, site: s.site_name || num });
+    }
+    return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
+  }
+
   // ── EM remedial battery photo upload (engineer or office) ───────────────────
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
