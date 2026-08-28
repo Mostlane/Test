@@ -2347,12 +2347,20 @@ async function init(){
 
   // Needs-scheduling tray: reinstate hidden jobs + collapse/expand.
   $("trayReinstate").addEventListener("click", () => { saveTrayHidden(new Set()); renderTray(); });
-  $("trayToggle").addEventListener("click", () => {
-    const box = $("trayJobs");
-    const collapsed = box.classList.toggle("collapsed");
+  function applyTrayCollapsed(collapsed){
+    const box = $("trayJobs"); if(!box) return;
+    box.classList.toggle("collapsed", collapsed);
     $("trayHint") && ($("trayHint").style.display = collapsed ? "none" : "");
-    $("trayToggle").textContent = collapsed ? "▸" : "▾";
+    $("trayToggle") && ($("trayToggle").textContent = collapsed ? "▸" : "▾");
+  }
+  $("trayToggle").addEventListener("click", () => {
+    const collapsed = !$("trayJobs").classList.contains("collapsed");
+    applyTrayCollapsed(collapsed);
+    try{ localStorage.setItem("slaTrayCollapsed", collapsed ? "1" : "0"); }catch(e){}
   });
+  // Collapsed by DEFAULT (the count stays visible in the header) — remembers the
+  // choice per device once you open it.
+  (function(){ let c = true; try{ if(localStorage.getItem("slaTrayCollapsed") === "0") c = false; }catch(e){} applyTrayCollapsed(c); })();
 
   // Wrap so the click Event isn't passed as `scope` — openMap treats any truthy
   // scope as an engineer-scoped view and would deref event.date (undefined).
