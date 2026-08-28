@@ -1898,7 +1898,12 @@ function fbJobOptions(sel){
     html += '<optgroup label="🛟 Standby jobs">' + FB_TEMPLATES.map(function(t){ return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>'+escapeHtml(fbTmplLabel(t))+'</option>'; }).join('') + '</optgroup>';
   }
   if(FB_OPENJOBS.length){
-    html += '<optgroup label="📋 Existing jobs (unscheduled)">' + FB_OPENJOBS.map(function(t){ return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>'+escapeHtml(fbTmplLabel(t))+'</option>'; }).join('') + '</optgroup>';
+    html += '<optgroup label="📋 Existing jobs (worked off the same live list)">' + FB_OPENJOBS.map(function(t){
+      var lbl = fbTmplLabel(t);
+      if(t.audit) lbl = "📋 " + lbl;
+      if(t.assignedTo) lbl += "  (→ " + t.assignedTo + ")";
+      return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>'+escapeHtml(lbl)+'</option>';
+    }).join('') + '</optgroup>';
   }
   return html;
 }

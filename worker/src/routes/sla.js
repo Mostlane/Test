@@ -120,13 +120,17 @@ export async function handle(request, env, ctx, url, sess) {
         durationMinutes: j.durationMinutes || null,
         workArea: j.workArea || null,
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      // Existing LOOSE jobs (open, unscheduled, unassigned) can also be a fallback —
-      // on activation the real job is MOVED to the free engineer (not cloned).
+      // Any EXISTING open job can also be a fallback. A job that already has
+      // engineer(s) — e.g. a staged site audit — gets the free engineer ADDED to
+      // the SAME job on activation (shared, up-to-date list); a loose one is moved.
       const finishedRe = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
       const openJobs = (await listJobs(env, tenantId))
-        .filter(j => !finishedRe(j.status) && !j.scheduledAt && !j.fallback
-          && !(Array.isArray(j.assignedEngineers) && j.assignedEngineers.length))
-        .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", description: j.description || "" }))
+        .filter(j => !finishedRe(j.status) && !j.fallback)
+        .map(j => {
+          const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
+          return { id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", description: j.description || "",
+            assignedTo: engs.join(", "), audit: Array.isArray(j.auditItems) && j.auditItems.length > 0 };
+        })
         .sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
       return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
     }
@@ -2862,11 +2866,17 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     quote: existing?.quote, riskAssessment: existing?.riskAssessment,
     hold: existing?.hold, order: existing?.order, signature: existing?.signature,
     travelStartMileage: existing?.travelStartMileage,
+    // Per-engineer status on a multi-engineer job — PRESERVED across a re-save, so
+    // adding an engineer (e.g. a fallback continuing a shared audit) keeps everyone
+    // else's progress + the shared item list intact.
+    engStatus: existing?.engStatus,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
 
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  // Seed a slice for any newly-added engineer (existing engineers keep theirs).
+  seedEngStatus(job, new Set(assignedList(existing || {}).map(normId)), existing?.status, now);
   await saveJob(env, tenantId, job);
   return job;
 }
@@ -4399,14 +4409,21 @@ export async function sweepFallbacks(env, tid = 1) {
           changedBy: "auto-fallback",
         };
       } else {
-        // An EXISTING real job → only usable while it's still a LOOSE backlog job
-        // (open, unscheduled, unassigned). MOVE it to this engineer (no duplicate);
-        // a second empty engineer sharing the same fallback finds it taken → skips.
-        if (finishedRe(src.status) || src.scheduledAt || assignedList(src).length) continue;
-        payload = {
-          id: src.id, assignedEngineers: [u.username], scheduledAt,
-          release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback",
-        };
+        // An EXISTING real job (never cloned — everyone works the SAME live job so
+        // the item list / progress stays shared + up to date, e.g. a staged audit).
+        if (finishedRe(src.status)) continue;
+        const roster = assignedList(src);
+        if (roster.some(a => normId(a) === normId(u.username))) continue;   // already on it
+        if (roster.length) {
+          // Already has engineer(s) → ADD this engineer to the SAME job so they
+          // continue the shared list. Put it on their day; don't disturb the others.
+          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), scheduledAt, changedBy: "auto-fallback" };
+        } else {
+          // Loose backlog job (no engineer) → MOVE it to this free engineer as a
+          // standalone fallback (drops if they get real work). Only if unscheduled.
+          if (src.scheduledAt) continue;
+          payload = { id: src.id, assignedEngineers: [u.username], scheduledAt, release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback" };
+        }
       }
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);

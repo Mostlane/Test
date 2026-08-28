@@ -653,12 +653,18 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   Fallbacks** (master enable + start time + a per-engineer dropdown + a "➕ Create a
   standby/fallback job" link → `add-job.html?fallback=1` + a **standby pool list with
   ✕ Remove** = DELETE /sla/jobs/{id}). On activation the cron looks up the chosen job by
-  id (`getJob`): a **dormant template is CLONED** into a live job (id `fb:<normId>:<target>`,
+  id (`getJob`): **(1) a dormant template is CLONED** into a live job (id `fb:<normId>:<target>`,
   idempotent per engineer/day; copies description/site/requirements/workArea/duration/
-  job-type), while an **existing loose job is MOVED** to the free engineer (assigned +
-  scheduled in place, no duplicate) — but only while it's still open/unscheduled/unassigned,
-  so a second engineer sharing it finds it taken and skips. All get `fallback:true` +
-  dayBefore release. (Old lightweight siteName/description/project rows are gone.)
+  job-type; `fallback:true` + dayBefore release); **(2) an existing job that ALREADY has
+  engineer(s)** — e.g. a staged **site audit** — has the free engineer **ADDED to the SAME
+  job** (multi-engineer, scheduled on their day) so everyone works the ONE live job with the
+  up-to-date shared item list (never a copy); **(3) a loose unscheduled/unassigned job is
+  MOVED** to the free engineer as a standalone fallback. `createOrUpdateJobFromPayload` now
+  **preserves `engStatus`** + `seedEngStatus`-seeds any newly-added engineer, so adding an
+  engineer keeps everyone else's per-engineer progress + the shared audit items. GET
+  `/sla/fallbacks` returns `openJobs` (all open non-fallback jobs, with `assignedTo`/`audit`);
+  the picker groups them 🛟 Standby jobs / 📋 Existing jobs. (Old lightweight
+  siteName/description/project rows are gone.)
   Cron **`sla.sweepFallbacks`** (every
   5-min tick, self-gates on Europe/London): **warns** the office (owner +
   FullAccess/SLAAdmin push) at **15:30 & 18:00** about field engineers with no job
