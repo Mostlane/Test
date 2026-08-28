@@ -4416,8 +4416,12 @@ export async function sweepFallbacks(env, tid = 1) {
         if (roster.some(a => normId(a) === normId(u.username))) continue;   // already on it
         if (roster.length) {
           // Already has engineer(s) → ADD this engineer to the SAME job so they
-          // continue the shared list. Put it on their day; don't disturb the others.
-          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), scheduledAt, changedBy: "auto-fallback" };
+          // continue the shared list. NEVER touch the shared schedule (multi-eng
+          // jobs share one scheduledAt), so the original engineer's timeslot is
+          // unaffected — the added engineer gets it in their assigned list. Only
+          // give it a day if the job had NO slot at all (nothing to disturb).
+          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), changedBy: "auto-fallback" };
+          if (!src.scheduledAt) payload.scheduledAt = scheduledAt;
         } else {
           // Loose backlog job (no engineer) → MOVE it to this free engineer as a
           // standalone fallback (drops if they get real work). Only if unscheduled.

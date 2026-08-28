@@ -9736,7 +9736,8 @@ async function sweepFallbacks(env, tid = 1) {
         const roster = assignedList(src);
         if (roster.some((a) => normId(a) === normId(u.username))) continue;
         if (roster.length) {
-          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), scheduledAt, changedBy: "auto-fallback" };
+          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), changedBy: "auto-fallback" };
+          if (!src.scheduledAt) payload.scheduledAt = scheduledAt;
         } else {
           if (src.scheduledAt) continue;
           payload = { id: src.id, assignedEngineers: [u.username], scheduledAt, release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback" };
