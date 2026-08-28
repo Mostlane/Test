@@ -54,6 +54,10 @@
     .tabs button.active { background:#0066cc; color:#fff; }
     .section { display:none; }
     .section.active { display:block; }
+    .needs-setup { outline:2px solid #f0a020 !important; outline-offset:1px; background:#fffaf0 !important; }
+    #setupBanner { background:#fbf0e0; border:1px solid #f0c98a; color:#8a4b12; border-radius:10px; padding:10px 12px; margin:8px 0 4px; font-size:13px; }
+    #setupBanner b { color:#b45309; }
+    #setupBanner .sg-jump { display:inline-block; background:#fff; border:1px solid #e0b877; color:#8a4b12; border-radius:999px; padding:2px 10px; margin:3px 6px 0 0; font-size:12px; font-weight:600; cursor:pointer; }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     label { font-size:12px; color:#667085; display:block; margin:8px 0 2px; }
     .panel input, .panel select { width:100%; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; }
@@ -194,6 +198,7 @@
   <div class="overlay" id="overlay">
     <div class="panel">
       <h2 id="panelTitle">Edit user</h2>
+      <div id="setupBanner" style="display:none;"></div>
 
       <div class="tabs" id="tabs">
         <button data-tab="details" class="active">Details</button>
@@ -261,6 +266,11 @@
 
       <!-- VEHICLE -->
       <div class="section" data-sec="vehicle">
+        <div style="margin-bottom:8px;">
+          <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;color:#334155;cursor:pointer;">
+            <input type="checkbox" id="p_noVehicle" style="width:auto;"> No company van <small style="font-weight:400;color:#64748b;">(uses own vehicle / not applicable — stops the "vehicle to set up" flag)</small>
+          </label>
+        </div>
         <div class="grid2">
           <div><label>Linked vehicle (reg)</label><input id="f_vehicle" /></div>
           <div><label>Fuel card number</label><input id="p_fuelCard" /></div>
@@ -642,7 +652,7 @@
       const selfEmp = /self/i.test(u.EmploymentType || "");
       const m = [];
       if ((field || selfEmp) && !(p.hourlyRate || p.dayRate)) m.push("pay rate");
-      if (field && !u.VehicleAssigned) m.push("vehicle");
+      if (field && !u.VehicleAssigned && !p.noVehicle) m.push("vehicle");
       if (field && !p.homePostcode) m.push("home postcode");
       return m;
     }
@@ -814,6 +824,7 @@
       const prof = user?.Profile || {};
       editingProfile = Object.assign({}, prof);
       PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
+      g("p_noVehicle").checked = !!prof.noVehicle;
       renderHomePin();
       // Clear any prior lock, set every switch from the user, then re-lock if
       // this user has Full access so all areas show on + locked.
@@ -825,8 +836,36 @@
       document.querySelectorAll("[data-area]").forEach(cb => { cb.checked = myAreas.has(cb.dataset.area); });
       if (g("faToggle").checked) lockFullAccess();
       g("panelMsg").textContent = "";
+      highlightGaps(user);
       g("overlay").classList.add("open");
       loadDevices(user?.Username || "");
+    }
+    // Map each setup gap to the field(s) + tab it lives on, ring those fields amber
+    // and show a banner at the top of the editor with one-tap jumps to each.
+    const GAP_MAP = {
+      "pay rate":      { fields: ["p_hourlyRate", "p_dayRate"], tab: "pay",     label: "Pay rate",      where: "Pay & rates" },
+      "vehicle":       { fields: ["f_vehicle"],                 tab: "vehicle", label: "Vehicle",       where: "Vehicle & fuel" },
+      "home postcode": { fields: ["p_homePostcode"],            tab: "details", label: "Home postcode", where: "Details" }
+    };
+    function highlightGaps(user) {
+      // Clear any prior highlights first.
+      Object.values(GAP_MAP).forEach(m => m.fields.forEach(id => { const el = g(id); if (el) el.classList.remove("needs-setup"); }));
+      const banner = g("setupBanner");
+      const gaps = user ? setupGaps(user) : [];
+      if (!gaps.length) { banner.style.display = "none"; banner.innerHTML = ""; return; }
+      let chips = "";
+      gaps.forEach(gp => {
+        const m = GAP_MAP[gp]; if (!m) return;
+        m.fields.forEach(id => { const el = g(id); if (el) el.classList.add("needs-setup"); });
+        chips += `<span class="sg-jump" data-goto="${m.tab}">${m.label} — ${m.where} ›</span>`;
+      });
+      banner.innerHTML = `<b>⚠ Still to set up (${gaps.length}):</b> fill the highlighted field${gaps.length > 1 ? "s" : ""} and Save.<div style="margin-top:4px;">${chips}</div>`;
+      banner.style.display = "block";
+      banner.querySelectorAll(".sg-jump").forEach(b => b.addEventListener("click", () => {
+        const btn = document.querySelector('#tabs button[data-tab="' + b.dataset.goto + '"]'); if (btn) btn.click();
+        const first = g(GAP_MAP[Object.keys(GAP_MAP).find(k => GAP_MAP[k].tab === b.dataset.goto)].fields[0]);
+        if (first) { try { first.focus(); } catch {} }
+      }));
     }
     function closeEditor() { g("overlay").classList.remove("open"); }
 
@@ -865,6 +904,7 @@
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
       profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
+      if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
       body.Profile = profile;
