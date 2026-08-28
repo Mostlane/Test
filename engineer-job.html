@@ -811,12 +811,14 @@
           if(it.thumb) form.append("thumb", it.thumb, "thumb.jpg");
           var r;
           if(it.kind==="audit"){
-            // Site-audit completion photo → marks the item done server-side.
-            form.append("itemId", it.itemId); form.append("stage","done");
+            // Site-audit photo → completion (marks the item done) or an extra
+            // on-site photo (stage:"extra", appended, never changes done state).
+            var aStage=(it.stage==="extra")?"extra":"done";
+            form.append("itemId", it.itemId); form.append("stage",aStage);
             r=await jfetch("/jobs/"+encodeURIComponent(it.jobId)+"/audit-photo",{method:"POST",body:form});
             if(r && r.ok){ var jr=await r.json().catch(function(){return{};});
               var item=(job.auditItems||[]).find(function(x){return x.id===it.itemId;});
-              if(item){ item.done=true; item.donePhoto=jr.key||"local"; item.donePhotoUrl={url:jr.url,thumb:jr.thumb}; }
+              if(item){ if(aStage==="extra"){ item.extraPhotos=item.extraPhotos||[]; if(jr.key)item.extraPhotos.push(jr.key); item.extraPhotoUrls=item.extraPhotoUrls||[]; item.extraPhotoUrls.push({url:jr.url,thumb:jr.thumb}); } else { item.done=true; item.donePhoto=jr.key||"local"; item.donePhotoUrl={url:jr.url,thumb:jr.thumb}; } }
               await PQ.del(it.id); anyOk=true;
             } else { throw new Error("bad status "+(r&&r.status)); }
           } else {
@@ -945,49 +947,55 @@
      and the engineer adds ONE completion photo to tick it off. Completion photos
      go through the SAME durable queue as normal photos (kind:"audit"), so they
      survive weak signal and are never lost. */
-  function auditPendingIds(){ var s={}; (pendingPhotos||[]).forEach(function(p){ if(p.kind==="audit") s[p.itemId]=true; }); return s; }
+  function auditPendingIds(){ var s={}; (pendingPhotos||[]).forEach(function(p){ if(p.kind==="audit" && (p.stage||"done")!=="extra") s[p.itemId]=true; }); return s; }
   function renderAuditList(){
     var host=$("auditList"); if(!host) return;
     var items=(job&&job.auditItems)||[]; var pend=auditPendingIds();
     var doneCount=items.filter(function(it){return it.done&&it.donePhoto;}).length;
     var cc=$("auditCount"); if(cc) cc.textContent=items.length? (doneCount+" / "+items.length+" done") : "";
     host.innerHTML=items.map(function(it,i){
-      var refs=(it.refPhotoUrls||[]).map(function(p){ return '<img class="au-ref" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy">'; }).join("");
+      var thumb=function(p,cls){ return '<img class="'+cls+'" data-full="'+esc(p.url||"")+'" src="'+esc(p.thumb||p.url||"")+'" alt="" loading="lazy">'; };
+      var refs=(it.refPhotoUrls||[]).map(function(p){ return thumb(p,"au-ref"); }).join("");
+      var extra=(it.extraPhotoUrls||[]).map(function(p){ return thumb(p,"au-ref au-extra"); }).join("");
       var pending=pend[it.id] && !(it.done&&it.donePhoto);
       var doneImg = (it.done&&it.donePhoto&&it.donePhotoUrl) ? '<img class="au-done" data-full="'+esc(it.donePhotoUrl.url||"")+'" src="'+esc(it.donePhotoUrl.thumb||it.donePhotoUrl.url||"")+'" alt="">' : (it.done&&it.donePhoto ? '<span class="au-tick">✓</span>' : '');
       var action = (it.done&&it.donePhoto)
         ? '<button class="btn line au-redo" data-redo="'+esc(it.id)+'">Redo photo</button>'
         : (pending ? '<span class="au-upl">⏳ Uploading…</span>'
                    : '<button class="btn au-add" data-add="'+esc(it.id)+'">📷 Add completion photo</button>');
+      var addExtra='<button class="btn line au-add2" data-extra="'+esc(it.id)+'">＋ Add photo</button>';
       return '<div class="au-item'+((it.done&&it.donePhoto)?' au-ok':'')+'">'+
         '<div class="au-h"><span class="au-n">'+(i+1)+'</span><div class="au-tx">'+esc(it.text||"")+'</div>'+((it.done&&it.donePhoto)?'<span class="au-badge">Done</span>':'')+'</div>'+
         (refs?'<div class="au-refs"><span class="au-lbl">Reference</span>'+refs+'</div>':'')+
-        '<div class="au-foot">'+doneImg+action+'</div>'+
+        (extra?'<div class="au-refs"><span class="au-lbl">Added on site</span>'+extra+'</div>':'')+
+        '<div class="au-foot">'+doneImg+action+addExtra+'</div>'+
       '</div>';
     }).join("") || '<div class="hint">No items on this audit.</div>';
     [].forEach.call(host.querySelectorAll("[data-add]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-add")); }; });
     [].forEach.call(host.querySelectorAll("[data-redo]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-redo")); }; });
+    [].forEach.call(host.querySelectorAll("[data-extra]"),function(b){ b.onclick=function(){ pickAuditPhoto(b.getAttribute("data-extra"),"extra"); }; });
     [].forEach.call(host.querySelectorAll(".au-ref,.au-done"),function(im){ im.onclick=function(){ var f=im.getAttribute("data-full"); if(f) openAuditImg(f); }; });
   }
-  var _auItem=null;
-  function pickAuditPhoto(itemId){ _auItem=itemId; $("auditFile").value=""; $("auditFile").click(); }
+  var _auItem=null, _auStage="done";
+  function pickAuditPhoto(itemId,stage){ _auItem=itemId; _auStage=(stage==="extra")?"extra":"done"; $("auditFile").value=""; $("auditFile").click(); }
   async function onAuditPhoto(e){
     var f=e.target.files && e.target.files[0]; e.target.value=""; if(!f||!_auItem) return;
-    var itemId=_auItem; _auItem=null;
+    var itemId=_auItem, stg=_auStage; _auItem=null; _auStage="done";
     var th=null; try{ th=await shrinkImage(f,400,0.7); }catch(_){}
     var full=null; try{ full=await shrinkImage(f,1600,0.72); }catch(_){}
-    var rec={ id:opId(), kind:"audit", jobId:jobId, itemId:itemId, filename:"done.jpg", blob:(full||f), thumb:th, at:Date.now() };
+    var rec={ id:opId(), kind:"audit", stage:stg, jobId:jobId, itemId:itemId, filename:stg+".jpg", blob:(full||f), thumb:th, at:Date.now() };
     try{ await PQ.add(rec); }
     catch(err){
       // IndexedDB unavailable — direct upload so the photo isn't dropped.
-      try{ var form=new FormData(); form.append("file",(full||f),"done.jpg"); if(th) form.append("thumb",th,"thumb.jpg"); form.append("itemId",itemId); form.append("stage","done");
+      try{ var form=new FormData(); form.append("file",(full||f),stg+".jpg"); if(th) form.append("thumb",th,"thumb.jpg"); form.append("itemId",itemId); form.append("stage",stg);
         var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/audit-photo",{method:"POST",body:form});
-        if(r&&r.ok){ var jr=await r.json().catch(function(){return{};}); var item=(job.auditItems||[]).find(function(x){return x.id===itemId;}); if(item){ item.done=true; item.donePhoto=jr.key||"local"; item.donePhotoUrl={url:jr.url,thumb:jr.thumb}; } }
+        if(r&&r.ok){ var jr=await r.json().catch(function(){return{};}); var item=(job.auditItems||[]).find(function(x){return x.id===itemId;});
+          if(item){ if(stg==="extra"){ item.extraPhotos=item.extraPhotos||[]; if(jr.key)item.extraPhotos.push(jr.key); item.extraPhotoUrls=item.extraPhotoUrls||[]; item.extraPhotoUrls.push({url:jr.url,thumb:jr.thumb}); } else { item.done=true; item.donePhoto=jr.key||"local"; item.donePhotoUrl={url:jr.url,thumb:jr.thumb}; } } }
       }catch(e2){ toast("⚠ Couldn't save that photo — check storage"); }
     }
     await loadPending(); renderAuditList(); refresh();
     flushPhotoQueue();
-    toast("Completion photo saved — uploading…");
+    toast((stg==="extra"?"Photo saved":"Completion photo saved")+" — uploading…");
   }
   function openAuditImg(url){ var lb=$("lightbox"); if(!lb){ window.open(url,"_blank"); return; } var im=$("lxImg"); if(im) im.src=url; var bar=$("lxStage"); if(bar){ bar.classList.remove("show"); bar.innerHTML=""; } lb.classList.add("show"); }
 

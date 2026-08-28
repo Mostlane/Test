@@ -1388,7 +1388,8 @@ export async function handle(request, env, ctx, url, sess) {
       catch { return jsonResponse({ error: "Upload was incomplete — please retry.", incomplete: true }, headers, 400); }
       const file = form.get("file");
       const itemId = String(form.get("itemId") || searchParams.get("itemId") || "");
-      const stage = (String(form.get("stage") || searchParams.get("stage") || "done") === "ref") ? "ref" : "done";
+      const stageRaw = String(form.get("stage") || searchParams.get("stage") || "done");
+      const stage = (stageRaw === "ref" || stageRaw === "extra") ? stageRaw : "done";
       if (!file || !itemId) return jsonResponse({ error: "Missing file or itemId" }, headers, 400);
       const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
@@ -1404,6 +1405,11 @@ export async function handle(request, env, ctx, url, sess) {
       if (stage === "ref") {
         item.refPhotos = Array.isArray(item.refPhotos) ? item.refPhotos : [];
         item.refPhotos.push(key);
+      } else if (stage === "extra") {
+        // An additional on-site photo the engineer added to this item (beyond
+        // the single completion shot) — never changes the done state.
+        item.extraPhotos = Array.isArray(item.extraPhotos) ? item.extraPhotos : [];
+        item.extraPhotos.push(key);
       } else {
         item.donePhoto = key; item.done = true;
         item.doneAt = new Date().toISOString();
@@ -1432,6 +1438,10 @@ export async function handle(request, env, ctx, url, sess) {
       if (b.removeRef) {
         item.refPhotos = (item.refPhotos || []).filter(k => k !== b.removeRef);
         try { await env.JOB_FILES.delete(b.removeRef); await env.JOB_FILES.delete(b.removeRef + ".thumb"); } catch {}
+      }
+      if (b.removeExtra) {
+        item.extraPhotos = (item.extraPhotos || []).filter(k => k !== b.removeExtra);
+        try { await env.JOB_FILES.delete(b.removeExtra); await env.JOB_FILES.delete(b.removeExtra + ".thumb"); } catch {}
       }
       job.updatedAt = new Date().toISOString();
       await saveJob(env, tenantId, job);
@@ -2143,6 +2153,7 @@ function normAuditItems(input, existing) {
       donePhoto: was.donePhoto || null,
       doneAt: was.doneAt || null,
       doneBy: was.doneBy || null,
+      extraPhotos: Array.isArray(was.extraPhotos) ? was.extraPhotos : [],
     });
     if (out.length >= 200) break;                            // sane cap
   }
@@ -4565,6 +4576,7 @@ function decorateAuditItems(env, items) {
     ...it,
     refPhotoUrls: (it.refPhotos || []).map(ph),
     donePhotoUrl: it.donePhoto ? ph(it.donePhoto) : null,
+    extraPhotoUrls: (it.extraPhotos || []).map(ph),
   }));
 }
 

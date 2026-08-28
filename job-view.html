@@ -992,9 +992,11 @@ function renderJob(){
 // Site-audit jobs: read-only checklist with each item's reference (before) +
 // completion (after) photo, and who did it / when. Photos are public R2 URLs
 // returned on the job (auditItems[].refPhotoUrls / donePhotoUrl).
+let auditViewTimer = null;
 function renderAuditView(){
   const card = $("auditCard"); if(!card || !job) return;
   const items = Array.isArray(job.auditItems) ? job.auditItems : [];
+  if(auditViewTimer){ clearInterval(auditViewTimer); auditViewTimer = null; }
   if(!items.length){ card.style.display = "none"; return; }
   card.style.display = "";
   const doneN = items.filter(it => it.done && it.donePhoto).length;
@@ -1002,19 +1004,38 @@ function renderAuditView(){
   const cell = (p, cls, label) => p && (p.url || p.thumb)
     ? '<figure class="au-cell"><img class="'+cls+'" src="'+esc(p.thumb||p.url)+'" data-full="'+esc(p.url||p.thumb)+'" alt=""><figcaption>'+label+'</figcaption></figure>'
     : '<figure class="au-cell au-empty"><div class="au-ph">—</div><figcaption>'+label+'</figcaption></figure>';
-  $("auditBody").innerHTML = items.map((it, i) => {
+  const rowsHtml = items.map((it, i) => {
     const refs = (it.refPhotoUrls || []);
+    const extras = (it.extraPhotoUrls || []);
     const refHtml = refs.length ? refs.map(p => cell(p, "au-img", "Reference")).join("") : cell(null, "", "Reference");
     const doneHtml = (it.done && it.donePhotoUrl) ? cell(it.donePhotoUrl, "au-img au-done", "Completed") : cell(null, "", "Completed");
+    const extraHtml = extras.map((p,k) => cell(p, "au-img", "Added " + (k+1))).join("");
     const when = (it.done && it.doneAt) ? ('<span class="sub">✓ ' + esc(it.doneBy || "") + (it.doneAt ? ' · ' + fmtWhen(it.doneAt) : '') + '</span>') : '<span class="sub" style="color:#b45309;">Outstanding</span>';
     return '<div class="au-row'+((it.done&&it.donePhoto)?' done':'')+'">'+
       '<div class="au-row-h"><span class="au-num">'+(i+1)+'</span><div class="au-txt">'+esc(it.text||"")+'</div>'+when+'</div>'+
-      '<div class="au-imgs">'+refHtml+doneHtml+'</div></div>';
+      '<div class="au-imgs">'+refHtml+doneHtml+extraHtml+'</div></div>';
   }).join("");
+  // Collapsible: the summary is always visible; expand to see every item + photos.
+  const wasOpen = (()=>{ const d = $("auditBody").querySelector("details"); return d ? d.open : true; })();
+  $("auditBody").innerHTML =
+    '<details '+(wasOpen?'open':'')+'><summary style="cursor:pointer;font-weight:700;color:#003468;margin:2px 0 8px;user-select:none">Each item &amp; photos ('+doneN+' / '+items.length+' complete)</summary>'
+    + rowsHtml + '</details>';
   // Open any thumbnail full-size in the existing photo modal.
   [].forEach.call($("auditBody").querySelectorAll("img[data-full]"), im => {
     im.onclick = () => { const u = im.getAttribute("data-full"); if(u && typeof openPhotoModalUrl === "function") openPhotoModalUrl(u); else if(u) window.open(u, "_blank"); };
   });
+  // Live: re-fetch the job's audit items every 15s while the tab is visible so the
+  // admin view reflects the engineer's autosaves (and stays in step across a
+  // reassignment — it's ONE shared job). Read-only, so a refresh loses nothing.
+  auditViewTimer = setInterval(async () => {
+    if(document.visibilityState !== "visible") return;
+    try{
+      const r = await fetch(`${SLA_API}/jobs/${encodeURIComponent(job.id)}?t=${Date.now()}`, { cache:"no-store" });
+      if(!r.ok) return;
+      const fresh = await r.json();
+      if(fresh && Array.isArray(fresh.auditItems)){ job.auditItems = fresh.auditItems; renderAuditView(); }
+    }catch(e){}
+  }, 15000);
 }
 function fmtWhen(iso){ try{ const d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 
