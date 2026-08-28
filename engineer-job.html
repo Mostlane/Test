@@ -129,6 +129,20 @@
     #lxStage .lbl{color:#cbd5e1;font-size:12px;align-self:center;margin-right:4px}
     #lxStage button{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:20px;padding:7px 14px;font-size:13px;cursor:pointer}
     #lxStage button.on{background:#2563eb;border-color:#2563eb;font-weight:600}
+    /* Desktop (sidebar showing): centre a proper column beside the sidebar (the
+       calc cancels the 248px inset so it reads as centred), drop the mobile
+       tabbar, make the body transparent so the embossed background shows through,
+       and the cards faintly translucent. Scoped ENTIRELY to min-width:1000px +
+       pnav-on → mobile and installed PWAs are UNAFFECTED. */
+    @media (min-width:1000px){
+      body.pnav-on{ max-width:calc(248px + 900px); margin:0 auto; padding-bottom:28px; background:transparent !important; }
+      html.pnav-collapsed body.pnav-on{ max-width:calc(64px + 900px); }
+      body.pnav-on .tabbar{ display:none !important; }
+      body.pnav-on .card{
+        background:color-mix(in srgb, var(--card) 86%, transparent) !important;
+        backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+      }
+    }
   </style>
 </head>
 <body>
