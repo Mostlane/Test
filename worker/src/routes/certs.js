@@ -600,7 +600,10 @@ export async function handle(request, env, ctx, url, sess) {
     for (const it of sites) {
       const num = String(it.siteNumber || ""); const s = byNum[num];
       if (!num || !s) { if (num) skipped.push(num); continue; }
-      let addr = ""; try { const dd = s.data ? JSON.parse(s.data) : {}; addr = dd.address || ""; } catch {}
+      let addr = "", siteDur = 0; try { const dd = s.data ? JSON.parse(s.data) : {}; addr = dd.address || ""; siteDur = Number(dd.expectedDurationMinutes) || 0; } catch {}
+      // Per-site expected duration: the row's own value → else the site's saved
+      // default → else the group default. Feeds the route optimiser later.
+      const sdur = Number(it.durationMinutes) > 0 ? Number(it.durationMinutes) : (siteDur > 0 ? siteDur : dur);
       const setNum = (em && emKind !== "monthly") ? await emSetFor(env, tid, num) : "";
       let desc;
       if (em && pat) desc = `EM: Import certificate number ${setNum || num}-${yr}\nPAT: Import certificate number ${num}-${yr}`;
@@ -611,13 +614,31 @@ export async function handle(request, env, ctx, url, sess) {
         reference: s.site_name || num, description: desc,
         siteName: s.site_name || "", siteCode: num, address: addr, postcode: s.postcode || "",
         emTest: em, pat, emKind,
-        durationMinutes: dur, scheduledAt: sched, status: "Pending",
+        durationMinutes: sdur, scheduledAt: sched, status: "Pending",
         assignedEngineers: engineers, originator: "bulk-em",
       });
       created.push({ id: job.id, site: s.site_name || num });
     }
     return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
   }
+
+  // POST /certs/site-duration {siteNumber, minutes} — save a site's expected
+  // on-site duration (stored on the site) so it prefills next time + can drive
+  // route optimisation. Office only.
+  if (sub === "/site-duration" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const num = String(b.siteNumber || "").trim();
+    const mins = Math.max(0, Math.min(1440, Number(b.minutes) || 0));
+    if (!num) return error("siteNumber required", 400, env, request);
+    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num).first();
+    if (!row) return error("Site not found", 404, env, request);
+    let data = {}; try { data = row.data ? JSON.parse(row.data) : {}; } catch {}
+    if (mins > 0) data.expectedDurationMinutes = mins; else delete data.expectedDurationMinutes;
+    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num, row.client).run();
+    return json({ ok: true, minutes: mins }, {}, env, request);
+  }
+
 
   // ── EM remedial battery photo upload (engineer or office) ───────────────────
   if (sub === "/photo" && method === "POST") {

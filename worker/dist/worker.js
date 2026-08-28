@@ -25638,12 +25638,14 @@ async function handle30(request, env, ctx, url, sess) {
         if (num2) skipped.push(num2);
         continue;
       }
-      let addr = "";
+      let addr = "", siteDur = 0;
       try {
         const dd = s.data ? JSON.parse(s.data) : {};
         addr = dd.address || "";
+        siteDur = Number(dd.expectedDurationMinutes) || 0;
       } catch {
       }
+      const sdur = Number(it.durationMinutes) > 0 ? Number(it.durationMinutes) : siteDur > 0 ? siteDur : dur;
       const setNum = em && emKind !== "monthly" ? await emSetFor(env, tid, num2) : "";
       let desc;
       if (em && pat) desc = `EM: Import certificate number ${setNum || num2}-${yr}
@@ -25661,7 +25663,7 @@ PAT: Import certificate number ${num2}-${yr}`;
         emTest: em,
         pat,
         emKind,
-        durationMinutes: dur,
+        durationMinutes: sdur,
         scheduledAt: sched,
         status: "Pending",
         assignedEngineers: engineers,
@@ -25670,6 +25672,24 @@ PAT: Import certificate number ${num2}-${yr}`;
       created.push({ id: job.id, site: s.site_name || num2 });
     }
     return json({ ok: true, created: created.length, skipped, jobs: created }, {}, env, request);
+  }
+  if (sub === "/site-duration" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const num2 = String(b.siteNumber || "").trim();
+    const mins = Math.max(0, Math.min(1440, Number(b.minutes) || 0));
+    if (!num2) return error("siteNumber required", 400, env, request);
+    const row = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, num2).first();
+    if (!row) return error("Site not found", 404, env, request);
+    let data = {};
+    try {
+      data = row.data ? JSON.parse(row.data) : {};
+    } catch {
+    }
+    if (mins > 0) data.expectedDurationMinutes = mins;
+    else delete data.expectedDurationMinutes;
+    await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND site_number=? AND client=?").bind(JSON.stringify(data), tid, num2, row.client).run();
+    return json({ ok: true, minutes: mins }, {}, env, request);
   }
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
