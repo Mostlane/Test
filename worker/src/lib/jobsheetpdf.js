@@ -66,7 +66,7 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
     try { const d = jpegInfo(meta.logo); const h = 30; doc.image(meta.logo, M, y, h * (d.w / d.h), h); } catch {}
   }
   doc.text(M + 130, y + 11, "Job Sheet", { size: 15, bold: true, color: BLUE });
-  doc.text(M + 130, y + 26, "Job " + (data.jobNo || "—"), { size: 10, color: GREY });
+  if (data.showJobNo !== false) doc.text(M + 130, y + 26, "Job " + (data.jobNo || "—"), { size: 10, color: GREY });
   const copyTxt = data.copyType === "client" ? "Client copy" : "Mostlane copy";
   doc.text(PAGE_W - M - textWidth(copyTxt, 8.5), y + 11, copyTxt, { size: 8.5, color: GREY });
   y += 40;
@@ -173,6 +173,7 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
   }
 
   // ── Sign-off ────────────────────────────────────────────────────────────
+  if (data.showSignoff !== false) {
   heading("Sign-off");
   const sig = data.signature;
   if (sig && sig.signedBy) {
@@ -195,6 +196,7 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
     ensure(24);
     doc.text(M, y + 11, "Not signed.", { size: 9.5, color: GREY });
     y += 20;
+  }
   }
 
   // Footer page numbers.

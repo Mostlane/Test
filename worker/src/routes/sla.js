@@ -1450,17 +1450,17 @@ export async function handle(request, env, ctx, url, sess) {
         else if (st.includes("progress")) onsite += mins;
       }
       const total = travelling + onsite;
-      const time = total ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
+      const time = (total && shown("timeSpent")) ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
 
-      const timeline = hist.map(e => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) }));
-      const notes = (j.events || [])
+      const timeline = shown("timeline") ? hist.map(e => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) })) : [];
+      const notes = shown("notes") ? (j.events || [])
         .filter(e => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined")
         .sort((a, b) => new Date(a.at) - new Date(b.at))
-        .map(n => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" }));
+        .map(n => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" })) : [];
 
       // Photos — fetch the small thumbnail bytes (fallback full-res), with stage.
       let photos = [];
-      if (env.JOB_FILES) {
+      if (env.JOB_FILES && shown("photos")) {
         try {
           const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
           const objs = (listed.objects || []).filter(o => !o.key.endsWith(".thumb"));
@@ -1478,7 +1478,7 @@ export async function handle(request, env, ctx, url, sess) {
       }
 
       let signature = null;
-      if (j.signature && j.signature.fileKey && j.signature.signedBy) {
+      if (shown("signature") && j.signature && j.signature.fileKey && j.signature.signedBy) {
         signature = { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt), image: null };
         // Decode the drawn signature PNG so it embeds in the PDF (flattened onto
         // white). Best-effort — falls back to the text sign-off if it can't read.
@@ -1493,10 +1493,11 @@ export async function handle(request, env, ctx, url, sess) {
       const name = j.siteName || j.siteCode || "Job";
       let logo = null; try { logo = logoBytes(); } catch {}
       const pdf = buildJobSheetPdf({
-        jobNo, copyType, title: name,
+        jobNo, copyType, title: shown("jobName") ? name : "", showJobNo: shown("jobId"),
         subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
-        details, description: j.description || j.summary || j.title || "",
+        details, description: shown("description") ? (j.description || j.summary || j.title || "") : "",
         sla, time, timeline, notes, photos, signature,
+        showSignoff: shown("signature"),
       }, { logo });
 
       const filename = `Job_${safeRef(j, id)}.pdf`;

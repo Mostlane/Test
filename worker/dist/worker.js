@@ -5183,7 +5183,7 @@ function buildJobSheetPdf(data = {}, meta = {}) {
     }
   }
   doc.text(M2 + 130, y + 11, "Job Sheet", { size: 15, bold: true, color: BLUE2 });
-  doc.text(M2 + 130, y + 26, "Job " + (data.jobNo || "\u2014"), { size: 10, color: GREY2 });
+  if (data.showJobNo !== false) doc.text(M2 + 130, y + 26, "Job " + (data.jobNo || "\u2014"), { size: 10, color: GREY2 });
   const copyTxt = data.copyType === "client" ? "Client copy" : "Mostlane copy";
   doc.text(PAGE_W3 - M2 - textWidth(copyTxt, 8.5), y + 11, copyTxt, { size: 8.5, color: GREY2 });
   y += 40;
@@ -5309,31 +5309,33 @@ function buildJobSheetPdf(data = {}, meta = {}) {
     });
     if (col !== 0) y = rowTop + cellH + 16;
   }
-  heading("Sign-off");
-  const sig = data.signature;
-  if (sig && sig.signedBy) {
-    const img = sig.image;
-    const sigH = 44, sigMaxW = 200;
-    ensure6((img ? sigH + 8 : 0) + 40);
-    if (img && img.rgb && img.width && img.height) {
-      let w = sigH * (img.width / img.height);
-      if (w > sigMaxW) w = sigMaxW;
-      const h = w * (img.height / img.width);
-      try {
-        doc.imageRGB(img.rgb, img.width, img.height, M2, y, w, h);
-      } catch {
+  if (data.showSignoff !== false) {
+    heading("Sign-off");
+    const sig = data.signature;
+    if (sig && sig.signedBy) {
+      const img = sig.image;
+      const sigH = 44, sigMaxW = 200;
+      ensure6((img ? sigH + 8 : 0) + 40);
+      if (img && img.rgb && img.width && img.height) {
+        let w = sigH * (img.width / img.height);
+        if (w > sigMaxW) w = sigMaxW;
+        const h = w * (img.height / img.width);
+        try {
+          doc.imageRGB(img.rgb, img.width, img.height, M2, y, w, h);
+        } catch {
+        }
+        doc.line(M2, y + h + 2, M2 + Math.max(w, 120), y + h + 2, { stroke: LINE2 });
+        y += h + 8;
       }
-      doc.line(M2, y + h + 2, M2 + Math.max(w, 120), y + h + 2, { stroke: LINE2 });
-      y += h + 8;
+      doc.text(M2, y + 10, "Signed by ", { size: 9, color: GREY2 });
+      doc.text(M2 + textWidth("Signed by ", 9), y + 10, sig.signedBy, { size: 10, bold: true });
+      if (sig.signedAt) doc.text(M2, y + 24, sig.signedAt, { size: 9, color: GREY2 });
+      y += 30;
+    } else {
+      ensure6(24);
+      doc.text(M2, y + 11, "Not signed.", { size: 9.5, color: GREY2 });
+      y += 20;
     }
-    doc.text(M2, y + 10, "Signed by ", { size: 9, color: GREY2 });
-    doc.text(M2 + textWidth("Signed by ", 9), y + 10, sig.signedBy, { size: 10, bold: true });
-    if (sig.signedAt) doc.text(M2, y + 24, sig.signedAt, { size: 9, color: GREY2 });
-    y += 30;
-  } else {
-    ensure6(24);
-    doc.text(M2, y + 11, "Not signed.", { size: 9.5, color: GREY2 });
-    y += 20;
   }
   const n = doc.pages.length;
   for (let i = 0; i < n; i++) {
@@ -7236,11 +7238,11 @@ async function handle8(request, env, ctx, url, sess) {
         else if (st.includes("progress")) onsite += mins;
       }
       const total = travelling + onsite;
-      const time = total ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
-      const timeline = hist.map((e) => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) }));
-      const notes = (j.events || []).filter((e) => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined").sort((a, b) => new Date(a.at) - new Date(b.at)).map((n) => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" }));
+      const time = total && shown("timeSpent") ? { travelling: travelling ? fmtDur(travelling) : "", onsite: onsite ? fmtDur(onsite) : "", total: fmtDur(total) } : null;
+      const timeline = shown("timeline") ? hist.map((e) => ({ status: e.status, at: fmtDT(e.at), by: nm(e.by) })) : [];
+      const notes = shown("notes") ? (j.events || []).filter((e) => e && e.type === "note" && typeof e.note === "string" && e.note.trim() && e.note !== "undefined").sort((a, b) => new Date(a.at) - new Date(b.at)).map((n) => ({ note: n.note, by: nm(n.by) || "Engineer", at: n.at ? fmtDT(n.at) : "" })) : [];
       let photos = [];
-      if (env.JOB_FILES) {
+      if (env.JOB_FILES && shown("photos")) {
         try {
           const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
           const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
@@ -7262,7 +7264,7 @@ async function handle8(request, env, ctx, url, sess) {
         }
       }
       let signature = null;
-      if (j.signature && j.signature.fileKey && j.signature.signedBy) {
+      if (shown("signature") && j.signature && j.signature.fileKey && j.signature.signedBy) {
         signature = { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt), image: null };
         if (env.JOB_FILES) {
           try {
@@ -7284,16 +7286,18 @@ async function handle8(request, env, ctx, url, sess) {
       const pdf = buildJobSheetPdf({
         jobNo,
         copyType,
-        title: name,
+        title: shown("jobName") ? name : "",
+        showJobNo: shown("jobId"),
         subtitle: j.scheduledAt ? fmtDT(j.scheduledAt) : fmtDT(j.raisedAt),
         details,
-        description: j.description || j.summary || j.title || "",
+        description: shown("description") ? j.description || j.summary || j.title || "" : "",
         sla,
         time,
         timeline,
         notes,
         photos,
-        signature
+        signature,
+        showSignoff: shown("signature")
       }, { logo });
       const filename = `Job_${safeRef(j, id)}.pdf`;
       return new Response(pdf, { status: 200, headers: {
