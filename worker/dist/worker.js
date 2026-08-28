@@ -8061,6 +8061,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     auditItems: normAuditItems(body.auditItems, existing),
     // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
     emTest: body.emTest !== void 0 ? !!body.emTest : existing?.emTest || false,
+    // EM test kind: "monthly" (function/flick test) or "yearly" (3-hour drain-down).
+    // Fareham do both; Co-op is a yearly test. Blank = yearly (the default/legacy).
+    emKind: body.emKind !== void 0 ? body.emKind === "monthly" ? "monthly" : "yearly" : existing?.emKind || "",
     pat: body.pat !== void 0 ? !!body.pat : existing?.pat || false,
     emTimer: body.emTimer !== void 0 ? body.emTimer || null : existing?.emTimer || null,
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
@@ -8170,6 +8173,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
   if (patch.auditItems !== void 0) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.emTest !== void 0) job.emTest = !!patch.emTest;
+  if (patch.emKind !== void 0) job.emKind = patch.emKind === "monthly" ? "monthly" : "yearly";
   if (patch.pat !== void 0) job.pat = !!patch.pat;
   if (patch.emTimer !== void 0) job.emTimer = patch.emTimer || null;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
@@ -25431,6 +25435,70 @@ async function handle30(request, env, ctx, url, sess) {
       else await env.DB.prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).run();
       return json({ ok: true }, {}, env, request);
     }
+  }
+  if (sub === "/jobs" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat));
+    const codes = [...new Set(jobs.map((j) => String(j.siteCode || "")).filter(Boolean))];
+    const clientByCode = {};
+    if (codes.length) {
+      const ph = codes.map(() => "?").join(",");
+      const rows = await env.DB.prepare(`SELECT site_number, client, site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph})`).bind(tid, ...codes).all().catch(() => ({ results: [] }));
+      (rows.results || []).forEach((r) => {
+        clientByCode[String(r.site_number)] = { client: String(r.client || "").toLowerCase(), name: r.site_name };
+      });
+    }
+    const done = (s) => {
+      s = String(s || "").toLowerCase();
+      return s.includes("complete") || s.includes("closed") || s.includes("invoiced") || s.includes("cancel");
+    };
+    const out = jobs.map((j) => {
+      const c = clientByCode[String(j.siteCode || "")] || {};
+      return {
+        id: j.id,
+        ref: j.helpdeskRef || j.reference || "",
+        site: j.siteName || c.name || "",
+        siteCode: j.siteCode || "",
+        client: c.client || "",
+        status: j.status || "",
+        closed: done(j.status),
+        scheduledAt: j.scheduledAt || "",
+        em: !!j.emTest,
+        pat: !!j.pat,
+        emKind: j.emKind || (j.emTest ? "yearly" : ""),
+        engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
+      };
+    }).sort((a, b) => (b.scheduledAt || "").localeCompare(a.scheduledAt || ""));
+    return json({ ok: true, jobs: out }, {}, env, request);
+  }
+  if (sub === "/jobs/create-next" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const src = await getJob2(env, tid, String(b.jobId || ""));
+    if (!src) return error("Job not found", 404, env, request);
+    let months = Number(b.months);
+    if (!Number.isFinite(months) || months < 1 || months > 60) months = src.emKind === "monthly" ? 1 : 12;
+    const base = src.scheduledAt ? new Date(src.scheduledAt) : /* @__PURE__ */ new Date();
+    const next = new Date(isNaN(base) ? Date.now() : base.getTime());
+    next.setMonth(next.getMonth() + months);
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      reference: src.helpdeskRef || src.reference || "",
+      description: src.description || "",
+      siteName: src.siteName || "",
+      siteCode: src.siteCode || "",
+      address: src.address || "",
+      postcode: src.postcode || "",
+      priority: src.priority || "",
+      emTest: !!src.emTest,
+      pat: !!src.pat,
+      emKind: src.emKind || "",
+      durationMinutes: src.durationMinutes,
+      scheduledAt: next.toISOString(),
+      status: "Pending",
+      assignedEngineers: [],
+      originator: "cert-next"
+    });
+    return json({ ok: true, id: job.id, scheduledAt: next.toISOString(), months }, {}, env, request);
   }
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);

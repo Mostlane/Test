@@ -2819,6 +2819,9 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     auditItems: normAuditItems(body.auditItems, existing),
     // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
     emTest: body.emTest !== undefined ? !!body.emTest : (existing?.emTest || false),
+    // EM test kind: "monthly" (function/flick test) or "yearly" (3-hour drain-down).
+    // Fareham do both; Co-op is a yearly test. Blank = yearly (the default/legacy).
+    emKind: body.emKind !== undefined ? (body.emKind === "monthly" ? "monthly" : "yearly") : (existing?.emKind || ""),
     pat: body.pat !== undefined ? !!body.pat : (existing?.pat || false),
     emTimer: body.emTimer !== undefined ? (body.emTimer || null) : (existing?.emTimer || null),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
@@ -2944,6 +2947,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.firestopping !== undefined) job.firestopping = !!patch.firestopping;
   if (patch.auditItems !== undefined) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.emTest !== undefined) job.emTest = !!patch.emTest;
+  if (patch.emKind !== undefined) job.emKind = patch.emKind === "monthly" ? "monthly" : "yearly";
   if (patch.pat !== undefined) job.pat = !!patch.pat;
   if (patch.emTimer !== undefined) job.emTimer = patch.emTimer || null;   // 3h drain-down countdown
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;

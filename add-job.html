@@ -298,9 +298,12 @@
         <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;">
           <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin:0;cursor:pointer"><input type="checkbox" id="emTest" style="width:auto"> 💡 EM light test <span class="hint">(3-hour drain-down)</span></label>
           <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin:0;cursor:pointer"><input type="checkbox" id="patTest" style="width:auto"> 🔌 PAT testing</label>
+          <label id="emKindWrap" style="display:none;align-items:center;gap:6px;font-weight:400;margin:0;">EM test:
+            <select id="emKind" style="width:auto;padding:4px 8px"><option value="yearly">Yearly — 3-hour drain-down</option><option value="monthly">Monthly — flick / function test</option></select>
+          </label>
           <button type="button" id="emRefresh" class="btn" style="padding:4px 10px;font-size:12px;">🔄 Refresh EM numbers</button>
         </div>
-        <div class="hint" id="emHint">Auto-fills the certificate-import text + duration. EM = 3h (PAT runs in the first 45 min); PAT alone = 45 min. EM cert numbers come from last year's compliance certs.</div>
+        <div class="hint" id="emHint">Auto-fills the certificate-import text + duration. Yearly EM = 3h (PAT runs in the first 45 min); Monthly EM flick test = 30 min; PAT alone = 45 min. EM cert numbers come from last year's compliance certs.</div>
       </div>
 
       <!-- On-site requirements -->
@@ -392,24 +395,28 @@ var EM_SETS = {};              // store code -> EM cert "set number"
 var emAutoDesc = "";           // the description WE last auto-filled (don't clobber manual edits)
 function currentYY(){ return String(new Date().getFullYear()).slice(-2); }
 function emSetFor(code){ return (EM_SETS && EM_SETS[code]) || code; }
+function emKindVal(){ return ($("emKind") && $("emKind").value === "monthly") ? "monthly" : "yearly"; }
 function applyTestType(){
   var em = $("emTest") && $("emTest").checked;
   var pat = $("patTest") && $("patTest").checked;
+  // Show the Yearly/Monthly picker only when EM is ticked.
+  var kw = $("emKindWrap"); if(kw) kw.style.display = em ? "inline-flex" : "none";
   if(!em && !pat) return;                       // untick both: leave the text as-is
+  var monthly = em && emKindVal() === "monthly";
   var store = ($("siteCode").value || "").trim() || "{store number}";
   var emNum = ($("siteCode").value ? emSetFor(store) : "{set number}");
   var yy = currentYY();
   var lines = [];
   if(em && pat){
-    lines.push("EM: Import certificate number " + emNum + "-" + yy);
+    lines.push((monthly ? "EM (monthly flick test)" : "EM: Import certificate number " + emNum + "-" + yy));
     lines.push("PAT: Import certificate number " + store + "-" + yy);
-  } else if(em){ lines.push("Import certificate number " + emNum + "-" + yy); }
+  } else if(em){ lines.push(monthly ? ("Monthly emergency lighting flick test — " + store) : ("Import certificate number " + emNum + "-" + yy)); }
   else if(pat){ lines.push("Import certificate number " + store + "-" + yy); }
   var text = lines.join("\n");
   var cur = $("description").value.trim();
   if(cur === "" || cur === emAutoDesc.trim()){ $("description").value = text; emAutoDesc = text; }
-  // Duration: EM (or EM+PAT) = 3h; PAT alone = 45 min.
-  var dur = em ? "180" : "45";
+  // Duration: monthly EM flick = 30 min; yearly EM (or EM+PAT) = 3h; PAT alone = 45 min.
+  var dur = em ? (monthly && !pat ? "30" : "180") : "45";
   if($("expectedDuration")) $("expectedDuration").value = dur;
 }
 
@@ -668,6 +675,7 @@ async function handleSubmit(evt){
     requiresNote: $("firestopping").checked ? false : $("reqNote").checked,
     firestopping: $("firestopping").checked,
     emTest: $("emTest") ? $("emTest").checked : false,
+    emKind: ($("emTest") && $("emTest").checked) ? emKindVal() : "",
     pat: $("patTest") ? $("patTest").checked : false,
     release: buildRelease(),
     originator: getLoggedInUser() || undefined
@@ -743,6 +751,7 @@ async function init(){
     var em = $("emTest"), pat = $("patTest"), refresh = $("emRefresh"), ss = $("siteSelect");
     if(em) em.addEventListener("change", applyTestType);
     if(pat) pat.addEventListener("change", applyTestType);
+    if($("emKind")) $("emKind").addEventListener("change", applyTestType);
     if(ss) ss.addEventListener("change", function(){ if((em&&em.checked)||(pat&&pat.checked)) setTimeout(applyTestType, 0); });
     fetch(API_BASE + "/emsets").then(function(r){return r.json();}).then(function(d){ if(d&&d.ok) EM_SETS = d.sets || {}; }).catch(function(){});
     if(refresh) refresh.addEventListener("click", async function(){
