@@ -7,7 +7,7 @@
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=23"></script>
+  <script src="sla-jobedit.js?v=24"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -522,10 +522,11 @@
       the next working day, and at <b>7pm</b> each still-empty engineer's fallback is made live (Friday covers
       Monday). It appears to them at <b>5pm the evening before</b>, and drops automatically if they get a real job.
     </p>
-    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 8px;flex-wrap:wrap;">
       <a class="btn" href="add-job.html?fallback=1" style="text-decoration:none;">➕ Create a standby / fallback job</a>
       <span id="fbPoolCount" style="font-size:12.5px;color:#5b6b78;"></span>
     </div>
+    <div id="fbPool" style="margin:0 0 12px;"></div>
     <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin:8px 0;cursor:pointer;">
       <input type="checkbox" id="fbEnabled"> Turn on automatic fallback assignment
     </label>
@@ -1876,9 +1877,9 @@ function openJobCard(id){
 $("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.display = "none"; });
 $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
 
-// ── Fallback jobs config (pick a dormant standby job per engineer) ──────────
+// ── Fallback jobs config (pick a standby OR existing loose job per engineer) ──
 function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
-let FB_TEMPLATES = [];
+let FB_TEMPLATES = [], FB_OPENJOBS = [];
 function fbTmplLabel(t){
   const bits = [t.ref || t.id];
   if(t.siteName && t.siteName !== t.ref) bits.push(t.siteName);
@@ -1886,28 +1887,66 @@ function fbTmplLabel(t){
   if(t.description){ const d = String(t.description).replace(/\s+/g," ").trim(); s += " — " + (d.length>50 ? d.slice(0,50)+"…" : d); }
   return s;
 }
+async function loadFbConfig(){
+  let cfg = { enabled:false, startHour:8, byEngineer:{} };
+  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok){ cfg = d.config || cfg; FB_TEMPLATES = d.templates || []; FB_OPENJOBS = d.openJobs || []; } } catch(e){}
+  return cfg;
+}
+function fbJobOptions(sel){
+  let html = '<option value="">— No fallback set —</option>';
+  if(FB_TEMPLATES.length){
+    html += '<optgroup label="🛟 Standby jobs">' + FB_TEMPLATES.map(function(t){ return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>'+escapeHtml(fbTmplLabel(t))+'</option>'; }).join('') + '</optgroup>';
+  }
+  if(FB_OPENJOBS.length){
+    html += '<optgroup label="📋 Existing jobs (unscheduled)">' + FB_OPENJOBS.map(function(t){ return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>'+escapeHtml(fbTmplLabel(t))+'</option>'; }).join('') + '</optgroup>';
+  }
+  return html;
+}
+function renderFbPool(){
+  const host = $("fbPool"); if(!host) return;
+  if(!FB_TEMPLATES.length){ host.innerHTML = ""; return; }
+  host.innerHTML = '<div style="font-size:12px;font-weight:700;color:#5b6b78;text-transform:uppercase;letter-spacing:.03em;margin:0 0 5px;">Standby pool — remove any you no longer want</div>'
+    + FB_TEMPLATES.map(function(t){
+        return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #eef2f7;font-size:13px;">'
+          + '<span style="flex:1;">🛟 '+escapeHtml(fbTmplLabel(t))+'</span>'
+          + '<button type="button" class="btn" style="padding:3px 9px;color:#b91c1c;" onclick="removeFbTemplate(\''+escapeHtml(t.id).replace(/'/g,"\\'")+'\',\''+escapeHtml((t.ref||t.id)).replace(/'/g,"\\'")+'\')">✕ Remove</button>'
+          + '</div>';
+      }).join("");
+}
+window.removeFbTemplate = async function(id, ref){
+  const ok = window.MLUI ? await MLUI.confirm('Remove the standby job "'+ref+'" from the pool? This deletes the dormant job.',{title:"Remove standby job",okLabel:"✕ Remove",danger:true}) : confirm('Remove "'+ref+'" from the fallback pool?');
+  if(!ok) return;
+  try{
+    const r = await authFetch("/sla/jobs/"+encodeURIComponent(id),{method:"DELETE"}).then(r=>r.json());
+    if(r && (r.ok || r.deleted!=null)){ FB_TEMPLATES = FB_TEMPLATES.filter(function(t){ return t.id!==id; }); renderFbPool(); refreshFbRows(); $("fbPoolCount").textContent = FB_TEMPLATES.length + " standby job" + (FB_TEMPLATES.length===1?"":"s") + " in the pool"; }
+    else if(window.MLUI){ MLUI.toast((r&&r.error)||"Could not remove."); } else alert((r&&r.error)||"Could not remove.");
+  }catch(e){ alert("Could not remove."); }
+};
+let FB_CFG = { byEngineer:{} };
+function refreshFbRows(){
+  const fields = (engineers||[]).filter(isFieldEng);
+  const noPool = !FB_TEMPLATES.length && !FB_OPENJOBS.length;
+  if(noPool){
+    $("fbRows").innerHTML = '<p style="color:#5b6b78;font-size:13px;">No standby jobs yet. Press <b>“➕ Create a standby / fallback job”</b> above to make one (or an unscheduled job will show here), then assign it.</p>';
+    return;
+  }
+  $("fbRows").innerHTML = fields.map(function(e){
+    const fb = (FB_CFG.byEngineer||{})[fbNorm(e.username)] || {};
+    return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:8px;">'
+      + '<b style="flex:0 0 130px;">'+escapeHtml(e.name)+'</b>'
+      + '<select class="fb-job" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
+      + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label>'
+      + '</div>';
+  }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
+}
 async function openFallbacks(){
   $("fbBackdrop").style.display = "flex"; $("fbMsg").textContent = "Loading…";
-  let cfg = { enabled:false, startHour:8, byEngineer:{} };
-  try { const d = await authFetch("/sla/fallbacks").then(r=>r.json()); if(d && d.ok){ cfg = d.config || cfg; FB_TEMPLATES = d.templates || []; } } catch(e){}
-  $("fbEnabled").checked = !!cfg.enabled;
-  $("fbStart").value = String(cfg.startHour!=null?cfg.startHour:8).padStart(2,"0") + ":00";
+  FB_CFG = await loadFbConfig();
+  $("fbEnabled").checked = !!FB_CFG.enabled;
+  $("fbStart").value = String(FB_CFG.startHour!=null?FB_CFG.startHour:8).padStart(2,"0") + ":00";
   $("fbPoolCount").textContent = FB_TEMPLATES.length + " standby job" + (FB_TEMPLATES.length===1?"":"s") + " in the pool";
-  const fields = (engineers||[]).filter(isFieldEng);
-  const jobOpts = function(sel){ return '<option value="">— No fallback set —</option>'
-    + FB_TEMPLATES.map(function(t){ return '<option value="'+escapeHtml(t.id)+'" '+(t.id===sel?"selected":"")+'>🛟 '+escapeHtml(fbTmplLabel(t))+'</option>'; }).join(''); };
-  if(!FB_TEMPLATES.length){
-    $("fbRows").innerHTML = '<p style="color:#5b6b78;font-size:13px;">No standby jobs yet. Press <b>“➕ Create a standby / fallback job”</b> above to make one, then come back to assign it.</p>';
-  } else {
-    $("fbRows").innerHTML = fields.map(function(e){
-      const fb = (cfg.byEngineer||{})[fbNorm(e.username)] || {};
-      return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:8px;">'
-        + '<b style="flex:0 0 130px;">'+escapeHtml(e.name)+'</b>'
-        + '<select class="fb-job" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">'+jobOpts(fb.jobId||"")+'</select>'
-        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label>'
-        + '</div>';
-    }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
-  }
+  renderFbPool();
+  refreshFbRows();
   $("fbMsg").textContent = "";
 }
 async function saveFallbacks(){
