@@ -212,17 +212,31 @@
         lists.forEach(function(arr){ (Array.isArray(arr)?arr:[]).forEach(function(s){
           var num=String(s.siteNumber||s.site_number||s.number||"").trim(); if(!num||seen[num]) return; seen[num]=1;
           if(s.active===false) return;
-          BK_SITES.push({ num:num, name:s.siteName||s.site_name||s.name||"", pc:s.postcode||"" });
+          BK_SITES.push({ num:num, name:s.siteName||s.site_name||s.name||"", pc:s.postcode||"", dur:Number(s.expectedDurationMinutes)||0 });
         }); });
         BK_SITES.sort(function(a,b){ return a.num.localeCompare(b.num,undefined,{numeric:true}); });
         $("bkList").innerHTML = BK_SITES.length ? BK_SITES.map(function(s,i){
           return '<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #f0f3f7;font-size:13.5px;cursor:pointer">'
-            +'<input type="checkbox" class="bkck" data-i="'+i+'" style="width:auto"> <b>'+esc(s.num)+'</b> <span style="color:#3a536e">'+esc(s.name)+'</span>'
-            +'<span style="margin-left:auto;color:#8a97a6">'+esc(s.pc)+'</span></label>';
+            +'<input type="checkbox" class="bkck" data-i="'+i+'" style="width:auto"> <b>'+esc(s.num)+'</b> <span style="color:#3a536e;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.name)+'</span>'
+            +'<span style="margin-left:auto;display:flex;align-items:center;gap:5px;flex:none"><input type="number" class="bkdur" data-i="'+i+'" min="5" max="600" step="5" title="Expected on-site minutes" style="width:58px;padding:4px 6px;border:1px solid #ccd5dd;border-radius:6px;font-size:13px"><span style="color:#8a97a6;font-size:12px">min</span></span>'
+            +'<span style="color:#8a97a6;min-width:62px;text-align:right;flex:none">'+esc(s.pc)+'</span></label>';
         }).join("") : '<div class="muted" style="padding:10px">No sites found for '+esc(g.label)+'.</div>';
-        $("bkAll").checked=false; updBkCount();
+        $("bkAll").checked=false; updBkCount(); setDurDefaults();
         [].forEach.call($("bkList").querySelectorAll(".bkck"),function(c){ c.addEventListener("change", updBkCount); });
+        [].forEach.call($("bkList").querySelectorAll(".bkdur"),function(inp){ inp.addEventListener("change", function(){ saveDur(+inp.getAttribute("data-i"), inp); }); });
       }).catch(function(){ $("bkList").textContent="Couldn't load sites."; });
+  }
+  // Default on-site minutes for a row = the site's SAVED value, else the group/kind default.
+  function defaultDur(){ var g=curGroup(); var kd=g.kind ? ($("bkKind").value==="yearly"?"yearly":"monthly") : "yearly"; return (g.em&&g.pat)?180 : g.em?(kd==="monthly"?30:180):45; }
+  function setDurDefaults(){ var d=defaultDur(); [].forEach.call($("bkList").querySelectorAll(".bkdur"),function(inp){ var i=+inp.getAttribute("data-i"); var st=BK_SITES[i]&&BK_SITES[i].dur; inp.value=(st>0)?st:d; }); }
+  // Autosave a site's expected on-site duration (used later when optimising routes).
+  function saveDur(i, inp){
+    var s=BK_SITES[i]; if(!s) return;
+    var mins=parseInt(inp.value,10); if(!(mins>0)) mins=0;
+    s.dur=mins; inp.style.borderColor="#f0a500";
+    af("/certs/site-duration",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({siteNumber:s.num, minutes:mins})})
+      .then(function(r){return r.json();}).then(function(d){ inp.style.borderColor=(d&&d.ok)?"#0a7d33":"#b00020"; setTimeout(function(){ inp.style.borderColor="#ccd5dd"; },1000); })
+      .catch(function(){ inp.style.borderColor="#b00020"; });
   }
   function openBulk(){
     $("bulkModal").style.display="block";
@@ -231,7 +245,8 @@
     applyGroupUI(); loadBulkSites();
   }
   if($("bkCust")) $("bkCust").addEventListener("change", function(){ applyGroupUI(); loadBulkSites(); });
-  function bkChecked(){ return [].filter.call($("bkList").querySelectorAll(".bkck"),function(c){return c.checked;}).map(function(c){return BK_SITES[+c.getAttribute("data-i")];}).filter(Boolean); }
+  if($("bkKind")) $("bkKind").addEventListener("change", setDurDefaults);
+  function bkChecked(){ return [].filter.call($("bkList").querySelectorAll(".bkck"),function(c){return c.checked;}).map(function(c){ var i=+c.getAttribute("data-i"); var di=$("bkList").querySelector('.bkdur[data-i="'+i+'"]'); var dur=di?parseInt(di.value,10):0; var s=BK_SITES[i]; return s?{ num:s.num, dur:(dur>0?dur:0) }:null; }).filter(Boolean); }
   function updBkCount(){ var n=bkChecked().length; $("bkCount").textContent=n+" of "+BK_SITES.length+" selected"; }
   function closeBulk(){ $("bulkModal").style.display="none"; }
   if($("bulkBtn")) $("bulkBtn").onclick=openBulk;
@@ -245,13 +260,18 @@
     var date=$("bkDate").value; if(!date){ $("bkMsg").textContent="Pick a start date."; return; }
     var tm=($("bkTime").value||"09:00"); var parts=tm.split(":"); var startMin=(+parts[0])*60+(+parts[1]);
     var perDay=parseInt($("bkPerDay").value,10); if(!(perDay>0)) perDay=0;
-    var dur = (em&&pat) ? 180 : em ? (kind==="monthly"?30:180) : 45;
-    var sites=picked.map(function(s,i){
-      var day, slotMin;
-      if(perDay>0){ var di=Math.floor(i/perDay), slot=i%perDay; day=addWorkingDays(date, di); slotMin=startMin+slot*dur; }
-      else { day=new Date(date+"T00:00:00"); slotMin=startMin; }
-      var dt=new Date(day); dt.setHours(0,0,0,0); dt.setMinutes(slotMin);
-      return { siteNumber:s.num, scheduledAt:dt.toISOString() };
+    var dflt = defaultDur();
+    // Stagger within a day by each site's OWN expected duration (accumulating).
+    var dayIdx=0, cursor=startMin, inDay=0;
+    var sites=picked.map(function(s){
+      var sdur = s.dur>0 ? s.dur : dflt;
+      if(perDay>0 && inDay>=perDay){ dayIdx++; cursor=startMin; inDay=0; }
+      var day = perDay>0 ? addWorkingDays(date, dayIdx) : new Date(date+"T00:00:00");
+      var dt=new Date(day); dt.setHours(0,0,0,0); dt.setMinutes(perDay>0?cursor:startMin);
+      var iso=dt.toISOString();
+      if(perDay>0) cursor+=sdur;
+      inDay++;
+      return { siteNumber:s.num, scheduledAt:iso, durationMinutes:sdur };
     });
     var what = (em&&pat) ? "EM + PAT" : em ? (kind==="monthly"?"monthly EM":"EM") : "PAT";
     $("bkGo").disabled=true;
