@@ -120,11 +120,12 @@ export async function handle(request, env, ctx, url, sess) {
         durationMinutes: j.durationMinutes || null,
         workArea: j.workArea || null,
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      // Any EXISTING open job can also be a fallback. A job that already has
-      // engineer(s) — e.g. a staged site audit — gets the free engineer ADDED to
-      // the SAME job on activation (shared, up-to-date list); a loose one is moved.
+      // ALL open jobs (lightweight) — the client TYPE-SEARCHES these to add one to
+      // the fallback list, and resolves the config.pool ids to labels. A job that
+      // already has engineer(s) — e.g. a staged site audit — gets the free engineer
+      // ADDED to the SAME job on activation (shared list); a loose one is moved.
       const finishedRe = s => /complete|closed|invoiced|cancel/i.test(String(s || ""));
-      const openJobs = (await listJobs(env, tenantId))
+      const allJobs = (await listJobs(env, tenantId))
         .filter(j => !finishedRe(j.status) && !j.fallback)
         .map(j => {
           const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : (j.assignedTo ? [j.assignedTo] : []);
@@ -132,7 +133,7 @@ export async function handle(request, env, ctx, url, sess) {
             assignedTo: engs.join(", "), audit: Array.isArray(j.auditItems) && j.auditItems.length > 0 };
         })
         .sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, allJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson(request)) }, headers);
   }
@@ -4452,13 +4453,17 @@ async function getFallbacks(env, tenantId) {
   let c; try { c = row ? JSON.parse(row.value) : null; } catch { c = null; }
   if (!c || typeof c !== "object") c = {};
   return { enabled: !!c.enabled, startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
-    byEngineer: (c.byEngineer && typeof c.byEngineer === "object") ? c.byEngineer : {} };
+    byEngineer: (c.byEngineer && typeof c.byEngineer === "object") ? c.byEngineer : {},
+    // Existing jobs the office has ADDED to the fallback list (job ids). The pool
+    // the per-engineer dropdown offers = these + the dormant standby templates.
+    pool: Array.isArray(c.pool) ? c.pool.map(String) : [] };
 }
 async function setFallbacks(env, tenantId, body) {
   const cur = await getFallbacks(env, tenantId);
   const out = { enabled: body.enabled !== undefined ? !!body.enabled : cur.enabled,
     startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
-    byEngineer: {} };
+    byEngineer: {},
+    pool: Array.isArray(body.pool) ? [...new Set(body.pool.map(String).filter(Boolean))] : cur.pool };
   // Each field engineer's fallback is now a reference to a DORMANT fallback job
   // (from the pool) — pick one per engineer, cloned live when they've no work.
   const src = (body.byEngineer && typeof body.byEngineer === "object") ? body.byEngineer : cur.byEngineer;
