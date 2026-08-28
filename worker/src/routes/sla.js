@@ -576,9 +576,18 @@ export async function handle(request, env, ctx, url, sess) {
     // updating an existing job never re-assigns (the office may have moved it).
     if (!before && !payload.assignedTo && !(payload.assignedEngineers && payload.assignedEngineers.length)) {
       const ia = await getInboundAssign(env, tenantId);
-      if (ia && ia.engineer && (!ia.priorities || !ia.priorities.length || (priority && ia.priorities.includes(priority)))) {
-        payload.assignedTo = ia.engineer;
-        payload.assignedEngineers = [ia.engineer];
+      const eng = inboundEngineerFor(ia, priority);
+      if (eng) {
+        payload.assignedTo = eng;
+        payload.assignedEngineers = [eng];
+        // Auto-assigned reactive jobs land on the engineer's day NOW (today, the
+        // current time) so they surface immediately — not left in "needs scheduling".
+        if (!payload.scheduledAt) {
+          const dur = Number(payload.durationMinutes) > 0 ? Number(payload.durationMinutes) : 60;
+          payload.scheduledAt = new Date().toISOString();
+          if (!payload.scheduledEnd) payload.scheduledEnd = new Date(Date.now() + dur * 60000).toISOString();
+        }
+        payload.status = "Scheduled";
       }
     }
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
@@ -595,7 +604,13 @@ export async function handle(request, env, ctx, url, sess) {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "SLA admins only." }, headers, 403);
     const cfg = await getInboundAssign(env, tenantId);
-    return jsonResponse({ ok: true, engineer: (cfg && cfg.engineer) || "", priorities: (cfg && cfg.priorities) || [] }, headers);
+    return jsonResponse({
+      ok: true,
+      engineer: (cfg && cfg.engineer) || "",
+      priorities: (cfg && cfg.priorities) || [],
+      mode: (cfg && cfg.mode) || "always",
+      windows: (cfg && Array.isArray(cfg.windows)) ? cfg.windows : []
+    }, headers);
   }
   if (subpath === "/inbound-assign" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -603,8 +618,16 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await readJson(request);
     const engineer = String(b.engineer || "").trim();
     const priorities = Array.isArray(b.priorities) ? b.priorities.filter(p => PRIORITY_SET.has(p)) : [];
-    try { await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:inboundAssign:" + tenantId, JSON.stringify({ engineer, priorities })).run(); } catch {}
-    return jsonResponse({ ok: true, engineer, priorities }, headers);
+    const mode = b.mode === "windows" ? "windows" : "always";
+    const windows = (mode === "windows" && Array.isArray(b.windows)) ? b.windows.map(w => ({
+      days: Array.isArray(w.days) ? [...new Set(w.days.map(Number).filter(d => d >= 0 && d <= 6))] : [],
+      from: String(w.from || "").slice(0, 5),
+      to: String(w.to || "").slice(0, 5),
+      engineer: String(w.engineer || "").trim()
+    })).filter(w => w.days.length && /^\d{1,2}:\d{2}$/.test(w.from) && /^\d{1,2}:\d{2}$/.test(w.to)).slice(0, 40) : [];
+    const cfg = { engineer, priorities, mode, windows };
+    try { await tenantDB(env, tenantId).prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, "sla:inboundAssign:" + tenantId, JSON.stringify(cfg)).run(); } catch {}
+    return jsonResponse({ ok: true, ...cfg }, headers);
   }
 
   /* POST /sla/jobs */
@@ -4297,12 +4320,35 @@ const DEFAULT_CONFIG = {
   }
 };
 
-// Auto-assign config for INCOMING jobs (set on SLA Settings): { engineer, priorities }.
+// Auto-assign config for INCOMING jobs (set on SLA Settings):
+//   { engineer, priorities, mode:"always"|"windows", windows:[{days:[0-6], from,to, engineer}] }.
+// mode "always" (or absent) = `engineer` gets every matching job. mode "windows" =
+// only inside a day/time window (Europe/London) does auto-assign fire, to the
+// window's engineer (blank → the default `engineer`); outside all windows → left
+// unallocated. Fully backward-compatible with the old { engineer, priorities } shape.
 async function getInboundAssign(env, tid) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:inboundAssign:" + tid).first();
     return row ? JSON.parse(row.value) : null;
   } catch { return null; }
+}
+function hhmmToMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim()); return m ? Number(m[1]) * 60 + Number(m[2]) : null; }
+// Resolve which engineer (if any) an incoming job should auto-assign to, given the
+// config + the job's priority + the CURRENT Europe/London day & time.
+function inboundEngineerFor(cfg, priority) {
+  if (!cfg) return "";
+  if (cfg.priorities && cfg.priorities.length && !(priority && cfg.priorities.includes(priority))) return "";
+  if ((cfg.mode || "always") !== "windows") return cfg.engineer || "";
+  const { dow, hour, minute } = londonNow();
+  const nowMin = hour * 60 + minute;
+  for (const w of (cfg.windows || [])) {
+    if (!Array.isArray(w.days) || !w.days.includes(dow)) continue;
+    const f = hhmmToMin(w.from), t = hhmmToMin(w.to);
+    if (f == null || t == null) continue;
+    const inWin = f <= t ? (nowMin >= f && nowMin < t) : (nowMin >= f || nowMin < t); // overnight window
+    if (inWin) return w.engineer || cfg.engineer || "";
+  }
+  return "";
 }
 
 async function getConfig(env, tenantId) {
