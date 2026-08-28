@@ -92,6 +92,10 @@
     <div class="stat" id="statHrs"><div class="n" id="hrsN">—</div><div class="l">Hrs this week</div><a href="engineer-timesheet.html">Timesheet ›</a></div>
   </div>
 
+  <!-- Jobs scheduled to me — populated from /jobs/for-engineer (own jobs). -->
+  <div class="grouplbl" id="myJobsLbl" style="display:none">Jobs scheduled to me</div>
+  <div class="card list" id="myJobsCard" style="display:none"><div id="myJobsList"></div></div>
+
   <!-- Permission-driven launcher: filled from the shared ML_MENU (see ml-perms.js). -->
   <div id="launcher"></div>
 
@@ -155,11 +159,49 @@
       }).catch(function(){});
   })();
 
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+
+  // ---- Jobs scheduled to me (own jobs, live) ----
+  // /jobs/for-engineer with no date returns ALL of this engineer's visible jobs
+  // (release-gated, per-engineer status). Show the open ones, soonest first.
+  (function loadMyJobs(){
+    if(!name) return;
+    fetch(SLA_API+"/jobs/for-engineer?engineer="+encodeURIComponent(name)+"&t="+Date.now(),{cache:"no-store"})
+      .then(function(r){ return r.ok ? r.json() : []; })
+      .then(function(list){
+        if(!Array.isArray(list)) return;
+        var isDone=function(s){ s=String(s||"").toLowerCase(); return s.indexOf("complete")>=0||s.indexOf("closed")>=0||s.indexOf("invoiced")>=0||s.indexOf("cancel")>=0; };
+        var open=list.filter(function(j){ return !isDone(j.status); });
+        open.sort(function(a,b){
+          var x=a.scheduledAt?Date.parse(a.scheduledAt):Infinity, y=b.scheduledAt?Date.parse(b.scheduledAt):Infinity;
+          if(isNaN(x))x=Infinity; if(isNaN(y))y=Infinity; return x-y;
+        });
+        if(!open.length) return;
+        var today=todayLocal();
+        var rows=open.slice(0,15).map(function(j){
+          var title=esc(j.siteName||j.helpdeskRef||j.reference||"Job");
+          var when="Not booked in";
+          if(j.scheduledAt){ var d=new Date(j.scheduledAt); if(!isNaN(d)){
+            var ds=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+            var day=(ds===today)?"Today":d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"});
+            when=day+" · "+d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+          } }
+          var sub=esc(when)+(j.status?(" · "+esc(j.status)):"");
+          return '<a href="engineer-job.html?jobId='+encodeURIComponent(j.id)+'&back=you.html">'
+            +'<span class="ic">🧰</span>'
+            +'<span style="flex:1;min-width:0;font-weight:600"><span style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</span>'
+            +'<span style="font-size:12px;color:var(--muted);font-weight:500">'+sub+'</span></span>'
+            +'<span class="ch">›</span></a>';
+        }).join("");
+        rows+='<a href="engineer-jobs.html"><span class="ic">📋</span>All my jobs<span class="ch">›</span></a>';
+        var listEl=$("myJobsList"); if(listEl){ listEl.innerHTML=rows; $("myJobsCard").style.display=""; $("myJobsLbl").style.display=""; }
+      }).catch(function(){});
+  })();
+
   // Everything below is driven by the user's real permissions, from the shared
   // /ml-perms.js (the SAME source as the office menu). Grant a permission and its
   // entry shows up here automatically. FullAccess (you, Jamie) sees everything.
   var can = window.mlCan || function(){ return true; };
-  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 
   // ---- permission-driven launcher (every portal area they can open) ----
   var GROUP_LABEL = { Work:"My work", Records:"My records", Portal:"Portal", Admin:"Admin", Settings:"Settings" };
