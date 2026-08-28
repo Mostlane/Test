@@ -63,9 +63,16 @@
        (the sidebar is the nav on desktop). Scoped entirely to desktop + pnav-on,
        so mobile/PWA engineers are UNAFFECTED. */
     @media (min-width:1000px){
-      body.pnav-on{ max-width:1180px; margin:0; padding-bottom:28px; }
+      body.pnav-on{ max-width:calc(248px + 1000px); margin:0 auto; padding-bottom:28px; }
+      html.pnav-collapsed body.pnav-on{ max-width:calc(64px + 1000px); }
       body.pnav-on .tabbar{ display:none !important; }
       body.pnav-on .toast{ left:280px; right:auto; max-width:600px; margin:0; bottom:24px; }
+      /* Faintly translucent cards so the embossed background shows through
+         (the dark profile header .prof is intentionally left solid). */
+      body.pnav-on .card, body.pnav-on .list, body.pnav-on .stat{
+        background:color-mix(in srgb, var(--card) 86%, transparent) !important;
+        backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+      }
     }
   </style>
 </head>
