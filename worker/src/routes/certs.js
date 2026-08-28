@@ -639,15 +639,21 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, minutes: mins }, {}, env, request);
   }
 
-  // POST /certs/w3w-postcodes {items:[{name, words}]} — resolve each what3words to
-  // coordinates (what3words API) → nearest postcode (postcodes.io), and save the
-  // postcode + pin + words onto the matching FBC site. Office only. The w3w key is
-  // a worker secret; the HTTP-referrer restriction is satisfied by the Referer
-  // header we send.
+  // GET /certs/w3w-key — hand the what3words key to an ADMIN's browser so the
+  // lookup runs browser-side (its referrer matches the key's HTTP-referrer
+  // restriction; a Cloudflare Worker can't send a matching referrer). Office only.
+  if (sub === "/w3w-key" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    return json({ ok: true, key: env.W3W_KEY || "" }, {}, env, request);
+  }
+
+  // POST /certs/w3w-postcodes {items:[{name, words, lat?, lng?, postcode?}]} —
+  // save each FBC site's postcode + pin + words. The browser resolves the
+  // what3words → lat/lng (+ postcode) and sends them here; if a row arrives
+  // without coords we fall back to a server-side lookup (works only if the key
+  // isn't referrer-restricted). Office only.
   if (sub === "/w3w-postcodes" && method === "POST") {
     if (!isOffice) return error("Office access required", 403, env, request);
-    const key = env.W3W_KEY;
-    if (!key) return error("Add the W3W_KEY secret to mostlane-api (Settings → Variables and Secrets) and Deploy, then try again.", 400, env, request);
     const b = await request.json().catch(() => ({}));
     const items = Array.isArray(b.items) ? b.items.slice(0, 60) : [];
     if (!items.length) return error("No items", 400, env, request);
@@ -659,24 +665,25 @@ export async function handle(request, env, ctx, url, sess) {
       const words = String(it.words || "").replace(/^\/+/, "").trim();
       const site = byName[norm(it.name)];
       if (!site) { out.push({ name: it.name, ok: false, error: "no matching FBC site" }); continue; }
-      if (!words) { out.push({ name: it.name, site: site.site_number, ok: false, error: "no words" }); continue; }
       try {
-        const w = await fetch("https://api.what3words.com/v3/convert-to-coordinates?words=" + encodeURIComponent(words) + "&key=" + encodeURIComponent(key),
-          { headers: { "Referer": "https://mostlane-portal.com/", "Accept": "application/json" } }).then(r => r.json());
-        const lat = w && w.coordinates && w.coordinates.lat, lng = w && w.coordinates && w.coordinates.lng;
-        if (typeof lat !== "number" || typeof lng !== "number") {
-          out.push({ name: it.name, site: site.site_number, ok: false, error: (w && w.error && (w.error.message || w.error.code)) || "what3words lookup failed" });
-        } else {
-          let pc = "";
-          try { const p = await fetch("https://api.postcodes.io/postcodes?lon=" + lng + "&lat=" + lat).then(r => r.json()); pc = (p && p.result && p.result[0] && p.result[0].postcode) || ""; } catch {}
-          let data = {}; try { data = site.data ? JSON.parse(site.data) : {}; } catch {}
-          data.lat = lat; data.lon = lng; data.fbcWhat3Words = "///" + words;
-          if (pc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
-          else await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
-          out.push({ name: it.name, site: site.site_number, ok: true, postcode: pc, lat, lng });
+        let lat = Number(it.lat), lng = Number(it.lng), pc = String(it.postcode || "").trim();
+        if (!(isFinite(lat) && isFinite(lng))) {
+          // Fallback: server-side conversion (only works if the key isn't referrer-restricted).
+          if (!env.W3W_KEY) { out.push({ name: it.name, site: site.site_number, ok: false, error: "not resolved in the browser and no server key" }); continue; }
+          if (!words) { out.push({ name: it.name, site: site.site_number, ok: false, error: "no words" }); continue; }
+          const w = await fetch("https://api.what3words.com/v3/convert-to-coordinates?words=" + encodeURIComponent(words) + "&key=" + encodeURIComponent(env.W3W_KEY), { headers: { "Accept": "application/json" } }).then(r => r.json());
+          lat = w && w.coordinates && w.coordinates.lat; lng = w && w.coordinates && w.coordinates.lng;
+          if (typeof lat !== "number" || typeof lng !== "number") { out.push({ name: it.name, site: site.site_number, ok: false, error: (w && w.error && (w.error.message || w.error.code)) || "what3words lookup failed" }); continue; }
         }
+        if (!pc && isFinite(lat) && isFinite(lng)) {
+          try { const p = await fetch("https://api.postcodes.io/postcodes?lon=" + lng + "&lat=" + lat).then(r => r.json()); pc = (p && p.result && p.result[0] && p.result[0].postcode) || ""; } catch {}
+        }
+        let data = {}; try { data = site.data ? JSON.parse(site.data) : {}; } catch {}
+        if (isFinite(lat)) data.lat = lat; if (isFinite(lng)) data.lon = lng; if (words) data.fbcWhat3Words = "///" + words;
+        if (pc) await env.DB.prepare("UPDATE sites SET postcode=?, data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(pc, JSON.stringify(data), tid, site.client, site.site_number).run();
+        else await env.DB.prepare("UPDATE sites SET data=? WHERE tenant_id=? AND client=? AND site_number=?").bind(JSON.stringify(data), tid, site.client, site.site_number).run();
+        out.push({ name: it.name, site: site.site_number, ok: true, postcode: pc, lat, lng });
       } catch (e) { out.push({ name: it.name, site: site.site_number, ok: false, error: String((e && e.message) || e) }); }
-      await new Promise(r => setTimeout(r, 180));   // stay well under 5 req/s
     }
     return json({ ok: true, results: out }, {}, env, request);
   }
