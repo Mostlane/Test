@@ -25705,10 +25705,27 @@ async function handle30(request, env, ctx, url, sess) {
     } catch {
     }
     const bytes = buildCertPdf(rec, { logo, signature: sig });
+    let fileScheme = "coop", fileType = cert.type;
+    try {
+      const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
+      if (String(srow && srow.client || "").toLowerCase() === "fbc") {
+        fileScheme = "fareham";
+        if (cert.type === "em") {
+          let kind = "";
+          try {
+            const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+            kind = jb && jb.emKind || "";
+          } catch {
+          }
+          fileType = kind === "monthly" ? "emMonthly" : "emYearly";
+        }
+      }
+    } catch {
+    }
     const filed = await fileCertificatePdf(env, tid, {
-      scheme: "coop",
+      scheme: fileScheme,
       code,
-      type: cert.type,
+      type: fileType,
       bytes,
       filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
       docDate: /^\d{4}-\d{2}-\d{2}/.test(docDate) ? docDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
