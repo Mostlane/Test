@@ -143,7 +143,9 @@
     rec.rows = Array.isArray(rec.rows) ? rec.rows : [];
     if (!rec.contractor.date) rec.contractor.date = new Date().toISOString().slice(0, 10);
 
-    const editable = mode === "engineer" ? (rec.status !== "final") : true;
+    // "view" = a live READ-ONLY reflection (job-view / office job card). Engineer
+    // can edit a non-final cert; office (review) can always edit.
+    const editable = mode === "view" ? false : (mode === "engineer" ? (rec.status !== "final") : true);
 
     function render() {
       const titleType = type === "pat" ? "Portable Appliance Test" : "Emergency Lighting Test";
@@ -238,11 +240,16 @@
       : (/fail/i.test(r.normal || "") || /fail/i.test(r.led || "") || /fail/i.test(r.emergency || ""));
     // Live count + fail tally in the sticky list header; the fail chip jumps to
     // the first failed item so nothing gets missed in a long list.
+    // An item counts as "completed" once its required fields are filled — so the
+    // header shows live progress (X of Y) as the engineer works, for the admin too.
+    const isComplete = r => type === "pat"
+      ? (!!String(r.appliance || "").trim() && !!r.visual && !!r.result)
+      : (!!r.normal && !!r.led && !!r.emergency && r.battery != null && String(r.battery).trim() !== "");
     function updateListHead() {
       const el = container.querySelector("#mlcCnt"); if (!el) return;
-      const n = rec.rows.length, fails = rec.rows.filter(isFail).length;
-      el.innerHTML = n + " item" + (n === 1 ? "" : "s") + " · "
-        + (fails ? '<span class="bad" data-jump="1">⚠ ' + fails + " failed</span>" : '<span class="ok">✓ all pass</span>');
+      const n = rec.rows.length, fails = rec.rows.filter(isFail).length, done = rec.rows.filter(isComplete).length;
+      el.innerHTML = '<span class="ok">' + done + " of " + n + " completed</span>"
+        + (fails ? ' · <span class="bad" data-jump="1">⚠ ' + fails + " failed</span>" : (done === n && n ? ' · <span class="ok">✓ all pass</span>' : ""));
       const j = el.querySelector("[data-jump]");
       if (j) j.onclick = () => { const f = container.querySelector(".mlrow.fail"); if (f) f.scrollIntoView({ behavior: "smooth", block: "center" }); };
     }
