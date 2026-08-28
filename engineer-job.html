@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=24"></script>
+  <script src="/portal-config.js?v=25"></script>
   <script src="ml-offline.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Job — Mostlane</title>
   <script src="auth.js"></script>
   <script src="/pwa.js?v=2"></script>
-  <script src="sla-jobedit.js?v=24"></script>
+  <script src="sla-jobedit.js?v=25"></script>
   <script src="firestop-form.js?v=1"></script>
   <script src="cert-form.js?v=13"></script>
   <style>
@@ -372,7 +372,7 @@
     h+='<button class="backline" id="backBtn">← '+esc(niceRef||"Back")+'</button>';
     h+='<h1 class="big">'+esc(jobName())+'</h1>';
     if(job.investigateOnly) h+='<div style="background:#fdecec;border:2px solid #d11f2d;border-radius:12px;color:#b00020;font-weight:800;font-size:22px;text-align:center;letter-spacing:.04em;padding:12px;margin:8px 0;">⚠ INVESTIGATE ONLY</div>';
-    if(job.description) h+='<div class="works"><div class="works-l">The job</div>'+esc(job.description)+'</div>';
+    if(job.description) h+='<div class="works"><div class="works-l">The job</div>'+((window.MLUI&&MLUI.rich)?MLUI.rich(job.description):esc(job.description))+'</div>';
     h+='<div class="metarow">'+(urgent?'<span class="pill urgent">Urgent</span>':'')+'<span class="pill grey" id="curstatus">'+esc(job.status||"")+'</span></div>';
     h+='<div class="banner lock" id="lockBanner"><b>🔒 Risk assessment on arrival.</b> <span id="lockMsg"></span><div class="go" id="lockGo"></div></div>';
     if(address||phone||job.siteName){

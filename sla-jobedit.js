@@ -166,8 +166,9 @@
   <div class="mlje-modal" role="dialog" aria-modal="true">
     <h2 id="mljeTitle">Edit job</h2>
     <div class="mlje-body">
-      <label for="mljeRef">Reference</label>
-      <input id="mljeRef" type="text">
+      <label for="mljeRef">Job name</label>
+      <input id="mljeRef" type="text" placeholder="e.g. 28667-Eastbourne, Beatty Road">
+      <div class="mlje-hint">How the job shows on the board and to the engineer — edit it for a clearer name.</div>
 
       <label for="mljeDesc">Description</label>
       <textarea id="mljeDesc"></textarea>
@@ -305,6 +306,8 @@
     // build static option lists
     $("mljePriority").innerHTML = PRIORITIES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
     buildStatusOptions();
+    // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
+    try { if (window.MLUI && MLUI.richBar) MLUI.richBar("mljeDesc"); } catch (e) {}
 
     $("mljeCancel").addEventListener("click", close);
     back.addEventListener("click", e => { if (e.target === back) close(); });
