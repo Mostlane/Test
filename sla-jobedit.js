@@ -774,7 +774,7 @@
   // drip-series day that date and let the office decide what to do with it.
   async function maybeSeriesClash(saved) {
     try {
-      if (!saved || !saved.scheduledAt || saved.seriesId) return;
+      if (!saved || !saved.scheduledAt || saved.seriesId || saved.fallback) return;
       const engs = (Array.isArray(saved.assignedEngineers) && saved.assignedEngineers.length)
         ? saved.assignedEngineers : (saved.assignedTo ? [saved.assignedTo] : []);
       if (!engs.length) return;
@@ -803,15 +803,22 @@
   function seriesClashPrompt(clash) {
     return new Promise(resolve => {
       const day = clash.scheduledAt ? new Date(clash.scheduledAt).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }) : "that day";
+      // A "fallback"/filler day (the auto "at least a job for tomorrow" one) vs a
+      // project drip-series day — same choices, different wording.
+      const fb = clash.kind === "fallback";
+      const title = fb ? "Auto job clash" : "Project day clash";
+      const what = fb ? "an auto-added filler job" : "a project day";
+      const fitLabel = fb ? "✅ Keep it — fit it in <b>after</b> this job" : "✅ Fit the project in <b>after</b> this job";
+      const skipLabel = fb ? "🗑 Remove the auto job that day" : "⏭ Skip the project that day";
       const ov = document.createElement("div");
       ov.style.cssText = "position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:2147483400;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;";
       const btn = "display:block;width:100%;padding:11px;border-radius:10px;border:1px solid #d7dee6;font:600 14px inherit;cursor:pointer;text-align:left;";
       ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:410px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
-        + '<h3 style="margin:0 0 8px;color:#003366;font-size:17px;">Project day clash</h3>'
-        + '<p style="margin:0 0 14px;color:#334;font-size:14px;line-height:1.5;">This engineer already has a project day on <b>' + day + '</b>. What should happen to it?</p>'
+        + '<h3 style="margin:0 0 8px;color:#003366;font-size:17px;">' + title + '</h3>'
+        + '<p style="margin:0 0 14px;color:#334;font-size:14px;line-height:1.5;">This engineer already has ' + what + ' on <b>' + day + '</b>. What should happen to it?</p>'
         + '<div style="display:flex;flex-direction:column;gap:8px;">'
-        + '<button data-c="fit" style="' + btn + 'background:#003366;color:#fff;border-color:#003366;">✅ Fit the project in <b>after</b> this job</button>'
-        + '<button data-c="skip" style="' + btn + 'background:#fff;color:#991b1b;">⏭ Skip the project that day</button>'
+        + '<button data-c="fit" style="' + btn + 'background:#003366;color:#fff;border-color:#003366;">' + fitLabel + '</button>'
+        + '<button data-c="skip" style="' + btn + 'background:#fff;color:#991b1b;">' + skipLabel + '</button>'
         + '<button data-c="leave" style="' + btn + 'background:#f4f6f9;color:#475569;">Leave it for now</button>'
         + '</div></div>';
       ov.addEventListener("click", e => {

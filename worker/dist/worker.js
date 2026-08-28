@@ -5586,8 +5586,8 @@ async function handle8(request, env, ctx, url, sess) {
     if (!engineer || !date) return jsonResponse({ clash: null }, headers);
     const eid = normId(engineer);
     const all = await listJobs(env, tenantId);
-    const hit = all.find((j) => j.seriesId && !j.seriesSkipped && j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && assignedList(j).some((a) => normId(a) === eid));
-    return jsonResponse({ clash: hit ? { id: hit.id, description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
+    const hit = all.find((j) => (j.seriesId || j.fallback) && !j.seriesSkipped && j.id !== excludeId && j.scheduledAt && new Date(j.scheduledAt).toISOString().slice(0, 10) === date && assignedList(j).some((a) => normId(a) === eid));
+    return jsonResponse({ clash: hit ? { id: hit.id, kind: hit.seriesId ? "series" : "fallback", description: hit.description || "", scheduledAt: hit.scheduledAt || null, scheduledEnd: hit.scheduledEnd || null, projectId: hit.projectId || null } : null }, headers);
   }
   if (subpath === "/engineer-day" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
