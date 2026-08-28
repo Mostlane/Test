@@ -6428,13 +6428,15 @@ async function handle8(request, env, ctx, url, sess) {
     jobs = jobs.filter((j) => releaseVisibleNow(j, all));
     if (date) {
       jobs = jobs.filter((j) => {
-        if (!j.scheduledAt) return false;
-        return new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
+        const s = effSchedule(j, engineer).scheduledAt;
+        if (!s) return false;
+        return new Date(s).toISOString().slice(0, 10) === date;
       });
     }
     return jsonResponse(jobs.map((j) => {
       const ms = effStatus(j, engineer);
-      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms };
+      const es = effSchedule(j, engineer);
+      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
     }), headers);
   }
   if (subpath === "/route-optimize" && method === "POST") {
@@ -7668,6 +7670,17 @@ function effStatus(job, engNorm) {
   if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
   return job ? job.status : "Pending";
 }
+function effSchedule(job, engNorm) {
+  const es = job && job.engSchedule && job.engSchedule[engNorm];
+  if (es && es.scheduledAt) return { scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd || null };
+  return { scheduledAt: job && job.scheduledAt || null, scheduledEnd: job && job.scheduledEnd || null };
+}
+function pruneEngSchedule(job) {
+  if (!job || !job.engSchedule) return;
+  const on = new Set(assignedList(job).map(normId));
+  for (const k of Object.keys(job.engSchedule)) if (!on.has(k)) delete job.engSchedule[k];
+  if (!Object.keys(job.engSchedule).length) job.engSchedule = void 0;
+}
 function rollupStatus(job) {
   const engs = assignedList(job).map(normId);
   if (!engs.length) return job.status;
@@ -8113,11 +8126,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // adding an engineer (e.g. a fallback continuing a shared audit) keeps everyone
     // else's progress + the shared item list intact.
     engStatus: existing?.engStatus,
+    // Per-engineer scheduled slot {normId:{scheduledAt,scheduledEnd}} — each
+    // engineer on a shared job can carry their own time. body wins, else preserve.
+    engSchedule: body.engSchedule && typeof body.engSchedule === "object" ? { ...existing?.engSchedule || {}, ...body.engSchedule } : existing?.engSchedule,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
   seedEngStatus(job, new Set(assignedList(existing || {}).map(normId)), existing?.status, now);
+  pruneEngSchedule(job);
   await saveJob(env, tenantId, job);
   return job;
 }
@@ -8139,6 +8156,18 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   }
   if (patch.assignedEngineers !== void 0 || patch.assignedTo !== void 0) {
     seedEngStatus(job, prevEngs, prevStatus, now);
+    pruneEngSchedule(job);
+  }
+  if (patch.engSchedule && typeof patch.engSchedule === "object") {
+    job.engSchedule = { ...job.engSchedule || {}, ...patch.engSchedule };
+  }
+  if (patch.scheduleForEngineer && patch.scheduleForEngineer.engineer) {
+    const k = normId(patch.scheduleForEngineer.engineer);
+    const sa = patch.scheduleForEngineer.scheduledAt || null;
+    job.engSchedule = job.engSchedule || {};
+    if (sa) job.engSchedule[k] = { scheduledAt: sa, scheduledEnd: patch.scheduleForEngineer.scheduledEnd || null };
+    else delete job.engSchedule[k];
+    pruneEngSchedule(job);
   }
   if (patch.release !== void 0) {
     const prev = job.release ? JSON.stringify(job.release) : "";
@@ -9740,8 +9769,13 @@ async function sweepFallbacks(env, tid = 1) {
         const roster = assignedList(src);
         if (roster.some((a) => normId(a) === normId(u.username))) continue;
         if (roster.length) {
-          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), changedBy: "auto-fallback" };
-          if (!src.scheduledAt) payload.scheduledAt = scheduledAt;
+          const durMs = Math.max(15, Number(src.durationMinutes) || 480) * 6e4;
+          payload = {
+            id: src.id,
+            assignedEngineers: roster.concat([u.username]),
+            engSchedule: { [normId(u.username)]: { scheduledAt, scheduledEnd: new Date(Date.parse(scheduledAt) + durMs).toISOString() } },
+            changedBy: "auto-fallback"
+          };
         } else {
           if (src.scheduledAt) continue;
           payload = { id: src.id, assignedEngineers: [u.username], scheduledAt, release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback" };

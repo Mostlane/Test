@@ -982,17 +982,19 @@ export async function handle(request, env, ctx, url, sess) {
     jobs = jobs.filter(j => releaseVisibleNow(j, all));
     if (date) {
       jobs = jobs.filter(j => {
-        if (!j.scheduledAt) return false;
-        return new Date(j.scheduledAt).toISOString().slice(0, 10) === date;
+        const s = effSchedule(j, engineer).scheduledAt;   // THIS engineer's own slot
+        if (!s) return false;
+        return new Date(s).toISOString().slice(0, 10) === date;
       });
     }
-    // This endpoint is always "one engineer's own jobs", so serve THEIR status:
-    // on a shared (multi-engineer) job that's their own slice, else the shared
-    // status. Overwriting `status` means every list view (route, jobs, inbox,
-    // my-day) shows the right thing with no page change.
+    // This endpoint is always "one engineer's own jobs", so serve THEIR status AND
+    // THEIR scheduled time: on a shared (multi-engineer) job it's their own slice,
+    // else the shared value. Overwriting `status`/`scheduledAt` means every list
+    // view (route, jobs, inbox, my-day, engineer-job) shows the right thing.
     return jsonResponse(jobs.map(j => {
       const ms = effStatus(j, engineer);
-      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms };
+      const es = effSchedule(j, engineer);
+      return { ...decorateJobWithLiveSla(j), status: ms, myStatus: ms, scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd };
     }), headers);
   }
 
@@ -2339,6 +2341,22 @@ function effStatus(job, engNorm) {
   if (job && job.engStatus && job.engStatus[engNorm] && job.engStatus[engNorm].status) return job.engStatus[engNorm].status;
   return job ? job.status : "Pending";
 }
+// One engineer's OWN scheduled slot on a multi-engineer job (their engSchedule
+// slice), else the shared top-level scheduledAt/End — so single-engineer jobs
+// and legacy jobs are unchanged, and each engineer on a shared job can carry a
+// different time without moving anyone else's.
+function effSchedule(job, engNorm) {
+  const es = job && job.engSchedule && job.engSchedule[engNorm];
+  if (es && es.scheduledAt) return { scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd || null };
+  return { scheduledAt: (job && job.scheduledAt) || null, scheduledEnd: (job && job.scheduledEnd) || null };
+}
+// Drop engSchedule slices for engineers no longer on the job (keeps it tidy).
+function pruneEngSchedule(job) {
+  if (!job || !job.engSchedule) return;
+  const on = new Set(assignedList(job).map(normId));
+  for (const k of Object.keys(job.engSchedule)) if (!on.has(k)) delete job.engSchedule[k];
+  if (!Object.keys(job.engSchedule).length) job.engSchedule = undefined;
+}
 // Roll each engineer's status up into the single board status: Complete only when
 // EVERYONE is done; otherwise reflect the most-active engineer.
 function rollupStatus(job) {
@@ -2873,6 +2891,11 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // adding an engineer (e.g. a fallback continuing a shared audit) keeps everyone
     // else's progress + the shared item list intact.
     engStatus: existing?.engStatus,
+    // Per-engineer scheduled slot {normId:{scheduledAt,scheduledEnd}} — each
+    // engineer on a shared job can carry their own time. body wins, else preserve.
+    engSchedule: (body.engSchedule && typeof body.engSchedule === "object")
+      ? { ...(existing?.engSchedule || {}), ...body.engSchedule }
+      : existing?.engSchedule,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
@@ -2880,6 +2903,7 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
   // Seed a slice for any newly-added engineer (existing engineers keep theirs).
   seedEngStatus(job, new Set(assignedList(existing || {}).map(normId)), existing?.status, now);
+  pruneEngSchedule(job);   // drop per-engineer times for anyone no longer on the job
   await saveJob(env, tenantId, job);
   return job;
 }
@@ -2906,6 +2930,21 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   // Seed any missing ones when the roster changes.
   if (patch.assignedEngineers !== undefined || patch.assignedTo !== undefined) {
     seedEngStatus(job, prevEngs, prevStatus, now);
+    pruneEngSchedule(job);   // clear per-engineer times for anyone dropped
+  }
+  // Per-engineer scheduling: set ONE engineer's own time (scheduleForEngineer)
+  // or merge several (engSchedule) WITHOUT moving anyone else's. Clearing a slice
+  // makes that engineer fall back to the shared time again.
+  if (patch.engSchedule && typeof patch.engSchedule === "object") {
+    job.engSchedule = { ...(job.engSchedule || {}), ...patch.engSchedule };
+  }
+  if (patch.scheduleForEngineer && patch.scheduleForEngineer.engineer) {
+    const k = normId(patch.scheduleForEngineer.engineer);
+    const sa = patch.scheduleForEngineer.scheduledAt || null;
+    job.engSchedule = job.engSchedule || {};
+    if (sa) job.engSchedule[k] = { scheduledAt: sa, scheduledEnd: patch.scheduleForEngineer.scheduledEnd || null };
+    else delete job.engSchedule[k];
+    pruneEngSchedule(job);
   }
   // Visibility scheduling: when it becomes visible to the engineer. Changing the
   // release re-arms `releaseNotified` so the assignment push fires at the new time.
@@ -4420,12 +4459,14 @@ export async function sweepFallbacks(env, tid = 1) {
         if (roster.some(a => normId(a) === normId(u.username))) continue;   // already on it
         if (roster.length) {
           // Already has engineer(s) → ADD this engineer to the SAME job so they
-          // continue the shared list. NEVER touch the shared schedule (multi-eng
-          // jobs share one scheduledAt), so the original engineer's timeslot is
-          // unaffected — the added engineer gets it in their assigned list. Only
-          // give it a day if the job had NO slot at all (nothing to disturb).
-          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), changedBy: "auto-fallback" };
-          if (!src.scheduledAt) payload.scheduledAt = scheduledAt;
+          // continue the shared list, and give them their OWN scheduled slot for the
+          // target day (engSchedule) — the original engineer's timeslot is untouched.
+          const durMs = Math.max(15, Number(src.durationMinutes) || 480) * 60000;
+          payload = {
+            id: src.id, assignedEngineers: roster.concat([u.username]),
+            engSchedule: { [normId(u.username)]: { scheduledAt, scheduledEnd: new Date(Date.parse(scheduledAt) + durMs).toISOString() } },
+            changedBy: "auto-fallback",
+          };
         } else {
           // Loose backlog job (no engineer) → MOVE it to this free engineer as a
           // standalone fallback (drops if they get real work). Only if unscheduled.
