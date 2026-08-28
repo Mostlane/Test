@@ -640,6 +640,52 @@
     // MLUI.loading("Loading jobs…")        → inline mark + label (HTML string)
     // MLUI.loading("Loading jobs…", {big:true}) → large centred, for a whole panel
     window.MLUI.loading = function (text, opts) { return markup(text, opts && opts.big); };
+
+    // ── Rich text for job descriptions (bold / colour / emoji) ──────────────
+    // A tiny, XSS-SAFE markup: **bold** and {red|amber|green|blue}…{/}. rich()
+    // ESCAPES first, then adds ONLY whitelisted <strong>/<span style=color>, so
+    // the user's text can never inject HTML. richStrip() shows clean text where a
+    // page renders the description plain (list previews). richBar(textarea)
+    // attaches a small format toolbar (B · colours · ⚠🚨🔴 emojis) above it.
+    var RICH_COLS = { red: "#c1121f", amber: "#b45309", green: "#1f7a44", blue: "#1e40af" };
+    function richEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    window.MLUI.rich = function (s) {
+      var e = richEsc(s);
+      e = e.replace(/\*\*([^*][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+      e = e.replace(/\{(red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, function (_m, c, t) { return '<span style="color:' + RICH_COLS[c] + ';font-weight:600;">' + t + "</span>"; });
+      return e.replace(/\n/g, "<br>");
+    };
+    window.MLUI.richStrip = function (s) {
+      return richEsc(s).replace(/\*\*([^*][\s\S]*?)\*\*/g, "$1").replace(/\{(?:red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, "$1");
+    };
+    window.MLUI.richBar = function (ta) {
+      if (typeof ta === "string") ta = document.getElementById(ta);
+      if (!ta || ta._mlRichBar) return; ta._mlRichBar = true;
+      function fire() { try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch (e) {} }
+      function wrap(pre, post) {
+        var s = ta.selectionStart || 0, en = ta.selectionEnd || 0, v = ta.value, sel = v.slice(s, en) || "text";
+        ta.value = v.slice(0, s) + pre + sel + post + v.slice(en);
+        ta.focus(); ta.selectionStart = s + pre.length; ta.selectionEnd = s + pre.length + sel.length; fire();
+      }
+      function ins(txt) {
+        var s = ta.selectionStart || 0, v = ta.value;
+        ta.value = v.slice(0, s) + txt + v.slice(ta.selectionEnd || s);
+        ta.focus(); ta.selectionStart = ta.selectionEnd = s + txt.length; fire();
+      }
+      var bar = document.createElement("div");
+      bar.style.cssText = "display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:5px;";
+      function mkBtn(html, title, fn, extra) {
+        var b = document.createElement("button"); b.type = "button"; b.innerHTML = html; b.title = title || "";
+        b.style.cssText = "width:auto;padding:3px 9px;border:1px solid #cdd6e0;background:#fff;border-radius:7px;font-size:14px;cursor:pointer;line-height:1.2;" + (extra || "");
+        b.addEventListener("click", function (ev) { ev.preventDefault(); fn(); });
+        bar.appendChild(b);
+      }
+      mkBtn("<b>B</b>", "Bold", function () { wrap("**", "**"); });
+      Object.keys(RICH_COLS).forEach(function (c) { mkBtn("A", c + " text", function () { wrap("{" + c + "}", "{/}"); }, "color:" + RICH_COLS[c] + ";font-weight:700;"); });
+      var sep = document.createElement("span"); sep.style.cssText = "width:1px;height:18px;background:#e2e8f0;margin:0 3px;"; bar.appendChild(sep);
+      ["⚠️", "🚨", "🔴", "🟠", "✅", "🔧", "📍", "🕒"].forEach(function (em) { mkBtn(em, "Insert " + em, function () { ins(em + " "); }); });
+      if (ta.parentNode) ta.parentNode.insertBefore(bar, ta);
+    };
   })();
 
   // ── View As (owner only) ────────────────────────────────────────────────────

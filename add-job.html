@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=24"></script>
+  <script src="/portal-config.js?v=25"></script>
   <meta charset="utf-8"/>
   <title>Mostlane • Add Job</title>
   <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover"/>
@@ -207,6 +207,13 @@
             <option value="">Select site…</option>
           </select>
         </div>
+      </div>
+
+      <!-- Job name (what the board + engineer see) -->
+      <div class="field-group">
+        <label for="jobName">Job name</label>
+        <input type="text" id="jobName" name="jobName" placeholder="e.g. 28667-Eastbourne, Beatty Road">
+        <div class="hint">How the job shows on the jobs list and to the engineer. Prefilled from the site — edit it for a clearer name, or leave blank to auto-name it.</div>
       </div>
 
       <!-- Job description -->
@@ -602,6 +609,10 @@ function handleSiteChange(){
 
   $("siteCode").value = site.code;
   $("siteName").value = site.name;
+  // Prefill the Job name from the site (editable) — unless the office has typed
+  // their own. `jobNameAuto` tracks the last auto value so a manual edit sticks.
+  const jn = $("jobName");
+  if (jn && (!jn.value.trim() || jn.value === (window.jobNameAuto || ""))) { jn.value = site.name || ""; window.jobNameAuto = jn.value; }
   $("address").value  = site.address;
   $("telephone").value = site.telephone;
 
@@ -667,6 +678,9 @@ async function handleSubmit(evt){
     sharepointURL: $("sharepointURL").value.trim() || undefined,
 
     description,
+    // Editable job name (the reference the board + engineer see). Blank = the
+    // server auto-names it (site name / number-site).
+    reference: ($("jobName") && $("jobName").value.trim()) || undefined,
     // A dormant fallback template is never scheduled or assigned — it just sits
     // in the pool until it's an engineer's fallback and comes into play.
     fallbackTemplate: ($("fallbackTemplate") && $("fallbackTemplate").checked) || undefined,
@@ -737,6 +751,8 @@ async function init(){
   if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
 
   $("jobForm").addEventListener("submit", handleSubmit);
+  // Format toolbar (bold / colour / ⚠🚨 emoji) above the description.
+  try{ if(window.MLUI && MLUI.richBar) MLUI.richBar("description"); }catch(e){}
   // Arrived from Scheduler → 🛟 Fallbacks "Create a fallback job": pre-tick it.
   try{ if(new URLSearchParams(location.search).get("fallback")==="1" && $("fallbackTemplate")){ $("fallbackTemplate").checked = true; } }catch(e){}
   $("siteType").addEventListener("change", populateSites);

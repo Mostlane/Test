@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=24"></script>
+  <script src="/portal-config.js?v=25"></script>
   <meta charset="UTF-8">
   <title>Mostlane • My Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -978,7 +978,7 @@ async function renderMapForRange(mode){
         <div style="font-size:13px;min-width:180px;">
           <b style="color:#003b82;">${escH(job.helpdeskRef || job.id)}</b>
           <span style="display:inline-block;border-radius:999px;padding:1px 8px;color:#fff;font-size:11px;font-weight:600;background:${colour};margin-left:4px;">${escH(job.status||"")}</span><br>
-          ${escH(job.description||"")}<br>
+          ${(window.MLUI&&MLUI.richStrip)?MLUI.richStrip(job.description||""):escH(job.description||"")}<br>
           <span style="color:#6b7280;">${escH(job.siteName||job.address||"")}</span><br>
           ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}) + " " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : '<span style="color:#b45309;font-weight:600;">📌 Not booked in yet</span><br>'}
           <a href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html" style="color:#1d4ed8;font-weight:600;">Open job →</a>
