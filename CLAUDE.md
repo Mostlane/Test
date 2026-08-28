@@ -636,17 +636,24 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   `seriesId`/`seriesSkipped` + `release.hour` are threaded through
   createOrUpdateJobFromPayload + patchJob and surfaced on `releaseView`
   (mode "skipped" / `series:true`).
-  **Per-engineer FALLBACK jobs — "at least a job for tomorrow" (Aug 2026):** so an
-  engineer always knows where they're heading next day. Config in app_config
-  **`sla:fallbacks:<tid>`** = `{enabled, startHour, byEngineer:{<normId>:{siteName,
-  postcode,description,durationMinutes,active, projectId,projectName,projectNumber}}}`
-  via **GET/POST /sla/fallbacks** (SLA admin; GET also returns live `projects`);
-  managed on **sla-scheduler.html → 🛟 Fallbacks** (master enable + start time + a
-  row per FIELD engineer). **A fallback can be a LIVE PROJECT** (per-row picker) —
-  the assigned job is stamped with `projectId` + the project's Pxxxx site
-  (address/postcode/coords) so it costs + shows like a project job; or a generic
-  site+task (falls back to generic if the project is no longer live). Cron
-  **`sla.sweepFallbacks`** (every
+  **Per-engineer FALLBACK jobs — "at least a job for tomorrow" (Aug 2026, REWORKED):**
+  so an engineer always knows where they're heading next day. **A fallback is now a
+  REAL job made in the normal editor but kept DORMANT** — `job.fallbackTemplate=true`
+  (Add Job "🛟 Standby / fallback job" tick; created unassigned + unscheduled).
+  **Dormant templates are hidden everywhere** — `listJobs` filters out
+  `fallbackTemplate` (so they never show on the board / scheduler / for-engineer /
+  dashboard); `listJobs(env,tid,{includeDormant:true})` + **`listFallbackTemplates()`**
+  expose them for the manager + cron. They form a **POOL**: config in app_config
+  **`sla:fallbacks:<tid>`** = `{enabled, startHour, byEngineer:{<normId>:{jobId,active}}}`
+  — each field engineer picks one pool job as their fallback. **GET/POST /sla/fallbacks**
+  (SLA admin; GET returns `config` + the `templates` pool + live `projects`); managed on
+  **sla-scheduler.html → 🛟 Fallbacks** (master enable + start time + a per-engineer
+  dropdown of the pool + a "➕ Create a standby/fallback job" link → `add-job.html?fallback=1`).
+  On activation the cron **CLONES** the chosen dormant template into a LIVE job
+  (id `fb:<normId>:<target>`, idempotent per engineer/day; `fallback:true`,
+  `fallbackTemplate:false`, dayBefore release) copying its description/site/requirements/
+  workArea/duration/job-type. (Old lightweight siteName/description/project rows are gone.)
+  Cron **`sla.sweepFallbacks`** (every
   5-min tick, self-gates on Europe/London): **warns** the office (owner +
   FullAccess/SLAAdmin push) at **15:30 & 18:00** about field engineers with no job
   for the **next working day**, and at **19:00 auto-assigns** each still-empty

@@ -5611,7 +5611,16 @@ async function handle8(request, env, ctx, url, sess) {
         projects = (results || []).map((p) => ({ id: p.id, number: p.number, name: p.name }));
       } catch {
       }
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects }, headers);
+      const templates = (await listFallbackTemplates(env, tenantId)).map((j) => ({
+        id: j.id,
+        ref: j.helpdeskRef || j.id,
+        description: j.description || "",
+        siteName: j.siteName || "",
+        postcode: j.postcode || "",
+        durationMinutes: j.durationMinutes || null,
+        workArea: j.workArea || null
+      })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
   }
@@ -7888,10 +7897,22 @@ async function getShift(env, tenantId, username, date) {
   const db = tenantDB(env, tenantId);
   return await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first() || null;
 }
-async function listJobs(env, tenantId) {
+async function listJobs(env, tenantId, opts) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
-  return (results || []).map((r) => JSON.parse(r.data));
+  const all = (results || []).map((r) => JSON.parse(r.data));
+  return opts && opts.includeDormant ? all : all.filter((j) => !j.fallbackTemplate);
+}
+async function listFallbackTemplates(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
+  return (results || []).map((r) => {
+    try {
+      return JSON.parse(r.data);
+    } catch {
+      return null;
+    }
+  }).filter((j) => j && j.fallbackTemplate);
 }
 function isTransientD1(e) {
   return /exceeded timeout|object to be reset|Network connection lost|D1_ERROR.*(timeout|reset|storage|internal)/i.test(String(e && e.message || e));
@@ -8052,6 +8073,10 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     seriesSkipped: body.seriesSkipped !== void 0 ? !!body.seriesSkipped : existing?.seriesSkipped || false,
     // Auto-assigned fallback "at least a job for tomorrow" day (cron). Preserved.
     fallback: body.fallback !== void 0 ? !!body.fallback : existing?.fallback || false,
+    // A DORMANT fallback TEMPLATE — a real job made in the editor but hidden from
+    // the board/scheduler/engineers (excluded in listJobs). It's a reusable
+    // standby that the cron CLONES into a live job when an engineer has no work.
+    fallbackTemplate: body.fallbackTemplate !== void 0 ? !!body.fallbackTemplate : existing?.fallbackTemplate || false,
     // Fleet renewal appointment (auto-made MOT/service booking) — links back to the
     // vehicle so the fleet page can find/reassign/cancel it. Preserved across saves.
     fleetRenewal: body.fleetRenewal !== void 0 ? !!body.fleetRenewal : existing?.fleetRenewal || false,
@@ -8136,6 +8161,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;
   if (patch.fallback !== void 0) job.fallback = !!patch.fallback;
+  if (patch.fallbackTemplate !== void 0) job.fallbackTemplate = !!patch.fallbackTemplate;
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
     if (patch[k] !== void 0) job[k] = patch[k];
   }
@@ -9566,22 +9592,9 @@ async function setFallbacks(env, tenantId, body) {
   const src = body.byEngineer && typeof body.byEngineer === "object" ? body.byEngineer : cur.byEngineer;
   for (const k of Object.keys(src || {})) {
     const e = src[k] || {};
-    const description = String(e.description || "").trim();
-    const siteName = String(e.siteName || "").trim();
-    const projectId = String(e.projectId || "").trim();
-    if (!description && !siteName && !projectId) continue;
-    out.byEngineer[normId(k)] = {
-      siteName,
-      postcode: String(e.postcode || "").trim(),
-      description,
-      durationMinutes: Math.max(15, Math.min(600, Number(e.durationMinutes) || 480)),
-      active: e.active === false ? false : true,
-      // Optional: default the engineer onto a LIVE PROJECT (the job is stamped
-      // with the project + its site). projectName/Number are cached for the UI.
-      projectId: String(e.projectId || "").trim() || null,
-      projectName: String(e.projectName || "").trim() || null,
-      projectNumber: String(e.projectNumber || "").trim() || null
-    };
+    const jobId = String(e.jobId || "").trim();
+    if (!jobId) continue;
+    out.byEngineer[normId(k)] = { jobId, active: e.active === false ? false : true };
   }
   const db = tenantDB(env, tenantId);
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, FALLBACK_KEY(tenantId), JSON.stringify(out)).run();
@@ -9663,80 +9676,51 @@ async function sweepFallbacks(env, tid = 1) {
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
+    const tById = {};
+    (await listFallbackTemplates(env, tid)).forEach((t) => {
+      tById[t.id] = t;
+    });
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
-      if (!fb || fb.active === false || !fb.description && !fb.siteName && !fb.projectId) continue;
-      let payload = null;
-      if (fb.projectId) {
-        try {
-          const proj = await db.prepare("SELECT id, number, name, data FROM projects WHERE id=? AND status='live'").bind(fb.projectId).first();
-          if (proj) {
-            let pdata = {};
-            try {
-              pdata = JSON.parse(proj.data || "{}");
-            } catch {
-            }
-            let siteRow = null;
-            try {
-              siteRow = await env.DB.prepare("SELECT site_number, site_name, postcode, data FROM sites WHERE client='projects' AND site_number=?").bind(proj.number).first();
-            } catch {
-            }
-            let sdata = {};
-            try {
-              if (siteRow && siteRow.data) sdata = JSON.parse(siteRow.data);
-            } catch {
-            }
-            payload = {
-              description: fb.description || "Fallback \u2014 " + proj.name,
-              projectId: proj.id,
-              siteCode: proj.number,
-              siteName: proj.name,
-              storeType: "projects",
-              address: siteRow && [sdata.address1, sdata.town, sdata.county, siteRow.postcode].filter(Boolean).join(", ") || "",
-              postcode: siteRow && siteRow.postcode || pdata.postcode || fb.postcode || "",
-              lat: pdata.lat != null ? pdata.lat : sdata.lat != null ? sdata.lat : void 0,
-              lon: pdata.lon != null ? pdata.lon : sdata.lng != null ? sdata.lng : sdata.lon != null ? sdata.lon : void 0,
-              assignedEngineers: [u.username],
-              scheduledAt,
-              durationMinutes: fb.durationMinutes || 480,
-              release: { mode: "dayBefore", hour: 17 },
-              fallback: true,
-              requiresRA: false,
-              requiresSignature: false,
-              requiresPhoto: false,
-              requiresNote: false,
-              changedBy: "auto-fallback"
-            };
-          }
-        } catch (e) {
-          console.error("fallback project lookup failed:", e && e.message);
-        }
-      }
-      if (!payload) {
-        if (!fb.description && !fb.siteName) continue;
-        payload = {
-          description: fb.description || "Fallback \u2014 " + (fb.siteName || "standby"),
-          siteName: fb.siteName || "",
-          siteCode: "",
-          postcode: fb.postcode || "",
-          assignedEngineers: [u.username],
-          scheduledAt,
-          durationMinutes: fb.durationMinutes || 480,
-          release: { mode: "dayBefore", hour: 17 },
-          fallback: true,
-          requiresRA: false,
-          requiresSignature: false,
-          requiresPhoto: false,
-          requiresNote: false,
-          changedBy: "auto-fallback"
-        };
-      }
+      if (!fb || fb.active === false || !fb.jobId) continue;
+      const tmpl = tById[fb.jobId];
+      if (!tmpl) continue;
+      const payload = {
+        id: "fb:" + normId(u.username) + ":" + target,
+        reference: tmpl.helpdeskRef || void 0,
+        description: tmpl.description || "Standby job",
+        siteCode: tmpl.siteCode || "",
+        siteName: tmpl.siteName || "",
+        storeType: tmpl.storeType || "",
+        address: tmpl.address || "",
+        postcode: tmpl.postcode || "",
+        telephone: tmpl.telephone || "",
+        lat: tmpl.lat != null ? tmpl.lat : void 0,
+        lon: tmpl.lon != null ? tmpl.lon : void 0,
+        projectId: tmpl.projectId || void 0,
+        workArea: tmpl.workArea || void 0,
+        priority: tmpl.priority || void 0,
+        requiresRA: tmpl.requiresRA,
+        requiresSignature: tmpl.requiresSignature,
+        requiresPhoto: tmpl.requiresPhoto,
+        requiresNote: tmpl.requiresNote,
+        emTest: tmpl.emTest,
+        pat: tmpl.pat,
+        firestopping: tmpl.firestopping,
+        assignedEngineers: [u.username],
+        scheduledAt,
+        durationMinutes: tmpl.durationMinutes || 480,
+        release: { mode: "dayBefore", hour: 17 },
+        fallback: true,
+        fallbackTemplate: false,
+        changedBy: "auto-fallback"
+      };
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {
         });
       } catch (e) {
-        console.error("fallback assign failed for", u.username, e && e.message);
+        console.error("fallback clone failed for", u.username, e && e.message);
       }
     }
   }

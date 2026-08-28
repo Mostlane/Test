@@ -111,7 +111,14 @@ export async function handle(request, env, ctx, url, sess) {
         ).all();
         projects = (results || []).map(p => ({ id: p.id, number: p.number, name: p.name }));
       } catch {}
-      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects }, headers);
+      // The pool of dormant fallback jobs — the options the office picks from.
+      const templates = (await listFallbackTemplates(env, tenantId)).map(j => ({
+        id: j.id, ref: j.helpdeskRef || j.id, description: j.description || "",
+        siteName: j.siteName || "", postcode: j.postcode || "",
+        durationMinutes: j.durationMinutes || null,
+        workArea: j.workArea || null,
+      })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson(request)) }, headers);
   }
@@ -2604,10 +2611,20 @@ async function getShift(env, tenantId, username, date) {
   return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
 }
 
-export async function listJobs(env, tenantId) {
+export async function listJobs(env, tenantId, opts) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
-  return (results || []).map(r => JSON.parse(r.data));
+  const all = (results || []).map(r => JSON.parse(r.data));
+  // Dormant fallback TEMPLATES never appear on the board / scheduler / engineer
+  // views / dashboard — they only exist to be cloned when they come into play.
+  return (opts && opts.includeDormant) ? all : all.filter(j => !j.fallbackTemplate);
+}
+// The pool of dormant fallback templates (for the manager + the activation cron).
+export async function listFallbackTemplates(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
+  return (results || []).map(r => { try { return JSON.parse(r.data); } catch { return null; } })
+    .filter(j => j && j.fallbackTemplate);
 }
 
 // Upsert a full job object: indexed columns for filtering + full JSON in `data`.
@@ -2817,6 +2834,10 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     seriesSkipped: body.seriesSkipped !== undefined ? !!body.seriesSkipped : (existing?.seriesSkipped || false),
     // Auto-assigned fallback "at least a job for tomorrow" day (cron). Preserved.
     fallback: body.fallback !== undefined ? !!body.fallback : (existing?.fallback || false),
+    // A DORMANT fallback TEMPLATE — a real job made in the editor but hidden from
+    // the board/scheduler/engineers (excluded in listJobs). It's a reusable
+    // standby that the cron CLONES into a live job when an engineer has no work.
+    fallbackTemplate: body.fallbackTemplate !== undefined ? !!body.fallbackTemplate : (existing?.fallbackTemplate || false),
     // Fleet renewal appointment (auto-made MOT/service booking) — links back to the
     // vehicle so the fleet page can find/reassign/cancel it. Preserved across saves.
     fleetRenewal: body.fleetRenewal !== undefined ? !!body.fleetRenewal : (existing?.fleetRenewal || false),
@@ -2911,6 +2932,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.seriesId !== undefined) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== undefined) job.seriesSkipped = !!patch.seriesSkipped;
   if (patch.fallback !== undefined) job.fallback = !!patch.fallback;
+  if (patch.fallbackTemplate !== undefined) job.fallbackTemplate = !!patch.fallbackTemplate;
   // The site can be corrected after creation (test jobs, wrong pick at raise
   // time). All the site details travel together.
   for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
@@ -4260,23 +4282,14 @@ async function setFallbacks(env, tenantId, body) {
   const out = { enabled: body.enabled !== undefined ? !!body.enabled : cur.enabled,
     startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
     byEngineer: {} };
+  // Each field engineer's fallback is now a reference to a DORMANT fallback job
+  // (from the pool) — pick one per engineer, cloned live when they've no work.
   const src = (body.byEngineer && typeof body.byEngineer === "object") ? body.byEngineer : cur.byEngineer;
   for (const k of Object.keys(src || {})) {
     const e = src[k] || {};
-    const description = String(e.description || "").trim();
-    const siteName = String(e.siteName || "").trim();
-    const projectId = String(e.projectId || "").trim();
-    if (!description && !siteName && !projectId) continue;   // empty row → drop it
-    out.byEngineer[normId(k)] = {
-      siteName, postcode: String(e.postcode || "").trim(), description,
-      durationMinutes: Math.max(15, Math.min(600, Number(e.durationMinutes) || 480)),
-      active: e.active === false ? false : true,
-      // Optional: default the engineer onto a LIVE PROJECT (the job is stamped
-      // with the project + its site). projectName/Number are cached for the UI.
-      projectId: String(e.projectId || "").trim() || null,
-      projectName: String(e.projectName || "").trim() || null,
-      projectNumber: String(e.projectNumber || "").trim() || null,
-    };
+    const jobId = String(e.jobId || "").trim();
+    if (!jobId) continue;   // no chosen fallback job → drop the row
+    out.byEngineer[normId(k)] = { jobId, active: e.active === false ? false : true };
   }
   const db = tenantDB(env, tenantId);
   await db.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tenantId, FALLBACK_KEY(tenantId), JSON.stringify(out)).run();
@@ -4349,51 +4362,35 @@ export async function sweepFallbacks(env, tid = 1) {
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);
+    // Load the dormant fallback pool once; each empty engineer's chosen template
+    // is CLONED into a live job for the target day (idempotent per engineer/day).
+    const tById = {}; (await listFallbackTemplates(env, tid)).forEach(t => { tById[t.id] = t; });
     for (const u of empties) {
       const fb = cfg.byEngineer[normId(u.username)];
-      if (!fb || fb.active === false || (!fb.description && !fb.siteName && !fb.projectId)) continue;
-      let payload = null;
-      // A PROJECT fallback: default them onto a live project — stamp projectId +
-      // the project's Pxxxx site so it costs + shows like a project job.
-      if (fb.projectId) {
-        try {
-          const proj = await db.prepare("SELECT id, number, name, data FROM projects WHERE id=? AND status='live'").bind(fb.projectId).first();
-          if (proj) {
-            let pdata = {}; try { pdata = JSON.parse(proj.data || "{}"); } catch {}
-            let siteRow = null; try { siteRow = await env.DB.prepare("SELECT site_number, site_name, postcode, data FROM sites WHERE client='projects' AND site_number=?").bind(proj.number).first(); } catch {}
-            let sdata = {}; try { if (siteRow && siteRow.data) sdata = JSON.parse(siteRow.data); } catch {}
-            payload = {
-              description: fb.description || ("Fallback — " + proj.name),
-              projectId: proj.id, siteCode: proj.number, siteName: proj.name, storeType: "projects",
-              address: (siteRow && [sdata.address1, sdata.town, sdata.county, siteRow.postcode].filter(Boolean).join(", ")) || "",
-              postcode: (siteRow && siteRow.postcode) || pdata.postcode || fb.postcode || "",
-              lat: pdata.lat != null ? pdata.lat : (sdata.lat != null ? sdata.lat : undefined),
-              lon: pdata.lon != null ? pdata.lon : (sdata.lng != null ? sdata.lng : (sdata.lon != null ? sdata.lon : undefined)),
-              assignedEngineers: [u.username], scheduledAt, durationMinutes: fb.durationMinutes || 480,
-              release: { mode: "dayBefore", hour: 17 }, fallback: true,
-              requiresRA: false, requiresSignature: false, requiresPhoto: false, requiresNote: false,
-              changedBy: "auto-fallback",
-            };
-          }
-        } catch (e) { console.error("fallback project lookup failed:", e && e.message); }
-      }
-      // Generic fallback (or the project wasn't found / no longer live).
-      if (!payload) {
-        if (!fb.description && !fb.siteName) continue;
-        payload = {
-          description: fb.description || ("Fallback — " + (fb.siteName || "standby")),
-          siteName: fb.siteName || "", siteCode: "", postcode: fb.postcode || "",
-          assignedEngineers: [u.username],
-          scheduledAt, durationMinutes: fb.durationMinutes || 480,
-          release: { mode: "dayBefore", hour: 17 }, fallback: true,
-          requiresRA: false, requiresSignature: false, requiresPhoto: false, requiresNote: false,
-          changedBy: "auto-fallback",
-        };
-      }
+      if (!fb || fb.active === false || !fb.jobId) continue;
+      const tmpl = tById[fb.jobId];
+      if (!tmpl) continue;   // the chosen fallback job no longer exists
+      const payload = {
+        id: "fb:" + normId(u.username) + ":" + target,
+        reference: tmpl.helpdeskRef || undefined,
+        description: tmpl.description || "Standby job",
+        siteCode: tmpl.siteCode || "", siteName: tmpl.siteName || "", storeType: tmpl.storeType || "",
+        address: tmpl.address || "", postcode: tmpl.postcode || "", telephone: tmpl.telephone || "",
+        lat: tmpl.lat != null ? tmpl.lat : undefined, lon: tmpl.lon != null ? tmpl.lon : undefined,
+        projectId: tmpl.projectId || undefined, workArea: tmpl.workArea || undefined,
+        priority: tmpl.priority || undefined,
+        requiresRA: tmpl.requiresRA, requiresSignature: tmpl.requiresSignature,
+        requiresPhoto: tmpl.requiresPhoto, requiresNote: tmpl.requiresNote,
+        emTest: tmpl.emTest, pat: tmpl.pat, firestopping: tmpl.firestopping,
+        assignedEngineers: [u.username],
+        scheduledAt, durationMinutes: tmpl.durationMinutes || 480,
+        release: { mode: "dayBefore", hour: 17 }, fallback: true, fallbackTemplate: false,
+        changedBy: "auto-fallback",
+      };
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
         await reconcileRelease(env, tid, job).catch(() => {});
-      } catch (e) { console.error("fallback assign failed for", u.username, e && e.message); }
+      } catch (e) { console.error("fallback clone failed for", u.username, e && e.message); }
     }
   }
   swept[stamp] = true;
