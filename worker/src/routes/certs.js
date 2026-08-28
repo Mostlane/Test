@@ -48,16 +48,21 @@ function clientForSiteClient(sc) {
     return { name: "Fareham Borough Council", address: "Civic Offices, Civic Way, Fareham", postcode: "PO16 7AZ" };
   return null;
 }
-// Fill a BLANK client on a cert record from its site's client type (never
-// overwrites a client someone has typed). Used wherever a cert is read/rendered
-// so the office and the PDF always carry the right client.
+// Fill BLANK client fields on a cert record from its site's client type — PER
+// FIELD, so a cert that carried only the client NAME (from an older seed) still
+// gets its address + postcode. Never overwrites a value someone has typed. Used
+// wherever a cert is read/rendered so the office and the PDF carry the right client.
 async function backfillClient(env, tid, rec) {
-  if (!rec || (rec.client && String(rec.client.name || "").trim())) return rec;
+  if (!rec) return rec;
   const code = rec.siteCode || "";
   if (!code) return rec;
   const sr = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first().catch(() => null);
   const m = clientForSiteClient(sr && sr.client);
-  if (m) rec.client = { ...m };
+  if (!m) return rec;
+  rec.client = rec.client || {};
+  if (!String(rec.client.name || "").trim()) rec.client.name = m.name;
+  if (!String(rec.client.address || "").trim()) rec.client.address = m.address;
+  if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
   return rec;
 }
 
@@ -498,6 +503,25 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  // ── My saved signature (any user) — a personal default signature so signing a
+  // cert is one tap. Stored per-user in app_config cert:sig:<username>. ─────────
+  if (sub === "/my-signature") {
+    const sigKey = "cert:sig:" + tid + ":" + me.toLowerCase();
+    if (method === "GET") {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).first();
+      return json({ ok: true, signature: (row && row.value) || "" }, {}, env, request);
+    }
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const sig = typeof b.signature === "string" ? b.signature : "";
+      // Guard: must be a small data-URL image (a signature PNG/JPEG is a few KB).
+      if (sig && (!/^data:image\//.test(sig) || sig.length > 200000)) return error("Invalid signature", 400, env, request);
+      if (sig) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, sigKey, sig).run();
+      else await env.DB.prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).run();
+      return json({ ok: true }, {}, env, request);
+    }
+  }
+
   // ── EM remedial battery photo upload (engineer or office) ───────────────────
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
@@ -553,9 +577,7 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(tid, jobId, type).first();
     if (existing) {
       const exRec = shapeRow(existing);
-      // Back-fill a BLANK client on an existing draft from the site mapping (never
-      // overwrite a client the office has already typed).
-      if (mappedClient && (!exRec.client || !String(exRec.client.name || "").trim())) exRec.client = { ...mappedClient };
+      await backfillClient(env, tid, exRec);   // fill any blank client field (name/address/postcode) from the site
       await resignRemedialPhotos(env, url.origin, exRec);
       return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
     }
@@ -579,8 +601,9 @@ export async function handle(request, env, ctx, url, sess) {
       comments: (h && h.comments != null && h.comments !== "") ? h.comments : config[type].comments,
       declaration: config[type].declaration,
       // Contractor = Mostlane's own details (config), refined by the previous
-      // cert's trading block; engineer name/date always blank (per-visit).
-      contractor: { ...config.contractor, ...((h && h.contractor) || {}), name: "", position: "Engineer", date: "" },
+      // cert's trading block; the engineer NAME auto-fills from the job's assigned
+      // engineer (per-visit), date left for the engineer to confirm.
+      contractor: { ...config.contractor, ...((h && h.contractor) || {}), name: (job && Array.isArray(job.assignedEngineers) && job.assignedEngineers[0]) || "", position: "Engineer", date: "" },
       rows: pre.rows,
       signature: "",
     };
