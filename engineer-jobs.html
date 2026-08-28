@@ -24,6 +24,13 @@
     body{background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:0 16px 92px;min-height:100vh}
     a{color:var(--accent)}
     .shell{padding:0}
+    /* Desktop (with the sidebar): widen out of the mobile column and drop the
+       bottom tabbar (the sidebar is the nav on desktop). Scoped ENTIRELY to
+       min-width:1000px + pnav-on, so mobile/PWA engineers are UNAFFECTED. */
+    @media (min-width:1000px){
+      body.pnav-on{ max-width:1180px; margin:0; padding-bottom:28px; }
+      body.pnav-on .tabbar{ display:none !important; }
+    }
     header.main-header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 2px 4px;background:transparent;border:0;position:static}
     .head-left{display:flex;align-items:center;gap:10px;min-width:0}
     /* Header back button — a top-left escape that the bottom tab bar (blocked by
