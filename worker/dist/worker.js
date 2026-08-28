@@ -5621,7 +5621,17 @@ async function handle8(request, env, ctx, url, sess) {
         workArea: j.workArea || null
       })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
       const finishedRe = (s) => /complete|closed|invoiced|cancel/i.test(String(s || ""));
-      const openJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.scheduledAt && !j.fallback && !(Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)).map((j) => ({ id: j.id, ref: j.helpdeskRef || j.id, siteName: j.siteName || "", description: j.description || "" })).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      const openJobs = (await listJobs(env, tenantId)).filter((j) => !finishedRe(j.status) && !j.fallback).map((j) => {
+        const engs = Array.isArray(j.assignedEngineers) ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [];
+        return {
+          id: j.id,
+          ref: j.helpdeskRef || j.id,
+          siteName: j.siteName || "",
+          description: j.description || "",
+          assignedTo: engs.join(", "),
+          audit: Array.isArray(j.auditItems) && j.auditItems.length > 0
+        };
+      }).sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
       return jsonResponse({ ok: true, config: await getFallbacks(env, tenantId), projects, templates, openJobs }, headers);
     }
     if (method === "POST") return jsonResponse({ ok: true, config: await setFallbacks(env, tenantId, await readJson2(request)) }, headers);
@@ -8051,6 +8061,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     auditItems: normAuditItems(body.auditItems, existing),
     // Emergency-lighting + PAT test type (a combined EM+PAT job carries both).
     emTest: body.emTest !== void 0 ? !!body.emTest : existing?.emTest || false,
+    // EM test kind: "monthly" (function/flick test) or "yearly" (3-hour drain-down).
+    // Fareham do both; Co-op is a yearly test. Blank = yearly (the default/legacy).
+    emKind: body.emKind !== void 0 ? body.emKind === "monthly" ? "monthly" : "yearly" : existing?.emKind || "",
     pat: body.pat !== void 0 ? !!body.pat : existing?.pat || false,
     emTimer: body.emTimer !== void 0 ? body.emTimer || null : existing?.emTimer || null,
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
@@ -8096,10 +8109,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     order: existing?.order,
     signature: existing?.signature,
     travelStartMileage: existing?.travelStartMileage,
+    // Per-engineer status on a multi-engineer job — PRESERVED across a re-save, so
+    // adding an engineer (e.g. a fallback continuing a shared audit) keeps everyone
+    // else's progress + the shared item list intact.
+    engStatus: existing?.engStatus,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
+  seedEngStatus(job, new Set(assignedList(existing || {}).map(normId)), existing?.status, now);
   await saveJob(env, tenantId, job);
   return job;
 }
@@ -8155,6 +8173,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.firestopping !== void 0) job.firestopping = !!patch.firestopping;
   if (patch.auditItems !== void 0) job.auditItems = normAuditItems(patch.auditItems, job);
   if (patch.emTest !== void 0) job.emTest = !!patch.emTest;
+  if (patch.emKind !== void 0) job.emKind = patch.emKind === "monthly" ? "monthly" : "yearly";
   if (patch.pat !== void 0) job.pat = !!patch.pat;
   if (patch.emTimer !== void 0) job.emTimer = patch.emTimer || null;
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
@@ -9717,15 +9736,16 @@ async function sweepFallbacks(env, tid = 1) {
           changedBy: "auto-fallback"
         };
       } else {
-        if (finishedRe(src.status) || src.scheduledAt || assignedList(src).length) continue;
-        payload = {
-          id: src.id,
-          assignedEngineers: [u.username],
-          scheduledAt,
-          release: { mode: "dayBefore", hour: 17 },
-          fallback: true,
-          changedBy: "auto-fallback"
-        };
+        if (finishedRe(src.status)) continue;
+        const roster = assignedList(src);
+        if (roster.some((a) => normId(a) === normId(u.username))) continue;
+        if (roster.length) {
+          payload = { id: src.id, assignedEngineers: roster.concat([u.username]), changedBy: "auto-fallback" };
+          if (!src.scheduledAt) payload.scheduledAt = scheduledAt;
+        } else {
+          if (src.scheduledAt) continue;
+          payload = { id: src.id, assignedEngineers: [u.username], scheduledAt, release: { mode: "dayBefore", hour: 17 }, fallback: true, changedBy: "auto-fallback" };
+        }
       }
       try {
         const job = await createOrUpdateJobFromPayload(env, tid, payload);
@@ -24882,13 +24902,34 @@ function buildBatteryEnquiryPdf(items, meta = {}) {
 
 // src/routes/certs.js
 var T = (t) => t === "pat" ? "pat" : "em";
+function clientForSiteClient(sc) {
+  sc = String(sc || "").toLowerCase().trim();
+  if (sc === "retail" || sc === "els" || sc === "els_private" || sc === "cobra")
+    return { name: "The Southern Co-op", address: "1000 Lakeside, Western Road, Portsmouth", postcode: "PO6 3FE" };
+  if (sc === "fbc")
+    return { name: "Fareham Borough Council", address: "Civic Offices, Civic Way, Fareham", postcode: "PO16 7AZ" };
+  return null;
+}
+async function backfillClient(env, tid, rec) {
+  if (!rec) return rec;
+  const code = rec.siteCode || "";
+  if (!code) return rec;
+  const sr = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first().catch(() => null);
+  const m = clientForSiteClient(sr && sr.client);
+  if (!m) return rec;
+  rec.client = rec.client || {};
+  if (!String(rec.client.name || "").trim()) rec.client.name = m.name;
+  if (!String(rec.client.address || "").trim()) rec.client.address = m.address;
+  if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
+  return rec;
+}
 var DEFAULT_CONFIG2 = {
   // Default client used to seed a NEW cert when the previous cert didn't supply one
   // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
   // wins over this, and it's never applied over a value the office has typed.
   client: {
     name: "The Southern Co-op",
-    address: "1000 Lakeside, Portsmouth",
+    address: "1000 Lakeside, Western Road, Portsmouth",
     postcode: "PO6 3FE"
   },
   contractor: {
@@ -25380,6 +25421,85 @@ async function handle30(request, env, ctx, url, sess) {
       return json({ ok: true, config: next }, {}, env, request);
     }
   }
+  if (sub === "/my-signature") {
+    const sigKey = "cert:sig:" + tid + ":" + me.toLowerCase();
+    if (method === "GET") {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).first();
+      return json({ ok: true, signature: row && row.value || "" }, {}, env, request);
+    }
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const sig = typeof b.signature === "string" ? b.signature : "";
+      if (sig && (!/^data:image\//.test(sig) || sig.length > 2e5)) return error("Invalid signature", 400, env, request);
+      if (sig) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, sigKey, sig).run();
+      else await env.DB.prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).run();
+      return json({ ok: true }, {}, env, request);
+    }
+  }
+  if (sub === "/jobs" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const jobs = (await listJobs(env, tid)).filter((j) => j && (j.emTest || j.pat));
+    const codes = [...new Set(jobs.map((j) => String(j.siteCode || "")).filter(Boolean))];
+    const clientByCode = {};
+    if (codes.length) {
+      const ph = codes.map(() => "?").join(",");
+      const rows = await env.DB.prepare(`SELECT site_number, client, site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph})`).bind(tid, ...codes).all().catch(() => ({ results: [] }));
+      (rows.results || []).forEach((r) => {
+        clientByCode[String(r.site_number)] = { client: String(r.client || "").toLowerCase(), name: r.site_name };
+      });
+    }
+    const done = (s) => {
+      s = String(s || "").toLowerCase();
+      return s.includes("complete") || s.includes("closed") || s.includes("invoiced") || s.includes("cancel");
+    };
+    const out = jobs.map((j) => {
+      const c = clientByCode[String(j.siteCode || "")] || {};
+      return {
+        id: j.id,
+        ref: j.helpdeskRef || j.reference || "",
+        site: j.siteName || c.name || "",
+        siteCode: j.siteCode || "",
+        client: c.client || "",
+        status: j.status || "",
+        closed: done(j.status),
+        scheduledAt: j.scheduledAt || "",
+        em: !!j.emTest,
+        pat: !!j.pat,
+        emKind: j.emKind || (j.emTest ? "yearly" : ""),
+        engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
+      };
+    }).sort((a, b) => (b.scheduledAt || "").localeCompare(a.scheduledAt || ""));
+    return json({ ok: true, jobs: out }, {}, env, request);
+  }
+  if (sub === "/jobs/create-next" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const src = await getJob2(env, tid, String(b.jobId || ""));
+    if (!src) return error("Job not found", 404, env, request);
+    let months = Number(b.months);
+    if (!Number.isFinite(months) || months < 1 || months > 60) months = src.emKind === "monthly" ? 1 : 12;
+    const base = src.scheduledAt ? new Date(src.scheduledAt) : /* @__PURE__ */ new Date();
+    const next = new Date(isNaN(base) ? Date.now() : base.getTime());
+    next.setMonth(next.getMonth() + months);
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      reference: src.helpdeskRef || src.reference || "",
+      description: src.description || "",
+      siteName: src.siteName || "",
+      siteCode: src.siteCode || "",
+      address: src.address || "",
+      postcode: src.postcode || "",
+      priority: src.priority || "",
+      emTest: !!src.emTest,
+      pat: !!src.pat,
+      emKind: src.emKind || "",
+      durationMinutes: src.durationMinutes,
+      scheduledAt: next.toISOString(),
+      status: "Pending",
+      assignedEngineers: [],
+      originator: "cert-next"
+    });
+    return json({ ok: true, id: job.id, scheduledAt: next.toISOString(), months }, {}, env, request);
+  }
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
     const form = await request.formData().catch(() => null);
@@ -25415,22 +25535,24 @@ async function handle30(request, env, ctx, url, sess) {
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
-    const existing = await env.DB.prepare(
-      "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
-    ).bind(tid, jobId, type).first();
     const config = await getConfig3(env, tid);
-    if (existing) {
-      const exRec = shapeRow(existing);
-      await resignRemedialPhotos(env, url.origin, exRec);
-      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
-    }
     const job = await getJob2(env, tid, jobId);
     const code = job ? job.siteCode || "" : "";
-    const siteRow = code ? await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
+    const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
     let siteData = {};
     try {
       siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {};
     } catch {
+    }
+    const mappedClient = clientForSiteClient(siteRow && siteRow.client);
+    const existing = await env.DB.prepare(
+      "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
+    ).bind(tid, jobId, type).first();
+    if (existing) {
+      const exRec = shapeRow(existing);
+      await backfillClient(env, tid, exRec);
+      await resignRemedialPhotos(env, url.origin, exRec);
+      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
     }
     const pre = await prefillFromPrevious(env, tid, code, type);
     const h = pre.header;
@@ -25441,9 +25563,9 @@ async function handle30(request, env, ctx, url, sess) {
       jobId,
       siteCode: code,
       certNumber: "",
-      // Client: transfer from the previous cert; NEVER invented. Blank until the
-      // office fills it once (then it chains forward on every future cert).
-      client: h && h.client ? h.client : config.client || { name: "", address: "", postcode: "" },
+      // Client: the SITE's client type is authoritative for known estates; else the
+      // previous cert; else the config default.
+      client: mappedClient || h && h.client || (config.client || { name: "", address: "", postcode: "" }),
       // Installation: previous cert → else the REAL portal site record.
       installation: h && h.installation ? h.installation : {
         name: job && job.siteName || siteRow && siteRow.site_name || "",
@@ -25455,8 +25577,9 @@ async function handle30(request, env, ctx, url, sess) {
       comments: h && h.comments != null && h.comments !== "" ? h.comments : config[type].comments,
       declaration: config[type].declaration,
       // Contractor = Mostlane's own details (config), refined by the previous
-      // cert's trading block; engineer name/date always blank (per-visit).
-      contractor: { ...config.contractor, ...h && h.contractor || {}, name: "", position: "Engineer", date: "" },
+      // cert's trading block; the engineer NAME auto-fills from the job's assigned
+      // engineer (per-visit), date left for the engineer to confirm.
+      contractor: { ...config.contractor, ...h && h.contractor || {}, name: job && Array.isArray(job.assignedEngineers) && job.assignedEngineers[0] || "", position: "Engineer", date: "" },
       rows: pre.rows,
       signature: ""
     };
@@ -25529,6 +25652,7 @@ async function handle30(request, env, ctx, url, sess) {
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
     const rec = shapeRow(cert);
+    await backfillClient(env, tid, rec);
     const sig = dataUrlToBytes(rec.signature);
     let logo = null;
     try {
@@ -25543,6 +25667,7 @@ async function handle30(request, env, ctx, url, sess) {
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
     const oneRec = shapeRow(cert);
+    await backfillClient(env, tid, oneRec);
     await resignRemedialPhotos(env, url.origin, oneRec);
     return json({ ok: true, record: oneRec, config: await getConfig3(env, tid) }, {}, env, request);
   }
@@ -25566,6 +25691,7 @@ async function handle30(request, env, ctx, url, sess) {
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     const rec = shapeRow(cert);
+    await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code \u2014 set the site first.", 400, env, request);
     const number = String(b.certNumber || cert.cert_number || await suggestNumber(env, tid, code, cert.type)).trim();

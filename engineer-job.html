@@ -10,7 +10,7 @@
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=24"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=11"></script>
+  <script src="cert-form.js?v=13"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -405,7 +405,7 @@
       h+='<div class="card"><div id="firestopHost"></div></div>';
     } else if(cert){
       // EM jobs (incl. combined EM+PAT): the 3-hour battery drain-down timer.
-      if(job.emTest) h+='<div class="card" id="emTimerCard"></div>';
+      if(job.emTest && job.emKind!=="monthly") h+='<div class="card" id="emTimerCard"></div>';   // 3h drain-down is a YEARLY test only
       // EM / PAT jobs complete via the portal certificate (filled + signed, then
       // submitted for office review) — the shared component handles it.
       h+='<div class="card"><div id="certHost"></div></div>';
@@ -609,7 +609,7 @@
     drawStatus(); drawTimeline(); applyLock();
     if(fs) mountFirestop();
     if(cert) mountCert();
-    if(cert && job.emTest) initEmTimer();
+    if(cert && job.emTest && job.emKind!=="monthly") initEmTimer();
   }
   // ── EM 3-hour drain-down timer (shared, persisted on job.emTimer) ──────────
   var emTick=null;

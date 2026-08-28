@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>EM / PAT Jobs</title>
+  <script src="/portal-config.js?v=24"></script>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003468; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#eef1f4;color:#1f2937;}
+    header.page{background:var(--brand);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+    header.page h1{font-size:18px;margin:0;flex:1;}
+    .wrap{max-width:1040px;margin:14px auto 90px;padding:0 12px;}
+    .card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(6,24,54,.06);padding:14px;margin-bottom:12px;}
+    .btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:9px 13px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand);} .btn.sm{padding:6px 10px;font-size:13px;}
+    .muted{color:#6b7a90;font-size:13px;}
+    .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+    .filters label{font-size:12px;color:#6b7a90;font-weight:700;display:flex;flex-direction:column;gap:3px;}
+    .filters select,.filters input{padding:8px 10px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;font-family:inherit;min-width:150px;}
+    table{width:100%;border-collapse:collapse;}
+    th,td{text-align:left;padding:10px 8px;border-top:1px solid #eef2f6;font-size:13.5px;vertical-align:middle;}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6b7a90;border-top:none;}
+    tr:hover td{background:#f7fafc;}
+    .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;white-space:nowrap;}
+    .b-em{background:#e8f0fe;color:#1746a2;} .b-pat{background:#eef7ee;color:#1c6b2e;} .b-open{background:#fff3cd;color:#7a5b00;} .b-closed{background:#e8eef5;color:#3a536e;}
+    .b-mon{background:#fdeede;color:#9a5a00;} .b-yr{background:#e8f0fe;color:#1746a2;}
+    .ref{font-weight:700;} .site{color:#3a536e;}
+    .rowacts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+    .count{font-size:12px;color:#6b7a90;font-weight:700;}
+    .tabrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+    .tab{padding:7px 14px;border-radius:999px;border:1px solid #cfd8e3;background:#fff;color:var(--brand);font-weight:700;cursor:pointer;font-size:13.5px;}
+    .tab.on{background:var(--brand);color:#fff;}
+    @media(max-width:640px){ th.hide-m,td.hide-m{display:none;} }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="cert-review.html" title="Back">‹ Back</a>
+    <h1>📄 EM / PAT jobs</h1>
+    <a class="btn ghost sm" href="cert-review.html">🗂 Review queue</a>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <div class="filters">
+        <label>Status
+          <select id="fStatus"><option value="open">Open</option><option value="closed">Closed</option><option value="all">All</option></select>
+        </label>
+        <label>Client
+          <select id="fClient"><option value="all">All clients</option><option value="coop">Southern Co-op</option><option value="fbc">Fareham (FBC)</option><option value="other">Other</option></select>
+        </label>
+        <label>Type
+          <select id="fType"><option value="all">EM &amp; PAT</option><option value="em">EM only</option><option value="pat">PAT only</option></select>
+        </label>
+        <label>Search
+          <input type="text" id="fSearch" placeholder="ref or site…">
+        </label>
+        <div style="flex:1"></div>
+        <span class="count" id="count"></span>
+      </div>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table id="tbl">
+        <thead><tr><th>Ref / site</th><th class="hide-m">Client</th><th>Type</th><th class="hide-m">Scheduled</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="6" class="muted" style="padding:18px">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var API = window.MOSTLANE_API || "";
+  var $=function(id){return document.getElementById(id);};
+  function token(){ try{return localStorage.getItem("mostlaneToken")||"";}catch(e){return"";} }
+  function af(p,o){ o=o||{}; o.headers=Object.assign({Authorization:"Bearer "+token()},o.headers||{}); return fetch(API+p,o); }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  var COOP=["retail","els","els_private","cobra"];
+  var ALL=[];
+
+  function clientLabel(c){
+    if(COOP.indexOf(c)>=0) return "Southern Co-op";
+    if(c==="fbc") return "Fareham";
+    return c ? c.replace(/_/g," ") : "—";
+  }
+  function fmtDate(iso){ if(!iso) return "Not booked"; var d=new Date(iso); if(isNaN(d)) return "—"; return d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short",year:"numeric"})+" "+d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); }
+
+  function matches(j){
+    var st=$("fStatus").value; if(st==="open"&&j.closed) return false; if(st==="closed"&&!j.closed) return false;
+    var cl=$("fClient").value;
+    if(cl==="coop"&&COOP.indexOf(j.client)<0) return false;
+    if(cl==="fbc"&&j.client!=="fbc") return false;
+    if(cl==="other"&&(COOP.indexOf(j.client)>=0||j.client==="fbc")) return false;
+    var ty=$("fType").value; if(ty==="em"&&!j.em) return false; if(ty==="pat"&&!j.pat) return false;
+    var q=$("fSearch").value.trim().toLowerCase();
+    if(q && (String(j.ref||"")+" "+String(j.site||"")).toLowerCase().indexOf(q)<0) return false;
+    return true;
+  }
+
+  function render(){
+    var rows=ALL.filter(matches);
+    $("count").textContent = rows.length+" job"+(rows.length===1?"":"s");
+    if(!rows.length){ $("rows").innerHTML='<tr><td colspan="6" class="muted" style="padding:18px">No matching EM/PAT jobs.</td></tr>'; return; }
+    $("rows").innerHTML = rows.map(function(j){
+      var types=[]; if(j.em) types.push('<span class="badge b-em">EM'+(j.emKind==="monthly"?" ·M":j.emKind==="yearly"?" ·Y":"")+'</span>'); if(j.pat) types.push('<span class="badge b-pat">PAT</span>');
+      var stCls=j.closed?"b-closed":"b-open";
+      return '<tr>'
+        +'<td><div class="ref">'+esc(j.ref||j.site||"Job")+'</div><div class="site">'+esc(j.site||"")+(j.engineers&&j.engineers.length?' · '+esc(j.engineers.join(", ")):"")+'</div></td>'
+        +'<td class="hide-m">'+esc(clientLabel(j.client))+'</td>'
+        +'<td>'+types.join(" ")+'</td>'
+        +'<td class="hide-m">'+esc(fmtDate(j.scheduledAt))+'</td>'
+        +'<td><span class="badge '+stCls+'">'+esc(j.status||"—")+'</span></td>'
+        +'<td><div class="rowacts">'
+          +'<a class="btn ghost sm" href="job-view.html?jobId='+encodeURIComponent(j.id)+'&back=cert-jobs.html">Open</a>'
+          +'<button class="btn sm" data-next="'+esc(j.id)+'" data-kind="'+esc(j.emKind||"")+'">↻ Next test</button>'
+        +'</div></td>'
+      +'</tr>';
+    }).join("");
+    [].forEach.call($("rows").querySelectorAll("[data-next]"),function(b){ b.onclick=function(){ createNext(b.getAttribute("data-next"), b.getAttribute("data-kind")); }; });
+  }
+
+  async function createNext(jobId, kind){
+    // Interval follows the test kind: a monthly EM flick test → +1 month; everything
+    // else (yearly EM 3-hour test, PAT) → +1 year. One click.
+    var months = kind==="monthly" ? 1 : 12;
+    var human = months===1 ? "in 1 month" : "in 1 year";
+    var ok = (window.MLUI && MLUI.confirm) ? await MLUI.confirm("Create the next test for this job "+human+"? It'll appear as a new Pending job to allocate.", {title:"Create next test", okLabel:"Create"}) : confirm("Create the next test "+human+"?");
+    if(!ok) return; doNext(jobId, months);
+  }
+  async function doNext(jobId, months){
+    try{
+      var d=await af("/certs/jobs/create-next",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobId:jobId, months:months})}).then(function(r){return r.json();});
+      if(d&&d.ok){ if(window.MLUI&&MLUI.toast) MLUI.toast("Next test created — "+fmtDate(d.scheduledAt)); else alert("Next test created."); load(); }
+      else alert((d&&d.error)||"Couldn't create the next test.");
+    }catch(e){ alert("Couldn't create the next test."); }
+  }
+
+  async function load(){
+    try{
+      var d=await af("/certs/jobs").then(function(r){return r.json();});
+      if(!d||!d.ok){ $("rows").innerHTML='<tr><td colspan="6" class="muted" style="padding:18px">'+esc((d&&d.error)||"Couldn't load jobs.")+'</td></tr>'; return; }
+      ALL=d.jobs||[]; render();
+    }catch(e){ $("rows").innerHTML='<tr><td colspan="6" class="muted" style="padding:18px">Couldn\'t load jobs.</td></tr>'; }
+  }
+
+  ["fStatus","fClient","fType","fSearch"].forEach(function(id){ var el=$(id); el.addEventListener(id==="fSearch"?"input":"change", render); });
+  load();
+})();
+</script>
+</body>
+</html>

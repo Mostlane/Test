@@ -27,7 +27,7 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
-import { createOrUpdateJobFromPayload } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs } from "./sla.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
@@ -35,13 +35,44 @@ import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
 const TYPES = ["em", "pat"];
 const T = t => (t === "pat" ? "pat" : "em");
 
+// The certificate CLIENT is decided by the SITE's client type (Jamie's rule):
+// every Southern Co-op estate (Retail / ELS / ELS Private / Cobra) bills to the
+// Co-op head office; Fareham Borough Council sites bill to the council. Returns a
+// {name,address,postcode} block for a known client type, else null (fall back to
+// the previous cert / config default).
+function clientForSiteClient(sc) {
+  sc = String(sc || "").toLowerCase().trim();
+  if (sc === "retail" || sc === "els" || sc === "els_private" || sc === "cobra")
+    return { name: "The Southern Co-op", address: "1000 Lakeside, Western Road, Portsmouth", postcode: "PO6 3FE" };
+  if (sc === "fbc")
+    return { name: "Fareham Borough Council", address: "Civic Offices, Civic Way, Fareham", postcode: "PO16 7AZ" };
+  return null;
+}
+// Fill BLANK client fields on a cert record from its site's client type — PER
+// FIELD, so a cert that carried only the client NAME (from an older seed) still
+// gets its address + postcode. Never overwrites a value someone has typed. Used
+// wherever a cert is read/rendered so the office and the PDF carry the right client.
+async function backfillClient(env, tid, rec) {
+  if (!rec) return rec;
+  const code = rec.siteCode || "";
+  if (!code) return rec;
+  const sr = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first().catch(() => null);
+  const m = clientForSiteClient(sr && sr.client);
+  if (!m) return rec;
+  rec.client = rec.client || {};
+  if (!String(rec.client.name || "").trim()) rec.client.name = m.name;
+  if (!String(rec.client.address || "").trim()) rec.client.address = m.address;
+  if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
+  return rec;
+}
+
 const DEFAULT_CONFIG = {
   // Default client used to seed a NEW cert when the previous cert didn't supply one
   // (most EM/PAT work is Southern Co-op). Office-editable; the previous cert always
   // wins over this, and it's never applied over a value the office has typed.
   client: {
     name: "The Southern Co-op",
-    address: "1000 Lakeside, Portsmouth",
+    address: "1000 Lakeside, Western Road, Portsmouth",
     postcode: "PO6 3FE",
   },
   contractor: {
@@ -472,6 +503,71 @@ export async function handle(request, env, ctx, url, sess) {
     }
   }
 
+  // ── My saved signature (any user) — a personal default signature so signing a
+  // cert is one tap. Stored per-user in app_config cert:sig:<username>. ─────────
+  if (sub === "/my-signature") {
+    const sigKey = "cert:sig:" + tid + ":" + me.toLowerCase();
+    if (method === "GET") {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).first();
+      return json({ ok: true, signature: (row && row.value) || "" }, {}, env, request);
+    }
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const sig = typeof b.signature === "string" ? b.signature : "";
+      // Guard: must be a small data-URL image (a signature PNG/JPEG is a few KB).
+      if (sig && (!/^data:image\//.test(sig) || sig.length > 200000)) return error("Invalid signature", 400, env, request);
+      if (sig) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, sigKey, sig).run();
+      else await env.DB.prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).run();
+      return json({ ok: true }, {}, env, request);
+    }
+  }
+
+  // ── EM/PAT JOBS hub (office): every EM/PAT job in its own area, with the site's
+  // client + status so the office can filter open/closed + by client. ──────────
+  if (sub === "/jobs" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat));
+    const codes = [...new Set(jobs.map(j => String(j.siteCode || "")).filter(Boolean))];
+    const clientByCode = {};
+    if (codes.length) {
+      const ph = codes.map(() => "?").join(",");
+      const rows = await env.DB.prepare(`SELECT site_number, client, site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph})`).bind(tid, ...codes).all().catch(() => ({ results: [] }));
+      (rows.results || []).forEach(r => { clientByCode[String(r.site_number)] = { client: String(r.client || "").toLowerCase(), name: r.site_name }; });
+    }
+    const done = s => { s = String(s || "").toLowerCase(); return s.includes("complete") || s.includes("closed") || s.includes("invoiced") || s.includes("cancel"); };
+    const out = jobs.map(j => {
+      const c = clientByCode[String(j.siteCode || "")] || {};
+      return {
+        id: j.id, ref: j.helpdeskRef || j.reference || "", site: j.siteName || c.name || "", siteCode: j.siteCode || "",
+        client: c.client || "", status: j.status || "", closed: done(j.status), scheduledAt: j.scheduledAt || "",
+        em: !!j.emTest, pat: !!j.pat, emKind: j.emKind || (j.emTest ? "yearly" : ""), engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [],
+      };
+    }).sort((a, b) => (b.scheduledAt || "").localeCompare(a.scheduledAt || ""));
+    return json({ ok: true, jobs: out }, {}, env, request);
+  }
+
+  // POST /certs/jobs/create-next {jobId, months?} — clone an EM/PAT job for its
+  // next test (default +12 months; monthly EM → +1). New job, Pending, unassigned.
+  if (sub === "/jobs/create-next" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const src = await getJob(env, tid, String(b.jobId || ""));
+    if (!src) return error("Job not found", 404, env, request);
+    let months = Number(b.months);
+    if (!Number.isFinite(months) || months < 1 || months > 60) months = (src.emKind === "monthly") ? 1 : 12;
+    const base = src.scheduledAt ? new Date(src.scheduledAt) : new Date();
+    const next = new Date(isNaN(base) ? Date.now() : base.getTime());
+    next.setMonth(next.getMonth() + months);
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      reference: src.helpdeskRef || src.reference || "", description: src.description || "",
+      siteName: src.siteName || "", siteCode: src.siteCode || "", address: src.address || "", postcode: src.postcode || "",
+      priority: src.priority || "", emTest: !!src.emTest, pat: !!src.pat, emKind: src.emKind || "",
+      durationMinutes: src.durationMinutes, scheduledAt: next.toISOString(), status: "Pending",
+      assignedEngineers: [], originator: "cert-next",
+    });
+    return json({ ok: true, id: job.id, scheduledAt: next.toISOString(), months }, {}, env, request);
+  }
+
   // ── EM remedial battery photo upload (engineer or office) ───────────────────
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
@@ -512,24 +608,34 @@ export async function handle(request, env, ctx, url, sess) {
     const jobId = String(q.get("jobId") || "");
     const type = T(q.get("type"));
     if (!jobId) return error("jobId required", 400, env, request);
+    const config = await getConfig(env, tid);
+    // Resolve the job's site + its CLIENT TYPE up front, so we can auto-fill the
+    // certificate's Client block from the site (Co-op estates → Co-op head office,
+    // FBC → the council) for both a fresh seed AND back-filling a blank existing draft.
+    const job = await getJob(env, tid, jobId);
+    const code = job ? (job.siteCode || "") : "";
+    const siteRow = code ? await env.DB.prepare("SELECT client, site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
+    let siteData = {}; try { siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {}; } catch {}
+    const mappedClient = clientForSiteClient(siteRow && siteRow.client);
+
     const existing = await env.DB.prepare(
       "SELECT * FROM certificates WHERE tenant_id=? AND job_id=? AND type=? ORDER BY created_at DESC LIMIT 1"
     ).bind(tid, jobId, type).first();
-    const config = await getConfig(env, tid);
-    if (existing) { const exRec = shapeRow(existing); await resignRemedialPhotos(env, url.origin, exRec); return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request); }
+    if (existing) {
+      const exRec = shapeRow(existing);
+      await backfillClient(env, tid, exRec);   // fill any blank client field (name/address/postcode) from the site
+      await resignRemedialPhotos(env, url.origin, exRec);
+      return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
+    }
 
     // seed a fresh draft from the job's site + config + prefill rows
-    const job = await getJob(env, tid, jobId);
-    const code = job ? (job.siteCode || "") : "";
-    const siteRow = code ? await env.DB.prepare("SELECT site_name, postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first() : null;
-    let siteData = {}; try { siteData = siteRow && siteRow.data ? JSON.parse(siteRow.data) : {}; } catch {}
     const pre = await prefillFromPrevious(env, tid, code, type);
     const h = pre.header;
     const record = {
       id: null, type, status: "draft", jobId, siteCode: code, certNumber: "",
-      // Client: transfer from the previous cert; NEVER invented. Blank until the
-      // office fills it once (then it chains forward on every future cert).
-      client: (h && h.client) ? h.client : (config.client || { name: "", address: "", postcode: "" }),
+      // Client: the SITE's client type is authoritative for known estates; else the
+      // previous cert; else the config default.
+      client: mappedClient || (h && h.client) || (config.client || { name: "", address: "", postcode: "" }),
       // Installation: previous cert → else the REAL portal site record.
       installation: (h && h.installation) ? h.installation : {
         name: (job && job.siteName) || (siteRow && siteRow.site_name) || "",
@@ -541,8 +647,9 @@ export async function handle(request, env, ctx, url, sess) {
       comments: (h && h.comments != null && h.comments !== "") ? h.comments : config[type].comments,
       declaration: config[type].declaration,
       // Contractor = Mostlane's own details (config), refined by the previous
-      // cert's trading block; engineer name/date always blank (per-visit).
-      contractor: { ...config.contractor, ...((h && h.contractor) || {}), name: "", position: "Engineer", date: "" },
+      // cert's trading block; the engineer NAME auto-fills from the job's assigned
+      // engineer (per-visit), date left for the engineer to confirm.
+      contractor: { ...config.contractor, ...((h && h.contractor) || {}), name: (job && Array.isArray(job.assignedEngineers) && job.assignedEngineers[0]) || "", position: "Engineer", date: "" },
       rows: pre.rows,
       signature: "",
     };
@@ -613,7 +720,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow(cert); await backfillClient(env, tid, rec);
     const sig = dataUrlToBytes(rec.signature);
     let logo = null; try { logo = logoBytes(); } catch {}
     const bytes = buildCertPdf(rec, { logo, signature: sig });
@@ -627,7 +734,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cert = await loadCert(String(q.get("id") || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
     if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
-    const oneRec = shapeRow(cert); await resignRemedialPhotos(env, url.origin, oneRec);
+    const oneRec = shapeRow(cert); await backfillClient(env, tid, oneRec); await resignRemedialPhotos(env, url.origin, oneRec);
     return json({ ok: true, record: oneRec, config: await getConfig(env, tid) }, {}, env, request);
   }
 
@@ -655,7 +762,7 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    const rec = shapeRow(cert);
+    const rec = shapeRow(cert); await backfillClient(env, tid, rec);
     const code = padCode(cert.site_code || rec.siteCode);
     if (!code) return error("This certificate has no store code — set the site first.", 400, env, request);
     const number = String(b.certNumber || cert.cert_number || (await suggestNumber(env, tid, code, cert.type))).trim();

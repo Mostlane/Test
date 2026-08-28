@@ -52,6 +52,10 @@
   .mlc .btn.green{background:#0a7d33;}.mlc .btn.grey{background:#5b6b7b;}.mlc .btn.red{background:#b00020;}
   .mlc .btn.sm{padding:7px 11px;font-size:13px;}
   .mlc .mlrows{display:flex;flex-direction:column;gap:8px;}
+  /* Desktop (office/admin): pack the appliance/light cards into a compact grid so
+     a long list uses the screen width instead of scrolling one column. Phones keep
+     the single column. */
+  @media (min-width:820px){ .mlc .mlrows{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;align-items:start;} }
   .mlc .mlrow{border:1px solid #e6ebf1;border-radius:11px;padding:9px 10px;background:#fff;}
   .mlc .mlrow-top{display:flex;align-items:flex-start;gap:8px;}
   .mlc .mlrow-n{font-weight:700;color:#8b97a6;font-size:12px;min-width:22px;text-align:center;padding-top:9px;}
@@ -201,6 +205,8 @@
       h += '<div class="cc"><h4>Signature</h4>';
       if (mode === "engineer" && editable) {
         h += '<canvas class="sigpad" id="mlcSig"></canvas><div class="toolbar"><button class="btn ghost sm" data-act="sigclear">Clear</button>'
+          + '<button class="btn ghost sm" data-act="siguse">✒ Use my saved signature</button>'
+          + '<button class="btn ghost sm" data-act="sigsave">💾 Save as my signature</button>'
           + '<span class="muted" id="mlcSigState">' + (rec.signature ? "Signed ✓" : "Sign above") + '</span></div>';
       } else {
         h += '<div class="muted">' + (rec.signature ? "Signed by the engineer ✓" : "Not signed") + '</div>';
@@ -481,6 +487,25 @@
       const bi = container.querySelector('[data-act="bulkinput"]'); if (bi) bi.addEventListener("click", () => { const f = container.querySelector("#mlcBulkField").value; const v = container.querySelector("#mlcBulkVal").value.trim(); if (f) bulkSet(f, v); });
       const pl = container.querySelector('[data-act="pull"]'); if (pl) pl.addEventListener("click", pullPrevious);
       const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
+      // Saved signature: one tap to drop in a consistent personal signature, and a
+      // button to save the current drawing as that default (stored per-user).
+      const su = container.querySelector('[data-act="siguse"]'); if (su) su.addEventListener("click", async () => {
+        try {
+          const d = await authFetch("/certs/my-signature").then(r => r.json());
+          if (!d || !d.ok || !d.signature) { alert("No saved signature yet — draw one, then tap “Save as my signature”."); return; }
+          rec.signature = d.signature;
+          if (sigCtx && sigCanvas) { sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); const im = new Image(); im.onload = () => sigCtx.drawImage(im, 0, 0, sigCanvas.width, sigCanvas.height); im.src = d.signature; }
+          const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Signed ✓ (saved)";
+          queueSave();
+        } catch (e) { alert("Couldn't load your saved signature."); }
+      });
+      const ss = container.querySelector('[data-act="sigsave"]'); if (ss) ss.addEventListener("click", async () => {
+        if (!rec.signature) { alert("Draw your signature first, then save it."); return; }
+        try {
+          const d = await authFetch("/certs/my-signature", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ signature: rec.signature }) }).then(r => r.json());
+          const st = container.querySelector("#mlcSigState"); if (st) st.textContent = (d && d.ok) ? "Saved as your signature ✓" : "Couldn't save signature";
+        } catch (e) { const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Couldn't save signature"; }
+      });
       const pdf = container.querySelector("#mlcPdf"); if (pdf) pdf.addEventListener("click", async () => {
         // Open the tab synchronously (keeps the user gesture), then stream the PDF
         // in WITH the bearer token — /certs/pdf is session-gated, so a plain
