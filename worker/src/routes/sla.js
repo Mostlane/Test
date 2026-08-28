@@ -23,6 +23,7 @@ import { sendToUser, sendToPermission, resolveNotificationsByTag, remindPermissi
 import { firstTime } from "../lib/idempotency.js";
 import { buildFirestopPdf } from "../lib/firestoppdf.js";
 import { buildJobSheetPdf } from "../lib/jobsheetpdf.js";
+import { decodePngToRgb } from "../lib/pngdecode.js";
 import { buildZip } from "../lib/zip.js";
 import { logoBytes } from "../lib/logo.js";
 import { pdfExtractText, certNumberFromText } from "../lib/pdftext.js";
@@ -1476,8 +1477,18 @@ export async function handle(request, env, ctx, url, sess) {
         } catch {}
       }
 
-      const signature = (j.signature && j.signature.fileKey && j.signature.signedBy)
-        ? { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt) } : null;
+      let signature = null;
+      if (j.signature && j.signature.fileKey && j.signature.signedBy) {
+        signature = { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt), image: null };
+        // Decode the drawn signature PNG so it embeds in the PDF (flattened onto
+        // white). Best-effort — falls back to the text sign-off if it can't read.
+        if (env.JOB_FILES) {
+          try {
+            const o = await env.JOB_FILES.get(j.signature.fileKey);
+            if (o) { const dec = await decodePngToRgb(new Uint8Array(await o.arrayBuffer())); if (dec) signature.image = dec; }
+          } catch {}
+        }
+      }
 
       const name = j.siteName || j.siteCode || "Job";
       let logo = null; try { logo = logoBytes(); } catch {}

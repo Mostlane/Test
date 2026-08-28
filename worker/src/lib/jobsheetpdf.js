@@ -174,14 +174,25 @@ export function buildJobSheetPdf(data = {}, meta = {}) {
 
   // ── Sign-off ────────────────────────────────────────────────────────────
   heading("Sign-off");
-  ensure(40);
-  if (data.signature && data.signature.signedBy) {
-    doc.text(M, y + 11, "Signed by", { size: 8, color: GREY });
-    doc.text(M, y + 26, data.signature.signedBy, { size: 11, bold: true });
-    if (data.signature.signedAt) doc.text(M, y + 40, data.signature.signedAt, { size: 9, color: GREY });
-    doc.text(M + 240, y + 40, "(customer signature on file)", { size: 8, color: GREY });
-    y += 48;
+  const sig = data.signature;
+  if (sig && sig.signedBy) {
+    const img = sig.image;  // { rgb, width, height } — the decoded drawn signature
+    const sigH = 44, sigMaxW = 200;
+    ensure((img ? sigH + 8 : 0) + 40);
+    if (img && img.rgb && img.width && img.height) {
+      let w = sigH * (img.width / img.height);
+      if (w > sigMaxW) w = sigMaxW;
+      const h = w * (img.height / img.width);
+      try { doc.imageRGB(img.rgb, img.width, img.height, M, y, w, h); } catch {}
+      doc.line(M, y + h + 2, M + Math.max(w, 120), y + h + 2, { stroke: LINE });
+      y += h + 8;
+    }
+    doc.text(M, y + 10, "Signed by ", { size: 9, color: GREY });
+    doc.text(M + textWidth("Signed by ", 9), y + 10, sig.signedBy, { size: 10, bold: true });
+    if (sig.signedAt) doc.text(M, y + 24, sig.signedAt, { size: 9, color: GREY });
+    y += 30;
   } else {
+    ensure(24);
     doc.text(M, y + 11, "Not signed.", { size: 9.5, color: GREY });
     y += 20;
   }

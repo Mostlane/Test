@@ -117,8 +117,19 @@ export class PdfDoc {
   // pages by index.
   image(bytes, x, yTop, w, h) {
     const idx = this.images.length;
-    this.images.push(bytes);
+    this.images.push({ jpeg: bytes });
     const y = this._page.h - yTop - h;   // PDF origin is bottom-left
+    this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
+    return this;
+  }
+
+  // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
+  // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
+  // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
+  imageRGB(rgb, iw, ih, x, yTop, w, h) {
+    const idx = this.images.length;
+    this.images.push({ rgb, w: iw, h: ih });
+    const y = this._page.h - yTop - h;
     this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
     return this;
   }
@@ -201,10 +212,12 @@ export class PdfDoc {
   bytes() {
     const enc = new TextEncoder();
     const nImg = this.images.length;
-    const imgMeta = this.images.map((b) => {
+    const imgMeta = this.images.map((im) => {
+      if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
+      const b = im && im.jpeg ? im.jpeg : im;   // back-compat if a bare buffer slipped in
       const d = jpegInfo(b);
       const cs = d.comps === 1 ? "/DeviceGray" : (d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB");
-      return { bytes: b, w: d.w, h: d.h, cs };
+      return { data: b, w: d.w, h: d.h, cs, filter: "/DCTDecode" };
     });
 
     // Object layout: 1 catalog, 2 pages, 3-4 fonts, 5 info, then nImg image
@@ -224,9 +237,10 @@ export class PdfDoc {
     objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>" });   // 4
     objs.push({ s: "<< /Producer (Mostlane Portal) >>" });                        // 5
     for (const m of imgMeta) {                                                    // 6 … image XObjects
+      const filt = m.filter ? ` /Filter ${m.filter}` : "";
       objs.push({
-        s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.bytes.length} >>\nstream\n`,
-        raw: m.bytes, sAfter: "\nendstream"
+        s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8${filt} /Length ${m.data.length} >>\nstream\n`,
+        raw: m.data, sAfter: "\nendstream"
       });
     }
     for (const pg of this.pages) {

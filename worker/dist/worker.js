@@ -3382,7 +3382,17 @@ var PdfDoc = class {
   // pages by index.
   image(bytes, x, yTop, w, h) {
     const idx = this.images.length;
-    this.images.push(bytes);
+    this.images.push({ jpeg: bytes });
+    const y = this._page.h - yTop - h;
+    this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
+    return this;
+  }
+  // Draw a RAW 8-bit DeviceRGB image (uncompressed samples, `iw`×`ih` pixels,
+  // 3 bytes/pixel). Used to embed a signature PNG the caller has already decoded
+  // (lib/pdf.js only decodes JPEG). (x, yTop) = top-left; w/h in pt.
+  imageRGB(rgb, iw, ih, x, yTop, w, h) {
+    const idx = this.images.length;
+    this.images.push({ rgb, w: iw, h: ih });
     const y = this._page.h - yTop - h;
     this._ops.push(`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im${idx} Do Q`);
     return this;
@@ -3448,10 +3458,12 @@ var PdfDoc = class {
   bytes() {
     const enc3 = new TextEncoder();
     const nImg = this.images.length;
-    const imgMeta = this.images.map((b) => {
+    const imgMeta = this.images.map((im) => {
+      if (im && im.rgb) return { data: im.rgb, w: im.w, h: im.h, cs: "/DeviceRGB", filter: null };
+      const b = im && im.jpeg ? im.jpeg : im;
       const d = jpegInfo(b);
       const cs = d.comps === 1 ? "/DeviceGray" : d.comps === 4 ? "/DeviceCMYK" : "/DeviceRGB";
-      return { bytes: b, w: d.w, h: d.h, cs };
+      return { data: b, w: d.w, h: d.h, cs, filter: "/DCTDecode" };
     });
     const IMG0 = 6;
     const firstPageObj = IMG0 + nImg;
@@ -3464,11 +3476,12 @@ var PdfDoc = class {
     objs.push({ s: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>" });
     objs.push({ s: "<< /Producer (Mostlane Portal) >>" });
     for (const m of imgMeta) {
+      const filt = m.filter ? ` /Filter ${m.filter}` : "";
       objs.push({
-        s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.bytes.length} >>
+        s: `<< /Type /XObject /Subtype /Image /Width ${m.w} /Height ${m.h} /ColorSpace ${m.cs} /BitsPerComponent 8${filt} /Length ${m.data.length} >>
 stream
 `,
-        raw: m.bytes,
+        raw: m.data,
         sAfter: "\nendstream"
       });
     }
@@ -5297,14 +5310,28 @@ function buildJobSheetPdf(data = {}, meta = {}) {
     if (col !== 0) y = rowTop + cellH + 16;
   }
   heading("Sign-off");
-  ensure6(40);
-  if (data.signature && data.signature.signedBy) {
-    doc.text(M2, y + 11, "Signed by", { size: 8, color: GREY2 });
-    doc.text(M2, y + 26, data.signature.signedBy, { size: 11, bold: true });
-    if (data.signature.signedAt) doc.text(M2, y + 40, data.signature.signedAt, { size: 9, color: GREY2 });
-    doc.text(M2 + 240, y + 40, "(customer signature on file)", { size: 8, color: GREY2 });
-    y += 48;
+  const sig = data.signature;
+  if (sig && sig.signedBy) {
+    const img = sig.image;
+    const sigH = 44, sigMaxW = 200;
+    ensure6((img ? sigH + 8 : 0) + 40);
+    if (img && img.rgb && img.width && img.height) {
+      let w = sigH * (img.width / img.height);
+      if (w > sigMaxW) w = sigMaxW;
+      const h = w * (img.height / img.width);
+      try {
+        doc.imageRGB(img.rgb, img.width, img.height, M2, y, w, h);
+      } catch {
+      }
+      doc.line(M2, y + h + 2, M2 + Math.max(w, 120), y + h + 2, { stroke: LINE2 });
+      y += h + 8;
+    }
+    doc.text(M2, y + 10, "Signed by ", { size: 9, color: GREY2 });
+    doc.text(M2 + textWidth("Signed by ", 9), y + 10, sig.signedBy, { size: 10, bold: true });
+    if (sig.signedAt) doc.text(M2, y + 24, sig.signedAt, { size: 9, color: GREY2 });
+    y += 30;
   } else {
+    ensure6(24);
     doc.text(M2, y + 11, "Not signed.", { size: 9.5, color: GREY2 });
     y += 20;
   }
@@ -5315,6 +5342,125 @@ function buildJobSheetPdf(data = {}, meta = {}) {
     pg.ops.push(`0.45 g BT /F1 8 Tf 1 0 0 1 ${M2} ${M2 / 2} Tm (Mostlane ${copyTxt}) Tj ET 0 g`);
   }
   return doc.bytes();
+}
+
+// src/lib/pngdecode.js
+var MAX_PIXELS = 4e6;
+async function decodePngToRgb(bytes) {
+  try {
+    const v = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    if (v.length < 8 || v[0] !== 137 || v[1] !== 80 || v[2] !== 78 || v[3] !== 71) return null;
+    const u32 = (o2) => (v[o2] << 24 | v[o2 + 1] << 16 | v[o2 + 2] << 8 | v[o2 + 3]) >>> 0;
+    let width = 0, height = 0, bitDepth = 0, colorType = 0, interlace = 0;
+    let palette = null, trns = null;
+    const idat = [];
+    let p = 8;
+    while (p + 8 <= v.length) {
+      const len = u32(p);
+      const type = String.fromCharCode(v[p + 4], v[p + 5], v[p + 6], v[p + 7]);
+      const d = p + 8;
+      if (type === "IHDR") {
+        width = u32(d);
+        height = u32(d + 4);
+        bitDepth = v[d + 8];
+        colorType = v[d + 9];
+        interlace = v[d + 12];
+      } else if (type === "PLTE") {
+        palette = v.subarray(d, d + len);
+      } else if (type === "tRNS") {
+        trns = v.subarray(d, d + len);
+      } else if (type === "IDAT") {
+        idat.push(v.subarray(d, d + len));
+      } else if (type === "IEND") break;
+      p = d + len + 4;
+    }
+    if (!width || !height || bitDepth !== 8 || interlace !== 0) return null;
+    if (width * height > MAX_PIXELS) return null;
+    const ch = colorType === 0 ? 1 : colorType === 2 ? 3 : colorType === 3 ? 1 : colorType === 4 ? 2 : colorType === 6 ? 4 : 0;
+    if (!ch) return null;
+    if (colorType === 3 && !palette) return null;
+    let total = 0;
+    idat.forEach((a) => total += a.length);
+    if (!total) return null;
+    const comp = new Uint8Array(total);
+    let q = 0;
+    idat.forEach((a) => {
+      comp.set(a, q);
+      q += a.length;
+    });
+    const ds = new DecompressionStream("deflate");
+    const raw = new Uint8Array(await new Response(new Blob([comp]).stream().pipeThrough(ds)).arrayBuffer());
+    const bpp = ch, stride = width * ch;
+    if (raw.length < height * (stride + 1)) return null;
+    const out = new Uint8Array(height * stride);
+    let ip = 0;
+    for (let y = 0; y < height; y++) {
+      const filter = raw[ip++];
+      const rowOff = y * stride, prevOff = (y - 1) * stride;
+      for (let x = 0; x < stride; x++) {
+        const rv = raw[ip++];
+        const a = x >= bpp ? out[rowOff + x - bpp] : 0;
+        const b = y > 0 ? out[prevOff + x] : 0;
+        const c = y > 0 && x >= bpp ? out[prevOff + x - bpp] : 0;
+        let val;
+        switch (filter) {
+          case 0:
+            val = rv;
+            break;
+          case 1:
+            val = rv + a;
+            break;
+          case 2:
+            val = rv + b;
+            break;
+          case 3:
+            val = rv + (a + b >> 1);
+            break;
+          case 4: {
+            const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+            val = rv + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+            break;
+          }
+          default:
+            return null;
+        }
+        out[rowOff + x] = val & 255;
+      }
+    }
+    const rgb = new Uint8Array(width * height * 3);
+    let o = 0;
+    for (let pix = 0; pix < width * height; pix++) {
+      let r, g, bl, al = 255;
+      if (colorType === 0) {
+        r = g = bl = out[pix];
+      } else if (colorType === 2) {
+        r = out[pix * 3];
+        g = out[pix * 3 + 1];
+        bl = out[pix * 3 + 2];
+      } else if (colorType === 4) {
+        r = g = bl = out[pix * 2];
+        al = out[pix * 2 + 1];
+      } else if (colorType === 6) {
+        r = out[pix * 4];
+        g = out[pix * 4 + 1];
+        bl = out[pix * 4 + 2];
+        al = out[pix * 4 + 3];
+      } else {
+        const idx = out[pix];
+        r = palette[idx * 3];
+        g = palette[idx * 3 + 1];
+        bl = palette[idx * 3 + 2];
+        if (trns && idx < trns.length) al = trns[idx];
+      }
+      const inv = 255 - al;
+      rgb[o++] = (r * al + 255 * inv) / 255 | 0;
+      rgb[o++] = (g * al + 255 * inv) / 255 | 0;
+      rgb[o++] = (bl * al + 255 * inv) / 255 | 0;
+    }
+    return { width, height, rgb };
+  } catch {
+    return null;
+  }
 }
 
 // src/lib/zip.js
@@ -7094,7 +7240,20 @@ async function handle8(request, env, ctx, url, sess) {
         } catch {
         }
       }
-      const signature = j.signature && j.signature.fileKey && j.signature.signedBy ? { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt) } : null;
+      let signature = null;
+      if (j.signature && j.signature.fileKey && j.signature.signedBy) {
+        signature = { signedBy: nm(j.signature.signedBy), signedAt: fmtDT(j.signature.signedAt), image: null };
+        if (env.JOB_FILES) {
+          try {
+            const o = await env.JOB_FILES.get(j.signature.fileKey);
+            if (o) {
+              const dec = await decodePngToRgb(new Uint8Array(await o.arrayBuffer()));
+              if (dec) signature.image = dec;
+            }
+          } catch {
+          }
+        }
+      }
       const name = j.siteName || j.siteCode || "Job";
       let logo = null;
       try {
