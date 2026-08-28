@@ -105,6 +105,21 @@
       <div style="margin-top:12px"><button id="geoSave" class="btn primary" type="button">Save geofence</button> <button id="geoOff" class="btn small" type="button">Turn off</button> <span id="geoMsg" class="muted"></span></div>
     </div>
 
+    <!-- LEFT-OPEN ALERTS (Full-Access only) -->
+    <div class="card" id="alertsCard" style="display:none">
+      <h2>🔔 Left-open alerts</h2>
+      <p class="sub">Who gets warned when the gate is left open, and how often. By default it goes to <b>all Full-Access admins</b>; tick specific people below to send only to them instead.</p>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+        <div><label class="f" style="font-weight:600">Alert after (mins open)</label><input id="alThreshold" type="number" min="1" value="10" style="width:110px;padding:8px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"></div>
+        <div><label class="f" style="font-weight:600">Re-alert every (mins)</label><input id="alRepeat" type="number" min="5" value="30" style="width:110px;padding:8px;border:1px solid #cdd7e2;border-radius:9px;font:inherit"></div>
+      </div>
+      <label class="f" style="font-weight:600">Send to <span class="muted" id="alSelCount"></span></label>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Leave everyone unticked to alert all Full-Access admins.</div>
+      <input type="text" id="alSearch" placeholder="Search people…" style="width:100%;padding:8px 10px;border:1px solid #cdd7e2;border-radius:9px;font:inherit;margin-bottom:6px">
+      <div id="alUserList" style="max-height:190px;overflow:auto;border:1px solid #e6ecf3;border-radius:9px;padding:6px 10px"></div>
+      <div style="margin-top:12px"><button id="alSave" class="btn primary" type="button">Save alerts</button> <span id="alMsg" class="muted"></span></div>
+    </div>
+
     <!-- SETUP (Full-Access only) -->
     <div class="card" id="setupCard" style="display:none">
       <h2>⚙️ Gate setup</h2>
@@ -500,7 +515,41 @@ $("geoOff") && $("geoOff").addEventListener("click", async ()=>{
   catch{ msg.textContent="Couldn’t save"; }
 });
 
-loadState(); loadCfg(); loadLog(); loadAccess(); loadGeo();
+/* ---- left-open alerts (Full-Access) ---- */
+let AL_USERS=[], AL_SELECTED=new Set();
+function alSelCount(){ $("alSelCount").textContent = AL_SELECTED.size ? "("+AL_SELECTED.size+" selected)" : "(all admins)"; }
+function renderAlUsers(filter){
+  const host=$("alUserList"); const f=(filter||"").toLowerCase();
+  const list=AL_USERS.filter(n=>!f||n.toLowerCase().includes(f));
+  host.innerHTML = list.length ? list.map(n=>`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer"><input type="checkbox" data-alu="${esc(n)}" ${AL_SELECTED.has(normU(n))?"checked":""} style="width:auto;margin:0"> ${esc(n)}</label>`).join("") : '<span class="muted">No matches.</span>';
+  host.querySelectorAll("[data-alu]").forEach(cb=>cb.onchange=()=>{ cb.checked?AL_SELECTED.add(normU(cb.dataset.alu)):AL_SELECTED.delete(normU(cb.dataset.alu)); alSelCount(); });
+  alSelCount();
+}
+async function loadAlerts(){
+  if(!isFull) return;
+  $("alertsCard").style.display="";
+  try{
+    const [cfgR, usersR] = await Promise.all([ aFetch("/tuya/config").then(r=>r.json()).catch(()=>({})), aFetch("/users").then(r=>r.json()).catch(()=>[]) ]);
+    const c=(cfgR.config||{});
+    $("alThreshold").value=c.thresholdMins||10;
+    $("alRepeat").value=c.repeatMins||30;
+    const users = Array.isArray(usersR) ? usersR : (usersR.Users||usersR.users||[]);
+    AL_USERS = users.map(u=>u.Username||u.username).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+    AL_SELECTED = new Set((Array.isArray(c.alertUsers)?c.alertUsers:[]).map(normU));
+    renderAlUsers();
+  }catch{}
+}
+$("alSearch") && $("alSearch").addEventListener("input",e=>renderAlUsers(e.target.value));
+$("alSave") && $("alSave").addEventListener("click", async ()=>{
+  const msg=$("alMsg"); msg.textContent="Saving…";
+  const names=AL_USERS.filter(n=>AL_SELECTED.has(normU(n)));
+  const body={ thresholdMins:parseInt($("alThreshold").value,10)||10, repeatMins:parseInt($("alRepeat").value,10)||30, alertUsers:names };
+  try{ const r=await aFetch("/tuya/config",{method:"POST",body:JSON.stringify(body)}); const j=await r.json();
+    msg.textContent = j.ok ? ("Saved ✓ — "+(names.length? ("alerting "+names.length+" "+(names.length===1?"person":"people")) : "alerting all Full-Access admins")) : (j.error||"Couldn’t save");
+  }catch{ msg.textContent="Couldn’t save"; }
+});
+
+loadState(); loadCfg(); loadLog(); loadAccess(); loadGeo(); loadAlerts();
 setInterval(loadState, 30000);
 </script>
 </body>

@@ -35,7 +35,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
-import { sendToPermission } from "./push.js";
+import { sendToPermission, sendToUser } from "./push.js";
 import { cameraSnapshotUrl } from "./cctv.js";
 
 const CFG_KEY = "tuya:config";
@@ -312,6 +312,14 @@ export async function handle(request, env, ctx, url, sess) {
     else if (cfg.thresholdMins === undefined) cfg.thresholdMins = 10;
     if (b.repeatMins !== undefined) cfg.repeatMins = Math.max(5, parseInt(b.repeatMins, 10) || 30);
     else if (cfg.repeatMins === undefined) cfg.repeatMins = 30;
+    // Left-open alert recipients: a specific username list (empty/omitted =
+    // all Full-Access admins). Deduped, capped.
+    if (b.alertUsers !== undefined) {
+      const arr = Array.isArray(b.alertUsers) ? b.alertUsers : [];
+      const seen = new Set(), clean = [];
+      for (const u of arr) { const name = String(u || "").trim(); const k = normU(name); if (!name || seen.has(k)) continue; seen.add(k); clean.push(name); if (clean.length >= 50) break; }
+      cfg.alertUsers = clean;
+    }
     // Per-user access hours. {accessUser, accessWindows} sets one; {accessUsers:[…],
     // accessWindows} tags several with the same windows; {accessRemove:name|[names]}
     // clears them.
@@ -524,12 +532,21 @@ export async function checkGateLeftOpen(env, tenantId) {
     let newLastAlert = watch.lastAlertAt || null;
     if (openMins >= threshold && (!lastAlertAt || (now - lastAlertAt) >= repeat * 60000)) {
       const who = openedBy ? `${openedBy} opened the yard gate and it's still open` : `The yard gate has been open (opened without the portal — check emergency access)`;
-      await sendToPermission(env, tenantId, ["FullAccess", "YardGate"], {
+      const payload = {
         title: "⚠️ Yard gate left open",
         body: `${who} — ${openMins} min.`,
         url: "/yard-gate.html",
         tag: "yardgate-open",
-      }).catch(() => {});
+      };
+      // Recipients: a specific list if the admin set one, else ALL Full-Access
+      // (admin) users. YardGate-only holders are NOT alerted.
+      const list = Array.isArray(cfg.alertUsers) ? cfg.alertUsers.filter(Boolean) : [];
+      if (list.length) {
+        const seen = new Set();
+        for (const u of list) { const k = normU(u); if (seen.has(k)) continue; seen.add(k); await sendToUser(env, tenantId, u, payload).catch(() => {}); }
+      } else {
+        await sendToPermission(env, tenantId, ["FullAccess"], payload).catch(() => {});
+      }
       newLastAlert = new Date(now).toISOString();
     }
     await saveKV(db, WATCH_KEY, { open: true, since, openedBy, lastAlertAt: newLastAlert });
