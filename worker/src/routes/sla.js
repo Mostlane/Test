@@ -1420,12 +1420,13 @@ export async function handle(request, env, ctx, url, sess) {
       const engs = (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
         ? j.assignedEngineers.map(nm).join(", ") : nm(j.assignedTo);
       const siteAddr = [j.address, j.postcode].filter(Boolean).join(", ");
+      const customerName = await resolveCustomerName(env, tenantId, j);
       const allRows = [
         ["jobDate", "Job date", j.scheduledAt ? fmtD(j.scheduledAt) : fmtD(j.raisedAt)],
         ["priority", "Priority", j.priority],
         ["status", "Status", j.status],
         ["engineer", "Engineer", engs],
-        ["customer", "Customer", j.customer || j.client || j.siteName],
+        ["customer", "Customer", customerName],
         ["contactPerson", "Site contact", j.contactPerson || j.contact || ""],
         ["contactPhone", "Telephone", j.telephone || j.phone || ""],
         ["contactEmail", "Email", j.email || ""],
@@ -1562,8 +1563,8 @@ export async function handle(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
       // Admin recategorisations live in job.photoStages (overrides the R2 tag set at
       // upload) so a photo can be re-stamped without rewriting the R2 object.
-      let overrides = {}, jobSig = null;
-      try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; jobSig = j && j.signature; } catch {}
+      let overrides = {}, jobSig = null, customerName = "";
+      try { const j = await getJob(env, tenantId, id); overrides = (j && j.photoStages) || {}; jobSig = j && j.signature; if (j) customerName = await resolveCustomerName(env, tenantId, j); } catch {}
       // A small <key>.thumb rides alongside each photo (client-generated on upload,
       // or backfilled). The grid loads the thumb, not the full-res original, so it
       // stays fast even with many photos. Filter out the .thumb objects themselves.
@@ -1584,7 +1585,7 @@ export async function handle(request, env, ctx, url, sess) {
       // The customer signature (PNG) — serve it through the signed worker route
       // too, so it loads even where the raw R2 public URL is blocked (the on-screen
       // sheet was showing an empty box because it used the public URL directly).
-      const out = { files };
+      const out = { files, customerName };
       if (jobSig && jobSig.fileKey && jobSig.fileKey !== "local") {
         out.signature = {
           signedBy: jobSig.signedBy || "",
@@ -5042,6 +5043,36 @@ async function inferWorkArea(env, tenantId, description) {
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+
+// Map a site's client group → the billing CUSTOMER name (what a job sheet shows
+// under "Customer"). Southern Co-op estates (Retail / ELS / ELS Private / Cobra /
+// Wenzels) all bill to the Co-op; FBC → the council; Chapplins → the lettings co.
+function customerForClient(c) {
+  c = String(c || "").toLowerCase().trim();
+  if (["retail", "els", "els_private", "cobra", "wenzels", "wenzel", "wenzel's"].includes(c)) return "The Southern Co-op";
+  if (c === "fbc") return "Fareham Borough Council";
+  if (c === "chapplins") return "Chapplins Lettings";
+  return "";
+}
+
+// Resolve a job's customer name: a typed job.customer wins, else derive it from the
+// site's client group (looked up numerically — the site is "0414" but a job carries
+// "414"), else fall back to the site name.
+async function resolveCustomerName(env, tenantId, job) {
+  if (job.customer && String(job.customer).trim()) return job.customer;
+  let cl = job.client || job.storeType || "";
+  const code = String(job.siteCode || "").trim();
+  if (!cl && code) {
+    try {
+      const padded = /^\d+$/.test(code) ? code.padStart(4, "0") : code;
+      const row = await env.DB.prepare(
+        "SELECT client FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
+      ).bind(tenantId, code, padded, code).first();
+      cl = (row && row.client) || "";
+    } catch {}
+  }
+  return customerForClient(cl) || (job.client && String(job.client).trim()) || job.siteName || job.siteCode || "";
 }
 // Attach public view URLs to a site-audit job's checklist items (their photos
 // live in the public JOB_FILES bucket). Response-only — never stored.

@@ -314,7 +314,7 @@ async function load(){
     kv("priority",      "Priority",               job.priority),
     kv("status",        "Status",                 job.status),
     kv("engineer",      "Engineer",               engs),
-    kv("customer",      "Customer",               job.customer || job.client || job.siteName),
+    kv("customer",      "Customer",               files.customerName || job.customer || job.client || job.siteName),
     kv("contactPerson", "Site contact",           job.contactPerson || job.contact || ""),
     kv("contactPhone",  "Telephone",              job.telephone || job.phone || ""),
     kv("contactEmail",  "Email",                  job.email || ""),

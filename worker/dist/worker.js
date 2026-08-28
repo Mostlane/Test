@@ -7250,12 +7250,13 @@ async function handle8(request, env, ctx, url, sess) {
       const jobNo = (String(j.id || "").match(/^([A-Za-z]?\d+(?:\/\d+)?)-/) || [])[1] || j.helpdeskRef || j.id;
       const engs = Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers.map(nm).join(", ") : nm(j.assignedTo);
       const siteAddr = [j.address, j.postcode].filter(Boolean).join(", ");
+      const customerName = await resolveCustomerName(env, tenantId, j);
       const allRows = [
         ["jobDate", "Job date", j.scheduledAt ? fmtD(j.scheduledAt) : fmtD(j.raisedAt)],
         ["priority", "Priority", j.priority],
         ["status", "Status", j.status],
         ["engineer", "Engineer", engs],
-        ["customer", "Customer", j.customer || j.client || j.siteName],
+        ["customer", "Customer", customerName],
         ["contactPerson", "Site contact", j.contactPerson || j.contact || ""],
         ["contactPhone", "Telephone", j.telephone || j.phone || ""],
         ["contactEmail", "Email", j.email || ""],
@@ -7388,11 +7389,12 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (parts[2] === "files" && method === "GET") {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
-      let overrides = {}, jobSig = null;
+      let overrides = {}, jobSig = null, customerName = "";
       try {
         const j = await getJob(env, tenantId, id);
         overrides = j && j.photoStages || {};
         jobSig = j && j.signature;
+        if (j) customerName = await resolveCustomerName(env, tenantId, j);
       } catch {
       }
       const objs = (listed.objects || []).filter((o) => !o.key.endsWith(".thumb"));
@@ -7409,7 +7411,7 @@ async function handle8(request, env, ctx, url, sess) {
           stage: overrides[name] || o.customMetadata && o.customMetadata.stage || ""
         });
       }
-      const out = { files };
+      const out = { files, customerName };
       if (jobSig && jobSig.fileKey && jobSig.fileKey !== "local") {
         out.signature = {
           signedBy: jobSig.signedBy || "",
@@ -10742,6 +10744,29 @@ Which single area id best fits this work?`;
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+function customerForClient(c) {
+  c = String(c || "").toLowerCase().trim();
+  if (["retail", "els", "els_private", "cobra", "wenzels", "wenzel", "wenzel's"].includes(c)) return "The Southern Co-op";
+  if (c === "fbc") return "Fareham Borough Council";
+  if (c === "chapplins") return "Chapplins Lettings";
+  return "";
+}
+async function resolveCustomerName(env, tenantId, job) {
+  if (job.customer && String(job.customer).trim()) return job.customer;
+  let cl = job.client || job.storeType || "";
+  const code = String(job.siteCode || "").trim();
+  if (!cl && code) {
+    try {
+      const padded = /^\d+$/.test(code) ? code.padStart(4, "0") : code;
+      const row = await env.DB.prepare(
+        "SELECT client FROM sites WHERE tenant_id=? AND (site_number=? OR site_number=? OR (site_number GLOB '[0-9]*' AND CAST(site_number AS INTEGER)=CAST(? AS INTEGER))) LIMIT 1"
+      ).bind(tenantId, code, padded, code).first();
+      cl = row && row.client || "";
+    } catch {
+    }
+  }
+  return customerForClient(cl) || job.client && String(job.client).trim() || job.siteName || job.siteCode || "";
 }
 function decorateAuditItems(env, items) {
   if (!Array.isArray(items)) return items;
