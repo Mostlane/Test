@@ -1264,7 +1264,10 @@ async function saveEditInstant(row){
    site's Site Documents. Config-driven; mirrors eicr-portal.html's copy. */
 const AFS_CFG = {
   clients: { fbc:"FBC", general:"General" },
-  codeIsSiteNumber: false, askType: true, defaultType: "Other",
+  // Fareham compliance codes ARE the portal site number (3001-3024) — so the chart,
+  // Site Documents and cert filing all tally on one number. New sites added from the
+  // portal use their site number as the code.
+  codeIsSiteNumber: true, askType: true, defaultType: "Other",
   emptyMsg: "No eligible FBC sites to add — every one is already on the chart."
 };
 function afsKey(num){ return AFS_CFG.codeIsSiteNumber ? pad4(num) : String(num||'').trim(); }
