@@ -128,6 +128,16 @@
   .mlje-back{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:100000;padding:12px;}
   .mlje-back.show{display:flex;}
   .mlje-modal{background:#fff;border-radius:14px;max-width:520px;width:100%;box-shadow:0 24px 48px rgba(0,0,0,.3);padding:16px;max-height:94vh;display:flex;flex-direction:column;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#0f172a;}
+  /* Editing is desktop-only — give it room so short forms don't scroll. */
+  @media(min-width:820px){ .mlje-modal{max-width:760px;padding:20px;} }
+  /* Collapsible section (Site, per-engineer visibility) — a details/summary card. */
+  details.mlje-coll > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:600;color:#003b82;font-size:13px;margin:0;}
+  details.mlje-coll > summary::-webkit-details-marker{display:none;}
+  details.mlje-coll > summary::after{content:"▸";margin-left:auto;color:#94a3b8;font-size:12px;}
+  details.mlje-coll[open] > summary::after{content:"▾";}
+  details.mlje-coll > summary h3{margin:0;font-size:13px;color:#003b82;}
+  details.mlje-coll > summary .mlje-collsub{font-weight:400;color:#64748b;font-size:12px;}
+  details.mlje-coll > .mlje-collbody{margin-top:8px;}
   .mlje-modal h2{margin:0 0 8px;font-size:17px;color:#003b82;}
   .mlje-body{flex:1;overflow-y:auto;padding-right:2px;}
   .mlje-body label{display:block;font-size:12px;font-weight:600;color:#334155;margin:10px 0 3px;}
@@ -245,10 +255,19 @@
           <input type="datetime-local" id="mljeVisAt" style="display:none;margin:4px 0 4px 30px;width:calc(100% - 30px);">
           <label class="mlje-visopt"><input type="radio" name="mljeVis" value="afterPrev"> <span><b>After the previous job that day</b><small>Stacks the day: this appears once the engineer finishes their earlier job. Set this on each queued job to drip them out one-by-one.</small></span></label>
         </div>
+
+        <details class="mlje-coll" id="mljeEngRelWrap" style="display:none;margin-top:10px;border:1px solid #e2e8f0;border-radius:10px;padding:9px 11px;background:#fff;">
+          <summary>When <b style="margin:0 3px;">each</b> engineer sees it <span class="mlje-collsub">— override per person</span></summary>
+          <div class="mlje-collbody">
+            <div class="mlje-hint" style="margin-bottom:6px;">Each engineer starts from the setting above — change a row to give that person their own time.</div>
+            <div id="mljeEngRel"></div>
+          </div>
+        </details>
       </div>
 
-      <div class="mlje-site">
-        <h3>Site</h3>
+      <details class="mlje-site mlje-coll">
+        <summary><h3>Site</h3></summary>
+        <div class="mlje-collbody">
         <label for="mljeSitePick">Use an existing site</label>
         <input id="mljeSiteFilter" type="text" placeholder="Type to filter sites…" style="margin-bottom:6px;">
         <select id="mljeSitePick"><option value="">— pick a site to fill the boxes below —</option></select>
@@ -275,7 +294,8 @@
           <input id="mljeSiteCustNew" type="text" placeholder="New customer name…" style="display:none;margin-top:6px;">
           <div class="mlje-hint" id="mljeSiteHint">A new site number will be created automatically.</div>
         </div>
-      </div>
+        </div>
+      </details>
 
       <label style="margin-top:4px;">On-site requirements <small style="font-weight:400;color:#64748b;">(what the engineer must do to complete)</small></label>
       <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-bottom:4px;">
@@ -338,9 +358,9 @@
     });
     back.querySelectorAll('input[name="mljeVis"]').forEach(r => r.addEventListener("change", () => {
       $("mljeVisAt").style.display = (visMode() === "at") ? "block" : "none";
-      updateVisBtn();
+      updateVisBtn(); renderEngRel();
     }));
-    $("mljeVisAt").addEventListener("change", updateVisBtn);
+    $("mljeVisAt").addEventListener("change", () => { updateVisBtn(); renderEngRel(); });
     document.addEventListener("keydown", e => { if (e.key === "Escape" && $("mljeBack").classList.contains("show")) close(); });
     wheelify(back);
   }
@@ -386,6 +406,34 @@
         + '<input class="es-f" type="time" step="300" value="' + esc(f) + '" style="flex:0 0 96px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
         + '</div>';
     }).join("");
+  }
+  function relOpt(v, l, cur) { return '<option value="' + v + '"' + (v === cur ? " selected" : "") + '>' + l + '</option>'; }
+  // Per-engineer visibility ("release"): each engineer defaults to the job-level
+  // setting; a row that differs becomes their own override. Shown only for 2+.
+  function renderEngRel() {
+    const wrap = $("mljeEngRelWrap"), host = $("mljeEngRel"); if (!wrap || !host) return;
+    const checked = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
+    if (checked.length < 2) { wrap.style.display = "none"; wrap.open = false; host.innerHTML = ""; return; }
+    wrap.style.display = "";
+    const defMode = (document.querySelector('input[name="mljeVis"]:checked') || {}).value || "now";
+    const defAt = $("mljeVisAt").value || "";
+    const prev = {};
+    host.querySelectorAll(".mlje-er-row").forEach(r => { prev[r.dataset.user.toLowerCase()] = { m: r.querySelector(".er-m").value, a: (r.querySelector(".er-a") || {}).value || "" }; });
+    const er = (currentJob && currentJob.engRelease) || {};
+    host.innerHTML = checked.map(u => {
+      let mode = defMode, at = defAt;
+      const p = prev[u.toLowerCase()];
+      if (p) { mode = p.m; at = p.a; }
+      else { const o = er[mljeNorm(u)]; if (o && o.mode) { mode = o.mode; if (o.mode === "at" && o.at) at = toLocalInput(o.at); } }
+      return '<div class="mlje-er-row" data-user="' + esc(u) + '" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">'
+        + '<span style="flex:0 0 120px;font-size:13px;font-weight:600;">' + esc(engNameFor(u)) + '</span>'
+        + '<select class="er-m" style="flex:1;min-width:150px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;">'
+        + relOpt("now", "Visible now", mode) + relOpt("dayBefore", "5pm the day before", mode) + relOpt("at", "At a set time…", mode) + relOpt("afterPrev", "After previous job", mode)
+        + '</select>'
+        + '<input class="er-a" type="datetime-local" value="' + esc(at) + '" style="flex:0 0 200px;padding:6px;border:1px solid #cbd5e1;border-radius:8px;' + (mode === "at" ? "" : "display:none;") + '">'
+        + '</div>';
+    }).join("");
+    host.querySelectorAll(".mlje-er-row").forEach(r => { const m = r.querySelector(".er-m"), a = r.querySelector(".er-a"); m.onchange = () => { a.style.display = m.value === "at" ? "" : "none"; }; });
   }
   function stepTime(v, mins, fallback) {
     const m = /^(\d{2}):(\d{2})/.exec(v || "");
@@ -633,11 +681,12 @@
       if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
     }
     const showOfficeTog = $("mljeShowOffice");
-    if (showOfficeTog) { showOfficeTog.checked = false; showOfficeTog.onchange = () => { paintEngineers(showOfficeTog.checked); renderEngSched(); }; }
+    if (showOfficeTog) { showOfficeTog.checked = false; showOfficeTog.onchange = () => { paintEngineers(showOfficeTog.checked); renderEngSched(); renderEngRel(); }; }
     paintEngineers(false);
     // Per-engineer time rows appear when 2+ engineers are ticked (re-render on tick).
-    if (!box._esHooked) { box.addEventListener("change", renderEngSched); box._esHooked = true; }
+    if (!box._esHooked) { box.addEventListener("change", () => { renderEngSched(); renderEngRel(); }); box._esHooked = true; }
     renderEngSched();
+    renderEngRel();
     // Deleting is for SLA admins only (the server enforces this too). This
     // server-confirmed check only ever ADDS the button (e.g. first login on a
     // new device before the permission cache exists) — it never removes it,
@@ -770,10 +819,30 @@
     else if (vm === "dayBefore") release = { mode: "dayBefore" };
     else if (vm === "afterPrev") release = { mode: "afterPrev" };
 
+    // Per-engineer visibility overrides (multi-engineer only). A row that DIFFERS
+    // from the job-level release above becomes that engineer's own override; rows
+    // matching the default fall back to it. Full REPLACE ({} clears it).
+    const engRelease = {};
+    if (assignedEngineers.length >= 2) {
+      const defMode = vm, defAt = (vm === "at") ? ($("mljeVisAt").value || "") : "";
+      document.querySelectorAll("#mljeEngRel .mlje-er-row").forEach(row => {
+        const u = row.dataset.user;
+        if (!assignedEngineers.some(a => a.toLowerCase() === String(u).toLowerCase())) return;
+        const m = row.querySelector(".er-m").value, aEl = row.querySelector(".er-a"), aVal = aEl ? aEl.value : "";
+        const differs = (m !== defMode) || (m === "at" && aVal !== defAt);
+        if (!differs) return;   // same as the job-level default → no override
+        if (m === "now") engRelease[mljeNorm(u)] = { mode: "now" };
+        else if (m === "at") { if (aVal) engRelease[mljeNorm(u)] = { mode: "at", at: new Date(aVal).toISOString() }; }
+        else if (m === "dayBefore") engRelease[mljeNorm(u)] = { mode: "dayBefore" };
+        else if (m === "afterPrev") engRelease[mljeNorm(u)] = { mode: "afterPrev" };
+      });
+    }
+
     // Patch the job with every edited detail.
     const raisedLocal = $("mljeRaised").value;
     const payload = {
       release: release,
+      engRelease: engRelease,   // per-engineer overrides (full replace; {} clears)
       helpdeskRef: $("mljeRef").value.trim() || undefined,
       description: $("mljeDesc").value.trim() || undefined,
       priority: $("mljePriority").value,
