@@ -236,6 +236,7 @@
         <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
         <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
+        <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
         <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
       </div>
@@ -255,6 +256,7 @@
         // Certificate review queue — office roles that can issue EM/PAT certs.
         if (yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance)) {
           var crl = document.getElementById("certReviewLink"); if (crl) crl.style.display = "";
+          var cjl = document.getElementById("certJobsLink"); if (cjl) cjl.style.display = "";
         }
         var isField = (function(){
           if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();
@@ -622,7 +624,9 @@ async function loadJobs(){
   try{
     const res = await authFetch("/sla/jobs?t=" + Date.now());
     const json = await res.json();
-    allJobs = (Array.isArray(json) ? json : []).map(j => ({
+    // EM/PAT jobs live in their own area (cert-jobs.html) so they don't clog the
+    // board — keep them off the main dashboard.
+    allJobs = (Array.isArray(json) ? json : []).filter(j => !(j && (j.emTest || j.pat))).map(j => ({
       ...j,
       status: j.status || "Pending",
       assignedEngineers: (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)

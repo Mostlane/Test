@@ -27,7 +27,7 @@ import { logoBytes } from "../lib/logo.js";
 import { pdfExtractTokens } from "../lib/pdftext.js";
 import { fileCertificatePdf } from "./compliance.js";
 import { sendToUser, sendToPermission } from "./push.js";
-import { createOrUpdateJobFromPayload } from "./sla.js";
+import { createOrUpdateJobFromPayload, listJobs } from "./sla.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendEmail } from "../lib/email.js";
 import { buildBatteryEnquiryPdf } from "../lib/batterypdf.js";
@@ -520,6 +520,52 @@ export async function handle(request, env, ctx, url, sess) {
       else await env.DB.prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).run();
       return json({ ok: true }, {}, env, request);
     }
+  }
+
+  // ── EM/PAT JOBS hub (office): every EM/PAT job in its own area, with the site's
+  // client + status so the office can filter open/closed + by client. ──────────
+  if (sub === "/jobs" && method === "GET") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const jobs = (await listJobs(env, tid)).filter(j => j && (j.emTest || j.pat));
+    const codes = [...new Set(jobs.map(j => String(j.siteCode || "")).filter(Boolean))];
+    const clientByCode = {};
+    if (codes.length) {
+      const ph = codes.map(() => "?").join(",");
+      const rows = await env.DB.prepare(`SELECT site_number, client, site_name FROM sites WHERE tenant_id=? AND site_number IN (${ph})`).bind(tid, ...codes).all().catch(() => ({ results: [] }));
+      (rows.results || []).forEach(r => { clientByCode[String(r.site_number)] = { client: String(r.client || "").toLowerCase(), name: r.site_name }; });
+    }
+    const done = s => { s = String(s || "").toLowerCase(); return s.includes("complete") || s.includes("closed") || s.includes("invoiced") || s.includes("cancel"); };
+    const out = jobs.map(j => {
+      const c = clientByCode[String(j.siteCode || "")] || {};
+      return {
+        id: j.id, ref: j.helpdeskRef || j.reference || "", site: j.siteName || c.name || "", siteCode: j.siteCode || "",
+        client: c.client || "", status: j.status || "", closed: done(j.status), scheduledAt: j.scheduledAt || "",
+        em: !!j.emTest, pat: !!j.pat, emKind: j.emKind || (j.emTest ? "yearly" : ""), engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [],
+      };
+    }).sort((a, b) => (b.scheduledAt || "").localeCompare(a.scheduledAt || ""));
+    return json({ ok: true, jobs: out }, {}, env, request);
+  }
+
+  // POST /certs/jobs/create-next {jobId, months?} — clone an EM/PAT job for its
+  // next test (default +12 months; monthly EM → +1). New job, Pending, unassigned.
+  if (sub === "/jobs/create-next" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const src = await getJob(env, tid, String(b.jobId || ""));
+    if (!src) return error("Job not found", 404, env, request);
+    let months = Number(b.months);
+    if (!Number.isFinite(months) || months < 1 || months > 60) months = (src.emKind === "monthly") ? 1 : 12;
+    const base = src.scheduledAt ? new Date(src.scheduledAt) : new Date();
+    const next = new Date(isNaN(base) ? Date.now() : base.getTime());
+    next.setMonth(next.getMonth() + months);
+    const job = await createOrUpdateJobFromPayload(env, tid, {
+      reference: src.helpdeskRef || src.reference || "", description: src.description || "",
+      siteName: src.siteName || "", siteCode: src.siteCode || "", address: src.address || "", postcode: src.postcode || "",
+      priority: src.priority || "", emTest: !!src.emTest, pat: !!src.pat, emKind: src.emKind || "",
+      durationMinutes: src.durationMinutes, scheduledAt: next.toISOString(), status: "Pending",
+      assignedEngineers: [], originator: "cert-next",
+    });
+    return json({ ok: true, id: job.id, scheduledAt: next.toISOString(), months }, {}, env, request);
   }
 
   // ── EM remedial battery photo upload (engineer or office) ───────────────────
