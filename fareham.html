@@ -1864,39 +1864,21 @@ document.addEventListener('DOMContentLoaded', () => {
     w3wBtn.onclick = async () => {
       if (!canEditCompliance()) return;
       if (!confirm("Resolve postcodes from what3words for "+W3W_ITEMS.length+" Fareham sites? This sets each site's postcode + map pin.")) return;
-      const old = w3wBtn.textContent; w3wBtn.disabled = true;
-      const sleep = ms => new Promise(r=>setTimeout(r,ms));
+      const old = w3wBtn.textContent; w3wBtn.disabled = true; w3wBtn.textContent = "Resolving…";
       try {
-        // The what3words key is HTTP-referrer restricted to this domain, so the
-        // lookup MUST run from this browser (it sends the matching referrer).
-        const kd = await authFetch("/certs/w3w-key").then(r=>r.json());
-        const key = kd && kd.key;
-        if (!key) { alert("The W3W_KEY secret isn't set on mostlane-api yet. Add it (Settings → Variables and Secrets) and Deploy."); w3wBtn.disabled=false; w3wBtn.textContent=old; return; }
-        const resolved = [];
-        for (let i=0;i<W3W_ITEMS.length;i++){
-          const it = W3W_ITEMS[i];
-          w3wBtn.textContent = "Resolving "+(i+1)+"/"+W3W_ITEMS.length+"…";
-          let lat=null,lng=null,pc="";
-          try{
-            const w = await fetch("https://api.what3words.com/v3/convert-to-coordinates?words="+encodeURIComponent(it.words)+"&key="+encodeURIComponent(key),{headers:{Accept:"application/json"}}).then(r=>r.json());
-            if (w && w.coordinates){ lat=w.coordinates.lat; lng=w.coordinates.lng; }
-            if (lat!=null && lng!=null){
-              try{ const p = await fetch("https://api.postcodes.io/postcodes?lon="+lng+"&lat="+lat).then(r=>r.json()); pc=(p&&p.result&&p.result[0]&&p.result[0].postcode)||""; }catch(_){}
-            }
-            resolved.push({ name:it.name, words:it.words, lat:lat, lng:lng, postcode:pc, err:(lat==null?((w&&w.error&&(w.error.message||w.error.code))||"lookup failed"):"") });
-          }catch(e){ resolved.push({ name:it.name, words:it.words, err:String(e) }); }
-          await sleep(250); // ~4/s, under the 5/s limit
+        // Server-side: the worker converts each what3words with the secret key.
+        // (Needs the key to have NO HTTP-referrer restriction — see the note.)
+        const d = await authFetch("/certs/w3w-postcodes", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ items: W3W_ITEMS }) }).then(r=>r.json());
+        if (!d || !d.ok) { alert((d && d.error) || "Couldn't resolve postcodes."); }
+        else {
+          const saved = d.results.filter(r=>r.ok);
+          const okLines = saved.map(r=>"• "+r.name+" → "+(r.postcode||"(no postcode)")).join("\n");
+          const fails = d.results.filter(r=>!r.ok);
+          let msg = "Set "+saved.length+" of "+d.results.length+" sites.\n\n"+okLines;
+          if (fails.length) msg += "\n\nCouldn't do:\n"+fails.map(r=>"• "+r.name+" — "+(r.error||"")).join("\n");
+          alert(msg);
+          if (typeof loadFromPortal === "function") loadFromPortal();
         }
-        w3wBtn.textContent = "Saving…";
-        const d = await authFetch("/certs/w3w-postcodes", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ items: resolved.filter(r=>r.lat!=null) }) }).then(r=>r.json());
-        const saved = (d && d.results) ? d.results.filter(r=>r.ok) : [];
-        const okLines = saved.map(r=>"• "+r.name+" → "+(r.postcode||"(no postcode)")).join("\n");
-        const fails = resolved.filter(r=>r.lat==null);
-        let msg = "Set "+saved.length+" of "+W3W_ITEMS.length+" sites.\n\n"+okLines;
-        if (fails.length) msg += "\n\nCouldn't resolve:\n"+fails.map(r=>"• "+r.name+" — "+(r.err||"")).join("\n");
-        if (d && !d.ok) msg += "\n\nSave error: "+(d.error||"");
-        alert(msg);
-        if (typeof loadFromPortal === "function") loadFromPortal();
       } catch (e) { alert("Failed: "+e); }
       w3wBtn.disabled = false; w3wBtn.textContent = old;
     };
