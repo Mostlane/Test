@@ -6061,7 +6061,6 @@ async function handle8(request, env, ctx, url, sess) {
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
-    if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
   }
   if (subpath === "/jobs" && method === "POST") {
@@ -6071,7 +6070,6 @@ async function handle8(request, env, ctx, url, sess) {
     const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
     }));
-    if (before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
   if (subpath === "/jobs" && method === "GET") {
@@ -6425,7 +6423,7 @@ async function handle8(request, env, ctx, url, sess) {
     const date = searchParams.get("date");
     const all = await listJobs(env, tenantId);
     let jobs = all.filter((j) => assignedList(j).some((a) => normId(a) === engineer));
-    jobs = jobs.filter((j) => releaseVisibleNow(j, all));
+    jobs = jobs.filter((j) => releaseVisibleNowFor(j, engineer, all));
     if (date) {
       jobs = jobs.filter((j) => {
         const s = effSchedule(j, engineer).scheduledAt;
@@ -6617,7 +6615,7 @@ async function handle8(request, env, ctx, url, sess) {
         const outstanding = [];
         for (const j of all) {
           if (!assignedList(j).some((a) => normId(a) === engNorm)) continue;
-          if (!releaseVisibleNow(j, all)) continue;
+          if (!releaseVisibleNowFor(j, engNorm, all)) continue;
           const st = String(effStatus(j, engNorm) || "");
           if (finished(st) || parked(st)) continue;
           const active = /^(travelling|in progress)$/i.test(st);
@@ -6726,7 +6724,6 @@ async function handle8(request, env, ctx, url, sess) {
     const updated = await patchJob(env, tenantId, id, patch, ctx);
     if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
     }));
-    if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
   }
@@ -7133,7 +7130,6 @@ async function handle8(request, env, ctx, url, sess) {
       const updated = await patchJob(env, tenantId, id, body, ctx);
       if (updated) ctx?.waitUntil(reconcileRelease(env, tenantId, updated).catch(() => {
       }));
-      if (updated && before?.releaseNotified) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       if (updated && jobIsFinished(updated) && !jobIsFinished(before || {})) {
         ctx?.waitUntil((async () => {
           const all = await listJobs(env, tenantId);
@@ -7754,17 +7750,74 @@ function hasEarlierOpenJob(job, engineers, allJobs) {
   const myStart = Date.parse(job.scheduledAt);
   return allJobs.some((o) => o.id !== job.id && sameSchedDay(o, job) && Date.parse(o.scheduledAt) < myStart && assignedList(o).some((a) => engSet.has(normId(a)) && !DONE_STATES.has(String(effStatus(o, normId(a))).toLowerCase())));
 }
-function releaseVisibleNow(job, allJobs) {
+function releaseForEng(job, eng) {
+  const m = job && job.engRelease, nid = normId(eng);
+  if (m && nid in m) return m[nid];
+  return job && job.release;
+}
+function releaseInstantFor(job, r) {
+  if (!r || !r.mode || r.mode === "now") return null;
+  if (r.mode === "at") {
+    const t = Date.parse(r.at);
+    return Number.isFinite(t) ? t : null;
+  }
+  if (r.mode === "dayBefore") return job.scheduledAt ? londonHourDayBefore(job.scheduledAt, r.hour) : null;
+  return null;
+}
+function releaseVisibleNowFor(job, eng, allJobs) {
   if (job && job.seriesSkipped) return false;
   if (job && (job.seriesId || job.fallback) && engineerHasOtherJobThatDay(job, allJobs || [])) return false;
-  const r = job && job.release;
+  const r = releaseForEng(job, eng);
   if (!r || !r.mode || r.mode === "now") return true;
   if (r.mode === "at" || r.mode === "dayBefore") {
-    const t = releaseInstant(job);
+    const t = releaseInstantFor(job, r);
     return t == null || t <= Date.now();
   }
-  if (r.mode === "afterPrev") return !hasEarlierOpenJob(job, assignedList(job), allJobs || []);
+  if (r.mode === "afterPrev") return !hasEarlierOpenJob(job, [eng], allJobs || []);
   return true;
+}
+function engNotified(job, eng) {
+  const nid = normId(eng);
+  if (job && job.releaseNotifiedBy) return !!job.releaseNotifiedBy[nid];
+  return !!(job && job.releaseNotified);
+}
+function markEngNotified(job, engs) {
+  job.releaseNotifiedBy = job.releaseNotifiedBy || {};
+  for (const e of engs) job.releaseNotifiedBy[normId(e)] = true;
+  if (assignedList(job).every((e) => engNotified(job, e))) job.releaseNotified = true;
+}
+function releaseGatedForEng(job, eng) {
+  const r = releaseForEng(job, eng);
+  return !!(r && r.mode && r.mode !== "now");
+}
+function sanitizeEngRelease(raw, engineers) {
+  if (!raw || typeof raw !== "object") return void 0;
+  const engSet = new Set((engineers || []).map(normId));
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const nid = normId(k);
+    if (engSet.size && !engSet.has(nid)) continue;
+    if (!v || !v.mode) continue;
+    if (v.mode === "at") {
+      if (!v.at) continue;
+      out[nid] = { mode: "at", at: v.at };
+    } else if (v.mode === "dayBefore") {
+      out[nid] = v.hour != null ? { mode: "dayBefore", hour: Number(v.hour) } : { mode: "dayBefore" };
+    } else if (v.mode === "now" || v.mode === "afterPrev") {
+      out[nid] = { mode: v.mode };
+    }
+  }
+  return Object.keys(out).length ? out : void 0;
+}
+function carryReleaseNotifiedBy(existing, releaseChanged) {
+  if (releaseChanged) return void 0;
+  if (existing && existing.releaseNotifiedBy) return { ...existing.releaseNotifiedBy };
+  if (existing && existing.releaseNotified) {
+    const m = {};
+    for (const e of assignedList(existing)) m[normId(e)] = true;
+    return Object.keys(m).length ? m : void 0;
+  }
+  return void 0;
 }
 function releaseLabel(job) {
   const r = job && job.release;
@@ -7832,21 +7885,21 @@ async function stopSeries(env, tenantId, seriesId) {
   return { removed, total: inSeries.length };
 }
 async function reconcileRelease(env, tid, job, allJobs) {
-  if (!job || job.releaseNotified) return false;
+  if (!job) return false;
   const engs = assignedList(job);
   if (!engs.length) return false;
-  if (!releaseVisibleNow(job, allJobs || await listJobs(env, tid))) return false;
-  await pushJobToEngineers(env, tid, job, engs);
-  job.releaseNotified = true;
+  const all = allJobs || await listJobs(env, tid);
+  const toPush = engs.filter((e) => !engNotified(job, e) && releaseVisibleNowFor(job, e, all));
+  if (!toPush.length) return false;
+  await pushJobToEngineers(env, tid, job, toPush);
+  markEngNotified(job, toPush);
   await saveJob(env, tid, job);
   return true;
 }
 async function sweepJobReleases(env, tid = 1) {
   const jobs = await listJobs(env, tid);
   for (const j of jobs) {
-    if (j.releaseNotified || j.seriesSkipped || !assignedList(j).length) continue;
-    const r = j.release;
-    if (!r || !r.mode || r.mode === "now") continue;
+    if (j.seriesSkipped || !assignedList(j).length) continue;
     if ((j.seriesId || j.fallback) && engineerHasOtherJobThatDay(j, jobs)) {
       const t = releaseInstant(j);
       if (t == null || t <= Date.now()) {
@@ -7856,6 +7909,8 @@ async function sweepJobReleases(env, tid = 1) {
       }
       continue;
     }
+    const pending = assignedList(j).some((e) => !engNotified(j, e) && releaseGatedForEng(j, e));
+    if (!pending) continue;
     await reconcileRelease(env, tid, j, jobs).catch(() => {
     });
   }
@@ -7874,32 +7929,6 @@ async function remindPendingHolds(env, tid = 1) {
       });
     }
   } catch {
-  }
-}
-async function notifyNewlyAssigned(env, tid, before, after) {
-  if (!after) return;
-  const prior = new Set(assignedList(before || {}).map(normId));
-  const added = assignedList(after).filter((a) => !prior.has(normId(a)));
-  if (!added.length) return;
-  const map = {};
-  try {
-    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
-    for (const u of results || []) {
-      map[normId(u.username)] = u.username;
-      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
-      if (full) map[normId(full)] = u.username;
-    }
-  } catch {
-  }
-  const body = jobPushBody(after);
-  for (const eng of added) {
-    const username = map[normId(eng)] || eng;
-    await sendToUser(env, tid, username, {
-      title: "New job assigned to you",
-      body,
-      url: "/engineer-jobs.html?job=" + encodeURIComponent(after.id),
-      tag: "sla-job:" + after.id
-    });
   }
 }
 async function getJob(env, tenantId, id) {
@@ -8095,6 +8124,12 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the announcement push; releaseNotified tracks whether it has fired.
     release: body.release !== void 0 ? body.release && body.release.mode && body.release.mode !== "now" ? { mode: body.release.mode, at: body.release.at || void 0, hour: body.release.hour != null ? Number(body.release.hour) : void 0 } : void 0 : existing?.release,
     releaseNotified: body.release !== void 0 && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null) ? false : existing?.releaseNotified || false,
+    // Per-engineer release overrides + who's already been pushed. When the
+    // job-level release changed, releaseNotifiedBy resets so everyone re-arms;
+    // otherwise it carries forward (seeding from the prior engineers if legacy),
+    // so a newly-added engineer is treated as not-yet-notified.
+    engRelease: sanitizeEngRelease(body.engRelease !== void 0 ? body.engRelease : existing?.engRelease, assignedEngineers),
+    releaseNotifiedBy: carryReleaseNotifiedBy(existing, body.release !== void 0 && JSON.stringify(body.release || null) !== JSON.stringify(existing?.release || null)),
     // Project multi-day drip "series": seriesId links the days; seriesSkipped
     // permanently drops a day (clash safeguard). Both preserved across re-saves.
     seriesId: body.seriesId !== void 0 ? String(body.seriesId || "") || null : existing?.seriesId ?? null,
@@ -8157,6 +8192,16 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.assignedEngineers !== void 0 || patch.assignedTo !== void 0) {
     seedEngStatus(job, prevEngs, prevStatus, now);
     pruneEngSchedule(job);
+    if (job.releaseNotified && !job.releaseNotifiedBy) {
+      job.releaseNotifiedBy = {};
+      for (const e of prevEngs) job.releaseNotifiedBy[normId(e)] = true;
+    }
+    if (job.engRelease || job.releaseNotifiedBy) {
+      const engSet = new Set(assignedList(job).map(normId));
+      for (const k of Object.keys(job.engRelease || {})) if (!engSet.has(k)) delete job.engRelease[k];
+      for (const k of Object.keys(job.releaseNotifiedBy || {})) if (!engSet.has(k)) delete job.releaseNotifiedBy[k];
+      if (job.engRelease && !Object.keys(job.engRelease).length) job.engRelease = void 0;
+    }
   }
   if (patch.engSchedule !== void 0) {
     job.engSchedule = patch.engSchedule && typeof patch.engSchedule === "object" && Object.keys(patch.engSchedule).length ? { ...patch.engSchedule } : void 0;
@@ -8173,7 +8218,23 @@ async function patchJob(env, tenantId, id, patch, ctx) {
     const prev = job.release ? JSON.stringify(job.release) : "";
     if (!patch.release || !patch.release.mode || patch.release.mode === "now") job.release = void 0;
     else job.release = { mode: patch.release.mode, at: patch.release.at || void 0, hour: patch.release.hour != null ? Number(patch.release.hour) : void 0 };
-    if ((job.release ? JSON.stringify(job.release) : "") !== prev) job.releaseNotified = false;
+    if ((job.release ? JSON.stringify(job.release) : "") !== prev) {
+      job.releaseNotified = false;
+      job.releaseNotifiedBy = void 0;
+    }
+  }
+  if (patch.engRelease !== void 0) {
+    const newEr = sanitizeEngRelease(patch.engRelease, assignedList(job)) || {};
+    const oldEr = job.engRelease || {};
+    const changed = /* @__PURE__ */ new Set();
+    for (const nid of /* @__PURE__ */ new Set([...Object.keys(oldEr), ...Object.keys(newEr)])) {
+      const oldEff = nid in oldEr ? oldEr[nid] : job.release || null;
+      const newEff = nid in newEr ? newEr[nid] : job.release || null;
+      if (JSON.stringify(oldEff) !== JSON.stringify(newEff)) changed.add(nid);
+    }
+    job.engRelease = Object.keys(newEr).length ? newEr : void 0;
+    if (changed.size && job.releaseNotifiedBy) for (const nid of changed) delete job.releaseNotifiedBy[nid];
+    if (changed.size) job.releaseNotified = assignedList(job).length ? assignedList(job).every((e) => engNotified(job, e)) : job.releaseNotified;
   }
   if (patch.scheduledAt !== void 0) {
     const prevStart = Date.parse(job.scheduledAt);
