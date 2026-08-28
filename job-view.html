@@ -8,6 +8,7 @@
   <script src="auth.js"></script>
   <script src="sla-jobedit.js?v=23"></script>
   <script src="firestop-form.js?v=1"></script>
+  <script src="cert-form.js?v=11"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -554,6 +555,12 @@
     <div id="auditBody"></div>
   </div>
 
+  <!-- EM / PAT certificate — a live read-only view of what the engineer sees -->
+  <div class="card" id="certCard" style="display:none;">
+    <h2 class="section-title">📄 EM / PAT certificate <span class="sub" style="font-weight:400;font-size:12px;color:#8a97a6;">· live view</span></h2>
+    <div id="certViewHost"></div>
+  </div>
+
   <!-- TOTAL COST TO US (labour + travel + fuel + materials) — office/admin only -->
   <div class="card" id="jobCostCard" style="display:none;">
     <h2 class="section-title">💷 Total cost to us</h2>
@@ -977,6 +984,7 @@ function renderJob(){
   loadJobPOs();
   mountFirestopView();
   renderAuditView();
+  mountCertView();
 
   startCountdownLoop();
 }
@@ -1022,6 +1030,31 @@ function mountFirestopView(){
       api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken")
     });
   }
+}
+
+// EM / PAT jobs: a LIVE read-only view of the engineer's certificate(s) — every
+// item exactly as they see it, updating as they autosave. A combined EM+PAT job
+// shows both. Re-drawn on a light poll while the tab is visible (read-only, so
+// there's nothing to lose on a refresh).
+let certViewTimer = null;
+function mountCertView(){
+  const card = $("certCard"); if(!card || !job) return;
+  const isCert = !!(job.emTest || job.pat) && !job.firestopping;
+  card.style.display = isCert ? "" : "none";
+  if(certViewTimer){ clearInterval(certViewTimer); certViewTimer = null; }
+  if(!isCert || !window.MLCert) return;
+  const draw = () => {
+    const host = $("certViewHost"); if(!host) return;
+    host.innerHTML = "";
+    const types = []; if(job.emTest) types.push("em"); if(job.pat) types.push("pat");
+    types.forEach(t => {
+      if(types.length > 1){ const hh = document.createElement("div"); hh.style.cssText="font-weight:800;color:#003468;margin:10px 0 4px;font-size:14px"; hh.textContent = (t==="pat"?"🔌 PAT":"💡 EM"); host.appendChild(hh); }
+      const h = document.createElement("div"); host.appendChild(h);
+      window.MLCert.mount(h, { jobId: job.id, type: t, mode: "view", api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken") });
+    });
+  };
+  draw();
+  certViewTimer = setInterval(() => { if(document.visibilityState === "visible") draw(); }, 15000);
 }
 
 /* Materials cost: the POs raised against THIS job (office/admin only). Reads
