@@ -1251,8 +1251,13 @@ btnRecalc.onclick = async () => {
   statusEl.textContent = "Recalculating… this may take a moment";
   let updatedCount = 0;
 
+  let geocoded = 0, noPin = 0;
   for (const s of list) {
-    if (!s.lat || !s.lon) continue;
+    // No pin yet but we have a postcode → geocode it first, so it isn't skipped.
+    if ((!s.lat || !s.lon) && cleanPostcode(s)) {
+      try { const loc = await geocodePostcode(cleanPostcode(s)); if (loc) { s.lat = loc.lat; s.lon = loc.lng; geocoded++; } } catch (_) {}
+    }
+    if (!s.lat || !s.lon) { noPin++; continue; }
 
     const miles = await calcMileage(s.lat, s.lon);
     if (!miles) continue;
@@ -1271,7 +1276,7 @@ btnRecalc.onclick = async () => {
   }
 
   await fetchAllSites();
-  statusEl.textContent = `Recalculated ${updatedCount} site(s)`;
+  statusEl.textContent = `Recalculated ${updatedCount} site(s)` + (geocoded ? ` (${geocoded} pinned from postcode)` : "") + (noPin ? ` — ${noPin} skipped (no postcode/pin)` : "");
   alert(`Mileage updated for ${updatedCount} sites`);
 };
   // Photo lightbox
