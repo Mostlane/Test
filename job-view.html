@@ -929,9 +929,14 @@ function renderJob(){
   if (engs.length > 1 && job.engStatus) {
     const jvEsc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const nrm = s => (s||"").toLowerCase().replace(/\s+/g,".").trim();
+    // Each engineer can carry their OWN scheduled time on a shared job (engSchedule),
+    // else the shared time. Show it beside their status.
+    const fmtT = iso => { if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); };
     $("jobAssigned").innerHTML = engs.map(e => {
       const st = (job.engStatus[nrm(e)] || {}).status || job.status || "";
-      return `${jvEsc(e)} — <b>${jvEsc(st)}</b>`;
+      const es = (job.engSchedule && job.engSchedule[nrm(e)]) || null;
+      const when = fmtT(es && es.scheduledAt ? es.scheduledAt : job.scheduledAt);
+      return `${jvEsc(e)} — <b>${jvEsc(st)}</b>${when ? ` · <span style="color:#475569;font-weight:400;">🕒 ${jvEsc(when)}</span>` : ""}`;
     }).join("<br>");
   } else {
     $("jobAssigned").textContent = engs.length ? engs.join(", ") : "Unassigned";

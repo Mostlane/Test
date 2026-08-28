@@ -571,6 +571,14 @@ function isDoneStatus(s){ return s === "Complete"; }
 // Match the server's engineer id normalisation (spaces → dots), so we can pick
 // this engineer's own entries out of a multi-engineer job's status history.
 const schedNormId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+// One engineer's OWN scheduled slot on a job (their engSchedule slice, else the
+// shared time) — lets each engineer on a shared job sit at a different time.
+function engSchedFor(job, username){
+  const k = schedNormId(username);
+  const es = job && job.engSchedule && job.engSchedule[k];
+  if(es && es.scheduledAt) return { scheduledAt: es.scheduledAt, scheduledEnd: es.scheduledEnd || null };
+  return { scheduledAt: (job && job.scheduledAt) || null, scheduledEnd: (job && job.scheduledEnd) || null };
+}
 // The ACTUAL worked window for a finished job in one engineer's lane, read from
 // the status history (In Progress → Complete). Returns {start,end} Dates, or
 // null when we can't tell (→ the block keeps its scheduled slot). Never changes
@@ -695,6 +703,10 @@ function normaliseJob(j){
     workArea: j.workArea || "",
     lat: j.lat, lon: j.lon,
     scheduledAt: j.scheduledAt || null,
+    scheduledEnd: j.scheduledEnd || null,
+    // Per-engineer scheduled slots {normId:{scheduledAt,scheduledEnd}} — each
+    // engineer on a shared job can carry their own time (engSchedFor resolves it).
+    engSchedule: (j.engSchedule && typeof j.engSchedule === "object") ? j.engSchedule : null,
     durationMinutes,
     assignedEngineers: assigned,
     // Actual worked timestamps (In Progress → Complete) so a finished job can be
@@ -922,14 +934,17 @@ function renderDayView(container){
     }
 
     const jobsForEngineer = jobs
-      .filter(j => j.scheduledAt && j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
-      .filter(j => sameDay(new Date(j.scheduledAt), dayDate));
+      .filter(j => j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
+      .filter(j => { const s = engSchedFor(j, engineer.username).scheduledAt; return s && sameDay(new Date(s), dayDate); });
 
-    // Pass 1: compute each job's on-lane time window (scheduled, or the ACTUAL
-    // worked window for a finished job so an early finish slides left).
+    // Pass 1: compute each job's on-lane time window (this engineer's OWN
+    // scheduled slot, or the ACTUAL worked window for a finished job).
     const placements = jobsForEngineer.map(job => {
+      const mySched = engSchedFor(job, engineer.username);
       const done = isDoneStatus(job.status);
-      const schedStartMins = clamp(minsSinceMidnight(new Date(job.scheduledAt)), dayStartMins, dayEndMins - 15);
+      const schedStartMins = clamp(minsSinceMidnight(new Date(mySched.scheduledAt)), dayStartMins, dayEndMins - 15);
+      let myDur = job.durationMinutes;
+      if(mySched.scheduledAt && mySched.scheduledEnd){ const d = (new Date(mySched.scheduledEnd) - new Date(mySched.scheduledAt))/60000; if(d>=15 && d<=24*60) myDur = Math.round(d); }
       const actRaw = done ? actualWindow(job, engineer.username) : null;
       const act = (actRaw && sameDay(actRaw.start, dayDate)) ? actRaw : null;
       let startMins, endMins;
@@ -939,7 +954,7 @@ function renderDayView(container){
         endMins = clamp(startMins + durM, startMins + 15, dayEndMins);
       } else {
         startMins = schedStartMins;
-        endMins = clamp(startMins + job.durationMinutes, startMins + 15, dayEndMins);
+        endMins = clamp(startMins + myDur, startMins + 15, dayEndMins);
       }
       return { job, done, schedStartMins, startMins, endMins, shifted: act && Math.abs(startMins - schedStartMins) >= 5 };
     });
@@ -1075,8 +1090,8 @@ function renderWeekView(container){
       }
 
       jobs
-        .filter(j => j.scheduledAt && j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
-        .filter(j => sameDay(new Date(j.scheduledAt), date))
+        .filter(j => j.assignedEngineers.map(a => a.toLowerCase()).includes(engineer.username.toLowerCase()))
+        .filter(j => { const s = engSchedFor(j, engineer.username).scheduledAt; return s && sameDay(new Date(s), date); })
         .forEach(job => {
           const done = isDoneStatus(job.status);
           const chip = document.createElement("div");
@@ -1189,13 +1204,15 @@ async function onPointerUp(e){
   const h = Math.floor(targetMins/60), m = targetMins%60;
   const startDate = withTime(selectedDate, h, m);
 
-  let newEngineers;
+  let newEngineers, perEngineerTarget = null;
   if(fromTray && !job.assignedEngineers.length){
     // Unassigned job dropped on a lane: that engineer takes it.
     newEngineers = [targetEngineer];
   } else if(job.assignedEngineers.length > 1){
-    // Multi-engineer job: the drag changes the TIME for everyone on it.
+    // Multi-engineer job: change ONLY this engineer's OWN time (their engSchedule),
+    // leaving everyone else's slot untouched. The roster is unchanged.
     newEngineers = job.assignedEngineers;
+    perEngineerTarget = targetEngineer;
   } else if(job.assignedEngineers.length === 1 &&
             job.assignedEngineers[0].toLowerCase() !== (targetEngineer||"").toLowerCase()){
     // Single-engineer job dropped in another lane: hand it over.
@@ -1204,23 +1221,31 @@ async function onPointerUp(e){
     newEngineers = job.assignedEngineers.length ? job.assignedEngineers : [targetEngineer];
   }
 
-  job.scheduledAt = startDate.toISOString();
-  job.assignedEngineers = newEngineers;
-  if(job.status === "Pending") job.status = "Scheduled";
-  render();
-  setStatus(`Moved ${job.ref || job.title} → ${pad2(h)}:${pad2(m)}${newEngineers.length > 1 ? " (all " + newEngineers.length + " engineers)" : ""}`);
+  const startIso = startDate.toISOString();
+  let patchBody;
+  if(perEngineerTarget){
+    const endIso = new Date(startDate.getTime() + (job.durationMinutes || 60)*60000).toISOString();
+    job.engSchedule = job.engSchedule || {};
+    job.engSchedule[schedNormId(perEngineerTarget)] = { scheduledAt: startIso, scheduledEnd: endIso };
+    patchBody = { scheduleForEngineer: { engineer: perEngineerTarget, scheduledAt: startIso, scheduledEnd: endIso }, changedBy: currentUser || "scheduler" };
+    if(job.status === "Pending") job.status = "Scheduled";
+    render();
+    const engName = (engineers.find(e => e.username && e.username.toLowerCase() === (perEngineerTarget||"").toLowerCase()) || {}).name || perEngineerTarget;
+    setStatus(`Moved ${job.ref || job.title} → ${pad2(h)}:${pad2(m)} for ${engName} only`);
+  } else {
+    job.scheduledAt = startIso;
+    job.assignedEngineers = newEngineers;
+    patchBody = { scheduledAt: startIso, durationMinutes: job.durationMinutes, assignedEngineers: newEngineers, assignedTo: newEngineers[0] || "", changedBy: currentUser || "scheduler" };
+    if(job.status === "Pending") job.status = "Scheduled";
+    render();
+    setStatus(`Moved ${job.ref || job.title} → ${pad2(h)}:${pad2(m)}`);
+  }
 
   try{
     const res = await authFetch("/sla/jobs/" + encodeURIComponent(job.id), {
       method: "PATCH",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        scheduledAt: job.scheduledAt,
-        durationMinutes: job.durationMinutes,
-        assignedEngineers: newEngineers,
-        assignedTo: newEngineers[0] || "",
-        changedBy: currentUser || "scheduler"
-      })
+      body: JSON.stringify(patchBody)
     });
     if(!res.ok) throw new Error("HTTP " + res.status);
     const saved = await res.json();

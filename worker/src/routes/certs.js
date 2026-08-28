@@ -771,8 +771,22 @@ export async function handle(request, env, ctx, url, sess) {
     const sig = dataUrlToBytes(rec.signature);
     let logo = null; try { logo = logoBytes(); } catch {}
     const bytes = buildCertPdf(rec, { logo, signature: sig });
+    // Which compliance chart? An FBC site files onto the FAREHAM chart (its code is
+    // the site number, 3001-3024, so it tallies), and an EM cert files as emMonthly
+    // or emYearly by the job's test kind. Everyone else → the Co-op chart (em/pat).
+    let fileScheme = "coop", fileType = cert.type;
+    try {
+      const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
+      if (String((srow && srow.client) || "").toLowerCase() === "fbc") {
+        fileScheme = "fareham";
+        if (cert.type === "em") {
+          let kind = ""; try { const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null; kind = (jb && jb.emKind) || ""; } catch {}
+          fileType = kind === "monthly" ? "emMonthly" : "emYearly";
+        }
+      }
+    } catch {}
     const filed = await fileCertificatePdf(env, tid, {
-      scheme: "coop", code, type: cert.type, bytes,
+      scheme: fileScheme, code, type: fileType, bytes,
       filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
       docDate: /^\d{4}-\d{2}-\d{2}/.test(docDate) ? docDate : new Date().toISOString().slice(0, 10),
       bump: true, source: "cert:" + cert.id, label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`,
