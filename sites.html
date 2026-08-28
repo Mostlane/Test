@@ -400,6 +400,23 @@ Fob – Main Gate
 
   <label>What3Words Location</label>
   <input id="fbcWhat3Words" placeholder="e.g. flame.tiger.rock">
+
+  <label>Access Arrangement</label>
+  <input id="accessArrangement" placeholder="e.g. By appointment / Collect key">
+
+  <label>Access Timing</label>
+  <input id="accessTiming" placeholder="e.g. Mon-Fri 8am-5pm">
+
+  <label>Access Instructions</label>
+  <textarea id="accessInstructions" placeholder="Gate codes, who to contact, key arrangements…" style="height:90px; resize:vertical;"></textarea>
+
+  <label>No. of EM Fittings</label>
+  <input id="emFittings" type="number" placeholder="e.g. 44">
+
+  <div style="display:flex; gap:10px;">
+    <div style="flex:1;"><label>Monthly flick — £/visit</label><input id="emCostMonthly" type="number" step="0.01" placeholder="e.g. 45"></div>
+    <div style="flex:1;"><label>Annual 3hr — £/visit</label><input id="emCostAnnual" type="number" step="0.01" placeholder="e.g. 115"></div>
+  </div>
 </div>
 
       <div id="map" class="map"></div>
@@ -1031,6 +1048,12 @@ document.getElementById("fbcExtraFields").style.display = isFBC ? "block" : "non
   fbcKeys.value = (currentEditing.fbcKeys || []).join("\n");
   fbcGateCodes.value = currentEditing.fbcGateCodes || "";
   fbcWhat3Words.value = currentEditing.fbcWhat3Words || "";
+  document.getElementById("accessArrangement").value = currentEditing.accessArrangement || "";
+  document.getElementById("accessTiming").value = currentEditing.accessTiming || "";
+  document.getElementById("accessInstructions").value = currentEditing.accessInstructions || "";
+  document.getElementById("emFittings").value = currentEditing.emFittings ?? "";
+  document.getElementById("emCostMonthly").value = currentEditing.emCostMonthly ?? "";
+  document.getElementById("emCostAnnual").value = currentEditing.emCostAnnual ?? "";
     uploadStatus.textContent = "";
 
     editModal.classList.add("active");
@@ -1119,6 +1142,15 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
 
         currentEditing.fbcGateCodes  = document.getElementById("fbcGateCodes").value.trim() || undefined;
         currentEditing.fbcWhat3Words = document.getElementById("fbcWhat3Words").value.trim() || undefined;
+        currentEditing.accessArrangement  = document.getElementById("accessArrangement").value.trim() || undefined;
+        currentEditing.accessTiming       = document.getElementById("accessTiming").value.trim() || undefined;
+        currentEditing.accessInstructions = document.getElementById("accessInstructions").value.trim() || undefined;
+        const _emF = document.getElementById("emFittings").value.trim();
+        currentEditing.emFittings   = _emF === "" ? undefined : Number(_emF);
+        const _emM = document.getElementById("emCostMonthly").value.trim();
+        currentEditing.emCostMonthly = _emM === "" ? undefined : Number(_emM);
+        const _emA = document.getElementById("emCostAnnual").value.trim();
+        currentEditing.emCostAnnual  = _emA === "" ? undefined : Number(_emA);
       } else {
         // Remove FBC fields if switching client away from FBC
         delete currentEditing.fbcContactName;
