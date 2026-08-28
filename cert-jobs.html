@@ -41,8 +41,48 @@
   <header class="page">
     <a class="ml-back" href="cert-review.html" title="Back">‹ Back</a>
     <h1>📄 EM / PAT jobs</h1>
+    <button class="btn sm" id="bulkBtn" style="background:#0a7d33">＋ Bulk create</button>
     <a class="btn ghost sm" href="cert-review.html">🗂 Review queue</a>
   </header>
+
+  <!-- Bulk-create EM jobs across many FBC sites in one go -->
+  <div id="bulkModal" style="display:none;position:fixed;inset:0;z-index:6000;background:rgba(8,20,40,.5);padding:16px;overflow:auto;">
+    <div style="max-width:640px;margin:24px auto;background:#fff;border-radius:16px;padding:18px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <h2 style="margin:0;font-size:17px;flex:1;">＋ Bulk create EM jobs</h2>
+        <button class="btn ghost sm" id="bkClose">Close</button>
+      </div>
+      <p class="muted" style="margin:0 0 10px;">Raise tests for many sites of a customer at once — e.g. the whole monthly round. Each becomes a Pending job you can allocate (or run Auto-day on).</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:10px;">
+        <label style="font-size:12px;color:#6b7a90;font-weight:700;">Customer
+          <select id="bkCust" style="display:block;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;margin-top:3px;"><option value="fbc">Fareham (FBC)</option><option value="coop">The Southern Co-op</option><option value="cobra">Cobra</option></select>
+        </label>
+        <label id="bkKindWrap" style="font-size:12px;color:#6b7a90;font-weight:700;">EM test
+          <select id="bkKind" style="display:block;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;margin-top:3px;"><option value="monthly">Monthly — flick test</option><option value="yearly">Yearly — 3-hour</option></select>
+        </label>
+        <span id="bkFixed" style="font-size:12px;color:#0a7d33;font-weight:700;display:none;align-self:center;">3-hour EM + PAT per site</span>
+        <label style="font-size:12px;color:#6b7a90;font-weight:700;">Start date
+          <input type="date" id="bkDate" style="display:block;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;margin-top:3px;">
+        </label>
+        <label style="font-size:12px;color:#6b7a90;font-weight:700;">Start time
+          <input type="time" id="bkTime" value="09:00" step="300" style="display:block;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;margin-top:3px;">
+        </label>
+        <label style="font-size:12px;color:#6b7a90;font-weight:700;">Per day
+          <input type="number" id="bkPerDay" min="1" max="30" placeholder="all" style="display:block;width:80px;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font-size:14px;margin-top:3px;">
+        </label>
+      </div>
+      <p class="muted" style="margin:0 0 6px;">Leave <b>Per day</b> blank to put them all on the start date (arrange later in the scheduler). Set it (e.g. 6) to spread them across working days, staggered by the test length.</p>
+      <div style="display:flex;align-items:center;gap:10px;margin:8px 0;">
+        <label style="font-size:13px;font-weight:700;"><input type="checkbox" id="bkAll"> Select all</label>
+        <span class="muted" id="bkCount" style="margin-left:auto;"></span>
+      </div>
+      <div id="bkList" style="max-height:40vh;overflow:auto;border:1px solid #eef2f6;border-radius:10px;padding:6px;">Loading sites…</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
+        <button class="btn" id="bkGo" style="background:#0a7d33">Create jobs</button>
+        <span class="muted" id="bkMsg"></span>
+      </div>
+    </div>
+  </div>
   <div class="wrap">
     <div class="card">
       <div class="filters">
@@ -147,6 +187,88 @@
   }
 
   ["fStatus","fClient","fType","fSearch"].forEach(function(id){ var el=$(id); el.addEventListener(id==="fSearch"?"input":"change", render); });
+
+  // ── Bulk create EM jobs across many FBC sites ──────────────────────────────
+  var BK_SITES = [];
+  // Customer groups: which site clients they cover + what tests to raise.
+  var GROUPS={
+    fbc:{ label:"Fareham (FBC)", clients:["fbc"], em:true, pat:false, kind:true },
+    coop:{ label:"The Southern Co-op", clients:["retail","els","els_private","wenzels"], em:true, pat:true, kind:false },
+    cobra:{ label:"Cobra", clients:["cobra"], em:true, pat:true, kind:false }
+  };
+  function curGroup(){ return GROUPS[$("bkCust").value] || GROUPS.fbc; }
+  function applyGroupUI(){
+    var g=curGroup();
+    $("bkKindWrap").style.display = g.kind ? "" : "none";
+    $("bkFixed").style.display = g.kind ? "none" : "";
+  }
+  function addWorkingDays(baseStr, n){ var d=new Date(baseStr+"T00:00:00"); var a=0; while(a<n){ d.setDate(d.getDate()+1); var w=d.getDay(); if(w!==0&&w!==6) a++; } return d; }
+  function loadBulkSites(){
+    var g=curGroup();
+    $("bkList").textContent="Loading sites…";
+    Promise.all(g.clients.map(function(c){ return af("/get-sites?category="+encodeURIComponent(c)).then(function(r){return r.json();}).catch(function(){return[];}); }))
+      .then(function(lists){
+        var seen={}; BK_SITES=[];
+        lists.forEach(function(arr){ (Array.isArray(arr)?arr:[]).forEach(function(s){
+          var num=String(s.siteNumber||s.site_number||s.number||"").trim(); if(!num||seen[num]) return; seen[num]=1;
+          if(s.active===false) return;
+          BK_SITES.push({ num:num, name:s.siteName||s.site_name||s.name||"", pc:s.postcode||"" });
+        }); });
+        BK_SITES.sort(function(a,b){ return a.num.localeCompare(b.num,undefined,{numeric:true}); });
+        $("bkList").innerHTML = BK_SITES.length ? BK_SITES.map(function(s,i){
+          return '<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #f0f3f7;font-size:13.5px;cursor:pointer">'
+            +'<input type="checkbox" class="bkck" data-i="'+i+'" checked style="width:auto"> <b>'+esc(s.num)+'</b> <span style="color:#3a536e">'+esc(s.name)+'</span>'
+            +'<span style="margin-left:auto;color:#8a97a6">'+esc(s.pc)+'</span></label>';
+        }).join("") : '<div class="muted" style="padding:10px">No sites found for '+esc(g.label)+'.</div>';
+        $("bkAll").checked=true; updBkCount();
+        [].forEach.call($("bkList").querySelectorAll(".bkck"),function(c){ c.addEventListener("change", updBkCount); });
+      }).catch(function(){ $("bkList").textContent="Couldn't load sites."; });
+  }
+  function openBulk(){
+    $("bulkModal").style.display="block";
+    var dt=$("bkDate"); if(dt && !dt.value){ var t=new Date(); t.setDate(t.getDate()+1); dt.value=t.toISOString().slice(0,10); }
+    $("bkMsg").textContent="";
+    applyGroupUI(); loadBulkSites();
+  }
+  if($("bkCust")) $("bkCust").addEventListener("change", function(){ applyGroupUI(); loadBulkSites(); });
+  function bkChecked(){ return [].filter.call($("bkList").querySelectorAll(".bkck"),function(c){return c.checked;}).map(function(c){return BK_SITES[+c.getAttribute("data-i")];}).filter(Boolean); }
+  function updBkCount(){ var n=bkChecked().length; $("bkCount").textContent=n+" of "+BK_SITES.length+" selected"; }
+  function closeBulk(){ $("bulkModal").style.display="none"; }
+  if($("bulkBtn")) $("bulkBtn").onclick=openBulk;
+  if($("bkClose")) $("bkClose").onclick=closeBulk;
+  $("bulkModal").addEventListener("click",function(e){ if(e.target===$("bulkModal")) closeBulk(); });
+  if($("bkAll")) $("bkAll").onclick=function(){ [].forEach.call($("bkList").querySelectorAll(".bkck"),function(c){ c.checked=$("bkAll").checked; }); updBkCount(); };
+  if($("bkGo")) $("bkGo").onclick=async function(){
+    var picked=bkChecked(); if(!picked.length){ $("bkMsg").textContent="Tick at least one site."; return; }
+    var g=curGroup(); var em=g.em, pat=g.pat;
+    var kind = g.kind ? ($("bkKind").value==="yearly"?"yearly":"monthly") : "yearly";
+    var date=$("bkDate").value; if(!date){ $("bkMsg").textContent="Pick a start date."; return; }
+    var tm=($("bkTime").value||"09:00"); var parts=tm.split(":"); var startMin=(+parts[0])*60+(+parts[1]);
+    var perDay=parseInt($("bkPerDay").value,10); if(!(perDay>0)) perDay=0;
+    var dur = (em&&pat) ? 180 : em ? (kind==="monthly"?30:180) : 45;
+    var sites=picked.map(function(s,i){
+      var day, slotMin;
+      if(perDay>0){ var di=Math.floor(i/perDay), slot=i%perDay; day=addWorkingDays(date, di); slotMin=startMin+slot*dur; }
+      else { day=new Date(date+"T00:00:00"); slotMin=startMin; }
+      var dt=new Date(day); dt.setHours(0,0,0,0); dt.setMinutes(slotMin);
+      return { siteNumber:s.num, scheduledAt:dt.toISOString() };
+    });
+    var what = (em&&pat) ? "EM + PAT" : em ? (kind==="monthly"?"monthly EM":"EM") : "PAT";
+    $("bkGo").disabled=true;
+    // Chunk so a big customer (Co-op ~270 sites) doesn't overload one request.
+    var total=0, ok=true;
+    try{
+      for(var off=0; off<sites.length; off+=80){
+        var chunk=sites.slice(off, off+80);
+        $("bkMsg").textContent="Creating "+what+" jobs… "+Math.min(off+chunk.length,sites.length)+" / "+sites.length;
+        var d=await af("/certs/jobs/bulk-create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({em:em, pat:pat, emKind:kind, durationMinutes:dur, sites:chunk})}).then(function(r){return r.json();});
+        if(d&&d.ok){ total+=d.created||0; } else { ok=false; $("bkMsg").textContent=(d&&d.error)||"Couldn't create the jobs."; break; }
+      }
+      if(ok){ $("bkMsg").textContent="✓ Created "+total+" jobs."; if(window.MLUI&&MLUI.toast) MLUI.toast("Created "+total+" jobs"); setTimeout(function(){ closeBulk(); load(); },800); }
+    }catch(e){ $("bkMsg").textContent="Created "+total+" so far — a batch failed, please retry."; }
+    $("bkGo").disabled=false;
+  };
+
   load();
 })();
 </script>
