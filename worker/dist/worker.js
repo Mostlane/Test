@@ -24891,12 +24891,16 @@ function clientForSiteClient(sc) {
   return null;
 }
 async function backfillClient(env, tid, rec) {
-  if (!rec || rec.client && String(rec.client.name || "").trim()) return rec;
+  if (!rec) return rec;
   const code = rec.siteCode || "";
   if (!code) return rec;
   const sr = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(code)).first().catch(() => null);
   const m = clientForSiteClient(sr && sr.client);
-  if (m) rec.client = { ...m };
+  if (!m) return rec;
+  rec.client = rec.client || {};
+  if (!String(rec.client.name || "").trim()) rec.client.name = m.name;
+  if (!String(rec.client.address || "").trim()) rec.client.address = m.address;
+  if (!String(rec.client.postcode || "").trim()) rec.client.postcode = m.postcode;
   return rec;
 }
 var DEFAULT_CONFIG2 = {
@@ -25397,6 +25401,21 @@ async function handle30(request, env, ctx, url, sess) {
       return json({ ok: true, config: next }, {}, env, request);
     }
   }
+  if (sub === "/my-signature") {
+    const sigKey = "cert:sig:" + tid + ":" + me.toLowerCase();
+    if (method === "GET") {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).first();
+      return json({ ok: true, signature: row && row.value || "" }, {}, env, request);
+    }
+    if (method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const sig = typeof b.signature === "string" ? b.signature : "";
+      if (sig && (!/^data:image\//.test(sig) || sig.length > 2e5)) return error("Invalid signature", 400, env, request);
+      if (sig) await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, sigKey, sig).run();
+      else await env.DB.prepare("DELETE FROM app_config WHERE tenant_id=? AND key=?").bind(tid, sigKey).run();
+      return json({ ok: true }, {}, env, request);
+    }
+  }
   if (sub === "/photo" && method === "POST") {
     if (!env.JOB_FILES) return error("Storage unavailable", 500, env, request);
     const form = await request.formData().catch(() => null);
@@ -25447,7 +25466,7 @@ async function handle30(request, env, ctx, url, sess) {
     ).bind(tid, jobId, type).first();
     if (existing) {
       const exRec = shapeRow(existing);
-      if (mappedClient && (!exRec.client || !String(exRec.client.name || "").trim())) exRec.client = { ...mappedClient };
+      await backfillClient(env, tid, exRec);
       await resignRemedialPhotos(env, url.origin, exRec);
       return json({ ok: true, record: exRec, config, seeded: false }, {}, env, request);
     }
@@ -25474,8 +25493,9 @@ async function handle30(request, env, ctx, url, sess) {
       comments: h && h.comments != null && h.comments !== "" ? h.comments : config[type].comments,
       declaration: config[type].declaration,
       // Contractor = Mostlane's own details (config), refined by the previous
-      // cert's trading block; engineer name/date always blank (per-visit).
-      contractor: { ...config.contractor, ...h && h.contractor || {}, name: "", position: "Engineer", date: "" },
+      // cert's trading block; the engineer NAME auto-fills from the job's assigned
+      // engineer (per-visit), date left for the engineer to confirm.
+      contractor: { ...config.contractor, ...h && h.contractor || {}, name: job && Array.isArray(job.assignedEngineers) && job.assignedEngineers[0] || "", position: "Engineer", date: "" },
       rows: pre.rows,
       signature: ""
     };
