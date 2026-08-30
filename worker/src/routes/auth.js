@@ -20,6 +20,7 @@ import {
   requireSession, permissionsFor,
 } from "../lib/auth.js";
 import { tenantDB } from "../lib/tenantdb.js";
+import { resolveComplianceAccess } from "../lib/complianceaccess.js";
 import { sendEmail, resetEmail, issuePasswordToken, appBase } from "../lib/email.js";
 
 export async function handle(request, env, ctx, url, sess) {
@@ -241,6 +242,9 @@ function shapeUser(u, perms) {
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
+    // Resolved per-scheme compliance access ({coop,fareham,chapplins,projects}
+    // each none|view|download|edit) — drives what each compliance page shows.
+    ComplianceAccess: resolveComplianceAccess(u.profile, perms),
     ...perms,
   };
 }

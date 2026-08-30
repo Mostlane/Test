@@ -1297,6 +1297,56 @@ init_http();
 init_auth();
 init_tenantdb();
 
+// src/lib/complianceaccess.js
+var COMPLIANCE_SCHEMES = [
+  { key: "coop", label: "Southern Co-op" },
+  { key: "fareham", label: "Fareham" },
+  { key: "chapplins", label: "Chapplins" },
+  { key: "projects", label: "Projects" }
+];
+var COMPLIANCE_LEVELS = ["none", "view", "download", "edit"];
+function parseProfile(profile) {
+  if (!profile) return {};
+  if (typeof profile === "string") {
+    try {
+      return JSON.parse(profile) || {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof profile === "object" ? profile : {};
+}
+function yes(v) {
+  return v === "Yes" || v === true;
+}
+function sanitizeComplianceAccess(input) {
+  const out = {};
+  const src = input && typeof input === "object" ? input : {};
+  for (const s of COMPLIANCE_SCHEMES) {
+    const v = String(src[s.key] == null ? "" : src[s.key]);
+    if (COMPLIANCE_LEVELS.includes(v)) out[s.key] = v;
+  }
+  return out;
+}
+function resolveComplianceAccess(profile, perms) {
+  const p = parseProfile(profile);
+  const pr = perms || {};
+  const stored = p.complianceAccess && typeof p.complianceAccess === "object" ? p.complianceAccess : null;
+  const full = yes(pr.FullAccess);
+  const office = p.staffType === "office";
+  const legacy = full ? "edit" : yes(pr.Compliance) ? office ? "edit" : "view" : "none";
+  const out = {};
+  for (const s of COMPLIANCE_SCHEMES) {
+    if (full) {
+      out[s.key] = "edit";
+      continue;
+    }
+    const v = stored && stored[s.key] != null ? String(stored[s.key]) : null;
+    out[s.key] = v && COMPLIANCE_LEVELS.includes(v) ? v : legacy;
+  }
+  return out;
+}
+
 // src/lib/email.js
 var BRAND = "Mostlane";
 function appBase(env) {
@@ -1581,6 +1631,9 @@ function shapeUser(u, perms) {
     // Areas of responsibility (profile.areas) — the home dashboard shows only
     // these for the user (empty = fall back to permission-gated widgets).
     Areas: areasOf(u),
+    // Resolved per-scheme compliance access ({coop,fareham,chapplins,projects}
+    // each none|view|download|edit) — drives what each compliance page shows.
+    ComplianceAccess: resolveComplianceAccess(u.profile, perms),
     ...perms
   };
 }
@@ -1777,6 +1830,9 @@ async function handle2(request, env, ctx, url, sess) {
     if (!b.Username) return error("Username required", 400, env, request);
     const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
     const isNewUser = !already;
+    if (b.Profile && typeof b.Profile === "object" && b.Profile.complianceAccess != null) {
+      b.Profile.complianceAccess = sanitizeComplianceAccess(b.Profile.complianceAccess);
+    }
     const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
     await db.prepare(`
       INSERT INTO users (engineer_number, first_name, last_name, username, email,
@@ -1976,6 +2032,9 @@ function shapeUser2(u, perms) {
     StaffType: profile.staffType === "office" ? "office" : "field",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
+    // Resolved per-scheme compliance access (none|view|download|edit) so the
+    // Users-admin picker pre-fills each page's dropdown with the current level.
+    ComplianceAccess: resolveComplianceAccess(profile, perms),
     Profile: profile,
     ...perms
   };

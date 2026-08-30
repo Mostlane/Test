@@ -48,7 +48,7 @@
     h1 { text-align: center; color: #0071CE; margin-top: 0; }
     .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
 
-    .backbar, .summary-bubbles, .filter-bubbles, .search-container, .utilbar {
+    .backbar, .summary-bubbles, .filter-bubbles, .search-container {
       display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-start; margin-bottom:10px;
     }
     .summary-bubbles, .filter-bubbles { justify-content:center; margin-bottom: 14px; }
@@ -61,6 +61,25 @@
     .btn { background:#1A4F8F; }
     .bubble:hover, .btn:hover, .backlink:hover { opacity:.9; }
     .bubble.active { background:#28a745; }
+    .iconbtn{ padding:7px 12px; font-size:16px; }
+    .backbar .barspacer{ flex:1 1 auto; }
+
+    /* Consolidated Tools dropdown — one home for every secondary action. */
+    .toolwrap{ position:relative; display:inline-flex; }
+    .toolmenu{
+      position:absolute; top:calc(100% + 6px); right:0; z-index:60;
+      background:#fff; border:1px solid #d5dde5; border-radius:12px;
+      box-shadow:0 10px 26px rgba(0,0,0,.18); padding:6px; min-width:236px;
+      display:flex; flex-direction:column; gap:3px;
+    }
+    .toolmenu[hidden]{ display:none; }
+    .toolmenu .bubble{
+      width:100%; justify-content:flex-start; background:#fff; color:#1f2937;
+      border:1px solid transparent; border-radius:8px; padding:9px 12px; font-weight:600;
+    }
+    .toolmenu .bubble:hover{ background:#eef3f9; opacity:1; }
+    .toolmenu .tooldiv{ height:1px; background:#e2e8f0; margin:5px 4px; }
+    @media (max-width:520px){ .toolmenu{ left:0; right:auto; } }
 
     .search-input { padding:8px; width:300px; border-radius:20px; border:1px solid #ccc; }
     .closed-badge { display:inline-block; margin-left:6px; background:#e5e7eb; color:#4b5563; border-radius:999px; padding:1px 8px; font-size:11px; font-weight:700; vertical-align:middle; }
@@ -90,7 +109,7 @@
     body.cmp-edit tbody td.site::after{ content:' 🗄'; font-size:12px; }
     /* Closed Sites view: hide the edit cluster, utility bar and the DUE (time)
        filters; the store-type/compliance filters, search + docs stay. */
-    body.closed-view .backbar, body.closed-view .utilbar, body.closed-view #dueFilters{ display:none !important; }
+    body.closed-view .backbar, body.closed-view #dueFilters{ display:none !important; }
     /* Status colours — the Status light AND each due-date cell tint green/amber/red
        based on that compliance's own warning settings. */
     td.st-green{ background:#e3f6e8; }
@@ -229,29 +248,38 @@
       <b style="font-size:16px;">🗄 Closed Sites</b>
       <span class="info">Archived stores — documents can still be added; no time filters.</span>
     </div>
-    <!-- Top bar -->
-    <div class="backbar">
-      <button id="reloadBtn" class="btn" title="Reload live data">↻ Reload</button>
+    <!-- Consolidated toolbar: two visible actions (Edit + Tools); every
+         secondary action lives inside the 🛠 Tools dropdown to cut clutter. -->
+    <div class="backbar" id="topBar">
+      <button id="reloadBtn" class="btn iconbtn" title="Reload live data">↻</button>
       <span id="liveNote" class="info">Live • <span id="loadedCount">0</span> records</span>
+      <span class="barspacer"></span>
 
-      <!-- Edit cluster -->
       <button id="editBtn" class="btn">✏️ Edit</button>
-      <button id="saveBtn" class="btn" style="display:none;">Save Changes</button>
-      <button id="addFromSitesBtn" class="btn" style="display:none;">🔗 Add from Sites</button>
-      <button id="addSiteBtn" class="btn" style="display:none;">＋ Add Site</button>
-      <button id="deleteSiteBtn" class="btn" style="display:none;">🗑 Delete Site</button>
-    </div>
+      <button id="saveBtn" class="btn" style="display:none;background:#28a745;">💾 Save changes</button>
 
-    <!-- Utility actions (separated from the filters to cut clutter) -->
-    <div class="utilbar" style="justify-content:center;">
-      <button class="bubble" id="searchModalBtn">🔎 Search by date/type</button>
-      <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
-      <button class="bubble" id="summaryBtn">％ Summary</button>
-      <button class="bubble" id="reviewBtn" onclick="location.href='compliance-review.html'" title="Verify all stored 5-year certificates">🔍 Run compliance checks</button>
-      <button class="bubble" id="clearBtn">✕ Clear filters</button>
-      <button class="bubble" id="closedSitesBtn">🗄 Closed Sites</button>
-      <button class="bubble" id="settingsBtn" style="display:none;">⚙ Settings</button>
-      <button class="bubble" id="migrateBtn" style="display:none;">⤵ Import from old system</button>
+      <!-- Tools menu -->
+      <div class="toolwrap">
+        <button id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
+        <div class="toolmenu" id="toolsMenu" hidden>
+          <button class="bubble" id="searchModalBtn">🔎 Search by date / type</button>
+          <button class="bubble" id="summaryBtn">％ Summary</button>
+          <button class="bubble" id="exportBtn">⬇ Export to Excel</button>
+          <button class="bubble" id="reviewBtn" onclick="location.href='compliance-review.html'" title="Verify all stored 5-year certificates">🔍 Run compliance checks</button>
+          <button class="bubble" id="closedSitesBtn">🗄 Closed sites</button>
+          <button class="bubble" id="clearBtn">✕ Clear filters</button>
+
+          <!-- Edit-mode tools (shown once Edit is on) -->
+          <button class="bubble" id="addFromSitesBtn" style="display:none;">🔗 Add from Sites</button>
+          <button class="bubble" id="addSiteBtn" style="display:none;">＋ Add site</button>
+          <button class="bubble" id="deleteSiteBtn" style="display:none;">🗑 Delete site</button>
+
+          <!-- Admin tools (shown to editors) -->
+          <div class="tooldiv" id="toolsAdminDiv" style="display:none;"></div>
+          <button class="bubble" id="settingsBtn" style="display:none;">⚙ Settings</button>
+          <button class="bubble" id="migrateBtn" style="display:none;">⤵ Import from old system</button>
+        </div>
+      </div>
     </div>
 
     <!-- Due-date filters -->
@@ -323,11 +351,48 @@ const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
 
 /* Editing is permission-based (Compliance or Full Access), replacing the old
    hard-coded "2025" PIN. */
-function canEditCompliance(){
+/* This page is the Southern Co-op compliance chart. */
+const COMPLIANCE_SCHEME = 'coop';
+
+/* ===== Per-user compliance access (shared model across all compliance pages) =====
+   Each user has a level per scheme: "none" | "view" | "download" | "edit".
+   Source of truth = mostlaneComplianceAccess (a {coop,fareham,chapplins,projects}
+   map stashed from /auth/me). Full-Access is always "edit" everywhere (the owner
+   can never be locked out). Before the server stash exists we fall back to the
+   legacy behaviour so nothing breaks: Full-Access / office-Compliance = edit,
+   field-engineer-Compliance = view, otherwise none. */
+function _mlPerms(){
+  try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); }
+  catch (e) { return {}; }
+}
+function isFieldUser(){
+  var p = _mlPerms(); if (p.FullAccess === "Yes") return false;
+  var stx = String(p.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+  return stx === "field" || (stx !== "office" && (p.SLA === "Yes" || p.StoryMode === "Yes"));
+}
+function complianceLevel(scheme){
+  var p = _mlPerms();
+  if (p.FullAccess === "Yes") return "edit";                 // owner: never scoped out
   try {
-    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
-    return p.FullAccess === "Yes" || p.Compliance === "Yes";
-  } catch (e) { return false; }
+    var raw = sessionStorage.getItem("mostlaneComplianceAccess") || localStorage.getItem("mostlaneComplianceAccess");
+    if (raw){ var m = JSON.parse(raw) || {}; if (m && m[scheme] != null) return m[scheme] || "none"; }
+  } catch (e) {}
+  if (p.Compliance === "Yes") return isFieldUser() ? "view" : "edit";   // legacy fallback
+  return "none";
+}
+function canViewCompliance(scheme){ return complianceLevel(scheme || COMPLIANCE_SCHEME) !== "none"; }
+function canDownloadCompliance(scheme){ var l = complianceLevel(scheme || COMPLIANCE_SCHEME); return l === "download" || l === "edit"; }
+/* Every edit/upload/manage gate on this page keys off canEditCompliance(), so
+   view/download users get a read-only chart automatically. */
+function canEditCompliance(){ return complianceLevel(COMPLIANCE_SCHEME) === "edit"; }
+/* Shown when a user has no access to this compliance page at all. */
+function showNoAccess(){
+  const c = document.querySelector('.container');
+  if (c) c.innerHTML = '<div style="text-align:center;padding:48px 20px;color:#334155;">'
+    + '<div style="font-size:40px;margin-bottom:8px;">🔒</div>'
+    + '<h2 style="color:#1A4F8F;margin:0 0 6px;">No access to this page</h2>'
+    + '<p style="margin:0 0 16px;">You don\'t have access to the Southern Co-op compliance chart. Ask an administrator if you think this is wrong.</p>'
+    + '<a class="btn" href="compliance.html" style="text-decoration:none;">‹ Back to Compliance</a></div>';
 }
 
 /* Escape user-supplied text (document labels/names) before putting it in HTML. */
@@ -717,11 +782,12 @@ async function openVersionsModal(code){
     <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
     ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
     <div id="vlist">Loading…</div>
-    <div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
+    <div class="actions">${canEdit?`<button class="btn" id="vadd">＋ Add document</button>`:''}<button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
   </div>`;
   document.body.appendChild(modal);
   modal.querySelector('#vc').onclick=()=>modal.remove();
-  modal.querySelector('#vadd').onclick=()=>{ modal.remove(); openUploadModal(code); };
+  const vaddBtn=modal.querySelector('#vadd');
+  if(vaddBtn) vaddBtn.onclick=()=>{ modal.remove(); openUploadModal(code); };
   const host=modal.querySelector('#vlist');
 
   // A doc's display name can carry a sub-folder path ("subA / report") from a
@@ -921,8 +987,10 @@ function renderTable(d){
     const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
     const reopenBtn = (viewMode==='closed' && canEditCompliance())
       ? ` <button class="doc-btn reopen" data-code="${e.storeCode}" title="Reopen to the live chart">↩</button>` : '';
-    const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
-      + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
+    // 📎 upload is manage-only; 🗂 view stays for everyone (view-only engineers included).
+    const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button> ` : '';
+    const docsCell = upBtn
+      + (nFiles ? `<button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
       + reopenBtn;
     // Archived stores render "plain" (no status light/tints — due warnings don't
     // apply). This is per-ROW so an archived store that surfaces via a search in
@@ -1741,12 +1809,33 @@ function openSettingsModal(){
 
 /* ============ Wiring UI ============ */
 document.addEventListener('DOMContentLoaded', () => {
+  // No access to this compliance page at all → show a friendly notice, load nothing.
+  if (!canViewCompliance()) { showNoAccess(); return; }
   // Buttons
   document.getElementById('reloadBtn').onclick = loadFromPortal;
   const migrateBtn = document.getElementById('migrateBtn');
   if (canEditCompliance()) { migrateBtn.style.display = ''; migrateBtn.onclick = migrateFromOld; }
   const settingsBtn = document.getElementById('settingsBtn');
   if (canEditCompliance()) { settingsBtn.style.display = ''; settingsBtn.onclick = openSettingsModal; }
+  if (canEditCompliance()) document.getElementById('toolsAdminDiv').style.display = '';
+
+  // 🛠 Tools dropdown — open/close + close on outside click or after any action.
+  (function(){
+    const tb = document.getElementById('toolsBtn');
+    const menu = document.getElementById('toolsMenu');
+    const close = ()=>{ menu.hidden = true; tb.setAttribute('aria-expanded','false'); };
+    tb.onclick = (e)=>{ e.stopPropagation(); const willOpen = menu.hidden; menu.hidden = !willOpen; tb.setAttribute('aria-expanded', String(willOpen)); };
+    document.addEventListener('click', (e)=>{ if (!menu.hidden && !menu.contains(e.target) && e.target !== tb) close(); });
+    document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
+    menu.querySelectorAll('.bubble').forEach(b=> b.addEventListener('click', close));
+  })();
+
+  // Trim the Tools menu by access level: Export is a bulk data download
+  // (download+ only); Run-compliance-checks is a management tool (edit only).
+  // Search / Summary / Clear filters / Closed sites stay for anyone who can view.
+  if (!canDownloadCompliance()) { const el=document.getElementById('exportBtn'); if (el) el.style.display='none'; }
+  if (!canEditCompliance())     { const el=document.getElementById('reviewBtn'); if (el) el.style.display='none'; }
+
   document.getElementById('closedSitesBtn').onclick = ()=> setView('closed');
   document.getElementById('closedBack').onclick = ()=> setView('active');
   document.getElementById('overdueBtn').onclick = ()=> {
@@ -1876,10 +1965,10 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedCode = null;
   });
 
-  // Drag a file onto any store row → upload against that site.
-  tb.addEventListener('dragover', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')){ ev.preventDefault(); tr.classList.add('drop-hot'); } });
+  // Drag a file onto any store row → upload against that site (manage-only).
+  tb.addEventListener('dragover', (ev)=>{ if(!canEditCompliance()) return; const tr=ev.target.closest('tr[data-code]'); if(tr && ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')){ ev.preventDefault(); tr.classList.add('drop-hot'); } });
   tb.addEventListener('dragleave', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && !tr.contains(ev.relatedTarget)) tr.classList.remove('drop-hot'); });
-  tb.addEventListener('drop', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
+  tb.addEventListener('drop', (ev)=>{ if(!canEditCompliance()) return; const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
 
   // initial load (portal is the single source now) — settings first so the
   // status colours are right on the first paint.

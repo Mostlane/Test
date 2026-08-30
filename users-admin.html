@@ -296,6 +296,12 @@
           <div id="areaGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 14px;"></div>
         </div>
         <div class="permwrap" id="permGrid"></div>
+
+        <div class="permsec" style="margin-top:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;">
+          <h4 style="margin:0 0 4px;">📋 Compliance access (per page)</h4>
+          <p class="muted" style="margin:0 0 8px;font-size:12.5px;">Set what this person can do on each compliance chart. <b>None</b> hides the page from them; <b>View</b> = see the chart &amp; open certificates; <b>Download</b> = also save/export the files; <b>Edit</b> = upload &amp; manage documents and dates. (Full-access users always get Edit on every page.)</p>
+          <div id="complianceGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 14px;"></div>
+        </div>
       </div>
 
       <!-- DEVICES -->
@@ -513,6 +519,27 @@
         `<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#14532d;cursor:pointer;padding:2px 0;">`
         + `<input type="checkbox" data-area="${a.key}" style="width:auto;margin:0;"> ${a.label}</label>`).join("");
     }
+    // ── Compliance access (per-page level: none|view|download|edit) ─────────
+    const COMPLIANCE_PAGES = [
+      {key:"coop",      label:"Southern Co-op"},
+      {key:"fareham",   label:"Fareham"},
+      {key:"chapplins", label:"Chapplins"},
+      {key:"projects",  label:"Projects"},
+    ];
+    const COMPLIANCE_LEVELS = [
+      {v:"none",     t:"No access"},
+      {v:"view",     t:"View"},
+      {v:"download", t:"View + Download"},
+      {v:"edit",     t:"Edit"},
+    ];
+    function renderComplianceAccess(){
+      g("complianceGrid").innerHTML = COMPLIANCE_PAGES.map(p =>
+        `<label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:#1e3a5f;padding:2px 0;">`
+        + `<span>${p.label}</span>`
+        + `<select data-compliance="${p.key}" style="width:auto;padding:4px 6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">`
+        + COMPLIANCE_LEVELS.map(l => `<option value="${l.v}">${l.t}</option>`).join("")
+        + `</select></label>`).join("");
+    }
     // ── Permission switches ────────────────────────────────────────────────
     function permRow(perm){
       return `<div class="togrow"><span class="tlabel">${PERM_LABELS[perm] || perm}</span>`
@@ -543,6 +570,7 @@
     }
     renderPerms();
     renderAreas();
+    renderComplianceAccess();
 
     if (/REPLACE-ME/.test(API || "")) g("configNotice").style.display = "block";
     if (!token) location.href = "login.html";
@@ -834,6 +862,10 @@
       // Areas of responsibility (profile.areas, surfaced as user.Areas).
       const myAreas = new Set((user && Array.isArray(user.Areas) ? user.Areas : (user?.Profile?.areas || [])).map(String));
       document.querySelectorAll("[data-area]").forEach(cb => { cb.checked = myAreas.has(cb.dataset.area); });
+      // Compliance access — resolved per-scheme level (user.ComplianceAccess),
+      // falling back to the stored profile map. Default each dropdown to "none".
+      const cacc = (user && user.ComplianceAccess) || (user?.Profile?.complianceAccess) || {};
+      document.querySelectorAll("[data-compliance]").forEach(sel => { sel.value = cacc[sel.dataset.compliance] || "none"; });
       if (g("faToggle").checked) lockFullAccess();
       g("panelMsg").textContent = "";
       highlightGaps(user);
@@ -907,6 +939,9 @@
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
+      // Compliance access → profile.complianceAccess (per-scheme level).
+      profile.complianceAccess = {};
+      document.querySelectorAll("[data-compliance]").forEach(sel => { profile.complianceAccess[sel.dataset.compliance] = sel.value; });
       body.Profile = profile;
       // Full access + Story Mode read straight from their switches. Area
       // permissions use the remembered underlying state while Full access has

@@ -254,6 +254,9 @@ if (!user || !user.Username) {
         set('mostlaneVehicle', user.VehicleAssigned || '');
         set('mostlaneEmployment', user.EmploymentType || '');
         set('mostlaneStaffType', (user.StaffType || 'field'));
+        // Per-scheme compliance access (none|view|download|edit) for the four
+        // compliance pages — each page reads this to decide view/download/edit.
+        set('mostlaneComplianceAccess', JSON.stringify(user.ComplianceAccess || {}));
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
        // Cache the COMPLETE set of permission flags so the sidebar and menu
