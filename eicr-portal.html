@@ -351,12 +351,29 @@ const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
 
 /* Editing is permission-based (Compliance or Full Access), replacing the old
    hard-coded "2025" PIN. */
-function canEditCompliance(){
+/* Raw grant: does this user hold Compliance (or Full-Access)? */
+function hasCompliancePerm(){
   try {
     var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
     return p.FullAccess === "Yes" || p.Compliance === "Yes";
   } catch (e) { return false; }
 }
+/* Field engineers get a VIEW-ONLY compliance page — they can see the chart and
+   open certificates, but never edit, upload, add/delete sites, change settings or
+   export. Mirrors main.html's applyGate field-user test (StaffType, or the
+   SLA/Story heuristic when StaffType is blank; Full-Access is never "field"). */
+function isFieldUser(){
+  try {
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    if (p.FullAccess === "Yes") return false;
+    var stx = String(p.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+    return stx === "field" || (stx !== "office" && (p.SLA === "Yes" || p.StoryMode === "Yes"));
+  } catch (e) { return false; }
+}
+/* "Can edit/manage compliance" = holds the grant AND is not a view-only field
+   engineer. Every edit/upload/manage gate on this page keys off this, so a field
+   engineer with the Compliance permission sees a read-only chart. */
+function canEditCompliance(){ return hasCompliancePerm() && !isFieldUser(); }
 
 /* Escape user-supplied text (document labels/names) before putting it in HTML. */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -745,11 +762,12 @@ async function openVersionsModal(code){
     <p style="margin:.2em 0 .4em"><b>${code}</b> — ${esc(rec.siteName||'')}</p>
     ${canEdit?`<p class="drop-note" style="margin:0 0 8px">Drag a document — or a 📁 sub-folder — onto another heading to file it there. Tick <b>keep</b> to link two current docs of a type.</p>`:''}
     <div id="vlist">Loading…</div>
-    <div class="actions"><button class="btn" id="vadd">＋ Add document</button><button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
+    <div class="actions">${canEdit?`<button class="btn" id="vadd">＋ Add document</button>`:''}<button class="btn" style="background:#ccc;color:#000;" id="vc">Close</button></div>
   </div>`;
   document.body.appendChild(modal);
   modal.querySelector('#vc').onclick=()=>modal.remove();
-  modal.querySelector('#vadd').onclick=()=>{ modal.remove(); openUploadModal(code); };
+  const vaddBtn=modal.querySelector('#vadd');
+  if(vaddBtn) vaddBtn.onclick=()=>{ modal.remove(); openUploadModal(code); };
   const host=modal.querySelector('#vlist');
 
   // A doc's display name can carry a sub-folder path ("subA / report") from a
@@ -949,8 +967,10 @@ function renderTable(d){
     const nFiles = Object.values(complianceIndex[pad4(e.storeCode)] || {}).reduce((a,b)=>a+(+b||0),0);
     const reopenBtn = (viewMode==='closed' && canEditCompliance())
       ? ` <button class="doc-btn reopen" data-code="${e.storeCode}" title="Reopen to the live chart">↩</button>` : '';
-    const docsCell = `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button>`
-      + (nFiles ? ` <button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
+    // 📎 upload is manage-only; 🗂 view stays for everyone (view-only engineers included).
+    const upBtn = canEditCompliance() ? `<button class="doc-btn up" data-code="${e.storeCode}" title="Upload / drop a document">📎</button> ` : '';
+    const docsCell = upBtn
+      + (nFiles ? `<button class="doc-btn view" data-code="${e.storeCode}" title="View documents">🗂 ${nFiles}</button>` : '')
       + reopenBtn;
     // Archived stores render "plain" (no status light/tints — due warnings don't
     // apply). This is per-ROW so an archived store that surfaces via a search in
@@ -1788,6 +1808,13 @@ document.addEventListener('DOMContentLoaded', () => {
     menu.querySelectorAll('.bubble').forEach(b=> b.addEventListener('click', close));
   })();
 
+  // View-only field engineers get a trimmed Tools menu: no export, no bulk
+  // compliance checks, no closed-sites view. (Edit / add-site / settings /
+  // import are already hidden because canEditCompliance() is false for them.)
+  if (isFieldUser()) {
+    ['exportBtn','reviewBtn','closedSitesBtn'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+  }
+
   document.getElementById('closedSitesBtn').onclick = ()=> setView('closed');
   document.getElementById('closedBack').onclick = ()=> setView('active');
   document.getElementById('overdueBtn').onclick = ()=> {
@@ -1917,10 +1944,10 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedCode = null;
   });
 
-  // Drag a file onto any store row → upload against that site.
-  tb.addEventListener('dragover', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')){ ev.preventDefault(); tr.classList.add('drop-hot'); } });
+  // Drag a file onto any store row → upload against that site (manage-only).
+  tb.addEventListener('dragover', (ev)=>{ if(!canEditCompliance()) return; const tr=ev.target.closest('tr[data-code]'); if(tr && ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')){ ev.preventDefault(); tr.classList.add('drop-hot'); } });
   tb.addEventListener('dragleave', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(tr && !tr.contains(ev.relatedTarget)) tr.classList.remove('drop-hot'); });
-  tb.addEventListener('drop', (ev)=>{ const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
+  tb.addEventListener('drop', (ev)=>{ if(!canEditCompliance()) return; const tr=ev.target.closest('tr[data-code]'); if(!tr) return; ev.preventDefault(); tr.classList.remove('drop-hot'); const f=ev.dataTransfer.files && ev.dataTransfer.files[0]; if(f) openUploadModal(tr.dataset.code, f); });
 
   // initial load (portal is the single source now) — settings first so the
   // status colours are right on the first paint.
