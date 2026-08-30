@@ -4,7 +4,7 @@
   <script src="/portal-config.js?v=26"></script>
   <script src="auth.js"></script>
   <!-- Robust in-app PDF/image viewer (PDF.js based) used across the portal. -->
-  <script src="docviewer.js?v=6"></script>
+  <script src="docviewer.js?v=7"></script>
   <meta charset="UTF-8" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -520,7 +520,7 @@ const CertViewer = (function(){
     if (!items.length || typeof MLDocViewer === 'undefined') return;
     idx = (i + items.length) % items.length;            // wrap around
     const it = items[idx];
-    MLDocViewer.open({ url: it.url, name: it.name, downloadUrl: it.url });
+    MLDocViewer.open({ url: it.url, name: it.name, downloadUrl: it.url, allowDownload: canDownloadCompliance() });
     hookClose();
     update();
   }
