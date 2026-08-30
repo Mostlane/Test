@@ -17216,11 +17216,11 @@ async function handle20(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
-  const isFull4 = perms.FullAccess === "Yes";
+  const isFull3 = perms.FullAccess === "Yes";
   const path = url.pathname;
   if (path === "/privacy/export" && request.method === "GET") {
     const who = (url.searchParams.get("u") || sess.user.username).trim();
-    if (who !== sess.user.username && !isFull4) return error("Forbidden", 403, env, request);
+    if (who !== sess.user.username && !isFull3) return error("Forbidden", 403, env, request);
     const data = {};
     for (const [table, col] of EXPORT_TABLES) {
       const rows = await safeSelect(env, tenantId, table, col, who);
@@ -17235,7 +17235,7 @@ async function handle20(request, env, ctx, url, sess) {
     }, {}, env, request);
   }
   if (path === "/privacy/erase" && request.method === "POST") {
-    if (!isFull4) return error("Only a Full-access user can erase an account.", 403, env, request);
+    if (!isFull3) return error("Only a Full-access user can erase an account.", 403, env, request);
     const body = await request.json().catch(() => ({}));
     const who = (body.username || "").trim();
     if (!who) return error("username required", 400, env, request);
@@ -23007,12 +23007,15 @@ function canonType(t) {
   const k = s.replace(/[^a-z0-9]+/g, "");
   return k ? k.slice(0, 20) : "other";
 }
-async function isFull3(env, tid, me) {
+async function complianceLevelFor(env, tid, me, scheme, viaToken) {
+  if (viaToken) return "edit";
   try {
-    const p = await permissionsFor(env, tid, me);
-    return p.FullAccess === "Yes" || p.Compliance === "Yes";
+    const perms = await permissionsFor(env, tid, me);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    const map = resolveComplianceAccess(row ? row.profile : null, perms);
+    return map[scheme] || "none";
   } catch {
-    return false;
+    return "none";
   }
 }
 async function listStoreFiles(env, origin, tid, scheme, code) {
@@ -23062,7 +23065,7 @@ async function handle25(request, env, ctx, url, sess) {
   if (sub === "/file" && method === "GET" && q.get("key")) {
     const key = q.get("key");
     if (!key || !String(key).startsWith("compliance/")) return jr6({ error: "Bad key" }, headers, 400);
-    if (!sess && !await verifyFileSig(env, key, q)) return jr6({ error: "Link expired or invalid" }, headers, 403);
+    if (!await verifyFileSig(env, key, q)) return jr6({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -23083,9 +23086,15 @@ async function handle25(request, env, ctx, url, sess) {
   if (!sess && !viaToken) return jr6({ error: "Not authenticated" }, headers, 401);
   const tid = sess ? sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request) : await resolveTenantId(env, request);
   const me = sess ? sess.user.username : "import-bot";
-  const canWrite = viaToken || await isFull3(env, tid, me);
   const scheme = schemeOf(q);
+  const level = await complianceLevelFor(env, tid, me, scheme, viaToken);
+  const canRead = viaToken || level !== "none";
+  const canWrite = viaToken || level === "edit";
   await ensure5(env);
+  const SCHEME_READS = /* @__PURE__ */ new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code"]);
+  if (!canRead && SCHEME_READS.has(sub)) {
+    return jr6({ error: "No compliance access to this page" }, headers, 403);
+  }
   if (sub === "/has" && method === "GET") {
     const source = q.get("source") || "";
     if (!source) return jr6({ error: "source required" }, headers, 400);
@@ -23532,7 +23541,7 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true, code: String(max + 1).padStart(4, "0") }, headers);
   }
   if (sub === "/review/targets" && method === "GET") {
-    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr6({ error: "Compliance edit access required" }, headers, 403);
     const CHECK_TYPES = ["fiveYear"];
     const siteLatest = {};
     const sl = await env.DB.prepare("SELECT code, MAX(uploaded_at) AS latest FROM compliance_files WHERE tenant_id=? AND scheme=? GROUP BY code").bind(tid, scheme).all();
@@ -23585,7 +23594,7 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true, targets, count: targets.length }, headers);
   }
   if (sub === "/review/save" && method === "POST") {
-    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr6({ error: "Compliance edit access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const code = pad4(b.code), type = canonType(b.type || "fiveYear");
     if (!code) return jr6({ error: "code required" }, headers, 400);
@@ -23620,7 +23629,7 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true, code, type, attention }, headers);
   }
   if (sub === "/review/list" && method === "GET") {
-    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr6({ error: "Compliance edit access required" }, headers, 403);
     const { results } = await env.DB.prepare(
       `SELECT r.code, r.type, r.status, r.outcome, r.attention, r.summary, r.flags, r.file_id, r.checked_at, r.notes,
               s.site_name AS sname, cs.name AS cname, f.r2_key AS r2_key
@@ -23656,7 +23665,7 @@ async function handle25(request, env, ctx, url, sess) {
     return jr6({ ok: true, rows, count: rows.length }, headers);
   }
   if (sub === "/review/status" && method === "POST") {
-    if (!await isFull3(env, tid, me)) return jr6({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr6({ error: "Compliance edit access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const code = pad4(b.code), type = canonType(b.type || "fiveYear");
     if (!code) return jr6({ error: "code required" }, headers, 400);
@@ -25147,7 +25156,7 @@ async function handle29(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/tasks(?=\/|$)/, "") || "/";
   await ensureTables3(env);
-  const isFull4 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
+  const isFull3 = async () => (await permissionsFor(env, tid, me)).FullAccess === "Yes";
   const activeTasks = async () => (await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? AND active=1").bind(tid).all()).results || [];
   if (sub === "/mine" && method === "GET") {
     const now = /* @__PURE__ */ new Date();
@@ -25190,11 +25199,11 @@ async function handle29(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/meta" && method === "GET") {
-    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    if (!await isFull3()) return error("Forbidden", 403, env, request);
     return json({ ok: true, areas: TASK_AREAS, recurrence: RECURRENCE }, {}, env, request);
   }
   if (sub === "/admin" && method === "GET") {
-    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    if (!await isFull3()) return error("Forbidden", 403, env, request);
     const now = /* @__PURE__ */ new Date();
     const { results: rows } = await env.DB.prepare("SELECT * FROM admin_tasks WHERE tenant_id=? ORDER BY created_at DESC").bind(tid).all();
     const users = /* @__PURE__ */ new Set();
@@ -25217,7 +25226,7 @@ async function handle29(request, env, ctx, url, sess) {
     return json({ ok: true, tasks: out, areas: TASK_AREAS }, {}, env, request);
   }
   if (sub === "/save" && method === "POST") {
-    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    if (!await isFull3()) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const title = String(b.title || "").trim();
     if (!title) return error("A title is required.", 400, env, request);
@@ -25260,7 +25269,7 @@ async function handle29(request, env, ctx, url, sess) {
     return json({ ok: true, id }, {}, env, request);
   }
   if (sub === "/delete" && method === "POST") {
-    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    if (!await isFull3()) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const id = String(b.id || "");
     await env.DB.prepare("DELETE FROM admin_tasks WHERE tenant_id=? AND id=?").bind(tid, id).run();
@@ -25268,7 +25277,7 @@ async function handle29(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/grant" && method === "POST") {
-    if (!await isFull4()) return error("Forbidden", 403, env, request);
+    if (!await isFull3()) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const username = String(b.username || "").trim();
     const permission = String(b.permission || "").trim();
@@ -29659,17 +29668,17 @@ async function handle34(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return json4({ ok: false, error: "Not authenticated" }, 401);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
-  const isFull4 = perms.FullAccess === "Yes";
-  const geoExempt = isFull4 || perms.YardGateAnywhere === "Yes";
-  const canGate = isFull4 || perms.YardGate === "Yes";
+  const isFull3 = perms.FullAccess === "Yes";
+  const geoExempt = isFull3 || perms.YardGateAnywhere === "Yes";
+  const canGate = isFull3 || perms.YardGate === "Yes";
   const db = tenantDB(env, sess.tenantId);
   if (path === "/tuya/config" && method === "GET") {
-    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    if (!isFull3) return json4({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     return json4({ ok: true, config: cfg, hasSecrets: !!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET) });
   }
   if (path === "/tuya/config" && method === "POST") {
-    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    if (!isFull3) return json4({ ok: false, error: "Forbidden" }, 403);
     const b = await request.json().catch(() => ({}));
     const cfg = await loadCfg(db);
     const set = (k, v, dflt) => {
@@ -29735,7 +29744,7 @@ async function handle34(request, env, ctx, url, sess) {
     return json4({ ok: true, config: cfg });
   }
   if (path === "/tuya/device-status" && method === "GET") {
-    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    if (!isFull3) return json4({ ok: false, error: "Forbidden" }, 403);
     const deviceId = (url.searchParams.get("deviceId") || "").trim();
     if (!deviceId) return json4({ ok: false, error: "Pass ?deviceId=" }, 400);
     const cfg = await loadCfg(db);
@@ -29753,7 +29762,7 @@ async function handle34(request, env, ctx, url, sess) {
     }
   }
   if (path === "/tuya/devices" && method === "GET") {
-    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    if (!isFull3) return json4({ ok: false, error: "Forbidden" }, 403);
     const cfg = await loadCfg(db);
     try {
       const jr7 = await api(env, db, cfg, "GET", "/v1.0/users/devices");
@@ -29771,7 +29780,7 @@ async function handle34(request, env, ctx, url, sess) {
     if (!(env.TUYA_ACCESS_ID && env.TUYA_ACCESS_SECRET)) return json4({ ok: false, error: "Tuya secrets not set on the worker." }, 400);
     const user = sess.user && sess.user.username || "?";
     const body = await request.json().catch(() => ({}));
-    if (!isFull4 && !accessAllowedForUser(cfg, user, londonNow2())) {
+    if (!isFull3 && !accessAllowedForUser(cfg, user, londonNow2())) {
       const s = accessSummaryForUser(cfg, user);
       return json4({ ok: false, denied: "hours", error: "You can only operate the gate during your allowed hours" + (s ? ` (${s})` : "") + "." }, 403);
     }
@@ -29802,7 +29811,7 @@ async function handle34(request, env, ctx, url, sess) {
     }
   }
   if (path === "/tuya/gate/set-state" && method === "POST") {
-    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    if (!isFull3) return json4({ ok: false, error: "Forbidden" }, 403);
     const b = await request.json().catch(() => ({}));
     const open = !!b.open;
     const user = sess.user && sess.user.username || "?";
@@ -29831,7 +29840,7 @@ async function handle34(request, env, ctx, url, sess) {
       mins,
       openedBy: open ? st.by || null : null,
       access: accessSummaryForUser(cfg, me),
-      allowedNow: isFull4 || accessAllowedForUser(cfg, me, londonNow2()),
+      allowedNow: isFull3 || accessAllowedForUser(cfg, me, londonNow2()),
       // Geofence: whether THIS caller must prove they're at the yard to operate.
       needLocation: !geoExempt && geoOn,
       geo: geoOn ? { enabled: true, radiusM: cfg.geo.radiusM } : { enabled: false }
@@ -29848,7 +29857,7 @@ async function handle34(request, env, ctx, url, sess) {
     return json4({ ok: true, url: "" });
   }
   if (path === "/tuya/gate/log" && method === "GET") {
-    if (!isFull4) return json4({ ok: false, error: "Forbidden" }, 403);
+    if (!isFull3) return json4({ ok: false, error: "Forbidden" }, 403);
     const log = await loadKV(db, "tuya:openlog") || [];
     return json4({ ok: true, log: log.slice(0, 100) });
   }
