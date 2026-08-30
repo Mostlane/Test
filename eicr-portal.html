@@ -351,29 +351,49 @@ const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
 
 /* Editing is permission-based (Compliance or Full Access), replacing the old
    hard-coded "2025" PIN. */
-/* Raw grant: does this user hold Compliance (or Full-Access)? */
-function hasCompliancePerm(){
-  try {
-    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
-    return p.FullAccess === "Yes" || p.Compliance === "Yes";
-  } catch (e) { return false; }
+/* This page is the Southern Co-op compliance chart. */
+const COMPLIANCE_SCHEME = 'coop';
+
+/* ===== Per-user compliance access (shared model across all compliance pages) =====
+   Each user has a level per scheme: "none" | "view" | "download" | "edit".
+   Source of truth = mostlaneComplianceAccess (a {coop,fareham,chapplins,projects}
+   map stashed from /auth/me). Full-Access is always "edit" everywhere (the owner
+   can never be locked out). Before the server stash exists we fall back to the
+   legacy behaviour so nothing breaks: Full-Access / office-Compliance = edit,
+   field-engineer-Compliance = view, otherwise none. */
+function _mlPerms(){
+  try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); }
+  catch (e) { return {}; }
 }
-/* Field engineers get a VIEW-ONLY compliance page — they can see the chart and
-   open certificates, but never edit, upload, add/delete sites, change settings or
-   export. Mirrors main.html's applyGate field-user test (StaffType, or the
-   SLA/Story heuristic when StaffType is blank; Full-Access is never "field"). */
 function isFieldUser(){
-  try {
-    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
-    if (p.FullAccess === "Yes") return false;
-    var stx = String(p.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
-    return stx === "field" || (stx !== "office" && (p.SLA === "Yes" || p.StoryMode === "Yes"));
-  } catch (e) { return false; }
+  var p = _mlPerms(); if (p.FullAccess === "Yes") return false;
+  var stx = String(p.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+  return stx === "field" || (stx !== "office" && (p.SLA === "Yes" || p.StoryMode === "Yes"));
 }
-/* "Can edit/manage compliance" = holds the grant AND is not a view-only field
-   engineer. Every edit/upload/manage gate on this page keys off this, so a field
-   engineer with the Compliance permission sees a read-only chart. */
-function canEditCompliance(){ return hasCompliancePerm() && !isFieldUser(); }
+function complianceLevel(scheme){
+  var p = _mlPerms();
+  if (p.FullAccess === "Yes") return "edit";                 // owner: never scoped out
+  try {
+    var raw = sessionStorage.getItem("mostlaneComplianceAccess") || localStorage.getItem("mostlaneComplianceAccess");
+    if (raw){ var m = JSON.parse(raw) || {}; if (m && m[scheme] != null) return m[scheme] || "none"; }
+  } catch (e) {}
+  if (p.Compliance === "Yes") return isFieldUser() ? "view" : "edit";   // legacy fallback
+  return "none";
+}
+function canViewCompliance(scheme){ return complianceLevel(scheme || COMPLIANCE_SCHEME) !== "none"; }
+function canDownloadCompliance(scheme){ var l = complianceLevel(scheme || COMPLIANCE_SCHEME); return l === "download" || l === "edit"; }
+/* Every edit/upload/manage gate on this page keys off canEditCompliance(), so
+   view/download users get a read-only chart automatically. */
+function canEditCompliance(){ return complianceLevel(COMPLIANCE_SCHEME) === "edit"; }
+/* Shown when a user has no access to this compliance page at all. */
+function showNoAccess(){
+  const c = document.querySelector('.container');
+  if (c) c.innerHTML = '<div style="text-align:center;padding:48px 20px;color:#334155;">'
+    + '<div style="font-size:40px;margin-bottom:8px;">🔒</div>'
+    + '<h2 style="color:#1A4F8F;margin:0 0 6px;">No access to this page</h2>'
+    + '<p style="margin:0 0 16px;">You don\'t have access to the Southern Co-op compliance chart. Ask an administrator if you think this is wrong.</p>'
+    + '<a class="btn" href="compliance.html" style="text-decoration:none;">‹ Back to Compliance</a></div>';
+}
 
 /* Escape user-supplied text (document labels/names) before putting it in HTML. */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1789,6 +1809,8 @@ function openSettingsModal(){
 
 /* ============ Wiring UI ============ */
 document.addEventListener('DOMContentLoaded', () => {
+  // No access to this compliance page at all → show a friendly notice, load nothing.
+  if (!canViewCompliance()) { showNoAccess(); return; }
   // Buttons
   document.getElementById('reloadBtn').onclick = loadFromPortal;
   const migrateBtn = document.getElementById('migrateBtn');
@@ -1808,12 +1830,11 @@ document.addEventListener('DOMContentLoaded', () => {
     menu.querySelectorAll('.bubble').forEach(b=> b.addEventListener('click', close));
   })();
 
-  // View-only field engineers get a trimmed Tools menu: no export, no bulk
-  // compliance checks, no closed-sites view. (Edit / add-site / settings /
-  // import are already hidden because canEditCompliance() is false for them.)
-  if (isFieldUser()) {
-    ['exportBtn','reviewBtn','closedSitesBtn'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
-  }
+  // Trim the Tools menu by access level: Export is a bulk data download
+  // (download+ only); Run-compliance-checks is a management tool (edit only).
+  // Search / Summary / Clear filters / Closed sites stay for anyone who can view.
+  if (!canDownloadCompliance()) { const el=document.getElementById('exportBtn'); if (el) el.style.display='none'; }
+  if (!canEditCompliance())     { const el=document.getElementById('reviewBtn'); if (el) el.style.display='none'; }
 
   document.getElementById('closedSitesBtn').onclick = ()=> setView('closed');
   document.getElementById('closedBack').onclick = ()=> setView('active');

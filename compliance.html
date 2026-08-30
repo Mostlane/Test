@@ -29,10 +29,30 @@
     <h1>✔️ Compliance</h1>
   </header>
   <div class="wrap">
-    <a class="card" href="eicr-portal.html"><img class="cimg" src="southern-coop-logo.png" alt="Southern Co-op"> The Southern Co-op<span class="ch">›</span></a>
-    <a class="card" href="fareham.html"><img class="cimg" src="fareham-crest.jpg" alt="Fareham Borough Council"> Fareham Borough Council<span class="ch">›</span></a>
-    <a class="card" href="compliance-projects.html"><span class="ic">📁</span> Projects<span class="ch">›</span></a>
-    <a class="card" href="chapplins-compliance.html"><span class="ic">🏠</span> Chapplins<span class="ch">›</span></a>
+    <a class="card" data-scheme="coop" href="eicr-portal.html"><img class="cimg" src="southern-coop-logo.png" alt="Southern Co-op"> The Southern Co-op<span class="ch">›</span></a>
+    <a class="card" data-scheme="fareham" href="fareham.html"><img class="cimg" src="fareham-crest.jpg" alt="Fareham Borough Council"> Fareham Borough Council<span class="ch">›</span></a>
+    <a class="card" data-scheme="projects" href="compliance-projects.html"><span class="ic">📁</span> Projects<span class="ch">›</span></a>
+    <a class="card" data-scheme="chapplins" href="chapplins-compliance.html"><span class="ic">🏠</span> Chapplins<span class="ch">›</span></a>
+    <p id="noneMsg" class="muted" style="display:none;text-align:center;color:#64748b;margin-top:10px;">You don't have access to any compliance charts yet. Ask an administrator.</p>
   </div>
+
+  <script>
+  // Show only the compliance charts this user can access (view level or higher).
+  (function(){
+    function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
+    function isField(){ var p=perms(); if(p.FullAccess==="Yes") return false;
+      var stx=String(p.StaffType||localStorage.getItem("mostlaneStaffType")||sessionStorage.getItem("mostlaneStaffType")||"").toLowerCase();
+      return stx==="field" || (stx!=="office" && (p.SLA==="Yes"||p.StoryMode==="Yes")); }
+    function level(scheme){ var p=perms(); if(p.FullAccess==="Yes") return "edit";
+      try{ var raw=sessionStorage.getItem("mostlaneComplianceAccess")||localStorage.getItem("mostlaneComplianceAccess");
+        if(raw){ var m=JSON.parse(raw)||{}; if(m && m[scheme]!=null) return m[scheme]||"none"; } }catch(e){}
+      if(p.Compliance==="Yes") return isField()?"view":"edit"; return "none"; }
+    var shown=0;
+    document.querySelectorAll(".card[data-scheme]").forEach(function(a){
+      if(level(a.dataset.scheme)==="none") a.style.display="none"; else shown++;
+    });
+    if(!shown){ var n=document.getElementById("noneMsg"); if(n) n.style.display=""; }
+  })();
+  </script>
 </body>
 </html>

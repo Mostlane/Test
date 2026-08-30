@@ -626,6 +626,12 @@ const MAP = window.ML_PERM_MAP || {
           if (pj !== JSON.stringify(cached)) applyGate(data.user);
           sessionStorage.setItem("mostlanePermissions", pj);
           localStorage.setItem("mostlanePermissions", pj);
+          // Keep the per-scheme compliance access fresh for the compliance pages.
+          if (data.user && data.user.ComplianceAccess) {
+            const cj = JSON.stringify(data.user.ComplianceAccess);
+            sessionStorage.setItem("mostlaneComplianceAccess", cj);
+            localStorage.setItem("mostlaneComplianceAccess", cj);
+          }
         } catch (e) {}
       })();
 

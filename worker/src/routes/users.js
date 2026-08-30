@@ -12,6 +12,7 @@ import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor, hashPassword, validatePassword, generateTempPassword } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { sendEmail, welcomeEmail, issuePasswordToken, appBase } from "../lib/email.js";
+import { resolveComplianceAccess, sanitizeComplianceAccess } from "../lib/complianceaccess.js";
 
 // How long a new user's "set your password" welcome link stays valid.
 const WELCOME_TOKEN_HOURS = 72;
@@ -206,6 +207,10 @@ export async function handle(request, env, ctx, url, sess) {
     const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
     const isNewUser = !already;
 
+    // Clean the compliance-access map before persisting (valid schemes + levels only).
+    if (b.Profile && typeof b.Profile === "object" && b.Profile.complianceAccess != null) {
+      b.Profile.complianceAccess = sanitizeComplianceAccess(b.Profile.complianceAccess);
+    }
     const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
 
     await db.prepare(`
@@ -398,6 +403,9 @@ function shapeUser(u, perms) {
     StaffType: profile.staffType === "office" ? "office" : "field",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
+    // Resolved per-scheme compliance access (none|view|download|edit) so the
+    // Users-admin picker pre-fills each page's dropdown with the current level.
+    ComplianceAccess: resolveComplianceAccess(profile, perms),
     Profile: profile,
     ...perms,
   };
