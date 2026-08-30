@@ -66,6 +66,11 @@
     .bubble.active { background:#28a745; }
     .iconbtn{ padding:7px 12px; font-size:16px; }
     .backbar .barspacer{ flex:1 1 auto; }
+    .fcount{ display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px;
+      padding:0 5px; margin-left:6px; border-radius:999px; background:#28a745; color:#fff; font-size:11px; font-weight:700; }
+    #filtersBtn[aria-expanded="true"]{ background:#123a63; }
+    #filterPanel{ margin-bottom:6px; }
+    #filterPanel .filter-bubbles{ margin-bottom:8px; }
 
     /* Consolidated Tools dropdown — one home for every secondary action. */
     .toolwrap{ position:relative; display:inline-flex; }
@@ -248,6 +253,7 @@
       <span id="liveNote" class="info">Live • <span id="loadedCount">0</span> records</span>
       <span class="barspacer"></span>
 
+      <button id="filtersBtn" class="btn" aria-expanded="false">🔽 Filters<span id="filtersCount" class="fcount" style="display:none;"></span></button>
       <button id="editBtn" class="btn">✏️ Edit</button>
       <button id="saveBtn" class="btn" style="display:none;background:#28a745;">💾 Save changes</button>
 
@@ -272,6 +278,7 @@
       </div>
     </div>
 
+    <div id="filterPanel" hidden>
     <!-- Due-date filters -->
     <div class="filter-bubbles summary-bubbles" id="dueFilters">
       <span class="flabel">Due</span>
@@ -289,6 +296,7 @@
       <button class="bubble" data-cat="emYearly">EM Yearly</button>
       <button class="bubble" data-cat="pat">PAT</button>
       <button class="bubble" data-cat="pv">PV</button>
+    </div>
     </div>
 
     <div id="filterSummary" class="filter-summary"></div>
@@ -1825,6 +1833,27 @@ document.addEventListener('DOMContentLoaded', () => {
     menu.querySelectorAll('.bubble').forEach(b=> b.addEventListener('click', close));
   })();
 
+  (function(){
+    const btn = document.getElementById('filtersBtn');
+    const panel = document.getElementById('filterPanel');
+    const countEl = document.getElementById('filtersCount');
+    if (!btn || !panel) return;
+    function badge(){
+      const due = document.querySelectorAll('#dueFilters .bubble.active').length;
+      const st  = document.querySelector('#storeTypeFilters .bubble.active:not([data-storetype="ALL"])') ? 1 : 0;
+      const cmp = document.querySelectorAll('#complianceFilters .bubble.active').length;
+      const n = due + st + cmp;
+      if (countEl){ countEl.textContent = n ? String(n) : ''; countEl.style.display = n ? 'inline-flex' : 'none'; }
+    }
+    function setOpen(open){ panel.hidden = !open; btn.setAttribute('aria-expanded', String(open)); try{ localStorage.setItem('mlCompFiltersOpen', open ? '1' : '0'); }catch(e){} }
+    let open = false; try{ open = localStorage.getItem('mlCompFiltersOpen') === '1'; }catch(e){}
+    setOpen(open);
+    btn.onclick = ()=> setOpen(panel.hidden);
+    panel.addEventListener('click', ()=> setTimeout(badge, 0));
+    window.mlUpdateFilterBadge = badge;
+    badge();
+  })();
+
   if (!canDownloadCompliance()) { const el=document.getElementById('exportBtn'); if (el) el.style.display='none'; }
 
   document.getElementById('overdueBtn').onclick = ()=> {
@@ -1843,6 +1872,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clearBtn').onclick = ()=>{
     document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
     clearFilters();
+    if (window.mlUpdateFilterBadge) window.mlUpdateFilterBadge();
   };
   document.getElementById('exportBtn').onclick = exportExcel;
   document.getElementById('summaryBtn').onclick = openSummaryModal;
