@@ -12,6 +12,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor, requireSession } from "../lib/auth.js";
+import { resolveComplianceAccess } from "../lib/complianceaccess.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { syncSiteToSiteLog } from "./sites.js";
 
@@ -327,6 +328,20 @@ function canonType(t) {
 
 async function isFull(env, tid, me) { try { const p = await permissionsFor(env, tid, me); return p.FullAccess === "Yes" || p.Compliance === "Yes"; } catch { return false; } }
 
+// The user's resolved compliance access LEVEL for a scheme: none|view|download|
+// edit. Same model the client uses (Full-Access => edit; explicit stored level;
+// else legacy default office edit / field view). The import bot (token) = edit.
+// This is the server-side gate so access can't be bypassed by crafting requests.
+async function complianceLevelFor(env, tid, me, scheme, viaToken) {
+  if (viaToken) return "edit";
+  try {
+    const perms = await permissionsFor(env, tid, me);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    const map = resolveComplianceAccess(row ? row.profile : null, perms);
+    return map[scheme] || "none";
+  } catch { return "none"; }
+}
+
 // One store's files grouped by type (newest first, signed URLs, current/previous
 // resolved). Shared by GET /files and GET /site-files.
 async function listStoreFiles(env, origin, tid, scheme, code) {
@@ -380,7 +395,10 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/file" && method === "GET" && q.get("key")) {
     const key = q.get("key");
     if (!key || !String(key).startsWith("compliance/")) return jr({ error: "Bad key" }, headers, 400);
-    if (!sess && !(await verifyFileSig(env, key, q))) return jr({ error: "Link expired or invalid" }, headers, 403);
+    // Always require a valid signed link (issued only to view+ users via /files
+    // and /file-url) — a bare session no longer bypasses the signature, so a
+    // logged-in user can't fetch an arbitrary compliance key directly.
+    if (!(await verifyFileSig(env, key, q))) return jr({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -402,9 +420,20 @@ export async function handle(request, env, ctx, url, sess) {
   if (!sess && !viaToken) return jr({ error: "Not authenticated" }, headers, 401);
   const tid = sess ? (sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request)) : await resolveTenantId(env, request);
   const me = sess ? sess.user.username : "import-bot";
-  const canWrite = viaToken || (await isFull(env, tid, me));
   const scheme = schemeOf(q);   // 'coop' (default) or 'fareham'
+  // Per-scheme access level — the authoritative server gate.
+  const level = await complianceLevelFor(env, tid, me, scheme, viaToken);
+  const canRead  = viaToken || level !== "none";   // view / download / edit
+  const canWrite = viaToken || level === "edit";    // edit only (all write routes key off this)
   await ensure(env);
+
+  // Reads for a scheme's chart require at least "view" on that scheme. The public
+  // /file GET (handled above, signature-gated) and the cross-scheme /site-files
+  // path (site-folder, used by engineers) are deliberately NOT gated here.
+  const SCHEME_READS = new Set(["/has", "/index", "/files", "/file-url", "/stores", "/summary", "/settings", "/next-code"]);
+  if (!canRead && SCHEME_READS.has(sub)) {
+    return jr({ error: "No compliance access to this page" }, headers, 403);
+  }
 
   // ── Dedupe check: has this SharePoint item already been ingested? ───────────
   if (sub === "/has" && method === "GET") {
@@ -868,7 +897,7 @@ export async function handle(request, env, ctx, url, sess) {
   // true when nothing's been run yet OR a document has been added to the site
   // since the last run — the client skips the rest.
   if (sub === "/review/targets" && method === "GET") {
-    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr({ error: "Compliance edit access required" }, headers, 403);
     const CHECK_TYPES = ["fiveYear"];   // extend as more per-type checkers are added
     // newest document per site (any type) → the "has anything changed" clock
     const siteLatest = {};
@@ -922,7 +951,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Store one check result (client posts after running the verifier on a cert).
   if (sub === "/review/save" && method === "POST") {
-    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr({ error: "Compliance edit access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const code = pad4(b.code), type = canonType(b.type || "fiveYear");
     if (!code) return jr({ error: "code required" }, headers, 400);
@@ -949,7 +978,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // The worklist (with a fresh signed URL to open each cert).
   if (sub === "/review/list" && method === "GET") {
-    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr({ error: "Compliance edit access required" }, headers, 403);
     const { results } = await env.DB.prepare(
       `SELECT r.code, r.type, r.status, r.outcome, r.attention, r.summary, r.flags, r.file_id, r.checked_at, r.notes,
               s.site_name AS sname, cs.name AS cname, f.r2_key AS r2_key
@@ -974,7 +1003,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // Tick off / add a note.
   if (sub === "/review/status" && method === "POST") {
-    if (!(await isFull(env, tid, me))) return jr({ error: "Compliance access required" }, headers, 403);
+    if (!canWrite) return jr({ error: "Compliance edit access required" }, headers, 403);
     const b = await request.json().catch(() => ({}));
     const code = pad4(b.code), type = canonType(b.type || "fiveYear");
     if (!code) return jr({ error: "code required" }, headers, 400);

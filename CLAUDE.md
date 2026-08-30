@@ -1051,6 +1051,36 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
 - `stats.js` — /stats D1 aggregates + R2 storage totals (stats.html).
+- **Per-user compliance ACCESS (Aug 2026)** — each user has a LEVEL per scheme in
+  `users.profile.complianceAccess` = `{coop,fareham,chapplins,projects}`, each
+  **none|view|download|edit** (none=page hidden; view=chart+open certs on screen;
+  download=+save/export files; edit=+upload & manage docs/dates). Shared model
+  **`worker/src/lib/complianceaccess.js`** (`resolveComplianceAccess(profile,perms)` +
+  `sanitizeComplianceAccess` + `COMPLIANCE_SCHEMES/LEVELS`): Full-Access → edit
+  everywhere (owner never scoped out); an explicit stored level wins; else a legacy
+  fallback preserves old behaviour (Compliance perm ⇒ office edit / field view; no
+  Compliance ⇒ none). Resolved map returned as **`ComplianceAccess`** by auth.js +
+  users.js `shapeUser` (both), stashed client-side as **`mostlaneComplianceAccess`**
+  (login.html + main.html). **Set in Users Admin** (Permissions tab → "📋 Compliance
+  access", four None/View/Download/Edit dropdowns → `profile.complianceAccess`).
+  **Client:** each compliance page (eicr-portal/fareham/chapplins-compliance/
+  compliance-projects) has `complianceLevel(scheme)`/`canViewCompliance`/
+  `canDownloadCompliance`/`canEditCompliance`; none→a "no access" screen, view/
+  download hide Edit + upload 📎 + drag-drop + Settings/Import, view also hides
+  Export; **docviewer.js `open({allowDownload})`** (default true; `?v=7`) hides the
+  ⬇ download + ⤢ full-screen + fallback link when a view user previews a cert.
+  **Server (the hard gate, compliance.js `complianceLevelFor`):** writes (file
+  POST/delete/update, store*, stores/import, settings POST, review/*) require
+  **edit** (was isFull); chart reads (stores/index/files/file-url/summary/settings/
+  has/next-code) require **view+** (none→403); **GET /compliance/file now ALWAYS
+  requires a valid signature** (a bare session no longer fetches an arbitrary key;
+  signed URLs are only issued to view+ users). `/site-files` (cross-scheme, site-
+  folder/engineers) is deliberately NOT gated. **Honest limit:** view-vs-download is
+  a UI deterrent — inline PDF viewing transfers the bytes, so a viewer can still
+  save/screenshot; only "none" (no bytes) and "edit" (writes) are hard-enforced.
+  **All four compliance pages** now share the compressed **🛠 Tools** toolbar + a
+  **🔽 Filters** collapse (Due/Store type/Compliance rows hidden by default, active-
+  count badge, remembered in localStorage `mlCompFiltersOpen`).
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
   (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`
