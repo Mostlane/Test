@@ -171,6 +171,12 @@
     el.mldvTitle.textContent = name;
     el.mldvFull.href = url;
     el.mldvDl.href = opts.downloadUrl || url;
+    // allowDownload defaults true. When false (e.g. a view-only compliance user),
+    // hide BOTH the ⬇ download and the ⤢ open-full-screen link (which loads the
+    // raw file in a new tab, another save route). The fallback link is gated too.
+    current.allowDownload = opts.allowDownload !== false;
+    el.mldvDl.style.display  = current.allowDownload ? '' : 'none';
+    el.mldvFull.style.display = current.allowDownload ? '' : 'none';
     el.mldvBody.innerHTML = '<div class="mldv-spin">Loading…</div>';
     el.stage = null;
     el.back.classList.add("show");
@@ -315,8 +321,13 @@
     // worker sees a key like "staffdocs%2F..." and rejects it ("Bad key"). Just
     // make it safe for an HTML attribute (escape & and ") without re-encoding.
     var href = String((current && (current.downloadUrl || current.url)) || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-    el.mldvBody.innerHTML = '<div class="mldv-msg">' + msg
-      + '<br><a class="big" href="' + href + '" target="_blank" rel="noopener">📄 Open document</a></div>';
+    // View-only (no-download) users don't get the "Open document" escape hatch.
+    if (current && current.allowDownload === false) {
+      el.mldvBody.innerHTML = '<div class="mldv-msg">' + msg + '</div>';
+    } else {
+      el.mldvBody.innerHTML = '<div class="mldv-msg">' + msg
+        + '<br><a class="big" href="' + href + '" target="_blank" rel="noopener">📄 Open document</a></div>';
+    }
   }
 
   /* ---- two-finger pinch zoom + pan ----
