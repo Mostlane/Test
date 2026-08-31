@@ -406,15 +406,22 @@
           </label>
         </div>
 
-        <div id="dangerZone" style="margin-top:18px;padding:14px;border:1px solid rgba(255,59,48,.3);border-radius:14px;background:rgba(255,59,48,.05);">
-          <div style="font-weight:600;color:var(--red);margin-bottom:4px;">Delete this user</div>
-          <p class="muted" style="margin:0 0 10px;font-size:13px;color:#a1362f;">
-            Removes the account, login, sessions and devices. Their work <b>history is kept</b>
-            (jobs, timesheets, POs, activity log) but can no longer be linked to their name — and this
-            <b>can't be undone</b>. To just stop someone accessing the portal, use <b>Block</b>
-            (bottom-left) instead — it's reversible and keeps everything intact.
+        <div id="dangerZone" style="margin-top:18px;padding:14px;border:1px solid var(--sep);border-radius:14px;background:var(--fill);">
+          <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Removing this person</div>
+          <p class="muted" style="margin:0 0 8px;font-size:13px;">
+            When someone leaves, use <b>Block</b> (bottom-left). It ends their access, sessions and POs
+            but <b>keeps their account, documents and history</b> — you can still view their files under
+            <b>My Documents</b> and their activity under <b>Activity Log</b> by ticking
+            <b>“Show former staff”</b>. It's fully reversible.
           </p>
-          <button type="button" class="btn red" id="deleteUserBtn" style="display:none;">🗑 Delete user…</button>
+          <details style="margin-top:6px;">
+            <summary style="cursor:pointer;color:var(--red);font-weight:600;font-size:13px;">Permanently erase this account…</summary>
+            <p class="muted" style="margin:8px 0 10px;font-size:12.5px;color:#a1362f;">
+              Only for test or duplicate accounts. This removes the account, login, sessions and devices,
+              and <b>you'll lose the way to reach their documents and history</b> from the portal. Can't be undone.
+            </p>
+            <button type="button" class="btn red" id="deleteUserBtn" style="display:none;">🗑 Permanently erase…</button>
+          </details>
         </div>
       </div>
 
@@ -1519,14 +1526,14 @@
       if (!username || username === MY_USERNAME) return;
       const ov = document.createElement("div"); ov.className = "overlay"; ov.style.display = "flex"; ov.style.zIndex = "2147483250";
       ov.innerHTML = `<div class="panel" style="max-width:440px;">
-        <h2 style="color:var(--red);">Delete ${esc(username)}</h2>
-        <p class="muted" style="font-size:13px;margin:0 0 12px;">This permanently removes the account and login. Their work history stays but can no longer be linked to their name, and <b>this can't be undone</b>. Confirm with <b>your own password</b>.</p>
+        <h2 style="color:var(--red);">Permanently erase ${esc(username)}</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 12px;">This removes the account and login for good. You'll <b>lose the way to reach their documents and history</b> from the portal, and <b>this can't be undone</b> (use <b>Block</b> instead to keep them). Confirm with <b>your own password</b>.</p>
         <label>Your password</label>
         <input type="password" id="delPw" autocomplete="current-password" placeholder="Your portal password">
         <p id="delMsg" class="msg err" style="min-height:18px;"></p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
           <button type="button" class="btn grey" id="delCancel">Cancel</button>
-          <button type="button" class="btn red" id="delGo">Delete user</button>
+          <button type="button" class="btn red" id="delGo">Erase account</button>
         </div>
       </div>`;
       document.body.appendChild(ov);
@@ -1544,7 +1551,7 @@
           const r = await res.json().catch(() => ({}));
           if (!res.ok || !r.ok) { msg.className = "msg err"; msg.textContent = r.error || "Delete failed."; go.disabled = false; return; }
           close(); closeEditor(); await loadUsers();
-          if (window.MLUI && MLUI.toast) MLUI.toast(`${username} deleted.`);
+          if (window.MLUI && MLUI.toast) MLUI.toast(`${username} erased.`);
         } catch (e) { msg.className = "msg err"; msg.textContent = "Network error."; go.disabled = false; }
       }
       go.onclick = submit;

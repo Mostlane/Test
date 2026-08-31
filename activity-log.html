@@ -92,10 +92,14 @@
         if (!me.ok || me.user.FullAccess !== "Yes") { alert("This page needs Full Access."); location.href = "main.html"; return; }
       } catch (e) { location.href = "main.html"; return; }
       try {
-        const d = await authFetch("/users").then(r => r.json());
+        // ?all=1 so FORMER (blocked/disabled) staff are still selectable AND their
+        // names resolve on historical rows — a departed person's history stays readable.
+        const d = await authFetch("/users?all=1").then(r => r.json());
         USERS = (d.Users || []).filter(u => u.Username);
-        g("fUser").innerHTML = '<option value="">Everyone</option>' + USERS.map(u =>
-          `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("");
+        const act = u => { const s = String(u.Status || "").toLowerCase(); return s === "" || s === "active"; };
+        const ordered = [...USERS].sort((a, b) => (act(a) ? 0 : 1) - (act(b) ? 0 : 1));  // active first, former last
+        g("fUser").innerHTML = '<option value="">Everyone</option>' + ordered.map(u =>
+          `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}${act(u) ? "" : " — former"}</option>`).join("");
       } catch (e) {}
       load();
     })();
