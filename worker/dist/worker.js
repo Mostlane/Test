@@ -17237,6 +17237,20 @@ async function handle19(request, env, ctx, url, sess) {
   }
   return jr2({ error: "Not found: " + sub }, headers, 404);
 }
+async function listPersonalDocFiles(env, tenantId, username) {
+  const out = [];
+  try {
+    const groups = await listUnder(env, personalPrefix(tenantId, username));
+    for (const category of Object.keys(groups)) {
+      for (const f of groups[category]) {
+        out.push({ category, name: f.name, at: f.at, size: f.size, by: f.by || "" });
+      }
+    }
+  } catch {
+  }
+  out.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  return out;
+}
 async function deletePersonalDocs(env, tenantId, username) {
   let n = 0;
   try {
@@ -17254,29 +17268,62 @@ async function deletePersonalDocs(env, tenantId, username) {
 init_http();
 init_auth();
 init_tenantdb();
-var EXPORT_TABLES = [
-  ["users", "username"],
-  ["user_permissions", "username"],
-  ["sessions", "username"],
-  ["devices", "username"],
-  ["login_history", "username"],
-  ["holidays", "username"],
-  ["office_shifts", "username"],
-  ["oncall_log", "username"],
-  ["key_log", "username"],
-  ["notify_log", "username"],
-  ["audit_log", "username"],
-  ["password_resets", "username"]
+var EXPORT_SPEC = [
+  // ── Account & access ──────────────────────────────────────────────────────
+  { table: "users", label: "Account & profile", cols: ["username"] },
+  { table: "user_permissions", label: "Permissions", cols: ["username"] },
+  { table: "sessions", label: "Login sessions", cols: ["username"] },
+  { table: "devices", label: "Registered devices", cols: ["username"] },
+  { table: "push_subscriptions", label: "Push-notification devices", cols: ["username"] },
+  { table: "login_history", label: "Login history", cols: ["username"] },
+  { table: "password_resets", label: "Password-reset requests", cols: ["username"] },
+  // ── Notifications & activity ─────────────────────────────────────────────
+  { table: "user_notifications", label: "Notification feed", cols: ["username"] },
+  { table: "notify_log", label: "Notification delivery log", cols: ["username"] },
+  { table: "audit_log", label: "Activity log (their actions)", cols: ["username"] },
+  // ── Holiday & absence ────────────────────────────────────────────────────
+  { table: "holidays", label: "Holiday & absence bookings", cols: ["username", "engineer"] },
+  { table: "holiday_allowance", label: "Holiday allowance", cols: ["username"] },
+  { table: "holiday_log", label: "Holiday admin actions", cols: ["by_user"] },
+  // ── Time & attendance ────────────────────────────────────────────────────
+  { table: "office_shifts", label: "Office timesheet / clock-ins", cols: ["username"] },
+  { table: "shifts", label: "Field shifts (clock on/off)", cols: ["username"] },
+  { table: "job_time_segments", label: "Job time capture", cols: ["username"] },
+  { table: "eng_timesheets", label: "Engineer timesheets", cols: ["username"] },
+  { table: "eng_invoices", label: "Engineer invoices", cols: ["username"] },
+  { table: "van_timesheets", label: "Van timesheets", cols: ["username"] },
+  { table: "sitelog_scans", label: "Site sign-in / out scans", cols: ["username"] },
+  // ── Vehicles ─────────────────────────────────────────────────────────────
+  { table: "vehicle_assignments", label: "Vehicle assignments", cols: ["username", "assigned_by"] },
+  { table: "vehicle_checks", label: "Weekly van checks", cols: ["username"] },
+  { table: "custom_van_checks", label: "Requested van checks", cols: ["username", "sent_by"] },
+  { table: "vehicle_handovers", label: "Vehicle handovers", cols: ["username", "requested_by"] },
+  { table: "driver_scores", label: "Driver scores", cols: ["username"] },
+  { table: "fuel_entries", label: "Fuel-card entries", cols: ["username", "by"] },
+  { table: "odometer_readings", label: "Odometer readings entered", cols: ["by"] },
+  // ── Equipment & keys ─────────────────────────────────────────────────────
+  { table: "assets", label: "Equipment currently held", cols: ["assigned_to"] },
+  { table: "asset_requests", label: "Equipment requests", cols: ["requested_by", "holder", "decided_by"] },
+  { table: "asset_transfer_requests", label: "Equipment transfers", cols: ["from_user", "to_user"] },
+  { table: "key_log", label: "Key-register activity", cols: ["holder", "by_user"] },
+  // ── Communications & sign-offs ───────────────────────────────────────────
+  { table: "messages", label: "Messages sent & received", cols: ["from_user", "to_user"] },
+  { table: "memo_acks", label: "Company-memo acknowledgements", cols: ["username"] },
+  { table: "admin_task_done", label: "Task completions", cols: ["username", "done_by"] },
+  { table: "certificates", label: "Certificates issued / finalised", cols: ["engineer", "finalised_by"] },
+  { table: "em_remedials", label: "EM remedials handled", cols: ["engineer"] }
 ];
-async function safeSelect(env, tenantId, table, col, value) {
+async function personRows(env, tenantId, table, cols, value) {
+  const where = cols.map((c) => `LOWER(${c}) = LOWER(?)`).join(" OR ");
+  const binds = cols.map(() => value);
   try {
     const res = await env.DB.prepare(
-      `SELECT * FROM ${table} WHERE tenant_id = ? AND ${col} = ?`
-    ).bind(tenantId, value).all();
+      `SELECT * FROM ${table} WHERE CAST(tenant_id AS REAL) = CAST(? AS REAL) AND (${where})`
+    ).bind(tenantId, ...binds).all();
     return res.results || [];
   } catch {
     try {
-      const res = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${col} = ?`).bind(value).all();
+      const res = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`).bind(...binds).all();
       return res.results || [];
     } catch {
       return [];
@@ -17287,10 +17334,35 @@ function redact(rows) {
   return rows.map((r) => {
     const o = { ...r };
     for (const k of Object.keys(o)) {
-      if (/password|hash|token|secret/i.test(k)) o[k] = "[redacted]";
+      if (/password|hash|token|secret|p256dh|(^|_)auth$/i.test(k)) o[k] = "[redacted]";
     }
     return o;
   });
+}
+async function sitelogSections(env, who) {
+  const out = [];
+  if (!env.SITELOG_DB) return out;
+  try {
+    const people = (await env.SITELOG_DB.prepare(
+      "SELECT * FROM people WHERE LOWER(portal_username) = LOWER(?)"
+    ).bind(who).all()).results || [];
+    if (!people.length) return out;
+    out.push({ id: "sitelog_people", label: "SiteLog profile (pay & travel)", rows: redact(people) });
+    const ids = people.map((p) => p.id).filter(Boolean);
+    if (ids.length) {
+      const ph = ids.map(() => "?").join(",");
+      const visits = (await env.SITELOG_DB.prepare(
+        `SELECT * FROM visits WHERE person_id IN (${ph}) ORDER BY check_in_at DESC`
+      ).bind(...ids).all()).results || [];
+      if (visits.length) out.push({ id: "sitelog_visits", label: "SiteLog site visits", rows: visits });
+      const devs = (await env.SITELOG_DB.prepare(
+        `SELECT * FROM devices WHERE person_id IN (${ph})`
+      ).bind(...ids).all()).results || [];
+      if (devs.length) out.push({ id: "sitelog_devices", label: "SiteLog devices", rows: redact(devs) });
+    }
+  } catch {
+  }
+  return out;
 }
 async function handle20(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
@@ -17301,17 +17373,42 @@ async function handle20(request, env, ctx, url, sess) {
   if (path === "/privacy/export" && request.method === "GET") {
     const who = (url.searchParams.get("u") || sess.user.username).trim();
     if (who !== sess.user.username && !isFull3) return error("Forbidden", 403, env, request);
-    const data = {};
-    for (const [table, col] of EXPORT_TABLES) {
-      const rows = await safeSelect(env, tenantId, table, col, who);
-      if (rows.length) data[table] = redact(rows);
+    const sections = [];
+    const searched = [];
+    for (const spec of EXPORT_SPEC) {
+      searched.push(spec.label);
+      const rows = await personRows(env, tenantId, spec.table, spec.cols, who);
+      if (rows.length) sections.push({ id: spec.table, label: spec.label, rows: redact(rows) });
+    }
+    for (const s of await sitelogSections(env, who)) {
+      searched.push(s.label);
+      sections.push(s);
+    }
+    let documents = [];
+    try {
+      documents = await listPersonalDocFiles(env, tenantId, who);
+    } catch {
+      documents = [];
+    }
+    if (documents.length) {
+      sections.push({ id: "documents", label: "Uploaded documents (in Staff Documents)", rows: documents });
+    }
+    let subjectName = who;
+    try {
+      const acct = sections.find((s) => s.id === "users");
+      const u = acct && acct.rows[0];
+      if (u) subjectName = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || who;
+    } catch {
     }
     return json({
       ok: true,
       subject: who,
+      subjectName,
       generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      note: "Personal data held for this person across the portal. Password hashes and tokens are redacted. Uploaded documents are stored separately in the staff documents area.",
-      data
+      recordCount: sections.reduce((n, s) => n + s.rows.length, 0),
+      note: "This report contains the personal data the portal holds on this person under the UK GDPR right of access. Password hashes, security tokens and push-encryption keys are redacted. Uploaded documents are listed here; the files themselves are in the Staff Documents area.",
+      searched,
+      sections
     }, {}, env, request);
   }
   if (path === "/privacy/erase" && request.method === "POST") {

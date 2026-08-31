@@ -59,7 +59,7 @@
     </div>
     <div class="row" style="border-top:1px solid #c7d2fe;padding-top:10px;margin-top:12px;">
       <label class="lbl">UK GDPR (selected staff):</label>
-      <button class="btn small" id="exportBtn" title="Download everything the portal holds on this person">⬇ Export data</button>
+      <button class="btn small" id="exportBtn" title="One click: full report of everything the portal holds on this person (print / save as PDF)">⬇ Export full GDPR report</button>
       <button class="btn small danger" id="eraseBtn" title="Anonymise identifiers, close the account, delete their private documents">Erase &amp; close account</button>
     </div>
     <div class="row" style="border-top:1px solid #c7d2fe;padding-top:10px;margin-top:12px;">
@@ -194,22 +194,28 @@ const TBL_NAMES = {
   notify_log:"Notifications", audit_log:"Activity log", password_resets:"Password resets"
 };
 function reportHtml(d){
-  const rows = d.data || {};
+  // New shape: d.sections = [{id,label,rows}]. Fall back to the legacy
+  // d.data (table→rows object) if an older worker answers.
+  let sections = d.sections;
+  if(!sections){ sections = Object.keys(d.data||{}).map(t => ({ id:t, label:TBL_NAMES[t]||t, rows:d.data[t]||[] })); }
   const fmtVal = v => (v==null) ? "" : (typeof v==="object" ? esc(JSON.stringify(v)) : esc(String(v)));
   let body = "";
-  for(const t of Object.keys(rows)){
-    const recs = rows[t] || [];
+  for(const sec of sections){
+    const recs = sec.rows || [];
     if(!recs.length) continue;
     const cols = Array.from(recs.reduce((s,r)=>{Object.keys(r).forEach(k=>s.add(k));return s;}, new Set()));
-    body += `<h2>${esc(TBL_NAMES[t]||t)} <span class="cnt">(${recs.length})</span></h2>`;
+    body += `<h2>${esc(sec.label||sec.id)} <span class="cnt">(${recs.length})</span></h2>`;
     body += `<div class="tw"><table><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>`;
     body += recs.map(r=>`<tr>${cols.map(c=>`<td>${fmtVal(r[c])}</td>`).join("")}</tr>`).join("");
     body += `</tbody></table></div>`;
   }
+  const searched = (d.searched||[]);
   if(!body) body = "<p>No personal data records were found for this person.</p>";
+  const summary = `<div class="meta">${d.recordCount!=null?esc(String(d.recordCount))+" records across "+sections.filter(s=>(s.rows||[]).length).length+" areas.":""}${searched.length?" Searched: "+esc(searched.join(", "))+".":""}</div>`;
+  body = summary + body;
   const jsonHref = "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(d,null,2));
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Personal data report — ${esc(d.subject)}</title>
+<title>GDPR data report — ${esc(d.subjectName||d.subject)}</title>
 <style>
   body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:24px;color:#111;max-width:1000px;}
   h1{font-size:22px;margin:0 0 2px;} h2{font-size:16px;margin:22px 0 6px;border-bottom:2px solid #333;padding-bottom:3px;}
@@ -227,8 +233,8 @@ function reportHtml(d){
   <button class="primary" onclick="window.print()">🖨 Print / Save as PDF</button>
   <a href="${jsonHref}" download="data-export-${esc(d.subject).replace(/[^\\w.-]+/g,'_')}.json">⬇ Download raw data (JSON)</a>
 </div>
-<h1>Personal data report</h1>
-<div class="meta"><strong>${esc(d.subject)}</strong> · generated ${esc((d.generatedAt||"").replace("T"," ").slice(0,16))} UTC</div>
+<h1>UK GDPR — Subject Access Report</h1>
+<div class="meta"><strong>${esc(d.subjectName||d.subject)}</strong>${d.subjectName&&d.subjectName!==d.subject?" ("+esc(d.subject)+")":""} · generated ${esc((d.generatedAt||"").replace("T"," ").slice(0,16))} UTC</div>
 <div class="note">${esc(d.note||"")}</div>
 ${body}
 </body></html>`;

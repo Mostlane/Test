@@ -162,6 +162,22 @@ export async function handle(request, env, ctx, url, sess) {
   return jr({ error: "Not found: " + sub }, headers, 404);
 }
 
+// Exposed so the GDPR data-export tool can list a person's held documents
+// (metadata only — names/categories/dates/sizes; the file bytes stay in R2).
+export async function listPersonalDocFiles(env, tenantId, username) {
+  const out = [];
+  try {
+    const groups = await listUnder(env, personalPrefix(tenantId, username));
+    for (const category of Object.keys(groups)) {
+      for (const f of groups[category]) {
+        out.push({ category, name: f.name, at: f.at, size: f.size, by: f.by || "" });
+      }
+    }
+  } catch { /* best effort — no documents area */ }
+  out.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  return out;
+}
+
 // Exposed so the privacy/erasure tool can wipe a leaver's personal file.
 export async function deletePersonalDocs(env, tenantId, username) {
   let n = 0;
