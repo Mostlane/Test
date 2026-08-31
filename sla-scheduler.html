@@ -53,6 +53,16 @@
     .tray-badge{font-size:11px;font-weight:700;color:#9a3412;background:#ffedd5;border:1px solid #fdba74;border-radius:999px;padding:1px 8px;letter-spacing:0;}
     .tray-tools{display:flex;gap:6px;align-items:center;}
     .btn.tiny{padding:3px 9px;font-size:11px;line-height:1.4;}
+    /* 🛠 Tools dropdown — one home for the scheduler's secondary tools. */
+    .toolwrap{position:relative;display:inline-flex;}
+    .toolmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:60;background:#fff;
+      border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.18);
+      padding:6px;min-width:210px;display:flex;flex-direction:column;gap:3px;}
+    .toolmenu[hidden]{display:none;}
+    .toolmenu .btn{width:100%;justify-content:flex-start;border:1px solid transparent;background:#fff;border-radius:8px;padding:9px 12px;font-size:13px;}
+    .toolmenu .btn:hover{background:#eef3f9;}
+    #toolsBtn[aria-expanded="true"]{background:#eef2f7;}
+    @media (max-width:520px){.toolmenu{left:0;right:auto;}}
     #trayToggle{min-width:30px;justify-content:center;}
     .tray-hint{font-size:11px;color:#94a3b8;margin:4px 0 6px;}
     .tray-jobs{display:flex;flex-wrap:wrap;gap:6px;}
@@ -255,13 +265,18 @@
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
-        <button class="btn" id="openAutoBtn" title="Auto-build a day from unscheduled jobs, across the team">🤖 Auto day</button>
         <button class="btn" id="undoAutoBtn" style="display:none;background:#fef2f2;border-color:#fecaca;color:#b91c1c;" title="Revert the jobs booked in by the last auto-day">↩ Undo last auto-day</button>
-        <button class="btn" id="openMapBtn">🗺️ Map view</button>
-        <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
-        <a class="btn" href="job-durations.html" title="See how job length estimates are learned + which jobs ran over">⏱ Durations</a>
-        <button class="btn" id="openFallbackBtn" title="Auto-give each engineer at least one job for the next working day">🛟 Fallbacks</button>
+        <div class="toolwrap">
+          <button type="button" class="btn" id="toolsBtn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
+          <div class="toolmenu" id="toolsMenu" hidden>
+            <button class="btn" id="openAutoBtn" title="Auto-build a day from unscheduled jobs, across the team">🤖 Auto day</button>
+            <button class="btn" id="openFillBtn" title="Find loose jobs that fit into engineers' days">💡 Fill-ins</button>
+            <button class="btn" id="openFallbackBtn" title="Auto-give each engineer at least one job for the next working day">🛟 Fallbacks</button>
+            <button class="btn" id="openMapBtn">🗺️ Map view</button>
+            <a class="btn" href="engineer-skills.html" title="Rate what each engineer is competent at">🧭 Engineer skills</a>
+            <a class="btn" href="job-durations.html" title="See how job length estimates are learned + which jobs ran over">⏱ Durations</a>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -2487,6 +2502,18 @@ async function init(){
   // Wrap so the click Event isn't passed as `scope` — openMap treats any truthy
   // scope as an engineer-scoped view and would deref event.date (undefined).
   $("openMapBtn").addEventListener("click", () => openMap());
+
+  // 🛠 Tools dropdown — open/close + close on outside click / Escape / item click.
+  (function(){
+    var tb = document.getElementById("toolsBtn");
+    var menu = document.getElementById("toolsMenu");
+    if (!tb || !menu) return;
+    var close = function(){ menu.hidden = true; tb.setAttribute("aria-expanded","false"); };
+    tb.addEventListener("click", function(e){ e.stopPropagation(); var open = menu.hidden; menu.hidden = !open; tb.setAttribute("aria-expanded", String(open)); });
+    document.addEventListener("click", function(e){ if (!menu.hidden && !menu.contains(e.target) && e.target !== tb) close(); });
+    document.addEventListener("keydown", function(e){ if (e.key === "Escape") close(); });
+    menu.querySelectorAll(".btn").forEach(function(b){ b.addEventListener("click", close); });
+  })();
   $("closeMapBtn").addEventListener("click", closeMap);
   document.querySelectorAll(".map-chip").forEach(chip => {
     chip.addEventListener("click", () => {
