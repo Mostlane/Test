@@ -83,6 +83,12 @@
     .panel-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
     .msg { font-size:14px; margin-top:10px; } .msg.err { color:#b00020; } .msg.ok { color:#0c7d27; }
     .notice { background:#fff3cd; color:#7a5b00; padding:12px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+    /* ⋯ More dropdown (secondary toolbar links) */
+    .toolwrap{ position:relative; display:inline-flex; }
+    .toolmenu{ position:absolute; top:calc(100% + 6px); right:0; z-index:60; background:#fff; border:1px solid #d1d5db; border-radius:12px; box-shadow:0 10px 26px rgba(0,0,0,.18); padding:6px; min-width:200px; display:flex; flex-direction:column; gap:4px; }
+    .toolmenu[hidden]{ display:none; }
+    .toolmenu .btn{ width:100%; justify-content:flex-start; text-align:left; background:#fff; color:#1f2937; border:1px solid transparent; }
+    .toolmenu .btn:hover{ background:#eef3f9; }
     @media (max-width:640px){
       .wrap{ padding:0 10px; }
       .grid2{ grid-template-columns:1fr; }
@@ -94,20 +100,33 @@
       .urow{ display:block; position:relative; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 2px 8px rgba(6,24,54,.06); margin-bottom:12px; padding:6px 14px 10px; }
       .ucell{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; text-align:right; padding:8px 0; border-bottom:1px solid #f2f5f8; font-size:14px; }
       .ucell::before{ content:attr(data-label); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; font-weight:700; text-align:left; flex:0 0 auto; }
-      .ucell.uname{ display:block; text-align:left; border-bottom:none; padding:10px 40px 8px 0; }
+      /* Compact card: fold the tier into the badge, email into a subtitle, and
+         hide the labelled Type/Access rows (was ~600px per user). */
+      .ucell{ padding:3px 0; border-bottom:none; }
+      .ucell[data-label="Type"], .ucell[data-label="Access"]{ display:none; }
+      .ucell[data-label="Email"]{ display:block; text-align:left; font-size:12.5px; color:#667085; padding:0; }
+      .ucell[data-label="Email"]::before{ display:none; }
+      .ucell[data-label="Status"]{ display:inline-flex; justify-content:flex-start; padding:2px 0 0; }
+      .ucell[data-label="Status"]::before{ display:none; }
+      .ucell.uname{ display:block; text-align:left; border-bottom:none; padding:8px 40px 0 0; }
       .ucell.uname::before{ display:none; }
       .ucell.uname b{ font-size:16px; color:#003366; }
       .ucell.uactions{ display:block; text-align:left; border-bottom:none; padding-top:10px; }
       .ucell.uactions::before{ display:none; }
-      .ucell.uactions .actions{ gap:6px; }
-      .ucell.uactions .btn.small{ flex:1 1 calc(50% - 4px); text-align:center; padding:10px; font-size:13px; }
+      .ucell.uactions .actions{ display:flex; flex-wrap:wrap; gap:6px; }
+      .ucell.uactions .actions [data-edit]{ flex:1 1 100%; text-align:center; padding:11px; font-size:15px; }
+      .ucell.uactions .actions .btn.small:not([data-edit]){ flex:1 1 calc(33.3% - 6px); text-align:center; padding:9px 4px; font-size:12.5px; }
       .urow .grip{ position:absolute; top:8px; right:8px; font-size:22px; padding:4px 6px; }
+      /* Drag-reorder is a desktop affordance — hide its hint on phones. */
+      #orderHint{ display:none; }
 
       /* Editor modal → full-width, comfortable tap targets. Clear the notch so
          the tabs bar isn't hidden under the iOS clock on an installed PWA. */
       .overlay{ padding:8px; padding-top:calc(env(safe-area-inset-top, 0px) + 8px); }
       .panel{ padding:16px; border-radius:14px; }
-      .tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; margin:10px -2px 14px; padding-bottom:4px; }
+      /* Wrap the tabs so EVERY tab is visible (Permissions/Devices/Account were
+         cut off in a horizontal-scroll strip with no affordance). */
+      .tabs{ flex-wrap:wrap; overflow:visible; margin:10px 0 12px; gap:6px; }
       .tabs button{ flex:0 0 auto; }
       .panel input, .panel select{ font-size:16px; }   /* 16px stops iOS zoom-on-focus */
       .panel-actions .btn{ flex:1; padding:12px; font-size:15px; }
@@ -131,10 +150,15 @@
       <input id="search" placeholder="Search by name, username or email…" />
       <button class="btn" id="addBtn">+ Add user</button>
       <button class="btn grey" id="saveOrderBtn" style="display:none;">Save order</button>
-      <a class="btn grey" id="devicesLink" href="device-admin.html" style="display:none;text-decoration:none;" title="Manage which devices each user can log in on">🔐 Devices</a>
-      <a class="btn grey" href="notify-log.html" style="text-decoration:none;" title="Who was shown which notifications, when">🔔 Notification log</a>
-      <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
-      <a class="btn grey" id="chatHistLink" href="chat-history.html" style="display:none;text-decoration:none;" title="Owner only: read any person's full chat history, including deleted messages">🕵️ Chat history</a>
+      <div class="toolwrap">
+        <button class="btn grey" id="uToolsBtn" type="button" aria-haspopup="true" aria-expanded="false">⋯ More</button>
+        <div class="toolmenu" id="uToolsMenu" hidden>
+          <a class="btn grey" id="devicesLink" href="device-admin.html" style="display:none;text-decoration:none;" title="Manage which devices each user can log in on">🔐 Devices</a>
+          <a class="btn grey" href="notify-log.html" style="text-decoration:none;" title="Who was shown which notifications, when">🔔 Notification log</a>
+          <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
+          <a class="btn grey" id="chatHistLink" href="chat-history.html" style="display:none;text-decoration:none;" title="Owner only: read any person's full chat history, including deleted messages">🕵️ Chat history</a>
+        </div>
+      </div>
     </div>
     <script>
       // Device-lock management now lives behind Users Admin. Show the shortcut
@@ -147,6 +171,15 @@
         var meU = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
         if (meU === "Jamie Line") document.getElementById("chatHistLink").style.display = "";
       }catch(e){} })();
+      // ⋯ More dropdown open/close
+      (function(){
+        var tb=document.getElementById("uToolsBtn"), menu=document.getElementById("uToolsMenu");
+        if(!tb||!menu) return;
+        var close=function(){ menu.hidden=true; tb.setAttribute("aria-expanded","false"); };
+        tb.onclick=function(e){ e.stopPropagation(); var o=menu.hidden; menu.hidden=!o; tb.setAttribute("aria-expanded",String(o)); };
+        document.addEventListener("click",function(e){ if(!menu.hidden && !menu.contains(e.target) && e.target!==tb) close(); });
+        document.addEventListener("keydown",function(e){ if(e.key==="Escape") close(); });
+      })();
     </script>
 
     <div id="menuVisCard" class="notice" style="display:none; background:#eef2ff; border-color:#c7d2fe;">
@@ -202,9 +235,9 @@
 
       <div class="tabs" id="tabs">
         <button data-tab="details" class="active">Details</button>
+        <button data-tab="perms">Permissions</button>
         <button data-tab="pay">Pay &amp; rates</button>
         <button data-tab="vehicle">Vehicle &amp; fuel</button>
-        <button data-tab="perms">Permissions</button>
         <button data-tab="devices">Devices</button>
         <button data-tab="account">Account</button>
       </div>
