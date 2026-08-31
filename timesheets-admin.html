@@ -18,6 +18,17 @@
   .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 13px;font:inherit;cursor:pointer}
   .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:600}
+  /* 🛠 Tools dropdown — one home for the page's secondary tools. */
+  .toolwrap{position:relative;display:inline-flex}
+  .toolmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:60;background:#fff;
+    border:1px solid #d1d5db;border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.18);
+    padding:6px;min-width:210px;display:flex;flex-direction:column;gap:3px}
+  .toolmenu[hidden]{display:none}
+  .toolmenu .btn{width:100%;justify-content:flex-start;text-align:left;border:1px solid transparent;
+    background:#fff;border-radius:8px;padding:9px 12px}
+  .toolmenu .btn:hover{background:#eef3f9}
+  #toolsBtn[aria-expanded="true"]{background:#eef2f7}
+  @media (max-width:520px){.toolmenu{left:0;right:auto}}
   .wk{font-weight:700;min-width:220px;text-align:center}
   table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)}
   th{background:var(--brand);color:#fff;padding:9px 7px;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
@@ -69,9 +80,14 @@
     <button class="btn" id="nextWk">Next ›</button>
     <label style="margin-left:8px;font-size:13px"><input type="checkbox" id="showAll"> Show everyone</label>
     <span style="flex:1"></span>
-    <button class="btn" id="milesBtn">🗺️ Site mileage</button>
-    <button class="btn" id="invBtn">🧾 Invoices</button>
-    <button class="btn" id="cfgBtn">⚙️ Settings</button>
+    <div class="toolwrap">
+      <button type="button" id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
+      <div class="toolmenu" id="toolsMenu" hidden>
+        <button class="btn" id="milesBtn">🗺️ Site mileage</button>
+        <button class="btn" id="invBtn">🧾 Invoices</button>
+        <button class="btn" id="cfgBtn">⚙️ Settings</button>
+      </div>
+    </div>
   </div>
   <table>
     <thead><tr id="head"></tr></thead>
@@ -492,6 +508,17 @@ async function delInv(id,user,number){
 
 g("prevWk").onclick=()=>{WEEK=addDays(WEEK,-7);load();};
 g("nextWk").onclick=()=>{WEEK=addDays(WEEK,7);load();};
+
+// 🛠 Tools dropdown — open/close + close on outside click / Escape.
+(function(){
+  var tb=document.getElementById("toolsBtn"), menu=document.getElementById("toolsMenu");
+  if(!tb||!menu) return;
+  var close=function(){ menu.hidden=true; tb.setAttribute("aria-expanded","false"); };
+  tb.onclick=function(e){ e.stopPropagation(); var open=menu.hidden; menu.hidden=!open; tb.setAttribute("aria-expanded", String(open)); };
+  document.addEventListener("click", function(e){ if(!menu.hidden && !menu.contains(e.target) && e.target!==tb) close(); });
+  document.addEventListener("keydown", function(e){ if(e.key==="Escape") close(); });
+})();
+
 load();
 </script>
 </body>
