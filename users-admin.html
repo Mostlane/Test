@@ -290,6 +290,16 @@
 
       <!-- PERMISSIONS -->
       <div class="section" data-sec="perms">
+        <!-- Standard role presets -->
+        <div class="permsec" style="margin-bottom:14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <h4 style="margin:0;">⚡ Apply a standard role</h4>
+            <button type="button" class="btn ghost" id="managePresetsBtn" style="display:none;padding:4px 10px;font-size:13px;">✎ Manage roles</button>
+          </div>
+          <p class="muted" style="margin:4px 0 8px;font-size:12.5px;">One tap sets this person's permissions and staff type to a standard role — fine-tune the switches below afterwards.</p>
+          <div id="presetBtns" style="display:flex;gap:8px;flex-wrap:wrap;"><span class="muted" style="font-size:12.5px;">Loading roles…</span></div>
+        </div>
+        <input type="text" id="permSearch" placeholder="🔍 Filter permissions…" style="width:100%;max-width:340px;margin-bottom:12px;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
         <div class="permsec" style="margin-bottom:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;">
           <h4 style="margin:0 0 4px;">🏠 Responsible for (home dashboard)</h4>
           <p class="muted" style="margin:0 0 8px;font-size:12.5px;">Tick the areas this person is responsible for. Their home page shows <b>only</b> these — a clean, focused summary of what they need to watch. Leave all unticked to show every area they have permission for. <b>They also need the matching permission below</b> for an area's data to load.</p>
@@ -353,7 +363,9 @@
       </div>
 
       <p id="panelMsg" class="msg"></p>
-      <div class="panel-actions">
+      <div class="panel-actions" style="display:flex;align-items:center;gap:8px;">
+        <button class="btn" id="blockBtn" style="display:none;background:#b91c1c;border-color:#b91c1c;color:#fff;">🚫 Block user</button>
+        <span style="flex:1;"></span>
         <button class="btn grey" id="cancelBtn">Cancel</button>
         <button class="btn" id="saveBtn">Save</button>
       </div>
@@ -568,6 +580,110 @@
       });
       faSnapshot = null;
     }
+    // ── Standard role presets ──────────────────────────────────────────────
+    let PRESETS = [];
+    async function loadPresets(){
+      try{ const r = await api("/users/presets"); const d = await r.json(); PRESETS = (d && d.presets) || []; }
+      catch(e){ PRESETS = []; }
+      renderPresetButtons();
+    }
+    function renderPresetButtons(){
+      const host = g("presetBtns"); if(!host) return;
+      if(!PRESETS.length){ host.innerHTML = '<span class="muted" style="font-size:12.5px;">No roles set up yet.</span>'; return; }
+      host.innerHTML = "";
+      PRESETS.forEach(p=>{
+        const b=document.createElement("button"); b.type="button"; b.className="btn";
+        b.style.cssText="background:#fff;border:1px solid #fdba74;color:#9a3412;font-weight:600;";
+        b.textContent=(p.fullAccess?"⭐ ":"")+(p.name||"Role");
+        b.onclick=()=>applyPreset(p);
+        host.appendChild(b);
+      });
+    }
+    async function applyPreset(p){
+      const ok = window.MLUI ? await MLUI.confirm(`Apply the “${p.name}” role to this user? It replaces the current permission selection — you can still fine-tune the switches afterwards.`, {title:"Apply role", okLabel:"Apply role"}) : confirm(`Apply the "${p.name}" role?`);
+      if(!ok) return;
+      const set=new Set(p.perms||[]);
+      const fa=g("faToggle");
+      if(p.fullAccess){ gridToggles().forEach(cb=>cb.checked=set.has(cb.dataset.perm)); fa.checked=true; lockFullAccess(); }
+      else { fa.checked=false; faSnapshot=null; gridToggles().forEach(cb=>{ cb.checked=set.has(cb.dataset.perm); cb.disabled=false; }); }
+      document.querySelectorAll('[data-perm]:not([data-grid])').forEach(cb=>{ if(cb.id==="faToggle") return; cb.checked=set.has(cb.dataset.perm); });
+      const st=g("f_staff"); if(st) st.value=p.staffType||st.value;
+      if(window.MLUI && MLUI.toast) MLUI.toast(`Applied “${p.name}” — review the switches, then Save.`);
+    }
+    // Permission search filter
+    (function(){
+      const s=g("permSearch"); if(!s) return;
+      s.addEventListener("input", ()=>{
+        const q=s.value.toLowerCase().trim();
+        document.querySelectorAll("#permGrid .togrow").forEach(row=>{
+          const lbl=((row.querySelector(".tlabel")||{}).textContent||"").toLowerCase();
+          row.style.display = !q || lbl.includes(q) ? "" : "none";
+        });
+        document.querySelectorAll("#permGrid .permsec").forEach(sec=>{
+          const any=[...sec.querySelectorAll(".togrow")].some(r=>r.style.display!=="none");
+          sec.style.display = any ? "" : "none";
+        });
+      });
+    })();
+    // Preset editor (Full-access only)
+    function openPresetEditor(){
+      const ov=document.createElement("div"); ov.className="overlay"; ov.style.display="flex";
+      const groupsHtml = PERM_GROUPS.map(gp=>`<div style="margin:4px 0;"><div style="font-weight:600;font-size:11.5px;color:#475569;margin:4px 0;text-transform:uppercase;letter-spacing:.03em;">${esc(gp.title)}</div>${gp.perms.map(pk=>`<label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;margin:0 10px 4px 0;"><input type="checkbox" data-pk="${pk}" style="width:auto;"> ${esc(PERM_LABELS[pk]||pk)}</label>`).join("")}</div>`).join("");
+      let work = JSON.parse(JSON.stringify(PRESETS||[]));
+      ov.innerHTML = `<div class="panel" style="max-width:660px;">
+        <header style="display:flex;align-items:center;justify-content:space-between;"><h3 style="margin:0;">✎ Manage standard roles</h3><button type="button" id="peClose" class="btn ghost">✕</button></header>
+        <p class="muted" style="font-size:12.5px;">Define each role's permissions. Tick <b>Full access</b> to grant everything. These appear as one-tap buttons when adding or editing a user.</p>
+        <div id="peList"></div>
+        <button type="button" id="peAdd" class="btn ghost" style="margin-top:4px;">＋ Add role</button>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;"><button type="button" id="peCancel" class="btn ghost">Cancel</button><button type="button" id="peSave" class="btn">Save roles</button></div>
+      </div>`;
+      document.body.appendChild(ov);
+      const list=ov.querySelector("#peList");
+      function cardHtml(p){
+        return `<div class="presetCard" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;background:#fff;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <input class="pName" value="${esc(p.name||"")}" placeholder="Role name" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:8px;font-weight:600;">
+            <select class="pStaff" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;"><option value="field"${p.staffType!=="office"?" selected":""}>Field</option><option value="office"${p.staffType==="office"?" selected":""}>Office</option></select>
+            <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;"><input type="checkbox" class="pFull" ${p.fullAccess?"checked":""} style="width:auto;"> Full access</label>
+            <button type="button" class="btn ghost pDel" style="color:#b91c1c;padding:4px 10px;">Delete</button>
+          </div>
+          <div class="pPerms" style="${p.fullAccess?"display:none;":""}">${groupsHtml}</div></div>`;
+      }
+      function collect(){
+        [...list.querySelectorAll(".presetCard")].forEach((card,i)=>{
+          if(!work[i]) return;
+          work[i].name=card.querySelector(".pName").value.trim()||"Role";
+          work[i].staffType=card.querySelector(".pStaff").value;
+          work[i].fullAccess=card.querySelector(".pFull").checked;
+          work[i].perms=[...card.querySelectorAll("[data-pk]:checked")].map(cb=>cb.dataset.pk);
+        });
+      }
+      function draw(){
+        list.innerHTML = work.map(cardHtml).join("");
+        [...list.querySelectorAll(".presetCard")].forEach((card,i)=>{
+          const set=new Set(work[i].perms||[]);
+          card.querySelectorAll("[data-pk]").forEach(cb=>{ cb.checked=set.has(cb.dataset.pk); });
+          card.querySelector(".pFull").addEventListener("change",e=>{ card.querySelector(".pPerms").style.display=e.target.checked?"none":""; });
+          card.querySelector(".pDel").addEventListener("click",()=>{ collect(); work.splice(i,1); draw(); });
+        });
+      }
+      ov.querySelector("#peAdd").onclick=()=>{ collect(); work.push({id:"role"+Date.now(),name:"New role",staffType:"field",fullAccess:false,perms:[]}); draw(); };
+      const close=()=>ov.remove();
+      ov.querySelector("#peClose").onclick=close; ov.querySelector("#peCancel").onclick=close;
+      ov.querySelector("#peSave").onclick=async()=>{
+        collect();
+        const btn=ov.querySelector("#peSave"); btn.disabled=true; btn.textContent="Saving…";
+        try{
+          const r=await api("/users/presets",{method:"POST",body:JSON.stringify({presets:work})});
+          const d=await r.json();
+          if(r.ok && d.ok){ PRESETS=d.presets||work; renderPresetButtons(); close(); if(window.MLUI&&MLUI.toast)MLUI.toast("Roles saved."); }
+          else { btn.disabled=false; btn.textContent="Save roles"; alert("Could not save roles."); }
+        }catch(e){ btn.disabled=false; btn.textContent="Save roles"; alert("Could not save roles."); }
+      };
+      draw();
+    }
+    { const _mp=g("managePresetsBtn"); if(_mp) _mp.onclick=openPresetEditor; }
+
     renderPerms();
     renderAreas();
     renderComplianceAccess();
@@ -590,7 +706,9 @@
         if (!me.ok || !me.user || !(me.user.FullAccess === "Yes" || me.user.Users === "Yes")) {
           alert("Access denied"); location.href = "main.html"; return;
         }
-        if (me.user.FullAccess === "Yes") initMenuVis();   // curation is Full-access only
+        MY_USERNAME = me.user.Username || "";
+        if (me.user.FullAccess === "Yes") { initMenuVis(); const mb=g("managePresetsBtn"); if(mb) mb.style.display=""; }
+        loadPresets();
         await loadUsers();
       } catch (e) {
         g("listMsg").style.display = "block";
@@ -830,6 +948,43 @@
     };
     g("listWrap").addEventListener("pointerdown", onPointerDown);
 
+    // ── Block / re-enable a user (full offboard: disable + kill sessions + PO) ─
+    let MY_USERNAME = "";
+    let BLOCK_TARGET = "";
+    function refreshBlockBtn(username){
+      BLOCK_TARGET = username || "";
+      const btn = g("blockBtn"); if(!btn) return;
+      // No block control when adding, or for your own account.
+      if(!BLOCK_TARGET || BLOCK_TARGET === MY_USERNAME){ btn.style.display="none"; return; }
+      btn.style.display="";
+      const blocked = (g("f_status").value === "Disabled");
+      if(blocked){ btn.textContent="♻ Re-enable"; btn.style.background="#16a34a"; btn.style.borderColor="#16a34a"; }
+      else { btn.textContent="🚫 Block user"; btn.style.background="#b91c1c"; btn.style.borderColor="#b91c1c"; }
+    }
+    async function toggleBlock(){
+      if(!BLOCK_TARGET) return;
+      const blocked = (g("f_status").value === "Disabled");
+      const doBlock = !blocked;
+      const msg = doBlock
+        ? `Block ${BLOCK_TARGET}? This blocks their login, ends all their active sessions and devices, and cuts Purchase Orders. Their record and history are kept — you can re-enable them anytime.`
+        : `Re-enable ${BLOCK_TARGET}? They'll be able to log in again (they'll need to sign in fresh).`;
+      const ok = window.MLUI ? await MLUI.confirm(msg, {title: doBlock?"Block user":"Re-enable user", okLabel: doBlock?"Block user":"Re-enable", danger:doBlock}) : confirm(msg);
+      if(!ok) return;
+      const btn=g("blockBtn"); btn.disabled=true;
+      try{
+        const r=await api("/users/block",{method:"POST",body:JSON.stringify({username:BLOCK_TARGET, blocked:doBlock})});
+        const d=await r.json().catch(()=>({}));
+        if(r.ok && d.ok){
+          g("f_status").value = d.status || (doBlock?"Disabled":"Active");
+          refreshBlockBtn(BLOCK_TARGET);
+          if(window.MLUI&&MLUI.toast) MLUI.toast(doBlock?`${BLOCK_TARGET} blocked — sessions ended.`:`${BLOCK_TARGET} re-enabled.`);
+          loadUsers();
+        } else { alert((d && d.error) || "Could not update the user."); }
+      }catch(e){ alert("Could not update the user."); }
+      finally{ btn.disabled=false; }
+    }
+    { const bb=g("blockBtn"); if(bb) bb.onclick=toggleBlock; }
+
     function openEditor(user) {
       // reset to first tab
       document.querySelector('#tabs button[data-tab="details"]').click();
@@ -846,6 +1001,7 @@
       g("f_vehicle").value = user?.VehicleAssigned || "";
       g("f_emp").value = user?.EmploymentType || "Employed";
       g("f_status").value = user?.Status || "Active";
+      refreshBlockBtn(user?.Username || "");
       g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
@@ -985,9 +1141,22 @@
       full:    { label: "Full access", sub: "Owner / director — sees and does everything", staffType: "office", fullAccess: true, perms: [] }
     };
     let W = null;
+    // The wizard uses the OWNER-EDITED server presets (PRESETS) when available,
+    // falling back to the built-in defaults so it always works.
+    function wizRoles() {
+      if (typeof PRESETS !== "undefined" && PRESETS && PRESETS.length) {
+        return PRESETS.map(p => ({
+          id: p.id, label: p.name,
+          sub: (p.staffType === "office" ? "Office" : "Field") + (p.fullAccess ? " · full access" : " · " + ((p.perms||[]).length) + " permissions"),
+          staffType: p.staffType, fullAccess: !!p.fullAccess, perms: p.perms || []
+        }));
+      }
+      return Object.entries(ROLE_PRESETS).map(([id, pr]) => ({ id, label: pr.label, sub: pr.sub, staffType: pr.staffType, fullAccess: !!pr.fullAccess, perms: pr.perms || [] }));
+    }
+    function wizRole(id) { const rs = wizRoles(); return rs.find(r => r.id === id) || rs[0]; }
     function applyRole(role) {
-      const pr = ROLE_PRESETS[role];
-      W.role = role; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
+      const pr = wizRole(role);
+      W.role = pr.id; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
       W.perms = new Set(pr.perms);
       // A self-employed field engineer also needs their timesheet/invoice area.
       if (/self/i.test(W.employment) && pr.staffType === "field") W.perms.add("EngTimesheet");
@@ -1024,8 +1193,9 @@
       g("wizNext").onclick = wizNextClick;
     }
     function wizOpen() {
-      W = { step: 0, role: "field", employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
-      applyRole("field");
+      const first = (wizRoles()[0] || { id: "field" }).id;
+      W = { step: 0, role: first, employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
+      applyRole(first);
       ensureWizDom(); wizRender();
       g("wizOverlay").style.display = "flex";
     }
@@ -1050,9 +1220,9 @@
           + wizInput("Start date", "startDate", d.startDate, "date");
       } else if (st.id === "role") {
         b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role — it sets sensible permissions you can fine-tune on the next step.</div>`
-          + Object.entries(ROLE_PRESETS).map(([k, pr]) =>
-            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === k ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
-               <input type="radio" name="wizRole" value="${k}" ${W.role === k ? "checked" : ""} style="width:auto;margin-top:3px;">
+          + wizRoles().map(pr =>
+            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === pr.id ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
+               <input type="radio" name="wizRole" value="${esc(pr.id)}" ${W.role === pr.id ? "checked" : ""} style="width:auto;margin-top:3px;">
                <div><div style="font-weight:700;">${esc(pr.label)}</div><div style="font-size:12.5px;color:#64748b;">${esc(pr.sub)}</div></div></label>`).join("")
           + `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
              <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
@@ -1065,7 +1235,7 @@
           b.innerHTML = `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:14px;font-size:14px;">
             <b>Full access</b> — this person will see and do everything in the portal. No individual permissions to pick.</div>`;
         } else {
-          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(ROLE_PRESETS[W.role].label)}</b>. Tick or untick anything.</div>`
+          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(wizRole(W.role).label)}</b>. Tick or untick anything.</div>`
             + PERM_GROUPS.map(gp => {
               const rows = gp.perms.filter(p => WIZ_PERMS.includes(p) || p === "OfficeClock");
               if (!rows.length) return "";
@@ -1094,7 +1264,7 @@
           + `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13.5px;"><input type="checkbox" id="wiz_welcome" ${W.sendWelcome ? "checked" : ""} style="width:auto;"> Send a welcome email with a “set your password” link</label>`
           + `<div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;">
                <div style="font-weight:700;margin-bottom:6px;">Review</div>
-               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(ROLE_PRESETS[W.role].label)}</b> · ${esc(W.employment)}</div>
+               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(wizRole(W.role).label)}</b> · ${esc(W.employment)}</div>
                <div style="font-size:13px;color:#475569;margin-top:2px;">${W.full ? "Full access" : (W.perms.size + " permission" + (W.perms.size === 1 ? "" : "s"))}</div>
              </div>`
           + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:12px 14px;">
@@ -1162,6 +1332,12 @@
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
         if (!res.ok || !r.ok) { msg.textContent = r.error || "Create failed."; return; }
+        // Wire the engineer into the fleet registry too (driver history + van
+        // checks) — VehicleAssigned alone covers van-check, this adds the proper
+        // assignment row. Best-effort; needs Vehicles/FullAccess.
+        if (d.vehicle && d.username) {
+          try { await api("/fleet/assign", { method: "POST", body: JSON.stringify({ reg: d.vehicle, username: d.username }) }); } catch (e) {}
+        }
         await loadUsers();
         wizFinishScreen(body, r);
       } catch (e) { msg.textContent = "Network error."; }
@@ -1177,10 +1353,19 @@
       const emailLine = body.Email
         ? (r.welcomeEmailed ? `A welcome email with a set-your-password link was sent to ${esc(body.Email)}.` : (body.Password ? "Password set — they can log in now." : "⚠ No welcome email went out (email isn't configured) — set a password with “Reset PW”."))
         : (body.Password ? "Password set — they can log in now." : "⚠ No email given and no password set — use “Reset PW” to give them one.");
+      // Positive "linked everywhere" list — what this user is now wired into
+      // automatically (everything reads the live users table).
+      const wired = ["SLA board & scheduler", "Purchase Orders", "Holidays", "Staff dropdowns & reports"];
+      if (body.EngTimesheet === "Yes" || W.perms.has("EngTimesheet")) wired.push("Engineer timesheets");
+      if (body.VehicleAssigned) wired.push("Fleet & van checks · " + esc(body.VehicleAssigned));
+      const wiredBox = `<div style="margin-top:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:11px 14px;">
+          <div style="font-weight:700;color:#065f46;">✓ Now wired into</div>
+          <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#065f46;">${wired.map(x => `<li>${x}</li>`).join("")}</ul></div>`;
       g("wizBody").innerHTML = `<div style="text-align:center;padding:6px 0 12px;"><div style="font-size:40px;">🎉</div>
           <div style="font-weight:800;font-size:18px;margin-top:4px;">${esc(name)} created</div>
-          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(ROLE_PRESETS[W.role].label)}</div></div>
+          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(wizRole(W.role).label)}</div></div>
         <div style="font-size:13.5px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:11px 14px;">${emailLine}</div>`
+        + wiredBox
         + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:11px 14px;">
              <div style="font-weight:700;color:#b45309;">Still to set up</div>
              <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#7c4a12;">${gaps.map(x => `<li>${esc(x)}</li>`).join("")}</ul>

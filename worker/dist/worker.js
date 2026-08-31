@@ -1888,7 +1888,60 @@ async function handle2(request, env, ctx, url, sess) {
       const res = await sendEmail(env, { to: b.Email, ...msg });
       welcomeEmailed = !!res.ok;
     }
+    if (String(b.Status || "").toLowerCase() === "disabled") {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username),
+        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username)
+      ]);
+    }
     return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
+  }
+  if (path === "/users/block" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    if (b.username === gate.sess.user.username) return error("You cannot block your own account.", 400, env, request);
+    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!exists) return error("User not found", 404, env, request);
+    const blocked = b.blocked !== false;
+    const status = blocked ? "Disabled" : "Active";
+    await db.prepare("UPDATE users SET status=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(status, db.tenantId, b.username).run();
+    if (blocked) {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username)
+      ]);
+    }
+    return json({ ok: true, status, blocked }, {}, env, request);
+  }
+  if (path === "/users/presets" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='user_role_presets'").bind(db.tenantId).first();
+    let presets = null;
+    try {
+      presets = row && row.value ? JSON.parse(row.value) : null;
+    } catch {
+      presets = null;
+    }
+    if (!Array.isArray(presets) || !presets.length) presets = DEFAULT_PRESETS;
+    return json({ ok: true, presets, permissionKeys: PERMISSION_KEYS }, {}, env, request);
+  }
+  if (path === "/users/presets" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const validKeys = new Set(PERMISSION_KEYS);
+    const clean = (Array.isArray(b.presets) ? b.presets : []).slice(0, 30).map((p, i) => ({
+      id: String(p && p.id ? p.id : "role" + i).replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || "role" + i,
+      name: String(p && p.name ? p.name : "Role").slice(0, 60),
+      staffType: p && p.staffType === "office" ? "office" : "field",
+      fullAccess: !!(p && p.fullAccess),
+      perms: Array.isArray(p && p.perms) ? [...new Set(p.perms.map(String).filter((k) => validKeys.has(k)))] : []
+    }));
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "user_role_presets", JSON.stringify(clean)).run();
+    return json({ ok: true, presets: clean }, {}, env, request);
   }
   if (path === "/users/reset-password" && request.method === "POST") {
     const gate = await requireAdmin(env, request);
@@ -1945,6 +1998,30 @@ async function handle2(request, env, ctx, url, sess) {
   }
   return error("Unknown user route", 404, env, request);
 }
+var DEFAULT_PRESETS = [
+  {
+    id: "field",
+    name: "Field engineer",
+    staffType: "field",
+    fullAccess: false,
+    perms: ["SLA", "PurchaseOrders", "Assets", "Holiday", "MyDocuments", "Projects", "ThemeColour", "ThemeBackground", "YardGate"]
+  },
+  {
+    id: "office",
+    name: "Office staff",
+    staffType: "office",
+    fullAccess: false,
+    perms: ["PurchaseOrders", "Holiday", "Assets", "Vehicles", "AssetAdmin", "OfficeClock", "ThemeColour", "ThemeBackground"]
+  },
+  {
+    id: "manager",
+    name: "Office manager / admin",
+    staffType: "office",
+    fullAccess: false,
+    perms: ["PurchaseOrders", "Holiday", "Assets", "AssetAdmin", "Vehicles", "OfficeClock", "SLA", "SLAAdmin", "HolidayAdmin", "TimesheetAdmin", "OfficeTimesheet", "Projects", "ProjectsAdmin", "Compliance", "Sites", "AddSite", "MyDocuments", "ThemeColour", "ThemeBackground", "DeviceAdmin"]
+  },
+  { id: "full", name: "Full access", staffType: "office", fullAccess: true, perms: [] }
+];
 var USER_AREAS = [
   { key: "vehicles", label: "Vehicles / van checks", perm: "Vehicles" },
   { key: "sla", label: "SLA jobs", perm: "SLA" },
@@ -24003,6 +24080,7 @@ async function getRaiseOptions(env, username) {
 async function handle27(request, env, ctx, url, sess) {
   const db = env.PO_DB;
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
+  if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const field = staffTypeOf2(sess.user) === "field";
   const office = perms.FullAccess === "Yes" || perms.PurchaseOrders === "Yes" && !field;

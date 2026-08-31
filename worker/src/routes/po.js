@@ -97,6 +97,9 @@ export async function handle(request, env, ctx, url, sess) {
   if (!db) return error("PO database not bound (PO_DB)", 500, env, request);
   // Permissions come from the user_permissions table; office = can manage POs,
   // field engineers = may raise (out of hours) but never see the office surface.
+  // A Disabled (blocked) user is cut off from PO server-side, even if a token
+  // somehow survived — requireSession loads the user fresh, so status is current.
+  if (sess.user && String(sess.user.status || "").toLowerCase() === "disabled") return error("Account disabled", 403, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   const field = staffTypeOf(sess.user) === "field";
   // Field engineers are ALWAYS the restricted (raise-only) role, even if they
