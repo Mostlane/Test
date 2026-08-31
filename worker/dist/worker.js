@@ -1988,6 +1988,9 @@ async function handle2(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     if (!b.username) return error("username required", 400, env, request);
     if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
+    const pw = String(b.confirmPassword || "");
+    const pwOk = env.MASTER_PASSWORD && pw && pw === env.MASTER_PASSWORD || pw && await verifyPassword(pw, gate.sess.user);
+    if (!pwOk) return error("Password confirmation required to delete a user.", 403, env, request);
     await db.batch([
       db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
       db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
