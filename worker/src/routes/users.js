@@ -411,10 +411,13 @@ export async function handle(request, env, ctx, url, sess) {
 // role's permissions in the Users-admin preset editor; stored in app_config
 // `user_role_presets` thereafter. Applying a preset sets the switches + staffType.
 const DEFAULT_PRESETS = [
-  { id: "field",  name: "Field engineer", staffType: "field",  fullAccess: false, perms: [] },
-  { id: "office", name: "Office staff",   staffType: "office", fullAccess: false, perms: [] },
-  { id: "admin",  name: "Office admin",   staffType: "office", fullAccess: false, perms: [] },
-  { id: "full",   name: "Full access",    staffType: "office", fullAccess: true,  perms: [] },
+  { id: "field",   name: "Field engineer",         staffType: "field",  fullAccess: false,
+    perms: ["SLA","PurchaseOrders","Assets","Holiday","MyDocuments","Projects","ThemeColour","ThemeBackground","YardGate"] },
+  { id: "office",  name: "Office staff",           staffType: "office", fullAccess: false,
+    perms: ["PurchaseOrders","Holiday","Assets","Vehicles","AssetAdmin","OfficeClock","ThemeColour","ThemeBackground"] },
+  { id: "manager", name: "Office manager / admin", staffType: "office", fullAccess: false,
+    perms: ["PurchaseOrders","Holiday","Assets","AssetAdmin","Vehicles","OfficeClock","SLA","SLAAdmin","HolidayAdmin","TimesheetAdmin","OfficeTimesheet","Projects","ProjectsAdmin","Compliance","Sites","AddSite","MyDocuments","ThemeColour","ThemeBackground","DeviceAdmin"] },
+  { id: "full",    name: "Full access",            staffType: "office", fullAccess: true,  perms: [] },
 ];
 
 // Areas of responsibility an admin can assign to an office user (Users Admin).

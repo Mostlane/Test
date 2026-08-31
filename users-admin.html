@@ -1141,9 +1141,22 @@
       full:    { label: "Full access", sub: "Owner / director — sees and does everything", staffType: "office", fullAccess: true, perms: [] }
     };
     let W = null;
+    // The wizard uses the OWNER-EDITED server presets (PRESETS) when available,
+    // falling back to the built-in defaults so it always works.
+    function wizRoles() {
+      if (typeof PRESETS !== "undefined" && PRESETS && PRESETS.length) {
+        return PRESETS.map(p => ({
+          id: p.id, label: p.name,
+          sub: (p.staffType === "office" ? "Office" : "Field") + (p.fullAccess ? " · full access" : " · " + ((p.perms||[]).length) + " permissions"),
+          staffType: p.staffType, fullAccess: !!p.fullAccess, perms: p.perms || []
+        }));
+      }
+      return Object.entries(ROLE_PRESETS).map(([id, pr]) => ({ id, label: pr.label, sub: pr.sub, staffType: pr.staffType, fullAccess: !!pr.fullAccess, perms: pr.perms || [] }));
+    }
+    function wizRole(id) { const rs = wizRoles(); return rs.find(r => r.id === id) || rs[0]; }
     function applyRole(role) {
-      const pr = ROLE_PRESETS[role];
-      W.role = role; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
+      const pr = wizRole(role);
+      W.role = pr.id; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
       W.perms = new Set(pr.perms);
       // A self-employed field engineer also needs their timesheet/invoice area.
       if (/self/i.test(W.employment) && pr.staffType === "field") W.perms.add("EngTimesheet");
@@ -1180,8 +1193,9 @@
       g("wizNext").onclick = wizNextClick;
     }
     function wizOpen() {
-      W = { step: 0, role: "field", employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
-      applyRole("field");
+      const first = (wizRoles()[0] || { id: "field" }).id;
+      W = { step: 0, role: first, employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
+      applyRole(first);
       ensureWizDom(); wizRender();
       g("wizOverlay").style.display = "flex";
     }
@@ -1206,9 +1220,9 @@
           + wizInput("Start date", "startDate", d.startDate, "date");
       } else if (st.id === "role") {
         b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role — it sets sensible permissions you can fine-tune on the next step.</div>`
-          + Object.entries(ROLE_PRESETS).map(([k, pr]) =>
-            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === k ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
-               <input type="radio" name="wizRole" value="${k}" ${W.role === k ? "checked" : ""} style="width:auto;margin-top:3px;">
+          + wizRoles().map(pr =>
+            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === pr.id ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
+               <input type="radio" name="wizRole" value="${esc(pr.id)}" ${W.role === pr.id ? "checked" : ""} style="width:auto;margin-top:3px;">
                <div><div style="font-weight:700;">${esc(pr.label)}</div><div style="font-size:12.5px;color:#64748b;">${esc(pr.sub)}</div></div></label>`).join("")
           + `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
              <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
@@ -1221,7 +1235,7 @@
           b.innerHTML = `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:14px;font-size:14px;">
             <b>Full access</b> — this person will see and do everything in the portal. No individual permissions to pick.</div>`;
         } else {
-          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(ROLE_PRESETS[W.role].label)}</b>. Tick or untick anything.</div>`
+          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(wizRole(W.role).label)}</b>. Tick or untick anything.</div>`
             + PERM_GROUPS.map(gp => {
               const rows = gp.perms.filter(p => WIZ_PERMS.includes(p) || p === "OfficeClock");
               if (!rows.length) return "";
@@ -1250,7 +1264,7 @@
           + `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13.5px;"><input type="checkbox" id="wiz_welcome" ${W.sendWelcome ? "checked" : ""} style="width:auto;"> Send a welcome email with a “set your password” link</label>`
           + `<div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;">
                <div style="font-weight:700;margin-bottom:6px;">Review</div>
-               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(ROLE_PRESETS[W.role].label)}</b> · ${esc(W.employment)}</div>
+               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(wizRole(W.role).label)}</b> · ${esc(W.employment)}</div>
                <div style="font-size:13px;color:#475569;margin-top:2px;">${W.full ? "Full access" : (W.perms.size + " permission" + (W.perms.size === 1 ? "" : "s"))}</div>
              </div>`
           + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:12px 14px;">
@@ -1318,6 +1332,12 @@
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
         if (!res.ok || !r.ok) { msg.textContent = r.error || "Create failed."; return; }
+        // Wire the engineer into the fleet registry too (driver history + van
+        // checks) — VehicleAssigned alone covers van-check, this adds the proper
+        // assignment row. Best-effort; needs Vehicles/FullAccess.
+        if (d.vehicle && d.username) {
+          try { await api("/fleet/assign", { method: "POST", body: JSON.stringify({ reg: d.vehicle, username: d.username }) }); } catch (e) {}
+        }
         await loadUsers();
         wizFinishScreen(body, r);
       } catch (e) { msg.textContent = "Network error."; }
@@ -1333,10 +1353,19 @@
       const emailLine = body.Email
         ? (r.welcomeEmailed ? `A welcome email with a set-your-password link was sent to ${esc(body.Email)}.` : (body.Password ? "Password set — they can log in now." : "⚠ No welcome email went out (email isn't configured) — set a password with “Reset PW”."))
         : (body.Password ? "Password set — they can log in now." : "⚠ No email given and no password set — use “Reset PW” to give them one.");
+      // Positive "linked everywhere" list — what this user is now wired into
+      // automatically (everything reads the live users table).
+      const wired = ["SLA board & scheduler", "Purchase Orders", "Holidays", "Staff dropdowns & reports"];
+      if (body.EngTimesheet === "Yes" || W.perms.has("EngTimesheet")) wired.push("Engineer timesheets");
+      if (body.VehicleAssigned) wired.push("Fleet & van checks · " + esc(body.VehicleAssigned));
+      const wiredBox = `<div style="margin-top:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:11px 14px;">
+          <div style="font-weight:700;color:#065f46;">✓ Now wired into</div>
+          <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#065f46;">${wired.map(x => `<li>${x}</li>`).join("")}</ul></div>`;
       g("wizBody").innerHTML = `<div style="text-align:center;padding:6px 0 12px;"><div style="font-size:40px;">🎉</div>
           <div style="font-weight:800;font-size:18px;margin-top:4px;">${esc(name)} created</div>
-          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(ROLE_PRESETS[W.role].label)}</div></div>
+          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(wizRole(W.role).label)}</div></div>
         <div style="font-size:13.5px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:11px 14px;">${emailLine}</div>`
+        + wiredBox
         + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:11px 14px;">
              <div style="font-weight:700;color:#b45309;">Still to set up</div>
              <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#7c4a12;">${gaps.map(x => `<li>${esc(x)}</li>`).join("")}</ul>

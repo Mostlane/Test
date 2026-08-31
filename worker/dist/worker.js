@@ -1999,9 +1999,27 @@ async function handle2(request, env, ctx, url, sess) {
   return error("Unknown user route", 404, env, request);
 }
 var DEFAULT_PRESETS = [
-  { id: "field", name: "Field engineer", staffType: "field", fullAccess: false, perms: [] },
-  { id: "office", name: "Office staff", staffType: "office", fullAccess: false, perms: [] },
-  { id: "admin", name: "Office admin", staffType: "office", fullAccess: false, perms: [] },
+  {
+    id: "field",
+    name: "Field engineer",
+    staffType: "field",
+    fullAccess: false,
+    perms: ["SLA", "PurchaseOrders", "Assets", "Holiday", "MyDocuments", "Projects", "ThemeColour", "ThemeBackground", "YardGate"]
+  },
+  {
+    id: "office",
+    name: "Office staff",
+    staffType: "office",
+    fullAccess: false,
+    perms: ["PurchaseOrders", "Holiday", "Assets", "Vehicles", "AssetAdmin", "OfficeClock", "ThemeColour", "ThemeBackground"]
+  },
+  {
+    id: "manager",
+    name: "Office manager / admin",
+    staffType: "office",
+    fullAccess: false,
+    perms: ["PurchaseOrders", "Holiday", "Assets", "AssetAdmin", "Vehicles", "OfficeClock", "SLA", "SLAAdmin", "HolidayAdmin", "TimesheetAdmin", "OfficeTimesheet", "Projects", "ProjectsAdmin", "Compliance", "Sites", "AddSite", "MyDocuments", "ThemeColour", "ThemeBackground", "DeviceAdmin"]
+  },
   { id: "full", name: "Full access", staffType: "office", fullAccess: true, perms: [] }
 ];
 var USER_AREAS = [
