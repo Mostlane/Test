@@ -310,6 +310,19 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   "Disabled" (and any other status), so a disabled account disappears from every
   picker/list portal-wide; **Users Admin passes `?all=1`** to still see + re-enable
   them. (Login already blocks Disabled in auth.js.)
+  **Role presets (Aug 2026):** GET/POST **/users/presets** (app_config
+  `user_role_presets`, admin) = editable standard roles `[{id,name,staffType,
+  fullAccess,perms[]}]`, seeded from the wizard defaults (field/office/manager/
+  full); Users Admin's Permissions tab + the add-user wizard apply them.
+  **Block/offboard:** POST **/users/block** `{username,blocked}` sets Disabled +
+  DELETEs the user's sessions + devices (and cuts PO — po.js refuses a Disabled
+  session); POST /users also kills sessions when it saves a user Disabled. Vehicle
+  assignment is left intact (reversible). **Delete is PASSWORD-GUARDED:** POST
+  /users/delete now requires `confirmPassword` = the acting admin's own password
+  (verifyPassword) OR MASTER_PASSWORD, else 403 — and it only removes the account/
+  permissions/sessions/devices, NOT the person's history (jobs/timesheets/POs/
+  audit_log stay, orphaned by username). Block is the recommended offboard; Delete
+  lives in the editor's Account tab "Delete this user" danger zone.
 - `devices.js` — check/register device, /device/admin-list, /device/allowed,
   /device/reset, owner exempt.
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,

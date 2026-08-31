@@ -405,6 +405,17 @@
             </span>
           </label>
         </div>
+
+        <div id="dangerZone" style="margin-top:18px;padding:14px;border:1px solid rgba(255,59,48,.3);border-radius:14px;background:rgba(255,59,48,.05);">
+          <div style="font-weight:600;color:var(--red);margin-bottom:4px;">Delete this user</div>
+          <p class="muted" style="margin:0 0 10px;font-size:13px;color:#a1362f;">
+            Removes the account, login, sessions and devices. Their work <b>history is kept</b>
+            (jobs, timesheets, POs, activity log) but can no longer be linked to their name — and this
+            <b>can't be undone</b>. To just stop someone accessing the portal, use <b>Block</b>
+            (bottom-left) instead — it's reversible and keeps everything intact.
+          </p>
+          <button type="button" class="btn red" id="deleteUserBtn" style="display:none;">🗑 Delete user…</button>
+        </div>
       </div>
 
       <p id="panelMsg" class="msg"></p>
@@ -863,7 +874,6 @@
           <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
           ${u.Email ? `<button class="btn small grey" data-welcome="${esc(u.Username)}">Resend welcome</button>` : ``}
           <button class="btn small grey" data-reset="${esc(u.Username)}">Reset PW</button>
-          <button class="btn small red" data-del="${esc(u.Username)}">Delete</button>
         </div></div>
       </div>`;
     }
@@ -998,6 +1008,8 @@
     let BLOCK_TARGET = "";
     function refreshBlockBtn(username){
       BLOCK_TARGET = username || "";
+      const delBtn = g("deleteUserBtn");
+      if (delBtn) delBtn.style.display = (BLOCK_TARGET && BLOCK_TARGET !== MY_USERNAME) ? "" : "none";
       const btn = g("blockBtn"); if(!btn) return;
       // No block control when adding, or for your own account.
       if(!BLOCK_TARGET || BLOCK_TARGET === MY_USERNAME){ btn.style.display="none"; return; }
@@ -1501,15 +1513,44 @@
       } catch (e) { alert("Network error."); }
     }
 
-    async function delUser(username) {
-      if (!confirm(`Delete user ${username}? This cannot be undone.`)) return;
-      try {
-        const res = await api("/users/delete", { method: "POST", body: JSON.stringify({ username }) });
-        const r = await res.json();
-        if (!res.ok || !r.ok) { alert(r.error || "Delete failed."); return; }
-        await loadUsers();
-      } catch (e) { alert("Network error."); }
+    // Delete is guarded: the admin must re-enter THEIR OWN password (verified
+    // server-side; the master password also works). Opens a small confirm modal.
+    function delUser(username) {
+      if (!username || username === MY_USERNAME) return;
+      const ov = document.createElement("div"); ov.className = "overlay"; ov.style.display = "flex"; ov.style.zIndex = "2147483250";
+      ov.innerHTML = `<div class="panel" style="max-width:440px;">
+        <h2 style="color:var(--red);">Delete ${esc(username)}</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 12px;">This permanently removes the account and login. Their work history stays but can no longer be linked to their name, and <b>this can't be undone</b>. Confirm with <b>your own password</b>.</p>
+        <label>Your password</label>
+        <input type="password" id="delPw" autocomplete="current-password" placeholder="Your portal password">
+        <p id="delMsg" class="msg err" style="min-height:18px;"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button type="button" class="btn grey" id="delCancel">Cancel</button>
+          <button type="button" class="btn red" id="delGo">Delete user</button>
+        </div>
+      </div>`;
+      document.body.appendChild(ov);
+      const close = () => ov.remove();
+      ov.querySelector("#delCancel").onclick = close;
+      ov.addEventListener("click", e => { if (e.target === ov) close(); });
+      const pw = ov.querySelector("#delPw"); setTimeout(() => { try { pw.focus(); } catch {} }, 50);
+      const go = ov.querySelector("#delGo");
+      async function submit() {
+        const msg = ov.querySelector("#delMsg");
+        if (!pw.value) { msg.textContent = "Enter your password to confirm."; return; }
+        go.disabled = true; msg.className = "msg"; msg.textContent = "Deleting…";
+        try {
+          const res = await api("/users/delete", { method: "POST", body: JSON.stringify({ username, confirmPassword: pw.value }) });
+          const r = await res.json().catch(() => ({}));
+          if (!res.ok || !r.ok) { msg.className = "msg err"; msg.textContent = r.error || "Delete failed."; go.disabled = false; return; }
+          close(); closeEditor(); await loadUsers();
+          if (window.MLUI && MLUI.toast) MLUI.toast(`${username} deleted.`);
+        } catch (e) { msg.className = "msg err"; msg.textContent = "Network error."; go.disabled = false; }
+      }
+      go.onclick = submit;
+      pw.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
     }
+    { const _delBtn = g("deleteUserBtn"); if (_delBtn) _delBtn.onclick = () => delUser(g("f_username").value.trim()); }
 
     guardAndLoad();
   </script>
