@@ -839,7 +839,7 @@
       const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
       const lv = levelOf(u);
       const gaps = setupGaps(u);
-      const gapBadge = gaps.length ? ` <span class="lvl" style="background:#fbf0e0;color:#b45309;" title="Still to set up: ${esc(gaps.join(", "))}">⚠ ${gaps.length} to set up</span>` : "";
+      const gapBadge = gaps.length ? ` <span class="lvl gapbadge" data-gap="${esc(u.Username)}" style="background:#fbf0e0;color:#b45309;cursor:pointer;" title="Tap to fix: ${esc(gaps.join(", "))}">⚠ ${gaps.length} to set up</span>` : "";
       return `<div class="urow" data-user="${esc(u.Username)}">
         <span class="grip" title="Drag to reorder">⠿</span>
         <div class="ucell uname" data-label="User"><b>${esc(name)}</b> <span class="lvl ${lv.cls}">${lv.label}</span>${gapBadge}<div class="muted">${esc(u.Username)}</div></div>
@@ -1085,8 +1085,21 @@
       banner.querySelectorAll(".sg-jump").forEach(b => b.addEventListener("click", () => {
         const btn = document.querySelector('#tabs button[data-tab="' + b.dataset.goto + '"]'); if (btn) btn.click();
         const first = g(GAP_MAP[Object.keys(GAP_MAP).find(k => GAP_MAP[k].tab === b.dataset.goto)].fields[0]);
-        if (first) { try { first.focus(); } catch {} }
+        focusField(first);
       }));
+    }
+    // Scroll a field into view + focus it (used by the setup jumps).
+    function focusField(el) {
+      if (!el) return;
+      try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {}
+      try { el.focus({ preventScroll: true }); } catch { try { el.focus(); } catch {} }
+    }
+    // Open a user's editor and land straight on the FIRST missing field.
+    function jumpToFirstGap(user) {
+      const gaps = setupGaps(user); if (!gaps.length) return;
+      const m = GAP_MAP[gaps[0]]; if (!m) return;
+      const btn = document.querySelector('#tabs button[data-tab="' + m.tab + '"]'); if (btn) btn.click();
+      focusField(g(m.fields[0]));
     }
     function closeEditor() { g("overlay").classList.remove("open"); }
 
@@ -1095,6 +1108,13 @@
 
     g("listWrap").addEventListener("click", async (e) => {
       const t = e.target;
+      // ⚠ "to set up" badge → open the editor AND jump to the first missing field.
+      const gapEl = t.closest ? t.closest("[data-gap]") : null;
+      if (gapEl) {
+        const u = allUsers.find(x => x.Username === gapEl.dataset.gap);
+        if (u) { openEditor(u); setTimeout(() => jumpToFirstGap(u), 80); }
+        return;
+      }
       if (t.dataset.edit) openEditor(allUsers.find(u => u.Username === t.dataset.edit));
       else if (t.dataset.welcome) await resendWelcome(t.dataset.welcome);
       else if (t.dataset.reset) await resetPw(t.dataset.reset);
