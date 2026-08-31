@@ -321,8 +321,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   /users/delete now requires `confirmPassword` = the acting admin's own password
   (verifyPassword) OR MASTER_PASSWORD, else 403 — and it only removes the account/
   permissions/sessions/devices, NOT the person's history (jobs/timesheets/POs/
-  audit_log stay, orphaned by username). Block is the recommended offboard; Delete
-  lives in the editor's Account tab "Delete this user" danger zone.
+  audit_log stay, orphaned by username). Block is the recommended offboard; the
+  editor's Account-tab "Removing this person" zone leads with Block and hides a
+  guarded "Permanently erase" behind a disclosure (for test/dupes only).
+  **Former-staff records stay reachable:** my-documents.html and activity-log.html
+  load `/users?all=1` behind a **"Show former staff"** toggle (docs) / a labelled
+  "— former" option (activity log), and the `/staff/docs?user=` + `/audit/log`
+  endpoints already accept any username — so a Blocked leaver's documents +
+  history remain fully accessible (only a permanent-erase loses that).
 - `devices.js` — check/register device, /device/admin-list, /device/allowed,
   /device/reset, owner exempt.
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,

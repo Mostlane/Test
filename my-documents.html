@@ -45,6 +45,7 @@
     <label class="lbl">Manage a staff member's file</label>
     <div class="row">
       <select id="staffPick"></select>
+      <label class="lbl" style="display:inline-flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;"><input type="checkbox" id="showFormer" style="width:auto;"> Show former staff</label>
       <button class="btn small" id="addCatBtn">+ Add category</button>
     </div>
     <div class="row">
@@ -103,15 +104,31 @@ const full = isFull();
 let viewing = me();     // whose personal file we're showing (admins can switch)
 let categories = [];
 
+let ALL_USERS = [];
+function isActiveStatus(u){ const s = String(u.Status||"").toLowerCase(); return s === "" || s === "active"; }
 async function loadUsers(){
   try{
-    const d = await authFetch("/users").then(r=>r.json());
-    const users = d.Users || d.users || [];
-    const sel = document.getElementById("staffPick");
-    sel.innerHTML = users.map(u => `<option value="${esc(u.Username||u.username)}">${esc(u.Username||u.username)}</option>`).join("");
-    if(users.length){ viewing = (users.find(u => (u.Username||u.username)===me()) ? me() : (users[0].Username||users[0].username)); sel.value = viewing; }
-    sel.onchange = () => { viewing = sel.value; load(); };
+    // Include disabled/former staff (?all=1) so a departed person's documents
+    // stay reachable — they're hidden behind the "Show former staff" toggle.
+    const d = await authFetch("/users?all=1").then(r=>r.json());
+    ALL_USERS = d.Users || d.users || [];
+    renderStaffPick();
+    const chk = document.getElementById("showFormer");
+    if(chk) chk.onchange = renderStaffPick;
   }catch(e){ /* non-fatal */ }
+}
+function renderStaffPick(){
+  const sel = document.getElementById("staffPick"); if(!sel) return;
+  const showFormer = !!(document.getElementById("showFormer") || {}).checked;
+  const list = ALL_USERS.filter(u => isActiveStatus(u) || showFormer);
+  const prev = viewing;
+  sel.innerHTML = list.map(u => { const un = (u.Username||u.username); return `<option value="${esc(un)}">${esc(un)}${isActiveStatus(u) ? "" : " — former"}</option>`; }).join("");
+  if(!list.some(u => (u.Username||u.username) === viewing)){
+    viewing = list.find(u => (u.Username||u.username) === me()) ? me() : (list[0] ? (list[0].Username||list[0].username) : me());
+  }
+  sel.value = viewing;
+  sel.onchange = () => { viewing = sel.value; load(); };
+  if(viewing !== prev) load();
 }
 
 function renderGroups(container, groups, canDelete){
