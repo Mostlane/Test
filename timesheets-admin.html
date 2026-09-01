@@ -50,6 +50,14 @@
   .eday{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:7px 0}
   .eday.wk2{background:#fffdf2}
   .eday h4{font-size:13px;color:var(--brand);margin-bottom:5px}
+  .autoMi{margin-top:6px;background:#f6f9fc;border:1px solid #e8eef6;border-radius:9px;padding:6px 10px}
+  .autoMi-h{font-size:11px;font-weight:700;color:#334155;margin-bottom:3px}
+  .autoMi.muted2{color:#64748b;font-size:12px}
+  .autoleg{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0;border-bottom:1px dashed #e2e8f0}
+  .autoleg:last-child{border-bottom:none}
+  .autoleg span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#475569}
+  .autoleg b{flex:none}
+  .autoleg.tot{font-weight:700;border-top:1px solid #cbd5e1;border-bottom:none;margin-top:2px;padding-top:5px}
   .erow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0}
   .erow input[type=time]{font:inherit;padding:6px;border:1px solid #cbd5e1;border-radius:7px}
   .erow input[type=text],.erow input[type=number]{font:inherit;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px}
@@ -100,8 +108,15 @@
   <h2 id="editTitle">Edit week</h2>
   <p class="note" id="editSub"></p>
   <div id="editBody"></div>
+  <div id="apprBox" style="border-top:1px solid #e5e9f0;margin-top:12px;padding-top:12px">
+    <div id="apprStatus" style="font-size:13px;margin-bottom:6px"></div>
+    <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">Office note to the engineer (optional)</label>
+    <textarea id="apprNote" rows="2" placeholder="e.g. Adjusted Tuesday finish to match the tracker" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;resize:vertical"></textarea>
+  </div>
   <div class="foot"><span class="muted" id="editState" style="margin-right:auto;align-self:center">Changes save automatically</span>
-  <button class="btn primary" onclick="closeEdit()">Close</button></div>
+  <button class="btn" id="reopenBtn" style="display:none" onclick="reopenWeek()">↩ Re-open</button>
+  <button class="btn primary" id="approveBtn" onclick="approveWeek()">✅ Approve &amp; lock</button>
+  <button class="btn" onclick="closeEdit()">Close</button></div>
 </div></div>
 
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
@@ -182,7 +197,7 @@ function renderTable(){
     const pay=u.selfEmployed&&u.totals.total!=null?`<br><span class="muted" style="font-size:11px">${money(u.totals.total)}</span>`:"";
     return `<tr><td class="name">${esc(u.name)}${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
       <td class="tot">${hmS(u.totals.paidMins)}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
-      <td>${inv}</td><td><button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="Edit this week">✎</button></td></tr>`;
+      <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");
 }
 g("showAll").onchange=renderTable;
@@ -193,20 +208,59 @@ function openEdit(username){
   EDIT_U=u;
   g("editTitle").textContent="Edit — "+u.name;
   g("editSub").textContent=u.invoice?"This week is invoiced (#"+u.invoice.number+") — delete the invoice first to make changes.":"Times are as the engineer entered them; deductions are applied automatically from Settings.";
+  const autoMi=!!(u.autoMileage&&u.autoMileage.applies);   // door-to-door, locked
   g("editBody").innerHTML=DATA.days.map((date,i)=>{
     const d=u.days[date]||{};
-    const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
     const hol=(u.holidays||{})[date];
+    let miBlock;
+    if(autoMi){
+      const b=(u.autoMileage.byDate||{})[date];
+      if(b&&(b.legs||[]).length){
+        const legs=b.legs.map(l=>`<div class="autoleg"><span>${esc(l.from)} → ${esc(l.to)}</span><b>${l.miles} mi${l.src==="est"?" ~":""}</b></div>`).join("");
+        miBlock=`<div class="autoMi"><div class="autoMi-h">🚗 Door-to-door (auto, locked)</div>${legs}<div class="autoleg tot"><span>Total</span><b>${b.miles} mi</b></div></div>`;
+      } else if(b&&b.noRoute){ miBlock=`<div class="autoMi muted2">No site postcodes captured — no mileage.</div>`; }
+      else miBlock="";
+    } else {
+      const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
+      miBlock=`<div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button>`;
+    }
     return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip">🌴 ${hol.half||"Hol"}</span>`:""}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
-      <div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button></div>`;
+      ${miBlock}</div>`;
   }).join("");
-  const locked=!!u.invoice;
+  const appr=u.approval||null;
+  const locked=!!u.invoice||!!appr;   // approved OR invoiced → day inputs read-only
   g("editBody").querySelectorAll("input,button").forEach(el=>el.disabled=locked);
-  g("editState").textContent=locked?"Week locked (invoiced)":"Changes save automatically";
+  g("editState").textContent=u.invoice?"Week locked (invoiced)":(appr?"Approved & locked":"Changes save automatically");
+  // Approval controls
+  const when=appr&&appr.at?new Date(appr.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"";
+  g("apprStatus").innerHTML=appr
+    ? `<span style="color:#166534;font-weight:700">✅ Approved</span> by ${esc(appr.by||"office")}${when?" on "+when:""} — locked for the engineer.`
+    : `<span style="color:#92400e">Not yet approved.</span> Make any edits above, then approve to lock it and notify the engineer.`;
+  g("apprNote").value=appr?(appr.note||""):"";
+  g("apprNote").disabled=!!u.invoice;
+  g("approveBtn").style.display=(appr||u.invoice)?"none":"";
+  g("reopenBtn").style.display=(appr&&!u.invoice)?"":"none";
   editDirty=false;editBusy=false;clearTimeout(editTimer);clearTimeout(editRetry);
   g("editOv").classList.add("show");
+}
+async function approveWeek(){
+  if(!EDIT_U)return;
+  // Flush any pending edits first, then approve.
+  if(editDirty||editBusy){clearTimeout(editTimer);await doEditSave();}
+  const note=g("apprNote").value.trim();
+  const btn=g("approveBtn");btn.disabled=true;btn.textContent="Approving…";
+  const r=await authFetchTO("/ts/admin/approve",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK,note})}).then(x=>x.json()).catch(()=>null);
+  if(r&&r.ok){ g("editOv").classList.remove("show"); EDIT_U=null; await load(); }
+  else{ btn.disabled=false;btn.textContent="✅ Approve & lock"; alert((r&&r.error)||"Couldn't approve."); }
+}
+async function reopenWeek(){
+  if(!EDIT_U)return;
+  if(!confirm("Re-open this week? The engineer will be able to edit it again until you re-approve."))return;
+  const r=await authFetchTO("/ts/admin/reopen",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK})}).then(x=>x.json()).catch(()=>null);
+  if(r&&r.ok){ g("editOv").classList.remove("show"); EDIT_U=null; await load(); }
+  else alert((r&&r.error)||"Couldn't re-open.");
 }
 function addMi(btn){
   const host=btn.parentNode.querySelector(".mihost");
@@ -231,13 +285,13 @@ function collectEditDays(){
   return days;
 }
 function queueEditSave(){
-  if(!EDIT_U||EDIT_U.invoice)return;
+  if(!EDIT_U||EDIT_U.invoice||EDIT_U.approval)return;
   editDirty=true;
   clearTimeout(editTimer);
   editTimer=setTimeout(()=>doEditSave(),900);
 }
 async function doEditSave(){
-  if(!EDIT_U)return;
+  if(!EDIT_U||EDIT_U.approval)return;
   clearTimeout(editTimer);clearTimeout(editRetry);
   if(editBusy){editDirty=true;return;}
   editBusy=true;editDirty=false;
