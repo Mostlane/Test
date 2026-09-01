@@ -3806,6 +3806,7 @@ ${xrefAt}
 
 // worker/src/routes/timesheets.js
 init_holidays();
+init_push();
 async function holidayDaysFor(env, tid, username, monday) {
   const end = weekDays(monday)[6];
   const map = await approvedLeaveInRange(env, tid, monday, end, username);
@@ -3844,6 +3845,18 @@ async function ensureTables(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN approved_at TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN approved_by TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN admin_note TEXT").run();
+  } catch {
+  }
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL, number INTEGER NOT NULL, week TEXT NOT NULL,
@@ -4232,13 +4245,17 @@ function weekTotals(days, eff) {
   };
 }
 async function loadWeek(env, tid, username, monday) {
-  const row = await env.DB.prepare("SELECT data, at FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, username).first();
+  const row = await env.DB.prepare("SELECT data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, username).first();
   let days = {};
   try {
     days = row && row.data ? JSON.parse(row.data).days || {} : {};
   } catch {
   }
-  return { days, savedAt: row ? row.at : null };
+  return {
+    days,
+    savedAt: row ? row.at : null,
+    approval: row && row.approved_at ? { at: row.approved_at, by: row.approved_by || "", note: row.admin_note || "" } : null
+  };
 }
 async function invoiceFor(env, tid, username, monday) {
   return env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? AND week=?").bind(tid, username, monday).first();
@@ -4668,7 +4685,7 @@ async function handle7(request, env, ctx, url, sess) {
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const u = await userRow(env, tid, me);
     const eff = effectiveCfg(cfg, u);
-    const { days, savedAt } = await loadWeek(env, tid, me, monday);
+    const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
@@ -4681,6 +4698,8 @@ async function handle7(request, env, ctx, url, sess) {
       auto,
       holidays,
       jobMeta,
+      approval,
+      locked: !!approval,
       totals: weekTotals(days, eff),
       invoice: inv ? {
         number: inv.number,
@@ -4696,6 +4715,10 @@ async function handle7(request, env, ctx, url, sess) {
     const monday = mondayOf(b.week);
     if (await invoiceFor(env, tid, me, monday))
       return error("This week has already been invoiced \u2014 ask the office to remove the invoice first.", 409, env, request);
+    {
+      const { approval } = await loadWeek(env, tid, me, monday);
+      if (approval) return error("This week has been approved by the office and is locked \u2014 ask the office to re-open it if something needs changing.", 423, env, request);
+    }
     const u = await userRow(env, tid, me);
     const eff = effectiveCfg(cfg, u);
     const days = cleanDays(monday, b.days);
@@ -5209,14 +5232,15 @@ async function handle7(request, env, ctx, url, sess) {
       const { results: users } = await env.DB.prepare(
         "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
       ).bind(tid).all();
-      const { results: rows } = await env.DB.prepare("SELECT username, data, at FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const { results: rows } = await env.DB.prepare("SELECT username, data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
       const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
-      const dataBy = {};
+      const dataBy = {}, apprBy = {};
       for (const r of rows || []) {
         try {
           dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at };
         } catch {
         }
+        if (r.approved_at) apprBy[r.username] = { at: r.approved_at, by: r.approved_by || "", note: r.admin_note || "" };
       }
       const invBy = {};
       for (const r of invs || []) invBy[r.username] = r;
@@ -5239,7 +5263,7 @@ async function handle7(request, env, ctx, url, sess) {
         }
         const inv = invBy[u.username];
         const perDay = {};
-        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };
+        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [] };
         out.push({
           username: u.username,
           name: displayName(u),
@@ -5250,6 +5274,7 @@ async function handle7(request, env, ctx, url, sess) {
           perDay,
           savedAt: d.at,
           totals: weekTotals(d.days, eff),
+          approval: apprBy[u.username] || null,
           holidays: leaveAll[u.username] || {},
           invoice: inv ? {
             id: inv.id,
@@ -5268,10 +5293,45 @@ async function handle7(request, env, ctx, url, sess) {
       const monday = mondayOf(b.week);
       if (await invoiceFor(env, tid, b.username, monday))
         return error("That week is invoiced \u2014 delete the invoice first if it needs correcting.", 409, env, request);
+      {
+        const cur = await loadWeek(env, tid, b.username, monday);
+        if (cur.approval) return error("This week is approved & locked \u2014 re-open it before editing.", 423, env, request);
+      }
       const days = cleanDays(monday, b.days);
       await env.DB.prepare(
         "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
       ).bind(tid, monday, b.username, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
+      await materialiseTimesheet(env, tid, b.username, monday, days);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (sub === "/admin/approve" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      const note = String(b.note || "").slice(0, 500);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      await env.DB.prepare(
+        "INSERT INTO eng_timesheets (tenant_id, week, username, data, at, approved_at, approved_by, admin_note) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET approved_at=excluded.approved_at, approved_by=excluded.approved_by, admin_note=excluded.admin_note"
+      ).bind(tid, monday, b.username, JSON.stringify({ days: {} }), now, now, sess.user.username, note).run();
+      ctx?.waitUntil(sendToUser(env, tid, b.username, {
+        title: "Timesheet approved",
+        body: `Your week of ${fmtDate(monday)} has been approved${note ? " \u2014 the office left a note" : ""}. Tap to view.`,
+        url: "/engineer-timesheet.html?week=" + monday,
+        tag: "ts-approved:" + monday
+      }));
+      return json({ ok: true, approvedAt: now, approvedBy: sess.user.username }, {}, env, request);
+    }
+    if (sub === "/admin/reopen" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      await env.DB.prepare("UPDATE eng_timesheets SET approved_at=NULL, approved_by=NULL WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, b.username).run();
+      ctx?.waitUntil(sendToUser(env, tid, b.username, {
+        title: "Timesheet re-opened",
+        body: `Your week of ${fmtDate(monday)} has been re-opened by the office \u2014 you can edit it again.`,
+        url: "/engineer-timesheet.html?week=" + monday,
+        tag: "ts-reopened:" + monday
+      }));
       return json({ ok: true }, {}, env, request);
     }
     if (sub === "/admin/config" && method === "GET") {

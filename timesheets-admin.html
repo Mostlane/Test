@@ -100,8 +100,15 @@
   <h2 id="editTitle">Edit week</h2>
   <p class="note" id="editSub"></p>
   <div id="editBody"></div>
+  <div id="apprBox" style="border-top:1px solid #e5e9f0;margin-top:12px;padding-top:12px">
+    <div id="apprStatus" style="font-size:13px;margin-bottom:6px"></div>
+    <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">Office note to the engineer (optional)</label>
+    <textarea id="apprNote" rows="2" placeholder="e.g. Adjusted Tuesday finish to match the tracker" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;resize:vertical"></textarea>
+  </div>
   <div class="foot"><span class="muted" id="editState" style="margin-right:auto;align-self:center">Changes save automatically</span>
-  <button class="btn primary" onclick="closeEdit()">Close</button></div>
+  <button class="btn" id="reopenBtn" style="display:none" onclick="reopenWeek()">↩ Re-open</button>
+  <button class="btn primary" id="approveBtn" onclick="approveWeek()">✅ Approve &amp; lock</button>
+  <button class="btn" onclick="closeEdit()">Close</button></div>
 </div></div>
 
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
@@ -182,7 +189,7 @@ function renderTable(){
     const pay=u.selfEmployed&&u.totals.total!=null?`<br><span class="muted" style="font-size:11px">${money(u.totals.total)}</span>`:"";
     return `<tr><td class="name">${esc(u.name)}${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
       <td class="tot">${hmS(u.totals.paidMins)}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
-      <td>${inv}</td><td><button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="Edit this week">✎</button></td></tr>`;
+      <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");
 }
 g("showAll").onchange=renderTable;
@@ -202,11 +209,38 @@ function openEdit(username){
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
       <div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button></div>`;
   }).join("");
-  const locked=!!u.invoice;
+  const appr=u.approval||null;
+  const locked=!!u.invoice||!!appr;   // approved OR invoiced → day inputs read-only
   g("editBody").querySelectorAll("input,button").forEach(el=>el.disabled=locked);
-  g("editState").textContent=locked?"Week locked (invoiced)":"Changes save automatically";
+  g("editState").textContent=u.invoice?"Week locked (invoiced)":(appr?"Approved & locked":"Changes save automatically");
+  // Approval controls
+  const when=appr&&appr.at?new Date(appr.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"";
+  g("apprStatus").innerHTML=appr
+    ? `<span style="color:#166534;font-weight:700">✅ Approved</span> by ${esc(appr.by||"office")}${when?" on "+when:""} — locked for the engineer.`
+    : `<span style="color:#92400e">Not yet approved.</span> Make any edits above, then approve to lock it and notify the engineer.`;
+  g("apprNote").value=appr?(appr.note||""):"";
+  g("apprNote").disabled=!!u.invoice;
+  g("approveBtn").style.display=(appr||u.invoice)?"none":"";
+  g("reopenBtn").style.display=(appr&&!u.invoice)?"":"none";
   editDirty=false;editBusy=false;clearTimeout(editTimer);clearTimeout(editRetry);
   g("editOv").classList.add("show");
+}
+async function approveWeek(){
+  if(!EDIT_U)return;
+  // Flush any pending edits first, then approve.
+  if(editDirty||editBusy){clearTimeout(editTimer);await doEditSave();}
+  const note=g("apprNote").value.trim();
+  const btn=g("approveBtn");btn.disabled=true;btn.textContent="Approving…";
+  const r=await authFetchTO("/ts/admin/approve",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK,note})}).then(x=>x.json()).catch(()=>null);
+  if(r&&r.ok){ g("editOv").classList.remove("show"); EDIT_U=null; await load(); }
+  else{ btn.disabled=false;btn.textContent="✅ Approve & lock"; alert((r&&r.error)||"Couldn't approve."); }
+}
+async function reopenWeek(){
+  if(!EDIT_U)return;
+  if(!confirm("Re-open this week? The engineer will be able to edit it again until you re-approve."))return;
+  const r=await authFetchTO("/ts/admin/reopen",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK})}).then(x=>x.json()).catch(()=>null);
+  if(r&&r.ok){ g("editOv").classList.remove("show"); EDIT_U=null; await load(); }
+  else alert((r&&r.error)||"Couldn't re-open.");
 }
 function addMi(btn){
   const host=btn.parentNode.querySelector(".mihost");
@@ -231,13 +265,13 @@ function collectEditDays(){
   return days;
 }
 function queueEditSave(){
-  if(!EDIT_U||EDIT_U.invoice)return;
+  if(!EDIT_U||EDIT_U.invoice||EDIT_U.approval)return;
   editDirty=true;
   clearTimeout(editTimer);
   editTimer=setTimeout(()=>doEditSave(),900);
 }
 async function doEditSave(){
-  if(!EDIT_U)return;
+  if(!EDIT_U||EDIT_U.approval)return;
   clearTimeout(editTimer);clearTimeout(editRetry);
   if(editBusy){editDirty=true;return;}
   editBusy=true;editDirty=false;

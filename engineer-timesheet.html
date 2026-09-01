@@ -169,7 +169,7 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={};
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={}, APPROVAL=null;
 function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
 
 function claimedMiles(miles){
@@ -275,7 +275,7 @@ function render(){
   const sun=new Date(addDays(WEEK,6)+"T12:00:00Z"),mon=new Date(WEEK+"T12:00:00Z");
   g("wkLabel").innerHTML=`<b>${mon.toLocaleDateString("en-GB",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</b><span>${WEEK===mondayOf(new Date())?"This week":sun.getFullYear()}</span>`;
   const host=g("dayCards");host.innerHTML="";
-  const locked=!!INVOICE;
+  const locked=!!INVOICE||!!APPROVAL;
   const today=new Date().toISOString().slice(0,10);
   let autoChanged=false;
   for(let i=0;i<7;i++){
@@ -358,9 +358,17 @@ function render(){
     const cardEl=document.querySelector(`.card[data-date="${date}"]`);
     if(cardEl)(list||[]).forEach(j=>{if(j.site)autoMileage(cardEl,{site:j.site,postcode:j.postcode});});
   }
-  g("invBanner").innerHTML=locked?`<div class="banner">✅ Invoice <b>${INVOICE.number}</b> has been generated for this week (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>. The week is locked; ask the office if something needs correcting.</div>`:"";
-  document.querySelectorAll(".card[data-date] input,.card[data-date] .btn,.card[data-date] .bk").forEach(el=>{if(locked)el.disabled=true;});
-  g("saveState").textContent=locked?"Week locked (invoiced)":"All changes save automatically";
+  let banner="";
+  if(APPROVAL){
+    const when=APPROVAL.at?new Date(APPROVAL.at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"";
+    banner+=`<div class="banner" style="background:#dcfce7;border-color:#86efac;color:#166534">✅ <b>Approved by the office</b>${APPROVAL.by?" ("+esc(APPROVAL.by)+")":""}${when?" on "+when:""}. This week is locked and saved to your history.${APPROVAL.note?`<div style="margin-top:6px;background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;color:#14532d">📝 <b>Office note:</b> ${esc(APPROVAL.note)}</div>`:""}</div>`;
+  }
+  if(INVOICE){
+    banner+=`<div class="banner">🧾 Invoice <b>${INVOICE.number}</b> generated (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>.</div>`;
+  }
+  g("invBanner").innerHTML=banner;
+  document.querySelectorAll(".card[data-date] input,.card[data-date] .btn,.card[data-date] .bk,.card[data-date] .addjob,.card[data-date] .jh-x").forEach(el=>{if(locked)el.disabled=true;});
+  g("saveState").textContent=APPROVAL?"Week approved & locked by the office":(INVOICE?"Week locked (invoiced)":"All changes save automatically");
   renderInvoiceCard();
   refreshTotals();
   const fn=[];
@@ -450,13 +458,13 @@ async function generateInvoice(){
 // retries on weak signal, flushes when the app is hidden/closed. ────────────
 let saveTimer=null,retryTimer=null,saveBusy=false,saveDirty=false;
 function queueSave(){
-  if(INVOICE)return;
+  if(INVOICE||APPROVAL)return;
   saveDirty=true;
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>doSave(),900);
 }
 async function doSave(opts={}){
-  if(INVOICE)return;
+  if(INVOICE||APPROVAL)return;
   clearTimeout(saveTimer);clearTimeout(retryTimer);
   if(saveBusy){saveDirty=true;return;}
   saveBusy=true;saveDirty=false;
@@ -693,6 +701,7 @@ async function load(){
     if(meR&&meR.ok)ME=meR;
     DAYS=(wkR&&wkR.days)||{};
     INVOICE=(wkR&&wkR.invoice)||null;
+    APPROVAL=(wkR&&wkR.approval)||null;
     ASSIGNED=(asR&&asR.byDay)||{};
     AUTO=(wkR&&wkR.auto)||{};
     HOL=(wkR&&wkR.holidays)||{};

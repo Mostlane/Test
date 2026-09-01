@@ -40,6 +40,7 @@ import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
 import { approvedLeaveInRange } from "./holidays.js";
+import { sendToUser } from "./push.js";
 
 // Approved leave for a Mon–Sun week as { "YYYY-MM-DD": {type, half} } for one
 // user — an approved holiday auto-shows on the timesheet without any entry.
@@ -77,6 +78,10 @@ async function ensureTables(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
+  // Office approval: a locked, engineer-read-only week + an office note.
+  try { await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN approved_at TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN approved_by TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE eng_timesheets ADD COLUMN admin_note TEXT").run(); } catch {}
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL, number INTEGER NOT NULL, week TEXT NOT NULL,
@@ -397,10 +402,11 @@ function weekTotals(days, eff) {
     total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null };
 }
 async function loadWeek(env, tid, username, monday) {
-  const row = await env.DB.prepare("SELECT data, at FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?")
+  const row = await env.DB.prepare("SELECT data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?")
     .bind(tid, monday, username).first();
   let days = {}; try { days = row && row.data ? (JSON.parse(row.data).days || {}) : {}; } catch {}
-  return { days, savedAt: row ? row.at : null };
+  return { days, savedAt: row ? row.at : null,
+    approval: (row && row.approved_at) ? { at: row.approved_at, by: row.approved_by || "", note: row.admin_note || "" } : null };
 }
 async function invoiceFor(env, tid, username, monday) {
   return env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? AND week=?").bind(tid, username, monday).first();
@@ -793,12 +799,12 @@ export async function handle(request, env, ctx, url, sess) {
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
     const u = await userRow(env, tid, me);
     const eff = effectiveCfg(cfg, u);
-    const { days, savedAt } = await loadWeek(env, tid, me, monday);
+    const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
     const jobMeta = await jobMetaFor(env, tid, days);
-    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, totals: weekTotals(days, eff),
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, approval, locked: !!approval, totals: weekTotals(days, eff),
       invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
@@ -814,6 +820,8 @@ export async function handle(request, env, ctx, url, sess) {
     const monday = mondayOf(b.week);
     if (await invoiceFor(env, tid, me, monday))
       return error("This week has already been invoiced — ask the office to remove the invoice first.", 409, env, request);
+    { const { approval } = await loadWeek(env, tid, me, monday);
+      if (approval) return error("This week has been approved by the office and is locked — ask the office to re-open it if something needs changing.", 423, env, request); }
     const u = await userRow(env, tid, me);
     const eff = effectiveCfg(cfg, u);
     const days = cleanDays(monday, b.days);
@@ -1269,9 +1277,13 @@ export async function handle(request, env, ctx, url, sess) {
       const { results: users } = await env.DB.prepare(
         "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
       ).bind(tid).all();
-      const { results: rows } = await env.DB.prepare("SELECT username, data, at FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const { results: rows } = await env.DB.prepare("SELECT username, data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
       const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
-      const dataBy = {}; for (const r of rows || []) { try { dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at }; } catch {} }
+      const dataBy = {}, apprBy = {};
+      for (const r of rows || []) {
+        try { dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at }; } catch {}
+        if (r.approved_at) apprBy[r.username] = { at: r.approved_at, by: r.approved_by || "", note: r.admin_note || "" };
+      }
       const invBy = {}; for (const r of invs || []) invBy[r.username] = r;
       const leaveAll = await approvedLeaveInRange(env, tid, monday, weekDays(monday)[6]);   // approved holidays this week
       const out = [];
@@ -1294,10 +1306,11 @@ export async function handle(request, env, ctx, url, sess) {
         } catch {}
         const inv = invBy[u.username];
         const perDay = {};
-        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };
+        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [] };
         out.push({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
           days: d.days, perDay, savedAt: d.at, totals: weekTotals(d.days, eff),
+          approval: apprBy[u.username] || null,
           holidays: leaveAll[u.username] || {},
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null });
@@ -1311,10 +1324,46 @@ export async function handle(request, env, ctx, url, sess) {
       const monday = mondayOf(b.week);
       if (await invoiceFor(env, tid, b.username, monday))
         return error("That week is invoiced — delete the invoice first if it needs correcting.", 409, env, request);
+      { const cur = await loadWeek(env, tid, b.username, monday);
+        if (cur.approval) return error("This week is approved & locked — re-open it before editing.", 423, env, request); }
       const days = cleanDays(monday, b.days);
       await env.DB.prepare(
         "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
       ).bind(tid, monday, b.username, JSON.stringify({ days }), new Date().toISOString()).run();
+      // Materialise any admin-edited per-job hours into the labour ledger too.
+      await materialiseTimesheet(env, tid, b.username, monday, days);
+      return json({ ok: true }, {}, env, request);
+    }
+
+    // Approve a week → lock it for the engineer + push them a notification. The
+    // office makes any edits via /admin/save first, then approves.
+    if (sub === "/admin/approve" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      const note = String(b.note || "").slice(0, 500);
+      const now = new Date().toISOString();
+      await env.DB.prepare(
+        "INSERT INTO eng_timesheets (tenant_id, week, username, data, at, approved_at, approved_by, admin_note) VALUES (?,?,?,?,?,?,?,?) " +
+        "ON CONFLICT(tenant_id, week, username) DO UPDATE SET approved_at=excluded.approved_at, approved_by=excluded.approved_by, admin_note=excluded.admin_note"
+      ).bind(tid, monday, b.username, JSON.stringify({ days: {} }), now, now, sess.user.username, note).run();
+      ctx?.waitUntil(sendToUser(env, tid, b.username, {
+        title: "Timesheet approved", body: `Your week of ${fmtDate(monday)} has been approved${note ? " — the office left a note" : ""}. Tap to view.`,
+        url: "/engineer-timesheet.html?week=" + monday, tag: "ts-approved:" + monday
+      }));
+      return json({ ok: true, approvedAt: now, approvedBy: sess.user.username }, {}, env, request);
+    }
+    // Re-open an approved week so the office can correct it (engineer stays locked
+    // out until it's re-approved).
+    if (sub === "/admin/reopen" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      await env.DB.prepare("UPDATE eng_timesheets SET approved_at=NULL, approved_by=NULL WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, b.username).run();
+      ctx?.waitUntil(sendToUser(env, tid, b.username, {
+        title: "Timesheet re-opened", body: `Your week of ${fmtDate(monday)} has been re-opened by the office — you can edit it again.`,
+        url: "/engineer-timesheet.html?week=" + monday, tag: "ts-reopened:" + monday
+      }));
       return json({ ok: true }, {}, env, request);
     }
 
