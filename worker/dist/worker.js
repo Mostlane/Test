@@ -17432,8 +17432,8 @@ async function handle20(request, env, ctx, url, sess) {
   const isFull3 = perms.FullAccess === "Yes";
   const path = url.pathname;
   if (path === "/privacy/export" && request.method === "GET") {
+    if (!isFull3) return error("Only a Full-access user can export data.", 403, env, request);
     const who = (url.searchParams.get("u") || sess.user.username).trim();
-    if (who !== sess.user.username && !isFull3) return error("Forbidden", 403, env, request);
     const sections = [];
     const searched = [];
     for (const spec of EXPORT_SPEC) {
