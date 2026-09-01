@@ -172,6 +172,7 @@
       <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
       <a class="btn small" href="van-timesheet.html" title="Door-to-door van timesheets">⏱️ Van Timesheet</a>
       <button class="btn small" onclick="openGaragesModal()" title="Manage the garages a service/MOT is carried out at">🔧 Garages</button>
+      <button class="btn small" onclick="openOneTimeHandover()" title="Send someone a handover form for a vehicle — paperwork only, does not change assignment">🤝 Un-linked Van Handover</button>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
     </div>
@@ -1221,6 +1222,29 @@
         await loadFleet();
       } else alert(r.error||"Failed to save"); }catch(e){ alert("Failed to save"); }
   }
+  /* ── One-time handover (paperwork only — does NOT change assignment) ── */
+  window.openOneTimeHandover=function(presetReg){
+    if(!FLEET || !FLEET.length){ toast("Loading vehicles…"); loadFleet().then(()=>openOneTimeHandover(presetReg)); return; }
+    const vopts=FLEET.slice().sort((a,b)=>String(a.reg||"").localeCompare(String(b.reg||"")))
+      .map(v=>`<option value="${esc(v.reg)}"${v.reg===presetReg?" selected":""}>${esc(v.reg)}${v.driver?" — "+esc(pName(v.driver)):""}</option>`).join("");
+    const uopts=['<option value="">— pick a person —</option>'].concat(PUSERS.map(u=>`<option value="${esc(u.Username)}">${esc(pLabel(u))}</option>`)).join("");
+    pModal(`<h3>🤝 Un-linked Van Handover</h3>
+      <p class="hint" style="margin:0 0 12px">Send someone a full handover check (condition, damage, equipment + photos, mileage &amp; signature) for a vehicle — e.g. when they're <b>collecting a leaver's van</b>. This is paperwork only: it does <b>not</b> change who the vehicle is assigned to.</p>
+      <div class="mrow"><label>Vehicle</label><select id="othReg">${vopts}</select></div>
+      <div class="mrow"><label>Send to</label><select id="othUser">${uopts}</select></div>
+      <div class="mfoot"><span></span><div style="display:flex;gap:10px"><button class="btn small" onclick="pClose()">Cancel</button><button class="btn primary small" onclick="sendOneTimeHandover()">Send handover</button></div></div>`);
+  };
+  window.sendOneTimeHandover=async function(){
+    const reg=($("othReg")||{}).value, username=($("othUser")||{}).value;
+    if(!reg){ alert("Pick a vehicle."); return; }
+    if(!username){ alert("Pick who should complete the handover."); return; }
+    try{
+      const r=await aFetch("/fleet/handover/request",{method:"POST",body:JSON.stringify({reg,username})}).then(r=>r.json());
+      if(r&&r.ok){ pClose(); toast("Handover sent to "+pName(username)+" for "+reg); }
+      else alert((r&&r.error)||"Couldn't send handover");
+    }catch(e){ alert("Couldn't send handover"); }
+  };
+
   function openHistory(reg){
     pModal(`<h3>${esc(reg)} — driver history</h3><div id="histBody" class="hint">Loading…</div><div class="mfoot"><span></span><button class="btn small" onclick="pClose()">Close</button></div>`);
     aFetch("/fleet/assignments?reg="+encodeURIComponent(reg)).then(r=>r.json()).then(d=>{
