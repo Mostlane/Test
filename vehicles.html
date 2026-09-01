@@ -15,6 +15,14 @@
   header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
   header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:180px;}
   .head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .tools-wrap{position:relative;}
+  #toolsBtn{position:relative;}
+  .tools-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:60;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 30px rgba(15,23,42,.20);padding:6px;min-width:220px;display:none;flex-direction:column;gap:2px;}
+  .tools-menu.open{display:flex;}
+  .tools-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:10px 12px;font:inherit;font-size:14px;color:#0f172a;cursor:pointer;text-decoration:none;position:relative;}
+  .tools-item:hover{background:#f1f5f9;}
+  .tools-item .vc-badge{position:static !important;top:auto !important;right:auto !important;margin-left:auto;box-shadow:none !important;}
+  .tools-dot{width:9px;height:9px;border-radius:50%;background:#e11900;display:inline-block;margin-left:4px;vertical-align:middle;}
   .wrap{max-width:1100px;margin:0 auto;padding:16px;}
 
   .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;}
@@ -166,13 +174,18 @@
     <a class="ml-back" href="main.html" title="Back">‹ Back</a>
     <h1>🚐 Vehicles</h1>
     <div class="head-actions">
-      <a class="btn small" id="vanChecksBtn" href="van-checks.html" style="position:relative;">Van Checks</a>
-      <a class="btn small" id="fuelLink" href="fuel-cards.html">⛽ Fuel Cards</a>
-      <a class="btn small" id="insightsLink" href="vehicle-insights.html" style="display:none;">📊 Insights</a>
-      <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
-      <a class="btn small" href="van-timesheet.html" title="Door-to-door van timesheets">⏱️ Van Timesheet</a>
-      <button class="btn small" onclick="openGaragesModal()" title="Manage the garages a service/MOT is carried out at">🔧 Garages</button>
-      <button class="btn small" onclick="openOneTimeHandover()" title="Send someone a handover form for a vehicle — paperwork only, does not change assignment">🤝 Un-linked Van Handover</button>
+      <div class="tools-wrap">
+        <button class="btn small" id="toolsBtn" onclick="toggleTools(event)">🛠 Tools <span aria-hidden="true">▾</span><span id="toolsDot" class="tools-dot" style="display:none"></span></button>
+        <div class="tools-menu" id="toolsMenu">
+          <a class="tools-item" id="vanChecksBtn" href="van-checks.html">🧾 Van Checks</a>
+          <a class="tools-item" id="fuelLink" href="fuel-cards.html">⛽ Fuel Cards</a>
+          <a class="tools-item" id="insightsLink" href="vehicle-insights.html" style="display:none;">📊 Insights</a>
+          <a class="tools-item" href="fleet-report.html">🚚 Fleet Report</a>
+          <a class="tools-item" href="van-timesheet.html">⏱️ Van Timesheet</a>
+          <button class="tools-item" onclick="closeTools();openGaragesModal()">🔧 Garages</button>
+          <button class="tools-item" onclick="closeTools();openOneTimeHandover()" title="Send someone a handover form for a vehicle — paperwork only, does not change assignment">🤝 Un-linked Van Handover</button>
+        </div>
+      </div>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
     </div>
@@ -341,6 +354,11 @@
   function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+pTok()},o.headers||{}); if(o.body&&!(o.body instanceof FormData)&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
   const $ = id => document.getElementById(id);
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  // Header "Tools" dropdown
+  window.toggleTools=function(e){ if(e) e.stopPropagation(); const m=$("toolsMenu"); if(m) m.classList.toggle("open"); };
+  window.closeTools=function(){ const m=$("toolsMenu"); if(m) m.classList.remove("open"); };
+  document.addEventListener("click", e => { if(!e.target.closest(".tools-wrap")) closeTools(); });
+  document.addEventListener("keydown", e => { if(e.key==="Escape") closeTools(); });
   function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
 
   let FLEET=[], PUSERS=[], EDIT_REG=null;
@@ -1214,7 +1232,11 @@
       if(r.ok){
         pClose(); toast("Driver updated");
         // Offer to send the new driver a full Van Handover to complete.
-        if(username && confirm("Send a Van Handover to "+pName(username)+"?\n\nThey'll be asked to complete a full handover check (condition, damage, equipment + photos) for "+reg+" before using it.")){
+        const askHandover = username && (window.MLUI
+          ? await MLUI.confirm("They'll be asked to complete a full handover check (condition, damage, equipment + photos) for "+reg+" before using it.",
+              { title:"Send a Van Handover to "+pName(username)+"?", okLabel:"Yes", cancelLabel:"No" })
+          : confirm("Send a Van Handover to "+pName(username)+"?"));
+        if(askHandover){
           try{ const hr=await aFetch("/fleet/handover/request",{method:"POST",body:JSON.stringify({reg,username})}).then(r=>r.json());
             toast(hr&&hr.ok?"Handover sent to "+pName(username):"Couldn't send handover"); }
           catch(e){ toast("Couldn't send handover"); }
@@ -1518,6 +1540,9 @@
       const seenWk = String(localSeen) > String(prefs.vcSeen||"") ? localSeen : (prefs.vcSeen||"");
       const missingN = (d.missing && seenWk !== d.week) ? d.missing.length : 0;
       const n = (d.mineDue?1:0) + missingN;
+      // Mirror the outstanding count onto the Tools button so it's visible when
+      // the menu is closed (Van Checks now lives inside the dropdown).
+      const dot = $("toolsDot"); if(dot) dot.style.display = n>0 ? "inline-block" : "none";
       const btn = $("vanChecksBtn"); if(!btn) return;
       const old = btn.querySelector(".vc-badge"); if(old) old.remove();
       if(n>0){
