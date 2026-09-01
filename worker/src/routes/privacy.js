@@ -139,10 +139,10 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Export (right of access) ───────────────────────────────────────────────
   if (path === "/privacy/export" && request.method === "GET") {
+    // Full-access only — export is an admin capability. Ordinary users cannot
+    // export their own data (or anyone else's).
+    if (!isFull) return error("Only a Full-access user can export data.", 403, env, request);
     const who = (url.searchParams.get("u") || sess.user.username).trim();
-    // A person can export their OWN data; only a Full-access admin can export
-    // someone else's.
-    if (who !== sess.user.username && !isFull) return error("Forbidden", 403, env, request);
 
     const sections = [];
     const searched = [];
