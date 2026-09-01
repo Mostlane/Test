@@ -356,7 +356,9 @@
     function initSig() {
       sigCanvas = container.querySelector("#mlcSig"); if (!sigCanvas) return;
       const rectW = sigCanvas.clientWidth || 340; sigCanvas.width = rectW; sigCanvas.height = 130;
-      sigCtx = sigCanvas.getContext("2d"); sigCtx.lineWidth = 2.2; sigCtx.lineCap = "round"; sigCtx.strokeStyle = "#12294a";
+      sigCtx = sigCanvas.getContext("2d");
+      sigCtx.fillStyle = "#fff"; sigCtx.fillRect(0, 0, sigCanvas.width, sigCanvas.height);   // white pad
+      sigCtx.lineWidth = 2.4; sigCtx.lineCap = "round"; sigCtx.lineJoin = "round"; sigCtx.strokeStyle = "#000";   // BLACK ink — visible on any theme/screen/PDF
       if (rec.signature) { const im = new Image(); im.onload = () => sigCtx.drawImage(im, 0, 0, sigCanvas.width, sigCanvas.height); im.src = rec.signature; }
       let drawing = false, last = null;
       const pos = e => { const r = sigCanvas.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
@@ -487,7 +489,7 @@
       container.querySelectorAll("[data-bulk]").forEach(btn => btn.addEventListener("click", () => { const [k, v] = btn.dataset.bulk.split("|"); bulkSet(k, v); }));
       const bi = container.querySelector('[data-act="bulkinput"]'); if (bi) bi.addEventListener("click", () => { const f = container.querySelector("#mlcBulkField").value; const v = container.querySelector("#mlcBulkVal").value.trim(); if (f) bulkSet(f, v); });
       const pl = container.querySelector('[data-act="pull"]'); if (pl) pl.addEventListener("click", pullPrevious);
-      const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
+      const sc = container.querySelector('[data-act="sigclear"]'); if (sc) sc.addEventListener("click", () => { if (sigCtx) { sigCtx.fillStyle = "#fff"; sigCtx.fillRect(0, 0, sigCanvas.width, sigCanvas.height); } rec.signature = ""; const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Sign above"; queueSave(); });
       // Saved signature: one tap to drop in a consistent personal signature, and a
       // button to save the current drawing as that default (stored per-user).
       const su = container.querySelector('[data-act="siguse"]'); if (su) su.addEventListener("click", async () => {
@@ -495,7 +497,7 @@
           const d = await authFetch("/certs/my-signature").then(r => r.json());
           if (!d || !d.ok || !d.signature) { alert("No saved signature yet — draw one, then tap “Save as my signature”."); return; }
           rec.signature = d.signature;
-          if (sigCtx && sigCanvas) { sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height); const im = new Image(); im.onload = () => sigCtx.drawImage(im, 0, 0, sigCanvas.width, sigCanvas.height); im.src = d.signature; }
+          if (sigCtx && sigCanvas) { sigCtx.fillStyle = "#fff"; sigCtx.fillRect(0, 0, sigCanvas.width, sigCanvas.height); const im = new Image(); im.onload = () => sigCtx.drawImage(im, 0, 0, sigCanvas.width, sigCanvas.height); im.src = d.signature; }
           const st = container.querySelector("#mlcSigState"); if (st) st.textContent = "Signed ✓ (saved)";
           queueSave();
         } catch (e) { alert("Couldn't load your saved signature."); }
