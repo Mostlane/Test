@@ -982,7 +982,7 @@ export async function handle(request, env, ctx, url, sess) {
     const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
     return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, approval, locked: !!approval,
       totals: weekTotals(am.days, eff), autoMileage: am.auto,
-      invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
+      invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
 
