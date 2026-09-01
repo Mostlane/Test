@@ -4608,11 +4608,61 @@ function visitedSequenceForDay(autoDay, day, jobsMeta) {
   for (const m of extra) push(m.site, m.pc);
   return seq;
 }
+async function scheduledSitesForWeek(env, tid, username, monday) {
+  const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+  endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const byDate = {};
+  try {
+    const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const map = {};
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of users || []) {
+      map[normId2(u.username)] = u.username;
+      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      if (full) map[normId2(full)] = u.username;
+    }
+    const meN = norm(username);
+    const isMe = (e) => {
+      const r = map[normId2(e)];
+      if (r != null) return r === username;
+      const n = norm(e);
+      return !!n && (n === meN || n.includes(meN) || meN.includes(n));
+    };
+    const lDate = (iso) => {
+      try {
+        return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+      } catch {
+        return String(iso).slice(0, 10);
+      }
+    };
+    const { results } = await env.DB.prepare(
+      "SELECT id, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+    ).bind(tid, monday, end).all();
+    for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data);
+      } catch {
+        continue;
+      }
+      const engs = Array.isArray(d.assignedEngineers) && d.assignedEngineers.length ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+      if (!engs.some(isMe)) continue;
+      const date = lDate(r.scheduled_at);
+      (byDate[date] = byDate[date] || []).push({ site: d.siteName || "", pc: normPc(d.postcode || ""), sched: r.scheduled_at });
+    }
+    for (const k of Object.keys(byDate)) byDate[k].sort((a, b) => String(a.sched || "").localeCompare(String(b.sched || "")));
+  } catch {
+  }
+  return byDate;
+}
 async function applyAutoMileage(env, tid, username, monday, days, eff, basePostcode) {
   if (!(eff.selfEmployed && eff.mileage)) return { days, auto: { applies: false } };
   const basePc = normPc(basePostcode || "PO15 5RQ");
   const homePc = normPc(eff.homePostcode || "") || basePc;
   const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
+  const sched = await scheduledSitesForWeek(env, tid, username, monday).catch(() => ({}));
   const coordCache = /* @__PURE__ */ new Map();
   const coord = async (pc) => {
     pc = normPc(pc);
@@ -4627,7 +4677,19 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
     out[date] = { ...d };
     const worked = toMin(d.start) != null && toMin(d.finish) != null;
     const jobsMeta = await jobsMetaForDay(env, tid, d);
-    const seq = visitedSequenceForDay(autoDays[date], d, jobsMeta);
+    let seq = visitedSequenceForDay(autoDays[date], d, jobsMeta);
+    let fromSchedule = false;
+    if (worked && !seq.length && (sched[date] || []).length) {
+      const seen = /* @__PURE__ */ new Set();
+      for (const s of sched[date]) {
+        const pc = normPc(s.pc);
+        if (!pc || seen.has(pc)) continue;
+        if (seq.length && seq[seq.length - 1].pc === pc) continue;
+        seq.push({ site: s.site || "", pc });
+        seen.add(pc);
+      }
+      fromSchedule = seq.length > 0;
+    }
     if (!worked || !seq.length) {
       out[date].mileage = [];
       if (worked) byDate[date] = { miles: 0, legs: [], sites: seq.map((s) => s.site), home: homePc, noRoute: !seq.length };
@@ -4657,7 +4719,7 @@ async function applyAutoMileage(env, tid, username, monday, days, eff, basePostc
     }
     total = round1(total);
     out[date].mileage = [{ site: "Door-to-door (auto)", postcode: "", miles: total, auto: true }];
-    byDate[date] = { miles: total, legs, sites: seq.map((s) => s.site), home: homePc, missing };
+    byDate[date] = { miles: total, legs, sites: seq.map((s) => s.site), home: homePc, missing, fromSchedule };
   }
   return { days: out, auto: { applies: true, home: homePc, base: basePc, byDate } };
 }

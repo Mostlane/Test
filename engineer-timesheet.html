@@ -190,6 +190,7 @@ function autoMiHtml(date){
     <div class="mautowrap">${legs}
     <div class="mileg mitot"><span>Day total${cl!==b.miles?` (−${Math.round((b.miles-cl)*10)/10} radius)`:""}</span><b>${cl} mi</b></div></div>
     ${b.missing?`<div class="muted" style="font-size:11px;margin-top:4px">⚠ A stop couldn't be located from its postcode and was skipped.</div>`:""}
+    ${b.fromSchedule?`<div class="muted" style="font-size:11px;margin-top:4px">From your booked jobs for the day — tap your job statuses on site to confirm the exact route.</div>`:""}
     <div class="muted" style="font-size:11px;margin-top:2px">Office ${esc(AUTOMI.base||"")} → your sites in order → home ${esc(AUTOMI.home||"")}. “~” = estimated.</div></div>`;
 }
 function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
