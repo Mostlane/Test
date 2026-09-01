@@ -129,6 +129,11 @@
     input.num { width:90px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:15px; }
     .msg { font-size:13px; margin-top:8px; } .msg.ok { color:#0c7d27; } .msg.err { color:#b00020; }
     select.yearsel { padding:8px 10px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; background:#fff; font-family:inherit; }
+    .archtog { display:inline-flex; align-items:center; gap:7px; margin:2px 0 10px; font-size:13px; color:#5b6b7d; cursor:pointer; }
+    .archtog input { width:auto; margin:0; }
+    .arch-badge { display:inline-block; margin-left:7px; font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+      color:#8a5a00; background:#fbeccb; border:1px solid #f0d9a8; border-radius:999px; padding:1px 7px; vertical-align:middle; }
+    tr.archived td, .wall tr.archived td.name { opacity:.62; }
   </style>
   <script>
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") location.href = "login.html";
@@ -169,6 +174,7 @@
         <button class="nav" id="wcNext">›</button>
         <button class="nav" id="wcMode" title="Year calendar" style="width:auto; padding:0 10px;">📅</button>
       </div>
+      <label class="archtog"><input type="checkbox" class="showArchived"> <span>Show archived / blocked staff</span></label>
       <div class="wcscroll" id="wallScroll"><table class="wall" id="wallTbl"></table></div>
       <div id="yearWrap" style="display:none;">
         <div class="calgrid" id="admCalGrid"></div>
@@ -195,6 +201,7 @@
 
     <!-- BALANCES -->
     <div class="sect" data-sec="balances">
+      <label class="archtog"><input type="checkbox" class="showArchived"> <span>Show archived / blocked staff</span></label>
       <div class="card balscroll" style="padding:6px 8px;">
         <table class="bal">
           <thead><tr><th>Person</th><th>Allowance</th><th>Used</th><th>Remaining</th><th></th></tr></thead>
@@ -263,7 +270,10 @@
     const fmtDays = n => { n = Number(n) || 0; if (n === 0.5) return "\u00bd day"; if (n % 1 === 0.5) return Math.floor(n) + "\u00bd days"; return n + " day" + (n === 1 ? "" : "s"); };
     const halfLbl = h => h === "AM" ? "morning" : h === "PM" ? "afternoon" : "half day";
     let BALMAP = {};          // username -> {allowance, used, committed, remaining, booked, bankHolidays, shutdown}
+    let ACTIVEMAP = {};       // username -> active? (false = archived/blocked staff)
     let SELECTED_USER = "";   // wall-chart highlighted person (persists across month nav)
+    let SHOW_ARCHIVED = false;
+    try { SHOW_ARCHIVED = localStorage.getItem("holAdminShowArchived") === "1"; } catch (e) {}
     const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
     function applyWallSel() {
       document.querySelectorAll("#wallTbl tr[data-user]").forEach(tr => tr.classList.toggle("sel", tr.getAttribute("data-user") === SELECTED_USER));
@@ -309,11 +319,29 @@
       ensureTab(b.dataset.tab);
     });
 
+    // "Show archived / blocked staff" toggle — shared across the Wall chart and
+    // Balances tabs. Off by default; remembered per device.
+    function setArchived(v) {
+      SHOW_ARCHIVED = !!v;
+      try { localStorage.setItem("holAdminShowArchived", SHOW_ARCHIVED ? "1" : "0"); } catch (e) {}
+      document.querySelectorAll(".showArchived").forEach(cb => { cb.checked = SHOW_ARCHIVED; });
+      CAL_CACHE = {}; BALMAP = {}; wallLoaded = false; balLoaded = false;
+      const activeBtn = document.querySelector("#tabs button.active");
+      const tab = activeBtn ? activeBtn.dataset.tab : "approvals";
+      if (tab === "wall") applyAView();
+      else if (tab === "balances") loadBalances();
+    }
+    document.querySelectorAll(".showArchived").forEach(cb => {
+      cb.checked = SHOW_ARCHIVED;
+      cb.addEventListener("change", () => setArchived(cb.checked));
+    });
+
     const fmtD = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" });
 
     async function loadOrder() {
       try {
-        const d = await authFetch("/users").then(r => r.json());
+        // ?all=1 so archived/blocked staff names still resolve in tooltips + rows.
+        const d = await authFetch("/users?all=1").then(r => r.json());
         (d.Users || []).forEach((u, i) => {
           ORDER[u.Username] = i;
           NAMES[u.Username] = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
@@ -325,8 +353,8 @@
     // cache is cleared whenever data changes (approvals, worked toggles, days).
     let CAL_CACHE = {};
     function fetchCal(y, m) {
-      const k = y + "-" + m;
-      if (!CAL_CACHE[k]) CAL_CACHE[k] = authFetch(`/holiday/calendar?year=${y}&month=${m}`).then(r => r.json());
+      const k = y + "-" + m + (SHOW_ARCHIVED ? "-all" : "");
+      if (!CAL_CACHE[k]) CAL_CACHE[k] = authFetch(`/holiday/calendar?year=${y}&month=${m}${SHOW_ARCHIVED ? "&all=1" : ""}`).then(r => r.json());
       return CAL_CACHE[k];
     }
 
@@ -417,7 +445,11 @@
     document.addEventListener("click", async e => {
       const t = e.target;
       const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-      if (t.dataset.approve) { await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }); loadAll(); }
+      if (t.dataset.approve) {
+        const r = await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }).then(x => x.json()).catch(() => ({}));
+        if (r && r.warning) alert(r.warning + "\n\nApproved anyway — check the calendar for a possible duplicate.");
+        loadAll();
+      }
       else if (t.dataset.reject) { if (confirm("Reject this request?")) { await post("/holiday/reject", { id: t.dataset.reject }); loadAll(); } }
       else if (t.dataset.revoke) { if (confirm("Cancel this APPROVED holiday? The days go back to their allowance.")) { await post("/holiday/cancel-approved", { id: t.dataset.revoke }); loadAll(); } }
     });
@@ -566,7 +598,9 @@
         const b = BALMAP[eng.username];
         const bd = b ? `<div class="nbd">${nDay(b.booked)} booked · ${nDay(b.bankHolidays)} bank · ${nDay(b.shutdown)} shutdown · <b>${nDay(b.remaining)} left</b></div>` : "";
         const selCls = eng.username === SELECTED_USER ? " sel" : "";
-        body += `<tr data-user="${esc(eng.username)}" class="${selCls.trim()}"><td class="name" data-user="${esc(eng.username)}" title="${esc(eng.username)}"><div class="nnm">${esc(NAMES[eng.username] || eng.name || eng.username)}</div>${bd}</td>`;
+        const archCls = eng.active === false ? " archived" : "";
+        const archBadge = eng.active === false ? `<span class="arch-badge">${esc(eng.status || "Archived")}</span>` : "";
+        body += `<tr data-user="${esc(eng.username)}" class="${(selCls + archCls).trim()}"><td class="name" data-user="${esc(eng.username)}" title="${esc(eng.username)}"><div class="nnm">${esc(NAMES[eng.username] || eng.name || eng.username)}${archBadge}</div>${bd}</td>`;
         for (let d = 1; d <= days; d++) {
           const di = `${YEAR}-${pad(MONTH)}-${pad(d)}`;
           const dt = new Date(Date.UTC(YEAR, MONTH - 1, d));
@@ -618,19 +652,22 @@
     async function loadBalances() {
       balLoaded = true;
       let d;
-      try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}`).then(r => r.json()); }
+      try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}${SHOW_ARCHIVED ? "&all=1" : ""}`).then(r => r.json()); }
       catch (e) { balLoaded = false; g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
       const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
       BALMAP = {};
-      list.forEach(e => { BALMAP[e.username] = { allowance: e.allowance, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown }; });
+      list.forEach(e => {
+        BALMAP[e.username] = { allowance: e.allowance, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown };
+        ACTIVEMAP[e.username] = e.active !== false;
+      });
       g("balBody").innerHTML = list.map(e => `
-        <tr>
-          <td>${esc(NAMES[e.username] || e.name || e.username)}</td>
+        <tr class="${e.active === false ? "archived" : ""}">
+          <td>${esc(NAMES[e.username] || e.name || e.username)}${e.active === false ? `<span class="arch-badge">${esc(e.status || "Archived")}</span>` : ""}</td>
           <td>${e.allowance}</td>
           <td>${e.used}</td>
           <td class="${e.remaining < 0 ? "neg" : e.remaining <= 2 ? "low" : ""}">${e.remaining}</td>
           <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.allowance}">✎<span class="elbl"> Edit allowance</span></button></td>
-        </tr>`).join("") || "<tr><td colspan='5' class='muted'>No active users.</td></tr>";
+        </tr>`).join("") || "<tr><td colspan='5' class='muted'>No users.</td></tr>";
     }
     document.addEventListener("click", async e => {
       const t = e.target.closest("[data-allow]") || e.target;
