@@ -66,7 +66,7 @@
         <h2 style="margin:0;">Document library</h2>
         <button class="btn small" id="newBtn">＋ New document</button>
       </div>
-      <p class="sub">Prepared documents in the Mostlane house style. Select one and send it to the people who need to sign.</p>
+      <p class="sub">Prepared documents in the Mostlane house style. Select one and send it to the people who need to sign. <b>Preview (blank)</b> shows the unsigned version (your signature only) — to see a completed copy with the recipient's signature, use <b>Signed → View</b>.</p>
       <div id="libBox"><p class="muted">Loading…</p></div>
     </div>
   </div>
@@ -80,7 +80,7 @@
       <label class="hint" style="margin-top:10px; display:block;">Body — one construct per line: <b># Heading</b>, <b>## Sub-heading</b>, <b>- bullet</b>, <b>---</b> for a rule, blank line for a gap.</label>
       <textarea id="ed_body" placeholder="# Section one&#10;Your text here…&#10;&#10;- a bullet&#10;- another bullet"></textarea>
       <div class="row" style="margin-top:12px; justify-content:flex-end;">
-        <button class="btn ghost small" id="ed_preview" type="button">Preview PDF</button>
+        <button class="btn ghost small" id="ed_preview" type="button" title="Shows the unsigned version (your signature only)">Preview (blank) PDF</button>
         <button class="btn" id="ed_save" type="button">Save</button>
       </div>
     </div>
@@ -176,7 +176,7 @@
             '<td>' + (t.sent ? ('<span class="pill' + (t.signed === t.sent ? ' ok' : '') + '">' + t.signed + ' / ' + t.sent + '</span>') : '<span class="muted">—</span>') + '</td>' +
             '<td class="row" style="justify-content:flex-end; border:none;">' +
               '<button class="btn ghost small" onclick="editDoc(' + t.id + ')">Edit</button>' +
-              '<button class="btn ghost small" onclick="previewDoc(' + t.id + ')">Preview</button>' +
+              '<button class="btn ghost small" title="Shows the unsigned version (your signature only). Use Signed → View for completed copies." onclick="previewDoc(' + t.id + ')">Preview (blank)</button>' +
               '<button class="btn small" onclick="openSend(' + t.id + ')">Send</button>' +
               '<button class="btn ghost small" onclick="openStatus(' + t.id + ')">Signed</button>' +
               '<button class="btn danger small" onclick="delDoc(' + t.id + ')">🗑</button>' +
