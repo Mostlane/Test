@@ -8621,7 +8621,8 @@ function rollupStatus(job) {
 function seedEngStatus(job, prevEngs, prevStatus, now) {
   if (!isMultiEng(job)) return;
   job.engStatus = job.engStatus || {};
-  const prev = new Set((prevEngs || []).map(normId));
+  const prevArr = prevEngs instanceof Set ? [...prevEngs] : Array.isArray(prevEngs) ? prevEngs : [];
+  const prev = new Set(prevArr.map(normId));
   for (const e of assignedList(job).map(normId)) {
     if (job.engStatus[e]) continue;
     job.engStatus[e] = { status: prev.has(e) ? prevStatus || "Scheduled" : "Scheduled", at: now, by: "system" };
@@ -9099,7 +9100,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     statusHistory: existing?.statusHistory || []
   };
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
-  seedEngStatus(job, new Set(assignedList(existing || {}).map(normId)), existing?.status, now);
+  seedEngStatus(job, assignedList(existing || {}), existing?.status, now);
   pruneEngSchedule(job);
   await saveJob(env, tenantId, job);
   return job;
