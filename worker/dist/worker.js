@@ -4229,7 +4229,14 @@ function cleanDays(monday, days) {
       }
     }
     const hasHours = Object.keys(jobHours).length > 0;
-    if (start || finish || jobs || note || mileage.length || hasHours) out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {} };
+    let leaveHours = null;
+    if (d.leaveHours !== void 0 && d.leaveHours !== null && d.leaveHours !== "") {
+      const lh = parseFloat(d.leaveHours);
+      if (isFinite(lh) && lh >= 0) leaveHours = Math.min(24, round1(lh));
+    }
+    const hasLeave = leaveHours !== null;
+    if (start || finish || jobs || note || mileage.length || hasHours || hasLeave)
+      out[date] = { start, finish, jobs, note, mileage, ...hasHours ? { jobHours } : {}, ...hasLeave ? { leaveHours } : {} };
   }
   return out;
 }
@@ -4255,7 +4262,7 @@ function weekTotals(days, eff) {
   const r2 = (n) => Math.round(n * 100) / 100;
   const otOn = eff.rateType !== "day" && eff.overtimeMult > 0;
   const thrMin = (eff.overtimeThresholdH || 8) * 60;
-  let paidMins = 0, otMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
+  let paidMins = 0, otMins = 0, leaveMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
   for (const d of Object.values(days || {})) {
     const c = dayCalc(d, eff);
     paidMins += c.paid;
@@ -4263,19 +4270,22 @@ function weekTotals(days, eff) {
     milesClaimed += c.milesClaimed;
     if (c.worked) daysWorked++;
     if (otOn && c.paid > thrMin) otMins += c.paid - thrMin;
+    if (d && d.leaveHours != null) leaveMins += (parseFloat(d.leaveHours) || 0) * 60;
   }
   const hours = r2(paidMins / 60);
   const otHours = r2(otMins / 60);
+  const leaveHours = r2(leaveMins / 60);
   const normalHours = r2((paidMins - otMins) / 60);
   const otRate = otOn && eff.rate ? r2(eff.rate * eff.overtimeMult) : null;
-  let labour = null, otPay = 0, normalPay = 0;
+  let labour = null, otPay = 0, normalPay = 0, leavePay = 0;
   if (eff.rate) {
+    leavePay = eff.rateType === "day" ? 0 : leaveHours * eff.rate;
     if (eff.rateType === "day") {
       labour = r2(daysWorked * eff.rate);
     } else {
       normalPay = normalHours * eff.rate;
       otPay = otHours * (otRate || eff.rate);
-      labour = r2(normalPay + otPay);
+      labour = r2(normalPay + otPay + leavePay);
     }
   }
   const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
@@ -4287,6 +4297,8 @@ function weekTotals(days, eff) {
     otRate,
     otPay: r2(otPay),
     normalPay: r2(normalPay),
+    leaveHours,
+    leavePay: r2(leavePay),
     miles: round1(miles),
     milesClaimed: round1(milesClaimed),
     milesDeducted: round1(miles - milesClaimed),
@@ -4295,6 +4307,25 @@ function weekTotals(days, eff) {
     mileagePay,
     total: labour != null ? r2(labour + mileagePay) : null
   };
+}
+async function missingLeaveHours(env, tid, username, monday, days) {
+  const from = monday, to = weekDays(monday)[6];
+  const leave = (await approvedLeaveInRange(env, tid, from, to, username))[username] || {};
+  const bank = await bankHolidaysInRange(env, tid, from, to);
+  const out = [];
+  for (const date of weekDays(monday)) {
+    const d = days[date] || {};
+    const worked = toMin(d.start) != null && toMin(d.finish) != null;
+    if (worked) continue;
+    if (d.leaveHours != null) continue;
+    const lv = leave[date];
+    const bh = bank[date];
+    let label = "";
+    if (lv && lv.type !== "Unpaid") label = lv.type === "Other" ? "Leave" : "Holiday";
+    else if (bh) label = bh.kind === "shutdown" ? "Company Shutdown" : "Bank Holiday";
+    if (label) out.push({ date, label });
+  }
+  return out;
 }
 async function loadWeek(env, tid, username, monday) {
   const row = await env.DB.prepare("SELECT data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, username).first();
@@ -4861,6 +4892,11 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   } else {
     doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
     doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true });
+    y += 16;
+  }
+  if (totals.leaveHours > 0 && totals.leavePay > 0 && eff.rateType !== "day") {
+    doc.text(cTot, y, "Holiday / leave: " + totals.leaveHours + " h @ " + money(eff.rate) + "/h", { size: 10 });
+    doc.text(cAmt, y, money(totals.leavePay), { size: 10, alignRight: true });
     y += 16;
   }
   if (totals.miles > 0) {
@@ -5529,7 +5565,7 @@ async function handle7(request, env, ctx, url, sess) {
         const am = await applyAutoMileage(env, tid, u.username, monday, d.days, eff, cfg.defaults.basePostcode);
         const daysEff = am.days;
         const perDay = {};
-        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [] };
+        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
         out.push({
           username: u.username,
           name: displayName(u),
@@ -5577,6 +5613,14 @@ async function handle7(request, env, ctx, url, sess) {
       if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
       const monday = mondayOf(b.week);
       const note = String(b.note || "").slice(0, 500);
+      const cur = await loadWeek(env, tid, b.username, monday);
+      const missing = await missingLeaveHours(env, tid, b.username, monday, cur.days);
+      if (missing.length) return error(
+        "Enter the paid hours for each leave / bank-holiday day first: " + missing.map((m) => fmtDate(m.date) + " (" + m.label + ")").join(", "),
+        400,
+        env,
+        request
+      );
       const now = (/* @__PURE__ */ new Date()).toISOString();
       await env.DB.prepare(
         "INSERT INTO eng_timesheets (tenant_id, week, username, data, at, approved_at, approved_by, admin_note) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET approved_at=excluded.approved_at, approved_by=excluded.approved_by, admin_note=excluded.admin_note"
