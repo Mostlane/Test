@@ -7702,6 +7702,36 @@ async function handle8(request, env, ctx, url, sess) {
     await saveSlaBlocks(env, tenantId, list.filter((x) => x.id !== id));
     return jsonResponse({ ok: true }, headers);
   }
+  if (subpath === "/blocks/skip" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Only SLA admins can edit a block." }, headers, 403);
+    const bb = await readJson2(request);
+    const id = String(bb.id || "");
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(bb.date || "") ? bb.date : "";
+    if (!date) return jsonResponse({ error: "A date is required." }, headers, 400);
+    const list = await getSlaBlocks(env, tenantId);
+    const b = list.find((x) => x.id === id);
+    if (!b || !b.repeat || b.repeat.dow == null) return jsonResponse({ error: "Not a repeating block." }, headers, 400);
+    b.repeat.skip = Array.isArray(b.repeat.skip) ? b.repeat.skip : [];
+    if (!b.repeat.skip.includes(date)) b.repeat.skip.push(date);
+    await saveSlaBlocks(env, tenantId, list);
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/blocks/set-until" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Only SLA admins can edit a block." }, headers, 403);
+    const bb = await readJson2(request);
+    const id = String(bb.id || "");
+    const until = bb.until === "" ? "" : /^\d{4}-\d{2}-\d{2}$/.test(bb.until || "") ? bb.until : null;
+    if (until === null) return jsonResponse({ error: "Enter a valid end date (or clear it)." }, headers, 400);
+    const list = await getSlaBlocks(env, tenantId);
+    const b = list.find((x) => x.id === id);
+    if (!b || !b.repeat || b.repeat.dow == null) return jsonResponse({ error: "Not a repeating block." }, headers, 400);
+    if (until && until < (b.date || "")) return jsonResponse({ error: "The end date must be on or after the block's start date." }, headers, 400);
+    b.repeat.until = until;
+    await saveSlaBlocks(env, tenantId, list);
+    return jsonResponse({ ok: true }, headers);
+  }
   if (subpath === "/auto-schedule/record" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
@@ -10195,7 +10225,8 @@ function blocksOnDate(list, date) {
     if (!b) continue;
     const rep = b.repeat;
     if (rep && rep.dow != null) {
-      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until)) out.push({ ...b, date, recurring: true });
+      const skipped = Array.isArray(rep.skip) && rep.skip.includes(date);
+      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until) && !skipped) out.push({ ...b, date, recurring: true });
     } else if ((b.date || "") === date) {
       out.push({ ...b, recurring: false });
     }

@@ -1080,7 +1080,7 @@ function renderDayView(container){
       const rep = b.repeat && b.repeat.dow != null;
       el.title = "Blocked " + b.start + "–" + b.end + (b.note ? " · " + b.note : "") + (rep ? " · repeats every " + dowName(b.repeat.dow) : "") + " (tap ✕ to remove)";
       el.innerHTML = `<span class="db-lbl">🚫${rep ? " 🔁" : ""} ${escapeHtml(b.note || "Blocked")}</span><button class="db-x" title="Remove block">✕</button>`;
-      el.querySelector(".db-x").addEventListener("click", ev => { ev.stopPropagation(); deleteBlock(b.id); });
+      el.querySelector(".db-x").addEventListener("click", ev => { ev.stopPropagation(); deleteBlock(b.id, false, ymd(dayDate)); });
       track.appendChild(el);
     });
 
@@ -1471,11 +1471,56 @@ function closeBlockModal(){ $("blkBackdrop").style.display = "none"; }
 function renderBlkList(){
   if(!blkCtx) return;
   const list = blocksForDay(blkCtx.username, blkCtx.date);
+  const occ = formatDateInput(blkCtx.date);
   $("blkList").innerHTML = list.length
     ? `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Blocks on this day</div>` +
-      list.map(b => `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${(b.repeat&&b.repeat.dow!=null)?"🔁 ":""}${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`).join("")
+      list.map(b => {
+        const rep = b.repeat && b.repeat.dow != null;
+        return `<div class="blk-entry">`
+          + `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${rep?"🔁 ":""}${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`
+          + (rep ? `<div class="bi-rep" style="font-size:11px;color:var(--muted);margin:1px 0 6px 2px;">🔁 every ${escapeHtml(dowName(b.repeat.dow))}${b.repeat.until?` · ends ${escapeHtml(b.repeat.until)}`:` · no end date`} · <button data-end="${escapeAttr(b.id)}" style="border:none;background:none;color:#003466;cursor:pointer;text-decoration:underline;font:inherit;padding:0;">change end date</button></div>` : ``)
+          + `</div>`;
+      }).join("")
     : "";
-  $("blkList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => deleteBlock(btn.getAttribute("data-del"), true)));
+  $("blkList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => deleteBlock(btn.getAttribute("data-del"), true, occ)));
+  $("blkList").querySelectorAll("[data-end]").forEach(btn => btn.addEventListener("click", () => editBlockEnd(btn.getAttribute("data-end"))));
+}
+// Inline "change end date" editor for a repeating block (in the modal list).
+function editBlockEnd(id){
+  const b = allBlocks.find(x => x.id === id); if(!b || !b.repeat) return;
+  const btn = $("blkList").querySelector(`[data-end="${id}"]`); const div = btn && btn.closest(".bi-rep"); if(!div) return;
+  div.innerHTML = `🔁 ends <input type="date" class="bi-end-in" value="${escapeAttr(b.repeat.until||"")}" style="padding:3px 5px;border:1px solid #ccd5dd;border-radius:6px;font:inherit;"> `
+    + `<button class="bi-end-save" style="border:0;background:#003466;color:#fff;border-radius:6px;padding:3px 8px;font:inherit;cursor:pointer;">Save</button> `
+    + `<button class="bi-end-clear" style="border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 8px;font:inherit;cursor:pointer;">No end</button>`;
+  div.querySelector(".bi-end-save").addEventListener("click", () => setBlockUntil(id, div.querySelector(".bi-end-in").value || ""));
+  div.querySelector(".bi-end-clear").addEventListener("click", () => setBlockUntil(id, ""));
+}
+async function setBlockUntil(id, until){
+  try{
+    const r = await authFetch("/sla/blocks/set-until", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, until }) }).then(r => r.json());
+    if(r && r.ok){ await loadBlocks(); render(); renderBlkList(); }
+    else alert((r && r.error) || "Couldn't update the end date.");
+  }catch(e){ alert("Couldn't update the end date."); }
+}
+// Three-way choice when removing a REPEATING block: just this day, or the series.
+function blockRemovalChoice(dowNm, occDate){
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;";
+    const dayLabel = occDate ? new Date(occDate+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"short"}) : "this day";
+    ov.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:360px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.3);">
+      <div style="font-weight:700;font-size:16px;margin-bottom:6px;">Remove repeating block</div>
+      <div style="font-size:13px;color:#475569;margin-bottom:14px;">This block repeats every ${escapeHtml(dowNm)}. What would you like to remove?</div>
+      <button class="rc-one" style="width:100%;padding:11px;margin-bottom:8px;border:1px solid #cbd5e1;background:#fff;border-radius:9px;font:inherit;font-weight:600;cursor:pointer;">Just ${escapeHtml(dayLabel)}</button>
+      <button class="rc-all" style="width:100%;padding:11px;margin-bottom:8px;border:0;background:#b00020;color:#fff;border-radius:9px;font:inherit;font-weight:600;cursor:pointer;">The whole series (every ${escapeHtml(dowNm)})</button>
+      <button class="rc-cancel" style="width:100%;padding:9px;border:none;background:none;color:#64748b;font:inherit;cursor:pointer;">Cancel</button></div>`;
+    const done = v => { try{ document.body.removeChild(ov); }catch(e){} resolve(v); };
+    ov.querySelector(".rc-one").onclick = () => done("one");
+    ov.querySelector(".rc-all").onclick = () => done("all");
+    ov.querySelector(".rc-cancel").onclick = () => done(null);
+    ov.addEventListener("click", e => { if(e.target === ov) done(null); });
+    document.body.appendChild(ov);
+  });
 }
 async function saveBlock(){
   if(!blkCtx) return;
@@ -1493,17 +1538,20 @@ async function saveBlock(){
   }catch(e){ alert("Couldn't add the block."); }
   btn.disabled = false;
 }
-async function deleteBlock(id, keepModal){
-  // Removing a repeating block clears the WHOLE series — confirm first.
+async function deleteBlock(id, keepModal, occDate){
   const b = allBlocks.find(x => x.id === id);
-  if(b && b.repeat && b.repeat.dow != null){
-    const msg = "Remove the whole repeating block? This clears it on every " + dowName(b.repeat.dow) + ".";
-    const ok = window.MLUI ? await MLUI.confirm(msg, { danger:true, okLabel:"Remove series" }) : confirm(msg);
-    if(!ok) return;
+  const rep = !!(b && b.repeat && b.repeat.dow != null);
+  let action = "all";   // one-off → straight delete; repeating → ask
+  if(rep){
+    action = await blockRemovalChoice(dowName(b.repeat.dow), occDate);
+    if(!action) return;
   }
   try{
-    const r = await authFetch("/sla/blocks/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r => r.json());
+    const path = action === "one" ? "/sla/blocks/skip" : "/sla/blocks/delete";
+    const body = action === "one" ? { id, date: occDate } : { id };
+    const r = await authFetch(path, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) }).then(r => r.json());
     if(r && r.ok){ await loadBlocks(); render(); if(keepModal) renderBlkList(); }
+    else alert((r && r.error) || "Couldn't update the block.");
   }catch(e){}
 }
 document.getElementById("engDayBlock").addEventListener("click", () => { if(engDayCtx) openBlockModal(engDayCtx.username, engDayCtx.name, engDayCtx.date); });

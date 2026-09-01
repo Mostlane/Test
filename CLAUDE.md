@@ -2175,9 +2175,14 @@ its exact date, a repeat occurs on every matching weekday from its start to `unt
 (`/blocks?date=`, autoScheduleDay capacity, `/route-optimize` via `blockOffsets`/
 `avoidBlocks`) go through the expander, so recurring blocks are honoured everywhere.
 Prune: one-offs drop 60 days past; a repeat drops only once its `until` is 60 days
-past (open-ended repeats kept until removed). Removing a repeating block clears the
-WHOLE series (id is the series key; the client confirms first). Recurring bars/list
-show a 🔁.
+past (open-ended repeats kept until removed). Recurring bars/list show a 🔁.
+**Removing/editing a repeat (Sep 2026):** the ✕/Remove on a repeating occurrence
+opens a 3-way choice (`blockRemovalChoice`) — **Just this day** (→ **POST
+/sla/blocks/skip** `{id,date}` adds the date to `repeat.skip`, which `blocksOnDate`
+excludes), **The whole series** (→ /blocks/delete), or Cancel. The block modal list
+shows a "change end date" inline editor per repeat (→ **POST /sla/blocks/set-until**
+`{id, until}`; ""=clear). Both new routes SLA-admin-gated. One-off blocks delete
+straight (no dialog).
 
 ## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
 Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal

@@ -1137,6 +1137,42 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true }, headers);
   }
 
+  /* POST /sla/blocks/skip — cancel a single occurrence of a REPEATING block on one
+     date (adds it to repeat.skip) without touching the rest of the series. */
+  if (subpath === "/blocks/skip" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Only SLA admins can edit a block." }, headers, 403);
+    const bb = await readJson(request);
+    const id = String(bb.id || "");
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(bb.date || "") ? bb.date : "";
+    if (!date) return jsonResponse({ error: "A date is required." }, headers, 400);
+    const list = await getSlaBlocks(env, tenantId);
+    const b = list.find(x => x.id === id);
+    if (!b || !b.repeat || b.repeat.dow == null) return jsonResponse({ error: "Not a repeating block." }, headers, 400);
+    b.repeat.skip = Array.isArray(b.repeat.skip) ? b.repeat.skip : [];
+    if (!b.repeat.skip.includes(date)) b.repeat.skip.push(date);
+    await saveSlaBlocks(env, tenantId, list);
+    return jsonResponse({ ok: true }, headers);
+  }
+
+  /* POST /sla/blocks/set-until — change (or clear, "") the end date of a REPEATING
+     block, so it stops from a date onwards without deleting the whole series. */
+  if (subpath === "/blocks/set-until" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Only SLA admins can edit a block." }, headers, 403);
+    const bb = await readJson(request);
+    const id = String(bb.id || "");
+    const until = bb.until === "" ? "" : (/^\d{4}-\d{2}-\d{2}$/.test(bb.until || "") ? bb.until : null);
+    if (until === null) return jsonResponse({ error: "Enter a valid end date (or clear it)." }, headers, 400);
+    const list = await getSlaBlocks(env, tenantId);
+    const b = list.find(x => x.id === id);
+    if (!b || !b.repeat || b.repeat.dow == null) return jsonResponse({ error: "Not a repeating block." }, headers, 400);
+    if (until && until < (b.date || "")) return jsonResponse({ error: "The end date must be on or after the block's start date." }, headers, 400);
+    b.repeat.until = until;
+    await saveSlaBlocks(env, tenantId, list);
+    return jsonResponse({ ok: true }, headers);
+  }
+
   /* POST /sla/auto-schedule/record — stash the batch of jobs the office just
      booked in from an auto-day, so it can be reverted in one tap. SLA admin. */
   if (subpath === "/auto-schedule/record" && method === "POST") {
@@ -3944,7 +3980,8 @@ function blocksOnDate(list, date) {
     if (!b) continue;
     const rep = b.repeat;
     if (rep && rep.dow != null) {
-      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until)) out.push({ ...b, date, recurring: true });
+      const skipped = Array.isArray(rep.skip) && rep.skip.includes(date);
+      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until) && !skipped) out.push({ ...b, date, recurring: true });
     } else if ((b.date || "") === date) {
       out.push({ ...b, recurring: false });
     }
