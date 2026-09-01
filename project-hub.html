@@ -306,7 +306,7 @@
           <textarea id="jvDesc" placeholder="What needs doing, access notes…" style="min-height:60px;"></textarea>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
             <div style="flex:1 1 200px;"><label style="font-size:13px;font-weight:600;">Start</label><input type="datetime-local" id="jvStart"></div>
-            <div style="flex:0 0 140px;"><label style="font-size:13px;font-weight:600;">Duration (mins)</label><input type="number" id="jvDur" placeholder="60" min="15" step="15"></div>
+            <div style="flex:0 0 140px;"><label style="font-size:13px;font-weight:600;">Duration (hours)</label><input type="number" id="jvDur" placeholder="1" min="0.25" step="0.25"></div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;font-weight:600;cursor:pointer;"><input type="checkbox" id="jvMulti" style="width:auto;"> 📆 Send as multiple days (drip-fed)</label>
           <div id="jvMultiPanel" class="hide" style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:#f8fafc;">
@@ -528,6 +528,17 @@
         el.textContent = days.length + " day" + (days.length===1?"":"s") + ": " + f(days[0].scheduledAt) + " → " + f(days[days.length-1].scheduledAt);
       } catch { el.textContent = ""; }
     }
+    // Treat a <input type="datetime-local"> value ("YYYY-MM-DDTHH:MM") as the
+    // user's LOCAL wall-clock time and return an absolute ISO. Building the Date
+    // from explicit parts avoids the iOS-Safari quirk where new Date("…T08:00")
+    // is parsed as UTC — which stored the wrong instant, so the scheduler (which
+    // reads times back in local time) showed the job hours off.
+    function localDatetimeToIso(v) {
+      if (!v) return null;
+      const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (m) { const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0); return isNaN(d) ? null : d.toISOString(); }
+      const d = new Date(v); return isNaN(d) ? null : d.toISOString();
+    }
     async function createProjectJob() {
       const multi = document.getElementById("jvMulti") && document.getElementById("jvMulti").checked;
       if (multi) return createProjectSeries();
@@ -535,8 +546,9 @@
       const msg = document.getElementById("jvMsg");
       if (!desc) { msg.textContent = "Say what the job is."; msg.className = "msg err"; return; }
       const engineers = Array.from(JV_PICK);
-      const scheduledAt = document.getElementById("jvStart").value ? new Date(document.getElementById("jvStart").value).toISOString() : null;
-      const durationMinutes = document.getElementById("jvDur").value ? Number(document.getElementById("jvDur").value) : null;
+      const scheduledAt = localDatetimeToIso(document.getElementById("jvStart").value);
+      // Entered in HOURS → stored as minutes (min 15).
+      const durationMinutes = document.getElementById("jvDur").value ? Math.max(15, Math.round(Number(document.getElementById("jvDur").value) * 60)) : null;
       msg.textContent = "Creating…"; msg.className = "msg";
       try {
         const r = await authFetch("/project/create-job", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: PID, description: desc, engineers, scheduledAt, durationMinutes }) }).then(r => r.json());
