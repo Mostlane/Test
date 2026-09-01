@@ -436,6 +436,13 @@
     </div>
     <label style="display:block;font-size:12px;color:var(--muted);margin-top:10px;">Note for the office<br>
       <input type="text" id="blkNote" maxlength="200" placeholder="e.g. Doctor's appointment" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+    <details id="blkRepeat" style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none;">🔁 Repeat weekly (optional)</summary>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;">
+        <input type="checkbox" id="blkRepOn" style="width:auto;"> Repeat every <b id="blkRepDow">week</b></label>
+      <label style="display:block;font-size:12px;color:var(--muted);margin-top:8px;">Until <span style="opacity:.7;">(optional — leave blank to repeat until removed)</span><br>
+        <input type="date" id="blkRepUntil" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+    </details>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
       <button type="button" class="btn" id="blkCancel">Cancel</button>
       <button type="button" class="btn primary" id="blkSave">Add block</button>
@@ -811,9 +818,18 @@ async function loadBlocks(){
   try{ const d = await authFetch("/sla/blocks").then(r=>r.json()); allBlocks = (d && d.blocks) || []; }
   catch(e){ allBlocks = []; }
 }
+const DOW_NAME = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function dowName(d){ return DOW_NAME[Number(d)] || "that day"; }
 function blocksForDay(username, dateObj){
   const ds = ymd(dateObj), u = String(username||"").toLowerCase();
-  return allBlocks.filter(b => b.date===ds && String(b.username||"").toLowerCase()===u)
+  const dow = new Date(ds+"T12:00:00Z").getUTCDay();
+  return allBlocks.filter(b => {
+      if(String(b.username||"").toLowerCase()!==u) return false;
+      // A weekly repeating block occurs on every matching weekday within its window;
+      // a one-off matches the exact date.
+      if(b.repeat && b.repeat.dow!=null) return Number(b.repeat.dow)===dow && ds>=(b.date||"") && (!b.repeat.until || ds<=b.repeat.until);
+      return b.date===ds;
+    })
     .sort((a,b)=> (a.start||"").localeCompare(b.start||""));
 }
 const hhmmToMins = s => { const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||"")); return m ? Number(m[1])*60+Number(m[2]) : 0; };
@@ -1061,8 +1077,9 @@ function renderDayView(container){
       el.className = "day-block";
       el.style.left = ((bs - dayStartMins) * pxPerMin) + "px";
       el.style.width = Math.max(22, (be - bs) * pxPerMin) + "px";
-      el.title = "Blocked " + b.start + "–" + b.end + (b.note ? " · " + b.note : "") + " (tap ✕ to remove)";
-      el.innerHTML = `<span class="db-lbl">🚫 ${escapeHtml(b.note || "Blocked")}</span><button class="db-x" title="Remove block">✕</button>`;
+      const rep = b.repeat && b.repeat.dow != null;
+      el.title = "Blocked " + b.start + "–" + b.end + (b.note ? " · " + b.note : "") + (rep ? " · repeats every " + dowName(b.repeat.dow) : "") + " (tap ✕ to remove)";
+      el.innerHTML = `<span class="db-lbl">🚫${rep ? " 🔁" : ""} ${escapeHtml(b.note || "Blocked")}</span><button class="db-x" title="Remove block">✕</button>`;
       el.querySelector(".db-x").addEventListener("click", ev => { ev.stopPropagation(); deleteBlock(b.id); });
       track.appendChild(el);
     });
@@ -1441,6 +1458,11 @@ function openBlockModal(username, name, date){
   blkCtx = { username, name, date };
   $("blkWho").textContent = name + " · " + date.toDateString();
   $("blkStart").value = "08:00"; $("blkEnd").value = "09:00"; $("blkNote").value = "";
+  // Reset the (hidden) repeat controls; the weekday label follows the chosen day.
+  const rp = $("blkRepeat"); if(rp) rp.open = false;
+  if($("blkRepOn")) $("blkRepOn").checked = false;
+  if($("blkRepUntil")) $("blkRepUntil").value = "";
+  if($("blkRepDow")) $("blkRepDow").textContent = dowName(new Date(ymd(date)+"T12:00:00Z").getUTCDay());
   renderBlkList();
   $("blkBackdrop").style.display = "flex";
   setTimeout(() => { try{ $("blkStart").focus(); }catch(e){} }, 50);
@@ -1451,7 +1473,7 @@ function renderBlkList(){
   const list = blocksForDay(blkCtx.username, blkCtx.date);
   $("blkList").innerHTML = list.length
     ? `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Blocks on this day</div>` +
-      list.map(b => `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`).join("")
+      list.map(b => `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${(b.repeat&&b.repeat.dow!=null)?"🔁 ":""}${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`).join("")
     : "";
   $("blkList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => deleteBlock(btn.getAttribute("data-del"), true)));
 }
@@ -1460,16 +1482,25 @@ async function saveBlock(){
   const start = $("blkStart").value, end = $("blkEnd").value, note = $("blkNote").value.trim();
   if(!start || !end){ alert("Pick a start and end time."); return; }
   if(hhmmToMins(end) <= hhmmToMins(start)){ alert("End time must be after the start time."); return; }
+  const body = { username: blkCtx.username, date: formatDateInput(blkCtx.date), start, end, note };
+  if($("blkRepOn") && $("blkRepOn").checked) body.repeat = { weekly: true, until: ($("blkRepUntil") && $("blkRepUntil").value) || "" };
   const btn = $("blkSave"); btn.disabled = true;
   try{
     const r = await authFetch("/sla/blocks", { method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ username: blkCtx.username, date: formatDateInput(blkCtx.date), start, end, note }) }).then(r => r.json());
+      body: JSON.stringify(body) }).then(r => r.json());
     if(r && r.ok){ await loadBlocks(); renderBlkList(); render(); $("blkNote").value = ""; }
     else alert((r && r.error) || "Couldn't add the block.");
   }catch(e){ alert("Couldn't add the block."); }
   btn.disabled = false;
 }
 async function deleteBlock(id, keepModal){
+  // Removing a repeating block clears the WHOLE series — confirm first.
+  const b = allBlocks.find(x => x.id === id);
+  if(b && b.repeat && b.repeat.dow != null){
+    const msg = "Remove the whole repeating block? This clears it on every " + dowName(b.repeat.dow) + ".";
+    const ok = window.MLUI ? await MLUI.confirm(msg, { danger:true, okLabel:"Remove series" }) : confirm(msg);
+    if(!ok) return;
+  }
   try{
     const r = await authFetch("/sla/blocks/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r => r.json());
     if(r && r.ok){ await loadBlocks(); render(); if(keepModal) renderBlkList(); }

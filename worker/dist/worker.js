@@ -7599,7 +7599,7 @@ async function handle8(request, env, ctx, url, sess) {
     const date = url.searchParams.get("date") || "";
     const eng = url.searchParams.get("engineer") || "";
     let list = await getSlaBlocks(env, tenantId);
-    if (date) list = list.filter((b) => b.date === date);
+    if (date) list = blocksOnDate(list, date);
     if (eng) list = list.filter((b) => normId(b.username) === normId(eng));
     return jsonResponse({ ok: true, blocks: list }, headers);
   }
@@ -7614,12 +7614,19 @@ async function handle8(request, env, ctx, url, sess) {
     if (!username || !date || !start || !end) return jsonResponse({ error: "username, date, start and end are required." }, headers, 400);
     if (hhmmMin(end) <= hhmmMin(start)) return jsonResponse({ error: "End time must be after the start time." }, headers, 400);
     const note = String(bb.note || "").slice(0, 200);
+    let repeat = null;
+    const rb = bb.repeat;
+    if (rb && (rb.weekly || rb.until)) {
+      const until = /^\d{4}-\d{2}-\d{2}$/.test(rb.until || "") ? rb.until : "";
+      if (until && until < date) return jsonResponse({ error: "The repeat-until date must be on or after the block date." }, headers, 400);
+      repeat = { dow: ymdDow(date), until };
+    }
     const list = await getSlaBlocks(env, tenantId);
     const id = "blk-" + crypto.randomUUID().slice(0, 12);
-    list.push({ id, username, date, start, end, note, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() });
+    list.push({ id, username, date, start, end, note, repeat, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() });
     const cutoff = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
-    await saveSlaBlocks(env, tenantId, list.filter((x) => (x.date || "") >= cutoff));
-    return jsonResponse({ ok: true, id, block: { id, username, date, start, end, note } }, headers);
+    await saveSlaBlocks(env, tenantId, list.filter((x) => x.repeat && x.repeat.dow != null ? !x.repeat.until || x.repeat.until >= cutoff : (x.date || "") >= cutoff));
+    return jsonResponse({ ok: true, id, block: { id, username, date, start, end, note, repeat } }, headers);
   }
   if (subpath === "/blocks/delete" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -10108,6 +10115,28 @@ async function getSlaBlocks(env, tid) {
 async function saveSlaBlocks(env, tid, arr) {
   await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, SLA_BLOCKS_KEY(tid), JSON.stringify(arr)).run();
 }
+function ymdDow(date) {
+  try {
+    return (/* @__PURE__ */ new Date(date + "T12:00:00Z")).getUTCDay();
+  } catch {
+    return -1;
+  }
+}
+function blocksOnDate(list, date) {
+  if (!date) return [];
+  const dow = ymdDow(date);
+  const out = [];
+  for (const b of Array.isArray(list) ? list : []) {
+    if (!b) continue;
+    const rep = b.repeat;
+    if (rep && rep.dow != null) {
+      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until)) out.push({ ...b, date, recurring: true });
+    } else if ((b.date || "") === date) {
+      out.push({ ...b, recurring: false });
+    }
+  }
+  return out;
+}
 function blockOffsets(blocks, dayStartMin) {
   return (Array.isArray(blocks) ? blocks : []).map((b) => ({ s: (hhmmMin(b.start) ?? 0) - dayStartMin, e: (hhmmMin(b.end) ?? 0) - dayStartMin, note: b.note || "" })).filter((b) => b.e > 0 && b.e > b.s).map((b) => ({ s: Math.max(0, b.s), e: b.e, note: b.note })).sort((a, b) => a.s - b.s);
 }
@@ -10247,7 +10276,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   if (!engineer) return { ok: false, error: "No engineer given." };
   let blkOffsets = [];
   try {
-    const mine = (await getSlaBlocks(env, tenantId)).filter((b) => b.date === date && normId(b.username) === normId(engineer));
+    const mine = blocksOnDate(await getSlaBlocks(env, tenantId), date).filter((b) => normId(b.username) === normId(engineer));
     blkOffsets = blockOffsets(mine, hhmmMin(dayStart) || 0);
   } catch {
   }
@@ -10355,8 +10384,8 @@ async function autoScheduleDay(env, tenantId, body) {
   const cap2 = Math.max(120, dayMinutes - lunch);
   const date = String(body.date || "").slice(0, 10);
   const dayStartMin = hhmmMin(dayStart) || 0;
-  const allBlocks = date ? await getSlaBlocks(env, tenantId).catch(() => []) : [];
-  const blocksFor = (u) => blockOffsets(allBlocks.filter((b) => b.date === date && normId(b.username) === normId(u)), dayStartMin);
+  const allBlocks = date ? blocksOnDate(await getSlaBlocks(env, tenantId).catch(() => []), date) : [];
+  const blocksFor = (u) => blockOffsets(allBlocks.filter((b) => normId(b.username) === normId(u)), dayStartMin);
   const warnings = [];
   const skills = await getEngSkills(env, tenantId);
   const dur = await estimateJobDurations(env, tenantId);

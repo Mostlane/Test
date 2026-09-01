@@ -2160,6 +2160,25 @@ default 400) makes route-optimise/infer fall back to non-AI when hit. **GET/POST
 engineer-skills.html "📊 AI usage this month". (Programme AI is occasional + NOT yet
 metered.)
 
+## Scheduler day blocks / "block off time" (sla.js `/sla/blocks*` + sla-scheduler.html)
+Admin reserves a window on an engineer's day (e.g. a dentist appointment) that
+nothing schedules into and the optimiser routes around. **Admin-only visibility:**
+only sla-scheduler.html (office/SLA-admin) renders blocks — the field app never
+shows them; **POST/delete are SLA-admin-gated**. Stored in app_config
+`sla:blocks:<tid>` as `[{id,username,date,start,end,note,repeat}]`. **Recurring
+(Sep 2026):** an optional **weekly** repeat lives behind a hidden `<details>`
+("🔁 Repeat weekly") in the block modal — `repeat = {dow (0-6 from the block's own
+date), until (optional)}`; a one-off has `repeat:null`. **`blocksOnDate(list,date)`
+(sla.js) + `blocksForDay()` (client)** are the shared expanders: a one-off matches
+its exact date, a repeat occurs on every matching weekday from its start to `until`
+(open-ended if blank). BOTH the scheduler render AND the enforcement paths
+(`/blocks?date=`, autoScheduleDay capacity, `/route-optimize` via `blockOffsets`/
+`avoidBlocks`) go through the expander, so recurring blocks are honoured everywhere.
+Prune: one-offs drop 60 days past; a repeat drops only once its `until` is 60 days
+past (open-ended repeats kept until removed). Removing a repeating block clears the
+WHOLE series (id is the series key; the client confirms first). Recurring bars/list
+show a 🔁.
+
 ## Scheduler route optimiser (sla.js `/sla/route-optimize` + sla-scheduler.html — Aug 2026)
 Per-engineer **"🧭 Optimise route"** button (in the engineer day-summary modal
 `#engDayBackdrop`, alongside 🗺️ Map) that auto-orders that engineer's jobs for a

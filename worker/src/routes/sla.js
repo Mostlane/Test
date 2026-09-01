@@ -1093,7 +1093,7 @@ export async function handle(request, env, ctx, url, sess) {
     const date = url.searchParams.get("date") || "";
     const eng = url.searchParams.get("engineer") || "";
     let list = await getSlaBlocks(env, tenantId);
-    if (date) list = list.filter(b => b.date === date);
+    if (date) list = blocksOnDate(list, date);   // expand recurring blocks for the day
     if (eng) list = list.filter(b => normId(b.username) === normId(eng));
     return jsonResponse({ ok: true, blocks: list }, headers);
   }
@@ -1108,13 +1108,24 @@ export async function handle(request, env, ctx, url, sess) {
     if (!username || !date || !start || !end) return jsonResponse({ error: "username, date, start and end are required." }, headers, 400);
     if (hhmmMin(end) <= hhmmMin(start)) return jsonResponse({ error: "End time must be after the start time." }, headers, 400);
     const note = String(bb.note || "").slice(0, 200);
+    // Optional weekly repeat: {weekly:true, until?}. The weekday is taken from the
+    // block's own date; `until` (optional) caps the series.
+    let repeat = null;
+    const rb = bb.repeat;
+    if (rb && (rb.weekly || rb.until)) {
+      const until = /^\d{4}-\d{2}-\d{2}$/.test(rb.until || "") ? rb.until : "";
+      if (until && until < date) return jsonResponse({ error: "The repeat-until date must be on or after the block date." }, headers, 400);
+      repeat = { dow: ymdDow(date), until };
+    }
     const list = await getSlaBlocks(env, tenantId);
     const id = "blk-" + crypto.randomUUID().slice(0, 12);
-    list.push({ id, username, date, start, end, note, by: sess.user.username, at: new Date().toISOString() });
-    // Keep the store small: drop blocks more than 60 days in the past.
+    list.push({ id, username, date, start, end, note, repeat, by: sess.user.username, at: new Date().toISOString() });
+    // Keep the store small: drop one-off blocks >60 days past, and repeating blocks
+    // whose `until` is >60 days past. An open-ended repeat is kept until removed.
     const cutoff = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
-    await saveSlaBlocks(env, tenantId, list.filter(x => (x.date || "") >= cutoff));
-    return jsonResponse({ ok: true, id, block: { id, username, date, start, end, note } }, headers);
+    await saveSlaBlocks(env, tenantId, list.filter(x =>
+      (x.repeat && x.repeat.dow != null) ? (!x.repeat.until || x.repeat.until >= cutoff) : ((x.date || "") >= cutoff)));
+    return jsonResponse({ ok: true, id, block: { id, username, date, start, end, note, repeat } }, headers);
   }
   if (subpath === "/blocks/delete" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -3919,6 +3930,27 @@ async function saveSlaBlocks(env, tid, arr) {
   await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .bind(tid, SLA_BLOCKS_KEY(tid), JSON.stringify(arr)).run();
 }
+// Weekday (0=Sun..6=Sat) of a YYYY-MM-DD date at noon UTC (timezone-stable).
+function ymdDow(date) { try { return new Date(date + "T12:00:00Z").getUTCDay(); } catch { return -1; } }
+// Expand the stored blocks into concrete occurrences on ONE date. A one-off block
+// matches b.date===date; a weekly REPEATING block (b.repeat={dow,until}) occurs on
+// every matching weekday from its start date to `until` (inclusive; open-ended if
+// until is blank). Occurrences keep the base id so deleting removes the whole series.
+function blocksOnDate(list, date) {
+  if (!date) return [];
+  const dow = ymdDow(date);
+  const out = [];
+  for (const b of (Array.isArray(list) ? list : [])) {
+    if (!b) continue;
+    const rep = b.repeat;
+    if (rep && rep.dow != null) {
+      if (Number(rep.dow) === dow && date >= (b.date || "") && (!rep.until || date <= rep.until)) out.push({ ...b, date, recurring: true });
+    } else if ((b.date || "") === date) {
+      out.push({ ...b, recurring: false });
+    }
+  }
+  return out;
+}
 // Turn a list of {start,end} HH:MM blocks into {s,e} minute-offsets from dayStart,
 // clamped to the working day, dropped if entirely before it, sorted by start.
 function blockOffsets(blocks, dayStartMin) {
@@ -4023,7 +4055,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   // laid out to work around them (loaded server-side, authoritative).
   let blkOffsets = [];
   try {
-    const mine = (await getSlaBlocks(env, tenantId)).filter(b => b.date === date && normId(b.username) === normId(engineer));
+    const mine = blocksOnDate(await getSlaBlocks(env, tenantId), date).filter(b => normId(b.username) === normId(engineer));
     blkOffsets = blockOffsets(mine, hhmmMin(dayStart) || 0);
   } catch {}
   const home = await engineerHome(env, tenantId, engineer);
@@ -4121,8 +4153,8 @@ async function autoScheduleDay(env, tenantId, body) {
   const dayStartMin = hhmmMin(dayStart) || 0;
   // Reserved blocks (appointments) per engineer for this day — shrink capacity
   // and route around them so nothing lands in a blocked window.
-  const allBlocks = date ? await getSlaBlocks(env, tenantId).catch(() => []) : [];
-  const blocksFor = u => blockOffsets(allBlocks.filter(b => b.date === date && normId(b.username) === normId(u)), dayStartMin);
+  const allBlocks = date ? blocksOnDate(await getSlaBlocks(env, tenantId).catch(() => []), date) : [];
+  const blocksFor = u => blockOffsets(allBlocks.filter(b => normId(b.username) === normId(u)), dayStartMin);
   const warnings = [];
   const skills = await getEngSkills(env, tenantId);
   const dur = await estimateJobDurations(env, tenantId);    // learned typical job length
