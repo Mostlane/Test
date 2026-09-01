@@ -29997,10 +29997,10 @@ function probeList(env) {
     ["d1_core", "Core tables readable", async () => {
       const out = [];
       for (const t of ["users", "sla_jobs", "sites", "vehicles", "app_config"]) {
-        const row = await env.DB.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = 1`).first();
-        out.push(`${t} ${row && row.n || 0}`);
+        await env.DB.prepare(`SELECT 1 FROM ${t} WHERE tenant_id = 1 LIMIT 1`).first();
+        out.push(t);
       }
-      return out.join(" \xB7 ");
+      return "readable: " + out.join(", ");
     }],
     ["r2_jobfiles", "Job files bucket (R2)", async () => {
       if (!env.JOB_FILES) return "not bound (skipped)";
