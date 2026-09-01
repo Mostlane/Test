@@ -59,6 +59,7 @@
   .card.hol .dhead{background:#f0fdf4}
   .holtag{margin-left:auto;background:#16a34a;color:#fff;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:700;white-space:nowrap}
   .holbanner{background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:9px;padding:7px 10px;font-size:13px;font-weight:600;margin-bottom:8px}
+  .bhbanner{background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:9px;padding:7px 10px;font-size:13px;font-weight:600;margin-bottom:8px}
   .flab{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin:12px 0 5px 3px}
   .row{margin:0}
   /* per-job hours (for costing) */
@@ -175,7 +176,7 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null;
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null;
 // Door-to-door fuel mileage is computed + locked server-side for self-employed
 // fuel-paid engineers — this helper reads the day's figure for the totals/card.
 function autoDayMiles(date){ if(!(AUTOMI&&AUTOMI.applies))return null; const b=AUTOMI.byDate&&AUTOMI.byDate[date]; return b?(b.miles||0):0; }
@@ -366,6 +367,7 @@ function render(){
       </button>
       <div class="cbody">
         ${hol?`<div class="holbanner">🌴 ${esc(holName(hol.type))} (${hol.half} half) — booked leave</div>`:""}
+        ${(!hol&&BANK[date])?`<div class="bhbanner">🏦 ${esc(BANK[date].label)} — ${BANK[date].kind==="shutdown"?"company shutdown":"bank holiday"} (0 hrs unless you worked)</div>`:""}
         <div class="times2">
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
@@ -777,6 +779,7 @@ async function load(){
     AUTO=(wkR&&wkR.auto)||{};
     AUTOMI=(wkR&&wkR.autoMileage)||null;
     HOL=(wkR&&wkR.holidays)||{};
+    BANK=(wkR&&wkR.bank)||{};
     JOBMETA=(wkR&&wkR.jobMeta)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';

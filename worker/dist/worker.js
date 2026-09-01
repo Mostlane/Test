@@ -661,6 +661,7 @@ var init_push = __esm({
 var holidays_exports = {};
 __export(holidays_exports, {
   approvedLeaveInRange: () => approvedLeaveInRange,
+  bankHolidaysInRange: () => bankHolidaysInRange,
   handle: () => handle5,
   remindPendingHolidays: () => remindPendingHolidays
 });
@@ -679,6 +680,31 @@ async function approvedLeaveInRange(env, tid, from, to, username) {
         const ds = d.toISOString().slice(0, 10);
         if (ds >= from && ds <= to) (out[r.username] = out[r.username] || {})[ds] = { type: r.type || "Holiday", half: r.half || "" };
         d.setUTCDate(d.getUTCDate() + 1);
+      }
+    }
+  } catch {
+  }
+  return out;
+}
+async function bankHolidaysInRange(env, tid, from, to) {
+  const out = {};
+  try {
+    const years = /* @__PURE__ */ new Set();
+    for (const d of [from, to]) if (d) years.add(String(d).slice(0, 4));
+    for (const y of years) {
+      for (const [key, kind] of [[`holiday:bankholidays:${y}`, "bank"], [`holiday:shutdown:${y}`, "shutdown"]]) {
+        const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+        if (!row || !row.value) continue;
+        let arr = [];
+        try {
+          arr = JSON.parse(row.value) || [];
+        } catch {
+        }
+        for (const b of arr) {
+          const date = b && b.date;
+          if (date && date >= from && date <= to)
+            out[date] = { label: b.label || (kind === "shutdown" ? "Company Shutdown" : "Bank Holiday"), kind };
+        }
       }
     }
   } catch {
@@ -4916,6 +4942,7 @@ async function handle7(request, env, ctx, url, sess) {
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
+    const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
     const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
     return json({
@@ -4925,6 +4952,7 @@ async function handle7(request, env, ctx, url, sess) {
       savedAt,
       auto,
       holidays,
+      bank,
       jobMeta,
       approval,
       locked: !!approval,
@@ -5524,7 +5552,8 @@ async function handle7(request, env, ctx, url, sess) {
           } : null
         });
       }
-      return json({ ok: true, week: monday, days: weekDays(monday), users: out }, {}, env, request);
+      const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
+      return json({ ok: true, week: monday, days: weekDays(monday), users: out, bank }, {}, env, request);
     }
     if (sub === "/admin/save" && method === "POST") {
       const b = await request.json().catch(() => ({}));

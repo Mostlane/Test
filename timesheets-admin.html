@@ -180,7 +180,7 @@ async function load(){
 
 function renderTable(){
   const days=DATA.days;
-  g("head").innerHTML='<th class="name">Engineer</th>'+days.map((d,i)=>`<th>${DOW[i]}<br><span style="font-weight:400">${d.slice(8)}</span></th>`).join("")+
+  g("head").innerHTML='<th class="name">Engineer</th>'+days.map((d,i)=>`<th>${DOW[i]}<br><span style="font-weight:400">${d.slice(8)}${(DATA.bank&&DATA.bank[d])?' <span title="'+esc(DATA.bank[d].label)+'">🏦</span>':''}</span></th>`).join("")+
     '<th>Total</th><th class="hideS">Miles</th><th>Invoice</th><th></th>';
   const showAll=g("showAll").checked;
   const rows=DATA.users.filter(u=>showAll||u.totals.daysWorked>0||u.totals.miles>0||u.selfEmployed||u.cfg.commute||u.cfg.lunch);
@@ -225,7 +225,8 @@ function openEdit(username){
       const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
       miBlock=`<div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button>`;
     }
-    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip">🌴 ${hol.half||"Hol"}</span>`:""}</h4>
+    const bh=(DATA.bank&&DATA.bank[date])||null;
+    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}${hol?` <span class="holchip">🌴 ${hol.half||"Hol"}</span>`:""}${bh?` <span class="holchip" style="background:#4f46e5" title="${esc(bh.label)}">🏦 BH</span>`:""}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
       ${miBlock}</div>`;
