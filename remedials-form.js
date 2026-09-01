@@ -178,20 +178,55 @@
       if (mk) mk.onclick = createWorks;
       Array.prototype.forEach.call(el.querySelectorAll(".mlr-th"), function (im) { im.onclick = function () { var u = im.getAttribute("data-full"); if (u) window.open(u, "_blank"); }; });
     }
+    // Opens a picker so the office chooses which remedials go on the works job.
+    // C1 / C2 / FI are pre-ticked (usually actioned); C3 (and un-coded items) are
+    // left unticked but can be added.
+    var PRESELECT = ["C1", "C2", "FI"];
     function createWorks() {
-      var btn = el.querySelector(".mlr-mk"); if (btn) { btn.disabled = true; btn.textContent = "Creating…"; }
-      afetch("/sla/jobs/" + encodeURIComponent(jobId) + "/create-works-job", { method: "POST" })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      var pick = items.filter(function (r) { return r.description || r.photos.length; });
+      if (!pick.length) { alert("There are no remedials to turn into works."); return; }
+      var ov = document.createElement("div");
+      ov.className = "mlr-ov";
+      var rows = pick.map(function (r, i) {
+        var on = PRESELECT.indexOf((r.code || "").toUpperCase()) >= 0;
+        return '<label class="mlr-pk-row"><input type="checkbox" data-i="' + i + '"' + (on ? " checked" : "") + '>' +
+          '<span class="mlr-pk-code">' + (r.code ? '<span class="mlr-code-pill c' + r.code + '">' + esc(r.code) + '</span>' : '<span class="mlr-pk-none">–</span>') + '</span>' +
+          '<span class="mlr-pk-desc">' + esc(r.description || "(no description)") + (r.photos.length ? ' <span class="mlr-pk-ph">📷' + r.photos.length + '</span>' : '') + '</span></label>';
+      }).join("");
+      ov.innerHTML = '<div class="mlr-pk">' +
+        '<div class="mlr-pk-h">Which remedials go on the works job?</div>' +
+        '<div class="mlr-pk-hint">C1, C2 &amp; FI are ticked by default. C3 isn\'t usually required — tick any you want to include.</div>' +
+        '<div class="mlr-pk-list">' + rows + '</div>' +
+        '<div class="mlr-pk-act"><button type="button" class="mlr-pk-cancel">Cancel</button>' +
+        '<button type="button" class="mlr-pk-go">Create works job</button></div></div>';
+      document.body.appendChild(ov);
+      var close = function () { try { document.body.removeChild(ov); } catch (e) {} };
+      var updateGo = function () {
+        var n = ov.querySelectorAll('.mlr-pk-list input:checked').length;
+        var g = ov.querySelector('.mlr-pk-go'); g.textContent = "Create works job" + (n ? " (" + n + ")" : ""); g.disabled = !n;
+      };
+      ov.querySelectorAll('.mlr-pk-list input').forEach(function (c) { c.addEventListener("change", updateGo); });
+      updateGo();
+      ov.querySelector(".mlr-pk-cancel").onclick = close;
+      ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+      ov.querySelector(".mlr-pk-go").onclick = function () {
+        var ids = Array.prototype.map.call(ov.querySelectorAll('.mlr-pk-list input:checked'), function (c) { return pick[+c.getAttribute("data-i")].id; });
+        if (!ids.length) return;
+        var g = ov.querySelector(".mlr-pk-go"); g.disabled = true; g.textContent = "Creating…";
+        submitWorks(ids, close, function () { g.disabled = false; updateGo(); });
+      };
+    }
+    function submitWorks(itemIds, onDone, onFail) {
+      afetch("/sla/jobs/" + encodeURIComponent(jobId) + "/create-works-job", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemIds: itemIds })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
           if (res.ok && res.j && res.j.id) {
-            worksJobId = res.j.id; renderOffice();
+            worksJobId = res.j.id; if (onDone) onDone(); renderOffice();
             if (typeof opts.onCreateWorks === "function") opts.onCreateWorks(res.j.id);
-            if (window.MLUI) MLUI.toast ? MLUI.toast("Works job created") : alert("Works job created");
-          } else {
-            if (btn) { btn.disabled = false; btn.textContent = "➕ Create works job from these remedials"; }
-            alert((res.j && res.j.error) || "Couldn't create the works job.");
-          }
-        }).catch(function () { if (btn) { btn.disabled = false; btn.textContent = "➕ Create works job from these remedials"; } alert("Couldn't create the works job."); });
+            if (window.MLUI && MLUI.toast) MLUI.toast("Works job created"); else alert("Works job created");
+          } else { alert((res.j && res.j.error) || "Couldn't create the works job."); if (onFail) onFail(); }
+        }).catch(function () { alert("Couldn't create the works job."); if (onFail) onFail(); });
     }
 
     injectStyle();
@@ -231,7 +266,20 @@
       + '.mlr-mk{width:100%;margin-top:12px;padding:12px;border:0;background:#003468;color:#fff;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer}'
       + '.mlr-mkhint{font-size:12px;color:#64748b;margin-top:6px;text-align:center}'
       + '.mlr-works{margin-top:12px;padding:10px;border-radius:10px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-weight:600}'
-      + '.mlr-works a{color:#166534}';
+      + '.mlr-works a{color:#166534}'
+      + '.mlr-ov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;}'
+      + '.mlr-pk{background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden;}'
+      + '.mlr-pk-h{font-weight:700;font-size:16px;color:#003468;padding:16px 16px 4px;}'
+      + '.mlr-pk-hint{font-size:12px;color:#64748b;padding:0 16px 8px;}'
+      + '.mlr-pk-list{overflow:auto;padding:4px 8px;flex:1;}'
+      + '.mlr-pk-row{display:flex;align-items:flex-start;gap:10px;padding:9px 8px;border-radius:8px;cursor:pointer;font-size:14px;}'
+      + '.mlr-pk-row:hover{background:#f3f7fc;}.mlr-pk-row input{margin-top:2px;width:18px;height:18px;flex:none;}'
+      + '.mlr-pk-code{flex:none;width:34px;}.mlr-pk-none{color:#94a3b8;}'
+      + '.mlr-pk-desc{flex:1;color:#0f2438;}.mlr-pk-ph{color:#64748b;font-size:12px;white-space:nowrap;}'
+      + '.mlr-pk-act{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e9ef;}'
+      + '.mlr-pk-cancel{padding:9px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:9px;font:inherit;cursor:pointer;}'
+      + '.mlr-pk-go{padding:9px 16px;border:0;background:#003468;color:#fff;border-radius:9px;font:inherit;font-weight:700;cursor:pointer;}'
+      + '.mlr-pk-go:disabled{opacity:.5;cursor:default;}';
     var st = document.createElement("style"); st.id = "mlr-style"; st.textContent = css; document.head.appendChild(st);
   }
 

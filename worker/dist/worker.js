@@ -8420,8 +8420,11 @@ async function handle8(request, env, ctx, url, sess) {
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
       const src = await getJob(env, tenantId, id);
       if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
-      const rem = Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
-      if (!rem.length) return jsonResponse({ error: "This job has no remedials to turn into works." }, headers, 400);
+      const wbody = await readJson2(request).catch(() => ({}));
+      const pickIds = Array.isArray(wbody && wbody.itemIds) ? wbody.itemIds.map(String) : null;
+      let rem = Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+      if (pickIds && pickIds.length) rem = rem.filter((r) => pickIds.includes(String(r.id)));
+      if (!rem.length) return jsonResponse({ error: "Pick at least one remedial to turn into works." }, headers, 400);
       if (src.remedialsWorksJobId) {
         const ex = await getJob(env, tenantId, src.remedialsWorksJobId).catch(() => null);
         if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);

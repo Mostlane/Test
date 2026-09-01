@@ -2518,8 +2518,11 @@ GET job returns `remedials` with `photoUrls` via `decorateRemedials`. Completion
 **site-audit** job at the same site — each remedial → an audit item (`text` =
 `[code] description`, the engineer's photos COPIED into `jobs/<newId>/audit/<item>/…`
 as the item's refPhotos), **duration + material cost NOT carried** (pricing stays off
-the works job). Idempotent (`job.remedialsWorksJobId` links both ways;
-`fromRemedialsOf` on the new job). Front-end: shared **remedials-form.js** (`?v=1`,
+the works job). **Which remedials to include is a PICKER (Sep 2026):** "Create works
+job" opens a modal listing every remedial with a checkbox — **C1/C2/FI pre-ticked,
+C3 + un-coded off but addable**; the chosen ids go up as **`itemIds`** on the POST
+(absent = all). Idempotent (`job.remedialsWorksJobId` links both ways;
+`fromRemedialsOf` on the new job). Front-end: shared **remedials-form.js** (`?v=2`,
 `window.MLRemedials.mount(el,{jobId,mode:engineer|office,api,token,job,canManage})`)
 — engineer mode = add/edit/remove items (code · description · duration(min) · material
 £ · camera photos, autosaves via PATCH {remedials}); office mode = clean table +
