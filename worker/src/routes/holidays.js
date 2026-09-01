@@ -49,6 +49,31 @@ export async function approvedLeaveInRange(env, tid, from, to, username) {
   return out;
 }
 
+// Bank-holiday + company-shutdown dates within [from,to] as
+// { "YYYY-MM-DD": { label, kind:"bank"|"shutdown" } }. Reads the per-year
+// app_config the holiday admin maintains. Company-wide (not per user) — used to
+// mark bank holidays on the timesheet (a 0-hour marker, not paid leave).
+export async function bankHolidaysInRange(env, tid, from, to) {
+  const out = {};
+  try {
+    const years = new Set();
+    for (const d of [from, to]) if (d) years.add(String(d).slice(0, 4));
+    for (const y of years) {
+      for (const [key, kind] of [[`holiday:bankholidays:${y}`, "bank"], [`holiday:shutdown:${y}`, "shutdown"]]) {
+        const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, key).first();
+        if (!row || !row.value) continue;
+        let arr = []; try { arr = JSON.parse(row.value) || []; } catch {}
+        for (const b of arr) {
+          const date = b && b.date;
+          if (date && date >= from && date <= to)
+            out[date] = { label: b.label || (kind === "shutdown" ? "Company Shutdown" : "Bank Holiday"), kind };
+        }
+      }
+    }
+  } catch { /* fail soft → no markers */ }
+  return out;
+}
+
 // Daily re-nudge to holiday admins about requests still Pending. Push-only (the
 // outstanding bell alert already exists). Called once a day from the cron.
 export async function remindPendingHolidays(env, tid = 1) {

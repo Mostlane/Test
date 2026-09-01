@@ -39,7 +39,7 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
-import { approvedLeaveInRange } from "./holidays.js";
+import { approvedLeaveInRange, bankHolidaysInRange } from "./holidays.js";
 import { sendToUser } from "./push.js";
 
 // Approved leave for a Mon–Sun week as { "YYYY-MM-DD": {type, half} } for one
@@ -296,7 +296,7 @@ async function materialiseTimesheet(env, tid, username, monday, days) {
 
 // ── Settings (app_config JSON, per-user overrides on shared defaults) ────────
 const DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45,
-  radiusMiles: 10, basePostcode: "PO15 5RQ", company: "Mostlane" };
+  radiusMiles: 10, overtimeThresholdH: 8, basePostcode: "PO15 5RQ", company: "Mostlane" };
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
   try {
@@ -335,6 +335,10 @@ function effectiveCfg(cfg, u) {
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
     rate: num(mine.rate) ?? (mine.rateType === "day" ? num(profile.dayRate) : num(profile.hourlyRate)) ?? num(profile.hourlyRate),
+    // Overtime: a multiplier of the normal HOURLY rate, applied to hours over the
+    // daily threshold. Only for hourly staff (day-rate excluded) with a mult set.
+    overtimeMult: num(mine.overtimeMult),
+    overtimeThresholdH: Number(mine.overtimeThresholdH ?? cfg.defaults.overtimeThresholdH) || 8,
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],   // extra lines under their name on the invoice
     nextNumber: Number(mine.nextNumber) || null,
@@ -388,18 +392,36 @@ function dayCalc(d, eff) {
 }
 function dayMiles(d) { return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0)); }
 function weekTotals(days, eff) {
-  let paidMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
+  const r2 = n => Math.round(n * 100) / 100;
+  // Overtime: hours over the DAILY threshold, paid at rate × multiplier. Only for
+  // hourly staff with a multiplier set (day-rate is excluded).
+  const otOn = eff.rateType !== "day" && eff.overtimeMult > 0;
+  const thrMin = (eff.overtimeThresholdH || 8) * 60;
+  let paidMins = 0, otMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
   for (const d of Object.values(days || {})) {
     const c = dayCalc(d, eff);
     paidMins += c.paid; miles += c.miles; milesClaimed += c.milesClaimed;
     if (c.worked) daysWorked++;
+    if (otOn && c.paid > thrMin) otMins += c.paid - thrMin;
   }
-  const hours = Math.round((paidMins / 60) * 100) / 100;
-  const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
+  const hours = r2(paidMins / 60);
+  const otHours = r2(otMins / 60);
+  const normalHours = r2((paidMins - otMins) / 60);
+  const otRate = otOn && eff.rate ? r2(eff.rate * eff.overtimeMult) : null;
+  let labour = null, otPay = 0, normalPay = 0;
+  if (eff.rate) {
+    if (eff.rateType === "day") { labour = r2(daysWorked * eff.rate); }
+    else {
+      normalPay = normalHours * eff.rate;
+      otPay = otHours * (otRate || eff.rate);
+      labour = r2(normalPay + otPay);
+    }
+  }
   const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
-  return { paidMins, hours, miles: round1(miles), milesClaimed: round1(milesClaimed),
+  return { paidMins, hours, normalHours, otHours, otRate, otPay: r2(otPay), normalPay: r2(normalPay),
+    miles: round1(miles), milesClaimed: round1(milesClaimed),
     milesDeducted: round1(miles - milesClaimed), daysWorked, labour, mileagePay,
-    total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null };
+    total: labour != null ? r2(labour + mileagePay) : null };
 }
 async function loadWeek(env, tid, username, monday) {
   const row = await env.DB.prepare("SELECT data, at, approved_at, approved_by, admin_note FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?")
@@ -715,9 +737,12 @@ async function jobsMetaForDay(env, tid, day) {
   return meta;
 }
 
-// Ordered postcodes visited on one day: status-tap capture order first
-// (jobTimeAuto), then any hand-entered jobHours jobs by scheduled time. Dupes
-// (and consecutive same-site) collapsed; entries with no postcode dropped.
+// Ordered postcodes visited on one day, forming ONE chained route (never a
+// round trip per job). Status-tap capture order first (jobTimeAuto = the real
+// driving order), then any hand-entered jobHours jobs IN THE ORDER THE ENGINEER
+// LISTED THEM on the timesheet (that's the order they drove them — a manually
+// added job carries no scheduled time to sort by). Dupes (and consecutive
+// same-site) collapsed; entries with no postcode dropped.
 function visitedSequenceForDay(autoDay, day, jobsMeta) {
   const seq = [], seen = new Set();
   const push = (site, pc) => {
@@ -732,13 +757,11 @@ function visitedSequenceForDay(autoDay, day, jobsMeta) {
     if (!pc) { const m = byRef[String(j.ref || "").toLowerCase()]; if (m) pc = m.pc; }
     push(j.site, pc);
   }
-  const extra = [];
+  // jobHours keys keep the engineer's entry order — that IS the route order.
   for (const jid of Object.keys((day && day.jobHours) || {})) {
     const m = jobsMeta && jobsMeta[jid];
-    if (m && m.pc && !seen.has(m.pc)) extra.push(m);
+    if (m && m.pc) push(m.site, m.pc);
   }
-  extra.sort((a, b) => String(a.sched || "").localeCompare(String(b.sched || "")));
-  for (const m of extra) push(m.site, m.pc);
   return seq;
 }
 
@@ -894,15 +917,25 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   if (eff.rateType === "day" && eff.rate) {
     doc.text(cTot, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
     doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true }); y += 16;
+  } else if (totals.otHours > 0 && eff.rate) {
+    // Split normal vs overtime when any overtime was worked.
+    doc.text(cTot, y, "Labour: " + totals.normalHours + " h @ " + money(eff.rate) + "/h", { size: 10 });
+    doc.text(cAmt, y, money(totals.normalPay), { size: 10, alignRight: true }); y += 16;
+    doc.text(cTot, y, "Overtime: " + totals.otHours + " h @ " + money(totals.otRate) + "/h (" + eff.overtimeMult + "×)", { size: 10 });
+    doc.text(cAmt, y, money(totals.otPay), { size: 10, alignRight: true }); y += 16;
   } else {
     doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
     doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true }); y += 16;
   }
   if (totals.miles > 0) {
     const ded = totals.milesDeducted > 0;
-    doc.text(cTot, y, "Mileage: " + (ded
-      ? totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"
-      : totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"), { size: ded ? 9 : 10 });
+    // The radius breakdown goes on its OWN small grey line so the label can
+    // never run into the right-aligned amount.
+    if (ded) {
+      doc.text(cTot, y, totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi", { size: 8.5, grey: true });
+      y += 12;
+    }
+    doc.text(cTot, y, "Mileage: " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p", { size: 10 });
     doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true }); y += 16;
   }
   y += 6;
@@ -973,11 +1006,12 @@ export async function handle(request, env, ctx, url, sess) {
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
+    const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
     const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
-    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, approval, locked: !!approval,
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
       totals: weekTotals(am.days, eff), autoMileage: am.auto,
-      invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
+      invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
 
@@ -1438,10 +1472,13 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   if (sub === "/invoice/delete" && method === "POST") {
-    if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, Number(b.id)).first();
     if (!row) return error("Invoice not found", 404, env, request);
+    // The office can delete anyone's; a self-employed engineer can delete their
+    // OWN (frees the week + the invoice number to regenerate).
+    const admin = await isTsAdmin(env, tid, sess);
+    if (!admin && row.username !== me) return error("You can only delete your own invoices.", 403, env, request);
     await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
     try { await env.JOB_FILES.delete(row.r2_key); } catch {}
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
@@ -1497,7 +1534,8 @@ export async function handle(request, env, ctx, url, sess) {
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null });
       }
-      return json({ ok: true, week: monday, days: weekDays(monday), users: out }, {}, env, request);
+      const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
+      return json({ ok: true, week: monday, days: weekDays(monday), users: out, bank }, {}, env, request);
     }
 
     if (sub === "/admin/save" && method === "POST") {
@@ -1567,7 +1605,7 @@ export async function handle(request, env, ctx, url, sess) {
           if (v === null) { delete cfg.byUser[u]; continue; }
           const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
           for (const k of ["commute", "lunch", "mileage", "radius"]) if (k in v) mine[k] = v[k] === true;
-          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles"]) {
+          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles", "overtimeMult", "overtimeThresholdH"]) {
             if (k in v) { const n = parseFloat(v[k]); if (isFinite(n) && n >= 0) mine[k] = n; else delete mine[k]; }
           }
           if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;

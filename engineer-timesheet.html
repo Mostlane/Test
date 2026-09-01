@@ -59,6 +59,7 @@
   .card.hol .dhead{background:#f0fdf4}
   .holtag{margin-left:auto;background:#16a34a;color:#fff;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:700;white-space:nowrap}
   .holbanner{background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:9px;padding:7px 10px;font-size:13px;font-weight:600;margin-bottom:8px}
+  .bhbanner{background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:9px;padding:7px 10px;font-size:13px;font-weight:600;margin-bottom:8px}
   .flab{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin:12px 0 5px 3px}
   .row{margin:0}
   /* per-job hours (for costing) */
@@ -175,10 +176,19 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null;
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null;
 // Door-to-door fuel mileage is computed + locked server-side for self-employed
 // fuel-paid engineers — this helper reads the day's figure for the totals/card.
 function autoDayMiles(date){ if(!(AUTOMI&&AUTOMI.applies))return null; const b=AUTOMI.byDate&&AUTOMI.byDate[date]; return b?(b.miles||0):0; }
+// Repaint the door-to-door breakdown for every day (after a save recomputes it
+// server-side) without touching the input rows, so typing/focus isn't disturbed.
+function paintAutoMileage(){
+  if(!(AUTOMI&&AUTOMI.applies))return;
+  document.querySelectorAll(".card[data-date]").forEach(card=>{
+    const host=card.querySelector(".miAutoHost");
+    if(host){ const date=card.dataset.date; host.innerHTML=(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""; }
+  });
+}
 function autoMiHtml(date){
   const b=(AUTOMI&&AUTOMI.byDate)?AUTOMI.byDate[date]:null;
   const head=`<div class="flab">Fuel mileage — door-to-door (automatic, locked)</div>`;
@@ -193,7 +203,14 @@ function autoMiHtml(date){
     ${b.fromSchedule?`<div class="muted" style="font-size:11px;margin-top:4px">From your booked jobs for the day — tap your job statuses on site to confirm the exact route.</div>`:""}
     <div class="muted" style="font-size:11px;margin-top:2px">Office ${esc(AUTOMI.base||"")} → your sites in order → home ${esc(AUTOMI.home||"")}. “~” = estimated.</div></div>`;
 }
-function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
+function holName(t){ return t==="Unpaid"?"Unpaid Leave":t==="Other"?"Leave":"Holiday"; }
+function bankName(b){ return b&&b.kind==="shutdown"?"Company Shutdown":"Bank Holiday"; }
+// The emoji + full label for a day's marker (booked leave wins over a bank holiday).
+function dayMark(date){
+  const h=HOL[date]; if(h) return "🌴 "+holName(h.type)+((h.half==="AM"||h.half==="PM")?" ("+h.half+")":"");
+  const b=BANK[date]; if(b) return "🏦 "+bankName(b);
+  return "";
+}
 
 function claimedMiles(miles){
   if(!(ME&&ME.radius)||!(miles>0))return miles;
@@ -238,18 +255,25 @@ function collect(){
 function refreshTotals(){
   const days=collect();
   const auto=!!(AUTOMI&&AUTOMI.applies);
-  let paid=0,miles=0,milesClaimed=0,worked=0;
+  // Overtime: hours over the daily threshold, for hourly staff with a multiplier.
+  const otOn=!!(ME&&ME.rateType!=="day"&&ME.overtimeMult>0);
+  const thrMin=(ME&&ME.overtimeThresholdH||8)*60;
+  let paid=0,otMins=0,miles=0,milesClaimed=0,worked=0;
   for(const [date,d] of Object.entries(days)){const c=dayCalc(d);paid+=c.paid;if(c.worked)worked++;
+    if(otOn&&c.paid>thrMin)otMins+=c.paid-thrMin;
     const dm=auto?(autoDayMiles(date)||0):c.miles;
     miles+=dm;milesClaimed+=auto?claimedMiles(dm):c.milesClaimed;}
   const hours=Math.round(paid/60*100)/100;
   miles=Math.round(miles*10)/10;milesClaimed=Math.round(milesClaimed*10)/10;
   let h=`<span>Paid time<b>${hmS(paid)}</b></span><span>Days<b>${worked}</b></span>`;
+  if(otOn&&otMins>0) h+=`<span>Overtime<b>${hmS(otMins)}</b>${ME.overtimeMult?`<span style="display:block;font-size:10px;text-transform:none;letter-spacing:0">${ME.overtimeMult}× over ${ME.overtimeThresholdH||8}h/day</span>`:""}</span>`;
   if(ME&&ME.mileage){
     h+=`<span>Mileage<b>${milesClaimed} mi</b>${milesClaimed!==miles?`<span style="display:block;font-size:10px;text-transform:none;letter-spacing:0">${miles} − ${Math.round((miles-milesClaimed)*10)/10} radius</span>`:""}</span>`;
   }
   if(ME&&ME.selfEmployed&&ME.rate){
-    const labour=ME.rateType==="day"?worked*ME.rate:hours*ME.rate;
+    let labour;
+    if(ME.rateType==="day")labour=worked*ME.rate;
+    else{const normMins=paid-otMins;labour=(normMins/60)*ME.rate+(otMins/60)*ME.rate*(ME.overtimeMult||1);}
     const mp=milesClaimed*ME.pencePerMile/100;
     h+=`<span>Labour<b>${money(labour)}</b></span>`;
     if(ME.mileage) h+=`<span>Mileage pay<b>${money(mp)}</b></span>`;
@@ -345,11 +369,12 @@ function render(){
     const jhRows=[...booked,...extras];
     card.innerHTML=`
       <button class="dhead" type="button">
-        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:""}</span></span>
+        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${dayMark(date)?` · ${dayMark(date)}`:(booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:"")}</span></span>
         <span class="sum"></span><span class="chev">›</span>
       </button>
       <div class="cbody">
         ${hol?`<div class="holbanner">🌴 ${esc(holName(hol.type))} (${hol.half} half) — booked leave</div>`:""}
+        ${(!hol&&BANK[date])?`<div class="bhbanner">🏦 ${bankName(BANK[date])}${(BANK[date].label&&BANK[date].label!==bankName(BANK[date]))?` — ${esc(BANK[date].label)}`:""} (0 hrs unless you worked)</div>`:""}
         <div class="times2">
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
@@ -369,7 +394,7 @@ function render(){
           <button type="button" class="addjob">＋ Add another job</button>
           <div class="addjobbox" hidden><input type="text" class="addjob-input" placeholder="Search a job number, site or description…" autocomplete="off"><div class="addjob-res"></div></div>
         </div>
-        ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?((AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""):`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
+        ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?`<div class="miAutoHost">${(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""}</div>`:`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
         ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
@@ -416,8 +441,14 @@ function renderInvoiceCard(){
     return;
   }
   card.style.display="";
+  const allBtn=`<div class="invrow" style="margin-top:6px"><button class="btn" id="viewAllInv" style="display:none">📋 View all invoices</button></div><div class="invlist" id="invList" hidden></div>`;
   if(INVOICE){
-    card.innerHTML=`<h3>🧾 Invoice</h3><div class="invrow">Invoice <b>${INVOICE.number}</b> · ${money(INVOICE.total||0)} · <a href="${esc(INVOICE.url)}" target="_blank">Open PDF</a></div><div class="invlist" id="invList"></div>`;
+    card.innerHTML=`<h3>🧾 Invoice</h3>
+      <div class="muted" style="font-size:12.5px;margin-bottom:4px">This week</div>
+      <div class="li"><b>#${INVOICE.number}</b><span>${money(INVOICE.total||0)}</span>
+        <a href="${esc(INVOICE.url)}" target="_blank" style="margin-left:auto">Open / print</a>
+        <button class="btn del" id="thisWkDel" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`+allBtn;
+    if(INVOICE.id!=null)g("thisWkDel").onclick=()=>deleteInvoice(INVOICE.id,INVOICE.number,INVOICE.url);
   } else {
     card.innerHTML=`<h3>🧾 Invoice this week</h3>
       <div class="invrow" style="flex-direction:column;align-items:stretch">
@@ -429,8 +460,7 @@ function renderInvoiceCard(){
            <select id="rateType"><option value="hour">per hour</option><option value="day">per day</option></select></div>`}
       <div class="invrow"><label>Next invoice number <input type="number" id="nextNo" min="1" step="1" value="${ME.nextInvoice}" style="width:110px" ${ME.canSetNumber?"":"disabled"}></label>
         <span class="muted" style="font-size:12.5px" id="noMsg">${ME.canSetNumber?"Set your starting number once — it saves as you type and counts up from there.":""}</span></div>
-      <div class="invrow"><button class="btn primary" id="genBtn">Generate invoice PDF</button></div>
-      <div class="invlist" id="invList"></div>`;
+      <div class="invrow"><button class="btn primary" id="genBtn">Generate invoice PDF</button></div>`+allBtn;
     if(ME.canSetNumber){
       let noTimer=null;
       g("nextNo").oninput=()=>{clearTimeout(noTimer);noTimer=setTimeout(async()=>{
@@ -453,11 +483,29 @@ function renderInvoiceCard(){
 }
 
 async function loadInvoiceList(){
-  const el=g("invList");if(!el)return;
+  const el=g("invList"),btn=g("viewAllInv");if(!el)return;
   const r=await authFetchTO("/ts/invoices").then(r=>r.json()).catch(()=>null);
-  if(!r||!r.invoices||!r.invoices.length){el.innerHTML="";return;}
-  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">My invoices</div>`+r.invoices.map(i=>
-    `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span><a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open</a></div>`).join("");
+  const invs=(r&&r.invoices)||[];
+  if(!invs.length){el.innerHTML="";el.hidden=true;if(btn)btn.style.display="none";return;}
+  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)</div>`+invs.map(i=>
+    `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
+    +`<a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open / print</a>`
+    +`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`).join("");
+  el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
+  if(btn){
+    btn.style.display="";
+    const setLbl=()=>btn.textContent=(el.hidden?"📋 View all invoices":"▲ Hide invoices")+" ("+invs.length+")";
+    setLbl();
+    btn.onclick=()=>{el.hidden=!el.hidden;setLbl();};
+  }
+}
+async function deleteInvoice(id,no,url){
+  const msg="Delete invoice #"+no+"?\n\nUse “Open / print” first if you want to check it. Deleting removes it, frees the number, and unlocks that week so it can be redone.";
+  const ok=window.MLUI?await MLUI.confirm(msg,{title:"Delete invoice",okLabel:"Delete invoice",danger:true}):confirm(msg);
+  if(!ok)return;
+  const r=await authFetchTO("/ts/invoice/delete",{method:"POST",body:JSON.stringify({id:Number(id)})}).then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok){alert((r&&r.error)||"Couldn't delete the invoice — try again.");return;}
+  await load();   // refresh: the deleted week unlocks + the number frees up
 }
 
 async function generateInvoice(){
@@ -506,11 +554,15 @@ async function doSave(opts={}){
     status=r.status;
     const j=await r.json().catch(()=>null);
     ok=!!(j&&j.ok);
+    // The server recomputes door-to-door mileage from the saved day — apply the
+    // fresh route so adding/removing a job updates the breakdown + totals.
+    if(ok&&j.autoMileage){AUTOMI=j.autoMileage;}
   }catch(e){}
   saveBusy=false;
   if(status===409){await load();return;}   // invoiced on another device — show the lock
   if(ok){
     g("saveState").textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    paintAutoMileage();refreshTotals();
     if(saveDirty)doSave();
   }else{
     saveDirty=true;
@@ -734,6 +786,7 @@ async function load(){
     AUTO=(wkR&&wkR.auto)||{};
     AUTOMI=(wkR&&wkR.autoMileage)||null;
     HOL=(wkR&&wkR.holidays)||{};
+    BANK=(wkR&&wkR.bank)||{};
     JOBMETA=(wkR&&wkR.jobMeta)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
