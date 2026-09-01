@@ -70,7 +70,18 @@
   .jh-in{flex:none;display:inline-flex;align-items:center;gap:4px}
   .jh-in input.jh-hrs{width:78px;text-align:center;padding:10px 8px;font-weight:700}
   .jh-in .jh-unit{color:var(--muted);font-size:13px;font-weight:600}
+  .jh-in .jh-x{border:none;background:none;color:#c0c9d6;font-size:15px;cursor:pointer;padding:0 2px;line-height:1}
+  .jh-in .jh-x:hover{color:#dc2626}
   .jh-none{font-size:13px;color:var(--muted);padding:8px 2px}
+  .addjobwrap{margin-top:8px}
+  .addjob{border:1.5px dashed #cfdaea;background:#fbfdff;color:var(--brand);border-radius:12px;padding:9px 12px;font-size:13.5px;font-weight:700;cursor:pointer;width:100%}
+  .addjob:hover{background:#f2f7fd}
+  .addjobbox{margin-top:8px}
+  .addjobbox input.addjob-input{width:100%}
+  .addjob-res{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+  .addjob-res button{text-align:left;border:1.5px solid #e3e9f2;background:#fff;border-radius:11px;padding:10px 12px;font-size:13.5px;color:#0e3a6d;cursor:pointer}
+  .addjob-res button:hover{background:#eef4fb;border-color:#cfdff4}
+  .addjob-none{font-size:13px;color:var(--muted);padding:6px 2px}
   /* deduction + assigned chips */
   .dedrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
   .ded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:#f2f5fa;border-radius:999px;padding:4px 10px}
@@ -158,7 +169,7 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[];
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={};
 function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
 
 function claimedMiles(miles){
@@ -298,6 +309,13 @@ function render(){
     if(ME&&ME.lunch) deds.push(`<span class="ded lunch" title="Deducted on days of ${ME.lunchThresholdH}h or more">🥪 −${ME.lunchMins}m lunch</span>`);
     if(ME&&ME.mileage&&ME.radius) deds.push(`<span class="ded">🚗 first/last ${ME.radiusMiles} mi unpaid</span>`);
     const booked=(ASSIGNED[date]||[]);
+    // Rows = the booked jobs + any OTHER portal job the engineer added earlier
+    // (saved in jobHours but not booked) — resolved via JOBMETA so they persist.
+    const bookedIds=new Set(booked.map(b=>b.jobId));
+    const extras=Object.keys(d.jobHours||{}).filter(jid=>!bookedIds.has(jid)).map(jid=>({
+      jobId:jid, ref:(JOBMETA[jid]&&JOBMETA[jid].ref)||jid, site:(JOBMETA[jid]&&JOBMETA[jid].site)||"",
+      label:(JOBMETA[jid]&&JOBMETA[jid].label)||jid, extra:true }));
+    const jhRows=[...booked,...extras];
     card.innerHTML=`
       <button class="dhead" type="button">
         <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:""}</span></span>
@@ -309,17 +327,21 @@ function render(){
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
         </div>
-        <div class="flab">Hours on each job — from the jobs you were booked on</div>
-        <div class="jobhrs">${booked.length ? booked.map(b => {
+        <div class="flab">Hours on each job — booked jobs are listed; add any other portal job you worked</div>
+        <div class="jobhrs">${jhRows.length ? jhRows.map(b => {
           const saved = (d.jobHours && d.jobHours[b.jobId] != null) ? d.jobHours[b.jobId] : null;
           const capH = b.capturedMins ? Math.round(b.capturedMins/60*4)/4 : 0;
           const val = (saved != null ? saved : (capH || ""));
-          const lab = b.label.length>40 ? b.label.slice(0,39)+"…" : b.label;
-          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref)}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}">
-            <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.capturedMins?` · ⏱ ${capH}h captured`:""}</span></span>
-            <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${val}"><span class="jh-unit">h</span></span>
+          const lab0 = b.label || b.ref || "Job"; const lab = lab0.length>40 ? lab0.slice(0,39)+"…" : lab0;
+          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref||"")}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}">
+            <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.capturedMins?` · ⏱ ${capH}h captured`:(b.extra?" · added":"")}</span></span>
+            <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${val}"><span class="jh-unit">h</span>${b.extra?`<button type="button" class="jh-x" title="Remove this job">✕</button>`:""}</span>
           </div>`;
         }).join("") : `<div class="jh-none">No portal jobs booked for you this day.</div>`}</div>
+        <div class="addjobwrap">
+          <button type="button" class="addjob">＋ Add another job</button>
+          <div class="addjobbox" hidden><input type="text" class="addjob-input" placeholder="Search a job number, site or description…" autocomplete="off"><div class="addjob-res"></div></div>
+        </div>
         ${ME&&ME.mileage?`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`:""}
         ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
@@ -615,6 +637,51 @@ document.addEventListener("keydown",e=>{
 });
 document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();queueSave();}});
 
+// ── Add-a-known-job picker (per day) — real portal jobs only, no free text ──
+function makeJhRow(job){
+  const div=document.createElement("div");
+  div.className="jhrow";div.dataset.jobid=job.id||job.jobId||"";div.dataset.ref=job.ref||"";div.dataset.site=job.site||"";div.dataset.pc="";
+  const lab0=job.label||job.ref||"Job";const lab=lab0.length>40?lab0.slice(0,39)+"…":lab0;
+  div.innerHTML=`<span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${esc(job.site||"")}${job.site?" · ":""}added</span></span>`+
+    `<span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value=""><span class="jh-unit">h</span><button type="button" class="jh-x" title="Remove this job">✕</button></span>`;
+  return div;
+}
+let addjobTimer=null;
+document.addEventListener("click",e=>{
+  if(INVOICE)return;
+  const add=e.target.closest&&e.target.closest(".addjob");
+  if(add){
+    const box=add.closest(".addjobwrap").querySelector(".addjobbox");
+    box.hidden=!box.hidden;
+    if(!box.hidden){const inp=box.querySelector(".addjob-input");inp.value="";box.querySelector(".addjob-res").innerHTML="";setTimeout(()=>inp.focus(),30);}
+    return;
+  }
+  const res=e.target.closest&&e.target.closest(".addjob-res button");
+  if(res){
+    const card=res.closest(".card[data-date]");const jid=res.dataset.id;
+    if(!card.querySelector('.jhrow[data-jobid="'+CSS.escape(jid)+'"]'))
+      card.querySelector(".jobhrs").appendChild(makeJhRow({id:jid,ref:res.dataset.ref,site:res.dataset.site,label:res.dataset.label}));
+    const box=res.closest(".addjobbox");box.hidden=true;box.querySelector(".addjob-input").value="";box.querySelector(".addjob-res").innerHTML="";
+    const hi=card.querySelector('.jhrow[data-jobid="'+CSS.escape(jid)+'"] .jh-hrs');if(hi)hi.focus();
+    refreshTotals();queueSave();
+    return;
+  }
+  const x=e.target.closest&&e.target.closest(".jh-x");
+  if(x){const row=x.closest(".jhrow");if(row){row.remove();refreshTotals();clearTimeout(saveTimer);doSave();}}
+});
+document.addEventListener("input",e=>{
+  const inp=e.target;
+  if(!inp.classList||!inp.classList.contains("addjob-input"))return;
+  const box=inp.closest(".addjobbox"),resEl=box.querySelector(".addjob-res"),token=inp.value.trim();
+  clearTimeout(addjobTimer);
+  if(token.length<2){resEl.innerHTML="";return;}
+  addjobTimer=setTimeout(async()=>{
+    const r=await authFetchTO("/ts/job-search?q="+encodeURIComponent(token)).then(x=>x.json()).catch(()=>null);
+    const list=(r&&r.jobs)||[];
+    resEl.innerHTML=list.length?list.map(j=>`<button type="button" data-id="${esc(j.id)}" data-ref="${esc(j.ref)}" data-site="${esc(j.site||"")}" data-label="${esc(j.label)}">${esc(j.label.length>52?j.label.slice(0,51)+"…":j.label)}</button>`).join(""):`<div class="addjob-none">No matching portal jobs.</div>`;
+  },250);
+});
+
 async function load(){
   g("saveState").textContent="";
   try{
@@ -629,6 +696,7 @@ async function load(){
     ASSIGNED=(asR&&asR.byDay)||{};
     AUTO=(wkR&&wkR.auto)||{};
     HOL=(wkR&&wkR.holidays)||{};
+    JOBMETA=(wkR&&wkR.jobMeta)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
     return;

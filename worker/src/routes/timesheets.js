@@ -240,6 +240,27 @@ async function capturedMinsWeek(env, tid, username, monday) {
   return cap;
 }
 
+// ref/site labels for every job id referenced by a week's jobHours — so a job
+// the engineer ADDED (not one they were booked on) still renders on reload.
+async function jobMetaFor(env, tid, days) {
+  const ids = new Set();
+  for (const d of Object.values(days || {})) for (const jid of Object.keys((d && d.jobHours) || {})) ids.add(jid);
+  const meta = {};
+  const arr = [...ids].slice(0, 200);
+  if (!arr.length) return meta;
+  try {
+    const ph = arr.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(`SELECT id, helpdesk_ref, site_code, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...arr).all();
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      const ref = r.helpdesk_ref || d.helpdeskRef || r.id;
+      const site = d.siteName || r.site_code || "";
+      meta[r.id] = { ref, site, label: ref + (site ? " — " + site : "") };
+    }
+  } catch {}
+  return meta;
+}
+
 // Materialise submitted per-job hours into the labour ledger. Each (day, job)
 // with hours becomes a `source='timesheet'` segment; it REPLACES the status-tap
 // segments for that engineer/job/day, so costing reads the engineer's figure and
@@ -776,7 +797,8 @@ export async function handle(request, env, ctx, url, sess) {
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
-    return json({ ok: true, week: monday, days, savedAt, auto, holidays, totals: weekTotals(days, eff),
+    const jobMeta = await jobMetaFor(env, tid, days);
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, totals: weekTotals(days, eff),
       invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
@@ -960,6 +982,29 @@ export async function handle(request, env, ctx, url, sess) {
       out.orderSites = { table: om.table, mode: om.mode, count: names.length, samples: names.slice(0, 3) };
     }
     return json(out, {}, env, request);
+  }
+
+  // ── GET /ts/job-search?q= — REAL SLA jobs (with ids) for the per-job hours
+  // picker on the timesheet. Known jobs only — every result carries a job id so
+  // the hours can be costed. No free text.
+  if (sub === "/job-search" && method === "GET") {
+    const term = String(q.get("q") || "").trim();
+    if (term.length < 2) return json({ ok: true, jobs: [] }, {}, env, request);
+    const like = "%" + term.replace(/[%_]/g, "") + "%";
+    const out = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, helpdesk_ref, site_code, status, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR data LIKE ?) AND (status IS NULL OR status!='Cancelled') ORDER BY updated_at DESC LIMIT 12"
+      ).bind(tid, like, like, like, like).all();
+      for (const r of results || []) {
+        let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+        const ref = r.helpdesk_ref || d.helpdeskRef || r.id;
+        const site = d.siteName || r.site_code || "";
+        out.push({ id: r.id, ref, site, status: r.status || "",
+          label: ref + (site ? " — " + site : "") + (d.description ? " · " + String(d.description).slice(0, 40) : "") });
+      }
+    } catch {}
+    return json({ ok: true, jobs: out }, {}, env, request);
   }
 
   // ── GET /ts/jobs — suggestions for the "job(s)" box ───────────────────────

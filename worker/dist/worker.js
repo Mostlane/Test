@@ -4031,6 +4031,29 @@ async function capturedMinsWeek(env, tid, username, monday) {
   }
   return cap2;
 }
+async function jobMetaFor(env, tid, days) {
+  const ids = /* @__PURE__ */ new Set();
+  for (const d of Object.values(days || {})) for (const jid of Object.keys(d && d.jobHours || {})) ids.add(jid);
+  const meta = {};
+  const arr = [...ids].slice(0, 200);
+  if (!arr.length) return meta;
+  try {
+    const ph = arr.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(`SELECT id, helpdesk_ref, site_code, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...arr).all();
+    for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+      }
+      const ref = r.helpdesk_ref || d.helpdeskRef || r.id;
+      const site = d.siteName || r.site_code || "";
+      meta[r.id] = { ref, site, label: ref + (site ? " \u2014 " + site : "") };
+    }
+  } catch {
+  }
+  return meta;
+}
 async function materialiseTimesheet(env, tid, username, monday, days) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -4649,6 +4672,7 @@ async function handle7(request, env, ctx, url, sess) {
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
+    const jobMeta = await jobMetaFor(env, tid, days);
     return json({
       ok: true,
       week: monday,
@@ -4656,6 +4680,7 @@ async function handle7(request, env, ctx, url, sess) {
       savedAt,
       auto,
       holidays,
+      jobMeta,
       totals: weekTotals(days, eff),
       invoice: inv ? {
         number: inv.number,
@@ -4858,6 +4883,35 @@ async function handle7(request, env, ctx, url, sess) {
       out.orderSites = { table: om.table, mode: om.mode, count: names.length, samples: names.slice(0, 3) };
     }
     return json(out, {}, env, request);
+  }
+  if (sub === "/job-search" && method === "GET") {
+    const term = String(q.get("q") || "").trim();
+    if (term.length < 2) return json({ ok: true, jobs: [] }, {}, env, request);
+    const like = "%" + term.replace(/[%_]/g, "") + "%";
+    const out = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, helpdesk_ref, site_code, status, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR data LIKE ?) AND (status IS NULL OR status!='Cancelled') ORDER BY updated_at DESC LIMIT 12"
+      ).bind(tid, like, like, like, like).all();
+      for (const r of results || []) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const ref = r.helpdesk_ref || d.helpdeskRef || r.id;
+        const site = d.siteName || r.site_code || "";
+        out.push({
+          id: r.id,
+          ref,
+          site,
+          status: r.status || "",
+          label: ref + (site ? " \u2014 " + site : "") + (d.description ? " \xB7 " + String(d.description).slice(0, 40) : "")
+        });
+      }
+    } catch {
+    }
+    return json({ ok: true, jobs: out }, {}, env, request);
   }
   if (sub === "/jobs" && method === "GET") {
     const term = String(q.get("q") || "").trim();
