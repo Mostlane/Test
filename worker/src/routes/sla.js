@@ -1086,6 +1086,46 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(await autoScheduleDay(env, tenantId, await readJson(request)), headers);
   }
 
+  /* Day blocks — reserved windows (e.g. a doctor's appointment) on an engineer's
+     day. Nothing is scheduled into them and the optimiser routes around them. */
+  if (subpath === "/blocks" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const date = url.searchParams.get("date") || "";
+    const eng = url.searchParams.get("engineer") || "";
+    let list = await getSlaBlocks(env, tenantId);
+    if (date) list = list.filter(b => b.date === date);
+    if (eng) list = list.filter(b => normId(b.username) === normId(eng));
+    return jsonResponse({ ok: true, blocks: list }, headers);
+  }
+  if (subpath === "/blocks" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Only SLA admins can block time." }, headers, 403);
+    const bb = await readJson(request);
+    const username = String(bb.username || "").trim();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(bb.date || "") ? bb.date : "";
+    const start = /^\d{1,2}:\d{2}$/.test(bb.start || "") ? bb.start : "";
+    const end = /^\d{1,2}:\d{2}$/.test(bb.end || "") ? bb.end : "";
+    if (!username || !date || !start || !end) return jsonResponse({ error: "username, date, start and end are required." }, headers, 400);
+    if (hhmmMin(end) <= hhmmMin(start)) return jsonResponse({ error: "End time must be after the start time." }, headers, 400);
+    const note = String(bb.note || "").slice(0, 200);
+    const list = await getSlaBlocks(env, tenantId);
+    const id = "blk-" + crypto.randomUUID().slice(0, 12);
+    list.push({ id, username, date, start, end, note, by: sess.user.username, at: new Date().toISOString() });
+    // Keep the store small: drop blocks more than 60 days in the past.
+    const cutoff = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+    await saveSlaBlocks(env, tenantId, list.filter(x => (x.date || "") >= cutoff));
+    return jsonResponse({ ok: true, id, block: { id, username, date, start, end, note } }, headers);
+  }
+  if (subpath === "/blocks/delete" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Only SLA admins can remove a block." }, headers, 403);
+    const bb = await readJson(request);
+    const id = String(bb.id || "");
+    const list = await getSlaBlocks(env, tenantId);
+    await saveSlaBlocks(env, tenantId, list.filter(x => x.id !== id));
+    return jsonResponse({ ok: true }, headers);
+  }
+
   /* POST /sla/auto-schedule/record — stash the batch of jobs the office just
      booked in from an auto-day, so it can be reverted in one tap. SLA admin. */
   if (subpath === "/auto-schedule/record" && method === "POST") {
@@ -3716,6 +3756,50 @@ async function driveMatrix(env, pts) {
     return { mins, miles, source: anyOk ? "google" : "estimate" };
   } catch { return fallback(); }
 }
+// ── Day blocks (e.g. a dentist/doctor appointment) — a reserved window on an
+// engineer's day that nothing gets scheduled into, with a note for the office.
+// Stored per tenant in app_config `sla:blocks:<tid>`.
+const SLA_BLOCKS_KEY = tid => `sla:blocks:${tid}`;
+function hhmmMin(s) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "")); return m ? (Number(m[1]) * 60 + Number(m[2])) : null; }
+async function getSlaBlocks(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, SLA_BLOCKS_KEY(tid)).first();
+    const arr = row ? JSON.parse(row.value) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+async function saveSlaBlocks(env, tid, arr) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, SLA_BLOCKS_KEY(tid), JSON.stringify(arr)).run();
+}
+// Turn a list of {start,end} HH:MM blocks into {s,e} minute-offsets from dayStart,
+// clamped to the working day, dropped if entirely before it, sorted by start.
+function blockOffsets(blocks, dayStartMin) {
+  return (Array.isArray(blocks) ? blocks : [])
+    .map(b => ({ s: (hhmmMin(b.start) ?? 0) - dayStartMin, e: (hhmmMin(b.end) ?? 0) - dayStartMin, note: b.note || "" }))
+    .filter(b => b.e > 0 && b.e > b.s)
+    .map(b => ({ s: Math.max(0, b.s), e: b.e, note: b.note }))
+    .sort((a, b) => a.s - b.s);
+}
+// Push an arrival so a job's on-site window [arrival, arrival+duration) never
+// overlaps a reserved block; returns the (possibly later) arrival offset.
+function avoidBlocks(arrival, duration, blocks) {
+  if (!blocks || !blocks.length) return arrival;
+  let a = arrival, moved = true, guard = 0;
+  while (moved && guard++ < 20) {
+    moved = false;
+    for (const b of blocks) { if (a < b.e && (a + duration) > b.s) { a = b.e; moved = true; } }
+  }
+  return a;
+}
+// Blocked minutes that fall inside a working window of `capMin` from dayStart —
+// used to shrink an engineer's day capacity when they have appointments.
+function blockedMinutesInCap(blocks, capMin) {
+  let sum = 0;
+  for (const b of (blocks || [])) { const s = Math.max(0, b.s), e = Math.min(capMin, b.e); if (e > s) sum += e - s; }
+  return sum;
+}
+
 // Nearest-neighbour then 2-opt over a driving-time matrix. Point 0 is home; the
 // tour is a round trip home→…→home. Returns the job point indices (1..N) in order.
 function solveRoute(cost) {
@@ -3788,6 +3872,13 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const warnings = [];
 
   if (!engineer) return { ok: false, error: "No engineer given." };
+  // Reserved blocks (appointments) for this engineer on this day — the route is
+  // laid out to work around them (loaded server-side, authoritative).
+  let blkOffsets = [];
+  try {
+    const mine = (await getSlaBlocks(env, tenantId)).filter(b => b.date === date && normId(b.username) === normId(engineer));
+    blkOffsets = blockOffsets(mine, hhmmMin(dayStart) || 0);
+  } catch {}
   const home = await engineerHome(env, tenantId, engineer);
   if (!home) return { ok: false, needsHome: true, error: "No home location saved for this engineer. Add a home postcode in Users Admin so the round-trip route can be worked out." };
 
@@ -3831,8 +3922,9 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   for (const p of order) {
     const dMin = M.mins[cur][p], dMi = M.miles[cur][p];
     driveMins += dMin; driveMiles += dMi;
-    const arrival = t + dMin;
     const j = jobs[p - 1];
+    // Don't let the on-site window fall inside a reserved block — push past it.
+    const arrival = avoidBlocks(t + dMin, j.durationMin, blkOffsets);
     legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, driveMins: dMin, driveMiles: Math.round(dMi * 10) / 10, arrivalOffset: arrival, durationMin: j.durationMin });
     siteMins += j.durationMin;
     t = arrival + j.durationMin;
@@ -3857,6 +3949,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   return {
     ok: true, engineer, date, dayStart, aiUsed, aiReason, matrixSource: M.source,
     home: { postcode: home.postcode }, legs, lunch,
+    blocks: blkOffsets.map(b => ({ offset: b.s, endOffset: b.e, minutes: b.e - b.s, note: b.note })),
     summary: {
       jobs: jobs.length, driveMins: Math.round(driveMins), driveMiles: Math.round(driveMiles * 10) / 10,
       siteMins: Math.round(siteMins), lunchMins: lunchMinutes, dayLengthMins: Math.round(endOffset),
@@ -3877,6 +3970,12 @@ async function autoScheduleDay(env, tenantId, body) {
   // Door-to-door day target ~9h (8-10h band). cap = travel + on-site minutes.
   const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 540));
   const cap = Math.max(120, dayMinutes - lunch);            // working minutes/engineer (travel + on-site)
+  const date = String(body.date || "").slice(0, 10);
+  const dayStartMin = hhmmMin(dayStart) || 0;
+  // Reserved blocks (appointments) per engineer for this day — shrink capacity
+  // and route around them so nothing lands in a blocked window.
+  const allBlocks = date ? await getSlaBlocks(env, tenantId).catch(() => []) : [];
+  const blocksFor = u => blockOffsets(allBlocks.filter(b => b.date === date && normId(b.username) === normId(u)), dayStartMin);
   const warnings = [];
   const skills = await getEngSkills(env, tenantId);
   const dur = await estimateJobDurations(env, tenantId);    // learned typical job length
@@ -3896,7 +3995,8 @@ async function autoScheduleDay(env, tenantId, body) {
     if (!coord) { const h = await engineerHome(env, tenantId, u); if (h) coord = h.coord; }
     if (!coord && e.homePostcode) { const g = await geocodePcServer(e.homePostcode); if (g) coord = g; }
     if (!coord) { warnings.push(`${e.name || u} has no home location — skipped.`); continue; }
-    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+    const blk = blocksFor(u);
+    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0, blk, cap: Math.max(60, cap - blockedMinutesInCap(blk, cap)) });
   }
   if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
 
@@ -3994,7 +4094,7 @@ async function autoScheduleDay(env, tenantId, body) {
     for (const k of ks) {
       handled.add(k);
       const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
-      if (newLoad <= cap) { e.seq.splice(ins.pos - 1, 0, k); e.load = newLoad; }
+      if (newLoad <= e.cap) { e.seq.splice(ins.pos - 1, 0, k); e.load = newLoad; }
       else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full — this one won't fit today` });
     }
   }
@@ -4008,7 +4108,7 @@ async function autoScheduleDay(env, tenantId, body) {
     engs.forEach((e, ei) => {
       const ins = insertCost(ei, k);
       const newLoad = e.load + ins.delta + j.durationMin;
-      if (newLoad > cap) return;                       // no room in this engineer's day
+      if (newLoad > e.cap) return;                     // no room in this engineer's day (blocks shrink it)
       const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
       const sameArea = j.area && e.seq.some(x => jobs[x].area === j.area);
       let eff = ins.delta;
@@ -4033,14 +4133,15 @@ async function autoScheduleDay(env, tenantId, body) {
     const legs = []; let cur = pE(ei), t = 0, drive = 0, site = 0, lunchDone = lunch === 0;
     for (const k of orderedK) {
       const p = pJ(k), dMin = M.mins[cur][p]; drive += dMin;
+      const j = jobs[k];
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
-      const j = jobs[k];
+      arrival = avoidBlocks(arrival, j.durationMin, e.blk);   // route around appointments
       legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, area: j.area, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
       site += j.durationMin; t = arrival + j.durationMin; cur = p;
     }
     const homeMin = orderedK.length ? M.mins[cur][pE(ei)] : 0; drive += homeMin;
-    return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+    return { username: e.username, name: e.name, hq: !!e.hq, blocks: e.blk.map(b => ({ offset: b.s, endOffset: b.e, minutes: b.e - b.s, note: b.note })), legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter(p => p.legs.length);
 
   // REAL driving times for the SHOWN routes, FREE via OSRM. The assignment above
@@ -4051,9 +4152,11 @@ async function autoScheduleDay(env, tenantId, body) {
   if (M.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map(j => [j.id, j.coord]));
     const engCoord = new Map(engs.map(e => [e.username, e.coord]));
+    const engBlk = new Map(engs.map(e => [e.username, e.blk]));
     let allReal = true;
     for (const p of plan) {
       const home = engCoord.get(p.username);
+      const blk = engBlk.get(p.username) || [];
       const pts2 = [home, ...p.legs.map(l => coordById.get(l.jobId))];
       if (!home || pts2.some(c => !c) || pts2.length < 2) { allReal = false; continue; }
       const dm = await roadMatrix(pts2);             // small: home + this day's stops
@@ -4063,6 +4166,7 @@ async function autoScheduleDay(env, tenantId, body) {
         const to = idx + 1, dMin = dm.mins[cur][to]; drive += dMin;
         let arrival = t + dMin;
         if (!lunchDone && arrival >= lunchTarget) { arrival += lunch; t += lunch; lunchDone = true; }
+        arrival = avoidBlocks(arrival, l.durationMin, blk);   // route around appointments
         l.driveMins = dMin; l.arrivalOffset = arrival;
         site += l.durationMin; t = arrival + l.durationMin; cur = to;
       });

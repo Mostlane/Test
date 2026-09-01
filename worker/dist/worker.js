@@ -7196,6 +7196,42 @@ async function handle8(request, env, ctx, url, sess) {
       return jsonResponse({ error: "Only SLA admins can auto-schedule a day." }, headers, 403);
     return jsonResponse(await autoScheduleDay(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/blocks" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const date = url.searchParams.get("date") || "";
+    const eng = url.searchParams.get("engineer") || "";
+    let list = await getSlaBlocks(env, tenantId);
+    if (date) list = list.filter((b) => b.date === date);
+    if (eng) list = list.filter((b) => normId(b.username) === normId(eng));
+    return jsonResponse({ ok: true, blocks: list }, headers);
+  }
+  if (subpath === "/blocks" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Only SLA admins can block time." }, headers, 403);
+    const bb = await readJson2(request);
+    const username = String(bb.username || "").trim();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(bb.date || "") ? bb.date : "";
+    const start = /^\d{1,2}:\d{2}$/.test(bb.start || "") ? bb.start : "";
+    const end = /^\d{1,2}:\d{2}$/.test(bb.end || "") ? bb.end : "";
+    if (!username || !date || !start || !end) return jsonResponse({ error: "username, date, start and end are required." }, headers, 400);
+    if (hhmmMin(end) <= hhmmMin(start)) return jsonResponse({ error: "End time must be after the start time." }, headers, 400);
+    const note = String(bb.note || "").slice(0, 200);
+    const list = await getSlaBlocks(env, tenantId);
+    const id = "blk-" + crypto.randomUUID().slice(0, 12);
+    list.push({ id, username, date, start, end, note, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() });
+    const cutoff = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+    await saveSlaBlocks(env, tenantId, list.filter((x) => (x.date || "") >= cutoff));
+    return jsonResponse({ ok: true, id, block: { id, username, date, start, end, note } }, headers);
+  }
+  if (subpath === "/blocks/delete" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Only SLA admins can remove a block." }, headers, 403);
+    const bb = await readJson2(request);
+    const id = String(bb.id || "");
+    const list = await getSlaBlocks(env, tenantId);
+    await saveSlaBlocks(env, tenantId, list.filter((x) => x.id !== id));
+    return jsonResponse({ ok: true }, headers);
+  }
   if (subpath === "/auto-schedule/record" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "SLA admins only." }, headers, 403);
@@ -9508,6 +9544,48 @@ async function driveMatrix(env, pts) {
     return fallback();
   }
 }
+var SLA_BLOCKS_KEY = (tid) => `sla:blocks:${tid}`;
+function hhmmMin(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || ""));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+async function getSlaBlocks(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, SLA_BLOCKS_KEY(tid)).first();
+    const arr = row ? JSON.parse(row.value) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+async function saveSlaBlocks(env, tid, arr) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, SLA_BLOCKS_KEY(tid), JSON.stringify(arr)).run();
+}
+function blockOffsets(blocks, dayStartMin) {
+  return (Array.isArray(blocks) ? blocks : []).map((b) => ({ s: (hhmmMin(b.start) ?? 0) - dayStartMin, e: (hhmmMin(b.end) ?? 0) - dayStartMin, note: b.note || "" })).filter((b) => b.e > 0 && b.e > b.s).map((b) => ({ s: Math.max(0, b.s), e: b.e, note: b.note })).sort((a, b) => a.s - b.s);
+}
+function avoidBlocks(arrival, duration, blocks) {
+  if (!blocks || !blocks.length) return arrival;
+  let a = arrival, moved = true, guard = 0;
+  while (moved && guard++ < 20) {
+    moved = false;
+    for (const b of blocks) {
+      if (a < b.e && a + duration > b.s) {
+        a = b.e;
+        moved = true;
+      }
+    }
+  }
+  return a;
+}
+function blockedMinutesInCap(blocks, capMin) {
+  let sum = 0;
+  for (const b of blocks || []) {
+    const s = Math.max(0, b.s), e = Math.min(capMin, b.e);
+    if (e > s) sum += e - s;
+  }
+  return sum;
+}
 function solveRoute(cost) {
   const n = cost.length;
   const jobIdx = [];
@@ -9620,6 +9698,12 @@ async function optimiseEngineerRoute(env, tenantId, body) {
   const inJobs = Array.isArray(body.jobs) ? body.jobs : [];
   const warnings = [];
   if (!engineer) return { ok: false, error: "No engineer given." };
+  let blkOffsets = [];
+  try {
+    const mine = (await getSlaBlocks(env, tenantId)).filter((b) => b.date === date && normId(b.username) === normId(engineer));
+    blkOffsets = blockOffsets(mine, hhmmMin(dayStart) || 0);
+  } catch {
+  }
   const home = await engineerHome(env, tenantId, engineer);
   if (!home) return { ok: false, needsHome: true, error: "No home location saved for this engineer. Add a home postcode in Users Admin so the round-trip route can be worked out." };
   const jobs = [];
@@ -9671,8 +9755,8 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     const dMin = M6.mins[cur][p], dMi = M6.miles[cur][p];
     driveMins += dMin;
     driveMiles += dMi;
-    const arrival = t + dMin;
     const j = jobs[p - 1];
+    const arrival = avoidBlocks(t + dMin, j.durationMin, blkOffsets);
     legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, driveMins: dMin, driveMiles: Math.round(dMi * 10) / 10, arrivalOffset: arrival, durationMin: j.durationMin });
     siteMins += j.durationMin;
     t = arrival + j.durationMin;
@@ -9702,6 +9786,7 @@ async function optimiseEngineerRoute(env, tenantId, body) {
     home: { postcode: home.postcode },
     legs,
     lunch,
+    blocks: blkOffsets.map((b) => ({ offset: b.s, endOffset: b.e, minutes: b.e - b.s, note: b.note })),
     summary: {
       jobs: jobs.length,
       driveMins: Math.round(driveMins),
@@ -9721,6 +9806,10 @@ async function autoScheduleDay(env, tenantId, body) {
   const lunch = Math.max(0, Math.min(120, Math.round(Number(body.lunchMinutes)) || 30));
   const dayMinutes = Math.max(180, Math.min(720, Math.round(Number(body.dayMinutes)) || 540));
   const cap2 = Math.max(120, dayMinutes - lunch);
+  const date = String(body.date || "").slice(0, 10);
+  const dayStartMin = hhmmMin(dayStart) || 0;
+  const allBlocks = date ? await getSlaBlocks(env, tenantId).catch(() => []) : [];
+  const blocksFor = (u) => blockOffsets(allBlocks.filter((b) => b.date === date && normId(b.username) === normId(u)), dayStartMin);
   const warnings = [];
   const skills = await getEngSkills(env, tenantId);
   const dur = await estimateJobDurations(env, tenantId);
@@ -9762,7 +9851,8 @@ async function autoScheduleDay(env, tenantId, body) {
       warnings.push(`${e.name || u} has no home location \u2014 skipped.`);
       continue;
     }
-    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0 });
+    const blk = blocksFor(u);
+    engs.push({ username: u, name: String(e.name || u), coord, hq: !!e._hq, sk: skills[normId(u)] || {}, seq: [], load: 0, blk, cap: Math.max(60, cap2 - blockedMinutesInCap(blk, cap2)) });
   }
   if (!engs.length) return { ok: false, error: "None of the chosen engineers has a home location saved (set a home postcode in Users Admin)." };
   const jobs = [];
@@ -9862,7 +9952,7 @@ async function autoScheduleDay(env, tenantId, body) {
     for (const k of ks) {
       handled.add(k);
       const ins = insertCost(bestE, k), newLoad = e.load + ins.delta + jobs[k].durationMin;
-      if (newLoad <= cap2) {
+      if (newLoad <= e.cap) {
         e.seq.splice(ins.pos - 1, 0, k);
         e.load = newLoad;
       } else unassigned.push({ id: jobs[k].id, ref: jobs[k].ref, priority: jobs[k].priority, reason: `${area} dedicated run (${e.name}) is full \u2014 this one won't fit today` });
@@ -9875,7 +9965,7 @@ async function autoScheduleDay(env, tenantId, body) {
     engs.forEach((e, ei) => {
       const ins = insertCost(ei, k);
       const newLoad = e.load + ins.delta + j.durationMin;
-      if (newLoad > cap2) return;
+      if (newLoad > e.cap) return;
       const stars = j.workArea ? Number(e.sk[j.workArea] || 0) : -1;
       const sameArea = j.area && e.seq.some((x) => jobs[x].area === j.area);
       let eff = ins.delta;
@@ -9902,13 +9992,14 @@ async function autoScheduleDay(env, tenantId, body) {
     for (const k of orderedK) {
       const p = pJ(k), dMin = M6.mins[cur][p];
       drive += dMin;
+      const j = jobs[k];
       let arrival = t + dMin;
       if (!lunchDone && arrival >= lunchTarget) {
         arrival += lunch;
         t += lunch;
         lunchDone = true;
       }
-      const j = jobs[k];
+      arrival = avoidBlocks(arrival, j.durationMin, e.blk);
       legs.push({ jobId: j.id, ref: j.ref, site: j.site, priority: j.priority, workArea: j.workArea, area: j.area, arrivalOffset: arrival, driveMins: dMin, durationMin: j.durationMin, estimated: !!j.estimated, aiEstimated: !!j.aiEstimated, stars: j.workArea ? Number(e.sk[j.workArea] || 0) : -1 });
       site += j.durationMin;
       t = arrival + j.durationMin;
@@ -9916,15 +10007,17 @@ async function autoScheduleDay(env, tenantId, body) {
     }
     const homeMin = orderedK.length ? M6.mins[cur][pE(ei)] : 0;
     drive += homeMin;
-    return { username: e.username, name: e.name, hq: !!e.hq, legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
+    return { username: e.username, name: e.name, hq: !!e.hq, blocks: e.blk.map((b) => ({ offset: b.s, endOffset: b.e, minutes: b.e - b.s, note: b.note })), legs, summary: { jobs: legs.length, driveMins: Math.round(drive), siteMins: site, dayLengthMins: Math.round(t + homeMin) } };
   }).filter((p) => p.legs.length);
   let matrixSource = M6.source;
   if (M6.source !== "osrm" && plan.length) {
     const coordById = new Map(jobs.map((j) => [j.id, j.coord]));
     const engCoord = new Map(engs.map((e) => [e.username, e.coord]));
+    const engBlk = new Map(engs.map((e) => [e.username, e.blk]));
     let allReal = true;
     for (const p of plan) {
       const home = engCoord.get(p.username);
+      const blk = engBlk.get(p.username) || [];
       const pts2 = [home, ...p.legs.map((l) => coordById.get(l.jobId))];
       if (!home || pts2.some((c) => !c) || pts2.length < 2) {
         allReal = false;
@@ -9945,6 +10038,7 @@ async function autoScheduleDay(env, tenantId, body) {
           t += lunch;
           lunchDone = true;
         }
+        arrival = avoidBlocks(arrival, l.durationMin, blk);
         l.driveMins = dMin;
         l.arrivalOffset = arrival;
         site += l.durationMin;
@@ -14053,6 +14147,9 @@ async function handle10(request, env, ctx, url, sess) {
       if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
       if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
     }
+    if (path === "/add-site" && client === "site" && !String(site.siteNumber || "").trim()) {
+      site.siteNumber = await nextSiteNumber(env, tenantId);
+    }
     const siteNumber = String(site.siteNumber || "").trim();
     if (!siteNumber) return error("siteNumber required", 400, env, request);
     site.siteNumber = siteNumber;
@@ -14398,6 +14495,18 @@ async function nextProjectNumber(env, tenantId) {
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   return "P" + String(max + 1).padStart(4, "0");
+}
+async function nextSiteNumber(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT site_number FROM sites WHERE tenant_id=? AND client='site' AND site_number IS NOT NULL"
+  ).bind(db.tenantId).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = String(r.site_number).match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "S" + String(max + 1).padStart(4, "0");
 }
 function slug(s) {
   return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
