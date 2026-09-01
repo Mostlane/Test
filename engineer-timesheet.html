@@ -203,7 +203,14 @@ function autoMiHtml(date){
     ${b.fromSchedule?`<div class="muted" style="font-size:11px;margin-top:4px">From your booked jobs for the day — tap your job statuses on site to confirm the exact route.</div>`:""}
     <div class="muted" style="font-size:11px;margin-top:2px">Office ${esc(AUTOMI.base||"")} → your sites in order → home ${esc(AUTOMI.home||"")}. “~” = estimated.</div></div>`;
 }
-function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
+function holName(t){ return t==="Unpaid"?"Unpaid Leave":t==="Other"?"Leave":"Holiday"; }
+function bankName(b){ return b&&b.kind==="shutdown"?"Company Shutdown":"Bank Holiday"; }
+// The emoji + full label for a day's marker (booked leave wins over a bank holiday).
+function dayMark(date){
+  const h=HOL[date]; if(h) return "🌴 "+holName(h.type)+((h.half==="AM"||h.half==="PM")?" ("+h.half+")":"");
+  const b=BANK[date]; if(b) return "🏦 "+bankName(b);
+  return "";
+}
 
 function claimedMiles(miles){
   if(!(ME&&ME.radius)||!(miles>0))return miles;
@@ -362,12 +369,12 @@ function render(){
     const jhRows=[...booked,...extras];
     card.innerHTML=`
       <button class="dhead" type="button">
-        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}${HOL[date]?" 🌴":(BANK[date]?" 🏦":"")}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:""}</span></span>
+        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${dayMark(date)?` · ${dayMark(date)}`:(booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:"")}</span></span>
         <span class="sum"></span><span class="chev">›</span>
       </button>
       <div class="cbody">
         ${hol?`<div class="holbanner">🌴 ${esc(holName(hol.type))} (${hol.half} half) — booked leave</div>`:""}
-        ${(!hol&&BANK[date])?`<div class="bhbanner">🏦 ${esc(BANK[date].label)} — ${BANK[date].kind==="shutdown"?"company shutdown":"bank holiday"} (0 hrs unless you worked)</div>`:""}
+        ${(!hol&&BANK[date])?`<div class="bhbanner">🏦 ${bankName(BANK[date])}${(BANK[date].label&&BANK[date].label!==bankName(BANK[date]))?` — ${esc(BANK[date].label)}`:""} (0 hrs unless you worked)</div>`:""}
         <div class="times2">
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
