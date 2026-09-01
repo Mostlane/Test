@@ -591,6 +591,7 @@
     var fs = !!(job && job.firestopping);
     var cert = !!(job && (job.emTest || job.pat)) && !fs;
     var au = jobIsAudit();
+    var elec = !!(job && job.elecTest) && !fs && !cert && !au;
     // Back goes through the portal's shared breadcrumb (window.mlBack) so it
     // returns to the genuine previous page and can never trap the user in a
     // revolving cycle. backTo is only the cold-start fallback.
