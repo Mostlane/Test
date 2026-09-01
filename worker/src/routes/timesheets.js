@@ -99,6 +99,9 @@ async function ensureTables(env) {
   // Ledger columns (costing.js): travel-vs-onsite split + auto-close tag.
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+  // 'timesheet' marks a segment materialised from an engineer's submitted per-job
+  // hours (it replaces the status-tap capture for that engineer/job/day).
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN source TEXT").run(); } catch {}
   // Site register archived flag (costing.js) — read by /ts/sites suggestions.
   try { await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run(); } catch {}
 }
@@ -174,7 +177,7 @@ async function jobTimeAuto(env, tid, username, monday) {
   const out = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at"
+      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? AND (source IS NULL OR source!='timesheet') ORDER BY started_at"
     ).bind(tid, username, monday, end).all();
     const today = lDate(new Date().toISOString());
     for (const seg of results || []) {
@@ -216,6 +219,54 @@ async function jobTimeAuto(env, tid, username, monday) {
   return shaped;
 }
 const normKey = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+// Minutes captured (status-tap, closed segments — NOT timesheet ones) per
+// job_id + London-day for one user, over the week. Pre-fills the hours boxes.
+async function capturedMinsWeek(env, tid, username, monday) {
+  const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 8);
+  const end = endD.toISOString().slice(0, 10);
+  const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso || "").slice(0, 10); } };
+  const cap = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT job_id, started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? AND ended_at IS NOT NULL AND (source IS NULL OR source!='timesheet')"
+    ).bind(tid, username, monday, end).all();
+    for (const s of results || []) {
+      const mins = Math.min(MAX_SEG_MS, Math.max(0, Date.parse(s.ended_at) - Date.parse(s.started_at))) / 60000;
+      const k = s.job_id + "|" + lDate(s.started_at);
+      cap[k] = (cap[k] || 0) + mins;
+    }
+  } catch {}
+  return cap;
+}
+
+// Materialise submitted per-job hours into the labour ledger. Each (day, job)
+// with hours becomes a `source='timesheet'` segment; it REPLACES the status-tap
+// segments for that engineer/job/day, so costing reads the engineer's figure and
+// never double-counts. Idempotent: the week's timesheet segments are rebuilt.
+async function materialiseTimesheet(env, tid, username, monday, days) {
+  const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  // Clear this user's timesheet segments for the week, then rebuild from `days`.
+  try { await env.DB.prepare("DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND source='timesheet' AND started_at>=? AND started_at<?").bind(tid, username, monday, end).run(); } catch {}
+  for (const [date, d] of Object.entries(days || {})) {
+    const jh = (d && d.jobHours && typeof d.jobHours === "object") ? d.jobHours : {};
+    for (const [jobId, hrs] of Object.entries(jh)) {
+      const h = Math.max(0, Math.min(24, parseFloat(hrs) || 0));
+      if (!(h > 0) || !jobId) continue;
+      let ref = jobId, site = "";
+      try {
+        const row = await env.DB.prepare("SELECT helpdesk_ref, site_code, data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, jobId).first();
+        if (row) { ref = row.helpdesk_ref || jobId; let dd = {}; try { dd = JSON.parse(row.data || "{}"); } catch {} site = dd.siteName || row.site_code || ""; }
+      } catch {}
+      const startISO = date + "T09:00:00.000Z";
+      const endISO = new Date(Date.parse(startISO) + Math.round(h * 60) * 60000).toISOString();
+      // Replace the status-tap capture for this engineer/job/day.
+      try { await env.DB.prepare("DELETE FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND (source IS NULL OR source!='timesheet') AND started_at>=? AND started_at<?").bind(tid, username, jobId, date + "T00:00:00Z", date + "T23:59:59Z").run(); } catch {}
+      try { await env.DB.prepare("INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, source) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(tid, username, jobId, ref, site, "", startISO, endISO, "onsite", "timesheet").run(); } catch {}
+    }
+  }
+}
 
 // ── Settings (app_config JSON, per-user overrides on shared defaults) ────────
 const DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45,
@@ -279,7 +330,16 @@ function cleanDays(monday, days) {
       postcode: String((m && m.postcode) || "").toUpperCase().slice(0, 10),
       miles: Math.max(0, Math.min(1000, round1(parseFloat(m && m.miles) || 0))),
     })).filter(m => m.miles > 0 || m.site || m.postcode);
-    if (start || finish || jobs || note || mileage.length) out[date] = { start, finish, jobs, note, mileage };
+    // Per-job hours the engineer entered (drives job costing). { jobId: hours }.
+    const jobHours = {};
+    if (d.jobHours && typeof d.jobHours === "object") {
+      for (const [jid, hrs] of Object.entries(d.jobHours)) {
+        const h = Math.max(0, Math.min(24, round1(parseFloat(hrs) || 0)));
+        if (h > 0 && jid) jobHours[String(jid).slice(0, 80)] = h;
+      }
+    }
+    const hasHours = Object.keys(jobHours).length > 0;
+    if (start || finish || jobs || note || mileage.length || hasHours) out[date] = { start, finish, jobs, note, mileage, ...(hasHours ? { jobHours } : {}) };
   }
   return out;
 }
@@ -756,6 +816,8 @@ export async function handle(request, env, ctx, url, sess) {
     await env.DB.prepare(
       "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
     ).bind(tid, monday, me, JSON.stringify({ days }), new Date().toISOString()).run();
+    // Push the per-job hours into the labour ledger for job costing.
+    await materialiseTimesheet(env, tid, me, monday, days);
     return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
   }
 
@@ -788,6 +850,7 @@ export async function handle(request, env, ctx, url, sess) {
         }
       } catch {}
       const meN = norm(me);
+      const cap = await capturedMinsWeek(env, tid, me, monday);   // status-tap minutes per job/day → pre-fill hours
       const isMe = e => {
         const resolved = map[normId(e)];
         if (resolved != null) return resolved === me;
@@ -808,10 +871,12 @@ export async function handle(request, env, ctx, url, sess) {
         if (!mine) continue;
         const date = londonDate(r.scheduled_at);
         (byDay[date] = byDay[date] || []).push({
+          jobId: r.id,
           ref: r.helpdesk_ref || r.id,
           label: (r.helpdesk_ref || r.id) + (d.description ? " — " + String(d.description).slice(0, 44) : ""),
           site: d.siteName || "", postcode: String(d.postcode || "").toUpperCase(),
-          time: londonTime(r.scheduled_at)
+          time: londonTime(r.scheduled_at),
+          capturedMins: Math.round(cap[r.id + "|" + date] || 0)
         });
       }
       for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => (a.time || "").localeCompare(b.time || ""));

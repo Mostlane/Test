@@ -61,6 +61,16 @@
   .holbanner{background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:9px;padding:7px 10px;font-size:13px;font-weight:600;margin-bottom:8px}
   .flab{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin:12px 0 5px 3px}
   .row{margin:0}
+  /* per-job hours (for costing) */
+  .jobhrs{display:flex;flex-direction:column;gap:8px}
+  .jhrow{display:flex;align-items:center;gap:10px;background:#f8fafd;border:1.5px solid #e3e9f2;border-radius:13px;padding:9px 11px}
+  .jh-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .jh-main b{font-size:14px;color:#0e3a6d;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .jh-sub{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .jh-in{flex:none;display:inline-flex;align-items:center;gap:4px}
+  .jh-in input.jh-hrs{width:78px;text-align:center;padding:10px 8px;font-weight:700}
+  .jh-in .jh-unit{color:var(--muted);font-size:13px;font-weight:600}
+  .jh-none{font-size:13px;color:var(--muted);padding:8px 2px}
   /* deduction + assigned chips */
   .dedrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
   .ded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:#f2f5fa;border-radius:999px;padding:4px 10px}
@@ -171,17 +181,22 @@ function collect(){
   const days={};
   document.querySelectorAll(".card[data-date]").forEach(card=>{
     const date=card.dataset.date;
-    const refs=[...card.querySelectorAll(".joblist .jpill")].map(p=>(p.dataset.ref||"").trim()).filter(Boolean);
-    const jin=card.querySelector(".joblist input.jobs");
-    if(jin&&jin.value.trim())refs.push(jin.value.trim());
-    const d={ start:card.querySelector(".t-start").value, finish:card.querySelector(".t-finish").value,
-      jobs:refs.join(", "), mileage:[] };
+    // Per-job hours — keyed by the portal job's id (no free text).
+    const jobHours={}; const refs=[];
+    card.querySelectorAll(".jhrow").forEach(r=>{
+      const jid=(r.dataset.jobid||"").trim();
+      const v=parseFloat(r.querySelector(".jh-hrs").value);
+      if(jid && v>0){ jobHours[jid]=Math.round(v*100)/100; if(r.dataset.ref)refs.push(r.dataset.ref); }
+    });
+    const sEl=card.querySelector(".t-start"), fEl=card.querySelector(".t-finish");
+    const d={ start:sEl?sEl.value:"", finish:fEl?fEl.value:"",
+      jobs:refs.join(", "), jobHours, mileage:[] };
     card.querySelectorAll(".mirow").forEach(r=>{
       const site=(r.dataset.site||"").trim(), pc=(r.dataset.pc||"").toUpperCase(),
         miles=parseFloat(r.dataset.miles)||0;
       if(site) d.mileage.push({site,postcode:pc,miles});
     });
-    if(d.start||d.finish||d.jobs||d.mileage.length) days[date]=d;
+    if(d.start||d.finish||Object.keys(jobHours).length||d.mileage.length) days[date]=d;
   });
   return days;
 }
@@ -260,9 +275,6 @@ function render(){
     if(a){
       if(!d.start&&a.start){d.start=a.start;autoChanged=true;}
       if(!d.finish&&a.finish){d.finish=a.finish;autoChanged=true;}
-      const have=(d.jobs||"").toLowerCase();
-      const addRefs=(a.jobs||[]).filter(j=>!have.includes(String(j.ref).toLowerCase()));
-      if(addRefs.length){d.jobs=[d.jobs,addRefs.map(j=>j.ref).join(", ")].filter(Boolean).join(", ");autoChanged=true;}
       DAYS[date]=d;
     }
     const card=document.createElement("div");
@@ -293,17 +305,21 @@ function render(){
       </button>
       <div class="cbody">
         ${hol?`<div class="holbanner">🌴 ${esc(holName(hol.type))} (${hol.half} half) — booked leave</div>`:""}
-        ${booked.length?`<div class="flab">You're booked on — tap to add</div><div class="booked">${booked.map((b,ix)=>`<button type="button" class="bk" data-ix="${ix}" title="${esc(b.label)}">${b.time?`<span class="t">${esc(b.time)}</span>`:""}${esc(b.label.length>34?b.label.slice(0,33)+"…":b.label)}</button>`).join("")}</div>`:""}
         <div class="times2">
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
         </div>
-        <div class="flab">Jobs — tap above or type to add (as many as needed)</div>
-        <div class="row joblist"></div>
-        <div class="ovhrow"><span class="flab" style="align-self:center;margin:0">Not on a site?</span>
-          <button type="button" class="ovh" data-o="Yard">🏠 Yard</button>
-          <button type="button" class="ovh" data-o="Supplier">🛒 Supplier</button>
-          <button type="button" class="ovh" data-o="Workshop">🔧 Workshop</button></div>
+        <div class="flab">Hours on each job — from the jobs you were booked on</div>
+        <div class="jobhrs">${booked.length ? booked.map(b => {
+          const saved = (d.jobHours && d.jobHours[b.jobId] != null) ? d.jobHours[b.jobId] : null;
+          const capH = b.capturedMins ? Math.round(b.capturedMins/60*4)/4 : 0;
+          const val = (saved != null ? saved : (capH || ""));
+          const lab = b.label.length>40 ? b.label.slice(0,39)+"…" : b.label;
+          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref)}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}">
+            <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.capturedMins?` · ⏱ ${capH}h captured`:""}</span></span>
+            <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${val}"><span class="jh-unit">h</span></span>
+          </div>`;
+        }).join("") : `<div class="jh-none">No portal jobs booked for you this day.</div>`}</div>
         ${ME&&ME.mileage?`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`:""}
         ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
@@ -312,32 +328,13 @@ function render(){
       const list=card.querySelector(".milist");
       (d.mileage||[]).forEach(m=>list.appendChild(mileRow(m)));
     }
-    const jl=card.querySelector(".joblist");
-    (d.jobs||"").split(",").map(s=>s.trim()).filter(Boolean).forEach(rf=>jl.appendChild(jobPill(rf)));
-    const jin=document.createElement("input");
-    jin.type="text";jin.className="jobs";jin.placeholder="Type to add a job or site…";jin.autocomplete="off";
-    jl.appendChild(jin);
     card.querySelector(".dhead").addEventListener("click",()=>{card.classList.toggle("open");});
-    booked.forEach((b,ix)=>{
-      card.querySelectorAll(".bk")[ix].addEventListener("click",ev=>{
-        ev.preventDefault();
-        if(addJobPill(card,b.ref)){
-          if(b.site)autoMileage(card,{site:b.site,postcode:b.postcode});
-          refreshTotals();
-          clearTimeout(saveTimer);doSave();
-        }
-        ev.target.closest(".bk").classList.add("used");
-      });
-      // Already on the sheet? Show the chip as used from the start.
-      const refs=(d.jobs||"").toLowerCase();
-      if(refs.includes(String(b.ref).toLowerCase()))card.querySelectorAll(".bk")[ix].classList.add("used");
-    });
     host.appendChild(card);
   }
   if(autoChanged){setTimeout(()=>{refreshTotals();queueSave();},0);}
-  if(!locked)for(const [date,a] of Object.entries(AUTO)){
+  if(!locked)for(const [date,list] of Object.entries(ASSIGNED)){
     const cardEl=document.querySelector(`.card[data-date="${date}"]`);
-    if(cardEl)(a.jobs||[]).forEach(j=>{if(j.site)autoMileage(cardEl,j);});
+    if(cardEl)(list||[]).forEach(j=>{if(j.site)autoMileage(cardEl,{site:j.site,postcode:j.postcode});});
   }
   g("invBanner").innerHTML=locked?`<div class="banner">✅ Invoice <b>${INVOICE.number}</b> has been generated for this week (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>. The week is locked; ask the office if something needs correcting.</div>`:"";
   document.querySelectorAll(".card[data-date] input,.card[data-date] .btn,.card[data-date] .bk").forEach(el=>{if(locked)el.disabled=true;});
