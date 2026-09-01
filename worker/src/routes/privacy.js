@@ -15,49 +15,119 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
-import { deletePersonalDocs } from "./hrdocs.js";
+import { deletePersonalDocs, listPersonalDocFiles } from "./hrdocs.js";
 
-// Tables that carry a person's data, keyed by their username column. Each is
-// queried defensively so a schema that lacks one simply contributes nothing.
-const EXPORT_TABLES = [
-  ["users", "username"],
-  ["user_permissions", "username"],
-  ["sessions", "username"],
-  ["devices", "username"],
-  ["login_history", "username"],
-  ["holidays", "username"],
-  ["office_shifts", "username"],
-  ["oncall_log", "username"],
-  ["key_log", "username"],
-  ["notify_log", "username"],
-  ["audit_log", "username"],
-  ["password_resets", "username"],
+// Every table in the central D1 that can hold a person's data, grouped so the
+// one-click report reads like a proper subject-access record. Each entry lists
+// the column(s) that reference the person — a record is included if the person
+// appears in ANY of them (e.g. a message they SENT or RECEIVED). Queried
+// defensively: a table/column that doesn't exist simply contributes nothing, so
+// this stays safe as the schema grows.
+const EXPORT_SPEC = [
+  // ── Account & access ──────────────────────────────────────────────────────
+  { table: "users",              label: "Account & profile",               cols: ["username"] },
+  { table: "user_permissions",   label: "Permissions",                     cols: ["username"] },
+  { table: "sessions",           label: "Login sessions",                  cols: ["username"] },
+  { table: "devices",            label: "Registered devices",              cols: ["username"] },
+  { table: "push_subscriptions", label: "Push-notification devices",       cols: ["username"] },
+  { table: "login_history",      label: "Login history",                   cols: ["username"] },
+  { table: "password_resets",    label: "Password-reset requests",         cols: ["username"] },
+  // ── Notifications & activity ─────────────────────────────────────────────
+  { table: "user_notifications", label: "Notification feed",               cols: ["username"] },
+  { table: "notify_log",         label: "Notification delivery log",       cols: ["username"] },
+  { table: "audit_log",          label: "Activity log (their actions)",    cols: ["username"] },
+  // ── Holiday & absence ────────────────────────────────────────────────────
+  { table: "holidays",           label: "Holiday & absence bookings",      cols: ["username", "engineer"] },
+  { table: "holiday_allowance",  label: "Holiday allowance",               cols: ["username"] },
+  { table: "holiday_log",        label: "Holiday admin actions",           cols: ["by_user"] },
+  // ── Time & attendance ────────────────────────────────────────────────────
+  { table: "office_shifts",      label: "Office timesheet / clock-ins",    cols: ["username"] },
+  { table: "shifts",             label: "Field shifts (clock on/off)",     cols: ["username"] },
+  { table: "job_time_segments",  label: "Job time capture",                cols: ["username"] },
+  { table: "eng_timesheets",     label: "Engineer timesheets",             cols: ["username"] },
+  { table: "eng_invoices",       label: "Engineer invoices",               cols: ["username"] },
+  { table: "van_timesheets",     label: "Van timesheets",                  cols: ["username"] },
+  { table: "sitelog_scans",      label: "Site sign-in / out scans",        cols: ["username"] },
+  // ── Vehicles ─────────────────────────────────────────────────────────────
+  { table: "vehicle_assignments",label: "Vehicle assignments",             cols: ["username", "assigned_by"] },
+  { table: "vehicle_checks",     label: "Weekly van checks",               cols: ["username"] },
+  { table: "custom_van_checks",  label: "Requested van checks",            cols: ["username", "sent_by"] },
+  { table: "vehicle_handovers",  label: "Vehicle handovers",               cols: ["username", "requested_by"] },
+  { table: "driver_scores",      label: "Driver scores",                   cols: ["username"] },
+  { table: "fuel_entries",       label: "Fuel-card entries",               cols: ["username", "by"] },
+  { table: "odometer_readings",  label: "Odometer readings entered",       cols: ["by"] },
+  // ── Equipment & keys ─────────────────────────────────────────────────────
+  { table: "assets",                  label: "Equipment currently held",   cols: ["assigned_to"] },
+  { table: "asset_requests",          label: "Equipment requests",         cols: ["requested_by", "holder", "decided_by"] },
+  { table: "asset_transfer_requests", label: "Equipment transfers",        cols: ["from_user", "to_user"] },
+  { table: "key_log",                 label: "Key-register activity",      cols: ["holder", "by_user"] },
+  // ── Communications & sign-offs ───────────────────────────────────────────
+  { table: "messages",           label: "Messages sent & received",        cols: ["from_user", "to_user"] },
+  { table: "memo_acks",          label: "Company-memo acknowledgements",   cols: ["username"] },
+  { table: "admin_task_done",    label: "Task completions",                cols: ["username", "done_by"] },
+  { table: "certificates",       label: "Certificates issued / finalised", cols: ["engineer", "finalised_by"] },
+  { table: "em_remedials",       label: "EM remedials handled",            cols: ["engineer"] },
 ];
 
-async function safeSelect(env, tenantId, table, col, value) {
+// Multi-column, case-insensitive lookup. Returns [] on any error (missing
+// table/column) so the export never fails because the schema moved on.
+async function personRows(env, tenantId, table, cols, value) {
+  const where = cols.map(c => `LOWER(${c}) = LOWER(?)`).join(" OR ");
+  const binds = cols.map(() => value);
   try {
+    // Match the tenant numerically: some tables store tenant_id as the TEXT
+    // "1.0", others as the integer 1 — CAST(...AS REAL) reconciles both so a
+    // person's records are never silently dropped on a type mismatch.
     const res = await env.DB.prepare(
-      `SELECT * FROM ${table} WHERE tenant_id = ? AND ${col} = ?`
-    ).bind(tenantId, value).all();
+      `SELECT * FROM ${table} WHERE CAST(tenant_id AS REAL) = CAST(? AS REAL) AND (${where})`
+    ).bind(tenantId, ...binds).all();
     return res.results || [];
   } catch {
     // Table may not have tenant_id — retry without it before giving up.
     try {
-      const res = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${col} = ?`).bind(value).all();
+      const res = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`).bind(...binds).all();
       return res.results || [];
     } catch { return []; }
   }
 }
 
 function redact(rows) {
-  // Never include password hashes / reset tokens in an export.
+  // Never include password hashes / reset tokens / push crypto keys in an export.
   return rows.map(r => {
     const o = { ...r };
     for (const k of Object.keys(o)) {
-      if (/password|hash|token|secret/i.test(k)) o[k] = "[redacted]";
+      if (/password|hash|token|secret|p256dh|(^|_)auth$/i.test(k)) o[k] = "[redacted]";
     }
     return o;
   });
+}
+
+// SiteLog holds the person's pay rate + every site sign-in — significant
+// personal data on a separate D1 (bound as SITELOG_DB). Linked by
+// people.portal_username. Best-effort: skipped silently if unbound/unlinked.
+async function sitelogSections(env, who) {
+  const out = [];
+  if (!env.SITELOG_DB) return out;
+  try {
+    const people = (await env.SITELOG_DB.prepare(
+      "SELECT * FROM people WHERE LOWER(portal_username) = LOWER(?)"
+    ).bind(who).all()).results || [];
+    if (!people.length) return out;
+    out.push({ id: "sitelog_people", label: "SiteLog profile (pay & travel)", rows: redact(people) });
+    const ids = people.map(p => p.id).filter(Boolean);
+    if (ids.length) {
+      const ph = ids.map(() => "?").join(",");
+      const visits = (await env.SITELOG_DB.prepare(
+        `SELECT * FROM visits WHERE person_id IN (${ph}) ORDER BY check_in_at DESC`
+      ).bind(...ids).all()).results || [];
+      if (visits.length) out.push({ id: "sitelog_visits", label: "SiteLog site visits", rows: visits });
+      const devs = (await env.SITELOG_DB.prepare(
+        `SELECT * FROM devices WHERE person_id IN (${ph})`
+      ).bind(...ids).all()).results || [];
+      if (devs.length) out.push({ id: "sitelog_devices", label: "SiteLog devices", rows: redact(devs) });
+    }
+  } catch { /* SiteLog unreachable — omit the section */ }
+  return out;
 }
 
 export async function handle(request, env, ctx, url, sess) {
@@ -69,22 +139,47 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Export (right of access) ───────────────────────────────────────────────
   if (path === "/privacy/export" && request.method === "GET") {
+    // Full-access only — export is an admin capability. Ordinary users cannot
+    // export their own data (or anyone else's).
+    if (!isFull) return error("Only a Full-access user can export data.", 403, env, request);
     const who = (url.searchParams.get("u") || sess.user.username).trim();
-    // A person can export their OWN data; only a Full-access admin can export
-    // someone else's.
-    if (who !== sess.user.username && !isFull) return error("Forbidden", 403, env, request);
 
-    const data = {};
-    for (const [table, col] of EXPORT_TABLES) {
-      const rows = await safeSelect(env, tenantId, table, col, who);
-      if (rows.length) data[table] = redact(rows);
+    const sections = [];
+    const searched = [];
+    for (const spec of EXPORT_SPEC) {
+      searched.push(spec.label);
+      const rows = await personRows(env, tenantId, spec.table, spec.cols, who);
+      if (rows.length) sections.push({ id: spec.table, label: spec.label, rows: redact(rows) });
     }
+
+    // SiteLog (separate D1) — pay rate + site-visit history.
+    for (const s of await sitelogSections(env, who)) { searched.push(s.label); sections.push(s); }
+
+    // Uploaded personal documents (contracts, right-to-work, etc.) — metadata
+    // only; the files live in the staff-documents area and are downloaded there.
+    let documents = [];
+    try { documents = await listPersonalDocFiles(env, tenantId, who); } catch { documents = []; }
+    if (documents.length) {
+      sections.push({ id: "documents", label: "Uploaded documents (in Staff Documents)", rows: documents });
+    }
+
+    // Full name for the report header, from the account row if we have it.
+    let subjectName = who;
+    try {
+      const acct = sections.find(s => s.id === "users");
+      const u = acct && acct.rows[0];
+      if (u) subjectName = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || who;
+    } catch { /* fall back to username */ }
+
     return json({
       ok: true,
       subject: who,
+      subjectName,
       generatedAt: new Date().toISOString(),
-      note: "Personal data held for this person across the portal. Password hashes and tokens are redacted. Uploaded documents are stored separately in the staff documents area.",
-      data
+      recordCount: sections.reduce((n, s) => n + s.rows.length, 0),
+      note: "This report contains the personal data the portal holds on this person under the UK GDPR right of access. Password hashes, security tokens and push-encryption keys are redacted. Uploaded documents are listed here; the files themselves are in the Staff Documents area.",
+      searched,
+      sections
     }, {}, env, request);
   }
 

@@ -56,6 +56,17 @@
     .btn.orange{background:#ea7a23;color:#fff;border-color:#ea7a23;}
     .btn.small{padding:6px 11px;font-size:13px;}
     .btn:disabled{opacity:.5;cursor:default;}
+    /* 🛠 Tools dropdown — one home for the board's secondary nav/tools. */
+    .toolwrap{position:relative;display:inline-flex;}
+    .toolmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:60;background:#fff;
+      border:1px solid #d1d5db;border-radius:12px;box-shadow:0 10px 26px rgba(0,0,0,.18);
+      padding:6px;min-width:210px;display:flex;flex-direction:column;gap:3px;}
+    .toolmenu[hidden]{display:none;}
+    .toolmenu .btn{width:100%;justify-content:flex-start;border:1px solid transparent;
+      background:#fff;border-radius:8px;padding:9px 12px;}
+    .toolmenu .btn:hover{background:#eef3f9;}
+    #toolsBtn[aria-expanded="true"]{background:#eef2f7;}
+    @media (max-width:520px){.toolmenu{left:0;right:auto;}}
 
     /* ---- Status chips (Workever-style) ---- */
     .chips{display:flex;flex-wrap:wrap;gap:8px;padding:12px 18px 4px;}
@@ -230,15 +241,21 @@
       </div>
       <div class="header-right">
         <a href="sla-scheduler.html" class="btn">🗓️ Scheduler</a>
-        <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
-        <a href="engineer-jobs.html" class="btn" id="myJobsLink" style="display:none">📝 My Jobs</a>
-        <a href="you.html" class="btn" title="Your personal screen">👤 You</a>
-        <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
-        <a href="sla-settings.html" class="btn">⚙️ Settings</a>
-        <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
-        <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
-        <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
+        <div class="toolwrap">
+          <button type="button" id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
+          <div class="toolmenu" id="toolsMenu" hidden>
+            <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
+            <a href="engineer-jobs.html" class="btn" id="myJobsLink" style="display:none">📝 My Jobs</a>
+            <a href="you.html" class="btn" title="Your personal screen">👤 You</a>
+            <a href="fra-tracker.html" class="btn" title="Live tracker for the FRA works batch (temporary)">🔥 FRA Tracker</a>
+            <a href="cert-jobs.html" class="btn" id="certJobsLink" style="display:none">📄 EM/PAT jobs</a>
+            <a href="cert-review.html" class="btn" id="certReviewLink" style="display:none">📄 Certificates</a>
+            <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
+            <a href="site-audit.html" class="btn" id="siteAuditLink" style="display:none">🔍 Site audit</a>
+            <a href="sla-settings.html" class="btn">⚙️ Settings</a>
+          </div>
+        </div>
       </div>
     </header>
     <script>
@@ -250,6 +267,7 @@
         var yes = v => String(v||"").toLowerCase() === "yes";
         if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
           document.getElementById("archiveLink").style.display = "";
+          var sal = document.getElementById("siteAuditLink"); if (sal) sal.style.display = "";
           // 🧰 Data, 🔥 Firestopping, 🏷️ Categories and 🧾 Sheet settings now live
           // under ⚙️ Settings (sla-settings.html) to keep the board toolbar clean.
         }
@@ -268,6 +286,17 @@
         })();
         if (isField) document.getElementById("myJobsLink").style.display = "";
       }catch(e){} })();
+
+      // 🛠 Tools dropdown — open/close + close on outside click / Escape.
+      (function(){
+        var tb = document.getElementById("toolsBtn");
+        var menu = document.getElementById("toolsMenu");
+        if (!tb || !menu) return;
+        var close = function(){ menu.hidden = true; tb.setAttribute("aria-expanded","false"); };
+        tb.onclick = function(e){ e.stopPropagation(); var open = menu.hidden; menu.hidden = !open; tb.setAttribute("aria-expanded", String(open)); };
+        document.addEventListener("click", function(e){ if (!menu.hidden && !menu.contains(e.target) && e.target !== tb) close(); });
+        document.addEventListener("keydown", function(e){ if (e.key === "Escape") close(); });
+      })();
     </script>
 
     <div class="chips" id="statusChips"></div>

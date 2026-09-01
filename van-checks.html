@@ -28,6 +28,17 @@
     .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
     .btn.grey { background:#5b6b7b; } .btn.green { background:var(--ok); } .btn.small { padding:6px 9px; font-size:13px; }
     .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+    /* 🛠 Tools dropdown — one home for the header's secondary tool buttons. */
+    .toolwrap { position:relative; display:inline-flex; }
+    .toolmenu { position:absolute; top:calc(100% + 6px); right:0; z-index:60; background:#fff;
+      border:1px solid #d1d5db; border-radius:12px; box-shadow:0 10px 26px rgba(0,0,0,.18);
+      padding:6px; min-width:210px; display:flex; flex-direction:column; gap:3px; }
+    .toolmenu[hidden] { display:none; }
+    .toolmenu .btn { width:100%; justify-content:flex-start; text-align:left; background:#fff;
+      color:#26303a; border:1px solid transparent; border-radius:8px; padding:9px 12px; font-size:14px; }
+    .toolmenu .btn:hover { background:#eef3f9; }
+    #toolsBtn[aria-expanded="true"] { background:#4a5766; }
+    @media (max-width:520px){ .toolmenu { left:0; right:auto; } .toolwrap { display:flex; } }
     .muted { color:#6b7a90; } .hide { display:none !important; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     table.list { width:100%; border-collapse:collapse; }
@@ -98,11 +109,16 @@
     <a class="ml-back" data-role="home" href="/vehicles.html" style="text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Checks</h1>
     <div class="hactions">
-      <button class="btn grey small" id="matrixBtn">📅 By engineer</button>
-      <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
-      <button class="btn grey small" id="customBtn">🧩 Custom checks</button>
-      <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
-      <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
+      <div class="toolwrap">
+        <button type="button" id="toolsBtn" class="btn grey small" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
+        <div class="toolmenu" id="toolsMenu" hidden>
+          <button class="btn grey small" id="matrixBtn">📅 By engineer</button>
+          <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
+          <button class="btn grey small" id="customBtn">🧩 Custom checks</button>
+          <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
+          <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
+        </div>
+      </div>
     </div>
   </header>
   <div class="wrap">
@@ -863,6 +879,16 @@
   }
   async function customCancel(id) { try { await authFetch("/vancheck/custom-cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(r => r.json()); loadCustomStatus(); } catch (e) {} }
   g("customBtn").onclick = openCustom;
+
+  // 🛠 Tools dropdown — open/close + close on outside click / Escape.
+  (function(){
+    var tb = g("toolsBtn"), menu = g("toolsMenu");
+    if (!tb || !menu) return;
+    var close = function(){ menu.hidden = true; tb.setAttribute("aria-expanded", "false"); };
+    tb.onclick = function(e){ e.stopPropagation(); var open = menu.hidden; menu.hidden = !open; tb.setAttribute("aria-expanded", String(open)); };
+    document.addEventListener("click", function(e){ if (!menu.hidden && !menu.contains(e.target) && e.target !== tb) close(); });
+    document.addEventListener("keydown", function(e){ if (e.key === "Escape") close(); });
+  })();
 </script>
 </body>
 </html>

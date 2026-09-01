@@ -153,6 +153,34 @@ export class PdfDoc {
     return this;
   }
 
+  // Draw text on a SPECIFIC page (0-indexed) — for headers/footers stamped AFTER
+  // the body has been laid out, once the total page count is known (e.g. a
+  // "Page X of Y" footer). opt: {size,bold,grey,alignRight,center}.
+  textOn(pageIndex, x, yTop, str, opt = {}) {
+    const pg = this.pages[pageIndex];
+    if (!pg) return this;
+    const size = opt.size || 10;
+    const font = opt.bold ? "/F2" : "/F1";
+    const col = opt.grey ? "0.45 g " : "";
+    let tx = x;
+    if (opt.alignRight) tx = x - textWidth(str, size);
+    else if (opt.center) tx = x - textWidth(str, size) / 2;
+    const y = pg.h - yTop;
+    pg.ops.push(`${col}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
+    return this;
+  }
+
+  // Horizontal rule on a SPECIFIC page (0-indexed) — companion to textOn for
+  // header/footer separator lines.
+  lineOn(pageIndex, x1, yTop, x2, opt = {}) {
+    const pg = this.pages[pageIndex];
+    if (!pg) return this;
+    const y = pg.h - yTop;
+    const grey = opt.grey ? "0.80 G " : "0.2 G ";
+    pg.ops.push(`${grey}${(opt.w || 0.5)} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+    return this;
+  }
+
   // Filled / stroked rectangle. (x, yTop) = top-left from the page top; fill and
   // stroke are [r,g,b] 0–1 arrays. Used by the programme (Gantt) export.
   rect(x, yTop, w, h, opt = {}) {

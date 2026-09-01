@@ -9,49 +9,60 @@
   <script src="auth.js"></script>
   <style>
     * { box-sizing: border-box; }
-    body { font-family:"Segoe UI",sans-serif; background:#eef1f4; margin:0; color:#27313a; }
-    header { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
-    header h1 { font-size:18px; margin:0; flex:1; }
-    header a { color:#fff; text-decoration:none; font-size:14px; opacity:.9; }
-    .wrap { max-width:1100px; margin:18px auto; padding:0 14px; }
-    .bar { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
-    .bar input { flex:1; min-width:180px; padding:10px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; }
-    .btn { background:#0066cc; color:#fff; border:none; border-radius:8px; padding:10px 14px; font-size:14px; cursor:pointer; }
-    .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.small { padding:6px 10px; font-size:13px; }
+    :root{
+      --bg:#f2f2f7; --card:#fff; --text:#1c1c1e; --text2:#8e8e93; --sep:rgba(60,60,67,.14);
+      --blue:#007aff; --green:#34c759; --red:#ff3b30; --orange:#ff9500; --purple:#af52de;
+      --fill:#efeff4; --fill2:#e6e6eb;
+    }
+    body { font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      background:var(--bg); margin:0; color:var(--text); -webkit-font-smoothing:antialiased; letter-spacing:-.01em; }
+    header { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:16px 18px; display:flex; align-items:center; gap:12px; }
+    header h1 { font-size:19px; margin:0; flex:1; font-weight:700; letter-spacing:-.02em; }
+    header a { color:#fff; text-decoration:none; font-size:15px; opacity:.92; }
+    .wrap { max-width:1000px; margin:18px auto; padding:0 16px; }
+    .bar { display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:center; }
+    .bar input { flex:1; min-width:180px; padding:11px 14px; border:1px solid var(--sep); border-radius:12px; font-size:15px; background:var(--card); }
+    .btn { background:var(--blue); color:#fff; border:none; border-radius:12px; padding:10px 16px; font-size:15px; font-weight:600; cursor:pointer; letter-spacing:-.01em; transition:opacity .15s ease, transform .04s ease; }
+    .btn:hover { opacity:.92; } .btn:active { transform:scale(.97); }
+    .btn.grey { background:var(--fill2); color:var(--blue); } .btn.grey:hover{ background:#dcdce1; opacity:1; }
+    .btn.red { background:var(--red); color:#fff; }
+    .btn.ghost { background:transparent; color:var(--blue); padding:8px 12px; }
+    .btn.ghost:hover{ background:rgba(0,122,255,.08); opacity:1; }
+    .btn.small { padding:8px 13px; font-size:14px; border-radius:10px; }
     /* Office / Field zones + draggable people rows */
     .zone { margin-bottom:16px; }
-    .zonehead { display:flex; align-items:center; gap:8px; font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:#003366; font-weight:700; margin:0 2px 8px; }
-    .zonehead .count { color:#8a97a6; font-weight:600; }
+    .zonehead { display:flex; align-items:center; gap:8px; font-size:13px; letter-spacing:-.01em; color:var(--text2); font-weight:600; margin:0 6px 8px; }
+    .zonehead .count { color:var(--text2); font-weight:500; opacity:.7; }
     .uhead, .urow { display:grid; grid-template-columns:26px minmax(150px,1.8fr) 1.6fr .9fr .8fr .9fr auto; align-items:center; gap:12px; }
-    .uhead { padding:6px 14px; font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#667085; }
-    .ulist { background:#fff; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.06); overflow:hidden; min-height:46px; }
+    .uhead { padding:6px 16px; font-size:12px; letter-spacing:-.005em; color:var(--text2); }
+    .ulist { background:var(--card); border-radius:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); overflow:hidden; min-height:46px; }
     .ulist.empty { display:flex; align-items:center; justify-content:center; }
-    .ulist.empty::after { content:"Drag people here"; padding:16px; color:#9aa6b2; font-size:13px; }
-    .urow { padding:10px 14px; border-bottom:1px solid #eef2f6; background:#fff; font-size:14px; }
+    .ulist.empty::after { content:"Drag people here"; padding:16px; color:var(--text2); font-size:13px; }
+    .urow { padding:12px 16px; border-bottom:1px solid var(--sep); background:var(--card); font-size:15px; }
     .urow:last-child { border-bottom:none; }
-    .urow .grip { cursor:grab; color:#b3c0cf; font-size:18px; line-height:1; text-align:center; touch-action:none; user-select:none; }
+    .urow .grip { cursor:grab; color:#c7c7cc; font-size:18px; line-height:1; text-align:center; touch-action:none; user-select:none; }
     .urow .grip:active { cursor:grabbing; }
-    .urow .uname b { color:#0f1b2d; }
-    .urow.dragging { box-shadow:0 14px 34px rgba(6,24,54,.22); border-radius:10px; border-bottom:none; opacity:.98; }
-    .drop-ph { background:#eaf1fb; border:1px dashed #9dbdf0; border-radius:8px; margin:4px 8px; }
-    .pill { font-size:11px; padding:2px 8px; border-radius:999px; }
-    .pill.active { background:#e3f6e8; color:#0c7d27; } .pill.disabled { background:#fde8ea; color:#b00020; }
-    .pill.pending { background:#fff3cd; color:#7a5b00; }
-    .lvl { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; vertical-align:middle; letter-spacing:.02em; }
-    .lvl-field  { background:#e6f0ff; color:#1d4ed8; }
-    .lvl-office { background:#e7f7ee; color:#0c7d33; }
-    .lvl-admin  { background:#fff0e0; color:#b45309; }
-    .lvl-full   { background:#f3e8ff; color:#7c2d92; }
-    .muted { color:#667085; font-size:12px; }
+    .urow .uname b { color:var(--text); font-weight:600; }
+    .urow.dragging { box-shadow:0 14px 34px rgba(0,0,0,.18); border-radius:14px; border-bottom:none; opacity:.98; }
+    .drop-ph { background:rgba(0,122,255,.08); border:1px dashed rgba(0,122,255,.5); border-radius:12px; margin:4px 8px; }
+    .pill { font-size:12px; padding:2px 9px; border-radius:999px; font-weight:500; }
+    .pill.active { background:rgba(52,199,89,.15); color:#248a3d; } .pill.disabled { background:rgba(255,59,48,.15); color:#c92a2a; }
+    .pill.pending { background:rgba(255,149,0,.18); color:#a15c00; }
+    .lvl { display:inline-block; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px; vertical-align:middle; letter-spacing:-.005em; }
+    .lvl-field  { background:rgba(0,122,255,.12); color:#0060df; }
+    .lvl-office { background:rgba(52,199,89,.16); color:#248a3d; }
+    .lvl-admin  { background:rgba(255,149,0,.18); color:#a15c00; }
+    .lvl-full   { background:rgba(175,82,222,.15); color:#8944ab; }
+    .muted { color:var(--text2); font-size:13px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
-    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; padding-top:calc(env(safe-area-inset-top, 0px) + 18px); overflow:auto; }
+    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.28); -webkit-backdrop-filter:saturate(120%) blur(10px); backdrop-filter:saturate(120%) blur(10px); display:none; align-items:flex-start; justify-content:center; padding:18px; padding-top:calc(env(safe-area-inset-top, 0px) + 18px); overflow:auto; }
     .overlay.open { display:flex; }
-    .panel { background:#fff; border-radius:12px; width:100%; max-width:680px; padding:18px; }
-    .panel h2 { color:#003366; margin:0 0 6px; font-size:18px; }
-    /* Section tabs */
-    .tabs { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 14px; }
-    .tabs button { background:#eef2f6; border:none; border-radius:999px; padding:7px 12px; font-size:13px; cursor:pointer; color:#27313a; }
-    .tabs button.active { background:#0066cc; color:#fff; }
+    .panel { background:var(--card); border-radius:20px; width:100%; max-width:680px; padding:20px; box-shadow:0 24px 60px rgba(0,0,0,.24); }
+    .panel h2 { color:var(--text); margin:0 0 6px; font-size:21px; font-weight:700; letter-spacing:-.02em; }
+    /* Section tabs → iOS segmented control */
+    .tabs { display:flex; gap:2px; flex-wrap:wrap; margin:12px 0 16px; background:var(--fill); border-radius:12px; padding:3px; }
+    .tabs button { background:transparent; border:none; border-radius:9px; padding:8px 13px; font-size:14px; font-weight:600; cursor:pointer; color:var(--text2); letter-spacing:-.01em; transition:color .15s ease; }
+    .tabs button.active { background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.12), 0 0 1px rgba(0,0,0,.06); }
     .section { display:none; }
     .section.active { display:block; }
     .needs-setup { outline:2px solid #f0a020 !important; outline-offset:1px; background:#fffaf0 !important; }
@@ -59,13 +70,14 @@
     #setupBanner b { color:#b45309; }
     #setupBanner .sg-jump { display:inline-block; background:#fff; border:1px solid #e0b877; color:#8a4b12; border-radius:999px; padding:2px 10px; margin:3px 6px 0 0; font-size:12px; font-weight:600; cursor:pointer; }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    label { font-size:12px; color:#667085; display:block; margin:8px 0 2px; }
-    .panel input, .panel select { width:100%; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; }
+    label { font-size:13px; color:var(--text2); display:block; margin:10px 0 3px; letter-spacing:-.005em; }
+    .panel input, .panel select { width:100%; padding:11px 12px; border:1px solid var(--sep); border-radius:11px; font-size:15px; background:var(--card); color:var(--text); transition:border-color .15s ease, box-shadow .15s ease; }
+    .panel input:focus, .panel select:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(0,122,255,.16); }
     .permwrap { display:block; }
-    .famaster { background:#f0f6ff; border:1px solid #cfe0f5; border-radius:10px; padding:4px 12px; margin-bottom:4px; }
+    .famaster { background:rgba(0,122,255,.06); border:1px solid rgba(0,122,255,.18); border-radius:12px; padding:4px 14px; margin-bottom:4px; }
     .permsec { margin-top:16px; }
-    .permsec h4 { margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#003366; padding-bottom:6px; border-bottom:1px solid #e6ebf1; }
-    .togrow { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 2px; border-bottom:1px solid #f2f5f8; }
+    .permsec h4 { margin:0; font-size:12px; letter-spacing:-.005em; color:var(--text2); font-weight:600; padding-bottom:8px; border-bottom:1px solid var(--sep); }
+    .togrow { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 2px; border-bottom:1px solid var(--sep); }
     .togrow:last-child { border-bottom:none; }
     .togrow .tlabel { font-size:14px; color:#27313a; }
     .togrow .tlabel b { font-weight:600; }
@@ -74,7 +86,7 @@
     .switch input { position:absolute; opacity:0; width:0; height:0; margin:0; }
     .switch .slider { position:absolute; inset:0; background:#cbd5e0; border-radius:999px; transition:background .18s ease; cursor:pointer; }
     .switch .slider::before { content:""; position:absolute; height:20px; width:20px; left:3px; top:3px; background:#fff; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,.35); transition:transform .18s ease; }
-    .switch input:checked + .slider { background:#0066cc; }
+    .switch input:checked + .slider { background:var(--green); }
     .switch input:checked + .slider::before { transform:translateX(20px); }
     .switch input:disabled + .slider { opacity:.5; cursor:not-allowed; }
     .switch input:focus-visible + .slider { outline:2px solid #0066cc; outline-offset:2px; }
@@ -83,6 +95,12 @@
     .panel-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
     .msg { font-size:14px; margin-top:10px; } .msg.err { color:#b00020; } .msg.ok { color:#0c7d27; }
     .notice { background:#fff3cd; color:#7a5b00; padding:12px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+    /* ⋯ More dropdown (secondary toolbar links) */
+    .toolwrap{ position:relative; display:inline-flex; }
+    .toolmenu{ position:absolute; top:calc(100% + 6px); right:0; z-index:60; background:#fff; border:1px solid #d1d5db; border-radius:12px; box-shadow:0 10px 26px rgba(0,0,0,.18); padding:6px; min-width:200px; display:flex; flex-direction:column; gap:4px; }
+    .toolmenu[hidden]{ display:none; }
+    .toolmenu .btn{ width:100%; justify-content:flex-start; text-align:left; background:#fff; color:#1f2937; border:1px solid transparent; }
+    .toolmenu .btn:hover{ background:#eef3f9; }
     @media (max-width:640px){
       .wrap{ padding:0 10px; }
       .grid2{ grid-template-columns:1fr; }
@@ -94,20 +112,33 @@
       .urow{ display:block; position:relative; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 2px 8px rgba(6,24,54,.06); margin-bottom:12px; padding:6px 14px 10px; }
       .ucell{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; text-align:right; padding:8px 0; border-bottom:1px solid #f2f5f8; font-size:14px; }
       .ucell::before{ content:attr(data-label); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; font-weight:700; text-align:left; flex:0 0 auto; }
-      .ucell.uname{ display:block; text-align:left; border-bottom:none; padding:10px 40px 8px 0; }
+      /* Compact card: fold the tier into the badge, email into a subtitle, and
+         hide the labelled Type/Access rows (was ~600px per user). */
+      .ucell{ padding:3px 0; border-bottom:none; }
+      .ucell[data-label="Type"], .ucell[data-label="Access"]{ display:none; }
+      .ucell[data-label="Email"]{ display:block; text-align:left; font-size:12.5px; color:#667085; padding:0; }
+      .ucell[data-label="Email"]::before{ display:none; }
+      .ucell[data-label="Status"]{ display:inline-flex; justify-content:flex-start; padding:2px 0 0; }
+      .ucell[data-label="Status"]::before{ display:none; }
+      .ucell.uname{ display:block; text-align:left; border-bottom:none; padding:8px 40px 0 0; }
       .ucell.uname::before{ display:none; }
       .ucell.uname b{ font-size:16px; color:#003366; }
       .ucell.uactions{ display:block; text-align:left; border-bottom:none; padding-top:10px; }
       .ucell.uactions::before{ display:none; }
-      .ucell.uactions .actions{ gap:6px; }
-      .ucell.uactions .btn.small{ flex:1 1 calc(50% - 4px); text-align:center; padding:10px; font-size:13px; }
+      .ucell.uactions .actions{ display:flex; flex-wrap:wrap; gap:6px; }
+      .ucell.uactions .actions [data-edit]{ flex:1 1 100%; text-align:center; padding:11px; font-size:15px; }
+      .ucell.uactions .actions .btn.small:not([data-edit]){ flex:1 1 calc(33.3% - 6px); text-align:center; padding:9px 4px; font-size:12.5px; }
       .urow .grip{ position:absolute; top:8px; right:8px; font-size:22px; padding:4px 6px; }
+      /* Drag-reorder is a desktop affordance — hide its hint on phones. */
+      #orderHint{ display:none; }
 
       /* Editor modal → full-width, comfortable tap targets. Clear the notch so
          the tabs bar isn't hidden under the iOS clock on an installed PWA. */
       .overlay{ padding:8px; padding-top:calc(env(safe-area-inset-top, 0px) + 8px); }
       .panel{ padding:16px; border-radius:14px; }
-      .tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; margin:10px -2px 14px; padding-bottom:4px; }
+      /* Wrap the tabs so EVERY tab is visible (Permissions/Devices/Account were
+         cut off in a horizontal-scroll strip with no affordance). */
+      .tabs{ flex-wrap:wrap; overflow:visible; margin:10px 0 14px; gap:3px; }
       .tabs button{ flex:0 0 auto; }
       .panel input, .panel select{ font-size:16px; }   /* 16px stops iOS zoom-on-focus */
       .panel-actions .btn{ flex:1; padding:12px; font-size:15px; }
@@ -131,10 +162,15 @@
       <input id="search" placeholder="Search by name, username or email…" />
       <button class="btn" id="addBtn">+ Add user</button>
       <button class="btn grey" id="saveOrderBtn" style="display:none;">Save order</button>
-      <a class="btn grey" id="devicesLink" href="device-admin.html" style="display:none;text-decoration:none;" title="Manage which devices each user can log in on">🔐 Devices</a>
-      <a class="btn grey" href="notify-log.html" style="text-decoration:none;" title="Who was shown which notifications, when">🔔 Notification log</a>
-      <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
-      <a class="btn grey" id="chatHistLink" href="chat-history.html" style="display:none;text-decoration:none;" title="Owner only: read any person's full chat history, including deleted messages">🕵️ Chat history</a>
+      <div class="toolwrap">
+        <button class="btn grey" id="uToolsBtn" type="button" aria-haspopup="true" aria-expanded="false">⋯ More</button>
+        <div class="toolmenu" id="uToolsMenu" hidden>
+          <a class="btn grey" id="devicesLink" href="device-admin.html" style="display:none;text-decoration:none;" title="Manage which devices each user can log in on">🔐 Devices</a>
+          <a class="btn grey" href="notify-log.html" style="text-decoration:none;" title="Who was shown which notifications, when">🔔 Notification log</a>
+          <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
+          <a class="btn grey" id="chatHistLink" href="chat-history.html" style="display:none;text-decoration:none;" title="Owner only: read any person's full chat history, including deleted messages">🕵️ Chat history</a>
+        </div>
+      </div>
     </div>
     <script>
       // Device-lock management now lives behind Users Admin. Show the shortcut
@@ -147,6 +183,15 @@
         var meU = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
         if (meU === "Jamie Line") document.getElementById("chatHistLink").style.display = "";
       }catch(e){} })();
+      // ⋯ More dropdown open/close
+      (function(){
+        var tb=document.getElementById("uToolsBtn"), menu=document.getElementById("uToolsMenu");
+        if(!tb||!menu) return;
+        var close=function(){ menu.hidden=true; tb.setAttribute("aria-expanded","false"); };
+        tb.onclick=function(e){ e.stopPropagation(); var o=menu.hidden; menu.hidden=!o; tb.setAttribute("aria-expanded",String(o)); };
+        document.addEventListener("click",function(e){ if(!menu.hidden && !menu.contains(e.target) && e.target!==tb) close(); });
+        document.addEventListener("keydown",function(e){ if(e.key==="Escape") close(); });
+      })();
     </script>
 
     <div id="menuVisCard" class="notice" style="display:none; background:#eef2ff; border-color:#c7d2fe;">
@@ -202,9 +247,9 @@
 
       <div class="tabs" id="tabs">
         <button data-tab="details" class="active">Details</button>
+        <button data-tab="perms">Permissions</button>
         <button data-tab="pay">Pay &amp; rates</button>
         <button data-tab="vehicle">Vehicle &amp; fuel</button>
-        <button data-tab="perms">Permissions</button>
         <button data-tab="devices">Devices</button>
         <button data-tab="account">Account</button>
       </div>
@@ -290,12 +335,28 @@
 
       <!-- PERMISSIONS -->
       <div class="section" data-sec="perms">
+        <!-- Standard role presets -->
+        <div class="permsec" style="margin-bottom:14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <h4 style="margin:0;">⚡ Apply a standard role</h4>
+            <button type="button" class="btn ghost" id="managePresetsBtn" style="display:none;padding:4px 10px;font-size:13px;">✎ Manage roles</button>
+          </div>
+          <p class="muted" style="margin:4px 0 8px;font-size:12.5px;">One tap sets this person's permissions and staff type to a standard role — fine-tune the switches below afterwards.</p>
+          <div id="presetBtns" style="display:flex;gap:8px;flex-wrap:wrap;"><span class="muted" style="font-size:12.5px;">Loading roles…</span></div>
+        </div>
+        <input type="text" id="permSearch" placeholder="🔍 Filter permissions…" style="width:100%;max-width:340px;margin-bottom:12px;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;">
         <div class="permsec" style="margin-bottom:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;">
           <h4 style="margin:0 0 4px;">🏠 Responsible for (home dashboard)</h4>
           <p class="muted" style="margin:0 0 8px;font-size:12.5px;">Tick the areas this person is responsible for. Their home page shows <b>only</b> these — a clean, focused summary of what they need to watch. Leave all unticked to show every area they have permission for. <b>They also need the matching permission below</b> for an area's data to load.</p>
           <div id="areaGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 14px;"></div>
         </div>
         <div class="permwrap" id="permGrid"></div>
+
+        <div class="permsec" style="margin-top:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;">
+          <h4 style="margin:0 0 4px;">📋 Compliance access (per page)</h4>
+          <p class="muted" style="margin:0 0 8px;font-size:12.5px;">Set what this person can do on each compliance chart. <b>None</b> hides the page from them; <b>View</b> = see the chart &amp; open certificates; <b>Download</b> = also save/export the files; <b>Edit</b> = upload &amp; manage documents and dates. (Full-access users always get Edit on every page.)</p>
+          <div id="complianceGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 14px;"></div>
+        </div>
       </div>
 
       <!-- DEVICES -->
@@ -344,10 +405,30 @@
             </span>
           </label>
         </div>
+
+        <div id="dangerZone" style="margin-top:18px;padding:14px;border:1px solid var(--sep);border-radius:14px;background:var(--fill);">
+          <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Removing this person</div>
+          <p class="muted" style="margin:0 0 8px;font-size:13px;">
+            When someone leaves, use <b>Block</b> (bottom-left). It ends their access, sessions and POs
+            but <b>keeps their account, documents and history</b> — you can still view their files under
+            <b>My Documents</b> and their activity under <b>Activity Log</b> by ticking
+            <b>“Show former staff”</b>. It's fully reversible.
+          </p>
+          <details style="margin-top:6px;">
+            <summary style="cursor:pointer;color:var(--red);font-weight:600;font-size:13px;">Permanently erase this account…</summary>
+            <p class="muted" style="margin:8px 0 10px;font-size:12.5px;color:#a1362f;">
+              Only for test or duplicate accounts. This removes the account, login, sessions and devices,
+              and <b>you'll lose the way to reach their documents and history</b> from the portal. Can't be undone.
+            </p>
+            <button type="button" class="btn red" id="deleteUserBtn" style="display:none;">🗑 Permanently erase…</button>
+          </details>
+        </div>
       </div>
 
       <p id="panelMsg" class="msg"></p>
-      <div class="panel-actions">
+      <div class="panel-actions" style="display:flex;align-items:center;gap:8px;">
+        <button class="btn" id="blockBtn" style="display:none;background:#b91c1c;border-color:#b91c1c;color:#fff;">🚫 Block user</button>
+        <span style="flex:1;"></span>
         <button class="btn grey" id="cancelBtn">Cancel</button>
         <button class="btn" id="saveBtn">Save</button>
       </div>
@@ -513,6 +594,27 @@
         `<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#14532d;cursor:pointer;padding:2px 0;">`
         + `<input type="checkbox" data-area="${a.key}" style="width:auto;margin:0;"> ${a.label}</label>`).join("");
     }
+    // ── Compliance access (per-page level: none|view|download|edit) ─────────
+    const COMPLIANCE_PAGES = [
+      {key:"coop",      label:"Southern Co-op"},
+      {key:"fareham",   label:"Fareham"},
+      {key:"chapplins", label:"Chapplins"},
+      {key:"projects",  label:"Projects"},
+    ];
+    const COMPLIANCE_LEVELS = [
+      {v:"none",     t:"No access"},
+      {v:"view",     t:"View"},
+      {v:"download", t:"View + Download"},
+      {v:"edit",     t:"Edit"},
+    ];
+    function renderComplianceAccess(){
+      g("complianceGrid").innerHTML = COMPLIANCE_PAGES.map(p =>
+        `<label style="display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:#1e3a5f;padding:2px 0;">`
+        + `<span>${p.label}</span>`
+        + `<select data-compliance="${p.key}" style="width:auto;padding:4px 6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">`
+        + COMPLIANCE_LEVELS.map(l => `<option value="${l.v}">${l.t}</option>`).join("")
+        + `</select></label>`).join("");
+    }
     // ── Permission switches ────────────────────────────────────────────────
     function permRow(perm){
       return `<div class="togrow"><span class="tlabel">${PERM_LABELS[perm] || perm}</span>`
@@ -541,8 +643,113 @@
       });
       faSnapshot = null;
     }
+    // ── Standard role presets ──────────────────────────────────────────────
+    let PRESETS = [];
+    async function loadPresets(){
+      try{ const r = await api("/users/presets"); const d = await r.json(); PRESETS = (d && d.presets) || []; }
+      catch(e){ PRESETS = []; }
+      renderPresetButtons();
+    }
+    function renderPresetButtons(){
+      const host = g("presetBtns"); if(!host) return;
+      if(!PRESETS.length){ host.innerHTML = '<span class="muted" style="font-size:12.5px;">No roles set up yet.</span>'; return; }
+      host.innerHTML = "";
+      PRESETS.forEach(p=>{
+        const b=document.createElement("button"); b.type="button"; b.className="btn";
+        b.style.cssText="background:#fff;border:1px solid #fdba74;color:#9a3412;font-weight:600;";
+        b.textContent=(p.fullAccess?"⭐ ":"")+(p.name||"Role");
+        b.onclick=()=>applyPreset(p);
+        host.appendChild(b);
+      });
+    }
+    async function applyPreset(p){
+      const ok = window.MLUI ? await MLUI.confirm(`Apply the “${p.name}” role to this user? It replaces the current permission selection — you can still fine-tune the switches afterwards.`, {title:"Apply role", okLabel:"Apply role"}) : confirm(`Apply the "${p.name}" role?`);
+      if(!ok) return;
+      const set=new Set(p.perms||[]);
+      const fa=g("faToggle");
+      if(p.fullAccess){ gridToggles().forEach(cb=>cb.checked=set.has(cb.dataset.perm)); fa.checked=true; lockFullAccess(); }
+      else { fa.checked=false; faSnapshot=null; gridToggles().forEach(cb=>{ cb.checked=set.has(cb.dataset.perm); cb.disabled=false; }); }
+      document.querySelectorAll('[data-perm]:not([data-grid])').forEach(cb=>{ if(cb.id==="faToggle") return; cb.checked=set.has(cb.dataset.perm); });
+      const st=g("f_staff"); if(st) st.value=p.staffType||st.value;
+      if(window.MLUI && MLUI.toast) MLUI.toast(`Applied “${p.name}” — review the switches, then Save.`);
+    }
+    // Permission search filter
+    (function(){
+      const s=g("permSearch"); if(!s) return;
+      s.addEventListener("input", ()=>{
+        const q=s.value.toLowerCase().trim();
+        document.querySelectorAll("#permGrid .togrow").forEach(row=>{
+          const lbl=((row.querySelector(".tlabel")||{}).textContent||"").toLowerCase();
+          row.style.display = !q || lbl.includes(q) ? "" : "none";
+        });
+        document.querySelectorAll("#permGrid .permsec").forEach(sec=>{
+          const any=[...sec.querySelectorAll(".togrow")].some(r=>r.style.display!=="none");
+          sec.style.display = any ? "" : "none";
+        });
+      });
+    })();
+    // Preset editor (Full-access only)
+    function openPresetEditor(){
+      const ov=document.createElement("div"); ov.className="overlay"; ov.style.display="flex";
+      const groupsHtml = PERM_GROUPS.map(gp=>`<div style="margin:4px 0;"><div style="font-weight:600;font-size:11.5px;color:#475569;margin:4px 0;text-transform:uppercase;letter-spacing:.03em;">${esc(gp.title)}</div>${gp.perms.map(pk=>`<label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;margin:0 10px 4px 0;"><input type="checkbox" data-pk="${pk}" style="width:auto;"> ${esc(PERM_LABELS[pk]||pk)}</label>`).join("")}</div>`).join("");
+      let work = JSON.parse(JSON.stringify(PRESETS||[]));
+      ov.innerHTML = `<div class="panel" style="max-width:660px;">
+        <header style="display:flex;align-items:center;justify-content:space-between;"><h3 style="margin:0;">✎ Manage standard roles</h3><button type="button" id="peClose" class="btn ghost">✕</button></header>
+        <p class="muted" style="font-size:12.5px;">Define each role's permissions. Tick <b>Full access</b> to grant everything. These appear as one-tap buttons when adding or editing a user.</p>
+        <div id="peList"></div>
+        <button type="button" id="peAdd" class="btn ghost" style="margin-top:4px;">＋ Add role</button>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;"><button type="button" id="peCancel" class="btn ghost">Cancel</button><button type="button" id="peSave" class="btn">Save roles</button></div>
+      </div>`;
+      document.body.appendChild(ov);
+      const list=ov.querySelector("#peList");
+      function cardHtml(p){
+        return `<div class="presetCard" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;background:#fff;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <input class="pName" value="${esc(p.name||"")}" placeholder="Role name" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:8px;font-weight:600;">
+            <select class="pStaff" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;"><option value="field"${p.staffType!=="office"?" selected":""}>Field</option><option value="office"${p.staffType==="office"?" selected":""}>Office</option></select>
+            <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;"><input type="checkbox" class="pFull" ${p.fullAccess?"checked":""} style="width:auto;"> Full access</label>
+            <button type="button" class="btn ghost pDel" style="color:#b91c1c;padding:4px 10px;">Delete</button>
+          </div>
+          <div class="pPerms" style="${p.fullAccess?"display:none;":""}">${groupsHtml}</div></div>`;
+      }
+      function collect(){
+        [...list.querySelectorAll(".presetCard")].forEach((card,i)=>{
+          if(!work[i]) return;
+          work[i].name=card.querySelector(".pName").value.trim()||"Role";
+          work[i].staffType=card.querySelector(".pStaff").value;
+          work[i].fullAccess=card.querySelector(".pFull").checked;
+          work[i].perms=[...card.querySelectorAll("[data-pk]:checked")].map(cb=>cb.dataset.pk);
+        });
+      }
+      function draw(){
+        list.innerHTML = work.map(cardHtml).join("");
+        [...list.querySelectorAll(".presetCard")].forEach((card,i)=>{
+          const set=new Set(work[i].perms||[]);
+          card.querySelectorAll("[data-pk]").forEach(cb=>{ cb.checked=set.has(cb.dataset.pk); });
+          card.querySelector(".pFull").addEventListener("change",e=>{ card.querySelector(".pPerms").style.display=e.target.checked?"none":""; });
+          card.querySelector(".pDel").addEventListener("click",()=>{ collect(); work.splice(i,1); draw(); });
+        });
+      }
+      ov.querySelector("#peAdd").onclick=()=>{ collect(); work.push({id:"role"+Date.now(),name:"New role",staffType:"field",fullAccess:false,perms:[]}); draw(); };
+      const close=()=>ov.remove();
+      ov.querySelector("#peClose").onclick=close; ov.querySelector("#peCancel").onclick=close;
+      ov.querySelector("#peSave").onclick=async()=>{
+        collect();
+        const btn=ov.querySelector("#peSave"); btn.disabled=true; btn.textContent="Saving…";
+        try{
+          const r=await api("/users/presets",{method:"POST",body:JSON.stringify({presets:work})});
+          const d=await r.json();
+          if(r.ok && d.ok){ PRESETS=d.presets||work; renderPresetButtons(); close(); if(window.MLUI&&MLUI.toast)MLUI.toast("Roles saved."); }
+          else { btn.disabled=false; btn.textContent="Save roles"; alert("Could not save roles."); }
+        }catch(e){ btn.disabled=false; btn.textContent="Save roles"; alert("Could not save roles."); }
+      };
+      draw();
+    }
+    { const _mp=g("managePresetsBtn"); if(_mp) _mp.onclick=openPresetEditor; }
+
     renderPerms();
     renderAreas();
+    renderComplianceAccess();
 
     if (/REPLACE-ME/.test(API || "")) g("configNotice").style.display = "block";
     if (!token) location.href = "login.html";
@@ -562,7 +769,9 @@
         if (!me.ok || !me.user || !(me.user.FullAccess === "Yes" || me.user.Users === "Yes")) {
           alert("Access denied"); location.href = "main.html"; return;
         }
-        if (me.user.FullAccess === "Yes") initMenuVis();   // curation is Full-access only
+        MY_USERNAME = me.user.Username || "";
+        if (me.user.FullAccess === "Yes") { initMenuVis(); const mb=g("managePresetsBtn"); if(mb) mb.style.display=""; }
+        loadPresets();
         await loadUsers();
       } catch (e) {
         g("listMsg").style.display = "block";
@@ -660,7 +869,7 @@
       const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
       const lv = levelOf(u);
       const gaps = setupGaps(u);
-      const gapBadge = gaps.length ? ` <span class="lvl" style="background:#fbf0e0;color:#b45309;" title="Still to set up: ${esc(gaps.join(", "))}">⚠ ${gaps.length} to set up</span>` : "";
+      const gapBadge = gaps.length ? ` <span class="lvl gapbadge" data-gap="${esc(u.Username)}" style="background:#fbf0e0;color:#b45309;cursor:pointer;" title="Tap to fix: ${esc(gaps.join(", "))}">⚠ ${gaps.length} to set up</span>` : "";
       return `<div class="urow" data-user="${esc(u.Username)}">
         <span class="grip" title="Drag to reorder">⠿</span>
         <div class="ucell uname" data-label="User"><b>${esc(name)}</b> <span class="lvl ${lv.cls}">${lv.label}</span>${gapBadge}<div class="muted">${esc(u.Username)}</div></div>
@@ -672,7 +881,6 @@
           <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
           ${u.Email ? `<button class="btn small grey" data-welcome="${esc(u.Username)}">Resend welcome</button>` : ``}
           <button class="btn small grey" data-reset="${esc(u.Username)}">Reset PW</button>
-          <button class="btn small red" data-del="${esc(u.Username)}">Delete</button>
         </div></div>
       </div>`;
     }
@@ -802,6 +1010,45 @@
     };
     g("listWrap").addEventListener("pointerdown", onPointerDown);
 
+    // ── Block / re-enable a user (full offboard: disable + kill sessions + PO) ─
+    let MY_USERNAME = "";
+    let BLOCK_TARGET = "";
+    function refreshBlockBtn(username){
+      BLOCK_TARGET = username || "";
+      const delBtn = g("deleteUserBtn");
+      if (delBtn) delBtn.style.display = (BLOCK_TARGET && BLOCK_TARGET !== MY_USERNAME) ? "" : "none";
+      const btn = g("blockBtn"); if(!btn) return;
+      // No block control when adding, or for your own account.
+      if(!BLOCK_TARGET || BLOCK_TARGET === MY_USERNAME){ btn.style.display="none"; return; }
+      btn.style.display="";
+      const blocked = (g("f_status").value === "Disabled");
+      if(blocked){ btn.textContent="♻ Re-enable"; btn.style.background="#16a34a"; btn.style.borderColor="#16a34a"; }
+      else { btn.textContent="🚫 Block user"; btn.style.background="#b91c1c"; btn.style.borderColor="#b91c1c"; }
+    }
+    async function toggleBlock(){
+      if(!BLOCK_TARGET) return;
+      const blocked = (g("f_status").value === "Disabled");
+      const doBlock = !blocked;
+      const msg = doBlock
+        ? `Block ${BLOCK_TARGET}? This blocks their login, ends all their active sessions and devices, and cuts Purchase Orders. Their record and history are kept — you can re-enable them anytime.`
+        : `Re-enable ${BLOCK_TARGET}? They'll be able to log in again (they'll need to sign in fresh).`;
+      const ok = window.MLUI ? await MLUI.confirm(msg, {title: doBlock?"Block user":"Re-enable user", okLabel: doBlock?"Block user":"Re-enable", danger:doBlock}) : confirm(msg);
+      if(!ok) return;
+      const btn=g("blockBtn"); btn.disabled=true;
+      try{
+        const r=await api("/users/block",{method:"POST",body:JSON.stringify({username:BLOCK_TARGET, blocked:doBlock})});
+        const d=await r.json().catch(()=>({}));
+        if(r.ok && d.ok){
+          g("f_status").value = d.status || (doBlock?"Disabled":"Active");
+          refreshBlockBtn(BLOCK_TARGET);
+          if(window.MLUI&&MLUI.toast) MLUI.toast(doBlock?`${BLOCK_TARGET} blocked — sessions ended.`:`${BLOCK_TARGET} re-enabled.`);
+          loadUsers();
+        } else { alert((d && d.error) || "Could not update the user."); }
+      }catch(e){ alert("Could not update the user."); }
+      finally{ btn.disabled=false; }
+    }
+    { const bb=g("blockBtn"); if(bb) bb.onclick=toggleBlock; }
+
     function openEditor(user) {
       // reset to first tab
       document.querySelector('#tabs button[data-tab="details"]').click();
@@ -818,6 +1065,7 @@
       g("f_vehicle").value = user?.VehicleAssigned || "";
       g("f_emp").value = user?.EmploymentType || "Employed";
       g("f_status").value = user?.Status || "Active";
+      refreshBlockBtn(user?.Username || "");
       g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
@@ -834,6 +1082,10 @@
       // Areas of responsibility (profile.areas, surfaced as user.Areas).
       const myAreas = new Set((user && Array.isArray(user.Areas) ? user.Areas : (user?.Profile?.areas || [])).map(String));
       document.querySelectorAll("[data-area]").forEach(cb => { cb.checked = myAreas.has(cb.dataset.area); });
+      // Compliance access — resolved per-scheme level (user.ComplianceAccess),
+      // falling back to the stored profile map. Default each dropdown to "none".
+      const cacc = (user && user.ComplianceAccess) || (user?.Profile?.complianceAccess) || {};
+      document.querySelectorAll("[data-compliance]").forEach(sel => { sel.value = cacc[sel.dataset.compliance] || "none"; });
       if (g("faToggle").checked) lockFullAccess();
       g("panelMsg").textContent = "";
       highlightGaps(user);
@@ -864,8 +1116,21 @@
       banner.querySelectorAll(".sg-jump").forEach(b => b.addEventListener("click", () => {
         const btn = document.querySelector('#tabs button[data-tab="' + b.dataset.goto + '"]'); if (btn) btn.click();
         const first = g(GAP_MAP[Object.keys(GAP_MAP).find(k => GAP_MAP[k].tab === b.dataset.goto)].fields[0]);
-        if (first) { try { first.focus(); } catch {} }
+        focusField(first);
       }));
+    }
+    // Scroll a field into view + focus it (used by the setup jumps).
+    function focusField(el) {
+      if (!el) return;
+      try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {}
+      try { el.focus({ preventScroll: true }); } catch { try { el.focus(); } catch {} }
+    }
+    // Open a user's editor and land straight on the FIRST missing field.
+    function jumpToFirstGap(user) {
+      const gaps = setupGaps(user); if (!gaps.length) return;
+      const m = GAP_MAP[gaps[0]]; if (!m) return;
+      const btn = document.querySelector('#tabs button[data-tab="' + m.tab + '"]'); if (btn) btn.click();
+      focusField(g(m.fields[0]));
     }
     function closeEditor() { g("overlay").classList.remove("open"); }
 
@@ -874,6 +1139,13 @@
 
     g("listWrap").addEventListener("click", async (e) => {
       const t = e.target;
+      // ⚠ "to set up" badge → open the editor AND jump to the first missing field.
+      const gapEl = t.closest ? t.closest("[data-gap]") : null;
+      if (gapEl) {
+        const u = allUsers.find(x => x.Username === gapEl.dataset.gap);
+        if (u) { openEditor(u); setTimeout(() => jumpToFirstGap(u), 80); }
+        return;
+      }
       if (t.dataset.edit) openEditor(allUsers.find(u => u.Username === t.dataset.edit));
       else if (t.dataset.welcome) await resendWelcome(t.dataset.welcome);
       else if (t.dataset.reset) await resetPw(t.dataset.reset);
@@ -907,6 +1179,9 @@
       if (g("p_noVehicle").checked) profile.noVehicle = true; else delete profile.noVehicle;
       // Areas of responsibility → profile.areas (drives the home dashboard).
       profile.areas = [...document.querySelectorAll("[data-area]:checked")].map(cb => cb.dataset.area);
+      // Compliance access → profile.complianceAccess (per-scheme level).
+      profile.complianceAccess = {};
+      document.querySelectorAll("[data-compliance]").forEach(sel => { profile.complianceAccess[sel.dataset.compliance] = sel.value; });
       body.Profile = profile;
       // Full access + Story Mode read straight from their switches. Area
       // permissions use the remembered underlying state while Full access has
@@ -950,9 +1225,22 @@
       full:    { label: "Full access", sub: "Owner / director — sees and does everything", staffType: "office", fullAccess: true, perms: [] }
     };
     let W = null;
+    // The wizard uses the OWNER-EDITED server presets (PRESETS) when available,
+    // falling back to the built-in defaults so it always works.
+    function wizRoles() {
+      if (typeof PRESETS !== "undefined" && PRESETS && PRESETS.length) {
+        return PRESETS.map(p => ({
+          id: p.id, label: p.name,
+          sub: (p.staffType === "office" ? "Office" : "Field") + (p.fullAccess ? " · full access" : " · " + ((p.perms||[]).length) + " permissions"),
+          staffType: p.staffType, fullAccess: !!p.fullAccess, perms: p.perms || []
+        }));
+      }
+      return Object.entries(ROLE_PRESETS).map(([id, pr]) => ({ id, label: pr.label, sub: pr.sub, staffType: pr.staffType, fullAccess: !!pr.fullAccess, perms: pr.perms || [] }));
+    }
+    function wizRole(id) { const rs = wizRoles(); return rs.find(r => r.id === id) || rs[0]; }
     function applyRole(role) {
-      const pr = ROLE_PRESETS[role];
-      W.role = role; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
+      const pr = wizRole(role);
+      W.role = pr.id; W.staffType = pr.staffType; W.full = !!pr.fullAccess;
       W.perms = new Set(pr.perms);
       // A self-employed field engineer also needs their timesheet/invoice area.
       if (/self/i.test(W.employment) && pr.staffType === "field") W.perms.add("EngTimesheet");
@@ -989,8 +1277,9 @@
       g("wizNext").onclick = wizNextClick;
     }
     function wizOpen() {
-      W = { step: 0, role: "field", employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
-      applyRole("field");
+      const first = (wizRoles()[0] || { id: "field" }).id;
+      W = { step: 0, role: first, employment: "Employed", d: {}, perms: new Set(), areas: new Set(), sendWelcome: true, done: false };
+      applyRole(first);
       ensureWizDom(); wizRender();
       g("wizOverlay").style.display = "flex";
     }
@@ -1015,9 +1304,9 @@
           + wizInput("Start date", "startDate", d.startDate, "date");
       } else if (st.id === "role") {
         b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pick the role — it sets sensible permissions you can fine-tune on the next step.</div>`
-          + Object.entries(ROLE_PRESETS).map(([k, pr]) =>
-            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === k ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
-               <input type="radio" name="wizRole" value="${k}" ${W.role === k ? "checked" : ""} style="width:auto;margin-top:3px;">
+          + wizRoles().map(pr =>
+            `<label style="display:flex;gap:10px;align-items:flex-start;border:2px solid ${W.role === pr.id ? "#003366" : "#e2e8f0"};border-radius:12px;padding:11px 13px;margin-bottom:8px;cursor:pointer;">
+               <input type="radio" name="wizRole" value="${esc(pr.id)}" ${W.role === pr.id ? "checked" : ""} style="width:auto;margin-top:3px;">
                <div><div style="font-weight:700;">${esc(pr.label)}</div><div style="font-size:12.5px;color:#64748b;">${esc(pr.sub)}</div></div></label>`).join("")
           + `<label style="display:block;margin:14px 0 3px;font-weight:600;font-size:13.5px;">Employment</label>
              <select id="wiz_employment" style="width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;">
@@ -1030,7 +1319,7 @@
           b.innerHTML = `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:14px;font-size:14px;">
             <b>Full access</b> — this person will see and do everything in the portal. No individual permissions to pick.</div>`;
         } else {
-          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(ROLE_PRESETS[W.role].label)}</b>. Tick or untick anything.</div>`
+          b.innerHTML = `<div style="font-size:13.5px;color:#475569;margin-bottom:8px;">Pre-ticked for a <b>${esc(wizRole(W.role).label)}</b>. Tick or untick anything.</div>`
             + PERM_GROUPS.map(gp => {
               const rows = gp.perms.filter(p => WIZ_PERMS.includes(p) || p === "OfficeClock");
               if (!rows.length) return "";
@@ -1059,7 +1348,7 @@
           + `<label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13.5px;"><input type="checkbox" id="wiz_welcome" ${W.sendWelcome ? "checked" : ""} style="width:auto;"> Send a welcome email with a “set your password” link</label>`
           + `<div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;">
                <div style="font-weight:700;margin-bottom:6px;">Review</div>
-               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(ROLE_PRESETS[W.role].label)}</b> · ${esc(W.employment)}</div>
+               <div style="font-size:13.5px;">${esc([d.first, d.last].filter(Boolean).join(" ") || d.username || "New user")} · <b>${esc(wizRole(W.role).label)}</b> · ${esc(W.employment)}</div>
                <div style="font-size:13px;color:#475569;margin-top:2px;">${W.full ? "Full access" : (W.perms.size + " permission" + (W.perms.size === 1 ? "" : "s"))}</div>
              </div>`
           + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:12px 14px;">
@@ -1127,6 +1416,12 @@
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
         if (!res.ok || !r.ok) { msg.textContent = r.error || "Create failed."; return; }
+        // Wire the engineer into the fleet registry too (driver history + van
+        // checks) — VehicleAssigned alone covers van-check, this adds the proper
+        // assignment row. Best-effort; needs Vehicles/FullAccess.
+        if (d.vehicle && d.username) {
+          try { await api("/fleet/assign", { method: "POST", body: JSON.stringify({ reg: d.vehicle, username: d.username }) }); } catch (e) {}
+        }
         await loadUsers();
         wizFinishScreen(body, r);
       } catch (e) { msg.textContent = "Network error."; }
@@ -1142,10 +1437,19 @@
       const emailLine = body.Email
         ? (r.welcomeEmailed ? `A welcome email with a set-your-password link was sent to ${esc(body.Email)}.` : (body.Password ? "Password set — they can log in now." : "⚠ No welcome email went out (email isn't configured) — set a password with “Reset PW”."))
         : (body.Password ? "Password set — they can log in now." : "⚠ No email given and no password set — use “Reset PW” to give them one.");
+      // Positive "linked everywhere" list — what this user is now wired into
+      // automatically (everything reads the live users table).
+      const wired = ["SLA board & scheduler", "Purchase Orders", "Holidays", "Staff dropdowns & reports"];
+      if (body.EngTimesheet === "Yes" || W.perms.has("EngTimesheet")) wired.push("Engineer timesheets");
+      if (body.VehicleAssigned) wired.push("Fleet & van checks · " + esc(body.VehicleAssigned));
+      const wiredBox = `<div style="margin-top:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:11px 14px;">
+          <div style="font-weight:700;color:#065f46;">✓ Now wired into</div>
+          <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#065f46;">${wired.map(x => `<li>${x}</li>`).join("")}</ul></div>`;
       g("wizBody").innerHTML = `<div style="text-align:center;padding:6px 0 12px;"><div style="font-size:40px;">🎉</div>
           <div style="font-weight:800;font-size:18px;margin-top:4px;">${esc(name)} created</div>
-          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(ROLE_PRESETS[W.role].label)}</div></div>
+          <div style="font-size:13.5px;color:#475569;margin-top:2px;">${esc(wizRole(W.role).label)}</div></div>
         <div style="font-size:13.5px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:11px 14px;">${emailLine}</div>`
+        + wiredBox
         + (gaps.length ? `<div style="margin-top:10px;background:#fbf0e0;border:1px solid #f0c98a;border-radius:12px;padding:11px 14px;">
              <div style="font-weight:700;color:#b45309;">Still to set up</div>
              <ul style="margin:4px 0 0 18px;font-size:13.5px;color:#7c4a12;">${gaps.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
@@ -1216,15 +1520,44 @@
       } catch (e) { alert("Network error."); }
     }
 
-    async function delUser(username) {
-      if (!confirm(`Delete user ${username}? This cannot be undone.`)) return;
-      try {
-        const res = await api("/users/delete", { method: "POST", body: JSON.stringify({ username }) });
-        const r = await res.json();
-        if (!res.ok || !r.ok) { alert(r.error || "Delete failed."); return; }
-        await loadUsers();
-      } catch (e) { alert("Network error."); }
+    // Delete is guarded: the admin must re-enter THEIR OWN password (verified
+    // server-side; the master password also works). Opens a small confirm modal.
+    function delUser(username) {
+      if (!username || username === MY_USERNAME) return;
+      const ov = document.createElement("div"); ov.className = "overlay"; ov.style.display = "flex"; ov.style.zIndex = "2147483250";
+      ov.innerHTML = `<div class="panel" style="max-width:440px;">
+        <h2 style="color:var(--red);">Permanently erase ${esc(username)}</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 12px;">This removes the account and login for good. You'll <b>lose the way to reach their documents and history</b> from the portal, and <b>this can't be undone</b> (use <b>Block</b> instead to keep them). Confirm with <b>your own password</b>.</p>
+        <label>Your password</label>
+        <input type="password" id="delPw" autocomplete="current-password" placeholder="Your portal password">
+        <p id="delMsg" class="msg err" style="min-height:18px;"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button type="button" class="btn grey" id="delCancel">Cancel</button>
+          <button type="button" class="btn red" id="delGo">Erase account</button>
+        </div>
+      </div>`;
+      document.body.appendChild(ov);
+      const close = () => ov.remove();
+      ov.querySelector("#delCancel").onclick = close;
+      ov.addEventListener("click", e => { if (e.target === ov) close(); });
+      const pw = ov.querySelector("#delPw"); setTimeout(() => { try { pw.focus(); } catch {} }, 50);
+      const go = ov.querySelector("#delGo");
+      async function submit() {
+        const msg = ov.querySelector("#delMsg");
+        if (!pw.value) { msg.textContent = "Enter your password to confirm."; return; }
+        go.disabled = true; msg.className = "msg"; msg.textContent = "Deleting…";
+        try {
+          const res = await api("/users/delete", { method: "POST", body: JSON.stringify({ username, confirmPassword: pw.value }) });
+          const r = await res.json().catch(() => ({}));
+          if (!res.ok || !r.ok) { msg.className = "msg err"; msg.textContent = r.error || "Delete failed."; go.disabled = false; return; }
+          close(); closeEditor(); await loadUsers();
+          if (window.MLUI && MLUI.toast) MLUI.toast(`${username} erased.`);
+        } catch (e) { msg.className = "msg err"; msg.textContent = "Network error."; go.disabled = false; }
+      }
+      go.onclick = submit;
+      pw.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
     }
+    { const _delBtn = g("deleteUserBtn"); if (_delBtn) _delBtn.onclick = () => delUser(g("f_username").value.trim()); }
 
     guardAndLoad();
   </script>

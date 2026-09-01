@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Documents — Mostlane</title>
+  <link rel="stylesheet" href="/portal.css?v=1">
+  <script src="/portal-config.js?v=26"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:var(--ink); }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; }
+    .wrap { max-width:900px; margin:16px auto 70px; padding:0 12px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:18px; margin-bottom:16px; }
+    .card h2 { margin:0 0 4px; font-size:17px; color:var(--brand); }
+    .sub { color:var(--muted); font-size:13px; margin:0 0 12px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:11px 16px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.grey { background:#5b6b7b; } .btn.small { padding:7px 11px; font-size:13px; } .btn.ghost { background:#eef2f6; color:var(--brand); } .btn.danger { background:var(--bad); }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:middle; }
+    th { color:var(--muted); font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+    .pill { display:inline-block; background:#eef2f6; color:var(--brand); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; }
+    .pill.ok { background:#e6f4ea; color:var(--ok); }
+    input[type=text], textarea, .search { width:100%; padding:10px 12px; border:1px solid #ccd5dd; border-radius:10px; font-size:15px; font-family:inherit; }
+    textarea { min-height:280px; resize:vertical; line-height:1.45; }
+    .sigwrap { border:1px solid #ccd5dd; border-radius:10px; overflow:hidden; background:#fff; max-width:360px; }
+    #isigPad { width:100%; height:150px; display:block; touch-action:none; }
+    .modal { position:fixed; inset:0; background:rgba(8,20,40,.5); display:none; align-items:flex-start; justify-content:center; padding:24px 12px; z-index:60; overflow:auto; }
+    .modal.on { display:flex; }
+    .sheet { background:#fff; border-radius:14px; width:100%; max-width:720px; padding:20px; }
+    .sheet h3 { margin:0 0 10px; color:var(--brand); }
+    .close { margin-left:auto; background:none; border:none; font-size:22px; cursor:pointer; color:var(--muted); }
+    .picklist { max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:6px; }
+    .picklist label { display:flex; gap:10px; align-items:center; padding:7px 8px; border-radius:8px; font-size:14px; cursor:pointer; }
+    .picklist label:hover { background:#f4f7fa; }
+    .hint { font-size:12px; color:var(--muted); margin:6px 0 0; }
+    .muted { color:var(--muted); } .ok { color:var(--ok); } .bad { color:var(--bad); }
+    a.link { color:var(--brand); font-weight:700; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="/main.html" title="Back">‹ Back</a>
+    <h1>📄 Documents</h1>
+  </header>
+  <div class="wrap">
+
+    <div class="card" id="sigCard">
+      <h2>My signature</h2>
+      <p class="sub">Draw your signature once. It's applied automatically — with your name and the send date — to every document you issue.</p>
+      <div id="sigStatus" class="muted" style="margin-bottom:8px;">Checking…</div>
+      <div class="sigwrap"><canvas id="isigPad"></canvas></div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn grey small" id="isigClear" type="button">Clear</button>
+        <button class="btn small" id="isigSave" type="button" disabled>Save my signature</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Document library</h2>
+        <button class="btn small" id="newBtn">＋ New document</button>
+      </div>
+      <p class="sub">Prepared documents in the Mostlane house style. Select one and send it to the people who need to sign. <b>Preview (blank)</b> shows the unsigned version (your signature only) — to see a completed copy with the recipient's signature, use <b>Signed → View</b>.</p>
+      <div id="libBox"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
+
+  <!-- Editor modal -->
+  <div class="modal" id="editModal">
+    <div class="sheet">
+      <div class="row"><h3 id="editTitle">New document</h3><button class="close" onclick="closeModal('editModal')">×</button></div>
+      <label class="hint">Title</label>
+      <input type="text" id="ed_title" placeholder="e.g. Portal User &amp; Data Protection Agreement">
+      <label class="hint" style="margin-top:10px; display:block;">Body — one construct per line: <b># Heading</b>, <b>## Sub-heading</b>, <b>- bullet</b>, <b>---</b> for a rule, blank line for a gap.</label>
+      <textarea id="ed_body" placeholder="# Section one&#10;Your text here…&#10;&#10;- a bullet&#10;- another bullet"></textarea>
+      <div class="row" style="margin-top:12px; justify-content:flex-end;">
+        <button class="btn ghost small" id="ed_preview" type="button" title="Shows the unsigned version (your signature only)">Preview (blank) PDF</button>
+        <button class="btn" id="ed_save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Send modal -->
+  <div class="modal" id="sendModal">
+    <div class="sheet">
+      <div class="row"><h3 id="sendTitle">Send document</h3><button class="close" onclick="closeModal('sendModal')">×</button></div>
+      <input type="text" class="search" id="pickSearch" placeholder="Search people…">
+      <div class="row" style="margin:8px 0;">
+        <button class="btn ghost small" type="button" onclick="pickAll(true)">Select all</button>
+        <button class="btn ghost small" type="button" onclick="pickAll(false)">Clear</button>
+        <span class="muted" id="pickCount" style="margin-left:auto; font-size:13px;"></span>
+      </div>
+      <div class="picklist" id="pickList"></div>
+      <div class="row" style="margin-top:12px; justify-content:flex-end;">
+        <button class="btn" id="send_go" type="button">Send to selected</button>
+      </div>
+      <p class="hint" id="sendNote"></p>
+    </div>
+  </div>
+
+  <!-- Status modal -->
+  <div class="modal" id="statusModal">
+    <div class="sheet">
+      <div class="row"><h3 id="statusTitle">Who has signed</h3><button class="close" onclick="closeModal('statusModal')">×</button></div>
+      <div id="statusBox"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
+
+  <script>
+    const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken"), "Content-Type": "application/json" }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    function toast(m) { try { if (window.MLUI) return void window.MLUI.toast ? MLUI.toast(m) : alert(m); } catch {} alert(m); }
+    const openModal = id => g(id).classList.add("on");
+    const closeModal = id => g(id).classList.remove("on");
+    const uname = u => u.Username || u.username;
+    const dispName = u => (u.Name || ((u.FirstName || u.first_name || "") + " " + (u.LastName || u.last_name || "")).trim() || uname(u));
+
+    let TEMPLATES = [], USERS = [], EDIT_ID = 0, SEND_ID = 0, PICKED = new Set(), HAS_SIG = false;
+
+    // ── gate ──
+    (async () => {
+      try {
+        const me = await (await authFetch("/auth/me")).json();
+        if (!me.ok || me.user.FullAccess !== "Yes") { alert("This page needs Full access."); location.href = "main.html"; return; }
+      } catch { alert("Please sign in."); location.href = "login.html"; return; }
+      initIssuerSig(); loadSigStatus(); loadLibrary(); loadUsers();
+    })();
+
+    // ── issuer signature ──
+    let isctx = null, idrawing = false, isigData = "";
+    function initIssuerSig() {
+      const c = g("isigPad"); const w = c.clientWidth || 340, h = 150; c.width = w; c.height = h;
+      isctx = c.getContext("2d"); isctx.fillStyle = "#fff"; isctx.fillRect(0, 0, w, h);
+      isctx.strokeStyle = "#0f172a"; isctx.lineWidth = 2.2; isctx.lineJoin = "round"; isctx.lineCap = "round";
+      const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+      c.onpointerdown = e => { idrawing = true; const p = pos(e); isctx.beginPath(); isctx.moveTo(p.x, p.y); e.preventDefault(); };
+      c.onpointermove = e => { if (!idrawing) return; const p = pos(e); isctx.lineTo(p.x, p.y); isctx.stroke(); e.preventDefault(); };
+      const up = () => { if (!idrawing) return; idrawing = false; isigData = c.toDataURL("image/jpeg", 0.92); g("isigSave").disabled = false; };
+      c.onpointerup = up; c.onpointerleave = up;
+      g("isigClear").onclick = () => { isctx.fillStyle = "#fff"; isctx.fillRect(0, 0, c.width, c.height); isigData = ""; g("isigSave").disabled = true; };
+      g("isigSave").onclick = saveIssuerSig;
+    }
+    async function loadSigStatus() {
+      try { const r = await (await authFetch("/documents/issuer-signature")).json(); HAS_SIG = !!r.has;
+        g("sigStatus").innerHTML = HAS_SIG ? '<span class="ok">✓ Your signature is saved.</span> Draw again to replace it.' : '<span class="bad">No signature saved yet</span> — draw one below to start sending.';
+      } catch { g("sigStatus").textContent = ""; }
+    }
+    async function saveIssuerSig() {
+      if (!isigData) return; g("isigSave").disabled = true; g("isigSave").textContent = "Saving…";
+      try { const r = await (await authFetch("/documents/issuer-signature", { method: "POST", body: JSON.stringify({ signature: isigData }) })).json();
+        if (!r.ok) throw new Error(r.error || "Failed"); HAS_SIG = true; loadSigStatus(); toast("Signature saved"); }
+      catch (e) { toast(e.message || "Couldn't save"); }
+      g("isigSave").textContent = "Save my signature"; g("isigSave").disabled = false;
+    }
+
+    // ── library ──
+    async function loadLibrary() {
+      try {
+        const r = await (await authFetch("/documents/templates")).json();
+        TEMPLATES = r.templates || []; HAS_SIG = !!r.hasIssuerSignature || HAS_SIG;
+        if (!TEMPLATES.length) { g("libBox").innerHTML = '<p class="muted">No documents yet. Click “＋ New document” to create one.</p>'; return; }
+        g("libBox").innerHTML = '<table><thead><tr><th>Document</th><th>Ref</th><th>Signed</th><th></th></tr></thead><tbody>' +
+          TEMPLATES.map(t =>
+            '<tr><td><b>' + esc(t.title) + '</b></td><td class="muted">' + esc(t.ref || "") + '</td>' +
+            '<td>' + (t.sent ? ('<span class="pill' + (t.signed === t.sent ? ' ok' : '') + '">' + t.signed + ' / ' + t.sent + '</span>') : '<span class="muted">—</span>') + '</td>' +
+            '<td class="row" style="justify-content:flex-end; border:none;">' +
+              '<button class="btn ghost small" onclick="editDoc(' + t.id + ')">Edit</button>' +
+              '<button class="btn ghost small" title="Shows the unsigned version (your signature only). Use Signed → View for completed copies." onclick="previewDoc(' + t.id + ')">Preview (blank)</button>' +
+              '<button class="btn small" onclick="openSend(' + t.id + ')">Send</button>' +
+              '<button class="btn ghost small" onclick="openStatus(' + t.id + ')">Signed</button>' +
+              '<button class="btn danger small" onclick="delDoc(' + t.id + ')">🗑</button>' +
+            '</td></tr>'
+          ).join("") + '</tbody></table>';
+      } catch { g("libBox").innerHTML = '<p class="bad">Couldn\'t load the library.</p>'; }
+    }
+
+    g("newBtn").onclick = () => { EDIT_ID = 0; g("editTitle").textContent = "New document"; g("ed_title").value = ""; g("ed_body").value = ""; openModal("editModal"); };
+    function editDoc(id) { const t = TEMPLATES.find(x => x.id === id); if (!t) return; EDIT_ID = id; g("editTitle").textContent = "Edit document"; g("ed_title").value = t.title || ""; g("ed_body").value = t.body || ""; openModal("editModal"); }
+    g("ed_save").onclick = async () => {
+      const title = g("ed_title").value.trim(); if (!title) return toast("A title is required");
+      const body = g("ed_body").value;
+      try { const r = await (await authFetch("/documents/template", { method: "POST", body: JSON.stringify({ id: EDIT_ID || undefined, title, body }) })).json();
+        if (!r.ok) throw new Error(r.error || "Failed"); closeModal("editModal"); loadLibrary(); toast("Saved"); }
+      catch (e) { toast(e.message || "Couldn't save"); }
+    };
+    async function delDoc(id) {
+      const ok = window.MLUI && MLUI.confirm ? await MLUI.confirm("Delete this document from the library? Copies already sent/signed are kept.", { title: "Delete document", danger: true }) : confirm("Delete this document?");
+      if (!ok) return;
+      try { await authFetch("/documents/template-delete", { method: "POST", body: JSON.stringify({ id }) }); loadLibrary(); toast("Deleted"); } catch { toast("Couldn't delete"); }
+    }
+    async function previewDoc(id) {
+      try {
+        const resp = await authFetch("/documents/preview?id=" + id);
+        if (!resp.ok) throw new Error("preview failed");
+        const blob = await resp.blob(); const u = URL.createObjectURL(blob); window.open(u, "_blank");
+        setTimeout(() => URL.revokeObjectURL(u), 60000);
+      } catch { toast("Couldn't open preview"); }
+    }
+    // Preview from inside the editor (saves first if new/changed would be ideal; here previews the saved version).
+    g("ed_preview").onclick = () => { if (!EDIT_ID) return toast("Save the document first, then preview."); previewDoc(EDIT_ID); };
+
+    // ── users / send ──
+    async function loadUsers() {
+      try { const r = await (await authFetch("/users")).json(); USERS = (r.Users || r.users || []).filter(u => uname(u)); }
+      catch { USERS = []; }
+    }
+    function openSend(id) {
+      if (!HAS_SIG) { toast("Save your signature first (top of the page)."); return; }
+      SEND_ID = id; PICKED = new Set();
+      const t = TEMPLATES.find(x => x.id === id);
+      g("sendTitle").textContent = "Send: " + (t ? t.title : "document");
+      g("pickSearch").value = ""; g("sendNote").textContent = "";
+      renderPick(""); openModal("sendModal");
+    }
+    function renderPick(q) {
+      q = (q || "").toLowerCase();
+      const list = USERS.filter(u => !q || dispName(u).toLowerCase().includes(q) || String(uname(u)).toLowerCase().includes(q))
+        .sort((a, b) => dispName(a).localeCompare(dispName(b)));
+      g("pickList").innerHTML = list.map(u => {
+        const un = uname(u);
+        return '<label><input type="checkbox" value="' + esc(un) + '" ' + (PICKED.has(un) ? "checked" : "") + ' onchange="togglePick(this)"><span>' + esc(dispName(u)) + ' <span class="muted">· ' + esc(un) + '</span></span></label>';
+      }).join("") || '<p class="muted" style="padding:8px;">No matches.</p>';
+      updateCount();
+    }
+    function togglePick(el) { if (el.checked) PICKED.add(el.value); else PICKED.delete(el.value); updateCount(); }
+    function pickAll(on) {
+      const q = g("pickSearch").value.toLowerCase();
+      USERS.filter(u => !q || dispName(u).toLowerCase().includes(q) || String(uname(u)).toLowerCase().includes(q)).forEach(u => { const un = uname(u); if (on) PICKED.add(un); else PICKED.delete(un); });
+      renderPick(g("pickSearch").value);
+    }
+    function updateCount() { g("pickCount").textContent = PICKED.size + " selected"; }
+    g("pickSearch").addEventListener("input", e => renderPick(e.target.value));
+    g("send_go").onclick = async () => {
+      if (!PICKED.size) return toast("Pick at least one person");
+      g("send_go").disabled = true; g("send_go").textContent = "Sending…";
+      try { const r = await (await authFetch("/documents/send", { method: "POST", body: JSON.stringify({ id: SEND_ID, recipients: [...PICKED] }) })).json();
+        if (!r.ok) throw new Error(r.error || "Failed"); closeModal("sendModal"); loadLibrary(); toast("Sent to " + r.sent + " " + (r.sent === 1 ? "person" : "people")); }
+      catch (e) { g("sendNote").textContent = e.message || "Couldn't send"; }
+      g("send_go").disabled = false; g("send_go").textContent = "Send to selected";
+    };
+
+    // ── who signed ──
+    async function openStatus(id) {
+      const t = TEMPLATES.find(x => x.id === id);
+      g("statusTitle").textContent = "Signed: " + (t ? t.title : "document");
+      g("statusBox").innerHTML = '<p class="muted">Loading…</p>'; openModal("statusModal");
+      try {
+        const r = await (await authFetch("/documents/status?id=" + id)).json();
+        if (!r.ok) throw new Error(r.error || "Failed");
+        const signed = r.signed || [], pending = r.pending || [];
+        g("statusBox").innerHTML =
+          '<h4 style="margin:6px 0;">Signed (' + signed.length + ')</h4>' +
+          (signed.length ? '<table><tbody>' + signed.map(s =>
+            '<tr><td>' + esc(s.name) + '</td><td class="muted">' + (s.at ? new Date(s.at).toLocaleString("en-GB") : "") + '</td><td class="muted">' + esc(s.ip || "") + '</td><td>' + (s.doc ? '<a class="link" href="' + esc(s.doc) + '" target="_blank">View</a>' : "") + '</td></tr>'
+          ).join("") + '</tbody></table>' : '<p class="muted">Nobody yet.</p>') +
+          '<h4 style="margin:14px 0 6px;">Awaiting signature (' + pending.length + ')</h4>' +
+          (pending.length ? '<p>' + pending.map(p => esc(p.name)).join(", ") + '</p>' : '<p class="muted">None outstanding.</p>');
+      } catch (e) { g("statusBox").innerHTML = '<p class="bad">Couldn\'t load.</p>'; }
+    }
+    window.editDoc = editDoc; window.previewDoc = previewDoc; window.openSend = openSend; window.openStatus = openStatus; window.delDoc = delDoc; window.togglePick = togglePick; window.pickAll = pickAll; window.closeModal = closeModal;
+  </script>
+</body>
+</html>

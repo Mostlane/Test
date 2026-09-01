@@ -136,12 +136,39 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(db.tenantId).all();
     return (results || []).map(r => r.username).filter(Boolean);
   }
+  // Blocked / archived / disabled staff (anything that isn't Active/blank) — hidden
+  // by default, shown in Holiday Admin behind the "Show archived staff" toggle so
+  // a leaver's booked leave and balance can still be reviewed.
+  async function getInactiveUsers() {
+    const { results } = await db.prepare(
+      "SELECT username, status FROM users WHERE tenant_id = ? AND COALESCE(status,'') NOT IN ('Active','')"
+    ).bind(db.tenantId).all();
+    return (results || []).map(r => ({ username: r.username, status: r.status || "Disabled" })).filter(x => x.username);
+  }
 
   async function logAction(requestId, action, by) {
     await db.prepare(
       "INSERT INTO holiday_log (tenant_id, request_id, action, by_user, at) VALUES (?,?,?,?,?)"
     ).bind(db.tenantId, requestId, action, by, new Date().toISOString()).run();
   }
+
+  // Other live (not Cancelled/Rejected) bookings for this person whose dates
+  // overlap [start,end]. Used to WARN (never block — Jamie's rule) when a new or
+  // approved booking clashes with one already on the calendar, so a duplicate
+  // like the Timetastic-import-vs-manual-re-entry can't slip in unnoticed.
+  async function overlappingBookings(username, start, end, excludeId) {
+    const binds = [db.tenantId, username, end, start];
+    let sql = "SELECT id, start_date, end_date, days, type, status FROM holidays " +
+      "WHERE tenant_id=? AND username=? AND status NOT IN ('Cancelled','Rejected') " +
+      "AND start_date<=? AND end_date>=?";
+    if (excludeId) { sql += " AND id<>?"; binds.push(excludeId); }
+    const { results } = await db.prepare(sql).bind(...binds).all();
+    return (results || []).map(r => ({ id: r.id, start: r.start_date, end: r.end_date, days: r.days, type: r.type, status: r.status }));
+  }
+  const overlapWarning = (clashes) => clashes.length
+    ? `⚠ Overlaps ${clashes.length} existing booking${clashes.length === 1 ? "" : "s"} on the calendar: ` +
+      clashes.map(c => `${c.start}${c.end !== c.start ? "→" + c.end : ""} (${c.status})`).join(", ")
+    : null;
 
   // Idempotently create per-user bank-holiday / shutdown rows (preserves worked
   // state). Bulk version: ONE select to find what's missing, ONE batch to insert
@@ -208,12 +235,32 @@ export async function handle(request, env, ctx, url, sess) {
   // One person's usage for the year, with the duplicate-day safeguard + a
   // used-to-date figure + a booked/bank/shutdown breakdown for the wall chart.
   function computeUsage(all, sys, username, allowance, todayISO) {
-    let booked = 0, bookedTD = 0;
+    // Booked paid-holiday days, DEDUPED BY CALENDAR DATE. Summing each booking's
+    // `days` used to double-count when two approved bookings covered the same day
+    // (e.g. a Timetastic import + a manual re-entry). We instead expand every
+    // approved paid booking to its weekday dates and charge each date at most
+    // once: a full day = 1; a genuine AM+PM split = 1; a lone/duplicate half = ½.
+    const dayMap = {};   // "YYYY-MM-DD" -> { full, am, pm, half }
     for (const h of all) {
       if (h.username !== username || h.status !== "Approved") continue;
-      if (h.type === "Other" || h.type === "Unpaid") continue;
-      const d = h.days || 0; booked += d;
-      if ((h.start || "") <= todayISO) bookedTD += d;   // it has started → counts to date
+      if (h.type === "Other" || h.type === "Unpaid") continue;   // only paid Holiday counts
+      if (!h.start) continue;
+      const isHalf = Number(h.days) === 0.5 && (h.end || h.start) === h.start;
+      const s = new Date(h.start + "T00:00:00Z"), e = new Date((h.end || h.start) + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay(); if (wd === 0 || wd === 6) continue;   // weekdays only, matching `days`
+        const di = d.toISOString().slice(0, 10);
+        const m = dayMap[di] || (dayMap[di] = { full: false, am: false, pm: false, half: false });
+        if (isHalf) { if (h.half === "AM") m.am = true; else if (h.half === "PM") m.pm = true; else m.half = true; }
+        else m.full = true;
+      }
+    }
+    let booked = 0, bookedTD = 0;
+    for (const di of Object.keys(dayMap)) {
+      const m = dayMap[di];
+      const v = m.full ? 1 : Math.min(1, (m.am ? 0.5 : 0) + (m.pm ? 0.5 : 0) + (m.half && !m.am && !m.pm ? 0.5 : 0));
+      booked += v;
+      if (di <= todayISO) bookedTD += v;   // the day has passed → counts to date
     }
     const covered = bookedHolidayDates(all, username);
     let bank = 0, bankTD = 0, shut = 0, shutTD = 0, credited = 0;
@@ -252,6 +299,8 @@ export async function handle(request, env, ctx, url, sess) {
     let days = countWeekdaysInclusive(start, end);
     if (days <= 0) return text("No weekdays in range", 400);
     if (half) days = 0.5;
+    // Warn (don't block) if this clashes with a booking already on the calendar.
+    const clashes = await overlappingBookings(user, start, end, null);
     await db.prepare(`
       INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, half, type, notes, status, submitted_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
@@ -262,7 +311,7 @@ export async function handle(request, env, ctx, url, sess) {
       body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} → ${end}).`,
       url: "/holiday-admin.html", tag: "holiday-admin:" + id, actionable: true
     }, user));
-    return json({ success: true, id });
+    return json({ success: true, id, warning: overlapWarning(clashes) || undefined });
   }
 
   // POST /holiday/cancel  (engineer self-cancel — Pending or Approved).
@@ -316,6 +365,36 @@ export async function handle(request, env, ctx, url, sess) {
       "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
     ).bind(user, new Date().toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
     await logAction(id, "Approval cancelled by admin", user);
+    return json({ success: true });
+  }
+
+  // POST /holiday/admin-edit  (admin: edit or hard-delete a booking straight
+  // from the calendar). Body: { id, action:"update"|"delete", type?, start?,
+  // end?, days?, half? }. "update" changes only the fields supplied; "delete"
+  // removes the row outright (used to tidy duplicates/mistakes).
+  if (path === "/holiday/admin-edit" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const b = await request.json();
+    const id = b.id;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (b.action === "delete") {
+      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+      await logAction(id, `Deleted by admin (${record.start} → ${record.end})`, user);
+      return json({ success: true, deleted: true });
+    }
+    // update
+    const sets = [], vals = [];
+    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) { sets.push("type=?"); vals.push(b.type); }
+    if (b.start) { sets.push("start_date=?"); vals.push(b.start); sets.push("year=?"); vals.push(Number(String(b.start).slice(0, 4)) || record.year); }
+    if (b.end) { sets.push("end_date=?"); vals.push(b.end); }
+    if (b.days != null && !Number.isNaN(Number(b.days))) { sets.push("days=?"); vals.push(Number(b.days)); }
+    if (b.half !== undefined) { sets.push("half=?"); vals.push(b.half || null); }
+    if (!sets.length) return json({ success: true, unchanged: true });
+    vals.push(db.tenantId, id);
+    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
+    await logAction(id, `Edited by admin (${(b.type || record.type)} · ${(b.start || record.start)} → ${(b.end || record.end)})`, user);
     return json({ success: true });
   }
 
@@ -398,7 +477,15 @@ export async function handle(request, env, ctx, url, sess) {
       title: `Holiday ${status.toLowerCase()}`,
       body: `${record.username}'s holiday ${record.start_date} → ${record.end_date} — ${status === "Approved" ? "✅ approved" : "❌ rejected"} by ${user}.`
     }));
-    return json({ success: true });
+    // On approval, warn (don't block) if this now overlaps another APPROVED
+    // booking for the same person — the duplicate-day early-warning.
+    let warning;
+    if (status === "Approved") {
+      const clashes = (await overlappingBookings(record.username, record.start, record.end, id))
+        .filter(c => c.status === "Approved");
+      warning = overlapWarning(clashes) || undefined;
+    }
+    return json({ success: true, warning });
   }
 
   // GET /holiday/config  (admin)
@@ -485,8 +572,14 @@ export async function handle(request, env, ctx, url, sess) {
   // GET /holiday/admin-summary  (admin)
   if (path === "/holiday/admin-summary" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
-    const usernames = await getActiveUsers();
-    await ensureSystemDaysBulk(usernames);
+    const includeInactive = url.searchParams.get("all") === "1";
+    const activeUsers = await getActiveUsers();
+    await ensureSystemDaysBulk(activeUsers);   // only active staff accrue new system days
+    const inactiveMap = {};
+    let usernames = activeUsers.slice();
+    if (includeInactive) {
+      for (const iu of await getInactiveUsers()) { usernames.push(iu.username); inactiveMap[iu.username] = iu.status; }
+    }
     const [all, sys, allowMap, dflt] = await Promise.all([
       listHolidayRequestsForYear(), listSystemRecordsForYear(), listAllowancesMap(), getDefaultAllowance()
     ]);
@@ -500,7 +593,8 @@ export async function handle(request, env, ctx, url, sess) {
         used: c.usedToDate,             // used TO DATE
         committed: c.committed,         // full-year commitment
         remaining: c.remaining,
-        booked: c.booked, bankHolidays: c.bank, shutdown: c.shutdown
+        booked: c.booked, bankHolidays: c.bank, shutdown: c.shutdown,
+        active: !inactiveMap[u], status: inactiveMap[u] || "Active"
       });
     }
     return json({ year, engineers: list });
@@ -513,8 +607,14 @@ export async function handle(request, env, ctx, url, sess) {
     const monthStart = new Date(Date.UTC(year, month - 1, 1));
     const monthEnd = new Date(Date.UTC(year, month, 0));
     const daysInMonth = monthEnd.getUTCDate();
-    const usernames = await getActiveUsers();
-    await ensureSystemDaysBulk(usernames);
+    const includeInactive = url.searchParams.get("all") === "1";
+    const activeUsers = await getActiveUsers();
+    await ensureSystemDaysBulk(activeUsers);   // only active staff accrue new system days
+    const inactiveMap = {};
+    let usernames = activeUsers.slice();
+    if (includeInactive) {
+      for (const iu of await getInactiveUsers()) { usernames.push(iu.username); inactiveMap[iu.username] = iu.status; }
+    }
     const [all, sys] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear()]);
     const engineers = [];
 
@@ -554,7 +654,7 @@ export async function handle(request, env, ctx, url, sess) {
           };
         }
       }
-      engineers.push({ username: u, name: u.replace(".", " "), cells });
+      engineers.push({ username: u, name: u.replace(".", " "), cells, active: !inactiveMap[u], status: inactiveMap[u] || "Active" });
     }
 
     return json({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });

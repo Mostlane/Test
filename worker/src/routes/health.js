@@ -90,14 +90,17 @@ function probeList(env) {
       return "reachable";
     }],
     ["d1_core", "Core tables readable", async () => {
-      // Touch the tables the busiest pages read. A missing/renamed table or a
-      // corrupt row surfaces here as a red probe rather than a live 500.
+      // Readability probe: a missing/renamed table or a corrupt leading row
+      // surfaces here as a red probe rather than a live 500. Uses LIMIT 1 (reads
+      // at most ONE row per table). A COUNT(*) here scanned the WHOLE of each
+      // table every 5 min (288×/day) and was a top D1 rows_read consumer for no
+      // user benefit — the live counts weren't load-bearing anywhere.
       const out = [];
       for (const t of ["users", "sla_jobs", "sites", "vehicles", "app_config"]) {
-        const row = await env.DB.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = 1`).first();
-        out.push(`${t} ${(row && row.n) || 0}`);
+        await env.DB.prepare(`SELECT 1 FROM ${t} WHERE tenant_id = 1 LIMIT 1`).first();
+        out.push(t);
       }
-      return out.join(" · ");
+      return "readable: " + out.join(", ");
     }],
     ["r2_jobfiles", "Job files bucket (R2)", async () => {
       if (!env.JOB_FILES) return "not bound (skipped)";

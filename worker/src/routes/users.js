@@ -9,9 +9,10 @@
 // we return those flat keys by joining users + user_permissions.
 
 import { json, error } from "../lib/http.js";
-import { requireSession, permissionsFor, hashPassword, validatePassword, generateTempPassword } from "../lib/auth.js";
+import { requireSession, permissionsFor, hashPassword, validatePassword, generateTempPassword, verifyPassword } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { sendEmail, welcomeEmail, issuePasswordToken, appBase } from "../lib/email.js";
+import { resolveComplianceAccess, sanitizeComplianceAccess } from "../lib/complianceaccess.js";
 
 // How long a new user's "set your password" welcome link stays valid.
 const WELCOME_TOKEN_HOURS = 72;
@@ -206,6 +207,10 @@ export async function handle(request, env, ctx, url, sess) {
     const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
     const isNewUser = !already;
 
+    // Clean the compliance-access map before persisting (valid schemes + levels only).
+    if (b.Profile && typeof b.Profile === "object" && b.Profile.complianceAccess != null) {
+      b.Profile.complianceAccess = sanitizeComplianceAccess(b.Profile.complianceAccess);
+    }
     const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
 
     await db.prepare(`
@@ -265,7 +270,72 @@ export async function handle(request, env, ctx, url, sess) {
       welcomeEmailed = !!res.ok;
     }
 
+    // Saving a user as Disabled fully cuts them off: end every live session and
+    // drop their device locks (a 90-day token would otherwise keep working, and
+    // the PO worker also refuses a Disabled user server-side). Reversible — the
+    // user + records are kept and re-enabling just restores Active.
+    if (String(b.Status || "").toLowerCase() === "disabled") {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username),
+        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username),
+      ]);
+    }
+
     return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
+  }
+
+  // POST /users/block — one-click full block / re-enable. blocked:true sets the
+  // user Disabled AND ends all sessions + device locks (cuts login, pickers and
+  // PO); blocked:false restores them to Active. Vehicle assignment is left intact.
+  if (path === "/users/block" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    if (b.username === gate.sess.user.username) return error("You cannot block your own account.", 400, env, request);
+    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
+    if (!exists) return error("User not found", 404, env, request);
+    const blocked = b.blocked !== false;   // default = block
+    const status = blocked ? "Disabled" : "Active";
+    await db.prepare("UPDATE users SET status=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?").bind(status, db.tenantId, b.username).run();
+    if (blocked) {
+      await db.batch([
+        db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+        db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      ]);
+    }
+    return json({ ok: true, status, blocked }, {}, env, request);
+  }
+
+  // GET /users/presets — role presets (standard permission sets) an admin applies
+  // when adding/editing a user. Stored per tenant in app_config; seeded with
+  // named-but-empty roles the owner fills in via the preset editor.
+  if (path === "/users/presets" && request.method === "GET") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='user_role_presets'").bind(db.tenantId).first();
+    let presets = null;
+    try { presets = row && row.value ? JSON.parse(row.value) : null; } catch { presets = null; }
+    if (!Array.isArray(presets) || !presets.length) presets = DEFAULT_PRESETS;
+    return json({ ok: true, presets, permissionKeys: PERMISSION_KEYS }, {}, env, request);
+  }
+
+  // POST /users/presets — replace the whole preset list (admin).
+  if (path === "/users/presets" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const validKeys = new Set(PERMISSION_KEYS);
+    const clean = (Array.isArray(b.presets) ? b.presets : []).slice(0, 30).map((p, i) => ({
+      id: String(p && p.id ? p.id : ("role" + i)).replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || ("role" + i),
+      name: String(p && p.name ? p.name : "Role").slice(0, 60),
+      staffType: (p && p.staffType === "office") ? "office" : "field",
+      fullAccess: !!(p && p.fullAccess),
+      perms: Array.isArray(p && p.perms) ? [...new Set(p.perms.map(String).filter((k) => validKeys.has(k)))] : [],
+    }));
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(db.tenantId, "user_role_presets", JSON.stringify(clean)).run();
+    return json({ ok: true, presets: clean }, {}, env, request);
   }
 
   // POST /users/reset-password (admin) — sets a temp password + forces change
@@ -325,6 +395,11 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     if (!b.username) return error("username required", 400, env, request);
     if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
+    // Delete is destructive + irreversible — require the acting admin to re-enter
+    // their own password (the master/break-glass password also authorises it).
+    const pw = String(b.confirmPassword || "");
+    const pwOk = (env.MASTER_PASSWORD && pw && pw === env.MASTER_PASSWORD) || (pw && await verifyPassword(pw, gate.sess.user));
+    if (!pwOk) return error("Password confirmation required to delete a user.", 403, env, request);
     await db.batch([
       db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
       db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
@@ -336,6 +411,19 @@ export async function handle(request, env, ctx, url, sess) {
 
   return error("Unknown user route", 404, env, request);
 }
+
+// Seed role presets — named-but-empty (bar Full access). The owner fills in each
+// role's permissions in the Users-admin preset editor; stored in app_config
+// `user_role_presets` thereafter. Applying a preset sets the switches + staffType.
+const DEFAULT_PRESETS = [
+  { id: "field",   name: "Field engineer",         staffType: "field",  fullAccess: false,
+    perms: ["SLA","PurchaseOrders","Assets","Holiday","MyDocuments","Projects","ThemeColour","ThemeBackground","YardGate"] },
+  { id: "office",  name: "Office staff",           staffType: "office", fullAccess: false,
+    perms: ["PurchaseOrders","Holiday","Assets","Vehicles","AssetAdmin","OfficeClock","ThemeColour","ThemeBackground"] },
+  { id: "manager", name: "Office manager / admin", staffType: "office", fullAccess: false,
+    perms: ["PurchaseOrders","Holiday","Assets","AssetAdmin","Vehicles","OfficeClock","SLA","SLAAdmin","HolidayAdmin","TimesheetAdmin","OfficeTimesheet","Projects","ProjectsAdmin","Compliance","Sites","AddSite","MyDocuments","ThemeColour","ThemeBackground","DeviceAdmin"] },
+  { id: "full",    name: "Full access",            staffType: "office", fullAccess: true,  perms: [] },
+];
 
 // Areas of responsibility an admin can assign to an office user (Users Admin).
 // The `key` matches the home dashboard's widget `area` domain so the home page
@@ -398,6 +486,9 @@ function shapeUser(u, perms) {
     StaffType: profile.staffType === "office" ? "office" : "field",
     SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Areas: Array.isArray(profile.areas) ? profile.areas.map(String) : [],
+    // Resolved per-scheme compliance access (none|view|download|edit) so the
+    // Users-admin picker pre-fills each page's dropdown with the current level.
+    ComplianceAccess: resolveComplianceAccess(profile, perms),
     Profile: profile,
     ...perms,
   };

@@ -18,6 +18,18 @@
     .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.green { background:#0c7d27; }
     .btn.small { padding:7px 11px; font-size:13px; font-weight:500; }
     .btn:disabled, .btn.disabled { opacity:.5; cursor:default; pointer-events:none; }
+    /* 🛠 Tools dropdown — one home for the secondary tools/links. */
+    .toolwrap { position:relative; display:inline-flex; }
+    .toolmenu { position:absolute; top:calc(100% + 6px); right:0; z-index:60; background:#fff;
+      border:1px solid #d1d5db; border-radius:12px; box-shadow:0 10px 26px rgba(0,0,0,.18);
+      padding:6px; min-width:210px; display:flex; flex-direction:column; gap:3px; }
+    .toolmenu[hidden] { display:none; }
+    .toolmenu .btn { width:100%; display:flex; align-items:center; justify-content:flex-start; text-align:left;
+      background:#fff !important; color:#003366 !important; border:1px solid transparent; border-radius:8px;
+      padding:9px 12px; font-weight:500; text-decoration:none; }
+    .toolmenu .btn:hover { background:#eef3f9 !important; }
+    #toolsBtn[aria-expanded="true"] { background:#004a99; }
+    @media (max-width:520px) { .toolmenu { left:0; right:auto; } }
     .card { background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px; margin-bottom:14px; }
 
     /* Value summary */
@@ -113,8 +125,14 @@
         <h2 style="margin:0; font-size:15px; color:#003366; flex:1;">Value per person</h2>
         <button class="btn grey small" id="sortValue">Value ↓</button>
         <button class="btn grey small" id="sortName">Name A–Z</button>
-        <button class="btn small" id="exportBtn">⬇ Export report</button>
-        <a class="btn grey small" href="keys.html" style="text-decoration:none;" title="Sign site & van keys out to engineers and back in">🔑 Keys</a>
+        <div class="toolwrap">
+          <button type="button" id="toolsBtn" class="btn small" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
+          <div class="toolmenu" id="toolsMenu" hidden>
+            <button class="btn small" id="exportBtn">⬇ Export report</button>
+            <a class="btn grey small" href="keys.html" style="text-decoration:none;" title="Sign site & van keys out to engineers and back in">🔑 Keys</a>
+            <button class="btn grey" onclick="location.href='asset-requests.html'">🙋 Requests</button>
+          </div>
+        </div>
       </div>
       <div id="summary"><span class="muted">Loading summary…</span></div>
     </div>
@@ -132,7 +150,6 @@
       <h2>Assets</h2>
       <span class="muted" id="assetCount"></span>
       <input class="search" id="search" placeholder="Search name, serial, category, person…">
-      <button class="btn grey" onclick="location.href='asset-requests.html'">🙋 Requests</button>
       <button class="btn" id="addBtn">+ Add asset</button>
     </div>
 
@@ -643,6 +660,17 @@
     function closeViewer() { g("viewer").style.display = "none"; g("viewerImg").src = ""; }
     function stepImg(d) { if (!viewList.length) return; viewIdx = (viewIdx + d + viewList.length) % viewList.length; g("viewerImg").src = viewList[viewIdx]; }
     window.addEventListener("keydown", e => { if (e.key === "Escape") closeViewer(); if (e.key === "ArrowRight") stepImg(1); if (e.key === "ArrowLeft") stepImg(-1); });
+
+    // 🛠 Tools dropdown — open/close + close on outside click / Escape.
+    (function(){
+      var tb = document.getElementById("toolsBtn");
+      var menu = document.getElementById("toolsMenu");
+      if (!tb || !menu) return;
+      var close = function(){ menu.hidden = true; tb.setAttribute("aria-expanded","false"); };
+      tb.onclick = function(e){ e.stopPropagation(); var open = menu.hidden; menu.hidden = !open; tb.setAttribute("aria-expanded", String(open)); };
+      document.addEventListener("click", function(e){ if (!menu.hidden && !menu.contains(e.target) && e.target !== tb) close(); });
+      document.addEventListener("keydown", function(e){ if (e.key === "Escape") close(); });
+    })();
 
     // ── Condition photos (taken during transfers) ──
     async function openCond(assetId) {

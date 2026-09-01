@@ -310,11 +310,38 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   "Disabled" (and any other status), so a disabled account disappears from every
   picker/list portal-wide; **Users Admin passes `?all=1`** to still see + re-enable
   them. (Login already blocks Disabled in auth.js.)
+  **Role presets (Aug 2026):** GET/POST **/users/presets** (app_config
+  `user_role_presets`, admin) = editable standard roles `[{id,name,staffType,
+  fullAccess,perms[]}]`, seeded from the wizard defaults (field/office/manager/
+  full); Users Admin's Permissions tab + the add-user wizard apply them.
+  **Block/offboard:** POST **/users/block** `{username,blocked}` sets Disabled +
+  DELETEs the user's sessions + devices (and cuts PO — po.js refuses a Disabled
+  session); POST /users also kills sessions when it saves a user Disabled. Vehicle
+  assignment is left intact (reversible). **Delete is PASSWORD-GUARDED:** POST
+  /users/delete now requires `confirmPassword` = the acting admin's own password
+  (verifyPassword) OR MASTER_PASSWORD, else 403 — and it only removes the account/
+  permissions/sessions/devices, NOT the person's history (jobs/timesheets/POs/
+  audit_log stay, orphaned by username). Block is the recommended offboard; the
+  editor's Account-tab "Removing this person" zone leads with Block and hides a
+  guarded "Permanently erase" behind a disclosure (for test/dupes only).
+  **Former-staff records stay reachable:** my-documents.html and activity-log.html
+  load `/users?all=1` behind a **"Show former staff"** toggle (docs) / a labelled
+  "— former" option (activity log), and the `/staff/docs?user=` + `/audit/log`
+  endpoints already accept any username — so a Blocked leaver's documents +
+  history remain fully accessible (only a permanent-erase loses that).
 - `devices.js` — check/register device, /device/admin-list, /device/allowed,
   /device/reset, owner exempt.
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,
   approve/reject (type override), staff self-cancel (notifies admin), bank
   holidays (GOV.UK import) + shutdown + worked-credit, batch system days.
+  **Admin edit-from-calendar (Sep 2026):** **POST /holiday/admin-edit** (admin)
+  `{id, action:"update"|"delete", type?, start?, end?, days?, half?}` edits or
+  hard-deletes a single booking. Surfaced in **holiday-admin.html**: the per-user
+  year calendar (`openUserYear`, opened by clicking a name) now makes each booked
+  day **clickable** → an edit modal (`openUyEdit`) listing that day's booking(s)
+  with a type dropdown + From/To dates + Save / Delete; it refreshes ALL +
+  balances and re-opens the year view. (Bank-holiday/shutdown days stay managed
+  via their own list editors, not here.)
   **Approved leave auto-flows to timesheets + scheduler (Aug 2026):** exported
   helper **`approvedLeaveInRange(env,tid,from,to,username?)`** expands each
   approved booking's start→end into per-day markers `{username:{date:{type,half}}}`;
@@ -689,7 +716,15 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   field engineers with no job for the **next working day**, and at **19:00
   auto-assigns** each still-empty engineer their fallback for that day (Mon–Fri;
   **Friday's run targets Monday**, skipping the weekend — so no Sat/Sun run). The
-  **19:00 run also sends a summary push** listing who got which fallback. **All
+  **19:00 run also sends a summary push** listing who got which fallback. **Omit
+  list + at-a-glance ticks (Sep 2026):** `sla:fallbacks` config gained
+  **`exclude`** (normId list) — engineers left OUT of the check AND the auto-assign
+  (apprentices/managers/etc.); managed on sla-scheduler.html → 🛟 Fallbacks
+  "🔕 Omit from the no-job reminder" (checkbox per field engineer). The warning
+  push now lists each empty engineer with **✅** (a fallback is set → auto-assigns
+  at 7pm) or **⚠️** (no fallback set → needs attention); the title reads
+  "✅ All covered…" when every empty engineer has a fallback, else "⚠️ N with no
+  fallback set" — so it's glanceable on a phone/watch. **All
   fallback notifications (both warnings AND the assign summary) go ONLY to
   `FALLBACK_NOTIFY` = Jamie Line / Joe Line / Greg Line** (`notifyFallbackAdmins`,
   deduped by normId) — no other office/SLAAdmin user is told (was owner +
@@ -1051,6 +1086,36 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   /privacy/erase (anonymise + kill sessions/devices + delete personal docs;
   keeps legally-required records). Front-end my-documents.html admin panel.
 - `stats.js` — /stats D1 aggregates + R2 storage totals (stats.html).
+- **Per-user compliance ACCESS (Aug 2026)** — each user has a LEVEL per scheme in
+  `users.profile.complianceAccess` = `{coop,fareham,chapplins,projects}`, each
+  **none|view|download|edit** (none=page hidden; view=chart+open certs on screen;
+  download=+save/export files; edit=+upload & manage docs/dates). Shared model
+  **`worker/src/lib/complianceaccess.js`** (`resolveComplianceAccess(profile,perms)` +
+  `sanitizeComplianceAccess` + `COMPLIANCE_SCHEMES/LEVELS`): Full-Access → edit
+  everywhere (owner never scoped out); an explicit stored level wins; else a legacy
+  fallback preserves old behaviour (Compliance perm ⇒ office edit / field view; no
+  Compliance ⇒ none). Resolved map returned as **`ComplianceAccess`** by auth.js +
+  users.js `shapeUser` (both), stashed client-side as **`mostlaneComplianceAccess`**
+  (login.html + main.html). **Set in Users Admin** (Permissions tab → "📋 Compliance
+  access", four None/View/Download/Edit dropdowns → `profile.complianceAccess`).
+  **Client:** each compliance page (eicr-portal/fareham/chapplins-compliance/
+  compliance-projects) has `complianceLevel(scheme)`/`canViewCompliance`/
+  `canDownloadCompliance`/`canEditCompliance`; none→a "no access" screen, view/
+  download hide Edit + upload 📎 + drag-drop + Settings/Import, view also hides
+  Export; **docviewer.js `open({allowDownload})`** (default true; `?v=7`) hides the
+  ⬇ download + ⤢ full-screen + fallback link when a view user previews a cert.
+  **Server (the hard gate, compliance.js `complianceLevelFor`):** writes (file
+  POST/delete/update, store*, stores/import, settings POST, review/*) require
+  **edit** (was isFull); chart reads (stores/index/files/file-url/summary/settings/
+  has/next-code) require **view+** (none→403); **GET /compliance/file now ALWAYS
+  requires a valid signature** (a bare session no longer fetches an arbitrary key;
+  signed URLs are only issued to view+ users). `/site-files` (cross-scheme, site-
+  folder/engineers) is deliberately NOT gated. **Honest limit:** view-vs-download is
+  a UI deterrent — inline PDF viewing transfers the bytes, so a viewer can still
+  save/screenshot; only "none" (no bytes) and "edit" (writes) are hard-enforced.
+  **All four compliance pages** now share the compressed **🛠 Tools** toolbar + a
+  **🔽 Filters** collapse (Due/Store type/Compliance rows hidden by default, active-
+  count badge, remembered in localStorage `mlCompFiltersOpen`).
 - `compliance.js` — **Multi-scheme compliance charts** (Southern Co-op + Fareham
   Borough Council), scheme-aware. Every /compliance/* route takes `?scheme=`
   (default `coop`; `fareham` = fareham.html). `compliance_stores`/`compliance_files`
@@ -3008,6 +3073,55 @@ Tables **memos** (draft/sent + the header fields + body + recipients) and **memo
 signed / who hasn't); **any session**: GET /memos/pending, GET /memos/one?id=,
 POST /memos/ack. "Memos" is a default staff-doc category (hrdocs). memo-sign.html
 is in the _headers no-cache list.
+
+## Signable documents (routes/documents.js + documents-admin.html + document-sign.html — Aug 2026)
+The portal's own **document-signing** system — replaces Jotform Sign. A **generalisation
+of Company Memos**: a memo is a typed body; a signable document is a **prepared, reusable,
+branded document** kept in a **library**, sent to chosen users to read + sign, with the
+signed PDF filed to their **My Documents › Agreements**. Reuses the memos/sign patterns,
+`lib/pdf.js` + `lib/logo.js`, the My Documents R2 layout (`staffdocs/…`), push.js, filesign.js.
+- **House style — ONE shared renderer `lib/signdoc-pdf.js`** (`buildSignDocPdf({ref,title,body}, sig)`)
+  so every document looks the same (matches the Mostlane Annual Leave policy example):
+  Mostlane logo top-left of page 1, a **"COMPANY CONFIDENTIAL"** running header, a footer
+  with **Document ID + Page X of Y** (stamped after layout via the new `PdfDoc.textOn`/`lineOn`
+  helpers, so page numbers know the total), navy headings, then a **signature block** with
+  BOTH the issuer's and the signer's signature + dates + an IP/device audit line. Body markup
+  is plain text: `# H1`, `## H2`, `- bullet`, `---` rule, blank line = gap, else paragraph.
+- **Issuer auto-signature:** the admin draws their signature ONCE (documents-admin → "My
+  signature"), stored in R2 `docsig/<tid>/issuer/<user>.jpg` + remembered in app_config
+  `doc:issuersig:<user>`. On **send**, the document is auto-stamped with that signature +
+  the admin's name + the send date — no re-signing per document. (Send is refused with a
+  clear message until a signature is saved.)
+- **Send to chosen users:** pick a library doc + one or many recipients (searchable picker,
+  reused from the memos pattern). Each recipient gets a **pending** `doc_sends` row (snapshotting
+  title/body/issuer at issue time so later library edits never change an issued doc) + a push
+  (`/document-sign.html?id=<sendId>`, tag `doc:<id>`).
+- **Recipient signs:** document-sign.html renders the snapshot body (`#`/`##`/`-`/`---` → HTML),
+  shows "Issued by … on …", captures a drawn **JPEG** signature (auto-dated to the sign day),
+  POST /documents/sign → builds the final branded PDF (issuer + signer signatures), files it to
+  `staffdocs/<tid>/user/<me>/Agreements/…`, marks signed, captures **IP (CF-Connecting-IP) +
+  User-Agent**, and pushes the issuer "✅ Document signed".
+- **My Documents pending list:** my-documents.html shows a "✍️ Documents to sign" card at the
+  top for every user (GET /documents/pending) linking to the sign page. **Non-blocking for now**
+  — notifications/blocking pop-ups/deadlines are a deliberate follow-up (hooks left in place).
+- **Tables (self-migrating):** **doc_templates** (id/tenant/ref `MOS-DOC-####`/title/body/archived/
+  timestamps) + **doc_sends** (one row per (template,user): status pending|signed, issued_by/at,
+  issuer_name/sig_key, title_snapshot/body_snapshot, signed_at, signer_ip, signer_ua, doc_key,
+  sig_key; UNIQUE (tenant,template,username) — re-send re-opens). `ensure()` also adds
+  **"Agreements"** to the My-Documents category list so the filed copies show.
+- **Endpoints** (mounted /documents; FullAccess to manage, any session for own): POST /documents/template
+  (create/update — assigns ref on create), GET /documents/templates (library + counts + hasIssuerSignature),
+  POST /documents/template-delete, GET/POST /documents/issuer-signature, GET /documents/preview?id= (admin
+  PDF, issuer sig only — opened as an auth'd blob, NOT a public link), POST /documents/send {id,recipients[]},
+  GET /documents/status?id= (signed/pending, signed rows carry a signed /staff/doc link), GET /documents/pending
+  (mine), GET /documents/one?id= (recipient/admin), POST /documents/sign {id,signature}. No new PUBLIC_ROUTE —
+  the signed PDFs are served by the existing signed `/staff/doc`. Entry point: **my-documents.html** (Full-access admin bar) "📄
+  Manage & send documents" → documents-admin.html (lives with the other document builders, NOT under
+  the notification centre). The Portal User & Data Protection Agreement is seeded as library doc #1
+  (MOS-DOC-0001). documents-admin.html + document-sign.html are in the
+  _headers no-cache list. **TODO/next:** blocking gate + deadlines + notifications; seed the Portal User
+  Agreement + Annual Leave policy as starter library docs; optional PDF-upload path (append a branded
+  signature page to an uploaded PDF).
 
 ## Activity log (audit trail)
 Server middleware records every state-changing request automatically (covers

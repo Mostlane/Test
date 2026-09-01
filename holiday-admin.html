@@ -129,6 +129,56 @@
     input.num { width:90px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:15px; }
     .msg { font-size:13px; margin-top:8px; } .msg.ok { color:#0c7d27; } .msg.err { color:#b00020; }
     select.yearsel { padding:8px 10px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; background:#fff; font-family:inherit; }
+    .archtog { display:inline-flex; align-items:center; gap:7px; margin:2px 0 10px; font-size:13px; color:#5b6b7d; cursor:pointer; }
+    .archtog input { width:auto; margin:0; }
+    .arch-badge { display:inline-block; margin-left:7px; font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+      color:#8a5a00; background:#fbeccb; border:1px solid #f0d9a8; border-radius:999px; padding:1px 7px; vertical-align:middle; }
+    tr.archived td, .wall tr.archived td.name { opacity:.62; }
+    /* Approvals — decisions/pending tables + filter bar */
+    .dechead { display:flex; flex-wrap:wrap; align-items:center; gap:12px; justify-content:space-between; margin-bottom:12px; }
+    .filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .filters select, .filters input { padding:7px 9px; border:1px solid #ccd5dd; border-radius:8px; font-size:13px; background:#fff; font-family:inherit; color:#27313a; }
+    .filters input[type=search] { min-width:150px; }
+    .tblwrap { overflow-x:auto; }
+    table.dtbl { width:100%; border-collapse:collapse; font-size:13.5px; }
+    table.dtbl th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#7c8a9b; font-weight:700; padding:6px 10px; border-bottom:2px solid #eef1f5; white-space:nowrap; }
+    table.dtbl td { padding:9px 10px; border-bottom:1px solid #eef1f5; vertical-align:middle; }
+    table.dtbl tbody tr:hover { background:#f7f9fc; }
+    table.dtbl .ta-r { text-align:right; }
+    .dtbl .pname { font-weight:600; color:#1f2d3d; white-space:nowrap; }
+    .dtbl .pwhen { white-space:nowrap; color:#27313a; }
+    .dtbl .pdays { white-space:nowrap; color:#5b6b7d; font-variant-numeric:tabular-nums; }
+    .dtbl .preason { color:#5b6b7d; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pill { display:inline-block; font-size:11.5px; font-weight:700; border-radius:999px; padding:2px 9px; white-space:nowrap; }
+    .pill.approved { background:#e7f5ec; color:#0c7d3f; }
+    .pill.rejected { background:#fdeaed; color:#b00020; }
+    .pill.cancelled { background:#eef1f5; color:#5b6b7d; }
+    .pill.holiday { background:#e6effc; color:#0a4f8f; }
+    .pill.unpaid { background:#f1eefc; color:#6b46c1; }
+    .pill.other { background:#eef1f5; color:#5b6b7d; }
+    .pill.accr { background:#fbeccb; color:#8a5a00; border:1px solid #f0d9a8; margin-left:6px; cursor:help; }
+    .dtbl .by { color:#8a97a6; font-size:12px; display:block; }
+    .dtbl .acts { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    .linkname { appearance:none; background:none; border:none; padding:0; font:inherit; font-weight:600; color:#0a4f8f; cursor:pointer; text-align:left; }
+    .linkname:hover { text-decoration:underline; }
+    /* clickable names on the Balances table */
+    table.bal td.name-link { cursor:pointer; color:#0a4f8f; font-weight:600; }
+    table.bal td.name-link:hover { text-decoration:underline; }
+    /* per-user year modal */
+    .uy-backdrop { display:none; position:fixed; inset:0; background:rgba(15,27,43,.5); z-index:200; padding:20px; overflow:auto; }
+    .uy-backdrop.on { display:flex; align-items:flex-start; justify-content:center; }
+    .uy-modal { background:#fff; border-radius:16px; max-width:1120px; width:100%; padding:18px 20px 22px; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+    .uy-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    .uy-head h3 { color:#003366; font-size:19px; }
+    .uy-legend { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:#5b6b7d; margin-bottom:14px; }
+    .uy-legend span { display:inline-flex; align-items:center; gap:6px; }
+    .uy-legend i { width:14px; height:14px; border-radius:4px; display:inline-block; }
+    #uyGrid td.uh { background:#18a558; color:#fff; font-weight:700; border-radius:6px; }
+    #uyGrid td.uu { background:#6b46c1; color:#fff; font-weight:700; border-radius:6px; }
+    #uyGrid td.uo { background:#14b8a6; color:#fff; font-weight:700; border-radius:6px; }
+    #uyGrid td.up { background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px); color:#5a4300; font-weight:700; border-radius:6px; }
+    #uyGrid td.ub { background:#4d8bff; color:#fff; border-radius:6px; }
+    #uyGrid td.us { background:#8b5cf6; color:#fff; border-radius:6px; }
   </style>
   <script>
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") location.href = "login.html";
@@ -152,12 +202,38 @@
     <!-- APPROVALS -->
     <div class="sect active" data-sec="approvals">
       <div class="card">
-        <h3>Waiting for a decision</h3>
-        <div id="pendList" class="muted">Loading…</div>
+        <h3>Waiting for a decision <span class="cnt" id="pendCnt2" style="display:none;">0</span></h3>
+        <div class="tblwrap"><table class="dtbl" id="pendTbl">
+          <thead><tr><th>Person</th><th>When</th><th>Days</th><th>Type</th><th>Reason</th><th class="ta-r">Decision</th></tr></thead>
+          <tbody id="pendList"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table></div>
       </div>
       <div class="card">
-        <h3>Recent decisions</h3>
-        <div id="doneList" class="muted">Loading…</div>
+        <div class="dechead">
+          <h3 style="margin:0;">Recent decisions</h3>
+          <div class="filters">
+            <select id="fPerson" title="Filter by person"><option value="">Everyone</option></select>
+            <select id="fStatus" title="Filter by outcome">
+              <option value="">Any outcome</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+            <select id="fType" title="Filter by type">
+              <option value="">Any type</option>
+              <option value="Holiday">Holiday</option>
+              <option value="Unpaid">Unpaid</option>
+              <option value="Other">Other</option>
+            </select>
+            <input id="fSearch" type="search" placeholder="Search name / reason…">
+            <button class="btn grey small" id="fClear">Clear</button>
+          </div>
+        </div>
+        <div class="tblwrap"><table class="dtbl" id="decTbl">
+          <thead><tr><th>Person</th><th>When</th><th>Days</th><th>Type</th><th>Reason</th><th>Outcome</th><th class="ta-r"></th></tr></thead>
+          <tbody id="doneList"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+        </table></div>
+        <div class="muted" id="decCount" style="margin-top:9px;font-size:12px;"></div>
       </div>
     </div>
 
@@ -169,6 +245,7 @@
         <button class="nav" id="wcNext">›</button>
         <button class="nav" id="wcMode" title="Year calendar" style="width:auto; padding:0 10px;">📅</button>
       </div>
+      <label class="archtog"><input type="checkbox" class="showArchived"> <span>Show archived / blocked staff</span></label>
       <div class="wcscroll" id="wallScroll"><table class="wall" id="wallTbl"></table></div>
       <div id="yearWrap" style="display:none;">
         <div class="calgrid" id="admCalGrid"></div>
@@ -195,6 +272,7 @@
 
     <!-- BALANCES -->
     <div class="sect" data-sec="balances">
+      <label class="archtog"><input type="checkbox" class="showArchived"> <span>Show archived / blocked staff</span></label>
       <div class="card balscroll" style="padding:6px 8px;">
         <table class="bal">
           <thead><tr><th>Person</th><th>Allowance</th><th>Used</th><th>Remaining</th><th></th></tr></thead>
@@ -204,6 +282,30 @@
     </div>
 
     <div class="daypop" id="dayPop"></div>
+
+    <!-- PER-USER YEAR VIEW (opened from a name) -->
+    <div class="uy-backdrop" id="uyBackdrop">
+      <div class="uy-modal">
+        <div class="uy-head">
+          <div><h3 id="uyName" style="margin:0;">—</h3><div class="muted" id="uySub" style="font-size:12.5px;"></div></div>
+          <button class="btn grey small" id="uyClose">✕ Close</button>
+        </div>
+        <div class="uy-legend" id="uyLegend"></div>
+        <div class="muted" style="font-size:12px;margin:2px 0 8px;">Tip: tap any booked day to edit or remove that booking.</div>
+        <div class="calgrid" id="uyGrid"></div>
+      </div>
+    </div>
+
+    <!-- EDIT A BOOKING (from the per-user calendar) -->
+    <div class="uy-backdrop" id="uyEditBackdrop" style="z-index:70;">
+      <div class="uy-modal" style="max-width:520px;">
+        <div class="uy-head">
+          <div><h3 id="uyEditTitle" style="margin:0;">Edit booking</h3><div class="muted" id="uyEditDay" style="font-size:12.5px;"></div></div>
+          <button class="btn grey small" id="uyEditClose">✕ Close</button>
+        </div>
+        <div id="uyEditBody" style="padding:4px 2px 6px;"></div>
+      </div>
+    </div>
 
     <!-- SETTINGS -->
     <div class="sect" data-sec="settings">
@@ -263,7 +365,10 @@
     const fmtDays = n => { n = Number(n) || 0; if (n === 0.5) return "\u00bd day"; if (n % 1 === 0.5) return Math.floor(n) + "\u00bd days"; return n + " day" + (n === 1 ? "" : "s"); };
     const halfLbl = h => h === "AM" ? "morning" : h === "PM" ? "afternoon" : "half day";
     let BALMAP = {};          // username -> {allowance, used, committed, remaining, booked, bankHolidays, shutdown}
+    let ACTIVEMAP = {};       // username -> active? (false = archived/blocked staff)
     let SELECTED_USER = "";   // wall-chart highlighted person (persists across month nav)
+    let SHOW_ARCHIVED = false;
+    try { SHOW_ARCHIVED = localStorage.getItem("holAdminShowArchived") === "1"; } catch (e) {}
     const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
     function applyWallSel() {
       document.querySelectorAll("#wallTbl tr[data-user]").forEach(tr => tr.classList.toggle("sel", tr.getAttribute("data-user") === SELECTED_USER));
@@ -309,11 +414,40 @@
       ensureTab(b.dataset.tab);
     });
 
+    // "Show archived / blocked staff" toggle — shared across the Wall chart and
+    // Balances tabs. Off by default; remembered per device.
+    function setArchived(v) {
+      SHOW_ARCHIVED = !!v;
+      try { localStorage.setItem("holAdminShowArchived", SHOW_ARCHIVED ? "1" : "0"); } catch (e) {}
+      document.querySelectorAll(".showArchived").forEach(cb => { cb.checked = SHOW_ARCHIVED; });
+      CAL_CACHE = {}; BALMAP = {}; wallLoaded = false; balLoaded = false;
+      const activeBtn = document.querySelector("#tabs button.active");
+      const tab = activeBtn ? activeBtn.dataset.tab : "approvals";
+      if (tab === "wall") applyAView();
+      else if (tab === "balances") loadBalances();
+    }
+    document.querySelectorAll(".showArchived").forEach(cb => {
+      cb.checked = SHOW_ARCHIVED;
+      cb.addEventListener("change", () => setArchived(cb.checked));
+    });
+
+    // Recent-decisions filters — re-render the table on any change.
+    ["fPerson", "fStatus", "fType"].forEach(id => { const el = g(id); if (el) el.addEventListener("change", () => renderDecisions()); });
+    (function () { const s = g("fSearch"); if (s) s.addEventListener("input", () => renderDecisions()); })();
+    (function () {
+      const c = g("fClear");
+      if (c) c.addEventListener("click", () => {
+        ["fPerson", "fStatus", "fType", "fSearch"].forEach(id => { const el = g(id); if (el) el.value = ""; });
+        renderDecisions();
+      });
+    })();
+
     const fmtD = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" });
 
     async function loadOrder() {
       try {
-        const d = await authFetch("/users").then(r => r.json());
+        // ?all=1 so archived/blocked staff names still resolve in tooltips + rows.
+        const d = await authFetch("/users?all=1").then(r => r.json());
         (d.Users || []).forEach((u, i) => {
           ORDER[u.Username] = i;
           NAMES[u.Username] = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
@@ -325,8 +459,8 @@
     // cache is cleared whenever data changes (approvals, worked toggles, days).
     let CAL_CACHE = {};
     function fetchCal(y, m) {
-      const k = y + "-" + m;
-      if (!CAL_CACHE[k]) CAL_CACHE[k] = authFetch(`/holiday/calendar?year=${y}&month=${m}`).then(r => r.json());
+      const k = y + "-" + m + (SHOW_ARCHIVED ? "-all" : "");
+      if (!CAL_CACHE[k]) CAL_CACHE[k] = authFetch(`/holiday/calendar?year=${y}&month=${m}${SHOW_ARCHIVED ? "&all=1" : ""}`).then(r => r.json());
       return CAL_CACHE[k];
     }
 
@@ -357,55 +491,104 @@
     }
 
     // ── Approvals ──
-    function renderApprovals() {
-      const pend = ALL.filter(h => h.status === "Pending").sort((a, b) => (a.start || "").localeCompare(b.start || ""));
-      g("pendCnt").style.display = pend.length ? "" : "none";
-      g("pendCnt").textContent = pend.length;
-      // Accrual: allowance builds 1/12th per month — tag pending requests that
-      // would exceed the person's accrued days by the month of the holiday.
-      function accrualTag(h) {
-        if (!CFGDATA.accrualMode || h.type === "Other") return "";
-        const b = BALMAP[h.username];
-        if (!b || !h.start) return "";
-        const m = Number(h.start.slice(5, 7));
-        const accrued = Math.round((b.allowance * m / 12) * 10) / 10;
-        const after = (b.used || 0) + (h.days || 0);
-        if (after <= accrued) return "";
-        const monthName = new Date(h.start + "T00:00:00").toLocaleDateString("en-GB", { month:"long" });
-        return `<span class="accrualtag">⚠ Over accrual — ${accrued} day${accrued === 1 ? "" : "s"} accrued by ${monthName}, this takes them to ${after}</span>`;
-      }
-      const row = (h, acts) => `
-        <div class="apr">
-          <div class="dateblock"><b>${fmtD(h.start)}${h.start !== h.end ? " – " + fmtD(h.end) : ""}</b><span>${fmtDays(h.days)}${h.half ? " \u00b7 " + halfLbl(h.half) : ""}</span></div>
-          <div class="who"><b>${esc(NAMES[h.username] || h.engineer || h.username)}</b>
-            <span class="muted">${esc(h.type || "Holiday")}${h.notes ? " · “" + esc(h.notes) + "”" : ""}</span>${accrualTag(h)}</div>
-          ${acts}
-        </div>`;
-      g("pendList").innerHTML = pend.length ? pend.map(h => row(h,
-        h.type === "Other"
-          ? `<div class="acts" style="flex-wrap:wrap;">
-               <button class="btn green small" data-approve="${esc(h.id)}" data-astype="Other" title="Approved as Other — NOT off their allowance">✓ as Other</button>
-               <button class="btn small" data-approve="${esc(h.id)}" data-astype="Holiday" title="Approve but count it as Holiday (off allowance)">✓ as Holiday</button>
-               <button class="btn small" data-approve="${esc(h.id)}" data-astype="Unpaid" style="background:#5b6b78;" title="Approve as Unpaid (off allowance)">✓ as Unpaid</button>
-               <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`
-          : `<div class="acts"><button class="btn green small" data-approve="${esc(h.id)}">Approve</button>
-             <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`)).join("")
-        : "<p class='muted'>Nothing waiting — all caught up. 🎉</p>";
+    // Shared cell/pill builders for the pending + decisions tables.
+    const nm = h => NAMES[h.username] || h.engineer || h.username;
+    const rangeCell = h => `${fmtD(h.start)}${h.start !== h.end ? " – " + fmtD(h.end) : ""}`;
+    const daysCell  = h => `${fmtDays(h.days)}${h.half ? " · " + halfLbl(h.half) : ""}`;
+    const typePill  = h => { const t = h.type || "Holiday"; return `<span class="pill ${esc(t.toLowerCase())}">${esc(t)}</span>`; };
+    const reasonCell = h => `<td class="preason" title="${esc(h.notes || "")}">${h.notes ? esc(h.notes) : "<span class='muted'>—</span>"}</td>`;
+    // Accrual: allowance builds 1/12th per month — flag anything that would exceed
+    // the person's accrued days by the holiday's month, as a compact ⚠ pill (full
+    // detail on hover) instead of a long inline sentence.
+    function accrualText(h) {
+      if (!CFGDATA.accrualMode || h.type === "Other") return "";
+      const b = BALMAP[h.username];
+      if (!b || !h.start) return "";
+      const m = Number(h.start.slice(5, 7));
+      const accrued = Math.round((b.allowance * m / 12) * 10) / 10;
+      const after = (b.used || 0) + (h.days || 0);
+      if (after <= accrued) return "";
+      const monthName = new Date(h.start + "T00:00:00").toLocaleDateString("en-GB", { month:"long" });
+      return `Over accrual — ${accrued} day${accrued === 1 ? "" : "s"} accrued by ${monthName}, this takes them to ${after}`;
+    }
+    const accrPill = h => { const a = accrualText(h); return a ? ` <span class="pill accr" title="${esc(a)}">⚠ over accrual</span>` : ""; };
 
-      const done = ALL.filter(h => ["Approved", "Rejected", "Cancelled"].includes(h.status))
-        .sort((a, b) => (b.decisionAt || b.submittedAt || "").localeCompare(a.decisionAt || a.submittedAt || "")).slice(0, 12);
-      g("doneList").innerHTML = done.length ? done.map(h => {
-        let lbl;
+    function populatePersonFilter() {
+      const sel = g("fPerson"); if (!sel) return;
+      const seen = new Map();
+      ALL.forEach(h => { if (!seen.has(h.username)) seen.set(h.username, nm(h)); });
+      const cur = sel.value;
+      sel.innerHTML = `<option value="">Everyone</option>` +
+        [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+          .map(([u, name]) => `<option value="${esc(u)}">${esc(name)}</option>`).join("");
+      sel.value = cur;
+    }
+
+    // Recent decisions — a filterable table (person / outcome / type / search).
+    function renderDecisions() {
+      const f = {
+        person: (g("fPerson") || {}).value || "",
+        status: (g("fStatus") || {}).value || "",
+        type:   (g("fType") || {}).value || "",
+        q: (((g("fSearch") || {}).value) || "").trim().toLowerCase()
+      };
+      let rows = ALL.filter(h => ["Approved", "Rejected", "Cancelled"].includes(h.status));
+      if (f.person) rows = rows.filter(h => h.username === f.person);
+      if (f.status) rows = rows.filter(h => h.status === f.status);
+      if (f.type)   rows = rows.filter(h => (h.type || "Holiday") === f.type);
+      if (f.q)      rows = rows.filter(h => (nm(h) + " " + (h.notes || "")).toLowerCase().includes(f.q));
+      rows.sort((a, b) => (b.decisionAt || b.submittedAt || "").localeCompare(a.decisionAt || a.submittedAt || ""));
+      const CAP = 200, shown = rows.slice(0, CAP);
+      g("doneList").innerHTML = shown.length ? shown.map(h => {
+        let outcome;
         if (h.status === "Cancelled") {
           const byStaff = h.cancelledBy && h.cancelledBy === h.username;
-          lbl = byStaff
-            ? `<b style="color:#b00020;">Cancelled by ${esc(NAMES[h.cancelledBy] || h.cancelledBy)}</b>${h.approvedBy ? " (was approved)" : ""}`
-            : `Cancelled${h.cancelledBy ? " · " + esc(h.cancelledBy) : ""}`;
+          const who = h.cancelledBy ? `<span class="by">by ${esc(NAMES[h.cancelledBy] || h.cancelledBy)}${byStaff && h.approvedBy ? " (was approved)" : ""}</span>` : "";
+          outcome = `<span class="pill cancelled">Cancelled</span>${who}`;
         } else {
-          lbl = `${esc(h.status)}${h.approvedBy ? " · " + esc(h.approvedBy) : ""}${h.status === "Approved" ? ` <button class="btn grey small" data-revoke="${esc(h.id)}" style="margin-left:6px;">Cancel</button>` : ""}`;
+          outcome = `<span class="pill ${esc(h.status.toLowerCase())}">${esc(h.status)}</span>${h.approvedBy ? `<span class="by">${esc(h.approvedBy)}</span>` : ""}`;
         }
-        return row(h, `<span class="muted" style="flex:none;">${lbl}</span>`);
-      }).join("") : "<p class='muted'>No decisions yet this year.</p>";
+        const action = h.status === "Approved" ? `<button class="btn grey small" data-revoke="${esc(h.id)}">Cancel</button>` : "";
+        return `<tr>
+          <td class="pname"><button class="linkname" data-peruser="${esc(h.username)}" title="View ${esc(nm(h))}'s year">${esc(nm(h))}</button></td>
+          <td class="pwhen">${rangeCell(h)}</td>
+          <td class="pdays">${daysCell(h)}</td>
+          <td>${typePill(h)}${accrPill(h)}</td>
+          ${reasonCell(h)}
+          <td>${outcome}</td>
+          <td class="ta-r"><div class="acts">${action}</div></td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="7" class="muted">No matching decisions.</td></tr>`;
+      const anyFilter = f.person || f.status || f.type || f.q;
+      g("decCount").textContent = rows.length
+        ? `Showing ${shown.length} of ${rows.length} decision${rows.length === 1 ? "" : "s"}${rows.length > CAP ? " (newest " + CAP + ")" : ""}${anyFilter ? " · filtered" : ""}`
+        : "";
+    }
+
+    function renderApprovals() {
+      const pend = ALL.filter(h => h.status === "Pending").sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+      [g("pendCnt"), g("pendCnt2")].forEach(el => { if (el) { el.style.display = pend.length ? "" : "none"; el.textContent = pend.length; } });
+      g("pendList").innerHTML = pend.length ? pend.map(h => {
+        const acts = h.type === "Other"
+          ? `<div class="acts">
+               <button class="btn green small" data-approve="${esc(h.id)}" data-astype="Other" title="Approve as Other — not off their allowance">✓ Other</button>
+               <button class="btn small" data-approve="${esc(h.id)}" data-astype="Holiday" title="Approve counting as Holiday (off allowance)">✓ Holiday</button>
+               <button class="btn small" data-approve="${esc(h.id)}" data-astype="Unpaid" style="background:#5b6b78;" title="Approve as Unpaid (off allowance)">✓ Unpaid</button>
+               <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`
+          : `<div class="acts"><button class="btn green small" data-approve="${esc(h.id)}">Approve</button>
+             <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`;
+        return `<tr>
+          <td class="pname"><button class="linkname" data-peruser="${esc(h.username)}" title="View ${esc(nm(h))}\u0027s year">${esc(nm(h))}</button></td>
+          <td class="pwhen">${rangeCell(h)}</td>
+          <td class="pdays">${daysCell(h)}</td>
+          <td>${typePill(h)}${accrPill(h)}</td>
+          ${reasonCell(h)}
+          <td class="ta-r">${acts}</td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="6" class="muted">Nothing waiting — all caught up. 🎉</td></tr>`;
+
+      populatePersonFilter();
+      renderDecisions();
       // Admin has now seen the current state — clears the cancellation part of
       // the badge, server-side too so it clears on every device.
       const adminSeenAt = new Date().toISOString();
@@ -417,7 +600,11 @@
     document.addEventListener("click", async e => {
       const t = e.target;
       const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-      if (t.dataset.approve) { await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }); loadAll(); }
+      if (t.dataset.approve) {
+        const r = await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }).then(x => x.json()).catch(() => ({}));
+        if (r && r.warning) alert(r.warning + "\n\nApproved anyway — check the calendar for a possible duplicate.");
+        loadAll();
+      }
       else if (t.dataset.reject) { if (confirm("Reject this request?")) { await post("/holiday/reject", { id: t.dataset.reject }); loadAll(); } }
       else if (t.dataset.revoke) { if (confirm("Cancel this APPROVED holiday? The days go back to their allowance.")) { await post("/holiday/cancel-approved", { id: t.dataset.revoke }); loadAll(); } }
     });
@@ -484,6 +671,166 @@
       }
       g("admCalGrid").innerHTML = html;
     }
+
+    // ── Per-user year view (opened by clicking a name) ──
+    let UY_USER = "", UY_DAYBK = {};   // current user + date -> [bookings] for the edit modal
+    function openUserYear(username) {
+      if (!username) return;
+      UY_USER = username; UY_DAYBK = {};
+      g("uyName").textContent = NAMES[username] || username;
+      const map = {};                                   // di -> class
+      const pri = { uh: 5, uu: 4, uo: 3, up: 2, ub: 1, us: 1 };
+      const set = (di, cls) => { if (!map[di] || pri[cls] >= pri[map[di]]) map[di] = cls; };
+      const counts = { hol: 0, unpaid: 0, other: 0, pend: 0 };
+      for (const h of ALL) {
+        if (h.username !== username || !h.start) continue;
+        if (!["Approved", "Pending"].includes(h.status)) continue;
+        const cls = h.status === "Pending" ? "up" : (h.type === "Unpaid" ? "uu" : h.type === "Other" ? "uo" : "uh");
+        const s = new Date(h.start + "T00:00:00Z"), e = new Date(h.end + "T00:00:00Z");
+        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+          if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+          const di = d.toISOString().slice(0, 10);
+          if (di.slice(0, 4) !== String(YEAR)) continue;
+          set(di, cls);
+          (UY_DAYBK[di] || (UY_DAYBK[di] = [])).push(h);
+        }
+        if (h.status === "Pending") counts.pend += h.days || 0;
+        else if (h.type === "Unpaid") counts.unpaid += h.days || 0;
+        else if (h.type === "Other") counts.other += h.days || 0;
+        else counts.hol += h.days || 0;
+      }
+      for (const b of bankDays) if (b.date && b.date.slice(0, 4) === String(YEAR)) set(b.date, "ub");
+      for (const sd of shutDays) if (sd.date && sd.date.slice(0, 4) === String(YEAR)) set(sd.date, "us");
+      const b = BALMAP[username];
+      const parts = [];
+      if (b) parts.push(`Allowance ${b.allowance} · used ${b.used} · ${b.remaining} left`);
+      const booked = [];
+      if (counts.hol) booked.push(`${counts.hol} holiday`);
+      if (counts.unpaid) booked.push(`${counts.unpaid} unpaid`);
+      if (counts.other) booked.push(`${counts.other} other`);
+      if (counts.pend) booked.push(`${counts.pend} pending`);
+      parts.push(booked.length ? booked.join(" · ") + ` booked in ${YEAR}` : `Nothing booked in ${YEAR}`);
+      g("uySub").textContent = parts.join(" — ");
+      g("uyLegend").innerHTML =
+        `<span><i style="background:#18a558"></i> Holiday</span>
+         <span><i style="background:#6b46c1"></i> Unpaid</span>
+         <span><i style="background:#14b8a6"></i> Other</span>
+         <span><i style="background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px)"></i> Pending</span>
+         <span><i style="background:#4d8bff"></i> Bank holiday</span>
+         <span><i style="background:#8b5cf6"></i> Shutdown</span>`;
+      const pad = n => String(n).padStart(2, "0");
+      const today = new Date().toISOString().slice(0, 10);
+      let html = "";
+      for (let m = 1; m <= 12; m++) {
+        const first = new Date(Date.UTC(YEAR, m - 1, 1));
+        const dim = new Date(Date.UTC(YEAR, m, 0)).getUTCDate();
+        const lead = (first.getUTCDay() + 6) % 7;
+        let cells = "";
+        for (let i = 0; i < lead; i++) cells += "<td></td>";
+        for (let d = 1; d <= dim; d++) {
+          const di = `${YEAR}-${pad(m)}-${pad(d)}`;
+          const dow = new Date(Date.UTC(YEAR, m - 1, d)).getUTCDay();
+          const we = dow === 0 || dow === 6;
+          let cls = map[di] || (we ? "we" : "");
+          if (di === today) cls += " today";
+          const bk = UY_DAYBK[di];
+          cells += `<td class="${cls}"${bk && bk.length ? ` data-uyday="${di}" style="cursor:pointer"` : ""}>${d}</td>`;
+          if ((lead + d) % 7 === 0 && d !== dim) cells += "</tr><tr>";
+        }
+        html += `<div class="mm"><h4>${first.toLocaleDateString("en-GB", { month:"long", timeZone:"UTC" })}</h4>
+          <table><tr><th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th><th>S</th></tr><tr>${cells}</tr></table></div>`;
+      }
+      g("uyGrid").innerHTML = html;
+      g("uyBackdrop").classList.add("on");
+    }
+
+    // ── Edit / remove a booking straight from the per-user calendar ──
+    g("uyGrid").addEventListener("click", e => {
+      const cell = e.target.closest("[data-uyday]");
+      if (cell) openUyEdit(cell.getAttribute("data-uyday"));
+    });
+    function closeUyEdit() { g("uyEditBackdrop").classList.remove("on"); }
+    g("uyEditClose").addEventListener("click", closeUyEdit);
+    g("uyEditBackdrop").addEventListener("click", e => { if (e.target === g("uyEditBackdrop")) closeUyEdit(); });
+    function wdCount(startISO, endISO) {
+      let n = 0; const s = new Date(startISO + "T00:00:00Z"), e = new Date(endISO + "T00:00:00Z");
+      if (isNaN(s) || isNaN(e) || e < s) return 0;
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) { const wd = d.getUTCDay(); if (wd !== 0 && wd !== 6) n++; }
+      return n;
+    }
+    function openUyEdit(di) {
+      const list = (UY_DAYBK[di] || []);
+      if (!list.length) return;
+      const dd = new Date(di + "T00:00:00").toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+      g("uyEditTitle").textContent = NAMES[UY_USER] || UY_USER;
+      g("uyEditDay").textContent = dd;
+      g("uyEditBody").innerHTML = list.map(h => {
+        const isHalf = Number(h.days) === 0.5;
+        return `<div class="uybk" data-id="${esc(h.id)}" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+            <span style="background:${h.status === 'Pending' ? '#f4b942' : '#e6eefc'};color:#20303f;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;">${esc(h.status)}</span>
+            <span class="muted" style="font-size:12px;">${esc(h.start)}${h.end !== h.start ? " → " + esc(h.end) : ""} · ${esc(String(h.days))}d</span>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center;font-size:13px;">
+            <label style="font-weight:700;">Type</label>
+            <select class="uf-type">${["Holiday","Unpaid","Other"].map(t => `<option value="${t}"${(h.type || 'Holiday') === t ? ' selected' : ''}>${t}</option>`).join("")}</select>
+            <label style="font-weight:700;">From</label><input type="date" class="uf-start" value="${esc(h.start)}">
+            <label style="font-weight:700;">To</label><input type="date" class="uf-end" value="${esc(h.end)}">
+          </div>
+          ${isHalf ? '<div class="muted" style="font-size:12px;margin-top:6px;">Half-day booking — changing the dates converts it to full day(s).</div>' : ''}
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+            <button class="btn small uf-save">Save changes</button>
+            <button class="btn small uf-del" style="background:#b00020;">Delete booking</button>
+          </div>
+          <p class="uf-msg" style="font-size:12.5px;margin:6px 0 0;"></p>
+        </div>`;
+      }).join("") + `<div class="muted" style="font-size:12px;">Editing changes the WHOLE booking (its full date range), not just this day.</div>`;
+      g("uyEditBody").querySelectorAll(".uybk").forEach(card => {
+        const id = card.getAttribute("data-id");
+        const msg = card.querySelector(".uf-msg");
+        card.querySelector(".uf-save").onclick = async () => {
+          const type = card.querySelector(".uf-type").value;
+          const start = card.querySelector(".uf-start").value;
+          const end = card.querySelector(".uf-end").value;
+          if (!start || !end || end < start) { msg.style.color = "#b00020"; msg.textContent = "Check the dates."; return; }
+          const orig = list.find(x => String(x.id) === String(id)) || {};
+          const days = (Number(orig.days) === 0.5 && start === end) ? 0.5 : wdCount(start, end);
+          await doUyEdit({ id, action: "update", type, start, end, days, half: (days === 0.5 ? (orig.half || null) : null) }, msg, card.querySelector(".uf-save"));
+        };
+        card.querySelector(".uf-del").onclick = async () => {
+          const ok = window.MLUI && MLUI.confirm ? await MLUI.confirm("Delete this booking? This removes it entirely.", { title: "Delete booking", danger: true }) : confirm("Delete this booking?");
+          if (!ok) return;
+          await doUyEdit({ id, action: "delete" }, msg, card.querySelector(".uf-del"));
+        };
+      });
+      g("uyEditBackdrop").classList.add("on");
+    }
+    async function doUyEdit(payload, msg, btn) {
+      const label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        const r = await authFetch("/holiday/admin-edit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.success === false) throw new Error(d.error || "Failed");
+        closeUyEdit();
+        await loadAll(); await loadBalances().catch(() => {});
+        openUserYear(UY_USER);
+      } catch (e) {
+        if (msg) { msg.style.color = "#b00020"; msg.textContent = "Couldn't save — " + (e.message || "try again"); }
+        btn.disabled = false; btn.textContent = label;
+      }
+    }
+    function closeUserYear() { g("uyBackdrop").classList.remove("on"); }
+    g("uyClose").addEventListener("click", closeUserYear);
+    g("uyBackdrop").addEventListener("click", e => { if (e.target === g("uyBackdrop")) closeUserYear(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeUserYear(); });
+    // Open the per-user year from any name button (approvals tables) or a
+    // Balances name cell.
+    document.addEventListener("click", e => {
+      const link = e.target.closest("[data-peruser]");
+      if (link) { openUserYear(link.getAttribute("data-peruser")); return; }
+      const balName = e.target.closest("table.bal td.name-link");
+      if (balName && balName.dataset.user) openUserYear(balName.dataset.user);
+    });
 
     // Day popover — who's off, pending, and any bank holiday / shutdown label.
     function showDayPop(target, html) {
@@ -566,7 +913,9 @@
         const b = BALMAP[eng.username];
         const bd = b ? `<div class="nbd">${nDay(b.booked)} booked · ${nDay(b.bankHolidays)} bank · ${nDay(b.shutdown)} shutdown · <b>${nDay(b.remaining)} left</b></div>` : "";
         const selCls = eng.username === SELECTED_USER ? " sel" : "";
-        body += `<tr data-user="${esc(eng.username)}" class="${selCls.trim()}"><td class="name" data-user="${esc(eng.username)}" title="${esc(eng.username)}"><div class="nnm">${esc(NAMES[eng.username] || eng.name || eng.username)}</div>${bd}</td>`;
+        const archCls = eng.active === false ? " archived" : "";
+        const archBadge = eng.active === false ? `<span class="arch-badge">${esc(eng.status || "Archived")}</span>` : "";
+        body += `<tr data-user="${esc(eng.username)}" class="${(selCls + archCls).trim()}"><td class="name" data-user="${esc(eng.username)}" title="${esc(eng.username)}"><div class="nnm">${esc(NAMES[eng.username] || eng.name || eng.username)}${archBadge}</div>${bd}</td>`;
         for (let d = 1; d <= days; d++) {
           const di = `${YEAR}-${pad(MONTH)}-${pad(d)}`;
           const dt = new Date(Date.UTC(YEAR, MONTH - 1, d));
@@ -618,19 +967,22 @@
     async function loadBalances() {
       balLoaded = true;
       let d;
-      try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}`).then(r => r.json()); }
+      try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}${SHOW_ARCHIVED ? "&all=1" : ""}`).then(r => r.json()); }
       catch (e) { balLoaded = false; g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
       const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
       BALMAP = {};
-      list.forEach(e => { BALMAP[e.username] = { allowance: e.allowance, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown }; });
+      list.forEach(e => {
+        BALMAP[e.username] = { allowance: e.allowance, used: e.used, committed: e.committed, remaining: e.remaining, booked: e.booked, bankHolidays: e.bankHolidays, shutdown: e.shutdown };
+        ACTIVEMAP[e.username] = e.active !== false;
+      });
       g("balBody").innerHTML = list.map(e => `
-        <tr>
-          <td>${esc(NAMES[e.username] || e.name || e.username)}</td>
+        <tr class="${e.active === false ? "archived" : ""}">
+          <td class="name-link" data-user="${esc(e.username)}" title="View ${esc(NAMES[e.username] || e.name || e.username)}'s year">${esc(NAMES[e.username] || e.name || e.username)}${e.active === false ? `<span class="arch-badge">${esc(e.status || "Archived")}</span>` : ""}</td>
           <td>${e.allowance}</td>
           <td>${e.used}</td>
           <td class="${e.remaining < 0 ? "neg" : e.remaining <= 2 ? "low" : ""}">${e.remaining}</td>
           <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.allowance}">✎<span class="elbl"> Edit allowance</span></button></td>
-        </tr>`).join("") || "<tr><td colspan='5' class='muted'>No active users.</td></tr>";
+        </tr>`).join("") || "<tr><td colspan='5' class='muted'>No users.</td></tr>";
     }
     document.addEventListener("click", async e => {
       const t = e.target.closest("[data-allow]") || e.target;
