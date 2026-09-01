@@ -5804,7 +5804,7 @@ function buildJobSheetPdf(data = {}, meta = {}) {
 
 // worker/src/lib/pngdecode.js
 var MAX_PIXELS = 4e6;
-var INK = [15, 36, 56];
+var INK = [17, 17, 17];
 async function decodePngToRgb(bytes, opts = {}) {
   try {
     const v = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);

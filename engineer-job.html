@@ -10,7 +10,7 @@
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=28"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=14"></script>
+  <script src="cert-form.js?v=15"></script>
   <style>
     :root{
       --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
@@ -1034,12 +1034,12 @@
   }
 
   function makeSigPad(canvas){ var cx,drawing=false,stroke=false;
-    function size(){canvas.width=canvas.offsetWidth*2;canvas.height=canvas.offsetHeight*2;cx=canvas.getContext("2d");cx.scale(2,2);cx.lineWidth=2.2;cx.lineCap="round";cx.strokeStyle="#0f2438";/* fixed dark ink — a themed body colour could be near-white and vanish on the white job sheet */}
+    function size(){canvas.width=canvas.offsetWidth*2;canvas.height=canvas.offsetHeight*2;cx=canvas.getContext("2d");cx.fillStyle="#fff";cx.fillRect(0,0,canvas.width,canvas.height);cx.scale(2,2);cx.lineWidth=2.4;cx.lineCap="round";cx.lineJoin="round";cx.strokeStyle="#000";/* BLACK ink on a WHITE pad — always visible while signing, when viewed on any theme/screen, and on the PDF */}
     function pos(e){var r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
     canvas.addEventListener("pointerdown",function(e){drawing=true;stroke=true;canvas.classList.remove("err");var p=pos(e);cx.beginPath();cx.moveTo(p.x,p.y);});
     canvas.addEventListener("pointermove",function(e){if(!drawing)return;var p=pos(e);cx.lineTo(p.x,p.y);cx.stroke();});
     window.addEventListener("pointerup",function(){drawing=false;});
-    return{size:size,el:canvas,has:function(){return stroke;},dataURL:function(){return canvas.toDataURL("image/png");},clear:function(){if(cx)cx.clearRect(0,0,canvas.width,canvas.height);stroke=false;canvas.classList.remove("err");}};
+    return{size:size,el:canvas,has:function(){return stroke;},dataURL:function(){return canvas.toDataURL("image/png");},clear:function(){if(cx){cx.save();cx.setTransform(1,0,0,1,0,0);cx.fillStyle="#fff";cx.fillRect(0,0,canvas.width,canvas.height);cx.restore();}stroke=false;canvas.classList.remove("err");}};
   }
   var custPad=makeSigPad($("sigCanvas")), raPad=makeSigPad($("raCanvas"));
   function openSig(){ $("sigModal").classList.add("show"); setTimeout(custPad.size,50); }

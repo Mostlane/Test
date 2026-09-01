@@ -16,7 +16,7 @@
 // A fully-opaque image (e.g. a scanned/imported signature) is flattened normally.
 
 const MAX_PIXELS = 4_000_000; // guard the uncompressed buffer (a signature is tiny)
-const INK = [15, 36, 56];     // Mostlane navy ink for alpha-rendered signatures
+const INK = [17, 17, 17];     // near-black ink for alpha-rendered (older, transparent) signatures
 
 export async function decodePngToRgb(bytes, opts = {}) {
   try {
