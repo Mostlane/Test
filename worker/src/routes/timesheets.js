@@ -1439,10 +1439,13 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   if (sub === "/invoice/delete" && method === "POST") {
-    if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const row = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, Number(b.id)).first();
     if (!row) return error("Invoice not found", 404, env, request);
+    // The office can delete anyone's; a self-employed engineer can delete their
+    // OWN (frees the week + the invoice number to regenerate).
+    const admin = await isTsAdmin(env, tid, sess);
+    if (!admin && row.username !== me) return error("You can only delete your own invoices.", 403, env, request);
     await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
     try { await env.JOB_FILES.delete(row.r2_key); } catch {}
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
