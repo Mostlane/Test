@@ -220,6 +220,7 @@
           <option value="cobra">Cobra</option>
           <option value="wenzels">Wenzels</option>
           <option value="projects">Projects</option>
+          <option value="site">Site (office / yard / one-off)</option>
           <option value="fbc">Fareham Borough Council</option>
         <option value="chapplins">Chapplins</option>
 
@@ -294,6 +295,7 @@
         <option value="cobra">Cobra</option>
         <option value="wenzels">Wenzels</option>
         <option value="projects">Projects</option>
+        <option value="site">Site (office / yard / one-off)</option>
         <option value="fbc">Fareham Borough Council</option>
         <option value="chapplins">Chapplins</option>
 
@@ -301,7 +303,7 @@
 
       <!-- Site Number (only for non-projects) -->
 <div class="row2" id="siteNumberRow">
-  <div>
+  <div id="siteNumField">
     <label>Site Number</label>
     <input id="editNumber" placeholder="e.g. 1234" autocomplete="off" inputmode="numeric">
   </div>
@@ -476,9 +478,14 @@ Fob – Main Gate
 
   const editClient = document.getElementById("editClient");
     editClient.onchange = () => {
-  const isProject = editClient.value.toLowerCase() === "projects";
+  const cat = editClient.value.toLowerCase();
+  const isProject = cat === "projects";
+  const isSiteCat = cat === "site";   // generic Site (office / yard / one-off): number auto-assigned, not typed
 
+  // Projects hide the whole number row; a generic Site keeps the row (for Active)
+  // but hides just the Site Number field — its number is assigned automatically.
   document.getElementById("siteNumberRow").style.display = isProject ? "none" : "flex";
+  document.getElementById("siteNumField").style.display = isSiteCat ? "none" : "";
   document.getElementById("jobNumberRow").style.display = isProject ? "block" : "none";
 
   const jobInput = document.getElementById("editJobNumber");
@@ -682,6 +689,7 @@ Fob – Main Gate
     if (v==="retail") return "Retail";
     if (v === "fbc") return "Fareham BC";
     if (v === "chapplins") return "Chapplins";
+    if (v === "site") return "Site";
     return k || "";
   }
   function roundTrip(m){
@@ -988,8 +996,10 @@ preferredOrder.forEach(k => {
     editNumber.value = currentEditing.siteNumber || "";
     // Project mode → hide Site Number, show Job Number
 const isProject = (currentEditing.client || "").toLowerCase() === "projects";
+const isSiteCat = (currentEditing.client || "").toLowerCase() === "site";
 
 document.getElementById("siteNumberRow").style.display = isProject ? "none" : "flex";
+document.getElementById("siteNumField").style.display = isSiteCat ? "none" : "";
 document.getElementById("jobNumberRow").style.display = isProject ? "block" : "none";
 
 // Populate read-only job number if editing an existing project
@@ -1085,6 +1095,7 @@ if (marker && marker.setPosition) {
       const oldNum = currentEditing.siteNumber;
       currentEditing.client = editClient.value;
       const isProjectSave = (currentEditing.client || "").toLowerCase() === "projects";
+      const isSiteSave = (currentEditing.client || "").toLowerCase() === "site";
 
 // Projects: a BRAND-NEW project sends no number (the Worker assigns the next
 // P-number). An EXISTING project must send its number (= the P-number / job
@@ -1093,6 +1104,11 @@ if (marker && marker.setPosition) {
 if (isProjectSave) {
   const projNum = currentEditing.jobNumber || oldNum;
   if (projNum) currentEditing.siteNumber = projNum;
+  else delete currentEditing.siteNumber;
+} else if (isSiteSave) {
+  // Generic Site (office / yard / one-off): the number is auto-assigned by the
+  // Worker on a NEW site; an EXISTING one keeps its assigned number.
+  if (oldNum) currentEditing.siteNumber = oldNum;
   else delete currentEditing.siteNumber;
 } else {
   // Read the box; if it comes back empty (autofill/timing quirk that made the
@@ -1149,7 +1165,7 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
         delete currentEditing.fbcGateCodes;
         delete currentEditing.fbcWhat3Words;
       }
-      if (!isProjectSave && !currentEditing.siteNumber) return alert("Site Number required — enter a store/site number before saving.");
+      if (!isProjectSave && !isSiteSave && !currentEditing.siteNumber) return alert("Site Number required — enter a store/site number before saving.");
       if (!currentEditing.siteName) return alert("Site Name required");
       if (!currentEditing.postcode) return alert("Postcode required");
 

@@ -84,6 +84,11 @@ export async function handle(request, env, ctx, url, sess) {
       if (!site.jobNumber) site.jobNumber = await nextProjectNumber(env, tenantId);
       if (!String(site.siteNumber || "").trim()) site.siteNumber = site.jobNumber;
     }
+    // Generic "site" category (office / yard / one-off): auto-assign an S-number
+    // so it never needs one typed — same idea as projects, no job-number machinery.
+    if (path === "/add-site" && client === "site" && !String(site.siteNumber || "").trim()) {
+      site.siteNumber = await nextSiteNumber(env, tenantId);
+    }
 
     const siteNumber = String(site.siteNumber || "").trim();
     if (!siteNumber) return error("siteNumber required", 400, env, request);
@@ -448,6 +453,19 @@ async function nextProjectNumber(env, tenantId) {
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   return "P" + String(max + 1).padStart(4, "0");
+}
+
+async function nextSiteNumber(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT site_number FROM sites WHERE tenant_id=? AND client='site' AND site_number IS NOT NULL"
+  ).bind(db.tenantId).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = String(r.site_number).match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "S" + String(max + 1).padStart(4, "0");
 }
 
 function slug(s) {
