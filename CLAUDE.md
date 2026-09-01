@@ -3033,6 +3033,53 @@ signed / who hasn't); **any session**: GET /memos/pending, GET /memos/one?id=,
 POST /memos/ack. "Memos" is a default staff-doc category (hrdocs). memo-sign.html
 is in the _headers no-cache list.
 
+## Signable documents (routes/documents.js + documents-admin.html + document-sign.html — Aug 2026)
+The portal's own **document-signing** system — replaces Jotform Sign. A **generalisation
+of Company Memos**: a memo is a typed body; a signable document is a **prepared, reusable,
+branded document** kept in a **library**, sent to chosen users to read + sign, with the
+signed PDF filed to their **My Documents › Agreements**. Reuses the memos/sign patterns,
+`lib/pdf.js` + `lib/logo.js`, the My Documents R2 layout (`staffdocs/…`), push.js, filesign.js.
+- **House style — ONE shared renderer `lib/signdoc-pdf.js`** (`buildSignDocPdf({ref,title,body}, sig)`)
+  so every document looks the same (matches the Mostlane Annual Leave policy example):
+  Mostlane logo top-left of page 1, a **"COMPANY CONFIDENTIAL"** running header, a footer
+  with **Document ID + Page X of Y** (stamped after layout via the new `PdfDoc.textOn`/`lineOn`
+  helpers, so page numbers know the total), navy headings, then a **signature block** with
+  BOTH the issuer's and the signer's signature + dates + an IP/device audit line. Body markup
+  is plain text: `# H1`, `## H2`, `- bullet`, `---` rule, blank line = gap, else paragraph.
+- **Issuer auto-signature:** the admin draws their signature ONCE (documents-admin → "My
+  signature"), stored in R2 `docsig/<tid>/issuer/<user>.jpg` + remembered in app_config
+  `doc:issuersig:<user>`. On **send**, the document is auto-stamped with that signature +
+  the admin's name + the send date — no re-signing per document. (Send is refused with a
+  clear message until a signature is saved.)
+- **Send to chosen users:** pick a library doc + one or many recipients (searchable picker,
+  reused from the memos pattern). Each recipient gets a **pending** `doc_sends` row (snapshotting
+  title/body/issuer at issue time so later library edits never change an issued doc) + a push
+  (`/document-sign.html?id=<sendId>`, tag `doc:<id>`).
+- **Recipient signs:** document-sign.html renders the snapshot body (`#`/`##`/`-`/`---` → HTML),
+  shows "Issued by … on …", captures a drawn **JPEG** signature (auto-dated to the sign day),
+  POST /documents/sign → builds the final branded PDF (issuer + signer signatures), files it to
+  `staffdocs/<tid>/user/<me>/Agreements/…`, marks signed, captures **IP (CF-Connecting-IP) +
+  User-Agent**, and pushes the issuer "✅ Document signed".
+- **My Documents pending list:** my-documents.html shows a "✍️ Documents to sign" card at the
+  top for every user (GET /documents/pending) linking to the sign page. **Non-blocking for now**
+  — notifications/blocking pop-ups/deadlines are a deliberate follow-up (hooks left in place).
+- **Tables (self-migrating):** **doc_templates** (id/tenant/ref `MOS-DOC-####`/title/body/archived/
+  timestamps) + **doc_sends** (one row per (template,user): status pending|signed, issued_by/at,
+  issuer_name/sig_key, title_snapshot/body_snapshot, signed_at, signer_ip, signer_ua, doc_key,
+  sig_key; UNIQUE (tenant,template,username) — re-send re-opens). `ensure()` also adds
+  **"Agreements"** to the My-Documents category list so the filed copies show.
+- **Endpoints** (mounted /documents; FullAccess to manage, any session for own): POST /documents/template
+  (create/update — assigns ref on create), GET /documents/templates (library + counts + hasIssuerSignature),
+  POST /documents/template-delete, GET/POST /documents/issuer-signature, GET /documents/preview?id= (admin
+  PDF, issuer sig only — opened as an auth'd blob, NOT a public link), POST /documents/send {id,recipients[]},
+  GET /documents/status?id= (signed/pending, signed rows carry a signed /staff/doc link), GET /documents/pending
+  (mine), GET /documents/one?id= (recipient/admin), POST /documents/sign {id,signature}. No new PUBLIC_ROUTE —
+  the signed PDFs are served by the existing signed `/staff/doc`. Entry point: notification-centre.html "📄
+  Signable documents" card → documents-admin.html. documents-admin.html + document-sign.html are in the
+  _headers no-cache list. **TODO/next:** blocking gate + deadlines + notifications; seed the Portal User
+  Agreement + Annual Leave policy as starter library docs; optional PDF-upload path (append a branded
+  signature page to an uploaded PDF).
+
 ## Activity log (audit trail)
 Server middleware records every state-changing request automatically (covers
 all current AND future pages); portal-config beacons page views. Middleware also

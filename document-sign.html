@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Sign a document — Mostlane</title>
+  <script src="/portal-config.js?v=26"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; --ink:#16202e; --muted:#5b6b7b; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:var(--ink); }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:17px; margin:0; flex:1; }
+    .wrap { max-width:720px; margin:14px auto 60px; padding:0 12px; }
+    .doc { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:24px 26px 26px; }
+    .doc .conf { font-size:10px; letter-spacing:.14em; color:var(--muted); text-align:center; margin:0 0 14px; }
+    .doc h2.title { font-size:22px; color:var(--brand); margin:0 0 4px; }
+    .doc .issued { color:var(--muted); font-size:13px; margin:0 0 4px; }
+    .doc .ref { color:var(--muted); font-size:12px; margin:0 0 14px; }
+    .doc hr { border:none; border-top:1px solid var(--line); margin:14px 0; }
+    .doc .body h3 { color:var(--brand); font-size:17px; margin:18px 0 6px; }
+    .doc .body h4 { color:var(--brand); font-size:14px; margin:14px 0 4px; }
+    .doc .body p { line-height:1.5; font-size:15px; margin:0 0 10px; }
+    .doc .body ul { margin:0 0 10px; padding-left:20px; } .doc .body li { line-height:1.5; font-size:15px; margin:3px 0; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 12px rgba(6,24,54,.07); padding:16px; margin-top:14px; }
+    .card h2 { margin:0 0 4px; font-size:16px; }
+    .sub { color:var(--muted); font-size:13px; margin:0 0 10px; }
+    label.ck { display:flex; gap:10px; align-items:flex-start; font-size:15px; margin:6px 0 12px; cursor:pointer; }
+    label.ck input { width:20px; height:20px; margin-top:1px; flex:none; }
+    .sigwrap { border:1px solid #ccd5dd; border-radius:10px; overflow:hidden; background:#fff; }
+    #sigPad { width:100%; height:180px; display:block; touch-action:none; }
+    .sigbar { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:13px 18px; font-size:16px; font-weight:700; cursor:pointer; font-family:inherit; }
+    .btn:disabled { opacity:.5; cursor:default; }
+    .btn.grey { background:#5b6b7b; } .btn.small { padding:8px 12px; font-size:13px; }
+    .btn.big { width:100%; margin-top:14px; }
+    .msg { font-size:14px; margin:10px 0 0; } .msg.err { color:var(--bad); } .msg.ok { color:var(--ok); }
+    .donebox { text-align:center; padding:34px 16px; } .donebox .big { font-size:52px; }
+    .muted { color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="page"><h1>📄 Sign a document</h1></header>
+  <div class="wrap" id="wrap">
+    <div class="doc" id="docCard"><p class="muted">Loading…</p></div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    const qId = parseInt(new URLSearchParams(location.search).get("id"), 10) || 0;
+    let sigData = "", sctx = null, drawing = false;
+    const homeHref = () => "main.html";
+
+    // Render the stored body markup (# / ## / - / --- / blank) as safe HTML.
+    function renderBody(body) {
+      const lines = String(body || "").split(/\r?\n/);
+      let html = "", inUl = false;
+      const closeUl = () => { if (inUl) { html += "</ul>"; inUl = false; } };
+      for (const raw of lines) {
+        const line = raw.replace(/\s+$/, "");
+        if (!line.trim()) { closeUl(); continue; }
+        if (/^---+$/.test(line.trim())) { closeUl(); html += "<hr>"; continue; }
+        if (/^#\s+/.test(line)) { closeUl(); html += "<h3>" + esc(line.replace(/^#\s+/, "")) + "</h3>"; continue; }
+        if (/^##\s+/.test(line)) { closeUl(); html += "<h4>" + esc(line.replace(/^##\s+/, "")) + "</h4>"; continue; }
+        if (/^[-•]\s+/.test(line)) { if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + esc(line.replace(/^[-•]\s+/, "")) + "</li>"; continue; }
+        closeUl(); html += "<p>" + esc(line) + "</p>";
+      }
+      closeUl();
+      return html;
+    }
+
+    async function load() {
+      if (!qId) { g("docCard").innerHTML = '<p class="muted">No document specified.</p>'; return; }
+      try {
+        const d = await authFetch("/documents/one?id=" + qId).then(r => r.json());
+        if (!d.ok) throw new Error(d.error || "Not found");
+        if (d.signed) { showDone(true); return; }
+        render(d.doc);
+      } catch (e) {
+        g("docCard").innerHTML = '<p class="muted">Couldn\'t load this document. It may have been withdrawn.</p>' +
+          '<p style="text-align:center"><a class="btn" style="text-decoration:none;display:inline-block" href="' + homeHref() + '">Back to menu</a></p>';
+      }
+    }
+
+    function render(d) {
+      const issued = d.issuerName ? ("Issued by " + esc(d.issuerName) + (d.issuedAt ? " on " + new Date(d.issuedAt).toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" }) : "")) : "";
+      g("docCard").innerHTML =
+        '<p class="conf">COMPANY CONFIDENTIAL</p>' +
+        '<h2 class="title">' + esc(d.title || "Document") + '</h2>' +
+        (issued ? '<p class="issued">' + issued + '</p>' : '') +
+        (d.ref ? '<p class="ref">Document ID: ' + esc(d.ref) + '</p>' : '') +
+        '<hr><div class="body">' + renderBody(d.body) + '</div>';
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML =
+        '<h2>Read &amp; sign</h2>' +
+        '<p class="sub">Confirm you have read and understood this document. A signed copy is saved to your <b>My Documents › Agreements</b>.</p>' +
+        '<label class="ck"><input type="checkbox" id="ackck"><span>I confirm I have read and understood this document.</span></label>' +
+        '<div class="sigwrap"><canvas id="sigPad"></canvas></div>' +
+        '<div class="sigbar"><span class="muted" style="font-size:12px;">Sign above with your finger or mouse</span><button class="btn grey small" type="button" id="sigClear">Clear</button></div>' +
+        '<button class="btn big" id="signBtn" disabled>Sign document</button>' +
+        '<p class="msg" id="msg"></p>';
+      g("wrap").appendChild(card);
+      initSig();
+      g("ackck").addEventListener("change", refresh);
+      g("sigClear").onclick = () => { const c = g("sigPad"); sctx.fillStyle = "#fff"; sctx.fillRect(0, 0, c.width, c.height); sigData = ""; refresh(); };
+      g("signBtn").addEventListener("click", submit);
+    }
+
+    function refresh() { g("signBtn").disabled = !(g("ackck").checked && !!sigData); }
+
+    function initSig() {
+      const c = g("sigPad");
+      const w = c.clientWidth || 320, h = 180;
+      c.width = w; c.height = h;
+      sctx = c.getContext("2d");
+      sctx.fillStyle = "#fff"; sctx.fillRect(0, 0, w, h);
+      sctx.strokeStyle = "#0f172a"; sctx.lineWidth = 2.2; sctx.lineJoin = "round"; sctx.lineCap = "round";
+      const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+      const down = e => { drawing = true; const p = pos(e); sctx.beginPath(); sctx.moveTo(p.x, p.y); e.preventDefault(); };
+      const move = e => { if (!drawing) return; const p = pos(e); sctx.lineTo(p.x, p.y); sctx.stroke(); e.preventDefault(); };
+      const up = () => { if (!drawing) return; drawing = false; sigData = c.toDataURL("image/jpeg", 0.92); refresh(); };
+      c.onpointerdown = down; c.onpointermove = move; c.onpointerup = up; c.onpointerleave = up;
+    }
+
+    async function submit() {
+      const btn = g("signBtn"), msg = g("msg");
+      if (!g("ackck").checked || !sigData) return;
+      btn.disabled = true; btn.textContent = "Saving…"; msg.className = "msg"; msg.textContent = "";
+      try {
+        const r = await authFetch("/documents/sign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: qId, signature: sigData }) }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Failed");
+        showDone(false);
+      } catch (e) {
+        msg.className = "msg err"; msg.textContent = "Couldn't save your signature — please try again.";
+        btn.disabled = false; btn.textContent = "Sign document";
+      }
+    }
+
+    function showDone(already) {
+      g("wrap").innerHTML =
+        '<div class="card donebox"><div class="big">✅</div>' +
+        '<h2 style="margin:8px 0 4px;">' + (already ? "Already signed" : "Thank you — signed") + '</h2>' +
+        '<p class="sub">A signed copy has been saved to your <b>My Documents › Agreements</b>.</p>' +
+        '<a class="btn" style="text-decoration:none;display:inline-block;margin-top:8px;" href="' + homeHref() + '">Back to menu</a></div>';
+    }
+
+    load();
+  </script>
+</body>
+</html>

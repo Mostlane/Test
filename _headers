@@ -93,6 +93,10 @@
   Cache-Control: no-cache
 /memo-sign.html
   Cache-Control: no-cache
+/documents-admin.html
+  Cache-Control: no-cache
+/document-sign.html
+  Cache-Control: no-cache
 /fleet-report.html
   Cache-Control: no-cache
 /van-timesheet.html

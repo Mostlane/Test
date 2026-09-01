@@ -40,6 +40,13 @@
 </header>
 
 <div class="wrap">
+  <!-- Documents awaiting your signature -->
+  <div class="card" id="pendingCard" style="display:none;border-color:#f59e0b;background:#fffbeb;">
+    <h2>✍️ Documents to sign</h2>
+    <p class="sub">These have been sent to you and need reading and signing.</p>
+    <div id="pendingList"></div>
+  </div>
+
   <!-- Admin controls (Full access only) -->
   <div class="adminbar" id="adminBar" style="display:none;">
     <label class="lbl">Manage a staff member's file</label>
@@ -284,7 +291,22 @@ async function eraseAccount(){
   }catch{ toast("Erase failed"); }
 }
 
+async function loadPending(){
+  try{
+    const d = await authFetch("/documents/pending").then(r=>r.json());
+    const list = (d && d.documents) || [];
+    if(!list.length) return;   // card stays hidden
+    document.getElementById("pendingList").innerHTML = list.map(x => `
+      <div class="doc" style="background:#fff;">
+        <div class="nm"><b>${esc(x.title||"Document")}</b><span>${x.issuedBy?"from "+esc(x.issuedBy):""}${x.at?" · "+fmtDate(x.at):""}${x.ref?" · "+esc(x.ref):""}</span></div>
+        <a class="btn primary small" href="/document-sign.html?id=${encodeURIComponent(x.id)}">Read &amp; sign</a>
+      </div>`).join("");
+    document.getElementById("pendingCard").style.display = "block";
+  }catch(e){ /* non-fatal */ }
+}
+
 function init(){
+  loadPending();
   if(full){
     document.getElementById("adminBar").style.display = "block";
     document.getElementById("upBtn").addEventListener("click", doUpload);
