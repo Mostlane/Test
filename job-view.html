@@ -1026,6 +1026,10 @@ function mountRemedialsView(){
 // returned on the job (auditItems[].refPhotoUrls / donePhotoUrl).
 let auditViewTimer = null;
 function renderAuditView(){
+  // Local esc — this function is not inside renderJob's scope and there is no
+  // global esc(), so referencing it here threw "esc is not defined", which broke
+  // the office view of every site-audit job ("Error loading job").
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const card = $("auditCard"); if(!card || !job) return;
   const items = Array.isArray(job.auditItems) ? job.auditItems : [];
   if(auditViewTimer){ clearInterval(auditViewTimer); auditViewTimer = null; }
