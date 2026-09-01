@@ -179,6 +179,15 @@ let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO
 // Door-to-door fuel mileage is computed + locked server-side for self-employed
 // fuel-paid engineers — this helper reads the day's figure for the totals/card.
 function autoDayMiles(date){ if(!(AUTOMI&&AUTOMI.applies))return null; const b=AUTOMI.byDate&&AUTOMI.byDate[date]; return b?(b.miles||0):0; }
+// Repaint the door-to-door breakdown for every day (after a save recomputes it
+// server-side) without touching the input rows, so typing/focus isn't disturbed.
+function paintAutoMileage(){
+  if(!(AUTOMI&&AUTOMI.applies))return;
+  document.querySelectorAll(".card[data-date]").forEach(card=>{
+    const host=card.querySelector(".miAutoHost");
+    if(host){ const date=card.dataset.date; host.innerHTML=(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""; }
+  });
+}
 function autoMiHtml(date){
   const b=(AUTOMI&&AUTOMI.byDate)?AUTOMI.byDate[date]:null;
   const head=`<div class="flab">Fuel mileage — door-to-door (automatic, locked)</div>`;
@@ -369,7 +378,7 @@ function render(){
           <button type="button" class="addjob">＋ Add another job</button>
           <div class="addjobbox" hidden><input type="text" class="addjob-input" placeholder="Search a job number, site or description…" autocomplete="off"><div class="addjob-res"></div></div>
         </div>
-        ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?((AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""):`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
+        ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?`<div class="miAutoHost">${(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""}</div>`:`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
         ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
@@ -506,11 +515,15 @@ async function doSave(opts={}){
     status=r.status;
     const j=await r.json().catch(()=>null);
     ok=!!(j&&j.ok);
+    // The server recomputes door-to-door mileage from the saved day — apply the
+    // fresh route so adding/removing a job updates the breakdown + totals.
+    if(ok&&j.autoMileage){AUTOMI=j.autoMileage;}
   }catch(e){}
   saveBusy=false;
   if(status===409){await load();return;}   // invoiced on another device — show the lock
   if(ok){
     g("saveState").textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    paintAutoMileage();refreshTotals();
     if(saveDirty)doSave();
   }else{
     saveDirty=true;
