@@ -7533,6 +7533,109 @@ async function handle8(request, env, ctx, url, sess) {
       await saveJob(env, tenantId, job);
       return jsonResponse({ ok: true, itemId: item.id, done: !!item.done }, headers);
     }
+    if (parts[2] === "remedial-photo" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      let form;
+      try {
+        form = await request.formData();
+      } catch {
+        return jsonResponse({ error: "Upload was incomplete \u2014 please retry.", incomplete: true }, headers, 400);
+      }
+      const file = form.get("file");
+      const itemId = String(form.get("itemId") || searchParams.get("itemId") || "").replace(/[^\w-]/g, "") || "misc";
+      if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
+      const fn = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const key = `jobs/${id}/remedial/${itemId}/${fn}`;
+      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.stream === "function") {
+        try {
+          await env.JOB_FILES.put(key + ".thumb", thumb.stream(), { httpMetadata: { contentType: thumb.type || "image/jpeg" } });
+        } catch {
+        }
+      }
+      return jsonResponse({ ok: true, key, url: r2Url(env, key), thumb: r2Url(env, key + ".thumb") }, headers, 201);
+    }
+    if (parts[2] === "remedial-photo" && method === "DELETE") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const key = searchParams.get("key") || "";
+      if (key.startsWith(`jobs/${id}/remedial/`)) {
+        try {
+          await env.JOB_FILES.delete(key);
+          await env.JOB_FILES.delete(key + ".thumb");
+        } catch {
+        }
+      }
+      return jsonResponse({ ok: true }, headers);
+    }
+    if (parts[2] === "create-works-job" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const rem = Array.isArray(src.remedials) ? src.remedials.filter((r) => r && (r.description || (r.photos || []).length)) : [];
+      if (!rem.length) return jsonResponse({ error: "This job has no remedials to turn into works." }, headers, 400);
+      if (src.remedialsWorksJobId) {
+        const ex = await getJob(env, tenantId, src.remedialsWorksJobId).catch(() => null);
+        if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
+      }
+      const newId4 = crypto.randomUUID();
+      const auditItems = [];
+      for (const r of rem) {
+        const itemId = crypto.randomUUID();
+        const refPhotos = [];
+        for (const srcKey of r.photos || []) {
+          try {
+            const obj = await env.JOB_FILES.get(srcKey);
+            if (!obj) continue;
+            const fn = String(srcKey).split("/").pop();
+            const dstKey = `jobs/${newId4}/audit/${itemId}/${fn}`;
+            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+            try {
+              const t = await env.JOB_FILES.get(srcKey + ".thumb");
+              if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata });
+            } catch {
+            }
+            refPhotos.push(dstKey);
+          } catch {
+          }
+        }
+        auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
+      }
+      const baseRef = src.siteName || src.helpdeskRef || src.siteCode || "Remedial works";
+      const payload = {
+        id: newId4,
+        reference: baseRef,
+        description: `Remedial works from electrical test${src.helpdeskRef ? " (" + src.helpdeskRef + ")" : ""}.`,
+        siteCode: src.siteCode,
+        siteName: src.siteName,
+        address: src.address,
+        postcode: src.postcode,
+        telephone: src.telephone,
+        storeType: src.storeType,
+        client: src.client,
+        lat: src.lat,
+        lon: src.lon,
+        auditItems,
+        assignedEngineers: [],
+        // unassigned — the office allocates it
+        priority: src.priority || "",
+        changedBy: sess.user && sess.user.username || "system"
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      src.remedialsWorksJobId = job.id;
+      src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      await saveJob(env, tenantId, src);
+      try {
+        const nj = await getJob(env, tenantId, job.id);
+        if (nj) {
+          nj.fromRemedialsOf = id;
+          await saveJob(env, tenantId, nj);
+        }
+      } catch {
+      }
+      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+    }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -7696,6 +7799,7 @@ async function handle8(request, env, ctx, url, sess) {
       const d = decorateJobWithLiveSla(job);
       if (sess) d.myStatus = effStatus(job, normId(sess.user.username));
       if (isAuditJob(job)) d.auditItems = decorateAuditItems(env, job.auditItems);
+      if (job.remedials) d.remedials = decorateRemedials(env, job.remedials);
       return jsonResponse(d, headers);
     }
     if (method === "DELETE" && !parts[2]) {
@@ -8172,9 +8276,44 @@ function normAuditItems(input, existing) {
   }
   return out;
 }
+function isElecTest(job) {
+  return !!(job && job.elecTest);
+}
+function normRemedials(input, existing) {
+  if (!Array.isArray(input)) return existing?.remedials;
+  const prev = {};
+  for (const it of existing?.remedials || []) if (it && it.id) prev[it.id] = it;
+  const CODES = ["C1", "C2", "C3", "FI"];
+  const out = [];
+  for (const raw of input) {
+    if (!raw) continue;
+    const id = String(raw.id || "") || crypto.randomUUID();
+    const was = prev[id] || {};
+    const description = String(raw.description != null ? raw.description : was.description || "").slice(0, 2e3);
+    const upper = String(raw.code || "").toUpperCase();
+    const code = CODES.includes(upper) ? upper : raw.code === "" ? "" : was.code || "";
+    let minutes = raw.minutes !== void 0 ? Number(raw.minutes) : was.minutes;
+    if (!(minutes >= 0) || !isFinite(minutes)) minutes = 0;
+    let materialCost = raw.materialCost !== void 0 ? Number(raw.materialCost) : was.materialCost;
+    if (!(materialCost >= 0) || !isFinite(materialCost)) materialCost = 0;
+    const photos = Array.isArray(raw.photos) ? raw.photos.map((p) => typeof p === "string" ? p : p && p.key).filter(Boolean).slice(0, 20) : Array.isArray(was.photos) ? was.photos : [];
+    if (!description && !photos.length && !(raw.id && prev[raw.id])) continue;
+    out.push({ id, code, description, minutes: Math.round(minutes), materialCost: Math.round(materialCost * 100) / 100, photos });
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+function decorateRemedials(env, remedials) {
+  if (!Array.isArray(remedials)) return remedials;
+  return remedials.map((r) => ({
+    ...r,
+    photoUrls: (r.photos || []).map((k) => ({ key: k, url: r2Url(env, k), thumb: r2Url(env, k + ".thumb") }))
+  }));
+}
 function completionMissing(job, patch, afterPhotoCount) {
   if (job && job.firestopping) return firestopMissing(job);
   if (job && (job.emTest || job.pat)) return [];
+  if (isElecTest(job)) return [];
   if (isAuditJob(job)) return auditMissing(job);
   if (job && job.investigateOnly) return [];
   const miss = [];
@@ -8736,6 +8875,13 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     emKind: body.emKind !== void 0 ? body.emKind === "monthly" ? "monthly" : "yearly" : existing?.emKind || "",
     pat: body.pat !== void 0 ? !!body.pat : existing?.pat || false,
     emTimer: body.emTimer !== void 0 ? body.emTimer || null : existing?.emTimer || null,
+    // Electrical test job: the engineer runs the test and captures a list of
+    // REMEDIAL works (each: code C1/C2/C3/FI, description, duration, material £,
+    // photos). Completion is relaxed (the remedials list is the deliverable). A
+    // one-tap office action turns the remedials into a new unassigned site-audit
+    // works job (photos carried, duration/cost stripped). Preserved across re-saves.
+    elecTest: body.elecTest !== void 0 ? !!body.elecTest : existing?.elecTest || false,
+    remedials: normRemedials(body.remedials, existing),
     // Investigate-only job: shows a big red "INVESTIGATE ONLY" banner on the
     // engineer + office job pages. Preserved across re-saves.
     investigateOnly: body.investigateOnly !== void 0 ? !!body.investigateOnly : existing?.investigateOnly || false,
@@ -8894,6 +9040,8 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.emKind !== void 0) job.emKind = patch.emKind === "monthly" ? "monthly" : "yearly";
   if (patch.pat !== void 0) job.pat = !!patch.pat;
   if (patch.emTimer !== void 0) job.emTimer = patch.emTimer || null;
+  if (patch.elecTest !== void 0) job.elecTest = !!patch.elecTest;
+  if (patch.remedials !== void 0) job.remedials = normRemedials(patch.remedials, job);
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;

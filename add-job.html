@@ -290,6 +290,14 @@
         <div class="hint" id="fsHint">Tick for fire-stopping works. The engineer fills the Record of Installation Activities (RIA) form — per-seal photos, products used and a signed declaration — and completing the job produces the PDF + product-spec bundle.</div>
       </div>
 
+      <!-- Electrical test job -->
+      <div class="field-group">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
+          <input type="checkbox" id="elecTest" style="width:auto"> ⚡ Electrical test
+        </label>
+        <div class="hint">Tick for an electrical test (EICR etc.). On the job the engineer records a <b>remedial works list</b> — each item with a code (C1/C2/C3/FI), what needs doing, rough duration, an approximate material cost and photos. When you get the order, one tap on the job turns those remedials into a new works job to allocate.</div>
+      </div>
+
       <!-- Standby / fallback job (dormant pool) -->
       <div class="field-group">
         <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;margin:0;cursor:pointer;font-size:15px">
@@ -774,11 +782,12 @@ async function handleSubmit(evt){
     scheduledAt: ($("fallbackTemplate") && $("fallbackTemplate").checked) ? undefined : toIsoOrNull($("scheduledAt").value),
     durationMinutes: Number($("expectedDuration").value) || 60,
     workArea: ($("workArea") && $("workArea").value) || undefined,
-    requiresRA: $("firestopping").checked ? false : $("reqRA").checked,
-    requiresSignature: $("firestopping").checked ? false : $("reqSig").checked,
-    requiresPhoto: $("firestopping").checked ? false : $("reqPhoto").checked,
-    requiresNote: $("firestopping").checked ? false : $("reqNote").checked,
+    requiresRA: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqRA").checked,
+    requiresSignature: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqSig").checked,
+    requiresPhoto: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqPhoto").checked,
+    requiresNote: ($("firestopping").checked || ($("elecTest") && $("elecTest").checked)) ? false : $("reqNote").checked,
     firestopping: $("firestopping").checked,
+    elecTest: $("elecTest") ? $("elecTest").checked : false,
     emTest: $("emTest") ? $("emTest").checked : false,
     emKind: ($("emTest") && $("emTest").checked) ? emKindVal() : "",
     pat: $("patTest") ? $("patTest").checked : false,

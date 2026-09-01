@@ -2414,6 +2414,31 @@ it straight onto the compliance chart (rolling the next-due date).
   navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
+## Electrical test → remedials → one-tap works job (sla.js + remedials-form.js — Sep 2026)
+An **electrical-test job** (add-job.html **⚡ Electrical test** tick → `job.elecTest`;
+sends requiresRA/Sig/Photo/Note=false) lets the engineer record a **remedial-works
+list** on the job: `job.remedials = [{id, code (C1/C2/C3/FI/""), description,
+minutes, materialCost, photos:[R2 keys]}]`. Threaded through
+`createOrUpdateJobFromPayload` + `patchJob` (`normRemedials` preserves photos by id);
+GET job returns `remedials` with `photoUrls` via `decorateRemedials`. Completion is
+**relaxed** (`completionMissing`/engineer-job `outcomeMissing` return [] for elecTest
+— a clean test has no remedials). Photos: **POST /sla/jobs/{id}/remedial-photo**
+(multipart file+thumb+itemId → R2 `jobs/<id>/remedial/<itemId>/…`, returns the key)
++ **DELETE /sla/jobs/{id}/remedial-photo?key=**. **One-tap works job:** **POST
+/sla/jobs/{id}/create-works-job** (FullAccess|SLAAdmin) builds a NEW UNASSIGNED
+**site-audit** job at the same site — each remedial → an audit item (`text` =
+`[code] description`, the engineer's photos COPIED into `jobs/<newId>/audit/<item>/…`
+as the item's refPhotos), **duration + material cost NOT carried** (pricing stays off
+the works job). Idempotent (`job.remedialsWorksJobId` links both ways;
+`fromRemedialsOf` on the new job). Front-end: shared **remedials-form.js** (`?v=1`,
+`window.MLRemedials.mount(el,{jobId,mode:engineer|office,api,token,job,canManage})`)
+— engineer mode = add/edit/remove items (code · description · duration(min) · material
+£ · camera photos, autosaves via PATCH {remedials}); office mode = clean table +
+totals + **"➕ Create works job"** button. Mounted in engineer-job.html (elecTest →
+`remedialHost`, slim Travelling/In Progress/Complete status set) + job-view.html
+(office `remedialCard`). NB the electrical engineer must be ADDED to the portal
+(Users Admin) before he can be assigned these jobs.
+
 ## Firestopping / RIA form (sla.js `/sla/firestop/*` + firestop-form.js + firestop-admin.html — Aug 2026)
 A **fire-stopping job** produces a "Record of Installation Activities" (RIA) PDF
 from the engineer's per-seal photos + a signed declaration, bundled with the

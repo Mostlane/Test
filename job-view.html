@@ -9,6 +9,7 @@
   <script src="sla-jobedit.js?v=28"></script>
   <script src="firestop-form.js?v=1"></script>
   <script src="cert-form.js?v=14"></script>
+  <script src="remedials-form.js?v=1"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -555,6 +556,12 @@
     <div id="auditBody"></div>
   </div>
 
+  <!-- ELECTRICAL TEST — remedial works list (office review + create works job) -->
+  <div class="card" id="remedialCard" style="display:none;">
+    <h2 class="section-title">⚡ Remedial works</h2>
+    <div id="remedialHostView"></div>
+  </div>
+
   <!-- EM / PAT certificate — a live read-only view of what the engineer sees -->
   <div class="card" id="certCard" style="display:none;">
     <h2 class="section-title">📄 EM / PAT certificate <span class="sub" style="font-weight:400;font-size:12px;color:#8a97a6;">· edit &amp; autosave</span></h2>
@@ -991,8 +998,27 @@ function renderJob(){
   mountFirestopView();
   renderAuditView();
   mountCertView();
+  mountRemedialsView();
 
   startCountdownLoop();
+}
+
+// Electrical-test jobs: office review of the engineer's remedial-works list, with
+// a one-tap "Create works job" (a new unassigned site-audit job carrying the
+// tasks + photos, no durations/costs). Admins (FullAccess|SLAAdmin) may create.
+let remedialViewMounted = false;
+function mountRemedialsView(){
+  const card = $("remedialCard"); if(!card || !job) return;
+  if(!job.elecTest && !(Array.isArray(job.remedials) && job.remedials.length)){ card.style.display = "none"; return; }
+  card.style.display = "";
+  if(remedialViewMounted || !window.MLRemedials) return;
+  remedialViewMounted = true;
+  let admin = false;
+  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); admin = p.FullAccess === "Yes" || p.SLAAdmin === "Yes"; }catch(e){}
+  window.MLRemedials.mount($("remedialHostView"), {
+    jobId: job.id, mode: "office", api: window.MOSTLANE_API, token: localStorage.getItem("mostlaneToken"),
+    job: job, canManage: admin
+  });
 }
 
 // Site-audit jobs: read-only checklist with each item's reference (before) +
