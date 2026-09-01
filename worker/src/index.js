@@ -42,6 +42,7 @@ import * as push from "./routes/push.js";          // DONE  (web push subscripti
 import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timesheets + self-employed invoices)
 import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer messages — Inbox)
 import * as memos from "./routes/memos.js";        // DONE  (company memos: draft/send/sign, filed to My Documents)
+import * as documents from "./routes/documents.js"; // DONE  (signable documents: library → send to chosen users → sign → filed to My Documents)
 import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as chapplins from "./routes/chapplins.js";   // DONE (Chapplins customer: site tenants current/previous + directory)
@@ -84,6 +85,7 @@ const ROUTES = [
   ["*", "/push",       push.handle],      // web push subscriptions + test send
   ["*", "/messages",   messages.handle],  // office ↔ engineer messages (Inbox)
   ["*", "/memos",      memos.handle],     // company memos (draft/send/sign)
+  ["*", "/documents",  documents.handle], // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
