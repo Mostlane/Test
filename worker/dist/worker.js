@@ -4113,6 +4113,7 @@ var DEFAULTS = {
   lunchThresholdH: 6,
   pencePerMile: 45,
   radiusMiles: 10,
+  overtimeThresholdH: 8,
   basePostcode: "PO15 5RQ",
   company: "Mostlane"
 };
@@ -4170,6 +4171,10 @@ function effectiveCfg(cfg, u) {
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
     rate: num2(mine.rate) ?? (mine.rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate),
+    // Overtime: a multiplier of the normal HOURLY rate, applied to hours over the
+    // daily threshold. Only for hourly staff (day-rate excluded) with a mult set.
+    overtimeMult: num2(mine.overtimeMult),
+    overtimeThresholdH: Number(mine.overtimeThresholdH ?? cfg.defaults.overtimeThresholdH) || 8,
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],
     // extra lines under their name on the invoice
@@ -4221,27 +4226,48 @@ function dayMiles(d) {
   return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0));
 }
 function weekTotals(days, eff) {
-  let paidMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const otOn = eff.rateType !== "day" && eff.overtimeMult > 0;
+  const thrMin = (eff.overtimeThresholdH || 8) * 60;
+  let paidMins = 0, otMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
   for (const d of Object.values(days || {})) {
     const c = dayCalc(d, eff);
     paidMins += c.paid;
     miles += c.miles;
     milesClaimed += c.milesClaimed;
     if (c.worked) daysWorked++;
+    if (otOn && c.paid > thrMin) otMins += c.paid - thrMin;
   }
-  const hours = Math.round(paidMins / 60 * 100) / 100;
-  const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
+  const hours = r2(paidMins / 60);
+  const otHours = r2(otMins / 60);
+  const normalHours = r2((paidMins - otMins) / 60);
+  const otRate = otOn && eff.rate ? r2(eff.rate * eff.overtimeMult) : null;
+  let labour = null, otPay = 0, normalPay = 0;
+  if (eff.rate) {
+    if (eff.rateType === "day") {
+      labour = r2(daysWorked * eff.rate);
+    } else {
+      normalPay = normalHours * eff.rate;
+      otPay = otHours * (otRate || eff.rate);
+      labour = r2(normalPay + otPay);
+    }
+  }
   const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
   return {
     paidMins,
     hours,
+    normalHours,
+    otHours,
+    otRate,
+    otPay: r2(otPay),
+    normalPay: r2(normalPay),
     miles: round1(miles),
     milesClaimed: round1(milesClaimed),
     milesDeducted: round1(miles - milesClaimed),
     daysWorked,
     labour,
     mileagePay,
-    total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null
+    total: labour != null ? r2(labour + mileagePay) : null
   };
 }
 async function loadWeek(env, tid, username, monday) {
@@ -4798,6 +4824,13 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   if (eff.rateType === "day" && eff.rate) {
     doc.text(cTot, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
     doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true });
+    y += 16;
+  } else if (totals.otHours > 0 && eff.rate) {
+    doc.text(cTot, y, "Labour: " + totals.normalHours + " h @ " + money(eff.rate) + "/h", { size: 10 });
+    doc.text(cAmt, y, money(totals.normalPay), { size: 10, alignRight: true });
+    y += 16;
+    doc.text(cTot, y, "Overtime: " + totals.otHours + " h @ " + money(totals.otRate) + "/h (" + eff.overtimeMult + "\xD7)", { size: 10 });
+    doc.text(cAmt, y, money(totals.otPay), { size: 10, alignRight: true });
     y += 16;
   } else {
     doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
@@ -5568,7 +5601,7 @@ async function handle7(request, env, ctx, url, sess) {
           }
           const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
           for (const k of ["commute", "lunch", "mileage", "radius"]) if (k in v) mine[k] = v[k] === true;
-          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles"]) {
+          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles", "overtimeMult", "overtimeThresholdH"]) {
             if (k in v) {
               const n = parseFloat(v[k]);
               if (isFinite(n) && n >= 0) mine[k] = n;
