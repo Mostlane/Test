@@ -207,8 +207,9 @@ function holName(t){ return t==="Unpaid"?"Unpaid Leave":t==="Other"?"Leave":"Hol
 function bankName(b){ return b&&b.kind==="shutdown"?"Company Shutdown":"Bank Holiday"; }
 // The emoji + full label for a day's marker (booked leave wins over a bank holiday).
 function dayMark(date){
-  const h=HOL[date]; if(h) return "🌴 "+holName(h.type)+((h.half==="AM"||h.half==="PM")?" ("+h.half+")":"");
-  const b=BANK[date]; if(b) return "🏦 "+bankName(b);
+  const paid=(DAYS[date]&&DAYS[date].leaveHours!=null)?` · ${DAYS[date].leaveHours}h paid`:"";
+  const h=HOL[date]; if(h) return "🌴 "+holName(h.type)+((h.half==="AM"||h.half==="PM")?" ("+h.half+")":"")+paid;
+  const b=BANK[date]; if(b) return "🏦 "+bankName(b)+paid;
   return "";
 }
 
@@ -263,17 +264,21 @@ function refreshTotals(){
     if(otOn&&c.paid>thrMin)otMins+=c.paid-thrMin;
     const dm=auto?(autoDayMiles(date)||0):c.miles;
     miles+=dm;milesClaimed+=auto?claimedMiles(dm):c.milesClaimed;}
+  // Admin-set paid leave hours (holiday/bank/shutdown) — fixed, read from DAYS.
+  let leaveH=0; for(const dt of Object.keys(DAYS||{})){const lh=DAYS[dt]&&DAYS[dt].leaveHours;if(lh!=null)leaveH+=parseFloat(lh)||0;}
+  leaveH=Math.round(leaveH*100)/100;
   const hours=Math.round(paid/60*100)/100;
   miles=Math.round(miles*10)/10;milesClaimed=Math.round(milesClaimed*10)/10;
   let h=`<span>Paid time<b>${hmS(paid)}</b></span><span>Days<b>${worked}</b></span>`;
   if(otOn&&otMins>0) h+=`<span>Overtime<b>${hmS(otMins)}</b>${ME.overtimeMult?`<span style="display:block;font-size:10px;text-transform:none;letter-spacing:0">${ME.overtimeMult}× over ${ME.overtimeThresholdH||8}h/day</span>`:""}</span>`;
+  if(leaveH>0) h+=`<span>Paid leave<b>${leaveH}h</b></span>`;
   if(ME&&ME.mileage){
     h+=`<span>Mileage<b>${milesClaimed} mi</b>${milesClaimed!==miles?`<span style="display:block;font-size:10px;text-transform:none;letter-spacing:0">${miles} − ${Math.round((miles-milesClaimed)*10)/10} radius</span>`:""}</span>`;
   }
   if(ME&&ME.selfEmployed&&ME.rate){
     let labour;
     if(ME.rateType==="day")labour=worked*ME.rate;
-    else{const normMins=paid-otMins;labour=(normMins/60)*ME.rate+(otMins/60)*ME.rate*(ME.overtimeMult||1);}
+    else{const normMins=paid-otMins;labour=(normMins/60)*ME.rate+(otMins/60)*ME.rate*(ME.overtimeMult||1)+leaveH*ME.rate;}
     const mp=milesClaimed*ME.pencePerMile/100;
     h+=`<span>Labour<b>${money(labour)}</b></span>`;
     if(ME.mileage) h+=`<span>Mileage pay<b>${money(mp)}</b></span>`;
@@ -349,7 +354,7 @@ function render(){
     if(hol && hol.half!=="AM" && hol.half!=="PM"){
       card.className="card hol"+(i>=5?" wknd":"");
       card.innerHTML=`<div class="dhead" style="cursor:default">
-        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${dLabel}</span></span>
+        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${dLabel}${(d.leaveHours!=null)?` · ${d.leaveHours}h paid`:""}</span></span>
         <span class="holtag">🌴 ${esc(holName(hol.type))}</span></div>`;
       host.appendChild(card);
       continue;
