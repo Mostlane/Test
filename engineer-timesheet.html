@@ -107,6 +107,12 @@
   .mi{margin-top:12px}
   .mirow{display:flex;gap:8px;align-items:center;margin:7px 0;background:#f6f9fc;border:1px solid #e8eef6;border-radius:12px;padding:9px 8px 9px 12px;font-size:14.5px}
   .mirow .btn{padding:7px 11px;flex:none;border-radius:10px}
+  .mautowrap{background:#f6f9fc;border:1px solid #e8eef6;border-radius:12px;padding:6px 12px;margin-top:6px}
+  .mileg{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:13.5px;padding:5px 0;border-bottom:1px dashed #e2e8f0}
+  .mileg:last-child{border-bottom:none}
+  .mileg span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#334155}
+  .mileg b{flex:none;color:var(--ink)}
+  .mileg.mitot{font-weight:700;border-top:1px solid #cbd5e1;border-bottom:none;margin-top:2px;padding-top:7px}
   /* totals */
   .tot{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .tot span{background:#f6f9fc;border-radius:12px;padding:10px 6px;text-align:center;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
@@ -169,7 +175,23 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={}, APPROVAL=null;
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null;
+// Door-to-door fuel mileage is computed + locked server-side for self-employed
+// fuel-paid engineers — this helper reads the day's figure for the totals/card.
+function autoDayMiles(date){ if(!(AUTOMI&&AUTOMI.applies))return null; const b=AUTOMI.byDate&&AUTOMI.byDate[date]; return b?(b.miles||0):0; }
+function autoMiHtml(date){
+  const b=(AUTOMI&&AUTOMI.byDate)?AUTOMI.byDate[date]:null;
+  const head=`<div class="flab">Fuel mileage — door-to-door (automatic, locked)</div>`;
+  if(!b) return `<div class="mi">${head}<div class="muted" style="font-size:12px">No mileage for this day yet.</div></div>`;
+  if(b.noRoute) return `<div class="mi">${head}<div class="muted" style="font-size:12px">No site postcodes captured for this day, so no mileage could be worked out.</div></div>`;
+  const legs=(b.legs||[]).map(l=>`<div class="mileg"><span>${esc(l.from)} → ${esc(l.to)}</span><b>${l.miles} mi${l.src==="est"?" ~":""}</b></div>`).join("");
+  const cl=claimedMiles(b.miles);
+  return `<div class="mi">${head}
+    <div class="mautowrap">${legs}
+    <div class="mileg mitot"><span>Day total${cl!==b.miles?` (−${Math.round((b.miles-cl)*10)/10} radius)`:""}</span><b>${cl} mi</b></div></div>
+    ${b.missing?`<div class="muted" style="font-size:11px;margin-top:4px">⚠ A stop couldn't be located from its postcode and was skipped.</div>`:""}
+    <div class="muted" style="font-size:11px;margin-top:2px">Office ${esc(AUTOMI.base||"")} → your sites in order → home ${esc(AUTOMI.home||"")}. “~” = estimated.</div></div>`;
+}
 function holName(t){ return t==="Unpaid"?"Unpaid leave":t==="Other"?"Leave":"Holiday"; }
 
 function claimedMiles(miles){
@@ -214,8 +236,11 @@ function collect(){
 
 function refreshTotals(){
   const days=collect();
+  const auto=!!(AUTOMI&&AUTOMI.applies);
   let paid=0,miles=0,milesClaimed=0,worked=0;
-  for(const d of Object.values(days)){const c=dayCalc(d);paid+=c.paid;miles+=c.miles;milesClaimed+=c.milesClaimed;if(c.worked)worked++;}
+  for(const [date,d] of Object.entries(days)){const c=dayCalc(d);paid+=c.paid;if(c.worked)worked++;
+    const dm=auto?(autoDayMiles(date)||0):c.miles;
+    miles+=dm;milesClaimed+=auto?claimedMiles(dm):c.milesClaimed;}
   const hours=Math.round(paid/60*100)/100;
   miles=Math.round(miles*10)/10;milesClaimed=Math.round(milesClaimed*10)/10;
   let h=`<span>Paid time<b>${hmS(paid)}</b></span><span>Days<b>${worked}</b></span>`;
@@ -234,9 +259,10 @@ function refreshTotals(){
     const d=days[card.dataset.date]||{};
     const c=dayCalc(d);
     const sum=card.querySelector(".sum");
+    const dm=auto?(autoDayMiles(card.dataset.date)||0):c.miles;
     if(sum){
-      if(c.worked)sum.innerHTML=`<span class="paid">${hmS(c.paid)}</span><br><span class="times">${esc(d.start||"")}–${esc(d.finish||"")}${c.miles?` · ${Math.round(c.miles*10)/10} mi`:""}</span>`;
-      else if(c.miles)sum.innerHTML=`<span class="times">${Math.round(c.miles*10)/10} mi mileage</span>`;
+      if(c.worked)sum.innerHTML=`<span class="paid">${hmS(c.paid)}</span><br><span class="times">${esc(d.start||"")}–${esc(d.finish||"")}${dm?` · ${Math.round(dm*10)/10} mi`:""}</span>`;
+      else if(dm)sum.innerHTML=`<span class="times">${Math.round(dm*10)/10} mi mileage</span>`;
       else sum.innerHTML=`<span class="empty">${INVOICE?"—":"Add ›"}</span>`;
     }
     const lc=card.querySelector(".ded.lunch");
@@ -342,11 +368,11 @@ function render(){
           <button type="button" class="addjob">＋ Add another job</button>
           <div class="addjobbox" hidden><input type="text" class="addjob-input" placeholder="Search a job number, site or description…" autocomplete="off"><div class="addjob-res"></div></div>
         </div>
-        ${ME&&ME.mileage?`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`:""}
+        ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?((AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""):`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
         ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
-    if(ME&&ME.mileage){
+    if(ME&&ME.mileage&&!(AUTOMI&&AUTOMI.applies)){
       const list=card.querySelector(".milist");
       (d.mileage||[]).forEach(m=>list.appendChild(mileRow(m)));
     }
@@ -354,7 +380,7 @@ function render(){
     host.appendChild(card);
   }
   if(autoChanged){setTimeout(()=>{refreshTotals();queueSave();},0);}
-  if(!locked)for(const [date,list] of Object.entries(ASSIGNED)){
+  if(!locked&&!(AUTOMI&&AUTOMI.applies))for(const [date,list] of Object.entries(ASSIGNED)){
     const cardEl=document.querySelector(`.card[data-date="${date}"]`);
     if(cardEl)(list||[]).forEach(j=>{if(j.site)autoMileage(cardEl,{site:j.site,postcode:j.postcode});});
   }
@@ -374,7 +400,8 @@ function render(){
   const fn=[];
   if(ME&&ME.commute) fn.push("Travel deduction: "+ME.commuteMins+" minutes each way is unpaid (set by the office).");
   if(ME&&ME.lunch) fn.push("Lunch: "+ME.lunchMins+" minutes is deducted on days of "+ME.lunchThresholdH+"h or more.");
-  if(ME&&ME.mileage) fn.push("Mileage is automatic: pick the site in the job box and the office's preset round-trip figure is claimed — miles can't be typed in. If a site shows “no preset”, ask the office to set its mileage.");
+  if(ME&&ME.mileage&&AUTOMI&&AUTOMI.applies) fn.push("Fuel mileage is worked out automatically door-to-door — office to each site you worked (in order) and home again — using road miles. It's locked to the office's set rate and radius; it can't be typed in.");
+  else if(ME&&ME.mileage) fn.push("Mileage is automatic: pick the site in the job box and the office's preset round-trip figure is claimed — miles can't be typed in. If a site shows “no preset”, ask the office to set its mileage.");
   if(ME&&ME.mileage&&ME.radius) fn.push("The first and last "+ME.radiusMiles+" miles of each day aren't paid — the deduction is applied automatically.");
   g("footNote").textContent=fn.join(" ");
 }
@@ -393,8 +420,8 @@ function renderInvoiceCard(){
   } else {
     card.innerHTML=`<h3>🧾 Invoice this week</h3>
       <div class="invrow" style="flex-direction:column;align-items:stretch">
-        <label class="muted" style="font-size:12.5px">Your name &amp; address on the invoice (the “From” box — saves as you type)</label>
-        <textarea id="fromDetails" rows="3" style="font:inherit;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px" placeholder="${esc(ME.name||"")}\n1 Your Street\nTown, Postcode">${esc((ME.details&&ME.details.length?ME.details:[ME.name||""]).join("\n"))}</textarea>
+        <label class="muted" style="font-size:12.5px">Your invoice details — the “From” box. Add anything that should appear: name, address, company, VAT/UTR number, bank details. Saves as you type.</label>
+        <textarea id="fromDetails" rows="6" style="font:inherit;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px" placeholder="${esc(ME.name||"")}\n1 Your Street, Town, Postcode\nUTR: 12345 67890\nBank: 00-00-00 / 12345678">${esc((ME.details&&ME.details.length?ME.details:[ME.name||""]).join("\n"))}</textarea>
       </div>
       ${ME.rate?`<div class="invrow muted">Your rate: <b>${money(ME.rate)}${ME.rateType==="day"?"/day":"/hour"}</b>${ME.mileage?` · mileage ${ME.pencePerMile}p/mi`:""}</div>`
         :`<div class="invrow"><label>Your rate £ <input type="number" id="rateIn" min="0" step="0.5" style="width:90px"></label>
@@ -704,6 +731,7 @@ async function load(){
     APPROVAL=(wkR&&wkR.approval)||null;
     ASSIGNED=(asR&&asR.byDay)||{};
     AUTO=(wkR&&wkR.auto)||{};
+    AUTOMI=(wkR&&wkR.autoMileage)||null;
     HOL=(wkR&&wkR.holidays)||{};
     JOBMETA=(wkR&&wkR.jobMeta)||{};
   }catch(e){

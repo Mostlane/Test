@@ -665,6 +665,132 @@ function haversineMiles(a, b) {
 }
 const ROAD_FACTOR = 1.25;
 
+// ── Door-to-door mileage (fuel-paid self-employed) ───────────────────────────
+// Exact road miles per consecutive leg via Google Distance Matrix. points is an
+// ordered [{lat,lng}]; returns [{miles,src}] for each leg points[i]→points[i+1]
+// (the matrix diagonal in ONE request). Falls back to haversine×ROAD_FACTOR per
+// leg when there's no GOOGLE_MAPS_KEY or the call fails, so it always returns a
+// figure. Edge-cached — postcodes/roads don't move.
+async function legMiles(env, points) {
+  const legs = [];
+  for (let i = 0; i < points.length - 1; i++)
+    legs.push({ miles: round1(haversineMiles(points[i], points[i + 1]) * ROAD_FACTOR), src: "est" });
+  const key = env && env.GOOGLE_MAPS_KEY;
+  if (!key || points.length < 2 || points.length > 12) return legs;
+  try {
+    const origins = points.slice(0, -1).map(p => p.lat + "," + p.lng).join("|");
+    const dests = points.slice(1).map(p => p.lat + "," + p.lng).join("|");
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?units=imperial&mode=driving"
+      + "&origins=" + encodeURIComponent(origins) + "&destinations=" + encodeURIComponent(dests)
+      + "&key=" + encodeURIComponent(key);
+    const r = await fetch(u, { cf: { cacheTtl: 7 * 86400, cacheEverything: true } });
+    const j = await r.json().catch(() => null);
+    if (j && j.status === "OK" && Array.isArray(j.rows)) {
+      for (let i = 0; i < legs.length; i++) {
+        const el = j.rows[i] && j.rows[i].elements && j.rows[i].elements[i];
+        if (el && el.status === "OK" && el.distance && el.distance.value != null)
+          legs[i] = { miles: round1(el.distance.value / 1609.344), src: "google" };
+      }
+    }
+  } catch {}
+  return legs;
+}
+
+// Site/postcode/scheduled-time for every job the engineer entered hours against
+// on a day (so a hand-added job can still be routed through by location).
+async function jobsMetaForDay(env, tid, day) {
+  const ids = Object.keys((day && day.jobHours) || {}).slice(0, 50);
+  const meta = {};
+  if (!ids.length) return meta;
+  try {
+    const ph = ids.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(
+      `SELECT id, helpdesk_ref, site_code, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id IN (${ph})`).bind(tid, ...ids).all();
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      meta[r.id] = { ref: r.helpdesk_ref || d.helpdeskRef || r.id, site: d.siteName || r.site_code || "",
+        pc: normPc(d.postcode || ""), sched: r.scheduled_at || "" };
+    }
+  } catch {}
+  return meta;
+}
+
+// Ordered postcodes visited on one day: status-tap capture order first
+// (jobTimeAuto), then any hand-entered jobHours jobs by scheduled time. Dupes
+// (and consecutive same-site) collapsed; entries with no postcode dropped.
+function visitedSequenceForDay(autoDay, day, jobsMeta) {
+  const seq = [], seen = new Set();
+  const push = (site, pc) => {
+    pc = normPc(pc); if (!pc) return;
+    if (seq.length && seq[seq.length - 1].pc === pc) return;
+    if (seen.has(pc)) return;
+    seq.push({ site: site || "", pc }); seen.add(pc);
+  };
+  const byRef = {}; for (const m of Object.values(jobsMeta || {})) if (m.ref) byRef[String(m.ref).toLowerCase()] = m;
+  for (const j of (autoDay && autoDay.jobs) || []) {
+    let pc = normPc(j.postcode);
+    if (!pc) { const m = byRef[String(j.ref || "").toLowerCase()]; if (m) pc = m.pc; }
+    push(j.site, pc);
+  }
+  const extra = [];
+  for (const jid of Object.keys((day && day.jobHours) || {})) {
+    const m = jobsMeta && jobsMeta[jid];
+    if (m && m.pc && !seen.has(m.pc)) extra.push(m);
+  }
+  extra.sort((a, b) => String(a.sched || "").localeCompare(String(b.sched || "")));
+  for (const m of extra) push(m.site, m.pc);
+  return seq;
+}
+
+// For fuel-paid SELF-EMPLOYED engineers, replace each worked day's mileage with a
+// single LOCKED door-to-door figure: office(base) → each site visited (in order)
+// → home. Returns a working copy of `days` (manual mileage ignored) + a per-date
+// breakdown for display. Anyone else → days unchanged, applies:false.
+async function applyAutoMileage(env, tid, username, monday, days, eff, basePostcode) {
+  if (!(eff.selfEmployed && eff.mileage)) return { days, auto: { applies: false } };
+  const basePc = normPc(basePostcode || "PO15 5RQ");
+  const homePc = normPc(eff.homePostcode || "") || basePc;
+  const autoDays = await jobTimeAuto(env, tid, username, monday).catch(() => ({}));
+  const coordCache = new Map();
+  const coord = async pc => {
+    pc = normPc(pc); if (!pc) return null;
+    if (coordCache.has(pc)) return coordCache.get(pc);
+    const c = await lookupPostcode(pc).catch(() => null);
+    coordCache.set(pc, c); return c;
+  };
+  const out = {}, byDate = {};
+  for (const [date, d] of Object.entries(days || {})) {
+    out[date] = { ...d };
+    const worked = toMin(d.start) != null && toMin(d.finish) != null;
+    const jobsMeta = await jobsMetaForDay(env, tid, d);
+    const seq = visitedSequenceForDay(autoDays[date], d, jobsMeta);
+    if (!worked || !seq.length) {
+      out[date].mileage = [];
+      if (worked) byDate[date] = { miles: 0, legs: [], sites: seq.map(s => s.site), home: homePc, noRoute: !seq.length };
+      continue;
+    }
+    const pts = [{ site: "Office", pc: basePc }, ...seq, { site: "Home", pc: homePc }];
+    const cleanPts = [], cleanCoords = [];
+    let missing = false;
+    for (const p of pts) { const c = await coord(p.pc); if (c) { cleanPts.push(p); cleanCoords.push(c); } else missing = true; }
+    if (cleanCoords.length < 2) {
+      out[date].mileage = [];
+      byDate[date] = { miles: 0, legs: [], sites: seq.map(s => s.site), home: homePc, noRoute: true };
+      continue;
+    }
+    const lm = await legMiles(env, cleanCoords);
+    let total = 0; const legs = [];
+    for (let i = 0; i < lm.length; i++) {
+      total += lm[i].miles;
+      legs.push({ from: cleanPts[i].site || cleanPts[i].pc, to: cleanPts[i + 1].site || cleanPts[i + 1].pc, miles: lm[i].miles, src: lm[i].src });
+    }
+    total = round1(total);
+    out[date].mileage = [{ site: "Door-to-door (auto)", postcode: "", miles: total, auto: true }];
+    byDate[date] = { miles: total, legs, sites: seq.map(s => s.site), home: homePc, missing };
+  }
+  return { days: out, auto: { applies: true, home: homePc, base: basePc, byDate } };
+}
+
 // ── Invoice PDF ──────────────────────────────────────────────────────────────
 function fmtDate(iso) { return new Date(iso + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); }
 function fmtHm(mins) { return Math.floor(mins / 60) + "h " + String(Math.round(mins % 60)).padStart(2, "0") + "m"; }
@@ -804,7 +930,9 @@ export async function handle(request, env, ctx, url, sess) {
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
     const jobMeta = await jobMetaFor(env, tid, days);
-    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, approval, locked: !!approval, totals: weekTotals(days, eff),
+    const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, approval, locked: !!approval,
+      totals: weekTotals(am.days, eff), autoMileage: am.auto,
       invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
@@ -827,6 +955,10 @@ export async function handle(request, env, ctx, url, sess) {
     const days = cleanDays(monday, b.days);
     if (!eff.mileage) {
       for (const d of Object.values(days)) d.mileage = [];
+    } else if (eff.selfEmployed) {
+      // Door-to-door mileage is computed + locked server-side (applyAutoMileage
+      // on read/invoice) — whatever the phone submits is discarded.
+      for (const d of Object.values(days)) d.mileage = [];
     } else {
       const names = [...new Set(Object.values(days).flatMap(d => (d.mileage || []).map(m => normKey(m.site))).filter(Boolean))];
       const preset = {};
@@ -848,7 +980,8 @@ export async function handle(request, env, ctx, url, sess) {
     ).bind(tid, monday, me, JSON.stringify({ days }), new Date().toISOString()).run();
     // Push the per-job hours into the labour ledger for job costing.
     await materialiseTimesheet(env, tid, me, monday, days);
-    return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
+    const amSave = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
   }
 
   // ── GET /ts/assigned?week= — the caller's scheduled SLA jobs, per day ─────
@@ -1227,11 +1360,13 @@ export async function handle(request, env, ctx, url, sess) {
     const eff = effectiveCfg(cfg, u);
     if (!eff.rate) return error("No pay rate set — enter your rate first.", 400, env, request);
     const { days } = await loadWeek(env, tid, me, monday);
-    const totals = weekTotals(days, eff);
+    const amInv = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    const daysEff = amInv.days;
+    const totals = weekTotals(daysEff, eff);
     if (!totals.daysWorked && !totals.miles) return error("Nothing on this week's timesheet yet — save your times first.", 400, env, request);
     const number = await nextInvoiceNumber(env, tid, me, eff);
     const pdf = buildInvoicePdf({ number, name: displayName(u), details: eff.details,
-      company: cfg.defaults.company, monday, days, eff, totals });
+      company: cfg.defaults.company, monday, days: daysEff, eff, totals });
     const key = `${INV_PREFIX(tid)}${encodeURIComponent(me)}/INV-${number}-${monday}.pdf`;
     await env.JOB_FILES.put(key, pdf, { httpMetadata: { contentType: "application/pdf" },
       customMetadata: { by: me, number: String(number), week: monday, at: new Date().toISOString() } });
@@ -1305,11 +1440,14 @@ export async function handle(request, env, ctx, url, sess) {
           }
         } catch {}
         const inv = invBy[u.username];
+        // Door-to-door mileage for fuel-paid self-employed staff (else unchanged).
+        const am = await applyAutoMileage(env, tid, u.username, monday, d.days, eff, cfg.defaults.basePostcode);
+        const daysEff = am.days;
         const perDay = {};
-        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [] };
+        for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [] };
         out.push({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
-          days: d.days, perDay, savedAt: d.at, totals: weekTotals(d.days, eff),
+          days: d.days, perDay, savedAt: d.at, totals: weekTotals(daysEff, eff), autoMileage: am.auto,
           approval: apprBy[u.username] || null,
           holidays: leaveAll[u.username] || {},
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
