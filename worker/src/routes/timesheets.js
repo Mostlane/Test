@@ -162,9 +162,40 @@ export async function trackJobTime(env, tid, actor, before, after) {
       ).bind(tid, actor, String(after.id), after.helpdeskRef || String(after.id),
         after.siteName || "", String(after.postcode || "").toUpperCase(), now, kind).run();
     } else {
-      await env.DB.prepare(
+      const res = await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(now, tid, actor, String(after.id)).run();
+      const closed = !!(res && res.meta && res.meta.changes > 0);
+      // COMPLETION-ONLY engineers: they "Start Day" then just mark each job
+      // Complete (never tap Travelling/In Progress), so there's no open segment
+      // to close. Infer this job's time as the gap since their last activity —
+      // the previous job's finish, else today's shift clock-on — so their hours
+      // and per-job costing still fill in. Only for genuinely finished statuses.
+      const DONE = new Set(["complete", "closed", "invoiced"]);
+      if (!closed && DONE.has(as)) {
+        const dayStart = now.slice(0, 10) + "T00:00:00.000Z", dayEnd = now.slice(0, 10) + "T23:59:59.999Z";
+        const exists = await env.DB.prepare(
+          "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND started_at>=? AND started_at<=? LIMIT 1"
+        ).bind(tid, actor, String(after.id), dayStart, dayEnd).first();
+        if (!exists) {
+          const last = await env.DB.prepare(
+            "SELECT MAX(ended_at) AS e FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NOT NULL AND started_at>=? AND started_at<=?"
+          ).bind(tid, actor, dayStart, dayEnd).first();
+          let anchor = last && last.e ? last.e : null;
+          if (!anchor) {
+            const sh = await env.DB.prepare("SELECT clock_on_at FROM shifts WHERE tenant_id=? AND username=? AND date=?")
+              .bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+            if (sh && sh.clock_on_at) anchor = sh.clock_on_at;
+          }
+          if (anchor) {
+            const span = Date.parse(now) - Date.parse(anchor);
+            if (span > 60000 && span <= MAX_SEG_MS) await env.DB.prepare(
+              "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, source) VALUES (?,?,?,?,?,?,?,?,?,?)"
+            ).bind(tid, actor, String(after.id), after.helpdeskRef || String(after.id),
+              after.siteName || "", String(after.postcode || "").toUpperCase(), anchor, now, "onsite", "shift").run();
+          }
+        }
+      }
     }
   } catch { /* time capture must never break a job update */ }
 }
@@ -174,7 +205,7 @@ export async function trackJobTime(env, tid, actor, before, after) {
 // A segment left open on an earlier day is lazily closed at 19:00 that day
 // (or an hour after it started, if it started later than that).
 const MAX_SEG_MS = 14 * 3600e3; // a session longer than a long shift = forgotten status change → clamp
-async function jobTimeAuto(env, tid, username, monday) {
+async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
   const end = endD.toISOString().slice(0, 10);
   const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
@@ -206,20 +237,49 @@ async function jobTimeAuto(env, tid, username, monday) {
         endedAt = forgotClose();
         try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
       }
-      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
+      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [], lastPc: "" };
       o.s = Math.min(o.s, Date.parse(seg.started_at));
       if (open) { o.open = true; }
-      else o.e = Math.max(o.e, Date.parse(endedAt));
+      else { const em = Date.parse(endedAt); if (em >= o.e) { o.e = em; o.lastPc = seg.postcode || ""; } }
       const ref = seg.job_ref || seg.job_id;
       if (!o.jobs.some(j => j.ref.toLowerCase() === String(ref).toLowerCase()))
         o.jobs.push({ ref, site: seg.site || "", postcode: seg.postcode || "" });
     }
   } catch {}
+  // "Start Day" / "End Day" shifts are the authoritative day boundaries when set.
+  const shifts = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT date, clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
+    ).bind(tid, username, monday, end).all();
+    for (const s of results || []) { const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date; if (dt) shifts[dt] = s; }
+  } catch {}
+  const homePc = normPc(opts.homePostcode || "");
+  let homeCoord;   // resolved lazily, once
+  const getHome = async () => { if (homeCoord !== undefined) return homeCoord; homeCoord = homePc ? await lookupPostcode(homePc).catch(() => null) : null; return homeCoord; };
+
   const shaped = {};
-  for (const [date, o] of Object.entries(out)) {
-    shaped[date] = { start: lTime(new Date(o.s).toISOString()),
-      finish: o.open || !o.e ? null : lTime(new Date(o.e).toISOString()),
-      open: o.open, jobs: o.jobs };
+  for (const date of new Set([...Object.keys(out), ...Object.keys(shifts)])) {
+    const o = out[date], sh = shifts[date];
+    let start = o ? lTime(new Date(o.s).toISOString()) : "";
+    if (sh && sh.clock_on_at) { const cs = lTime(sh.clock_on_at); if (cs && (!start || cs < start)) start = cs; }   // Start Day = real start
+    let finish = null, open = false, travelHome = false;
+    if (sh && sh.clock_off_at) {
+      finish = lTime(sh.clock_off_at);   // End Day = real finish
+    } else if (o) {
+      if (o.open || !o.e) open = true;
+      else {
+        finish = lTime(new Date(o.e).toISOString());
+        // No End Day → add estimated drive home from the last job they finished.
+        if (o.lastPc && homePc) {
+          try {
+            const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]);
+            if (a && b) { const mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60); if (mins > 0 && mins < 180) { finish = lTime(new Date(o.e + mins * 60000).toISOString()); travelHome = true; } }
+          } catch {}
+        }
+      }
+    }
+    shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome };
   }
   return shaped;
 }
@@ -1046,7 +1106,7 @@ export async function handle(request, env, ctx, url, sess) {
     const eff = effectiveCfg(cfg, u);
     const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
-    const auto = await jobTimeAuto(env, tid, me, monday);
+    const auto = await jobTimeAuto(env, tid, me, monday, { homePostcode: eff.homePostcode });
     const holidays = await holidayDaysFor(env, tid, me, monday);
     const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
@@ -1552,7 +1612,7 @@ export async function handle(request, env, ctx, url, sess) {
         // so the admin sees captured days even before the engineer opens
         // their timesheet.
         try {
-          const auto = await jobTimeAuto(env, tid, u.username, monday);
+          const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
           for (const [date, a] of Object.entries(auto)) {
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
