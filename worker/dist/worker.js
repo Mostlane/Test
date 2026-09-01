@@ -3913,6 +3913,10 @@ async function ensureTables(env) {
     await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE shifts ADD COLUMN home_drive_mins INTEGER").run();
+  } catch {
+  }
 }
 var TS_ACTIVE = /* @__PURE__ */ new Set(["travelling", "in progress"]);
 async function trackJobTime(env, tid, actor, before, after) {
@@ -3940,6 +3944,7 @@ async function trackJobTime(env, tid, actor, before, after) {
     if (!mine) return;
     await ensureTables(env);
     const now = (/* @__PURE__ */ new Date()).toISOString();
+    const DONE = /* @__PURE__ */ new Set(["complete", "closed", "invoiced"]);
     if (TS_ACTIVE.has(as)) {
       await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
@@ -3968,7 +3973,6 @@ async function trackJobTime(env, tid, actor, before, after) {
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(now, tid, actor, String(after.id)).run();
       const closed = !!(res && res.meta && res.meta.changes > 0);
-      const DONE = /* @__PURE__ */ new Set(["complete", "closed", "invoiced"]);
       if (!closed && DONE.has(as)) {
         const dayStart = now.slice(0, 10) + "T00:00:00.000Z", dayEnd = now.slice(0, 10) + "T23:59:59.999Z";
         const exists = await env.DB.prepare(
@@ -4000,6 +4004,24 @@ async function trackJobTime(env, tid, actor, before, after) {
               "shift"
             ).run();
           }
+        }
+      }
+    }
+    if (DONE.has(as)) {
+      const sh = await env.DB.prepare("SELECT clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+      if (sh && sh.clock_on_at && !sh.clock_off_at && after.postcode) {
+        const homePc = await homePostcodeFor(env, tid, actor);
+        if (homePc) {
+          let mins = await driveMinutesGoogle(env, after.postcode, homePc);
+          if (mins == null) {
+            try {
+              const [a, b] = await Promise.all([lookupPostcode(after.postcode), lookupPostcode(homePc)]);
+              if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60);
+            } catch {
+            }
+          }
+          if (mins != null && mins >= 0 && mins < 300)
+            await env.DB.prepare("UPDATE shifts SET home_drive_mins=? WHERE tenant_id=? AND username=? AND date=?").bind(mins, tid, actor, now.slice(0, 10)).run();
         }
       }
     }
@@ -4077,7 +4099,7 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const shifts = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT date, clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
+      "SELECT date, clock_on_at, clock_off_at, home_drive_mins FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
     ).bind(tid, username, monday, end).all();
     for (const s of results || []) {
       const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date;
@@ -4107,18 +4129,18 @@ async function jobTimeAuto(env, tid, username, monday, opts = {}) {
       if (o.open || !o.e) open = true;
       else {
         finish = lTime(new Date(o.e).toISOString());
-        if (o.lastPc && homePc) {
+        let mins = sh && sh.home_drive_mins != null ? Number(sh.home_drive_mins) : null;
+        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc);
+        if (mins == null && o.lastPc && homePc) {
           try {
             const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]);
-            if (a && b) {
-              const mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60);
-              if (mins > 0 && mins < 180) {
-                finish = lTime(new Date(o.e + mins * 6e4).toISOString());
-                travelHome = true;
-              }
-            }
+            if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60);
           } catch {
           }
+        }
+        if (mins != null && mins > 0 && mins < 300) {
+          finish = lTime(new Date(o.e + mins * 6e4).toISOString());
+          travelHome = true;
         }
       }
     }
@@ -4695,6 +4717,43 @@ function haversineMiles(a, b) {
   return 2 * R2 * Math.asin(Math.sqrt(h));
 }
 var ROAD_FACTOR = 1.25;
+async function driveMinutesGoogle(env, fromPc, toPc) {
+  const key = env && env.GOOGLE_MAPS_KEY;
+  if (!key) return null;
+  const f = normPc(fromPc), t = normPc(toPc);
+  if (!f || !t) return null;
+  try {
+    const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
+    if (!a || !b) return null;
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng + "&key=" + encodeURIComponent(key);
+    const r = await fetch(u, { cf: { cacheTtl: 3 * 86400, cacheEverything: true } });
+    const j = await r.json().catch(() => null);
+    const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
+    if (el && el.status === "OK" && el.duration && el.duration.value != null) return Math.round(el.duration.value / 60);
+  } catch {
+  }
+  return null;
+}
+async function homePostcodeFor(env, tid, username) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
+    if (row && row.value) {
+      const v = JSON.parse(row.value);
+      const mine = v.byUser && v.byUser[username] || {};
+      if (mine.homePostcode) return String(mine.homePostcode);
+    }
+  } catch {
+  }
+  try {
+    const u = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
+    if (u && u.profile) {
+      const p = JSON.parse(u.profile);
+      if (p.homePostcode) return String(p.homePostcode);
+    }
+  } catch {
+  }
+  return "";
+}
 async function legMiles(env, points) {
   const legs = [];
   for (let i = 0; i < points.length - 1; i++)
