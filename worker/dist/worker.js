@@ -10713,6 +10713,9 @@ async function getFallbacks(env, tenantId) {
     enabled: !!c.enabled,
     startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
     byEngineer: c.byEngineer && typeof c.byEngineer === "object" ? c.byEngineer : {},
+    // Engineers OMITTED from the no-job reminder + auto-assign (normId list) —
+    // e.g. apprentices, managers, anyone not on the daily fallback cycle.
+    exclude: Array.isArray(c.exclude) ? c.exclude.map((x) => normId(x)).filter(Boolean) : [],
     // Existing jobs the office has ADDED to the fallback list (job ids). The pool
     // the per-engineer dropdown offers = these + the dormant standby templates.
     pool: Array.isArray(c.pool) ? c.pool.map(String) : []
@@ -10724,6 +10727,7 @@ async function setFallbacks(env, tenantId, body) {
     enabled: body.enabled !== void 0 ? !!body.enabled : cur.enabled,
     startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
     byEngineer: {},
+    exclude: Array.isArray(body.exclude) ? [...new Set(body.exclude.map((x) => normId(x)).filter(Boolean))] : cur.exclude,
     pool: Array.isArray(body.pool) ? [...new Set(body.pool.map(String).filter(Boolean))] : cur.pool
   };
   const src = body.byEngineer && typeof body.byEngineer === "object" ? body.byEngineer : cur.byEngineer;
@@ -10829,14 +10833,23 @@ async function sweepFallbacks(env, tid = 1) {
     const m = leave[uname] || leave[normId(uname)];
     return !!(m && m[target]);
   };
-  const empties = fieldUsers.filter((u) => !hasJobThatDay(u.username) && !onLeave(u.username));
+  const excluded = new Set((cfg.exclude || []).map(normId));
+  const hasFallbackReady = (uname) => {
+    const fb = cfg.byEngineer[normId(uname)];
+    return !!(fb && fb.active !== false && fb.jobId);
+  };
+  const empties = fieldUsers.filter((u) => !excluded.has(normId(u.username)) && !hasJobThatDay(u.username) && !onLeave(u.username));
   if (slot === "warn1" || slot === "warn2") {
     if (empties.length) {
-      const names = empties.map((u) => `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username);
       const dayTxt = (/* @__PURE__ */ new Date(target + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
-      const body = names.join(", ") + " \u2014 no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
-      const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
-      await notifyFallbackAdmins(env, tid, payload);
+      const lines = empties.map((u) => {
+        const nm = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
+        return hasFallbackReady(u.username) ? "\u2705 " + nm : "\u26A0\uFE0F " + nm + " \u2014 no fallback set";
+      });
+      const needAttention = empties.filter((u) => !hasFallbackReady(u.username)).length;
+      const title = needAttention === 0 ? "\u2705 All covered for " + dayTxt + " \u2014 " + empties.length + " on fallback" : "\u26A0\uFE0F " + dayTxt + ": " + needAttention + " with no fallback set";
+      const body = lines.join("\n") + "\n\nFallbacks auto-assign at 7pm.";
+      await notifyFallbackAdmins(env, tid, { title, body, url: "/sla-scheduler.html", tag: "fallback-warn" });
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);

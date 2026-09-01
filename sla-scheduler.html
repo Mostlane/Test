@@ -589,6 +589,11 @@
       Fallback jobs start at <input type="time" id="fbStart" value="08:00" style="width:auto;padding:6px;border:1px solid var(--border);border-radius:8px;">
     </label>
     <div id="fbRows"></div>
+    <div style="border-top:1px solid #eef2f7;margin-top:10px;padding-top:12px;">
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:2px;">🔕 Omit from the no-job reminder</div>
+      <p style="margin:0 0 8px;color:#5b6b78;font-size:12.5px;line-height:1.5;">Ticked people are left out of the 3:30pm/6pm “no job tomorrow” warning <b>and</b> the 7pm auto-assign — e.g. apprentices, managers, or anyone not on the daily fallback cycle.</p>
+      <div id="fbOmitList"></div>
+    </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
       <span id="fbMsg" style="flex:1;align-self:center;font-size:13px;color:#5b6b78;"></span>
       <button type="button" class="btn" id="fbCancel">Cancel</button>
@@ -2146,6 +2151,18 @@ function refreshFbRows(){
       + '</div>';
   }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
 }
+// Field engineers you can omit from the no-job reminder + auto-assign.
+function renderFbOmit(){
+  const host = $("fbOmitList"); if(!host) return;
+  const fields = (engineers||[]).filter(isFieldEng);
+  const ex = new Set((FB_CFG.exclude||[]).map(fbNorm));
+  if(!fields.length){ host.innerHTML = '<p style="color:#5b6b78;font-size:13px;">No field engineers found.</p>'; return; }
+  host.innerHTML = fields.map(function(e){
+    const on = ex.has(fbNorm(e.username));
+    return '<label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;font-size:13.5px;cursor:pointer;">'
+      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")+'> '+escapeHtml(e.name)+'</label>';
+  }).join("");
+}
 async function openFallbacks(){
   $("fbBackdrop").style.display = "flex"; $("fbMsg").textContent = "Loading…";
   FB_CFG = await loadFbConfig();
@@ -2153,6 +2170,7 @@ async function openFallbacks(){
   $("fbStart").value = String(FB_CFG.startHour!=null?FB_CFG.startHour:8).padStart(2,"0") + ":00";
   $("fbSearchWrap").style.display = "none"; $("fbSearch").value = "";
   afterFbPoolChange();
+  renderFbOmit();
   $("fbMsg").textContent = "";
 }
 async function saveFallbacks(){
@@ -2164,9 +2182,11 @@ async function saveFallbacks(){
     byEngineer[row.dataset.user] = { jobId, active: row.querySelector(".fb-active").checked };
   });
   const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
+  const exclude = [];
+  document.querySelectorAll("#fbOmitList .fb-omit:checked").forEach(function(cb){ exclude.push(cb.dataset.user); });
   $("fbMsg").textContent = "Saving…";
   try {
-    const r = await authFetch("/sla/fallbacks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("fbEnabled").checked, startHour:sh, byEngineer, pool:FB_POOL})}).then(r=>r.json());
+    const r = await authFetch("/sla/fallbacks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:$("fbEnabled").checked, startHour:sh, byEngineer, exclude, pool:FB_POOL})}).then(r=>r.json());
     if(r && r.ok){ $("fbMsg").textContent="Saved ✓"; setTimeout(function(){ $("fbBackdrop").style.display="none"; }, 700); }
     else $("fbMsg").textContent = (r&&r.error)||"Couldn't save.";
   } catch(e){ $("fbMsg").textContent = "Couldn't save."; }

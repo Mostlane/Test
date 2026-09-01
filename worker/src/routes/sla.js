@@ -4798,6 +4798,9 @@ async function getFallbacks(env, tenantId) {
   if (!c || typeof c !== "object") c = {};
   return { enabled: !!c.enabled, startHour: Number.isFinite(Number(c.startHour)) ? Number(c.startHour) : 8,
     byEngineer: (c.byEngineer && typeof c.byEngineer === "object") ? c.byEngineer : {},
+    // Engineers OMITTED from the no-job reminder + auto-assign (normId list) —
+    // e.g. apprentices, managers, anyone not on the daily fallback cycle.
+    exclude: Array.isArray(c.exclude) ? c.exclude.map(x => normId(x)).filter(Boolean) : [],
     // Existing jobs the office has ADDED to the fallback list (job ids). The pool
     // the per-engineer dropdown offers = these + the dormant standby templates.
     pool: Array.isArray(c.pool) ? c.pool.map(String) : [] };
@@ -4807,6 +4810,7 @@ async function setFallbacks(env, tenantId, body) {
   const out = { enabled: body.enabled !== undefined ? !!body.enabled : cur.enabled,
     startHour: Number.isFinite(Number(body.startHour)) ? Math.max(0, Math.min(23, Number(body.startHour))) : cur.startHour,
     byEngineer: {},
+    exclude: Array.isArray(body.exclude) ? [...new Set(body.exclude.map(x => normId(x)).filter(Boolean))] : cur.exclude,
     pool: Array.isArray(body.pool) ? [...new Set(body.pool.map(String).filter(Boolean))] : cur.pool };
   // Each field engineer's fallback is now a reference to a DORMANT fallback job
   // (from the pool) — pick one per engineer, cloned live when they've no work.
@@ -4903,15 +4907,27 @@ export async function sweepFallbacks(env, tid = 1) {
   try { const { approvedLeaveInRange } = await import("./holidays.js"); leave = await approvedLeaveInRange(env, tid, target, target); } catch {}
   const onLeave = (uname) => { const m = leave[uname] || leave[normId(uname)]; return !!(m && m[target]); };
 
-  const empties = fieldUsers.filter(u => !hasJobThatDay(u.username) && !onLeave(u.username));
+  // Engineers the office has OMITTED from the fallback check/alert entirely.
+  const excluded = new Set((cfg.exclude || []).map(normId));
+  // Does an engineer have an active, configured fallback ready to go?
+  const hasFallbackReady = (uname) => { const fb = cfg.byEngineer[normId(uname)]; return !!(fb && fb.active !== false && fb.jobId); };
+  const empties = fieldUsers.filter(u => !excluded.has(normId(u.username)) && !hasJobThatDay(u.username) && !onLeave(u.username));
 
   if (slot === "warn1" || slot === "warn2") {
     if (empties.length) {
-      const names = empties.map(u => (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username);
       const dayTxt = new Date(target + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "Europe/London" });
-      const body = names.join(", ") + " — no job yet for " + dayTxt + ". Fallbacks auto-assign at 7pm.";
-      const payload = { title: empties.length + " engineer" + (empties.length === 1 ? "" : "s") + " with no job for " + dayTxt, body, url: "/sla-scheduler.html", tag: "fallback-warn" };
-      await notifyFallbackAdmins(env, tid, payload);
+      // ✅ = a fallback is set and will auto-assign at 7pm; ⚠️ = no fallback set,
+      // so this one genuinely needs attention. A glance tells you it's all okay.
+      const lines = empties.map(u => {
+        const nm = (`${u.first_name || ""} ${u.last_name || ""}`.trim()) || u.username;
+        return hasFallbackReady(u.username) ? ("✅ " + nm) : ("⚠️ " + nm + " — no fallback set");
+      });
+      const needAttention = empties.filter(u => !hasFallbackReady(u.username)).length;
+      const title = needAttention === 0
+        ? "✅ All covered for " + dayTxt + " — " + empties.length + " on fallback"
+        : "⚠️ " + dayTxt + ": " + needAttention + " with no fallback set";
+      const body = lines.join("\n") + "\n\nFallbacks auto-assign at 7pm.";
+      await notifyFallbackAdmins(env, tid, { title, body, url: "/sla-scheduler.html", tag: "fallback-warn" });
     }
   } else if (slot === "assign") {
     const scheduledAt = londonAtHour(target, cfg.startHour || 8);

@@ -716,7 +716,15 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   field engineers with no job for the **next working day**, and at **19:00
   auto-assigns** each still-empty engineer their fallback for that day (Mon–Fri;
   **Friday's run targets Monday**, skipping the weekend — so no Sat/Sun run). The
-  **19:00 run also sends a summary push** listing who got which fallback. **All
+  **19:00 run also sends a summary push** listing who got which fallback. **Omit
+  list + at-a-glance ticks (Sep 2026):** `sla:fallbacks` config gained
+  **`exclude`** (normId list) — engineers left OUT of the check AND the auto-assign
+  (apprentices/managers/etc.); managed on sla-scheduler.html → 🛟 Fallbacks
+  "🔕 Omit from the no-job reminder" (checkbox per field engineer). The warning
+  push now lists each empty engineer with **✅** (a fallback is set → auto-assigns
+  at 7pm) or **⚠️** (no fallback set → needs attention); the title reads
+  "✅ All covered…" when every empty engineer has a fallback, else "⚠️ N with no
+  fallback set" — so it's glanceable on a phone/watch. **All
   fallback notifications (both warnings AND the assign summary) go ONLY to
   `FALLBACK_NOTIFY` = Jamie Line / Joe Line / Greg Line** (`notifyFallbackAdmins`,
   deduped by normId) — no other office/SLAAdmin user is told (was owner +
