@@ -3913,6 +3913,10 @@ async function ensureTables(env) {
     await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
   } catch {
   }
+  try {
+    await env.DB.prepare("ALTER TABLE shifts ADD COLUMN home_drive_mins INTEGER").run();
+  } catch {
+  }
 }
 var TS_ACTIVE = /* @__PURE__ */ new Set(["travelling", "in progress"]);
 async function trackJobTime(env, tid, actor, before, after) {
@@ -3940,6 +3944,7 @@ async function trackJobTime(env, tid, actor, before, after) {
     if (!mine) return;
     await ensureTables(env);
     const now = (/* @__PURE__ */ new Date()).toISOString();
+    const DONE = /* @__PURE__ */ new Set(["complete", "closed", "invoiced"]);
     if (TS_ACTIVE.has(as)) {
       await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
@@ -3964,15 +3969,67 @@ async function trackJobTime(env, tid, actor, before, after) {
         kind
       ).run();
     } else {
-      await env.DB.prepare(
+      const res = await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(now, tid, actor, String(after.id)).run();
+      const closed = !!(res && res.meta && res.meta.changes > 0);
+      if (!closed && DONE.has(as)) {
+        const dayStart = now.slice(0, 10) + "T00:00:00.000Z", dayEnd = now.slice(0, 10) + "T23:59:59.999Z";
+        const exists = await env.DB.prepare(
+          "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND started_at>=? AND started_at<=? LIMIT 1"
+        ).bind(tid, actor, String(after.id), dayStart, dayEnd).first();
+        if (!exists) {
+          const last = await env.DB.prepare(
+            "SELECT MAX(ended_at) AS e FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NOT NULL AND started_at>=? AND started_at<=?"
+          ).bind(tid, actor, dayStart, dayEnd).first();
+          let anchor = last && last.e ? last.e : null;
+          if (!anchor) {
+            const sh = await env.DB.prepare("SELECT clock_on_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+            if (sh && sh.clock_on_at) anchor = sh.clock_on_at;
+          }
+          if (anchor) {
+            const span = Date.parse(now) - Date.parse(anchor);
+            if (span > 6e4 && span <= MAX_SEG_MS) await env.DB.prepare(
+              "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, source) VALUES (?,?,?,?,?,?,?,?,?,?)"
+            ).bind(
+              tid,
+              actor,
+              String(after.id),
+              after.helpdeskRef || String(after.id),
+              after.siteName || "",
+              String(after.postcode || "").toUpperCase(),
+              anchor,
+              now,
+              "onsite",
+              "shift"
+            ).run();
+          }
+        }
+      }
+    }
+    if (DONE.has(as)) {
+      const sh = await env.DB.prepare("SELECT clock_on_at, clock_off_at FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, actor, now.slice(0, 10)).first().catch(() => null);
+      if (sh && sh.clock_on_at && !sh.clock_off_at && after.postcode) {
+        const homePc = await homePostcodeFor(env, tid, actor);
+        if (homePc) {
+          let mins = await driveMinutesGoogle(env, after.postcode, homePc);
+          if (mins == null) {
+            try {
+              const [a, b] = await Promise.all([lookupPostcode(after.postcode), lookupPostcode(homePc)]);
+              if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60);
+            } catch {
+            }
+          }
+          if (mins != null && mins >= 0 && mins < 300)
+            await env.DB.prepare("UPDATE shifts SET home_drive_mins=? WHERE tenant_id=? AND username=? AND date=?").bind(mins, tid, actor, now.slice(0, 10)).run();
+        }
+      }
     }
   } catch {
   }
 }
 var MAX_SEG_MS = 14 * 36e5;
-async function jobTimeAuto(env, tid, username, monday) {
+async function jobTimeAuto(env, tid, username, monday, opts = {}) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
   const end = endD.toISOString().slice(0, 10);
@@ -4022,25 +4079,72 @@ async function jobTimeAuto(env, tid, username, monday) {
         } catch {
         }
       }
-      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
+      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [], lastPc: "" };
       o.s = Math.min(o.s, Date.parse(seg.started_at));
       if (open) {
         o.open = true;
-      } else o.e = Math.max(o.e, Date.parse(endedAt));
+      } else {
+        const em = Date.parse(endedAt);
+        if (em >= o.e) {
+          o.e = em;
+          o.lastPc = seg.postcode || "";
+        }
+      }
       const ref = seg.job_ref || seg.job_id;
       if (!o.jobs.some((j) => j.ref.toLowerCase() === String(ref).toLowerCase()))
         o.jobs.push({ ref, site: seg.site || "", postcode: seg.postcode || "" });
     }
   } catch {
   }
+  const shifts = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT date, clock_on_at, clock_off_at, home_drive_mins FROM shifts WHERE tenant_id=? AND username=? AND date>=? AND date<?"
+    ).bind(tid, username, monday, end).all();
+    for (const s of results || []) {
+      const dt = s.clock_on_at ? lDate(s.clock_on_at) : s.date;
+      if (dt) shifts[dt] = s;
+    }
+  } catch {
+  }
+  const homePc = normPc(opts.homePostcode || "");
+  let homeCoord;
+  const getHome = async () => {
+    if (homeCoord !== void 0) return homeCoord;
+    homeCoord = homePc ? await lookupPostcode(homePc).catch(() => null) : null;
+    return homeCoord;
+  };
   const shaped = {};
-  for (const [date, o] of Object.entries(out)) {
-    shaped[date] = {
-      start: lTime(new Date(o.s).toISOString()),
-      finish: o.open || !o.e ? null : lTime(new Date(o.e).toISOString()),
-      open: o.open,
-      jobs: o.jobs
-    };
+  for (const date of /* @__PURE__ */ new Set([...Object.keys(out), ...Object.keys(shifts)])) {
+    const o = out[date], sh = shifts[date];
+    let start = o ? lTime(new Date(o.s).toISOString()) : "";
+    if (sh && sh.clock_on_at) {
+      const cs = lTime(sh.clock_on_at);
+      if (cs && (!start || cs < start)) start = cs;
+    }
+    let finish = null, open = false, travelHome = false;
+    if (sh && sh.clock_off_at) {
+      finish = lTime(sh.clock_off_at);
+    } else if (o) {
+      if (o.open || !o.e) open = true;
+      else {
+        finish = lTime(new Date(o.e).toISOString());
+        let mins = sh && sh.home_drive_mins != null ? Number(sh.home_drive_mins) : null;
+        if (mins == null && o.lastPc && homePc) mins = await driveMinutesGoogle(env, o.lastPc, homePc);
+        if (mins == null && o.lastPc && homePc) {
+          try {
+            const [a, b] = await Promise.all([lookupPostcode(o.lastPc), getHome()]);
+            if (a && b) mins = Math.round(haversineMiles(a, b) * ROAD_FACTOR / 30 * 60);
+          } catch {
+          }
+        }
+        if (mins != null && mins > 0 && mins < 300) {
+          finish = lTime(new Date(o.e + mins * 6e4).toISOString());
+          travelHome = true;
+        }
+      }
+    }
+    shaped[date] = { start, finish, open, jobs: o ? o.jobs : [], travelHome };
   }
   return shaped;
 }
@@ -4613,6 +4717,43 @@ function haversineMiles(a, b) {
   return 2 * R2 * Math.asin(Math.sqrt(h));
 }
 var ROAD_FACTOR = 1.25;
+async function driveMinutesGoogle(env, fromPc, toPc) {
+  const key = env && env.GOOGLE_MAPS_KEY;
+  if (!key) return null;
+  const f = normPc(fromPc), t = normPc(toPc);
+  if (!f || !t) return null;
+  try {
+    const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
+    if (!a || !b) return null;
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng + "&key=" + encodeURIComponent(key);
+    const r = await fetch(u, { cf: { cacheTtl: 3 * 86400, cacheEverything: true } });
+    const j = await r.json().catch(() => null);
+    const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
+    if (el && el.status === "OK" && el.duration && el.duration.value != null) return Math.round(el.duration.value / 60);
+  } catch {
+  }
+  return null;
+}
+async function homePostcodeFor(env, tid, username) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
+    if (row && row.value) {
+      const v = JSON.parse(row.value);
+      const mine = v.byUser && v.byUser[username] || {};
+      if (mine.homePostcode) return String(mine.homePostcode);
+    }
+  } catch {
+  }
+  try {
+    const u = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
+    if (u && u.profile) {
+      const p = JSON.parse(u.profile);
+      if (p.homePostcode) return String(p.homePostcode);
+    }
+  } catch {
+  }
+  return "";
+}
 async function legMiles(env, points) {
   const legs = [];
   for (let i = 0; i < points.length - 1; i++)
@@ -4976,7 +5117,7 @@ async function handle7(request, env, ctx, url, sess) {
     const eff = effectiveCfg(cfg, u);
     const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
-    const auto = await jobTimeAuto(env, tid, me, monday);
+    const auto = await jobTimeAuto(env, tid, me, monday, { homePostcode: eff.homePostcode });
     const holidays = await holidayDaysFor(env, tid, me, monday);
     const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
@@ -5550,7 +5691,7 @@ async function handle7(request, env, ctx, url, sess) {
         const eff = effectiveCfg(cfg, u);
         const d = dataBy[u.username] || { days: {}, at: null };
         try {
-          const auto = await jobTimeAuto(env, tid, u.username, monday);
+          const auto = await jobTimeAuto(env, tid, u.username, monday, { homePostcode: eff.homePostcode });
           for (const [date, a] of Object.entries(auto)) {
             const day = d.days[date] = d.days[date] || {};
             if (!day.start && a.start) day.start = a.start;
