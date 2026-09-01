@@ -247,18 +247,25 @@ function collect(){
 function refreshTotals(){
   const days=collect();
   const auto=!!(AUTOMI&&AUTOMI.applies);
-  let paid=0,miles=0,milesClaimed=0,worked=0;
+  // Overtime: hours over the daily threshold, for hourly staff with a multiplier.
+  const otOn=!!(ME&&ME.rateType!=="day"&&ME.overtimeMult>0);
+  const thrMin=(ME&&ME.overtimeThresholdH||8)*60;
+  let paid=0,otMins=0,miles=0,milesClaimed=0,worked=0;
   for(const [date,d] of Object.entries(days)){const c=dayCalc(d);paid+=c.paid;if(c.worked)worked++;
+    if(otOn&&c.paid>thrMin)otMins+=c.paid-thrMin;
     const dm=auto?(autoDayMiles(date)||0):c.miles;
     miles+=dm;milesClaimed+=auto?claimedMiles(dm):c.milesClaimed;}
   const hours=Math.round(paid/60*100)/100;
   miles=Math.round(miles*10)/10;milesClaimed=Math.round(milesClaimed*10)/10;
   let h=`<span>Paid time<b>${hmS(paid)}</b></span><span>Days<b>${worked}</b></span>`;
+  if(otOn&&otMins>0) h+=`<span>Overtime<b>${hmS(otMins)}</b>${ME.overtimeMult?`<span style="display:block;font-size:10px;text-transform:none;letter-spacing:0">${ME.overtimeMult}× over ${ME.overtimeThresholdH||8}h/day</span>`:""}</span>`;
   if(ME&&ME.mileage){
     h+=`<span>Mileage<b>${milesClaimed} mi</b>${milesClaimed!==miles?`<span style="display:block;font-size:10px;text-transform:none;letter-spacing:0">${miles} − ${Math.round((miles-milesClaimed)*10)/10} radius</span>`:""}</span>`;
   }
   if(ME&&ME.selfEmployed&&ME.rate){
-    const labour=ME.rateType==="day"?worked*ME.rate:hours*ME.rate;
+    let labour;
+    if(ME.rateType==="day")labour=worked*ME.rate;
+    else{const normMins=paid-otMins;labour=(normMins/60)*ME.rate+(otMins/60)*ME.rate*(ME.overtimeMult||1);}
     const mp=milesClaimed*ME.pencePerMile/100;
     h+=`<span>Labour<b>${money(labour)}</b></span>`;
     if(ME.mileage) h+=`<span>Mileage pay<b>${money(mp)}</b></span>`;
