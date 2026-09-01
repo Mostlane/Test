@@ -4599,13 +4599,10 @@ function visitedSequenceForDay(autoDay, day, jobsMeta) {
     }
     push(j.site, pc);
   }
-  const extra = [];
   for (const jid of Object.keys(day && day.jobHours || {})) {
     const m = jobsMeta && jobsMeta[jid];
-    if (m && m.pc && !seen.has(m.pc)) extra.push(m);
+    if (m && m.pc) push(m.site, m.pc);
   }
-  extra.sort((a, b) => String(a.sched || "").localeCompare(String(b.sched || "")));
-  for (const m of extra) push(m.site, m.pc);
   return seq;
 }
 async function scheduledSitesForWeek(env, tid, username, monday) {

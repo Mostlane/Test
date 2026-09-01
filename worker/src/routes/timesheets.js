@@ -715,9 +715,12 @@ async function jobsMetaForDay(env, tid, day) {
   return meta;
 }
 
-// Ordered postcodes visited on one day: status-tap capture order first
-// (jobTimeAuto), then any hand-entered jobHours jobs by scheduled time. Dupes
-// (and consecutive same-site) collapsed; entries with no postcode dropped.
+// Ordered postcodes visited on one day, forming ONE chained route (never a
+// round trip per job). Status-tap capture order first (jobTimeAuto = the real
+// driving order), then any hand-entered jobHours jobs IN THE ORDER THE ENGINEER
+// LISTED THEM on the timesheet (that's the order they drove them — a manually
+// added job carries no scheduled time to sort by). Dupes (and consecutive
+// same-site) collapsed; entries with no postcode dropped.
 function visitedSequenceForDay(autoDay, day, jobsMeta) {
   const seq = [], seen = new Set();
   const push = (site, pc) => {
@@ -732,13 +735,11 @@ function visitedSequenceForDay(autoDay, day, jobsMeta) {
     if (!pc) { const m = byRef[String(j.ref || "").toLowerCase()]; if (m) pc = m.pc; }
     push(j.site, pc);
   }
-  const extra = [];
+  // jobHours keys keep the engineer's entry order — that IS the route order.
   for (const jid of Object.keys((day && day.jobHours) || {})) {
     const m = jobsMeta && jobsMeta[jid];
-    if (m && m.pc && !seen.has(m.pc)) extra.push(m);
+    if (m && m.pc) push(m.site, m.pc);
   }
-  extra.sort((a, b) => String(a.sched || "").localeCompare(String(b.sched || "")));
-  for (const m of extra) push(m.site, m.pc);
   return seq;
 }
 
