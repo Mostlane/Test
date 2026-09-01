@@ -39,7 +39,7 @@ import { json, error, corsHeaders } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { PdfDoc, textWidth } from "../lib/pdf.js";
-import { approvedLeaveInRange } from "./holidays.js";
+import { approvedLeaveInRange, bankHolidaysInRange } from "./holidays.js";
 import { sendToUser } from "./push.js";
 
 // Approved leave for a Mon–Sun week as { "YYYY-MM-DD": {type, half} } for one
@@ -1006,9 +1006,10 @@ export async function handle(request, env, ctx, url, sess) {
     const inv = await invoiceFor(env, tid, me, monday);
     const auto = await jobTimeAuto(env, tid, me, monday);
     const holidays = await holidayDaysFor(env, tid, me, monday);
+    const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
     const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
-    return json({ ok: true, week: monday, days, savedAt, auto, holidays, jobMeta, approval, locked: !!approval,
+    return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
       totals: weekTotals(am.days, eff), autoMileage: am.auto,
       invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
@@ -1533,7 +1534,8 @@ export async function handle(request, env, ctx, url, sess) {
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
             url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null });
       }
-      return json({ ok: true, week: monday, days: weekDays(monday), users: out }, {}, env, request);
+      const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
+      return json({ ok: true, week: monday, days: weekDays(monday), users: out, bank }, {}, env, request);
     }
 
     if (sub === "/admin/save" && method === "POST") {
