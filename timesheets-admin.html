@@ -333,7 +333,7 @@ g("cfgBtn").onclick=async()=>{
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
-  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th title="Overtime multiplier of the normal hourly rate, for hours over the daily threshold. Blank = no overtime.">OT ×</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
+  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th title="Overtime multiplier of the normal hourly rate, for hours over the daily threshold. Blank = no overtime.">OT ×</th><th title="Overtime kicks in after this many PAID hours in a day (after lunch/travel come off). Blank = use the default below.">OT after h</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
     r.users.map(u=>{
       const o=(r.byUser&&r.byUser[u.username])||{};
       const e=u.effective;
@@ -346,6 +346,7 @@ g("cfgBtn").onclick=async()=>{
         <td><input type="number" class="c-rate" step="0.5" min="0" value="${o.rate!=null?o.rate:(e.rate!=null?e.rate:"")}"></td>
         <td><select class="c-ratetype"><option value="hour" ${e.rateType!=="day"?"selected":""}>hour</option><option value="day" ${e.rateType==="day"?"selected":""}>day</option></select></td>
         <td><input type="number" class="c-otmult" step="0.1" min="0" value="${o.overtimeMult!=null?o.overtimeMult:""}" placeholder="—" style="width:52px" title="e.g. 1.5"></td>
+        <td><input type="number" class="c-otthresh" step="0.5" min="0" value="${o.overtimeThresholdH!=null?o.overtimeThresholdH:""}" placeholder="${e.overtimeThresholdH||8}" style="width:56px" title="Paid hours/day before OT"></td>
         <td><input type="number" class="c-ppm" value="${o.pencePerMile!=null?o.pencePerMile:""}" placeholder="${e.pencePerMile}"></td>
         <td><input type="text" class="c-home" value="${esc(e.homePostcode||"")}"></td>
         <td><input type="number" class="c-next" min="1" value="${o.nextNumber!=null?o.nextNumber:""}"></td></tr>`;
@@ -421,6 +422,7 @@ function collectCfg(){
       rate:tr.querySelector(".c-rate").value,
       rateType:tr.querySelector(".c-ratetype").value,
       overtimeMult:tr.querySelector(".c-otmult").value,
+      overtimeThresholdH:tr.querySelector(".c-otthresh").value,
       pencePerMile:tr.querySelector(".c-ppm").value,
       homePostcode:tr.querySelector(".c-home").value,
       nextNumber:tr.querySelector(".c-next").value,
