@@ -465,8 +465,20 @@ async function loadInvoiceList(){
   const el=g("invList");if(!el)return;
   const r=await authFetchTO("/ts/invoices").then(r=>r.json()).catch(()=>null);
   if(!r||!r.invoices||!r.invoices.length){el.innerHTML="";return;}
-  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">My invoices</div>`+r.invoices.map(i=>
-    `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span><a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open</a></div>`).join("");
+  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">My invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)</div>`+r.invoices.map(i=>
+    `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
+    +`<a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open / print</a>`
+    +`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`).join("");
+  el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
+}
+async function deleteInvoice(id,no,url){
+  try{window.open(url,"_blank");}catch(e){}   // open the PDF so they can check/print before confirming
+  const msg="Delete invoice #"+no+"?\n\nCheck the PDF that just opened first. Deleting removes it, frees the number, and unlocks that week so it can be redone.";
+  const ok=window.MLUI?await MLUI.confirm(msg,{title:"Delete invoice",okLabel:"Delete invoice",danger:true}):confirm(msg);
+  if(!ok)return;
+  const r=await authFetchTO("/ts/invoice/delete",{method:"POST",body:JSON.stringify({id:Number(id)})}).then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok){alert((r&&r.error)||"Couldn't delete the invoice — try again.");return;}
+  await load();   // refresh: the deleted week unlocks + the number frees up
 }
 
 async function generateInvoice(){
