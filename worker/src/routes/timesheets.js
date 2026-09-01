@@ -901,9 +901,13 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   }
   if (totals.miles > 0) {
     const ded = totals.milesDeducted > 0;
-    doc.text(cTot, y, "Mileage: " + (ded
-      ? totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"
-      : totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"), { size: ded ? 9 : 10 });
+    // The radius breakdown goes on its OWN small grey line so the label can
+    // never run into the right-aligned amount.
+    if (ded) {
+      doc.text(cTot, y, totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi", { size: 8.5, grey: true });
+      y += 12;
+    }
+    doc.text(cTot, y, "Mileage: " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p", { size: 10 });
     doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true }); y += 16;
   }
   y += 6;
