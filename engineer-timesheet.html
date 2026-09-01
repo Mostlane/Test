@@ -362,7 +362,7 @@ function render(){
     const jhRows=[...booked,...extras];
     card.innerHTML=`
       <button class="dhead" type="button">
-        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:""}</span></span>
+        <span class="dow"><b>${DOWFULL[i]}${isToday?" · today":""}${HOL[date]?" 🌴":(BANK[date]?" 🏦":"")}</b><span>${new Date(date+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}${booked.length?` · ${booked.length} job${booked.length>1?"s":""} booked`:""}</span></span>
         <span class="sum"></span><span class="chev">›</span>
       </button>
       <div class="cbody">

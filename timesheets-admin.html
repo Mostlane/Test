@@ -189,8 +189,11 @@ function renderTable(){
     const cells=days.map(d=>{
       const hol=(u.holidays||{})[d];
       if(hol) return `<td style="background:#f0fdf4"><span class="holchip" title="Approved leave">🌴 ${hol.half?hol.half:"Hol"}</span></td>`;
+      const bh=(DATA.bank||{})[d];
       const p=u.perDay[d];
-      return "<td>"+(p&&p.worked?hmS(p.paid):"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
+      if(bh && !(p&&p.worked)) return `<td style="background:#eef2ff"><span title="${esc(bh.label)}" style="font-size:16px">🏦</span></td>`;
+      const bhTag=bh?` <span title="${esc(bh.label)}">🏦</span>`:"";
+      return "<td>"+(p&&p.worked?hmS(p.paid)+bhTag:"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
     }).join("");
     const inv=u.invoice?`<a class="inv" href="${esc(u.invoice.url)}" target="_blank" title="Open invoice PDF">#${u.invoice.number}</a>`
       :(u.selfEmployed?"<span class='muted'>—</span>":"");
