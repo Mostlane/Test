@@ -425,8 +425,14 @@ function renderInvoiceCard(){
     return;
   }
   card.style.display="";
+  const allBtn=`<div class="invrow" style="margin-top:6px"><button class="btn" id="viewAllInv" style="display:none">📋 View all invoices</button></div><div class="invlist" id="invList" hidden></div>`;
   if(INVOICE){
-    card.innerHTML=`<h3>🧾 Invoice</h3><div class="invrow">Invoice <b>${INVOICE.number}</b> · ${money(INVOICE.total||0)} · <a href="${esc(INVOICE.url)}" target="_blank">Open PDF</a></div><div class="invlist" id="invList"></div>`;
+    card.innerHTML=`<h3>🧾 Invoice</h3>
+      <div class="muted" style="font-size:12.5px;margin-bottom:4px">This week</div>
+      <div class="li"><b>#${INVOICE.number}</b><span>${money(INVOICE.total||0)}</span>
+        <a href="${esc(INVOICE.url)}" target="_blank" style="margin-left:auto">Open / print</a>
+        <button class="btn del" id="thisWkDel" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`+allBtn;
+    if(INVOICE.id!=null)g("thisWkDel").onclick=()=>deleteInvoice(INVOICE.id,INVOICE.number,INVOICE.url);
   } else {
     card.innerHTML=`<h3>🧾 Invoice this week</h3>
       <div class="invrow" style="flex-direction:column;align-items:stretch">
@@ -438,8 +444,7 @@ function renderInvoiceCard(){
            <select id="rateType"><option value="hour">per hour</option><option value="day">per day</option></select></div>`}
       <div class="invrow"><label>Next invoice number <input type="number" id="nextNo" min="1" step="1" value="${ME.nextInvoice}" style="width:110px" ${ME.canSetNumber?"":"disabled"}></label>
         <span class="muted" style="font-size:12.5px" id="noMsg">${ME.canSetNumber?"Set your starting number once — it saves as you type and counts up from there.":""}</span></div>
-      <div class="invrow"><button class="btn primary" id="genBtn">Generate invoice PDF</button></div>
-      <div class="invlist" id="invList"></div>`;
+      <div class="invrow"><button class="btn primary" id="genBtn">Generate invoice PDF</button></div>`+allBtn;
     if(ME.canSetNumber){
       let noTimer=null;
       g("nextNo").oninput=()=>{clearTimeout(noTimer);noTimer=setTimeout(async()=>{
@@ -462,14 +467,21 @@ function renderInvoiceCard(){
 }
 
 async function loadInvoiceList(){
-  const el=g("invList");if(!el)return;
+  const el=g("invList"),btn=g("viewAllInv");if(!el)return;
   const r=await authFetchTO("/ts/invoices").then(r=>r.json()).catch(()=>null);
-  if(!r||!r.invoices||!r.invoices.length){el.innerHTML="";return;}
-  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">My invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)</div>`+r.invoices.map(i=>
+  const invs=(r&&r.invoices)||[];
+  if(!invs.length){el.innerHTML="";el.hidden=true;if(btn)btn.style.display="none";return;}
+  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)</div>`+invs.map(i=>
     `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
     +`<a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open / print</a>`
     +`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`).join("");
   el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
+  if(btn){
+    btn.style.display="";
+    const setLbl=()=>btn.textContent=(el.hidden?"📋 View all invoices":"▲ Hide invoices")+" ("+invs.length+")";
+    setLbl();
+    btn.onclick=()=>{el.hidden=!el.hidden;setLbl();};
+  }
 }
 async function deleteInvoice(id,no,url){
   const msg="Delete invoice #"+no+"?\n\nUse “Open / print” first if you want to check it. Deleting removes it, frees the number, and unlocks that week so it can be redone.";

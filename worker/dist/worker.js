@@ -4898,6 +4898,7 @@ async function handle7(request, env, ctx, url, sess) {
       totals: weekTotals(am.days, eff),
       autoMileage: am.auto,
       invoice: inv ? {
+        id: inv.id,
         number: inv.number,
         total: inv.total,
         at: inv.at,
