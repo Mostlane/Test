@@ -291,7 +291,19 @@
           <button class="btn grey small" id="uyClose">✕ Close</button>
         </div>
         <div class="uy-legend" id="uyLegend"></div>
+        <div class="muted" style="font-size:12px;margin:2px 0 8px;">Tip: tap any booked day to edit or remove that booking.</div>
         <div class="calgrid" id="uyGrid"></div>
+      </div>
+    </div>
+
+    <!-- EDIT A BOOKING (from the per-user calendar) -->
+    <div class="uy-backdrop" id="uyEditBackdrop" style="z-index:70;">
+      <div class="uy-modal" style="max-width:520px;">
+        <div class="uy-head">
+          <div><h3 id="uyEditTitle" style="margin:0;">Edit booking</h3><div class="muted" id="uyEditDay" style="font-size:12.5px;"></div></div>
+          <button class="btn grey small" id="uyEditClose">✕ Close</button>
+        </div>
+        <div id="uyEditBody" style="padding:4px 2px 6px;"></div>
       </div>
     </div>
 
@@ -661,8 +673,10 @@
     }
 
     // ── Per-user year view (opened by clicking a name) ──
+    let UY_USER = "", UY_DAYBK = {};   // current user + date -> [bookings] for the edit modal
     function openUserYear(username) {
       if (!username) return;
+      UY_USER = username; UY_DAYBK = {};
       g("uyName").textContent = NAMES[username] || username;
       const map = {};                                   // di -> class
       const pri = { uh: 5, uu: 4, uo: 3, up: 2, ub: 1, us: 1 };
@@ -678,6 +692,7 @@
           const di = d.toISOString().slice(0, 10);
           if (di.slice(0, 4) !== String(YEAR)) continue;
           set(di, cls);
+          (UY_DAYBK[di] || (UY_DAYBK[di] = [])).push(h);
         }
         if (h.status === "Pending") counts.pend += h.days || 0;
         else if (h.type === "Unpaid") counts.unpaid += h.days || 0;
@@ -718,7 +733,8 @@
           const we = dow === 0 || dow === 6;
           let cls = map[di] || (we ? "we" : "");
           if (di === today) cls += " today";
-          cells += `<td class="${cls}">${d}</td>`;
+          const bk = UY_DAYBK[di];
+          cells += `<td class="${cls}"${bk && bk.length ? ` data-uyday="${di}" style="cursor:pointer"` : ""}>${d}</td>`;
           if ((lead + d) % 7 === 0 && d !== dim) cells += "</tr><tr>";
         }
         html += `<div class="mm"><h4>${first.toLocaleDateString("en-GB", { month:"long", timeZone:"UTC" })}</h4>
@@ -726,6 +742,82 @@
       }
       g("uyGrid").innerHTML = html;
       g("uyBackdrop").classList.add("on");
+    }
+
+    // ── Edit / remove a booking straight from the per-user calendar ──
+    g("uyGrid").addEventListener("click", e => {
+      const cell = e.target.closest("[data-uyday]");
+      if (cell) openUyEdit(cell.getAttribute("data-uyday"));
+    });
+    function closeUyEdit() { g("uyEditBackdrop").classList.remove("on"); }
+    g("uyEditClose").addEventListener("click", closeUyEdit);
+    g("uyEditBackdrop").addEventListener("click", e => { if (e.target === g("uyEditBackdrop")) closeUyEdit(); });
+    function wdCount(startISO, endISO) {
+      let n = 0; const s = new Date(startISO + "T00:00:00Z"), e = new Date(endISO + "T00:00:00Z");
+      if (isNaN(s) || isNaN(e) || e < s) return 0;
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) { const wd = d.getUTCDay(); if (wd !== 0 && wd !== 6) n++; }
+      return n;
+    }
+    function openUyEdit(di) {
+      const list = (UY_DAYBK[di] || []);
+      if (!list.length) return;
+      const dd = new Date(di + "T00:00:00").toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+      g("uyEditTitle").textContent = NAMES[UY_USER] || UY_USER;
+      g("uyEditDay").textContent = dd;
+      g("uyEditBody").innerHTML = list.map(h => {
+        const isHalf = Number(h.days) === 0.5;
+        return `<div class="uybk" data-id="${esc(h.id)}" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+            <span style="background:${h.status === 'Pending' ? '#f4b942' : '#e6eefc'};color:#20303f;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;">${esc(h.status)}</span>
+            <span class="muted" style="font-size:12px;">${esc(h.start)}${h.end !== h.start ? " → " + esc(h.end) : ""} · ${esc(String(h.days))}d</span>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center;font-size:13px;">
+            <label style="font-weight:700;">Type</label>
+            <select class="uf-type">${["Holiday","Unpaid","Other"].map(t => `<option value="${t}"${(h.type || 'Holiday') === t ? ' selected' : ''}>${t}</option>`).join("")}</select>
+            <label style="font-weight:700;">From</label><input type="date" class="uf-start" value="${esc(h.start)}">
+            <label style="font-weight:700;">To</label><input type="date" class="uf-end" value="${esc(h.end)}">
+          </div>
+          ${isHalf ? '<div class="muted" style="font-size:12px;margin-top:6px;">Half-day booking — changing the dates converts it to full day(s).</div>' : ''}
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+            <button class="btn small uf-save">Save changes</button>
+            <button class="btn small uf-del" style="background:#b00020;">Delete booking</button>
+          </div>
+          <p class="uf-msg" style="font-size:12.5px;margin:6px 0 0;"></p>
+        </div>`;
+      }).join("") + `<div class="muted" style="font-size:12px;">Editing changes the WHOLE booking (its full date range), not just this day.</div>`;
+      g("uyEditBody").querySelectorAll(".uybk").forEach(card => {
+        const id = card.getAttribute("data-id");
+        const msg = card.querySelector(".uf-msg");
+        card.querySelector(".uf-save").onclick = async () => {
+          const type = card.querySelector(".uf-type").value;
+          const start = card.querySelector(".uf-start").value;
+          const end = card.querySelector(".uf-end").value;
+          if (!start || !end || end < start) { msg.style.color = "#b00020"; msg.textContent = "Check the dates."; return; }
+          const orig = list.find(x => String(x.id) === String(id)) || {};
+          const days = (Number(orig.days) === 0.5 && start === end) ? 0.5 : wdCount(start, end);
+          await doUyEdit({ id, action: "update", type, start, end, days, half: (days === 0.5 ? (orig.half || null) : null) }, msg, card.querySelector(".uf-save"));
+        };
+        card.querySelector(".uf-del").onclick = async () => {
+          const ok = window.MLUI && MLUI.confirm ? await MLUI.confirm("Delete this booking? This removes it entirely.", { title: "Delete booking", danger: true }) : confirm("Delete this booking?");
+          if (!ok) return;
+          await doUyEdit({ id, action: "delete" }, msg, card.querySelector(".uf-del"));
+        };
+      });
+      g("uyEditBackdrop").classList.add("on");
+    }
+    async function doUyEdit(payload, msg, btn) {
+      const label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        const r = await authFetch("/holiday/admin-edit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.success === false) throw new Error(d.error || "Failed");
+        closeUyEdit();
+        await loadAll(); await loadBalances().catch(() => {});
+        openUserYear(UY_USER);
+      } catch (e) {
+        if (msg) { msg.style.color = "#b00020"; msg.textContent = "Couldn't save — " + (e.message || "try again"); }
+        btn.disabled = false; btn.textContent = label;
+      }
     }
     function closeUserYear() { g("uyBackdrop").classList.remove("on"); }
     g("uyClose").addEventListener("click", closeUserYear);

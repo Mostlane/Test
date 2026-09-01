@@ -334,6 +334,14 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
 - `holidays.js` — summary ring, accrual mode, Holiday/Unpaid/Other,
   approve/reject (type override), staff self-cancel (notifies admin), bank
   holidays (GOV.UK import) + shutdown + worked-credit, batch system days.
+  **Admin edit-from-calendar (Sep 2026):** **POST /holiday/admin-edit** (admin)
+  `{id, action:"update"|"delete", type?, start?, end?, days?, half?}` edits or
+  hard-deletes a single booking. Surfaced in **holiday-admin.html**: the per-user
+  year calendar (`openUserYear`, opened by clicking a name) now makes each booked
+  day **clickable** → an edit modal (`openUyEdit`) listing that day's booking(s)
+  with a type dropdown + From/To dates + Save / Delete; it refreshes ALL +
+  balances and re-opens the year view. (Bank-holiday/shutdown days stay managed
+  via their own list editors, not here.)
   **Approved leave auto-flows to timesheets + scheduler (Aug 2026):** exported
   helper **`approvedLeaveInRange(env,tid,from,to,username?)`** expands each
   approved booking's start→end into per-day markers `{username:{date:{type,half}}}`;

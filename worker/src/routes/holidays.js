@@ -368,6 +368,36 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ success: true });
   }
 
+  // POST /holiday/admin-edit  (admin: edit or hard-delete a booking straight
+  // from the calendar). Body: { id, action:"update"|"delete", type?, start?,
+  // end?, days?, half? }. "update" changes only the fields supplied; "delete"
+  // removes the row outright (used to tidy duplicates/mistakes).
+  if (path === "/holiday/admin-edit" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const b = await request.json();
+    const id = b.id;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (b.action === "delete") {
+      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+      await logAction(id, `Deleted by admin (${record.start} → ${record.end})`, user);
+      return json({ success: true, deleted: true });
+    }
+    // update
+    const sets = [], vals = [];
+    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) { sets.push("type=?"); vals.push(b.type); }
+    if (b.start) { sets.push("start_date=?"); vals.push(b.start); sets.push("year=?"); vals.push(Number(String(b.start).slice(0, 4)) || record.year); }
+    if (b.end) { sets.push("end_date=?"); vals.push(b.end); }
+    if (b.days != null && !Number.isNaN(Number(b.days))) { sets.push("days=?"); vals.push(Number(b.days)); }
+    if (b.half !== undefined) { sets.push("half=?"); vals.push(b.half || null); }
+    if (!sets.length) return json({ success: true, unchanged: true });
+    vals.push(db.tenantId, id);
+    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
+    await logAction(id, `Edited by admin (${(b.type || record.type)} · ${(b.start || record.start)} → ${(b.end || record.end)})`, user);
+    return json({ success: true });
+  }
+
   // GET /holiday/my
   if (path === "/holiday/my" && method === "GET") {
     await ensureSystemDaysForUser(user);

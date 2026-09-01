@@ -981,6 +981,47 @@ async function handle5(request, env, ctx, url, sess) {
     await logAction(id, "Approval cancelled by admin", user);
     return json4({ success: true });
   }
+  if (path === "/holiday/admin-edit" && method === "POST") {
+    if (!isAdmin) return text("Forbidden", 403);
+    const b = await request.json();
+    const id = b.id;
+    if (!id) return text("Missing id", 400);
+    const record = await getHolidayById(id);
+    if (!record) return text("Not found", 404);
+    if (b.action === "delete") {
+      await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
+      await logAction(id, `Deleted by admin (${record.start} \u2192 ${record.end})`, user);
+      return json4({ success: true, deleted: true });
+    }
+    const sets = [], vals = [];
+    if (b.type != null && ["Holiday", "Unpaid", "Other"].includes(b.type)) {
+      sets.push("type=?");
+      vals.push(b.type);
+    }
+    if (b.start) {
+      sets.push("start_date=?");
+      vals.push(b.start);
+      sets.push("year=?");
+      vals.push(Number(String(b.start).slice(0, 4)) || record.year);
+    }
+    if (b.end) {
+      sets.push("end_date=?");
+      vals.push(b.end);
+    }
+    if (b.days != null && !Number.isNaN(Number(b.days))) {
+      sets.push("days=?");
+      vals.push(Number(b.days));
+    }
+    if (b.half !== void 0) {
+      sets.push("half=?");
+      vals.push(b.half || null);
+    }
+    if (!sets.length) return json4({ success: true, unchanged: true });
+    vals.push(db.tenantId, id);
+    await db.prepare(`UPDATE holidays SET ${sets.join(", ")} WHERE tenant_id=? AND id=?`).bind(...vals).run();
+    await logAction(id, `Edited by admin (${b.type || record.type} \xB7 ${b.start || record.start} \u2192 ${b.end || record.end})`, user);
+    return json4({ success: true });
+  }
   if (path === "/holiday/my" && method === "GET") {
     await ensureSystemDaysForUser(user);
     const reqs = (await listHolidayRequestsForYear()).filter((h) => h.username === user);
