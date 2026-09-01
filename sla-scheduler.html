@@ -250,6 +250,18 @@
     .pin-pop b{color:var(--ml-blue);}
     .pin-pop .st{display:inline-block;border-radius:999px;padding:1px 8px;color:#fff;font-size:11px;font-weight:600;margin-left:4px;}
     .pin-pop a{display:inline-block;margin-top:6px;color:#1d4ed8;font-weight:600;}
+    /* ---- Day blocks (appointments) ---- */
+    .day-block{position:absolute;top:3px;bottom:3px;z-index:1;border-radius:7px;overflow:hidden;
+      background:repeating-linear-gradient(45deg,#e2e6ea,#e2e6ea 6px,#d4d9df 6px,#d4d9df 12px);
+      border:1px solid #b9c2cc;display:flex;align-items:center;gap:4px;padding:0 4px;box-sizing:border-box;}
+    .day-block .db-lbl{font-size:11px;font-weight:600;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+    .day-block .db-x{flex:none;border:none;background:rgba(255,255,255,.75);color:#64748b;border-radius:50%;
+      width:16px;height:16px;line-height:14px;font-size:11px;cursor:pointer;padding:0;}
+    .day-block .db-x:hover{background:#fee2e2;color:#b00020;}
+    #blkList .blk-item{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #eef1f5;font-size:13px;}
+    #blkList .blk-item .bi-t{font-family:ui-monospace,Menlo,monospace;color:var(--ml-blue);font-weight:600;white-space:nowrap;}
+    #blkList .blk-item .bi-n{flex:1;color:#334;}
+    #blkList .blk-item button{border:none;background:none;color:#b00020;cursor:pointer;font-size:13px;}
   </style>
 </head>
 <body>
@@ -399,6 +411,7 @@
       <span style="display:flex;gap:6px;flex:none;">
         <button type="button" class="btn" id="engDayAuto" title="Auto-build this engineer's day from nearby unscheduled jobs they're competent for">🪄 Auto-build day</button>
         <button type="button" class="btn" id="engDayOptimise" title="Auto-order this engineer's day into the most efficient route">🧭 Optimise route</button>
+        <button type="button" class="btn" id="engDayBlock" title="Block off time on this engineer's day (e.g. an appointment) — nothing gets scheduled into it">🚫 Block time</button>
         <button type="button" class="btn" id="engDayMap" title="See these jobs on the map">🗺️ Map</button>
         <button type="button" class="btn" id="engDayClose">✕</button>
       </span>
@@ -406,6 +419,28 @@
     <div id="engDayDate" style="font-size:12px;color:var(--muted);margin:2px 0 8px;"></div>
     <div class="eng-sum" id="engDaySummary"></div>
     <div class="eng-jobs" id="engDayJobs"></div>
+  </div>
+</div>
+
+<!-- BLOCK TIME MODAL -->
+<div class="modal-backdrop" id="blkBackdrop">
+  <div class="modal" style="max-width:420px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <h2 style="margin:0;font-size:18px;">🚫 Block off time</h2>
+      <button type="button" class="btn" id="blkClose">✕</button>
+    </div>
+    <div id="blkWho" style="font-size:12px;color:var(--muted);margin:2px 0 12px;"></div>
+    <div style="display:flex;gap:10px;">
+      <label style="flex:1;font-size:12px;color:var(--muted);">From<br><input type="time" id="blkStart" step="300" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+      <label style="flex:1;font-size:12px;color:var(--muted);">To<br><input type="time" id="blkEnd" step="300" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+    </div>
+    <label style="display:block;font-size:12px;color:var(--muted);margin-top:10px;">Note for the office<br>
+      <input type="text" id="blkNote" maxlength="200" placeholder="e.g. Doctor's appointment" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+      <button type="button" class="btn" id="blkCancel">Cancel</button>
+      <button type="button" class="btn primary" id="blkSave">Add block</button>
+    </div>
+    <div id="blkList" style="margin-top:14px;"></div>
   </div>
 </div>
 
@@ -764,6 +799,20 @@ async function loadHolidays(){
     holidayMap = out;
   }catch(e){ holidayMap = {}; }
 }
+
+// ── Day blocks (appointments) — reserved windows the optimiser routes around ──
+let allBlocks = [];
+async function loadBlocks(){
+  try{ const d = await authFetch("/sla/blocks").then(r=>r.json()); allBlocks = (d && d.blocks) || []; }
+  catch(e){ allBlocks = []; }
+}
+function blocksForDay(username, dateObj){
+  const ds = ymd(dateObj), u = String(username||"").toLowerCase();
+  return allBlocks.filter(b => b.date===ds && String(b.username||"").toLowerCase()===u)
+    .sort((a,b)=> (a.start||"").localeCompare(b.start||""));
+}
+const hhmmToMins = s => { const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||"")); return m ? Number(m[1])*60+Number(m[2]) : 0; };
+
 // Ensure holidays cover the date about to be shown; refetch (then re-render) if not.
 function ensureHolidays(){
   const cur = ymd(selectedDate);
@@ -998,6 +1047,20 @@ function renderDayView(container){
     const JOB_H = numLanes > 1 ? 26 : 32;
     const rowH = Math.max(DAY_ROW_HEIGHT, 6 + numLanes * JOB_H + (numLanes - 1) * GAP + 6);
     track.style.height = rowH + "px";
+
+    // Reserved appointment blocks — drawn as grey hatched bars; nothing schedules here.
+    blocksForDay(engineer.username, dayDate).forEach(b => {
+      const bs = clamp(hhmmToMins(b.start), dayStartMins, dayEndMins - 5);
+      const be = clamp(hhmmToMins(b.end), bs + 5, dayEndMins);
+      const el = document.createElement("div");
+      el.className = "day-block";
+      el.style.left = ((bs - dayStartMins) * pxPerMin) + "px";
+      el.style.width = Math.max(22, (be - bs) * pxPerMin) + "px";
+      el.title = "Blocked " + b.start + "–" + b.end + (b.note ? " · " + b.note : "") + " (tap ✕ to remove)";
+      el.innerHTML = `<span class="db-lbl">🚫 ${escapeHtml(b.note || "Blocked")}</span><button class="db-x" title="Remove block">✕</button>`;
+      el.querySelector(".db-x").addEventListener("click", ev => { ev.stopPropagation(); deleteBlock(b.id); });
+      track.appendChild(el);
+    });
 
     placements.forEach(p => {
       const { job, done, schedStartMins, startMins, endMins, shifted, lane } = p;
@@ -1367,6 +1430,52 @@ document.getElementById("engDayClose").addEventListener("click", () => { $("engD
 document.getElementById("engDayMap").addEventListener("click", () => { if(engDayCtx) openMapForEngineer(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
 document.getElementById("engDayBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("engDayBackdrop")) document.getElementById("engDayBackdrop").style.display = "none"; });
 
+/* ===== Block time (appointments) ===== */
+let blkCtx = null;
+function openBlockModal(username, name, date){
+  blkCtx = { username, name, date };
+  $("blkWho").textContent = name + " · " + date.toDateString();
+  $("blkStart").value = "08:00"; $("blkEnd").value = "09:00"; $("blkNote").value = "";
+  renderBlkList();
+  $("blkBackdrop").style.display = "flex";
+  setTimeout(() => { try{ $("blkStart").focus(); }catch(e){} }, 50);
+}
+function closeBlockModal(){ $("blkBackdrop").style.display = "none"; }
+function renderBlkList(){
+  if(!blkCtx) return;
+  const list = blocksForDay(blkCtx.username, blkCtx.date);
+  $("blkList").innerHTML = list.length
+    ? `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Blocks on this day</div>` +
+      list.map(b => `<div class="blk-item"><span class="bi-t">${escapeHtml(b.start)}–${escapeHtml(b.end)}</span><span class="bi-n">${escapeHtml(b.note||"Blocked")}</span><button data-del="${escapeAttr(b.id)}">Remove</button></div>`).join("")
+    : "";
+  $("blkList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => deleteBlock(btn.getAttribute("data-del"), true)));
+}
+async function saveBlock(){
+  if(!blkCtx) return;
+  const start = $("blkStart").value, end = $("blkEnd").value, note = $("blkNote").value.trim();
+  if(!start || !end){ alert("Pick a start and end time."); return; }
+  if(hhmmToMins(end) <= hhmmToMins(start)){ alert("End time must be after the start time."); return; }
+  const btn = $("blkSave"); btn.disabled = true;
+  try{
+    const r = await authFetch("/sla/blocks", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ username: blkCtx.username, date: formatDateInput(blkCtx.date), start, end, note }) }).then(r => r.json());
+    if(r && r.ok){ await loadBlocks(); renderBlkList(); render(); $("blkNote").value = ""; }
+    else alert((r && r.error) || "Couldn't add the block.");
+  }catch(e){ alert("Couldn't add the block."); }
+  btn.disabled = false;
+}
+async function deleteBlock(id, keepModal){
+  try{
+    const r = await authFetch("/sla/blocks/delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id }) }).then(r => r.json());
+    if(r && r.ok){ await loadBlocks(); render(); if(keepModal) renderBlkList(); }
+  }catch(e){}
+}
+document.getElementById("engDayBlock").addEventListener("click", () => { if(engDayCtx) openBlockModal(engDayCtx.username, engDayCtx.name, engDayCtx.date); });
+document.getElementById("blkClose").addEventListener("click", closeBlockModal);
+document.getElementById("blkCancel").addEventListener("click", closeBlockModal);
+document.getElementById("blkSave").addEventListener("click", saveBlock);
+document.getElementById("blkBackdrop").addEventListener("click", e => { if(e.target === document.getElementById("blkBackdrop")) closeBlockModal(); });
+
 /* ===== Route optimiser ===== */
 let optCtx = null, optResult = null, optAddedIds = new Set(), optThreshold = 20;
 async function ensureAllJobGeocodes(){
@@ -1443,6 +1552,7 @@ function renderOptimise(data){
       <div><b>${optFmtMins(s.dayLengthMins)}</b><span>day · ends ~${endClock}</span></div>
     </div>` +
     (data.aiReason ? `<div class="opt-reason">🤖 ${escapeHtml(data.aiReason)}</div>` : "") +
+    ((data.blocks && data.blocks.length) ? `<div class="opt-reason">🚫 Routed around: ${data.blocks.map(b => `${optWallClock(optCtx.date, dayStart, b.offset)}–${optWallClock(optCtx.date, dayStart, b.endOffset)}${b.note ? " " + escapeHtml(b.note) : ""}`).join(" · ")}</div>` : "") +
     ((data.warnings && data.warnings.length) ? `<div class="opt-warn">⚠ ${data.warnings.map(escapeHtml).join("<br>")}</div>` : "");
   const rows = [];
   rows.push(`<div class="opt-leg opt-home"><span class="opt-time">${dayStart}</span><span>🏠 Leave home${data.home && data.home.postcode ? " (" + escapeHtml(data.home.postcode) + ")" : ""}</span></div>`);
@@ -2541,6 +2651,7 @@ async function init(){
     populateEngineerFilter();
     await loadJobs();
     await loadHolidays();
+    await loadBlocks();
     render();
     setStatus("Scheduler ready");
     if(location.hash === "#map") openMap();
