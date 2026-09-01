@@ -3074,8 +3074,10 @@ signed PDF filed to their **My Documents › Agreements**. Reuses the memos/sign
   PDF, issuer sig only — opened as an auth'd blob, NOT a public link), POST /documents/send {id,recipients[]},
   GET /documents/status?id= (signed/pending, signed rows carry a signed /staff/doc link), GET /documents/pending
   (mine), GET /documents/one?id= (recipient/admin), POST /documents/sign {id,signature}. No new PUBLIC_ROUTE —
-  the signed PDFs are served by the existing signed `/staff/doc`. Entry point: notification-centre.html "📄
-  Signable documents" card → documents-admin.html. documents-admin.html + document-sign.html are in the
+  the signed PDFs are served by the existing signed `/staff/doc`. Entry point: **my-documents.html** (Full-access admin bar) "📄
+  Manage & send documents" → documents-admin.html (lives with the other document builders, NOT under
+  the notification centre). The Portal User & Data Protection Agreement is seeded as library doc #1
+  (MOS-DOC-0001). documents-admin.html + document-sign.html are in the
   _headers no-cache list. **TODO/next:** blocking gate + deadlines + notifications; seed the Portal User
   Agreement + Annual Leave policy as starter library docs; optional PDF-upload path (append a branded
   signature page to an uploaded PDF).
