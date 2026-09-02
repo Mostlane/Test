@@ -1248,6 +1248,8 @@ async function loadExistingPhotos(){
       url: f.publicURL,
       name: f.name
     }));
+    if(data.signature) sigMeta = data.signature;   // signed/public signature URLs, when provided
+    renderSignatureImage();                        // now a URL can be derived from a photo's base
 
     renderPhotoGrid();
     $("photoUploadStatus").textContent =
@@ -2171,12 +2173,52 @@ function sigLocalKey(id){ return "mlSig:" + id; }
 function readSigLocal(id){ try{ return JSON.parse(localStorage.getItem(sigLocalKey(id)) || "null"); }catch(e){ return null; } }
 function writeSigLocal(id, rec){ try{ localStorage.setItem(sigLocalKey(id), JSON.stringify(rec)); }catch(e){} }
 function sigEsc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+let sigMeta = null;   // signature URLs from /files, when the host provides them
 function showSignedStatus(rec){
   const note = rec.pending ? `<div class="muted" id="sigSyncNote" style="font-size:12px;margin-top:2px;">saved on this device — syncing…</div>`
                            : `<div class="muted" id="sigSyncNote" style="font-size:12px;margin-top:2px;">saved ✓</div>`;
   $("signatureStatus").innerHTML =
     `✔ Signed by <strong>${sigEsc(rec.signedBy)}</strong>` +
-    (rec.signedAt ? ` on ${fmtDateTimeLong(new Date(rec.signedAt))}` : "") + note;
+    (rec.signedAt ? ` on ${fmtDateTimeLong(new Date(rec.signedAt))}` : "") + note +
+    `<div id="sigImgWrap" style="margin-top:8px;"></div>`;
+  renderSignatureImage();
+}
+// The best available source for the drawn signature image: a device-local copy
+// (same-origin data URL), a signed URL from /files, or the public URL derived from
+// how the photos load (same bucket base). `cors` says whether we can re-ink it.
+function bestSigSrc(){
+  const loc = readSigLocal(job && job.id);
+  if(loc && loc.img) return { src: loc.img, cors: true };
+  if(sigMeta && sigMeta.url) return { src: sigMeta.url, cors: true };
+  const fk = job && job.signature && job.signature.fileKey;
+  if(fk && fk !== "local" && photoGallery && photoGallery.length){
+    const base = String(photoGallery[0].url || "").split("/jobs/")[0];
+    if(base) return { src: base + "/" + fk.split("/").map(encodeURIComponent).join("/"), cors: false };
+  }
+  if(sigMeta && sigMeta.publicURL) return { src: sigMeta.publicURL, cors: false };
+  return null;
+}
+// Show the signature image. Where we can read the pixels (same-origin/CORS), re-ink
+// it dark by its alpha so a pale/white pen colour still shows; otherwise show raw.
+function renderSignatureImage(){
+  const wrap = document.getElementById("sigImgWrap"); if(!wrap) return;
+  const s = bestSigSrc(); if(!s){ wrap.innerHTML = ""; return; }
+  const style = 'max-width:260px;max-height:120px;border:1px solid #e5e9ef;border-radius:8px;background:#fff;padding:4px;';
+  const show = url => { wrap.innerHTML = '<img src="' + sigEsc(url) + '" alt="Customer signature" style="' + style + '">'; };
+  if(!s.cors){ const t = new Image(); t.onload = () => show(s.src); t.onerror = () => { wrap.innerHTML = ""; }; t.src = s.src; return; }
+  const img = new Image(); img.crossOrigin = "anonymous";
+  img.onload = function(){
+    try{
+      const c = document.createElement("canvas"); c.width = img.naturalWidth || 300; c.height = img.naturalHeight || 120;
+      const x = c.getContext("2d"); x.drawImage(img, 0, 0);
+      const d = x.getImageData(0, 0, c.width, c.height), p = d.data, n = c.width * c.height;
+      let tr = 0; for(let i = 3; i < p.length; i += 4){ if(p[i] < 250) tr++; }
+      if(tr > n * 0.02){ for(let i = 0; i < p.length; i += 4){ p[i] = 15; p[i+1] = 36; p[i+2] = 56; } x.putImageData(d, 0, 0); }
+      show(c.toDataURL("image/png"));
+    }catch(e){ show(s.src); }
+  };
+  img.onerror = function(){ wrap.innerHTML = ""; };
+  img.src = s.src;
 }
 let sigFlushTimer = null;
 async function flushSignature(id){
