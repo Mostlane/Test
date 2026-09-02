@@ -4279,29 +4279,33 @@ async function anthropicToolLocal(env, { system, user, toolName, schema, maxToke
     return { ok: false, error: "Couldn't reach the AI service." };
   }
 }
-async function tsVerifyAI(env, engineers, monday, vanList) {
+var DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+async function tsVerifyAI(env, engineers, monday, poolVans) {
   if (!engineers.length) return { byUser: {} };
-  const lines = engineers.map((e) => {
-    const dl = e.days.filter((d) => d.hours > 0).map((d) => d.date.slice(5) + ":" + d.hours + "h").join(", ") || "none";
-    return `- ${e.username} | assigned van ${e.reg || "(none)"}${e.assignedDriver ? " (telematics driver: " + e.assignedDriver + ")" : ""} | entered ${e.total}h (${dl}) | assigned-van driving this week ${e.driveMins != null ? Math.round(e.driveMins / 6) / 10 + "h" : "NO DATA / van didn't move"}`;
+  const dlab = (dt) => {
+    const d = /* @__PURE__ */ new Date(dt + "T12:00:00Z");
+    return DOW3[d.getUTCDay()] + " " + dt.slice(8);
+  };
+  const blocks = engineers.map((e) => {
+    const rows = e.dayLog.filter((d) => d.entered > 0 || d.moved).map((d) => {
+      const van = d.moved ? `van out ${d.vanStart}\u2013${d.vanEnd} (door-to-door ${d.spanH}h${d.driveH != null ? ", " + d.driveH + "h driving" : ""})${d.locs.length ? " [" + d.locs.slice(0, 4).join("; ") + "]" : ""}` : "assigned van DID NOT MOVE";
+      return `    ${dlab(d.date)}: entered ${d.entered}h | ${van}`;
+    }).join("\n");
+    return `- ${e.username} (assigned van ${e.reg || "none"}) \u2014 entered ${e.total}h this week; van door-to-door ${e.weekSpanH}h
+${rows}`;
   }).join("\n");
-  const vanTable = (vanList || []).map((v) => `  ${v.reg} | telematics driver "${v.driver || "?"}" | ${Math.round(v.driveMins / 6) / 10}h | ${v.trips || 0} trips`).join("\n");
+  const pool = (poolVans || []).length ? "\n\nPool/unassigned vans that moved (an engineer may have collected one \u2014 use to explain a day their own van didn't move):\n" + poolVans.map((v) => `  ${v.reg} "${v.driver || "?"}": ` + Object.entries(v.days || {}).map(([dt, x]) => `${dlab(dt)} ${x.s}\u2013${x.e}${(x.locs || []).length ? " [" + x.locs.join("; ") + "]" : ""}`).join("; ")).join("\n") : "";
   const schema = { type: "object", properties: { byUser: { type: "object", additionalProperties: { type: "object", properties: {
     verdict: { type: "string", enum: ["ok", "check", "flag"] },
     summary: { type: "string" },
-    flags: { type: "array", items: { type: "object", properties: { severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
+    flags: { type: "array", items: { type: "object", properties: { date: { type: "string" }, severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
   }, required: ["verdict"] } } }, required: ["byUser"] };
-  const system = "You help UK office staff sanity-check weekly timesheets before payroll against telematics van data. Driving time is a SUBSET of the paid day \u2014 on-site work, office/yard visits, collecting a tipper are NOT driving \u2014 so entered hours are normally somewhat MORE than the van's driving time, which is expected and fine. Each van has a 'telematics driver' name; engineers sometimes swap to a pool van or tipper, so if an engineer's ASSIGNED van barely moved, check the van-activity table for another van whose telematics driver looks like them and use that instead before flagging. Only raise a flag when something looks genuinely wrong: (a) entered hours are LESS than the driving time they can be attributed (impossible); (b) sizeable entered hours but NO van (assigned or matchable) moved for them (worth a look \u2014 usually medium); (c) an implausibly long week. Allow generously for on-site time and vehicle swaps. Give each engineer a one-sentence plain-English summary and a verdict: ok (fine), check (worth a glance), flag (needs attention). Only add flags[] for real concerns. Key the object by the EXACT username given.";
-  const user = `Week beginning ${monday}. Only WEEKLY van driving totals are available (no per-day breakdown).
-
-Van activity this week (registration | telematics driver | driving hours | trips):
-${vanTable}
-
-Engineers to check:
-${lines}
+  const system = "You help UK office staff check weekly timesheets before payroll against telematics van movement, DAY BY DAY. The van's 'door-to-door' is first-move to last-stop = the outer bound of the paid day. Entered hours are on-site work hours and are NORMALLY somewhat LESS than door-to-door (which also includes driving and waiting) \u2014 that is expected and fine. Raise a flag only for genuine problems: (a) a day's entered hours EXCEED the van's door-to-door span by more than ~1h (claiming more than the van was even out); (b) hours entered on a day the assigned van DID NOT MOVE \u2014 but first check the pool/unassigned van list: if a pool van/tipper was out at times matching the entered hours, treat it as a vehicle swap (office/yard collection) and note it low-severity, not a flag; (c) an implausibly long day/week. Be conservative and generous about on-site time and vehicle swaps. Give each engineer a one-sentence summary and a verdict: ok / check / flag. Attach flags[] (with the date and a reason) only for real concerns. Key the object by the EXACT username given.";
+  const user = `Week beginning ${monday}. Per-day data:
+${blocks}${pool}
 
 Return byUser keyed by username.`;
-  const r = await anthropicToolLocal(env, { system, user, toolName: "verify", schema, maxTokens: 1800 });
+  const r = await anthropicToolLocal(env, { system, user, toolName: "verify", schema, maxTokens: 2500 });
   if (!r.ok) return { error: r.error, byUser: {} };
   return { byUser: r.input.byUser || {} };
 }
@@ -5898,46 +5902,73 @@ async function handle7(request, env, ctx, url, sess) {
     const monday = mondayOf(b.week);
     const vans = Array.isArray(b.vans) ? b.vans : [];
     const scores = b.scores && typeof b.scores === "object" ? b.scores : {};
+    const r1 = (n) => Math.round(n * 10) / 10;
     const vanByReg = {};
     for (const v of vans) {
       const k = normReg(v && v.reg);
-      if (k) vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), trips: Math.round(parseFloat(v && v.trips) || 0) };
+      if (!k) continue;
+      const days = v && v.days && typeof v.days === "object" ? v.days : {};
+      vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), trips: Math.round(parseFloat(v && v.trips) || 0), days };
     }
-    const vanList = Object.values(vanByReg).filter((v) => v.driveMins > 0).sort((a, b2) => b2.driveMins - a.driveMins);
     const scoreByReg = {};
     for (const [r, s] of Object.entries(scores)) {
       const k = normReg(r);
       if (k && s != null && s !== "") scoreByReg[k] = Math.round(parseFloat(s));
     }
     const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    const week = weekDays(monday);
     const engineers = [];
     for (const u of users || []) {
       if (!await hasEngTimesheet(env, tid, u.username)) continue;
       const reg = u.vehicle_assigned || "";
       const rk = normReg(reg);
+      const van = vanByReg[rk] || null;
       const { days } = await loadWeek(env, tid, u.username, monday);
-      const dayList = weekDays(monday).map((dt) => {
+      let total = 0, weekSpan = 0;
+      const dayLog = week.map((dt) => {
         const d = days[dt] || {};
         const jh = d.jobHours || {};
         let h = 0;
         for (const v of Object.values(jh)) h += parseFloat(v) || 0;
         if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
-        return { date: dt, hours: Math.round(h * 100) / 100 };
+        h = Math.round(h * 100) / 100;
+        total += h;
+        const vd = van && van.days ? van.days[dt] : null;
+        const moved = !!(vd && (vd.span > 0 || (vd.drive || 0) > 0));
+        if (moved) weekSpan += vd.span || 0;
+        return {
+          date: dt,
+          entered: h,
+          moved,
+          vanStart: vd ? vd.s || "" : "",
+          vanEnd: vd ? vd.e || "" : "",
+          spanH: moved ? r1(vd.span / 60) : null,
+          driveH: vd && vd.drive ? r1(vd.drive / 60) : null,
+          locs: vd && Array.isArray(vd.locs) ? vd.locs.slice(0, 6) : []
+        };
       });
-      const total = Math.round(dayList.reduce((a, x) => a + x.hours, 0) * 100) / 100;
-      if (total === 0) continue;
+      total = Math.round(total * 100) / 100;
+      if (total === 0 && !van) continue;
       engineers.push({
         username: u.username,
         name: displayName(u),
         reg,
-        driveMins: vanByReg[rk] ? vanByReg[rk].driveMins : null,
-        assignedDriver: vanByReg[rk] ? vanByReg[rk].driver : "",
+        driveMins: van ? van.driveMins : null,
+        weekSpanH: r1(weekSpan / 60),
         score: scoreByReg[rk] != null ? scoreByReg[rk] : null,
-        days: dayList,
-        total
+        total,
+        dayLog
       });
     }
-    const ai = await tsVerifyAI(env, engineers, monday, vanList);
+    const usedRegs = new Set(engineers.map((e) => normReg(e.reg)).filter(Boolean));
+    const poolVans = Object.values(vanByReg).filter((v) => !usedRegs.has(normReg(v.reg)) && v.driveMins > 0).map((v) => ({
+      reg: v.reg,
+      driver: v.driver,
+      driveMins: v.driveMins,
+      score: scoreByReg[normReg(v.reg)] ?? null,
+      days: Object.fromEntries(week.filter((dt) => v.days[dt] && (v.days[dt].span > 0 || (v.days[dt].drive || 0) > 0)).map((dt) => [dt, { s: v.days[dt].s, e: v.days[dt].e, locs: (v.days[dt].locs || []).slice(0, 4) }]))
+    }));
+    const ai = await tsVerifyAI(env, engineers, monday, poolVans);
     const byUser = {};
     for (const e of engineers) {
       const v = ai.byUser && ai.byUser[e.username] || {};
@@ -5945,17 +5976,17 @@ async function handle7(request, env, ctx, url, sess) {
         name: e.name,
         reg: e.reg,
         driveMins: e.driveMins,
+        weekSpanH: e.weekSpanH,
         score: e.score,
         total: e.total,
-        days: e.days,
+        dayLog: e.dayLog,
         verdict: v.verdict || "ok",
         summary: v.summary || "",
         flags: Array.isArray(v.flags) ? v.flags : []
       };
     }
-    const usedRegs = new Set(engineers.map((e) => normReg(e.reg)).filter(Boolean));
-    const unassignedVans = vans.filter((v) => !usedRegs.has(normReg(v && v.reg))).map((v) => ({ reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), score: scoreByReg[normReg(v && v.reg)] ?? null })).filter((v) => v.driveMins > 0 || v.score != null);
-    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, aiError: ai.error || null };
+    const unassignedVans = poolVans.map((v) => ({ reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: v.score }));
+    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, poolVans, aiError: ai.error || null };
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VERIFY_KEY(tid, monday), JSON.stringify(rec)).run();
     return json({ ok: true, ...rec }, {}, env, request);
   }
