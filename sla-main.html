@@ -1531,7 +1531,7 @@ window.addEventListener("pageshow", e => {
     </div>
     <div id="aiLog"></div>
     <div id="aiInputRow">
-      <textarea id="aiInput" rows="1" placeholder="e.g. Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow"></textarea>
+      <textarea id="aiInput" rows="1" placeholder="Ask anything — jobs, sites, compliance, vehicles — or raise/assign a job"></textarea>
       <button type="button" id="aiSend">Send</button>
     </div>
   </div>
@@ -1557,8 +1557,8 @@ window.addEventListener("pageshow", e => {
     rulesBtn.style.display = full ? "" : "none";
     box.classList.add("on");
     if(!greeted){ greeted=true; bubble("ai", rich(full
-      ? "Hi — tell me the job to raise (site, engineer, when). I'll draft it for you to confirm. You can also ask me to adjust the house rules."
-      : "Hi — tell me the job to raise and I'll draft it for you to confirm. For example: **Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow**.")); }
+      ? "Hi — ask me anything across the portal (jobs, sites, compliance due dates, vehicles, engineers) or tell me a job to raise, assign or reschedule. I'll look it up and confirm before anything changes. You can also ask me to adjust the house rules."
+      : "Hi — ask me about jobs, sites, compliance or vehicles, or tell me a job to raise/assign. For example: **Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow**, or **when is the EICR due at store 649?**")); }
     setTimeout(function(){ input.focus(); }, 50);
   }
   function close(){ box.classList.remove("on"); }
@@ -1615,15 +1615,23 @@ window.addEventListener("pageshow", e => {
       var wrap=document.createElement("div"); wrap.className="aibub ai"; wrap.style.maxWidth="100%";
       var htmlp="";
       jobs.forEach(function(x){
-        htmlp+="<div class='aijob'><b>"+esc(x.typeLabel||x.jobType)+"</b> · "+esc(x.siteCode)+" "+esc(x.siteName)+
+        var assign = x.action==="assign";
+        var head = assign ? ("🔁 <b>Assign</b> · "+esc(x.title||x.siteName||x.siteCode))
+                          : ("<b>"+esc(x.typeLabel||x.jobType)+"</b> · "+esc(x.siteCode)+" "+esc(x.siteName));
+        htmlp+="<div class='aijob'>"+head+
           "<div class='row'>👷 "+esc(x.engineerName||x.engineer)+" &nbsp; 📅 "+esc(fmtDate(x.date))+(x.date?(" "+esc(x.startTime||"")):"")+
-          " &nbsp; ⏱ "+esc(x.durationMinutes)+" min"+(x.priority?(" &nbsp; 🏷 "+esc(x.priority)):"")+"</div>"+
-          "<div class='row' style='font-size:12.5px;color:#55707f'>"+rich(x.description||"")+"</div></div>";
+          (x.durationMinutes?(" &nbsp; ⏱ "+esc(x.durationMinutes)+" min"):"")+(x.priority?(" &nbsp; 🏷 "+esc(x.priority)):"")+"</div>"+
+          (assign?("<div class='row' style='font-size:11.5px;color:#8593a0'>was: "+esc((x.currentEngineers&&x.currentEngineers.length?x.currentEngineers.join(", "):"unassigned"))+(x.currentStatus?(" · "+esc(x.currentStatus)):"")+"</div>"):"")+
+          (x.description?("<div class='row' style='font-size:12.5px;color:#55707f'>"+rich(x.description)+"</div>"):"")+
+          ((x.warn&&x.warn.length)?("<div class='aiwarn'>⚠️ "+x.warn.map(esc).join(" · ")+"</div>"):"")+
+          "</div>";
       });
       if((j.warnings||[]).length) htmlp+="<div class='aiwarn'>⚠️ "+j.warnings.map(esc).join("<br>")+"</div>";
       wrap.innerHTML=htmlp;
+      var allAssign=jobs.every(function(x){return x.action==="assign";});
+      var verb=allAssign?"Assign":(jobs.some(function(x){return x.action==="assign";})?"Apply":"Create");
       var acts=document.createElement("div"); acts.className="aiacts";
-      acts.innerHTML="<button class='go'>✓ Create "+jobs.length+" job"+(jobs.length>1?"s":"")+"</button><button class='no'>Discard</button>";
+      acts.innerHTML="<button class='go'>✓ "+verb+" "+jobs.length+" job"+(jobs.length>1?"s":"")+"</button><button class='no'>Discard</button>";
       wrap.appendChild(acts); log.appendChild(wrap); scroll();
       acts.querySelector(".go").onclick=async function(){
         acts.querySelector(".go").disabled=true; acts.querySelector(".go").textContent="Creating…";
@@ -1633,7 +1641,8 @@ window.addEventListener("pageshow", e => {
             var errc=(res.created||[]).filter(function(c){return c.error;});
             acts.innerHTML="";
             var done=document.createElement("div");
-            done.innerHTML="<span style='color:#1a8f4c;font-weight:600'>✓ Created "+okc.length+" job"+(okc.length!==1?"s":"")+".</span> "+
+            var vb=okc.every(function(c){return c.action==="assign";})?"Assigned":"Done —";
+            done.innerHTML="<span style='color:#1a8f4c;font-weight:600'>✓ "+vb+" "+okc.length+" job"+(okc.length!==1?"s":"")+".</span> "+
               okc.map(function(c){return "<a href='job-view.html?jobId="+encodeURIComponent(c.id)+"' style='color:#0b5cab'>"+esc(c.ref)+"</a>";}).join(" · ")+
               (errc.length?("<div class='aiwarn'>"+errc.length+" failed: "+errc.map(function(c){return esc(c.site+": "+c.error);}).join("; ")+"</div>"):"");
             wrap.appendChild(done);
