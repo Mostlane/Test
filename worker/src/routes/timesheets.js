@@ -377,8 +377,13 @@ async function materialiseTimesheet(env, tid, username, monday, days) {
 
 // ── Settings (app_config JSON, per-user overrides on shared defaults) ────────
 const DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45,
-  radiusMiles: 10, overtimeThresholdH: 8, dueDow: 3, dueTime: "12:00",
+  radiusMiles: 10, overtimeThresholdH: 8, dueDow: 3, dueTime: "12:00", remindersOn: true,
   basePostcode: "PO15 5RQ", company: "Mostlane" };
+// Timesheet reminders are ON unless explicitly turned off in Settings.
+const remindersEnabled = cfg => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+async function hasEngTimesheet(env, tid, username) {
+  try { const p = await permissionsFor(env, tid, username); return p.EngTimesheet === "Yes"; } catch { return false; }
+}
 const DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
@@ -1027,6 +1032,7 @@ async function timesheetGaps(env, tid, username, monday, cfg) {
 export async function sweepTimesheetReminders(env, tid = 1) {
   try {
     const cfg = await getCfg(env, tid);
+    if (!remindersEnabled(cfg)) return;   // reminders switched off in Settings
     const curMon = mondayOf(new Date().toISOString().slice(0, 10));
     const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
@@ -1039,6 +1045,7 @@ export async function sweepTimesheetReminders(env, tid = 1) {
     if (sent.includes(prevMon)) return;
     const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
     for (const u of users || []) {
+      if (!(await hasEngTimesheet(env, tid, u.username))) continue;   // timesheet-permission engineers only
       const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
       if (g.count > 0) await sendToUser(env, tid, u.username, {
         title: "Timesheet due", body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours — complete last week's timesheet by " + dl.label + ".",
@@ -1270,6 +1277,10 @@ export async function handle(request, env, ctx, url, sess) {
   // ── GET /ts/outstanding — the caller's last completed week's missing hours ──
   // Drives the "complete your timesheet" reminder (attention gate + push).
   if (sub === "/outstanding" && method === "GET") {
+    // Only engineers with the EngTimesheet permission are chased, and only when
+    // reminders are switched on in Settings.
+    if (!remindersEnabled(cfg) || !(await hasEngTimesheet(env, tid, me)))
+      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
     const curMon = mondayOf(new Date().toISOString().slice(0, 10));
     const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
     const prevMon = pm.toISOString().slice(0, 10);
@@ -1293,7 +1304,7 @@ export async function handle(request, env, ctx, url, sess) {
     const am = await applyAutoMileage(env, tid, who, monday, days, eff, cfg.defaults.basePostcode);
     const gaps = await timesheetGaps(env, tid, who, monday, cfg);
     return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
-      viewingUser: who !== me ? who : null,
+      viewingUser: who !== me ? who : null, remindersOn: remindersEnabled(cfg),
       due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue }, missingHours: gaps.missing,
       totals: weekTotals(am.days, eff), autoMileage: am.auto,
       invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
