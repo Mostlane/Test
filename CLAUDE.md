@@ -263,6 +263,12 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   dotted form (Jamie.Line → "Jamie Line"), or email — phones autofill old
   dotted usernames, which once looked like "new password doesn't work".
   Everything downstream uses the canonical username from the matched row.
+- **Welcome email PWA guide (Sep 2026):** `email.js welcomeEmail` now ends with
+  an `installSection(base)` — email-safe (tables + inline styles) "📲 Add Mostlane
+  to your phone": numbered iPhone(Safari) + Android(Chrome) steps + a button to the
+  hosted **`install.html`** (a standalone, no-auth, branded step-by-step guide with
+  CSS phone mockups using `/icons/icon-192.png` — the M tile). Mockups authored in
+  the scratchpad + published as an artifact; install.html is the portal copy.
 - Self-service reset: login → forgot-password.html → Resend email link (1h)
   → reset-password.html. Admin: Users Admin password box (with "must change
   at next login" tick-box → ForceChange) or Reset password button (temp
