@@ -139,7 +139,7 @@ function jobRow(r) {
     status: d.status || r.status || "", priority: d.priority || "", scheduledAt: d.scheduledAt || r.scheduled_at || null,
     engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 220), _dormant: !!d.fallbackTemplate };
 }
-const FINISHED = /^(complete|closed|invoiced|cancelled)$/i;
+const FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
 async function searchJobs(env, tid, query) {
   const q = String(query || "").trim();
   if (!q) return [];
@@ -150,12 +150,12 @@ async function searchJobs(env, tid, query) {
   const likeNum = numRun ? "%" + numRun + "%" : like;
   try {
     const { results } = await env.DB.prepare(
-      "SELECT id, helpdesk_ref, description, status, site_code, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR lower(data) LIKE lower(?)) ORDER BY (CASE WHEN status IN ('Complete','Closed','Invoiced','Cancelled') THEN 1 ELSE 0 END), updated_at DESC LIMIT 30"
-    ).bind(tid, like, likeNum, like, like, like).all();
+      "SELECT id, helpdesk_ref, description, status, site_code, scheduled_at, updated_at, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR lower(status) LIKE lower(?) OR lower(data) LIKE lower(?)) ORDER BY (CASE WHEN lower(status) LIKE lower(?) THEN 0 ELSE 1 END), (CASE WHEN status IN ('Complete','Closed','Closed Jobs','Invoiced','Cancelled') THEN 1 ELSE 0 END), updated_at DESC LIMIT 60"
+    ).bind(tid, like, likeNum, like, like, like, like, like).all();
     return (results || [])
       .map(jobRow)
       .filter(j => !j._dormant)   // dormant fallback templates never surface
-      .slice(0, 15);
+      .slice(0, 20);
   } catch { return []; }
 }
 async function jobById(env, tid, id) {
@@ -297,6 +297,10 @@ export async function handle(request, env, ctx, url, sess) {
       engNames = (results || []).filter(u => { let p = {}; try { p = JSON.parse(u.profile || "{}"); } catch {} return String(p.staffType || "").toLowerCase() === "field"; })
         .map(u => (u.first_name + " " + u.last_name).trim()).filter(Boolean);
     } catch {}
+    // Custom job categories — a job's STATUS can be one of these to mark a
+    // workstream (e.g. "FRA Works"). The assistant must recognise these.
+    let cats = [];
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); if (row && row.value) cats = (JSON.parse(row.value) || []).map(c => c && c.name).filter(Boolean); } catch {}
     const tools = [
       { name: "find_jobs", description: "Search the LIVE job board for existing jobs — by reference/incident number, site name or store number, or words from the description. ALWAYS use this first when the office refers to jobs that already exist (reference numbers like '28767/1', 'the Tesco job', a store number). Returns matching jobs with their id, ref, site, status and current engineer.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
       { name: "ask", description: "Ask the office ONE clarifying question — only when something genuinely can't be found or is truly ambiguous. Don't ask for details you can look up with find_jobs.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
@@ -334,6 +338,7 @@ export async function handle(request, env, ctx, url, sess) {
       + "Be smart and proactive: when the office gives reference/incident numbers or names an existing job, USE find_jobs to look it up rather than asking them to re-type details. Job type doesn't matter when you're just assigning an existing job. "
       + (fullAccess ? "This user is FULL ACCESS: you may chat freely (use `reply`) and may adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: only help RAISE or MANAGE jobs. If they ask for open chat or to change the rules, use `ask` to say that's Full-Access only and steer back to the task. ")
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
+      + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text just because random words also contain those letters. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs (usually already assigned to them) onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
       + "\n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
