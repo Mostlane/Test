@@ -2240,10 +2240,16 @@ function renderFbOmit(){
   const fields = (engineers||[]).filter(isFieldEng);
   const ex = new Set((FB_CFG.exclude||[]).map(fbNorm));
   if(!fields.length){ host.innerHTML = '<p style="color:#5b6b78;font-size:13px;">No field engineers found.</p>'; return; }
+  // A clean auto-fill grid; each checkbox is EXPLICITLY sized (some pages force
+  // input{width:100%}, which stretched these boxes and scattered the names).
+  host.style.display = "grid";
+  host.style.gridTemplateColumns = "repeat(auto-fill, minmax(150px, 1fr))";
+  host.style.gap = "6px 12px";
   host.innerHTML = fields.map(function(e){
     const on = ex.has(fbNorm(e.username));
-    return '<label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;font-size:13.5px;cursor:pointer;">'
-      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")+'> '+escapeHtml(e.name)+'</label>';
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;">'
+      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")
+      + ' style="flex:0 0 auto;width:18px;height:18px;margin:0;"> <span>'+escapeHtml(e.name)+'</span></label>';
   }).join("");
 }
 async function openFallbacks(){
