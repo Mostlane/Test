@@ -1849,10 +1849,11 @@ export async function handle(request, env, ctx, url, sess) {
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
     }
 
-    // POST /sla/jobs/{id}/revisit — clone a completed/closed job into a NEW job for
-    // a re-visit: fresh date/time + engineer(s), completion evidence reset (a new id
-    // means a fresh signature/RA/photos/history), linked to the original so all
-    // visits against one job are grouped (and cost individually + combined). Admin.
+    // POST /sla/jobs/{id}/revisit — clone a completed/closed job into a NEW job for a
+    // re-visit: fresh date/time + engineer(s), CARRYING the original visit's evidence
+    // across (photos, signature, notes, risk assessment — files copied + re-pathed to
+    // the new id), linked to the original so all visits are grouped (and cost
+    // individually + combined). The status history starts fresh (Scheduled). Admin.
     if (parts[2] === "revisit" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -1889,6 +1890,39 @@ export async function handle(request, env, ctx, url, sess) {
         changedBy: (sess.user && sess.user.username) || "system",
       };
       const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      // Carry the original visit's FILES across (all photos, signatures, audit +
+      // remedial photos) by copying the whole R2 prefix to the new job id.
+      const repath = k => (typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k);
+      if (env.JOB_FILES) {
+        try {
+          let cursor;
+          do {
+            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+            for (const o of (listed.objects || [])) {
+              try { const obj = await env.JOB_FILES.get(o.key); if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata }); } catch {}
+            }
+            cursor = listed.truncated ? listed.cursor : null;
+          } while (cursor);
+        } catch {}
+      }
+      // Carry the evidence FIELDS onto the new job (notes, RA, signature, photo tags,
+      // audit/remedial items) with their file keys re-pathed to the new id.
+      try {
+        const nj = await getJob(env, tenantId, job.id);
+        if (nj) {
+          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+          if (src.photoStages) nj.photoStages = { ...src.photoStages };
+          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+          }
+          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map(it => ({ ...it,
+            refPhotos: (it.refPhotos || []).map(repath), donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto, extraPhotos: (it.extraPhotos || []).map(repath) }));
+          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map(r => ({ ...r, photos: (r.photos || []).map(repath) }));
+          nj.updatedAt = new Date().toISOString();
+          await saveJob(env, tenantId, nj);
+        }
+      } catch {}
       // Stamp the ROOT job with the group id too, so the whole chain shares one key.
       if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
       ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));

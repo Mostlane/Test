@@ -8688,6 +8688,45 @@ async function handle8(request, env, ctx, url, sess) {
         changedBy: sess.user && sess.user.username || "system"
       };
       const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      const repath = (k) => typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k;
+      if (env.JOB_FILES) {
+        try {
+          let cursor;
+          do {
+            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+            for (const o of listed.objects || []) {
+              try {
+                const obj = await env.JOB_FILES.get(o.key);
+                if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
+              } catch {
+              }
+            }
+            cursor = listed.truncated ? listed.cursor : null;
+          } while (cursor);
+        } catch {
+        }
+      }
+      try {
+        const nj = await getJob(env, tenantId, job.id);
+        if (nj) {
+          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+          if (src.photoStages) nj.photoStages = { ...src.photoStages };
+          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+          }
+          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map((it) => ({
+            ...it,
+            refPhotos: (it.refPhotos || []).map(repath),
+            donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto,
+            extraPhotos: (it.extraPhotos || []).map(repath)
+          }));
+          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map((r) => ({ ...r, photos: (r.photos || []).map(repath) }));
+          nj.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          await saveJob(env, tenantId, nj);
+        }
+      } catch {
+      }
       if (!src.visitGroupId) {
         try {
           src.visitGroupId = groupId;

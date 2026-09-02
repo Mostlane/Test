@@ -1164,7 +1164,7 @@ function openRevisitModal(){
   const dur = job.durationMinutes ? (job.durationMinutes/60) : 1;
   ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:410px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
     + '<div style="font-weight:700;font-size:17px;color:#003468;margin-bottom:2px;">🔁 Re-visit this job</div>'
-    + '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Creates a new, linked job at the same site (same engineer + requirements) on a fresh date — the engineer completes it cleanly, and it links back here so all visits show together.</div>'
+    + '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Creates a new, linked job at the same site on a fresh date. It carries the original visit\'s notes, photos, signature and risk assessment across, and links back here so all visits show together.</div>'
     + '<div style="display:flex;gap:10px;">'
     + '<label style="flex:1;font-size:12px;color:#64748b;">Date<br><input type="date" id="rvDate" value="'+dstr+'" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>'
     + '<label style="flex:1;font-size:12px;color:#64748b;">Start time<br><input type="time" id="rvTime" value="08:00" step="300" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>'
