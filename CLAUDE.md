@@ -2663,7 +2663,15 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   documents, not stored files, so only their attached-file form appears there.
   **Valuations**: sets proj_fin value),
   **Project Documents** (drag-drop upload, hide/show, delete; engineers with
-  Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
+  Projects perm see non-hidden). **Naming (Sep 2026):** every upload now PROMPTS
+  for a document name (`askDocName` modal in project-hub.html) — required, used as
+  the doc `title` (the display name) instead of the raw file name (camera photos
+  arrived as UUIDs). Pre-fills the file's base name unless it looks auto-generated
+  (UUID / IMG_ / long digits) → then blank so a name must be typed. Both upload
+  paths (the Project Documents drop-zone `upload()` + the required-doc picker
+  `uploadDocFile()`) use it. Existing docs get a **✏️ Rename** button →
+  `askDocName` → POST /project/doc-update `{fileId,title}` (server already accepts
+  `title`). **SiteLog** (edit rules+companies, re-applied to
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
