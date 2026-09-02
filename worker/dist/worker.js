@@ -9548,8 +9548,11 @@ async function handle8(request, env, ctx, url, sess) {
               at: f.uploaded_at,
               by: f.uploaded_by,
               size: 0,
-              projectDoc: true
+              projectDoc: true,
               // marker: engineers/office see it but can't delete via /site/doc-delete
+              fileId: f.id,
+              projectId: proj.id
+              // so an admin can rename it via /project/doc-update
             })));
           }
         }
