@@ -2226,10 +2226,11 @@ function refreshFbRows(){
   }
   $("fbRows").innerHTML = fields.map(function(e){
     const fb = (FB_CFG.byEngineer||{})[fbNorm(e.username)] || {};
+    // One control per engineer: the dropdown. Pick a job = fallback on; "No
+    // fallback set" = off; use the Omit list below to leave someone out entirely.
     return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:8px;">'
-      + '<b style="flex:0 0 130px;">'+escapeHtml(e.name)+'</b>'
-      + '<select class="fb-job" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
-      + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label>'
+      + '<b style="flex:0 0 120px;">'+escapeHtml(e.name)+'</b>'
+      + '<select class="fb-job" style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
       + '</div>';
   }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
 }
@@ -2261,7 +2262,7 @@ async function saveFallbacks(){
     const sel = row.querySelector(".fb-job");
     const jobId = sel ? sel.value : "";
     if(!jobId) return;
-    byEngineer[row.dataset.user] = { jobId, active: row.querySelector(".fb-active").checked };
+    byEngineer[row.dataset.user] = { jobId, active: true };   // a picked job = fallback on
   });
   const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
   const exclude = [];
