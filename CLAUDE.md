@@ -2629,12 +2629,26 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   companies[]}, contractValue, links{programmeId,ramsIds[],cppRef,costingKey},
   doneOverride{}. **costingKey = normName(project name)** — the SAME key costing
   uses, so PO/labour/valuations roll up automatically.
-- **Wizard (project-new.html)** — 4 steps: **1** site (existing → search+copy
-  coords, or new) + **always creates its own Pxxxx project-site** via `/add-site?
-  category=projects` (auto P-number, pushes the SiteLog geofence, PO picks it up
-  via its add-only mirror) + confirm/drop coords (Leaflet, postcodes.io geocode) +
-  **round-trip mileage** computed client-side (haversine ×1.25×2 from HQ PO15 5RQ,
-  saved to site_miles) + name/number; **2** required-docs tick-box; **3** SiteLog
+- **Wizard (project-new.html)** — 4 steps: **1** SITE + PROJECT.
+  **Site = the PLACE, project = the works on it (Sep 2026 rework — "site should be
+  Goodwood Farm, project Goodwood Farm VPU").** Two site modes:
+  - **Existing site** → search + pick ANY saved site (a store, a place, another
+    project's site); the project **LINKS** to it (`site_number` = the picked site,
+    `site_client` = its client). **No new site is created** — it reuses that site's
+    geofence, address, history + costing. The project still gets its OWN P-number
+    (`number`, from /next-project-job-number) so it has its own valuations +
+    projects-compliance entry.
+  - **New site** → enter a **site/location (place) name** (`#newSiteName`, separate
+    from the project name) → creates a place-named Pxxxx site via `/add-site?
+    category=projects` (auto P-number = the project number, pushes the SiteLog
+    geofence). The SITE is named the place, the PROJECT the works.
+  (Was: ALWAYS cloned a project-site named after the PROJECT even when you picked an
+  existing site — which is what split Goodwood into "Goodwood Farm" + "Goodwood Farm
+  VPU". `collect().linkExisting` drives the finalize branch; `/project/create`'s
+  compliance row now uses `siteNumber` for its `site_number` so a linked project's
+  docs surface under the real site.) Plus confirm/drop coords (Leaflet,
+  postcodes.io geocode) + **round-trip mileage** (haversine ×1.25×2 from HQ PO15 5RQ,
+  saved to site_miles — new sites only); **2** required-docs tick-box; **3** SiteLog
   message (→ site_rules) + companies-on-site (pick from PO `/po/api/subcontractors`
   + free add); **4** review → POST **/project/create** → project-hub.
 - **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off

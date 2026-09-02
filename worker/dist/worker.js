@@ -30814,7 +30814,7 @@ async function handle33(request, env, ctx, url, sess) {
         `INSERT OR IGNORE INTO compliance_stores
           (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
           VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
-      ).bind(tenantId, number, name, number, now).run();
+      ).bind(tenantId, number, name, siteNumber, now).run();
     } catch {
     }
     const row = await getRow(id);
