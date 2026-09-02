@@ -257,6 +257,72 @@ async function sequenceDay(env, tid, jobs) {
   }
 }
 
+// ── Read tools: the assistant can look up any portal area, gated per user ─────
+function dueSummary(dueJson) {
+  let due = {}; try { due = JSON.parse(dueJson || "{}"); } catch {}
+  const t0 = Date.parse(londonToday() + "T12:00:00Z");
+  const out = [];
+  for (const [type, date] of Object.entries(due || {})) {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) continue;
+    const days = Math.round((Date.parse(date + "T12:00:00Z") - t0) / 86400000);
+    out.push({ type, date, daysUntil: days, state: days < 0 ? "OVERDUE" : days <= 30 ? "due soon" : "ok" });
+  }
+  return out;
+}
+async function toolFindSite(env, tid, query) {
+  const q = String(query || "").trim();
+  if (!q) return { count: 0, sites: [] };
+  const like = "%" + q.replace(/[%_]/g, "") + "%"; const num = q.replace(/\D/g, "");
+  const binds = [tid, like, like]; let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
+  if (num) { sql += " OR site_number IN (?,?,?)"; binds.push(num, num.padStart(4, "0"), String(Number(num) || "")); }
+  sql += ") ORDER BY length(site_name) LIMIT 10";
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  const sites = (results || []).map(r => { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} return { number: r.site_number, name: r.site_name, type: r.client, postcode: r.postcode || d.postcode || "", lat: d.lat, lon: d.lon != null ? d.lon : d.lng, telephone: d.telephone || "" }; });
+  return { count: sites.length, sites };
+}
+async function toolFindCompliance(env, tid, caps, query, scheme) {
+  if (!caps.compliance) return { denied: true, message: "You don't have Compliance access." };
+  const term = String(query || "").trim().toLowerCase();
+  const wantDue = /overdue|expired|outstanding|due/.test(term);
+  const binds = [tid]; let sql = "SELECT scheme, code, category, name, postcode, due, site_number FROM compliance_stores WHERE tenant_id=? AND active=1";
+  if (scheme) { sql += " AND scheme=?"; binds.push(String(scheme).toLowerCase()); }
+  const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
+  if (bare) {
+    const like = "%" + bare.replace(/[%_]/g, "") + "%"; const num = bare.replace(/\D/g, "");
+    sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?"; binds.push(like, like);
+    if (num) { sql += " OR code IN (?,?,?)"; binds.push(num, num.padStart(4, "0"), String(Number(num) || "")); }
+    sql += ")";
+  }
+  sql += " LIMIT 500";
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  const stores = [];
+  for (const r of results || []) {
+    const items = dueSummary(r.due);
+    if (wantDue && !items.some(i => i.state !== "ok")) continue;
+    let nm = r.name;
+    if (!nm && r.site_number) { try { const s = await env.DB.prepare("SELECT site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, r.site_number).first(); if (s) nm = s.site_name; } catch {} }
+    stores.push({ scheme: r.scheme, code: r.code, name: nm || r.code, category: r.category || "", postcode: r.postcode || "", due: items });
+    if (stores.length >= 25) break;
+  }
+  return { count: stores.length, stores };
+}
+async function toolListEngineers(env, tid) {
+  const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+  const engineers = (results || []).filter(u => { let p = {}; try { p = JSON.parse(u.profile || "{}"); } catch {} return String(p.staffType || "").toLowerCase() === "field"; })
+    .map(u => ({ name: (u.first_name + " " + u.last_name).trim(), username: u.username }));
+  return { count: engineers.length, engineers };
+}
+async function toolFindVehicle(env, tid, caps, query) {
+  if (!caps.vehicles) return { denied: true, message: "You don't have Vehicles access." };
+  const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
+  try {
+    const { results } = await env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND (reg LIKE ? OR make LIKE ? OR model LIKE ?) LIMIT 12").bind(tid, like, like, like).all().catch(() =>
+      env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND reg LIKE ? LIMIT 12").bind(tid, like).all());
+    const vehicles = (results || []).map(r => ({ reg: r.reg, make: r.make, model: r.model, motDue: r.mot_due, taxDue: r.tax_due, nextService: r.next_service }));
+    return { count: vehicles.length, vehicles };
+  } catch { return { error: "vehicle lookup failed" }; }
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
@@ -267,6 +333,13 @@ export async function handle(request, env, ctx, url, sess) {
   const fullAccess = perms.FullAccess === "Yes";
   const office = fullAccess || await isOfficeUser(env, tid, me);
   if (!office) return error("The job assistant is for office staff.", 403, env, request);
+  // What this user is allowed to reach — the assistant can look up ANY area, but
+  // only surfaces what the user's own permissions permit.
+  const caps = {
+    sla: fullAccess || perms.SLA === "Yes" || perms.SLAAdmin === "Yes",
+    compliance: fullAccess || perms.Compliance === "Yes",
+    vehicles: fullAccess || perms.Vehicles === "Yes",
+  };
 
   // ── Rulebook ──────────────────────────────────────────────────────────────
   if (sub === "/jobrules" && method === "GET") {
@@ -302,9 +375,16 @@ export async function handle(request, env, ctx, url, sess) {
     let cats = [];
     try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); if (row && row.value) cats = (JSON.parse(row.value) || []).map(c => c && c.name).filter(Boolean); } catch {}
     const tools = [
-      { name: "find_jobs", description: "Search the LIVE job board for existing jobs — by reference/incident number, site name or store number, or words from the description. ALWAYS use this first when the office refers to jobs that already exist (reference numbers like '28767/1', 'the Tesco job', a store number). Returns matching jobs with their id, ref, site, status and current engineer.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
-      { name: "ask", description: "Ask the office ONE clarifying question — only when something genuinely can't be found or is truly ambiguous. Don't ask for details you can look up with find_jobs.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
-      { name: "assign_jobs", description: "Assign and/or schedule one or more EXISTING jobs to an engineer (you found them with find_jobs). Use this for 'assign X to Y', 'give these to Z tomorrow', 'move to Thursday', etc.", input_schema: { type: "object", properties: {
+      { name: "find_jobs", description: "Search the LIVE job board for existing jobs — by reference/incident number, site name or store number, words from the description, an engineer's name, or a status/category. ALWAYS use this when the office refers to jobs that already exist. Returns matching jobs with id, ref, site, status, current engineer and scheduled time.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "find_site", description: "Look up a SITE / store in the register — by name, store number or postcode. Returns number, name, type/customer, postcode and coordinates. Use it to answer questions about a site or to get a site's details.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "find_compliance", description: "Look up COMPLIANCE certificate due dates for a store (EICR/5-year, EM, PAT, gas, etc.) or list what's overdue/due-soon. Query a store number/name, or words like 'overdue'. Optionally set scheme (coop/fareham/chapplins/projects). Returns per-type due dates with OVERDUE/due-soon flags.", input_schema: { type: "object", properties: { query: { type: "string" }, scheme: { type: "string" } }, required: ["query"] } },
+      { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
+      { name: "find_vehicle", description: "Look up a fleet VEHICLE by registration, make or model. Returns reg, make/model and MOT/tax/service due dates.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "ask", description: "Ask the office ONE clarifying question — only when something genuinely can't be found or is truly ambiguous. Never ask for details you can look up with a find_ tool first.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
+      { name: "reply", description: "Answer the office in plain text — use this to ANSWER a question after looking things up (e.g. compliance due dates, a site's details, what's on the board). Also for Full-Access general chat.", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+    ];
+    if (caps.sla) {
+      tools.push({ name: "assign_jobs", description: "Assign and/or schedule one or more EXISTING jobs to an engineer (found with find_jobs). Use for 'assign X to Y', 'give these to Z tomorrow', 'move to Thursday'.", input_schema: { type: "object", properties: {
         summary: { type: "string" },
         assignments: { type: "array", items: { type: "object", properties: {
           jobId: { type: "string", description: "the job id from find_jobs (preferred)" },
@@ -314,8 +394,8 @@ export async function handle(request, env, ctx, url, sess) {
           startTime: { type: "string", description: "HH:MM 24h, or empty" },
           durationMinutes: { type: "number" },
         }, required: [] } },
-      }, required: ["assignments"] } },
-      { name: "draft_jobs", description: "Propose brand-NEW jobs to create (only for work not already on the board). A preview the office confirms.", input_schema: { type: "object", properties: {
+      }, required: ["assignments"] } });
+      tools.push({ name: "draft_jobs", description: "Propose brand-NEW jobs to create (only for work not already on the board). A preview the office confirms.", input_schema: { type: "object", properties: {
         summary: { type: "string", description: "one short sentence describing what you're proposing" },
         jobs: { type: "array", items: { type: "object", properties: {
           jobType: { type: "string", enum: Object.keys(JOB_TYPES), description: "best guess; use reactive if unsure" },
@@ -328,17 +408,22 @@ export async function handle(request, env, ctx, url, sess) {
           title: { type: "string", description: "short reference/title, or empty to use the site" },
           description: { type: "string" },
         }, required: ["site", "description"] } },
-      }, required: ["jobs"] } },
-    ];
+      }, required: ["jobs"] } });
+    }
     if (fullAccess) {
-      tools.push({ name: "reply", description: "Reply conversationally (Full-Access relaxed chat only).", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } });
       tools.push({ name: "set_rules", description: "Propose a full replacement of the house rules (Full-Access only). Return the COMPLETE new rules text.", input_schema: { type: "object", properties: { rules: { type: "string" }, summary: { type: "string" } }, required: ["rules", "summary"] } });
     }
-    const system = "You are the Mostlane office job assistant on the live SLA job board. You can LOOK UP existing jobs with find_jobs and assign/schedule them, or draft new jobs. A person always confirms before anything changes — never claim a job is created or assigned. "
-      + "Be smart and proactive: when the office gives reference/incident numbers or names an existing job, USE find_jobs to look it up rather than asking them to re-type details. Job type doesn't matter when you're just assigning an existing job. "
-      + (fullAccess ? "This user is FULL ACCESS: you may chat freely (use `reply`) and may adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: only help RAISE or MANAGE jobs. If they ask for open chat or to change the rules, use `ask` to say that's Full-Access only and steer back to the task. ")
+    const canDo = [];
+    if (caps.sla) canDo.push("raise, assign and schedule jobs"); else canDo.push("look up jobs (read-only — you don't have permission to raise or change jobs)");
+    canDo.push("look up sites");
+    canDo.push(caps.compliance ? "look up compliance due dates" : "compliance is NOT available to you (no permission)");
+    canDo.push(caps.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
+    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal — jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles — and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES — never claim a job was created or assigned. "
+      + "Be smart and proactive: look things up rather than asking the user to re-type details. "
+      + "THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them — never invent it. "
+      + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ")
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
-      + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text just because random words also contain those letters. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs (usually already assigned to them) onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
+      + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
       + "\n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
@@ -356,17 +441,22 @@ export async function handle(request, env, ctx, url, sess) {
       ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "⚠️ " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter(c => c.type === "tool_use");
-      const finds = uses.filter(c => c.name === "find_jobs");
-      if (finds.length) {
+      const READ = new Set(["find_jobs", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+      const reads = uses.filter(c => READ.has(c.name));
+      if (reads.length) {
         messages.push({ role: "assistant", content: ai.content });
         const out = [];
         for (const u of uses) {
-          if (u.name === "find_jobs") {
-            const found = await searchJobs(env, tid, u.input.query || "");
-            out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ count: found.length, jobs: found }) });
-          } else {
-            out.push({ type: "tool_result", tool_use_id: u.id, content: "Use the find_jobs results above, then propose again." });
-          }
+          let data;
+          try {
+            if (u.name === "find_jobs") { const f = await searchJobs(env, tid, u.input.query || ""); data = { count: f.length, jobs: f }; }
+            else if (u.name === "find_site") data = await toolFindSite(env, tid, u.input.query || "");
+            else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps, u.input.query || "", u.input.scheme);
+            else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
+            else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps, u.input.query || "");
+            else data = { note: "Use the lookup results above, then answer or propose." };
+          } catch (e) { data = { error: String(e && e.message || e) }; }
+          out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(data).slice(0, 12000) });
         }
         messages.push({ role: "user", content: out });
         continue;   // let the model use the results
@@ -446,6 +536,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── Create confirmed drafts ───────────────────────────────────────────────
   if (sub === "/assistant/create" && method === "POST") {
+    if (!caps.sla) return error("You don't have permission to raise or change jobs.", 403, env, request);
     const b = await request.json().catch(() => ({}));
     const jobs = Array.isArray(b.jobs) ? b.jobs.slice(0, 12) : [];
     if (!jobs.length) return error("No jobs to create.", 400, env, request);

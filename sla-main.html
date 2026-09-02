@@ -1531,7 +1531,7 @@ window.addEventListener("pageshow", e => {
     </div>
     <div id="aiLog"></div>
     <div id="aiInputRow">
-      <textarea id="aiInput" rows="1" placeholder="e.g. Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow"></textarea>
+      <textarea id="aiInput" rows="1" placeholder="Ask anything — jobs, sites, compliance, vehicles — or raise/assign a job"></textarea>
       <button type="button" id="aiSend">Send</button>
     </div>
   </div>
@@ -1557,8 +1557,8 @@ window.addEventListener("pageshow", e => {
     rulesBtn.style.display = full ? "" : "none";
     box.classList.add("on");
     if(!greeted){ greeted=true; bubble("ai", rich(full
-      ? "Hi — tell me the job to raise (site, engineer, when). I'll draft it for you to confirm. You can also ask me to adjust the house rules."
-      : "Hi — tell me the job to raise and I'll draft it for you to confirm. For example: **Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow**.")); }
+      ? "Hi — ask me anything across the portal (jobs, sites, compliance due dates, vehicles, engineers) or tell me a job to raise, assign or reschedule. I'll look it up and confirm before anything changes. You can also ask me to adjust the house rules."
+      : "Hi — ask me about jobs, sites, compliance or vehicles, or tell me a job to raise/assign. For example: **Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow**, or **when is the EICR due at store 649?**")); }
     setTimeout(function(){ input.focus(); }, 50);
   }
   function close(){ box.classList.remove("on"); }
