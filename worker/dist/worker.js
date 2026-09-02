@@ -4725,11 +4725,14 @@ async function driveMinutesGoogle(env, fromPc, toPc) {
   try {
     const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
     if (!a || !b) return null;
-    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng + "&key=" + encodeURIComponent(key);
-    const r = await fetch(u, { cf: { cacheTtl: 3 * 86400, cacheEverything: true } });
+    const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&departure_time=now&traffic_model=best_guess&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng + "&key=" + encodeURIComponent(key);
+    const r = await fetch(u);
     const j = await r.json().catch(() => null);
     const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
-    if (el && el.status === "OK" && el.duration && el.duration.value != null) return Math.round(el.duration.value / 60);
+    if (el && el.status === "OK") {
+      const secs = el.duration_in_traffic && el.duration_in_traffic.value != null ? el.duration_in_traffic.value : el.duration && el.duration.value != null ? el.duration.value : null;
+      if (secs != null) return Math.round(secs / 60);
+    }
   } catch {
   }
   return null;
