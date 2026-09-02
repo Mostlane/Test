@@ -806,8 +806,11 @@ function haversineMiles(a, b) {
 }
 const ROAD_FACTOR = 1.25;
 
-// Google-driven drive TIME (minutes) between two postcodes via Distance Matrix.
-// null when no GOOGLE_MAPS_KEY or the call fails (caller decides the fallback).
+// Google-driven drive TIME (minutes) between two postcodes via Distance Matrix,
+// WITH LIVE TRAFFIC (departure_time=now → duration_in_traffic). We call this at
+// the moment a job is completed — i.e. when the engineer would set off home — so
+// the traffic reading is real. NOT edge-cached (traffic is live). Falls back to
+// the free-flow duration, then null (caller decides the last-resort estimate).
 async function driveMinutesGoogle(env, fromPc, toPc) {
   const key = env && env.GOOGLE_MAPS_KEY; if (!key) return null;
   const f = normPc(fromPc), t = normPc(toPc); if (!f || !t) return null;
@@ -815,12 +818,18 @@ async function driveMinutesGoogle(env, fromPc, toPc) {
     const [a, b] = await Promise.all([lookupPostcode(f), lookupPostcode(t)]);
     if (!a || !b) return null;
     const u = "https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving"
+      + "&departure_time=now&traffic_model=best_guess"
       + "&origins=" + a.lat + "," + a.lng + "&destinations=" + b.lat + "," + b.lng
       + "&key=" + encodeURIComponent(key);
-    const r = await fetch(u, { cf: { cacheTtl: 3 * 86400, cacheEverything: true } });
+    const r = await fetch(u);   // no cf cache — a live-traffic reading must be fresh
     const j = await r.json().catch(() => null);
     const el = j && j.rows && j.rows[0] && j.rows[0].elements && j.rows[0].elements[0];
-    if (el && el.status === "OK" && el.duration && el.duration.value != null) return Math.round(el.duration.value / 60);
+    if (el && el.status === "OK") {
+      const secs = (el.duration_in_traffic && el.duration_in_traffic.value != null)
+        ? el.duration_in_traffic.value
+        : (el.duration && el.duration.value != null ? el.duration.value : null);
+      if (secs != null) return Math.round(secs / 60);
+    }
   } catch {}
   return null;
 }
