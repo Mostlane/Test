@@ -2520,6 +2520,13 @@ whole group; job-view "🔁 Visits" card lists every visit (status · date · op
 each visit's individual cost (/costing/job-full-cost per job) + a combined total
 (shown once ≥2 visits; costs admin-only). NB job-view still loads via the legacy
 mostlane-sla host, so the new endpoints are called on MOSTLANE_API (mApi helper).
+**Multi-visit badge (Sep 2026):** every job in a chain carries **`job.visitCount`**
+(the group size, re-stamped on all members whenever a re-visit is created — threaded
+through createOrUpdateJobFromPayload + patchJob). When `>1` a small **🔁N** pill shows
+on the SLA board (sla-main.html row + mobile card, `.visit-tag`, next to `groupTag`),
+the scheduler **day-view block** (`.day-job-ref`) and **week-view chip** — so a job with
+multiple visits is obvious at a glance; open it and the "🔁 Visits" card lists/opens
+them all.
 
 ## Electrical test → remedials → one-tap works job (sla.js + remedials-form.js — Sep 2026)
 An **electrical-test job** (add-job.html **⚡ Electrical test** tick → `job.elecTest`;

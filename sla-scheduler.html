@@ -1111,7 +1111,7 @@ function renderDayView(container){
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "");
+      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
@@ -1203,7 +1203,7 @@ function renderWeekView(container){
           chip.className = "week-job-chip" + (done ? " done" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title;
+          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });

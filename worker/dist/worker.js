@@ -8735,6 +8735,19 @@ async function handle8(request, env, ctx, url, sess) {
         } catch {
         }
       }
+      try {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const members = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+        const cnt = members.length;
+        for (const m of members) {
+          if (m.visitCount !== cnt) {
+            m.visitCount = cnt;
+            m.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+            await saveJob(env, tenantId, m);
+          }
+        }
+      } catch {
+      }
       ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
       }));
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
@@ -10016,6 +10029,9 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the chain, so all visits against one job are easy to find + cost together.
     revisitOf: body.revisitOf !== void 0 ? String(body.revisitOf || "") || null : existing?.revisitOf || null,
     visitGroupId: body.visitGroupId !== void 0 ? String(body.visitGroupId || "") || null : existing?.visitGroupId || null,
+    // How many jobs are in this visit chain (for the board/scheduler "×N" badge);
+    // stamped on every group member when a re-visit is created.
+    visitCount: body.visitCount !== void 0 ? Number(body.visitCount) || null : existing?.visitCount || null,
     scheduledAt,
     scheduledEnd,
     durationMinutes,
@@ -10174,6 +10190,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== void 0) job.revisitOf = String(patch.revisitOf || "") || null;
   if (patch.visitGroupId !== void 0) job.visitGroupId = String(patch.visitGroupId || "") || null;
+  if (patch.visitCount !== void 0) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;

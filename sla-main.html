@@ -128,6 +128,7 @@
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
     .rel-badge{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#8a5a00;background:#fff6e5;border:1px solid #f0d9a6;border-radius:999px;padding:1px 8px;vertical-align:middle;}
+    .visit-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#003466;background:#eef4fb;border:1px solid #cfe0f3;border-radius:999px;padding:1px 7px;vertical-align:middle;}
     .em-chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#003468;background:#eaf1fb;border:1px solid #c9dcf3;border-radius:999px;padding:1px 8px;vertical-align:middle;font-variant-numeric:tabular-nums;}
     .em-chip.em-done{color:#0a7d33;background:#e9f8ef;border-color:#b7e3c6;}
     .arch-tag{display:inline-block;font-size:10px;font-weight:700;color:#475569;background:#eef2f7;border:1px solid #d7dee7;border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;}
@@ -751,6 +752,10 @@ function render(){
   const groupTag = j => (j.groupId && groupCounts[j.groupId] > 1)
     ? ` <span class="grp-tag" title="Multi-engineer job — each engineer works their own day independently">👥 ${esc(j.groupLabel||"")}/${groupCounts[j.groupId]}</span>`
     : "";
+  // Re-visit chain badge: this job is one of N visits raised against the same original.
+  const visitTag = j => (j.visitCount > 1)
+    ? ` <span class="visit-tag" title="One of ${j.visitCount} visits to this job — open the job to see them all">🔁 ${j.visitCount}</span>`
+    : "";
 
   for(const j of list){
     // The "Job" title should read "<ticket number> - <site>" (e.g.
@@ -785,7 +790,7 @@ function render(){
     tr.innerHTML = `
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
+        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
@@ -813,7 +818,7 @@ function render(){
     card.dataset.jobId = j.id;
     card.innerHTML = `
       <div class="mjob-top">
-        ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
+        ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>

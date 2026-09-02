@@ -1925,6 +1925,14 @@ export async function handle(request, env, ctx, url, sess) {
       } catch {}
       // Stamp the ROOT job with the group id too, so the whole chain shares one key.
       if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
+      // Stamp every job in the group with the current visit count (for the board /
+      // scheduler "×N" badge) — accurate regardless of which are filtered per view.
+      try {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const members = all.filter(j => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+        const cnt = members.length;
+        for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
+      } catch {}
       ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
     }
@@ -3460,6 +3468,9 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // the chain, so all visits against one job are easy to find + cost together.
     revisitOf: body.revisitOf !== undefined ? (String(body.revisitOf || "") || null) : (existing?.revisitOf || null),
     visitGroupId: body.visitGroupId !== undefined ? (String(body.visitGroupId || "") || null) : (existing?.visitGroupId || null),
+    // How many jobs are in this visit chain (for the board/scheduler "×N" badge);
+    // stamped on every group member when a re-visit is created.
+    visitCount: body.visitCount !== undefined ? (Number(body.visitCount) || null) : (existing?.visitCount || null),
     scheduledAt,
     scheduledEnd,
     durationMinutes,
@@ -3646,6 +3657,7 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
   if (patch.revisitOf !== undefined) job.revisitOf = String(patch.revisitOf || "") || null;
   if (patch.visitGroupId !== undefined) job.visitGroupId = String(patch.visitGroupId || "") || null;
+  if (patch.visitCount !== undefined) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== undefined) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== undefined) job.seriesSkipped = !!patch.seriesSkipped;
