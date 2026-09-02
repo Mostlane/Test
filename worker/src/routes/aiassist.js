@@ -132,12 +132,20 @@ async function anthropicChat(env, { system, messages, tools, forceTool }) {
 }
 
 // ── Live SLA job lookup (so the assistant can find + assign EXISTING jobs) ─────
+const WORKED_RE = /in progress|complete|closed|travel|on hold|quote|order|resumed|safety/i;
 function jobRow(r) {
   let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
   const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
+  const hist = Array.isArray(d.statusHistory) ? d.statusHistory : [];
+  const last = hist.length ? hist[hist.length - 1] : null;
   return { id: r.id, ref: d.helpdeskRef || r.helpdesk_ref || r.id, siteName: d.siteName || "", siteCode: d.siteCode || r.site_code || "",
     status: d.status || r.status || "", priority: d.priority || "", scheduledAt: d.scheduledAt || r.scheduled_at || null,
-    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 220), _dormant: !!d.fallbackTemplate };
+    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 220),
+    // Cheap activity signals (from the job JSON already loaded — no extra reads):
+    visited: hist.some(h => WORKED_RE.test(String(h && h.status || ""))),
+    lastActivity: last ? { status: last.status, at: last.at, by: last.by } : null,
+    _histBy: hist.map(h => String(h && h.by || "").toLowerCase()).filter(Boolean),
+    _dormant: !!d.fallbackTemplate };
 }
 const FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
 async function searchJobs(env, tid, query) {
@@ -316,7 +324,8 @@ async function toolListEngineers(env, tid) {
 // history + whether photos/signature are attached, so the assistant can tell
 // if a site has already been surveyed/quoted. (It can't SEE image contents,
 // but it can see how many photos exist and the visit history.)
-async function toolGetJob(env, tid, ref) {
+async function toolGetJob(env, tid, ref, engSet) {
+  engSet = engSet || new Set();
   const jt = await resolveJobTarget(env, tid, { jobRef: ref, jobId: ref });
   if (!jt.ok) return jt.ambiguous ? { ambiguous: jt.ambiguous } : { notfound: true, message: "No job found for \"" + ref + "\"." };
   const id = jt.job.id;
@@ -338,8 +347,9 @@ async function toolGetJob(env, tid, ref) {
       cursor = l.truncated ? l.cursor : null;
     } while (cursor);
   } catch {}
-  const hist = (Array.isArray(d.statusHistory) ? d.statusHistory : []).slice(-10).map(h => ({ status: h.status, at: h.at, by: h.by }));
-  const visited = photoCount > 0 || hist.some(h => /in progress|complete|closed|travel|quote|hold|order/i.test(String(h.status || "")));
+  const hist = (Array.isArray(d.statusHistory) ? d.statusHistory : []).slice(-12).map(h => ({ status: h.status, at: h.at, by: h.by, byEngineer: engSet.has(String(h.by || "").toLowerCase()) }));
+  const attendedByEngineer = photoCount > 0 || hist.some(h => h.byEngineer && WORKED_RE.test(String(h.status || "")));
+  const visited = attendedByEngineer || hist.some(h => WORKED_RE.test(String(h.status || "")));
   return {
     id, ref: d.helpdeskRef || id, site: d.siteName || "", siteCode: d.siteCode || "", status: d.status || "",
     priority: d.priority || "", engineers: Array.isArray(d.assignedEngineers) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []),
@@ -347,7 +357,7 @@ async function toolGetJob(env, tid, ref) {
     description: String(d.description || "").slice(0, 1800),
     notes: String(d.notes || d.note || d.officeNote || "").slice(0, 1800),
     photoCount, photoStages: stages, hasSignature, statusHistory: hist,
-    likelyVisited: visited,
+    likelyVisited: visited, attendedByEngineer,
   };
 }
 async function toolFindVehicle(env, tid, caps, query) {
@@ -401,13 +411,24 @@ export async function handle(request, env, ctx, url, sess) {
     const message = String(b.message || "").slice(0, 4000);
     if (!message) return error("Say what you'd like me to do.", 400, env, request);
     const g = await getRules(env, tid);
-    // Field engineers list (names) for context.
-    let engNames = [];
+    // Field engineers (names + a lookup set for engineer-vs-office attribution).
+    let engNames = []; const engSet = new Set();
     try {
-      const { results } = await env.DB.prepare("SELECT first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
-      engNames = (results || []).filter(u => { let p = {}; try { p = JSON.parse(u.profile || "{}"); } catch {} return String(p.staffType || "").toLowerCase() === "field"; })
-        .map(u => (u.first_name + " " + u.last_name).trim()).filter(Boolean);
+      const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+      for (const u of results || []) {
+        let p = {}; try { p = JSON.parse(u.profile || "{}"); } catch {}
+        if (String(p.staffType || "").toLowerCase() !== "field") continue;
+        const full = (u.first_name + " " + u.last_name).trim();
+        if (full) engNames.push(full);
+        [u.username, full, u.first_name].forEach(x => { const s = String(x || "").toLowerCase().trim(); if (s) engSet.add(s); });
+      }
     } catch {}
+    // Flag which of a job's activity signals were an ENGINEER (not the office).
+    const markEngActivity = jobs => { for (const j of jobs || []) {
+      j.attendedByEngineer = !!(j._histBy && j._histBy.some(b => engSet.has(b)));
+      j.lastByEngineer = !!(j.lastActivity && engSet.has(String(j.lastActivity.by || "").toLowerCase()));
+      delete j._histBy;
+    } return jobs; };
     // Custom job categories — a job's STATUS can be one of these to mark a
     // workstream (e.g. "FRA Works"). The assistant must recognise these.
     let cats = [];
@@ -460,6 +481,7 @@ export async function handle(request, env, ctx, url, sess) {
     const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal — jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles — and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES — never claim a job was created or assigned. "
       + "Be smart and proactive: look things up rather than asking the user to re-type details. "
       + "You CAN inspect a job's detail with get_job — its full description, office/site notes, status history and whether PHOTOS/signature are attached — so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. Don't call get_job on more than ~8 jobs in one go. "
+      + "BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER — not the office — moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit — e.g. '🔧 attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. "
       + "THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them — never invent it. "
       + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ")
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
@@ -490,8 +512,8 @@ export async function handle(request, env, ctx, url, sess) {
         for (const u of uses) {
           let data;
           try {
-            if (u.name === "find_jobs") { const f = await searchJobs(env, tid, u.input.query || ""); data = { count: f.length, jobs: f }; }
-            else if (u.name === "get_job") data = await toolGetJob(env, tid, u.input.job || u.input.query || "");
+            if (u.name === "find_jobs") { const f = markEngActivity(await searchJobs(env, tid, u.input.query || "")); data = { count: f.length, jobs: f }; }
+            else if (u.name === "get_job") data = await toolGetJob(env, tid, u.input.job || u.input.query || "", engSet);
             else if (u.name === "find_site") data = await toolFindSite(env, tid, u.input.query || "");
             else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps, u.input.query || "", u.input.scheme);
             else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
