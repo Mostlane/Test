@@ -254,6 +254,34 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   persist arrays exclusively. sla-scheduler's "postcode not recognised"
   diagnostic reads `geoMiss`, not a stored null.
 
+## Server-side authorisation hardening (2 Sep 2026 — code review Stage 1)
+- **No data files in this PUBLIC repo — enforced by .gitignore now** (root `*.json`
+  except manifest.json, root `*.txt`, `logs/`, `json_logs/`, `Compliance/`,
+  `Mostlane/`, `assets/*.json`). The staff pay-rate / postcode / GPS / holiday /
+  PO / customer-store files that had crept back in were removed; weekly.html,
+  my-timesheet.html (read rates from raw.githubusercontent) and van-scores.html
+  are redirect stubs. **History still holds them until `main` is rewritten** —
+  see the Stage-1 handover message; a `git filter-repo` + force-push is Jamie's call.
+- **holidays.js identity = the session ONLY.** The X-User / X-Role request headers
+  (which let any logged-in user call themselves Admin) are ignored and no longer
+  in CORS Allow-Headers.
+- **Login + forgot-password require an ACTIVE account** (`isActiveStatus`: blank or
+  "Active"), so a self-registered Pending starter can't reset a password and log in.
+- **Job PATCH is scoped for non-admins** (sla.js, anyone without FullAccess|SLAAdmin):
+  must be on the job's roster; body is whitelisted to the field-app fields
+  (status, note, riskAssessment, hold, quote, order, gps, lat, lon, localDate, opId,
+  changedBy, travelStartMileage, remedials, auditItems, emTimer, investigateOnly) —
+  office fields incl. the requiresRA/Photo/Signature/Note gates are dropped; a
+  risk assessment must be real (hazards + declarations.safeToProceed + name) and
+  `skipped` is refused (Full-Access skip still works — it's an admin session).
+  **POST /sla/jobs** (upsert by id/ref) and **POST /sla/config** are SLA-admin only.
+- **File streams:** /staff/doc with a bare session opens only your OWN personal docs
+  or company docs (Full-Access any); /ts/invoice-file only your OWN invoices
+  (timesheet admin any); /sla/firestop/spec-file|photo-file only `firestop/` +
+  `firestopspec/` keys. Signed links behave exactly as before.
+- **Test:** `node worker/tools/test-auth-gates.mjs` (mock D1/R2, 21 cases) — run it
+  after touching any of the above.
+
 ## Auth & sessions (worker lib/auth.js + routes/auth.js + client auth.js)
 - Passwords: salted PBKDF2 100k (`pbkdf2$100000$salt$hash`), legacy sha256
   auto-upgraded on login. NEVER paste plaintext into D1 — it won't work.

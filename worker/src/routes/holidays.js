@@ -9,9 +9,8 @@
 //   • USERS_KV `all_users`                  -> D1 `users` (status = 'Active')
 //
 // All allowance/accrual maths, validation and admin gating are preserved
-// exactly. Identity still comes from X-User / X-Role headers (so the existing
-// pages work unchanged); if those are absent it falls back to the verified
-// session token and derives the role from permissions.
+// exactly. Identity comes ONLY from the verified session token (role derived
+// from permissions). The legacy X-User / X-Role headers are ignored.
 //
 // NOTE: holiday-config.html is a dead/broken page (posts to a non-existent
 // /holiday/config and sends the wrong role) — superseded by holiday-admin.html.
@@ -106,13 +105,15 @@ export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
 
-  // ── Identity (X-User/X-Role headers, else verified session) ────────────────
-  let user = request.headers.get("X-User");
-  let role = request.headers.get("X-Role") || "Engineer";
-  if (!user) {
-    const sess = await requireSession(env, request);
-    if (sess) {
-      user = sess.user.username;
+  // ── Identity: ALWAYS the verified session — never a request header ─────────
+  // (The old X-User / X-Role headers let any logged-in caller name themselves
+  // an admin. They are ignored entirely now; role comes from permissions.)
+  let user = null;
+  let role = "Engineer";
+  {
+    const s = sess || await requireSession(env, request);
+    if (s) {
+      user = s.user.username;
       const perms = await permissionsFor(env, tenantId, user);
       role = (perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes") ? "Admin" : "Engineer";
     }

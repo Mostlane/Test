@@ -1120,7 +1120,14 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/invoice-file" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("invoices/")) return error("Bad key", 400, env, request);
-    if (!sess && !(await verifyFileSig(env, key, q))) return error("Link expired or invalid", 403, env, request);
+    // Signed link always passes. A bare session may only open its OWN invoices
+    // (keys are invoices/<tid>/<user>/…, so another engineer's are guessable)
+    // unless it's a timesheet admin.
+    if (!(await verifyFileSig(env, key, q))) {
+      if (!sess) return error("Link expired or invalid", 403, env, request);
+      const own = String(key).startsWith(`${INV_PREFIX(sess.tenantId)}${encodeURIComponent(sess.user.username)}/`);
+      if (!own && !(await isTsAdmin(env, sess.tenantId, sess))) return error("Forbidden", 403, env, request);
+    }
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
