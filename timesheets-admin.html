@@ -202,7 +202,7 @@ function renderTable(){
     const pay=u.selfEmployed&&u.totals.total!=null?`<br><span class="muted" style="font-size:11px">${money(u.totals.total)}</span>`:"";
     const ot=u.totals.otHours>0?`<br><span style="font-size:11px;color:#b45309">OT ${u.totals.otHours}h${u.totals.otPay?` · ${money(u.totals.otPay)}`:""}</span>`:"";
     const lv=u.totals.leaveHours>0?`<br><span style="font-size:11px;color:#4f46e5">Leave ${u.totals.leaveHours}h${u.totals.leavePay?` · ${money(u.totals.leavePay)}`:""}</span>`:"";
-    return `<tr><td class="name">${esc(u.name)}${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
+    return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
       <td class="tot">${hmS(u.totals.paidMins)}${ot}${lv}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
       <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");

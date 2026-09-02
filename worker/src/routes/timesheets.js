@@ -1134,17 +1134,29 @@ export async function handle(request, env, ctx, url, sess) {
   await ensureTables(env);
   const cfg = await getCfg(env, tid);
 
-  // ── GET /ts/me — the caller's effective settings ──────────────────────────
+  // A TimesheetAdmin can VIEW another engineer's timesheet read-only via ?user=.
+  // Only the GET reads below honour it; every write always acts as the caller.
+  let _adminView = null;
+  const viewUser = async () => {
+    const w = q.get("user");
+    if (!w || w === me) return me;
+    if (_adminView === null) _adminView = await isTsAdmin(env, tid, sess);
+    return _adminView ? w : me;
+  };
+
+  // ── GET /ts/me — the caller's (or a viewed engineer's) effective settings ──
   if (sub === "/me" && method === "GET") {
-    const u = await userRow(env, tid, me);
+    const who = await viewUser();
+    const u = await userRow(env, tid, who);
     if (!u) return error("User not found", 404, env, request);
     const eff = effectiveCfg(cfg, u);
-    const next = await nextInvoiceNumber(env, tid, me, eff);
+    const next = await nextInvoiceNumber(env, tid, who, eff);
     const admin = await isTsAdmin(env, tid, sess);
-    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, who).first();
     return json({ ok: true, name: displayName(u), ...eff, rate: eff.rate, nextInvoice: next,
       basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
-      canSetNumber: !invCount || Number(invCount.n) === 0, admin }, {}, env, request);
+      canSetNumber: !invCount || Number(invCount.n) === 0, admin,
+      viewingUser: who !== me ? who : null }, {}, env, request);
   }
 
   // ── POST /ts/me — self-service settings (postcode, invoice details, rate) ─
@@ -1160,19 +1172,21 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
 
-  // ── GET /ts/my — own week ─────────────────────────────────────────────────
+  // ── GET /ts/my — own week (or a viewed engineer's, for an admin) ──────────
   if (sub === "/my" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
-    const u = await userRow(env, tid, me);
+    const u = await userRow(env, tid, who);
     const eff = effectiveCfg(cfg, u);
-    const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
-    const inv = await invoiceFor(env, tid, me, monday);
-    const auto = await jobTimeAuto(env, tid, me, monday, { homePostcode: eff.homePostcode });
-    const holidays = await holidayDaysFor(env, tid, me, monday);
+    const { days, savedAt, approval } = await loadWeek(env, tid, who, monday);
+    const inv = await invoiceFor(env, tid, who, monday);
+    const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
+    const holidays = await holidayDaysFor(env, tid, who, monday);
     const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
-    const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    const am = await applyAutoMileage(env, tid, who, monday, days, eff, cfg.defaults.basePostcode);
     return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
+      viewingUser: who !== me ? who : null,
       totals: weekTotals(am.days, eff), autoMileage: am.auto,
       invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
@@ -1230,11 +1244,12 @@ export async function handle(request, env, ctx, url, sess) {
   // on jobs arrive in several spellings (dotted ids, case differences), so
   // matching is normalised the same way login is forgiving.
   if (sub === "/assigned" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
     const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
     const end = endD.toISOString().slice(0, 10);
     const byDay = {};
-    const debug = { me, matchedAs: [], candidates: [] };
+    const debug = { me: who, matchedAs: [], candidates: [] };
     try {
       const { results } = await env.DB.prepare(
         "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
@@ -1253,11 +1268,11 @@ export async function handle(request, env, ctx, url, sess) {
           if (full) map[normId(full)] = u.username;
         }
       } catch {}
-      const meN = norm(me);
-      const cap = await capturedMinsWeek(env, tid, me, monday);   // status-tap minutes per job/day → pre-fill hours
+      const meN = norm(who);
+      const cap = await capturedMinsWeek(env, tid, who, monday);   // status-tap minutes per job/day → pre-fill hours
       const isMe = e => {
         const resolved = map[normId(e)];
-        if (resolved != null) return resolved === me;
+        if (resolved != null) return resolved === who;
         const n = norm(e);
         return !!n && (n === meN || n.includes(meN) || meN.includes(n));
       };
