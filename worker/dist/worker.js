@@ -28603,8 +28603,33 @@ function monthYY(date) {
   const x = isNaN(d) ? /* @__PURE__ */ new Date() : d;
   return String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getFullYear()).slice(-2);
 }
+async function prevCertNumberForStore(env, tid, code, type) {
+  const c4 = padCode(code);
+  try {
+    const row = await env.DB.prepare(
+      "SELECT cert_number FROM certificates WHERE tenant_id=? AND site_code=? AND type=? AND cert_number IS NOT NULL AND cert_number!='' ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 1"
+    ).bind(tid, c4, type).first();
+    if (row && row.cert_number) {
+      const m = String(row.cert_number).match(/(\d{3,5})/);
+      if (m) return m[1];
+    }
+  } catch {
+  }
+  try {
+    const key = await latestCertR2Key(env, tid, c4, type);
+    if (key) {
+      const name = key.split("/").pop() || "";
+      const m = name.match(/_(\d{3,5})[-.](?:DEC|JAN)?\d{2}[A-Za-z]?_?\.pdf$/i);
+      if (m) return m[1];
+    }
+  } catch {
+  }
+  return "";
+}
 async function suggestNumber(env, tid, code, type, opts = {}) {
   if (type === "pat") {
+    const prev = await prevCertNumberForStore(env, tid, code, "pat");
+    if (prev) return String(prev).padStart(4, "0") + "-" + yy();
     const n = await nextPatNumber(env, tid);
     return String(n).padStart(4, "0") + "-" + yy();
   }
