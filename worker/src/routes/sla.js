@@ -1809,33 +1809,43 @@ export async function handle(request, env, ctx, url, sess) {
         if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
       }
       const newId = crypto.randomUUID();
-      const auditItems = [];
+      // Build a NUMBERED works list from the chosen remedials — this is the job's
+      // description, so it reads like any other reactive SLA job. The engineer's
+      // fault photos from the test are carried into the new job's photo grid as
+      // "Before" shots so they still see exactly what needs doing.
+      const workLines = [];
+      let n = 0;
       for (const r of rem) {
-        const itemId = crypto.randomUUID();
-        const refPhotos = [];
+        n++;
+        workLines.push(`${n}. ${(r.code ? `[${r.code}] ` : "")}${(r.description || "").trim()}`);
         for (const srcKey of (r.photos || [])) {
           try {
             const obj = await env.JOB_FILES.get(srcKey);
             if (!obj) continue;
             const fn = String(srcKey).split("/").pop();
-            const dstKey = `jobs/${newId}/audit/${itemId}/${fn}`;
-            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+            const dstKey = `jobs/${newId}/photos/${fn}`;
+            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: { stage: "Before" } });
             try { const t = await env.JOB_FILES.get(srcKey + ".thumb"); if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata }); } catch {}
-            refPhotos.push(dstKey);
           } catch {}
         }
-        auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
       }
-      const baseRef = src.siteName || src.helpdeskRef || src.siteCode || "Remedial works";
+      // Resolve the real site name (the source test job can carry an empty siteName,
+      // which made the job read "0657 - 0657"); default the reference to it too.
+      let siteName = (src.siteName || "").trim();
+      try { const meta = await resolveSiteMeta(env, tenantId, src); if (meta && meta.siteName) siteName = meta.siteName; } catch {}
+      const worksDesc = `Remedial works${src.helpdeskRef ? ` (from electrical test ${src.helpdeskRef})` : ""}:\n` + workLines.join("\n");
       const payload = {
         id: newId,
-        reference: baseRef,
-        description: `Remedial works from electrical test${src.helpdeskRef ? " (" + src.helpdeskRef + ")" : ""}.`,
-        siteCode: src.siteCode, siteName: src.siteName,
+        reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
+        description: worksDesc,
+        siteCode: src.siteCode, siteName,
         address: src.address, postcode: src.postcode, telephone: src.telephone,
         storeType: src.storeType, client: src.client,
         lat: src.lat, lon: src.lon,
-        auditItems,
+        // A standard reactive job — full RA / photo / note / signature gates, the
+        // ordinary status flow, NO site-audit checklist (Jamie: "must follow the
+        // same process and gates").
+        requiresRA: true, requiresSignature: true, requiresPhoto: true, requiresNote: true,
         assignedEngineers: [],           // unassigned — the office allocates it
         priority: src.priority || "",
         changedBy: (sess.user && sess.user.username) || "system",
@@ -1846,7 +1856,7 @@ export async function handle(request, env, ctx, url, sess) {
       src.updatedAt = new Date().toISOString();
       await saveJob(env, tenantId, src);
       try { const nj = await getJob(env, tenantId, job.id); if (nj) { nj.fromRemedialsOf = id; await saveJob(env, tenantId, nj); } } catch {}
-      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: rem.length }, headers, 201);
     }
 
     // POST /sla/jobs/{id}/revisit — clone a completed/closed job into a NEW job for a
