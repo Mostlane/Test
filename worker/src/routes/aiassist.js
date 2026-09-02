@@ -140,7 +140,7 @@ function jobRow(r) {
   const last = hist.length ? hist[hist.length - 1] : null;
   return { id: r.id, ref: d.helpdeskRef || r.helpdesk_ref || r.id, siteName: d.siteName || "", siteCode: d.siteCode || r.site_code || "",
     status: d.status || r.status || "", priority: d.priority || "", scheduledAt: d.scheduledAt || r.scheduled_at || null,
-    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 220),
+    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 400),
     // Cheap activity signals (from the job JSON already loaded — no extra reads):
     visited: hist.some(h => WORKED_RE.test(String(h && h.status || ""))),
     lastActivity: last ? { status: last.status, at: last.at, by: last.by } : null,
@@ -480,7 +480,7 @@ export async function handle(request, env, ctx, url, sess) {
     canDo.push(caps.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
     const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal — jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles — and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES — never claim a job was created or assigned. "
       + "Be smart and proactive: look things up rather than asking the user to re-type details. "
-      + "You CAN inspect a job's detail with get_job — its full description, office/site notes, status history and whether PHOTOS/signature are attached — so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. Don't call get_job on more than ~8 jobs in one go. "
+      + "You CAN inspect a job's detail with get_job — its full description, office/site notes, status history and whether PHOTOS/signature are attached — so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs — don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). "
       + "BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER — not the office — moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit — e.g. '🔧 attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. "
       + "THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them — never invent it. "
       + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ")
@@ -510,6 +510,9 @@ export async function handle(request, env, ctx, url, sess) {
       ai = await anthropicChat(env, { system, messages, tools: last ? termTools : tools, forceTool: !fullAccess || last });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "⚠️ " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter(c => c.type === "tool_use");
+      // A terminal tool ends the loop immediately.
+      const term = uses.find(u => !READ.has(u.name));
+      if (term) { t = term; break; }
       const reads = last ? [] : uses.filter(c => READ.has(c.name));
       if (reads.length) {
         messages.push({ role: "assistant", content: ai.content });
@@ -530,8 +533,12 @@ export async function handle(request, env, ctx, url, sess) {
         messages.push({ role: "user", content: out });
         continue;   // let the model use the results
       }
-      t = uses.find(u => !READ.has(u.name)) || null;
-      break;
+      // No terminal tool and no reads — the model answered in PROSE. Use it.
+      if (ai.text) return json({ ok: true, kind: "reply", text: ai.text }, {}, env, request);
+      if (last) break;
+      // Empty turn: nudge it to conclude, then loop.
+      messages.push({ role: "assistant", content: (ai.content && ai.content.length) ? ai.content : [{ type: "text", text: "(thinking)" }] });
+      messages.push({ role: "user", content: "Give your answer or proposal now, using the information above." });
     }
     if (!t) return json({ ok: true, kind: "reply", text: ai.text || "Sorry — I couldn't pull that together. Try rephrasing, or ask for a specific site or engineer." }, {}, env, request);
     if (t.name === "ask") return json({ ok: true, kind: "ask", question: t.input.question || "Could you clarify?" }, {}, env, request);
