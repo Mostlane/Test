@@ -181,10 +181,10 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null, DUE=null;
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null, DUE=null, REMIND=true;
 // Booked jobs (data-booked=1) with no hours = still to complete before the deadline.
 function countEmptyBooked(){ let n=0; document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const v=parseFloat(r.querySelector('.jh-hrs').value); if(!(v>0))n++;}); return n; }
-function markGaps(){ document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); inp.classList.toggle('needhrs', !(parseFloat(inp.value)>0)); }); }
+function markGaps(){ document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); inp.classList.toggle('needhrs', REMIND&&!(parseFloat(inp.value)>0)); }); }
 // Persist any prefilled-but-unsaved job hours (captured from status/day) so a job
 // isn't counted "blank" just because the engineer hasn't touched the box.
 function maybeSavePrefill(){
@@ -443,7 +443,7 @@ function render(){
     banner+=`<div class="banner">🧾 Invoice <b>${INVOICE.number}</b> generated (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>.</div>`;
   }
   const emptyBooked=countEmptyBooked();
-  if(DUE&&!APPROVAL&&!INVOICE&&emptyBooked>0){
+  if(REMIND&&DUE&&!APPROVAL&&!INVOICE&&emptyBooked>0){
     const od=DUE.overdue;
     banner+=`<div class="banner" style="background:${od?"#fef2f2":"#fffbeb"};border-color:${od?"#fecaca":"#fde68a"};color:${od?"#991b1b":"#92400e"}">⏱ <b>${emptyBooked} job${emptyBooked>1?"s":""} still ${od?"":"to "}need${od?"":" "} hours</b> — please enter the hours you worked on every job. ${od?"This was due":"Due"} <b>${esc(DUE.label||"")}</b>${od?" — please complete it now.":"."}</div>`;
   }
@@ -820,6 +820,7 @@ async function load(){
     HOL=(wkR&&wkR.holidays)||{};
     BANK=(wkR&&wkR.bank)||{};
     DUE=(wkR&&wkR.due)||null;
+    REMIND=!(wkR&&wkR.remindersOn===false);
     JOBMETA=(wkR&&wkR.jobMeta)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
