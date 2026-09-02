@@ -27361,6 +27361,59 @@ async function toolListEngineers(env, tid) {
   }).map((u) => ({ name: (u.first_name + " " + u.last_name).trim(), username: u.username }));
   return { count: engineers.length, engineers };
 }
+async function toolGetJob(env, tid, ref) {
+  const jt = await resolveJobTarget(env, tid, { jobRef: ref, jobId: ref });
+  if (!jt.ok) return jt.ambiguous ? { ambiguous: jt.ambiguous } : { notfound: true, message: 'No job found for "' + ref + '".' };
+  const id = jt.job.id;
+  let d = {};
+  try {
+    const r = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (r) d = JSON.parse(r.data || "{}");
+  } catch {
+  }
+  let photoCount = 0;
+  const stages = {};
+  let hasSignature = !!d.signature;
+  try {
+    let cursor;
+    do {
+      const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/`, cursor, include: ["customMetadata"] });
+      for (const o of l.objects || []) {
+        const k = String(o.key || "");
+        if (/\.thumb$/i.test(k)) continue;
+        if (/signature/i.test(k)) {
+          hasSignature = true;
+          continue;
+        }
+        photoCount++;
+        const st = o.customMetadata && (o.customMetadata.stage || o.customMetadata.Stage) || "";
+        if (st) stages[st] = (stages[st] || 0) + 1;
+      }
+      cursor = l.truncated ? l.cursor : null;
+    } while (cursor);
+  } catch {
+  }
+  const hist = (Array.isArray(d.statusHistory) ? d.statusHistory : []).slice(-10).map((h) => ({ status: h.status, at: h.at, by: h.by }));
+  const visited = photoCount > 0 || hist.some((h) => /in progress|complete|closed|travel|quote|hold|order/i.test(String(h.status || "")));
+  return {
+    id,
+    ref: d.helpdeskRef || id,
+    site: d.siteName || "",
+    siteCode: d.siteCode || "",
+    status: d.status || "",
+    priority: d.priority || "",
+    engineers: Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [],
+    scheduledAt: d.scheduledAt || null,
+    durationMinutes: d.durationMinutes || null,
+    description: String(d.description || "").slice(0, 1800),
+    notes: String(d.notes || d.note || d.officeNote || "").slice(0, 1800),
+    photoCount,
+    photoStages: stages,
+    hasSignature,
+    statusHistory: hist,
+    likelyVisited: visited
+  };
+}
 async function toolFindVehicle(env, tid, caps2, query) {
   if (!caps2.vehicles) return { denied: true, message: "You don't have Vehicles access." };
   const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
@@ -27431,6 +27484,7 @@ async function handle29(request, env, ctx, url, sess) {
     }
     const tools = [
       { name: "find_jobs", description: "Search the LIVE job board for existing jobs \u2014 by reference/incident number, site name or store number, words from the description, an engineer's name, or a status/category. ALWAYS use this when the office refers to jobs that already exist. Returns matching jobs with id, ref, site, status, current engineer and scheduled time.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "get_job", description: "Get FULL detail for ONE job by its id (from find_jobs) or reference: the full description, office/site notes, status history (who did what, when), how many PHOTOS are attached and whether a signature exists. Use this to judge whether a job has already been surveyed/visited/quoted (photos present or an In Progress/Quote/Complete in its history = it's been attended). NB you cannot see image contents, only that they exist.", input_schema: { type: "object", properties: { job: { type: "string", description: "job id (preferred) or reference/number" } }, required: ["job"] } },
       { name: "find_site", description: "Look up a SITE / store in the register \u2014 by name, store number or postcode. Returns number, name, type/customer, postcode and coordinates. Use it to answer questions about a site or to get a site's details.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
       { name: "find_compliance", description: "Look up COMPLIANCE certificate due dates for a store (EICR/5-year, EM, PAT, gas, etc.) or list what's overdue/due-soon. Query a store number/name, or words like 'overdue'. Optionally set scheme (coop/fareham/chapplins/projects). Returns per-type due dates with OVERDUE/due-soon flags.", input_schema: { type: "object", properties: { query: { type: "string" }, scheme: { type: "string" } }, required: ["query"] } },
       { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
@@ -27474,7 +27528,7 @@ async function handle29(request, env, ctx, url, sess) {
     canDo.push("look up sites");
     canDo.push(caps2.compliance ? "look up compliance due dates" : "compliance is NOT available to you (no permission)");
     canDo.push(caps2.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
-    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
+    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. Don't call get_job on more than ~8 jobs in one go. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
     const messages = [];
     for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
       if (h && h.role && h.text) messages.push({ role: h.role === "user" ? "user" : "assistant", content: String(h.text).slice(0, 2e3) });
@@ -27485,7 +27539,7 @@ async function handle29(request, env, ctx, url, sess) {
       ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "\u26A0\uFE0F " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter((c) => c.type === "tool_use");
-      const READ = /* @__PURE__ */ new Set(["find_jobs", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+      const READ = /* @__PURE__ */ new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
       const reads = uses.filter((c) => READ.has(c.name));
       if (reads.length) {
         messages.push({ role: "assistant", content: ai.content });
@@ -27496,7 +27550,8 @@ async function handle29(request, env, ctx, url, sess) {
             if (u.name === "find_jobs") {
               const f = await searchJobs2(env, tid, u.input.query || "");
               data = { count: f.length, jobs: f };
-            } else if (u.name === "find_site") data = await toolFindSite(env, tid, u.input.query || "");
+            } else if (u.name === "get_job") data = await toolGetJob(env, tid, u.input.job || u.input.query || "");
+            else if (u.name === "find_site") data = await toolFindSite(env, tid, u.input.query || "");
             else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps2, u.input.query || "", u.input.scheme);
             else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
             else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps2, u.input.query || "");
