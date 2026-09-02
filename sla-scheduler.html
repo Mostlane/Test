@@ -2117,7 +2117,10 @@ $("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.displa
 $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
 
 // ── Fallback jobs config (pick a standby OR existing loose job per engineer) ──
-function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
+// MUST match the worker's normId (sla.js): lowercase + spaces→dots. The server
+// stores byEngineer/exclude keyed this way ("Ryan Diggens" → "ryan.diggens"), so
+// reading back with a space-keyed variant showed everything as "no fallback set".
+function fbNorm(s){ return String(s||"").toLowerCase().replace(/\s+/g,".").trim(); }
 let FB_TEMPLATES = [], FB_ALLJOBS = [], FB_POOL = [], FB_CFG = { byEngineer:{} };
 function fbTmplLabel(t){
   const bits = [t.ref || t.id];
