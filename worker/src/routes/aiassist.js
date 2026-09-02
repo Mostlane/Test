@@ -496,16 +496,21 @@ export async function handle(request, env, ctx, url, sess) {
     }
     messages.push({ role: "user", content: message });
 
-    // Agentic loop: let the model call find_jobs (possibly several in one turn,
-    // and re-search) before proposing. Every tool_use in an assistant message
-    // MUST get a matching tool_result, or the next call is rejected.
+    // Agentic loop: let the model call the find_/get_ read tools (possibly
+    // several per turn, and re-search) before it concludes. Every tool_use in an
+    // assistant message MUST get a matching tool_result, or the next call is
+    // rejected. On the LAST round the read tools are withdrawn and a tool is
+    // forced, so it always concludes with an answer/proposal from what it gathered.
+    const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+    const termTools = tools.filter(x => !READ.has(x.name));
+    const MAXR = 8;
     let t = null, ai = null;
-    for (let round = 0; round < 5; round++) {
-      ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
+    for (let round = 0; round < MAXR; round++) {
+      const last = round === MAXR - 1;
+      ai = await anthropicChat(env, { system, messages, tools: last ? termTools : tools, forceTool: !fullAccess || last });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "⚠️ " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter(c => c.type === "tool_use");
-      const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
-      const reads = uses.filter(c => READ.has(c.name));
+      const reads = last ? [] : uses.filter(c => READ.has(c.name));
       if (reads.length) {
         messages.push({ role: "assistant", content: ai.content });
         const out = [];
@@ -525,10 +530,10 @@ export async function handle(request, env, ctx, url, sess) {
         messages.push({ role: "user", content: out });
         continue;   // let the model use the results
       }
-      t = uses[0] || null;
+      t = uses.find(u => !READ.has(u.name)) || null;
       break;
     }
-    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "I didn't catch that — try again." }, {}, env, request);
+    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "Sorry — I couldn't pull that together. Try rephrasing, or ask for a specific site or engineer." }, {}, env, request);
     if (t.name === "ask") return json({ ok: true, kind: "ask", question: t.input.question || "Could you clarify?" }, {}, env, request);
     if (t.name === "reply") return json({ ok: true, kind: "reply", text: t.input.text || "" }, {}, env, request);
     if (t.name === "set_rules") return json({ ok: true, kind: "rules", proposed: String(t.input.rules || "").slice(0, 20000), summary: t.input.summary || "Updated rules" }, {}, env, request);
