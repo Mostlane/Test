@@ -8940,35 +8940,41 @@ async function handle8(request, env, ctx, url, sess) {
         if (ex) return jsonResponse({ ok: true, existing: true, id: ex.id, ref: ex.helpdeskRef }, headers);
       }
       const newId4 = crypto.randomUUID();
-      const auditItems = [];
+      const workLines = [];
+      let n = 0;
       for (const r of rem) {
-        const itemId = crypto.randomUUID();
-        const refPhotos = [];
+        n++;
+        workLines.push(`${n}. ${r.code ? `[${r.code}] ` : ""}${(r.description || "").trim()}`);
         for (const srcKey of r.photos || []) {
           try {
             const obj = await env.JOB_FILES.get(srcKey);
             if (!obj) continue;
             const fn = String(srcKey).split("/").pop();
-            const dstKey = `jobs/${newId4}/audit/${itemId}/${fn}`;
-            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata });
+            const dstKey = `jobs/${newId4}/photos/${fn}`;
+            await env.JOB_FILES.put(dstKey, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: { stage: "Before" } });
             try {
               const t = await env.JOB_FILES.get(srcKey + ".thumb");
               if (t) await env.JOB_FILES.put(dstKey + ".thumb", t.body, { httpMetadata: t.httpMetadata });
             } catch {
             }
-            refPhotos.push(dstKey);
           } catch {
           }
         }
-        auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
       }
-      const baseRef = src.siteName || src.helpdeskRef || src.siteCode || "Remedial works";
+      let siteName = (src.siteName || "").trim();
+      try {
+        const meta = await resolveSiteMeta(env, tenantId, src);
+        if (meta && meta.siteName) siteName = meta.siteName;
+      } catch {
+      }
+      const worksDesc = `Remedial works${src.helpdeskRef ? ` (from electrical test ${src.helpdeskRef})` : ""}:
+` + workLines.join("\n");
       const payload = {
         id: newId4,
-        reference: baseRef,
-        description: `Remedial works from electrical test${src.helpdeskRef ? " (" + src.helpdeskRef + ")" : ""}.`,
+        reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
+        description: worksDesc,
         siteCode: src.siteCode,
-        siteName: src.siteName,
+        siteName,
         address: src.address,
         postcode: src.postcode,
         telephone: src.telephone,
@@ -8976,7 +8982,13 @@ async function handle8(request, env, ctx, url, sess) {
         client: src.client,
         lat: src.lat,
         lon: src.lon,
-        auditItems,
+        // A standard reactive job — full RA / photo / note / signature gates, the
+        // ordinary status flow, NO site-audit checklist (Jamie: "must follow the
+        // same process and gates").
+        requiresRA: true,
+        requiresSignature: true,
+        requiresPhoto: true,
+        requiresNote: true,
         assignedEngineers: [],
         // unassigned — the office allocates it
         priority: src.priority || "",
@@ -8994,7 +9006,7 @@ async function handle8(request, env, ctx, url, sess) {
         }
       } catch {
       }
-      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: rem.length }, headers, 201);
     }
     if (parts[2] === "revisit" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
