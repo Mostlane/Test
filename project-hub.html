@@ -808,9 +808,11 @@
       if (!DP) return;
       const inp = g("docFileInput"), file = inp.files && inp.files[0];
       if (!file) { g("docPickMsg").textContent = "Choose a file first."; g("docPickMsg").className = "msg err"; return; }
+      const name = await askDocName(file.name);
+      if (name == null) { g("docPickMsg").textContent = ""; return; }   // cancelled
       g("docPickMsg").textContent = "Uploading…"; g("docPickMsg").className = "msg"; g("docUpBtn").disabled = true;
       try {
-        const fd = new FormData(); fd.append("file", file); fd.append("id", PID); fd.append("section", DP.cfg.title.replace(/^[^A-Za-z0-9]+/, "").trim()); fd.append("title", file.name);
+        const fd = new FormData(); fd.append("file", file); fd.append("id", PID); fd.append("section", DP.cfg.title.replace(/^[^A-Za-z0-9]+/, "").trim()); fd.append("title", name);
         const r = await authFetch("/project/doc", { method: "POST", body: fd }).then(r => r.json());
         if (r.ok && r.id) {
           await authFetch("/project/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: PID, kind: "doc-file", docKey: DP.key, value: r.id }) });
@@ -862,13 +864,19 @@
       if (!files.length) { list.innerHTML = `<p class="muted">No documents yet.</p>`; return; }
       list.innerHTML = files.map(f => `<div>
         <span class="nm">📄 <a href="#" data-open="${esc(f.url)}" data-name="${esc(f.title)}" style="text-decoration:none;">${esc(f.title)}</a>${f.hidden ? ' <span class="muted">(hidden)</span>' : ""}<br><span class="muted" style="font-size:12px;">${esc(f.section || "")} · ${esc(f.uploadedBy || "")}</span></span>
-        ${CAN ? `<button class="btn grey small" data-hide="${f.id}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${f.id}" style="background:#b00020;">✕</button>` : ""}
+        ${CAN ? `<button class="btn grey small" data-ren="${f.id}" data-t="${esc(f.title || "")}">✏️ Rename</button><button class="btn grey small" data-hide="${f.id}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? "Show" : "Hide"}</button><button class="btn red small" data-del="${f.id}" style="background:#b00020;">✕</button>` : ""}
       </div>`).join("");
       list.querySelectorAll("[data-open]").forEach(a => a.onclick = e => { e.preventDefault();
         if (window.MLDocViewer) MLDocViewer.open({ url: a.dataset.open, fetchUrl: a.dataset.open, name: a.dataset.name, downloadUrl: a.dataset.open });
         else window.open(a.dataset.open, "_blank");
       });
       if (CAN) {
+        list.querySelectorAll("[data-ren]").forEach(b => b.onclick = async () => {
+          const name = await askDocName("", b.dataset.t || "");
+          if (name == null) return;
+          await authFetch("/project/doc-update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.ren, title: name }) });
+          loadDocs();
+        });
         list.querySelectorAll("[data-hide]").forEach(b => b.onclick = async () => { await authFetch("/project/doc-update", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.hide, hidden: b.dataset.h !== "1" }) }); loadDocs(); });
         list.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this document?")) return; await authFetch("/project/doc-delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ fileId: b.dataset.del }) }); loadDocs(); loadProject(); });
       }
@@ -881,9 +889,46 @@
       dz.ondragleave = () => dz.classList.remove("over");
       dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); };
     }
+    // Ask for a friendly document name before saving. Pre-fills the file's own
+    // base name UNLESS it looks auto-generated (a UUID / camera name), in which
+    // case it starts blank so the user must name it. Resolves to the name, or
+    // null if cancelled. Every document therefore gets a real name.
+    function docBaseName(fn){ return String(fn || "").replace(/\.[a-z0-9]+$/i, ""); }
+    function looksAutoName(n){
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(n)
+          || /^(image|img|photo|untitled|fullsizerender|scan)[-_ ]?\d*$/i.test(n)
+          || /^\d{8,}([-_].*)?$/.test(n);
+    }
+    function askDocName(fileName, current){
+      return new Promise(function(resolve){
+        var def = current != null ? current : docBaseName(fileName);
+        if (current == null && looksAutoName(def)) def = "";
+        var ov = document.createElement("div");
+        ov.style.cssText = "position:fixed;inset:0;background:rgba(6,24,54,.5);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;";
+        ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:360px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,.3);">'
+          + '<div style="font-weight:700;font-size:16px;color:#0f2438;margin-bottom:4px;">Name this document</div>'
+          + '<div style="font-size:13px;color:#64748b;margin-bottom:10px;">What should it be called?</div>'
+          + '<input id="mlDocNameInp" type="text" placeholder="e.g. Site layout drawing" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;color:#0f2438;">'
+          + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'
+          + '<button id="mlDocNameCancel" style="padding:9px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-weight:600;color:#0f2438;">Cancel</button>'
+          + '<button id="mlDocNameSave" style="padding:9px 16px;border:none;background:#003366;color:#fff;border-radius:8px;font-weight:700;">Save</button>'
+          + '</div></div>';
+        document.body.appendChild(ov);
+        var inp = ov.querySelector("#mlDocNameInp"); inp.value = def;
+        function done(v){ try { document.body.removeChild(ov); } catch(e){} resolve(v); }
+        function save(){ var v = inp.value.trim(); if (!v){ inp.style.borderColor = "#dc2626"; inp.focus(); return; } done(v); }
+        ov.querySelector("#mlDocNameCancel").onclick = function(){ done(null); };
+        ov.querySelector("#mlDocNameSave").onclick = save;
+        ov.addEventListener("click", function(e){ if (e.target === ov) done(null); });
+        inp.addEventListener("keydown", function(e){ if (e.key === "Enter") save(); });
+        setTimeout(function(){ inp.focus(); inp.select(); }, 60);
+      });
+    }
     async function upload(file) {
+      const name = await askDocName(file.name);
+      if (name == null) { g("docMsg").textContent = ""; return; }   // cancelled — nothing saved
       const fd = new FormData(); fd.append("file", file); fd.append("id", PID);
-      fd.append("title", file.name); fd.append("section", g("docSection") ? g("docSection").value.trim() || "Documents" : "Documents");
+      fd.append("title", name); fd.append("section", g("docSection") ? g("docSection").value.trim() || "Documents" : "Documents");
       g("docMsg").textContent = "Uploading…"; g("docMsg").className = "msg";
       try {
         const r = await authFetch("/project/doc", { method:"POST", body: fd }).then(r => r.json());
