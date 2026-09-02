@@ -4279,19 +4279,25 @@ async function anthropicToolLocal(env, { system, user, toolName, schema, maxToke
     return { ok: false, error: "Couldn't reach the AI service." };
   }
 }
-async function tsVerifyAI(env, engineers, monday) {
+async function tsVerifyAI(env, engineers, monday, vanList) {
   if (!engineers.length) return { byUser: {} };
   const lines = engineers.map((e) => {
     const dl = e.days.filter((d) => d.hours > 0).map((d) => d.date.slice(5) + ":" + d.hours + "h").join(", ") || "none";
-    return `- ${e.username} | van ${e.reg || "(none assigned)"} | entered ${e.total}h (${dl}) | van driving this week ${e.driveMins != null ? Math.round(e.driveMins / 6) / 10 + "h" : "NO VAN DATA"}`;
+    return `- ${e.username} | assigned van ${e.reg || "(none)"}${e.assignedDriver ? " (telematics driver: " + e.assignedDriver + ")" : ""} | entered ${e.total}h (${dl}) | assigned-van driving this week ${e.driveMins != null ? Math.round(e.driveMins / 6) / 10 + "h" : "NO DATA / van didn't move"}`;
   }).join("\n");
+  const vanTable = (vanList || []).map((v) => `  ${v.reg} | telematics driver "${v.driver || "?"}" | ${Math.round(v.driveMins / 6) / 10}h | ${v.trips || 0} trips`).join("\n");
   const schema = { type: "object", properties: { byUser: { type: "object", additionalProperties: { type: "object", properties: {
     verdict: { type: "string", enum: ["ok", "check", "flag"] },
     summary: { type: "string" },
     flags: { type: "array", items: { type: "object", properties: { severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
   }, required: ["verdict"] } } }, required: ["byUser"] };
-  const system = "You help UK office staff sanity-check weekly timesheets before payroll against telematics van data. Driving time is a SUBSET of the paid day \u2014 on-site work, office/yard visits, collecting a tipper are NOT driving \u2014 so entered hours are normally somewhat MORE than the van's driving time, which is expected and fine. Only raise a flag when something looks genuinely wrong: (a) entered hours are LESS than the van's driving time (impossible); (b) sizeable entered hours but the assigned van barely moved or shows no data (a likely vehicle switch \u2014 note it, usually low/medium); (c) an implausibly long day or week. Allow generously for on-site time and swapping to a pool/tipper. Give each engineer a one-sentence plain-English summary and a verdict: ok (fine), check (worth a glance), flag (needs attention). Only add flags[] entries for real concerns. Key the object by the EXACT username given.";
-  const user = `Week beginning ${monday}. Only weekly van DRIVING totals are available (not per-day). Engineers:
+  const system = "You help UK office staff sanity-check weekly timesheets before payroll against telematics van data. Driving time is a SUBSET of the paid day \u2014 on-site work, office/yard visits, collecting a tipper are NOT driving \u2014 so entered hours are normally somewhat MORE than the van's driving time, which is expected and fine. Each van has a 'telematics driver' name; engineers sometimes swap to a pool van or tipper, so if an engineer's ASSIGNED van barely moved, check the van-activity table for another van whose telematics driver looks like them and use that instead before flagging. Only raise a flag when something looks genuinely wrong: (a) entered hours are LESS than the driving time they can be attributed (impossible); (b) sizeable entered hours but NO van (assigned or matchable) moved for them (worth a look \u2014 usually medium); (c) an implausibly long week. Allow generously for on-site time and vehicle swaps. Give each engineer a one-sentence plain-English summary and a verdict: ok (fine), check (worth a glance), flag (needs attention). Only add flags[] for real concerns. Key the object by the EXACT username given.";
+  const user = `Week beginning ${monday}. Only WEEKLY van driving totals are available (no per-day breakdown).
+
+Van activity this week (registration | telematics driver | driving hours | trips):
+${vanTable}
+
+Engineers to check:
 ${lines}
 
 Return byUser keyed by username.`;
@@ -5895,8 +5901,9 @@ async function handle7(request, env, ctx, url, sess) {
     const vanByReg = {};
     for (const v of vans) {
       const k = normReg(v && v.reg);
-      if (k) vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0) };
+      if (k) vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), trips: Math.round(parseFloat(v && v.trips) || 0) };
     }
+    const vanList = Object.values(vanByReg).filter((v) => v.driveMins > 0).sort((a, b2) => b2.driveMins - a.driveMins);
     const scoreByReg = {};
     for (const [r, s] of Object.entries(scores)) {
       const k = normReg(r);
@@ -5924,12 +5931,13 @@ async function handle7(request, env, ctx, url, sess) {
         name: displayName(u),
         reg,
         driveMins: vanByReg[rk] ? vanByReg[rk].driveMins : null,
+        assignedDriver: vanByReg[rk] ? vanByReg[rk].driver : "",
         score: scoreByReg[rk] != null ? scoreByReg[rk] : null,
         days: dayList,
         total
       });
     }
-    const ai = await tsVerifyAI(env, engineers, monday);
+    const ai = await tsVerifyAI(env, engineers, monday, vanList);
     const byUser = {};
     for (const e of engineers) {
       const v = ai.byUser && ai.byUser[e.username] || {};
