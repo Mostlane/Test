@@ -5083,13 +5083,21 @@ async function handle7(request, env, ctx, url, sess) {
   const me = sess.user.username;
   await ensureTables(env);
   const cfg = await getCfg(env, tid);
+  let _adminView = null;
+  const viewUser = async () => {
+    const w = q.get("user");
+    if (!w || w === me) return me;
+    if (_adminView === null) _adminView = await isTsAdmin(env, tid, sess);
+    return _adminView ? w : me;
+  };
   if (sub === "/me" && method === "GET") {
-    const u = await userRow(env, tid, me);
+    const who = await viewUser();
+    const u = await userRow(env, tid, who);
     if (!u) return error("User not found", 404, env, request);
     const eff = effectiveCfg(cfg, u);
-    const next = await nextInvoiceNumber(env, tid, me, eff);
+    const next = await nextInvoiceNumber(env, tid, who, eff);
     const admin = await isTsAdmin(env, tid, sess);
-    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, who).first();
     return json({
       ok: true,
       name: displayName(u),
@@ -5098,7 +5106,8 @@ async function handle7(request, env, ctx, url, sess) {
       nextInvoice: next,
       basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
       canSetNumber: !invCount || Number(invCount.n) === 0,
-      admin
+      admin,
+      viewingUser: who !== me ? who : null
     }, {}, env, request);
   }
   if (sub === "/me" && method === "POST") {
@@ -5115,16 +5124,17 @@ async function handle7(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/my" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    const u = await userRow(env, tid, me);
+    const u = await userRow(env, tid, who);
     const eff = effectiveCfg(cfg, u);
-    const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
-    const inv = await invoiceFor(env, tid, me, monday);
-    const auto = await jobTimeAuto(env, tid, me, monday, { homePostcode: eff.homePostcode });
-    const holidays = await holidayDaysFor(env, tid, me, monday);
+    const { days, savedAt, approval } = await loadWeek(env, tid, who, monday);
+    const inv = await invoiceFor(env, tid, who, monday);
+    const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
+    const holidays = await holidayDaysFor(env, tid, who, monday);
     const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
-    const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    const am = await applyAutoMileage(env, tid, who, monday, days, eff, cfg.defaults.basePostcode);
     return json({
       ok: true,
       week: monday,
@@ -5136,6 +5146,7 @@ async function handle7(request, env, ctx, url, sess) {
       jobMeta,
       approval,
       locked: !!approval,
+      viewingUser: who !== me ? who : null,
       totals: weekTotals(am.days, eff),
       autoMileage: am.auto,
       invoice: inv ? {
@@ -5189,12 +5200,13 @@ async function handle7(request, env, ctx, url, sess) {
     return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
   }
   if (sub === "/assigned" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
     endD.setUTCDate(endD.getUTCDate() + 7);
     const end = endD.toISOString().slice(0, 10);
     const byDay = {};
-    const debug = { me, matchedAs: [], candidates: [] };
+    const debug = { me: who, matchedAs: [], candidates: [] };
     try {
       const { results } = await env.DB.prepare(
         "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
@@ -5211,11 +5223,11 @@ async function handle7(request, env, ctx, url, sess) {
         }
       } catch {
       }
-      const meN = norm(me);
-      const cap2 = await capturedMinsWeek(env, tid, me, monday);
+      const meN = norm(who);
+      const cap2 = await capturedMinsWeek(env, tid, who, monday);
       const isMe = (e) => {
         const resolved = map[normId2(e)];
-        if (resolved != null) return resolved === me;
+        if (resolved != null) return resolved === who;
         const n = norm(e);
         return !!n && (n === meN || n.includes(meN) || meN.includes(n));
       };

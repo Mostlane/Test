@@ -164,6 +164,10 @@
 <script>
 const API=(window.MOSTLANE_API||"https://mostlane-api.jamie-def.workers.dev");
 function tok(){return localStorage.getItem("mostlaneToken")||"";}
+// Admin "view an engineer's timesheet" mode (?user=…): read-only, their view.
+const VIEW_USER=new URLSearchParams(location.search).get("user")||"";
+const VIEWONLY=!!VIEW_USER;
+const VU=VIEW_USER?("&user="+encodeURIComponent(VIEW_USER)):"";
 function authFetch(p,o={}){o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{});if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json";return fetch(API+p,o);}
 // Weak-signal guard: never let a hung fetch freeze the page (see CLAUDE quirks).
 function authFetchTO(p,o={},ms=9000){return Promise.race([authFetch(p,o),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);}
@@ -331,7 +335,7 @@ function render(){
   const sun=new Date(addDays(WEEK,6)+"T12:00:00Z"),mon=new Date(WEEK+"T12:00:00Z");
   g("wkLabel").innerHTML=`<b>${mon.toLocaleDateString("en-GB",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</b><span>${WEEK===mondayOf(new Date())?"This week":sun.getFullYear()}</span>`;
   const host=g("dayCards");host.innerHTML="";
-  const locked=!!INVOICE||!!APPROVAL;
+  const locked=!!INVOICE||!!APPROVAL||VIEWONLY;
   const today=new Date().toISOString().slice(0,10);
   let autoChanged=false;
   for(let i=0;i<7;i++){
@@ -489,14 +493,14 @@ function renderInvoiceCard(){
 
 async function loadInvoiceList(){
   const el=g("invList"),btn=g("viewAllInv");if(!el)return;
-  const r=await authFetchTO("/ts/invoices").then(r=>r.json()).catch(()=>null);
+  const r=await authFetchTO("/ts/invoices"+(VIEWONLY?"?u="+encodeURIComponent(VIEW_USER):"")).then(r=>r.json()).catch(()=>null);
   const invs=(r&&r.invoices)||[];
   if(!invs.length){el.innerHTML="";el.hidden=true;if(btn)btn.style.display="none";return;}
-  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)</div>`+invs.map(i=>
+  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">${VIEWONLY?"Invoices (read-only)":"All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)"}</div>`+invs.map(i=>
     `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
     +`<a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open / print</a>`
-    +`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`).join("");
-  el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
+    +(VIEWONLY?"":`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button>`)+`</div>`).join("");
+  if(!VIEWONLY)el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
   if(btn){
     btn.style.display="";
     const setLbl=()=>btn.textContent=(el.hidden?"📋 View all invoices":"▲ Hide invoices")+" ("+invs.length+")";
@@ -514,6 +518,7 @@ async function deleteInvoice(id,no,url){
 }
 
 async function generateInvoice(){
+  if(VIEWONLY)return;
   clearTimeout(saveTimer);saveDirty=false;   // our own save below covers anything pending
   const days=collect();
   // Save first so the invoice matches exactly what's on screen.
@@ -545,7 +550,7 @@ function queueSave(){
   saveTimer=setTimeout(()=>doSave(),900);
 }
 async function doSave(opts={}){
-  if(INVOICE||APPROVAL)return;
+  if(INVOICE||APPROVAL||VIEWONLY)return;
   clearTimeout(saveTimer);clearTimeout(retryTimer);
   if(saveBusy){saveDirty=true;return;}
   saveBusy=true;saveDirty=false;
@@ -779,9 +784,9 @@ async function load(){
   g("saveState").textContent="";
   try{
     const [meR,wkR,asR]=await Promise.all([
-      authFetchTO("/ts/me").then(r=>r.json()),
-      authFetchTO("/ts/my?week="+WEEK).then(r=>r.json()),
-      authFetchTO("/ts/assigned?week="+WEEK).then(r=>r.json()).catch(()=>null)
+      authFetchTO("/ts/me"+(VIEW_USER?"?user="+encodeURIComponent(VIEW_USER):"")).then(r=>r.json()),
+      authFetchTO("/ts/my?week="+WEEK+VU).then(r=>r.json()),
+      authFetchTO("/ts/assigned?week="+WEEK+VU).then(r=>r.json()).catch(()=>null)
     ]);
     if(meR&&meR.ok)ME=meR;
     DAYS=(wkR&&wkR.days)||{};
@@ -797,7 +802,30 @@ async function load(){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
     return;
   }
+  if(VIEWONLY)viewChrome();
   render();
+  if(VIEWONLY)applyViewOnly();
+}
+// Admin viewing an engineer's timesheet: title/back/banner + lock everything down.
+function viewChrome(){
+  const nm=(ME&&ME.name)||VIEW_USER;
+  const h1=document.querySelector("header.page h1"); if(h1)h1.textContent="⏱️ "+nm+" — Timesheet";
+  const back=document.querySelector("header.page .ml-back"); if(back){back.setAttribute("href","timesheets-admin.html");}
+  if(!g("viewBanner")){
+    const d=document.createElement("div");d.id="viewBanner";
+    d.style.cssText="background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;margin:0 0 10px";
+    const bar=document.querySelector(".wrap .bar"); if(bar)bar.parentNode.insertBefore(d,bar.nextSibling);
+  }
+  g("viewBanner").innerHTML="👁 Viewing <b>"+esc(nm)+"</b>’s timesheet — read-only. <a href=\"timesheets-admin.html\" style=\"color:#3730a3\">‹ Back to Engineer Timesheets</a>";
+}
+function applyViewOnly(){
+  // Day INPUTS are already disabled by render()'s locked pass. Here we only lock
+  // the invoice card — and crucially DON'T touch the day-header toggle (.dhead)
+  // or the "View all invoices" toggle, so the office can still expand each day to
+  // read what the engineer entered.
+  document.querySelectorAll("#invCard input,#invCard textarea").forEach(el=>{el.disabled=true;});
+  const gb=g("genBtn"); if(gb)gb.disabled=true;
+  g("saveState").textContent="Read-only — viewing "+((ME&&ME.name)||VIEW_USER)+"’s timesheet";
 }
 g("prevWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,-7);load();};
 g("nextWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,7);load();};
