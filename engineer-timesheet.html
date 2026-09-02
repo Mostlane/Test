@@ -400,7 +400,7 @@ function render(){
           <div class="addjobbox" hidden><input type="text" class="addjob-input" placeholder="Search a job number, site or description…" autocomplete="off"><div class="addjob-res"></div></div>
         </div>
         ${ME&&ME.mileage?((AUTOMI&&AUTOMI.applies)?`<div class="miAutoHost">${(AUTOMI.byDate&&AUTOMI.byDate[date])?autoMiHtml(date):""}</div>`:`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`):""}
-        ${a?`<span class="autoline">⏱ From your day: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}${a.travelHome?" (incl. est. drive home)":""}</span>`:""}
+        ${a?`<span class="autoline">⏱ From your day: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}${a.travelHome?" (incl. drive home, live traffic)":""}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
     if(ME&&ME.mileage&&!(AUTOMI&&AUTOMI.applies)){
