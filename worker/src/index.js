@@ -47,6 +47,7 @@ import * as costing from "./routes/costing.js";    // DONE  (site register, labo
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as chapplins from "./routes/chapplins.js";   // DONE (Chapplins customer: site tenants current/previous + directory)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
+import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: plain-English → job draft preview → create)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
@@ -88,6 +89,7 @@ const ROUTES = [
   ["*", "/memos",      memos.handle],     // company memos (draft/send/sign)
   ["*", "/documents",  documents.handle], // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
+  ["*", "/ai",         aiassist.handle],  // AI job assistant (draft → preview → create)
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
