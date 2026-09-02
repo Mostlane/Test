@@ -426,6 +426,7 @@ export async function handle(request, env, ctx, url, sess) {
       + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
+      + "FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings — they don't render here. Bold a label with **like this**. Keep it tight. "
       + "\n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
     const messages = [];
     for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
