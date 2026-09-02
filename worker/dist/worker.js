@@ -8652,10 +8652,13 @@ async function handle8(request, env, ctx, url, sess) {
       const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : src.durationMinutes || void 0;
       const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean) : Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : [];
       const groupId = src.visitGroupId || src.id;
+      const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4e3);
+      const oldDesc = String(src.description || "").trim();
+      const description = rvNote ? rvNote + (oldDesc ? "\n\n\u2014 Original job \u2014\n" + oldDesc : "") : oldDesc;
       const payload = {
         id: crypto.randomUUID(),
         reference: src.helpdeskRef || src.siteName || src.siteCode,
-        description: src.description || "",
+        description,
         siteCode: src.siteCode,
         siteName: src.siteName,
         address: src.address,

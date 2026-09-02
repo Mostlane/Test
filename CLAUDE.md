@@ -2509,7 +2509,9 @@ Re-attending a finished job is a NEW linked job, never a re-open of the old one
 /admin **🔁 Re-visit** button on a Complete/Closed job (job-view header) → modal
 (date · time · hours) → **POST /sla/jobs/{id}/revisit** clones it at the same site
 (same engineer + requirements + job type) with a FRESH id, so signature/RA/photos/
-history reset and the engineer completes cleanly. Links: `revisitOf` (parent id) +
+history reset and the engineer completes cleanly. An optional **re-visit note** (the
+snag) becomes the PRIMARY description with the original kept below (`revisitNote` →
+composed server-side); no note = original description as-is. Links: `revisitOf` (parent id) +
 `visitGroupId` (the ROOT job id shared by the whole chain), threaded through
 createOrUpdateJobFromPayload + patchJob. **GET /sla/jobs/{id}/visits** returns the
 whole group; job-view "🔁 Visits" card lists every visit (status · date · open) with

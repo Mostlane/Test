@@ -1864,10 +1864,17 @@ export async function handle(request, env, ctx, url, sess) {
       const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean)
         : (Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : []);
       const groupId = src.visitGroupId || src.id;   // the whole chain shares the root's id
+      // Optional re-visit note (e.g. the snag): when given it becomes the PRIMARY
+      // description, with the original visit's description kept below as secondary.
+      const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4000);
+      const oldDesc = String(src.description || "").trim();
+      const description = rvNote
+        ? (rvNote + (oldDesc ? "\n\n— Original job —\n" + oldDesc : ""))
+        : oldDesc;
       const payload = {
         id: crypto.randomUUID(),
         reference: src.helpdeskRef || src.siteName || src.siteCode,
-        description: src.description || "",
+        description,
         siteCode: src.siteCode, siteName: src.siteName,
         address: src.address, postcode: src.postcode, telephone: src.telephone,
         storeType: src.storeType, client: src.client, lat: src.lat, lon: src.lon,
