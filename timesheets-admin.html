@@ -262,20 +262,22 @@ function openEdit(username){
   if(vf){
     const col=vf.verdict==="flag"?"#fef2f2":vf.verdict==="check"?"#fffbeb":"#f0fdf4";
     const bc=vf.verdict==="flag"?"#fecaca":vf.verdict==="check"?"#fde68a":"#bbf7d0";
-    const rows=(vf.dayLog||[]).filter(d=>d.entered>0||d.moved).map(d=>{
+    const table=(vf.dayLog||[]).filter(d=>d.entered>0||d.moved).map(d=>{
       const dd=new Date(d.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
-      const over=d.moved&&d.spanH!=null&&d.entered>d.spanH+1, noMove=d.entered>0&&!d.moved;
-      const c=(over||noMove)?"#b91c1c":"#334155";
-      return `<tr style="color:${c}"><td style="padding:2px 6px 2px 0">${dd}</td><td style="padding:2px 6px">${d.moved?esc(d.vanStart+"–"+d.vanEnd):'<span style="color:#b91c1c">van didn\'t move</span>'}</td><td style="text-align:right;padding:2px 6px">${d.moved?d.spanH+"h":"—"}</td><td style="text-align:right;padding:2px 6px">${d.driveH!=null?d.driveH+"h":"—"}</td><td style="text-align:right;padding:2px 6px;font-weight:700">${d.entered?d.entered+"h":"—"}</td><td style="padding:2px 0;font-size:11px;color:#64748b">${esc((d.locs||[]).slice(0,3).join(", "))}</td></tr>`;
+      const vanTxt=d.moved?`van ${esc(d.vanStart)}–${esc(d.vanEnd)} · D2D ${d.spanH}h${d.driveH!=null?" · "+d.driveH+"h drive":""}`:'<span style="color:#b91c1c">van didn\'t move</span>';
+      const jobRows=(d.jobs||[]).map(j=>{
+        const diff=j.suggested!=null&&Math.abs(j.suggested-j.entered)>0.75;
+        return `<div style="display:flex;gap:8px;font-size:12px;padding:1px 0;${diff?"color:#b91c1c":""}"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.ref)}${j.site?" · "+esc(j.site):""}</span><span style="flex:none;font-weight:700">${j.entered}h${diff?` → ${j.suggested}h`:""}</span></div>${(diff&&j.note)?`<div style="font-size:11px;color:#991b1b;margin:0 0 3px 4px">↳ ${esc(j.note)}</div>`:""}`;
+      }).join("");
+      return `<div style="border-top:1px solid #eef2f7;padding:5px 0"><div style="font-size:12px;font-weight:700">${dd} <span style="font-weight:400;color:#64748b">${vanTxt}</span> · entered ${d.entered}h</div>${jobRows||'<div style="font-size:11px;color:#94a3b8">no jobs booked this day</div>'}</div>`;
     }).join("");
-    const table=rows?`<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px"><tr style="color:#64748b;text-align:left"><th style="padding:0 6px 2px 0">Day</th><th style="padding:0 6px">Van out</th><th style="text-align:right;padding:0 6px" title="Door-to-door: first move to last stop">D2D</th><th style="text-align:right;padding:0 6px">Drive</th><th style="text-align:right;padding:0 6px">Entered</th><th style="padding:0">Sites</th></tr>${rows}</table>`:"";
     vfHtml=`<div style="background:${col};border:1px solid ${bc};border-radius:10px;padding:10px 12px;margin-bottom:12px">
       <div style="font-weight:700">🚚 Fleet cross-check${vf.score!=null?` · van score <span style="color:${scoreColour(vf.score)}">${vf.score}</span>`:""}</div>
       <div style="font-size:13px;margin-top:3px">Van <b>${esc(vf.reg||"—")}</b> · door-to-door <b>${vf.weekSpanH!=null?vf.weekSpanH+"h":"—"}</b> this week · entered <b>${vf.total}h</b></div>
       ${vf.summary?`<div style="font-size:13px;margin-top:4px">${esc(vf.summary)}</div>`:""}
       ${(vf.flags||[]).map(f=>`<div style="font-size:12.5px;margin-top:3px;color:#991b1b">• ${f.date?esc(new Date(f.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric"}))+": ":""}${esc(f.reason)}${f.severity?` <i>(${esc(f.severity)})</i>`:""}</div>`).join("")}
       ${table}
-      <div class="muted" style="font-size:11px;margin-top:6px">“Door-to-door” = the van’s first move to last stop — the outer bound of the paid day (it includes driving + waiting, so entered on-site hours are normally a bit less). Red = entered more than the van was out, or hours on a day the van didn’t move (check for a pool/tipper swap). Adjust the days below or leave as-is.</div>
+      <div class="muted" style="font-size:11px;margin-top:6px">The AI attributes each trip to the job booked — travel to a site counts as that job, the drive home counts to the last job — and ignores fuel/quick stops. Red shows where it thinks a job's hours differ (→ suggested). Telematics is approximate, so adjust the days below or leave as-is.</div>
     </div>`;
   }
   g("editBody").innerHTML=vfHtml+DATA.days.map((date,i)=>{
@@ -685,25 +687,27 @@ async function parseTripXls(file){
   const det=wb.Sheets["Detailed View"];
   if(det){
     const rows=XLSX.utils.sheet_to_json(det,{header:1,blankrows:false});
-    let h=-1,cDrv=-1,cReg=-1,cDate=-1,cS=-1,cE=-1,cEL=-1,cDrive=-1;
-    for(let i=0;i<rows.length;i++){const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());if(low.some(c=>c.includes("start time"))){h=i;cDrv=low.findIndex(c=>c.includes("driver"));cReg=low.findIndex(c=>c.includes("registration"));cDate=low.findIndex(c=>c.includes("date"));cS=low.findIndex(c=>c.includes("start time"));cE=low.findIndex(c=>c.includes("end time"));cEL=low.findIndex(c=>c.includes("end location"));cDrive=low.findIndex(c=>c.includes("drive time"));break;}}
+    let h=-1,cDrv=-1,cReg=-1,cDate=-1,cS=-1,cE=-1,cSL=-1,cEL=-1,cDrive=-1,cStop=-1;
+    for(let i=0;i<rows.length;i++){const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());if(low.some(c=>c.includes("start time"))){h=i;cDrv=low.findIndex(c=>c.includes("driver"));cReg=low.findIndex(c=>c.includes("registration"));cDate=low.findIndex(c=>c.includes("date"));cS=low.findIndex(c=>c.includes("start time"));cE=low.findIndex(c=>c.includes("end time"));cSL=low.findIndex(c=>c.includes("start location"));cEL=low.findIndex(c=>c.includes("end location"));cDrive=low.findIndex(c=>c.includes("drive time"));cStop=low.findIndex(c=>c.includes("stopped"));break;}}
     if(h>=0)for(let i=h+1;i<rows.length;i++){
       const row=rows[i];if(!row)continue; const rr=row[cReg]; const reg=normRegC(rr); if(!reg||reg.length<5)continue;
       const st=String(row[cS]||"").trim(); if(!st||st==="-")continue;
       const date=xlDate(row[cDate]); if(!/^\d{4}-\d{2}-\d{2}$/.test(date))continue;
       const sM=toMinC(st), eM=toMinC(row[cE]);
       const v=van(reg,rr); if(!v.driver&&cDrv>=0)v.driver=String(row[cDrv]||"").trim();
-      const d=v.days[date]||(v.days[date]={firstM:null,lastM:null,driveMins:0,trips:0,locs:[]});
+      const d=v.days[date]||(v.days[date]={firstM:null,lastM:null,driveMins:0,trips:0,locs:[],tripList:[]});
       if(sM!=null&&(d.firstM==null||sM<d.firstM))d.firstM=sM;
       if(eM!=null&&(d.lastM==null||eM>d.lastM))d.lastM=eM;
-      d.driveMins+=cDrive>=0?parseDur(row[cDrive]):0; d.trips++;
+      const drv=cDrive>=0?parseDur(row[cDrive]):0, stp=cStop>=0?parseDur(row[cStop]):0;
+      d.driveMins+=drv; d.trips++;
       const el=String((cEL>=0?row[cEL]:"")||"").trim();
       if(el&&!/^office$|^yard$/i.test(el)){ const short=el.split(",")[0].trim(); if(short&&!d.locs.includes(short)&&d.locs.length<6)d.locs.push(short); }
+      if(d.tripList.length<45)d.tripList.push({s:hmC(sM),e:hmC(eM),to:el.slice(0,70),drive:drv,stop:stp});
     }
   }
   const out=Object.keys(vanMap).length?Object.values(vanMap):Object.keys(nameByReg).map(reg=>van(reg));
   return out.map(v=>({reg:v.reg,driver:v.driver,driveMins:v.driveMins,trips:v.trips,
-    days:Object.fromEntries(Object.entries(v.days).map(([dt,d])=>[dt,{s:hmC(d.firstM),e:hmC(d.lastM),span:(d.firstM!=null&&d.lastM!=null)?Math.max(0,d.lastM-d.firstM):0,drive:Math.round(d.driveMins),trips:d.trips,locs:d.locs}]))}));
+    days:Object.fromEntries(Object.entries(v.days).map(([dt,d])=>[dt,{s:hmC(d.firstM),e:hmC(d.lastM),span:(d.firstM!=null&&d.lastM!=null)?Math.max(0,d.lastM-d.firstM):0,drive:Math.round(d.driveMins),trips:d.trips,locs:d.locs,trips_detail:d.tripList||[]}]))}));
 }
 async function parseScores(file){
   if(!window.pdfjsLib)return {};
@@ -750,7 +754,7 @@ g("vfRun").onclick=async()=>{
   const pf=g("vfPdf").files[0];
   if(pf){try{scores=await parseScores(pf);}catch(e){scores={};}}
   g("vfState").textContent="Checking "+vans.length+" vans with AI…";
-  const r=await authFetchTO("/ts/verify",{method:"POST",body:JSON.stringify({week:WEEK,vans,scores})},60000).then(x=>x.json()).catch(()=>null);
+  const r=await authFetchTO("/ts/verify",{method:"POST",body:JSON.stringify({week:WEEK,vans,scores})},120000).then(x=>x.json()).catch(()=>null);
   g("vfRun").disabled=false;
   if(!r||!r.ok){g("vfState").textContent=(r&&r.error)||"Check failed — try again.";return;}
   g("vfState").textContent="Done ✓"+(r.aiError?(" — AI note: "+r.aiError):"");

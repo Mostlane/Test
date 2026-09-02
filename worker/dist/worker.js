@@ -4280,34 +4280,41 @@ async function anthropicToolLocal(env, { system, user, toolName, schema, maxToke
   }
 }
 var DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-async function tsVerifyAI(env, engineers, monday, poolVans) {
-  if (!engineers.length) return { byUser: {} };
+async function tsVerifyEngineerAI(env, e, monday, poolVans) {
   const dlab = (dt) => {
     const d = /* @__PURE__ */ new Date(dt + "T12:00:00Z");
     return DOW3[d.getUTCDay()] + " " + dt.slice(8);
   };
-  const blocks = engineers.map((e) => {
-    const rows = e.dayLog.filter((d) => d.entered > 0 || d.moved).map((d) => {
-      const van = d.moved ? `van out ${d.vanStart}\u2013${d.vanEnd} (door-to-door ${d.spanH}h${d.driveH != null ? ", " + d.driveH + "h driving" : ""})${d.locs.length ? " [" + d.locs.slice(0, 4).join("; ") + "]" : ""}` : "assigned van DID NOT MOVE";
-      return `    ${dlab(d.date)}: entered ${d.entered}h | ${van}`;
-    }).join("\n");
-    return `- ${e.username} (assigned van ${e.reg || "none"}) \u2014 entered ${e.total}h this week; van door-to-door ${e.weekSpanH}h
-${rows}`;
+  const blocks = e.dayLog.filter((d) => d.entered > 0 || d.moved).map((d) => {
+    const jobs = (d.jobs || []).length ? d.jobs.map((j) => `[${j.ref}] ${j.site || "?"} \u2014 entered ${j.entered}h`).join("; ") : "(none booked)";
+    const trips = (d.trips || []).length ? d.trips.map((t) => `${t.s}\u2013${t.e} \u2192 ${t.to || "?"} (drive ${t.drive}m, stop ${t.stop}m)`).join("\n      ") : d.moved ? `van out ${d.vanStart}\u2013${d.vanEnd}` : "van did not move";
+    return `  ${dlab(d.date)} (${d.date}) \u2014 booked: ${jobs}
+      Trips: ${trips}`;
   }).join("\n");
-  const pool = (poolVans || []).length ? "\n\nPool/unassigned vans that moved (an engineer may have collected one \u2014 use to explain a day their own van didn't move):\n" + poolVans.map((v) => `  ${v.reg} "${v.driver || "?"}": ` + Object.entries(v.days || {}).map(([dt, x]) => `${dlab(dt)} ${x.s}\u2013${x.e}${(x.locs || []).length ? " [" + x.locs.join("; ") + "]" : ""}`).join("; ")).join("\n") : "";
-  const schema = { type: "object", properties: { byUser: { type: "object", additionalProperties: { type: "object", properties: {
+  const pool = (poolVans || []).length ? "\n\nPool/unassigned vans that moved (they may have collected one \u2014 use to explain a day their own van didn't move):\n" + poolVans.map((v) => `  ${v.reg} "${v.driver || "?"}": ` + Object.entries(v.days || {}).map(([dt, x]) => `${dlab(dt)} ${x.s}\u2013${x.e}${(x.locs || []).length ? " [" + x.locs.join("; ") + "]" : ""}`).join("; ")).join("\n") : "";
+  const schema = { type: "object", properties: {
     verdict: { type: "string", enum: ["ok", "check", "flag"] },
-    summary: { type: "string" },
+    summary: { type: "string", description: "One short sentence overall." },
+    days: { type: "array", items: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD" },
+      jobs: { type: "array", items: { type: "object", properties: {
+        ref: { type: "string", description: "the booked job ref exactly as given" },
+        suggested: { type: "number", description: "hours you think this job actually took, 0.25 steps" },
+        note: { type: "string", description: "short reason, only if it differs from entered" }
+      }, required: ["ref", "suggested"] } }
+    }, required: ["date"] } },
     flags: { type: "array", items: { type: "object", properties: { date: { type: "string" }, severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
-  }, required: ["verdict"] } } }, required: ["byUser"] };
-  const system = "You help UK office staff check weekly timesheets before payroll against telematics van movement, DAY BY DAY. The van's 'door-to-door' is first-move to last-stop = the outer bound of the paid day. Entered hours are on-site work hours and are NORMALLY somewhat LESS than door-to-door (which also includes driving and waiting) \u2014 that is expected and fine. Raise a flag only for genuine problems: (a) a day's entered hours EXCEED the van's door-to-door span by more than ~1h (claiming more than the van was even out); (b) hours entered on a day the assigned van DID NOT MOVE \u2014 but first check the pool/unassigned van list: if a pool van/tipper was out at times matching the entered hours, treat it as a vehicle swap (office/yard collection) and note it low-severity, not a flag; (c) an implausibly long day/week. Be conservative and generous about on-site time and vehicle swaps. Give each engineer a one-sentence summary and a verdict: ok / check / flag. Attach flags[] (with the date and a reason) only for real concerns. Key the object by the EXACT username given.";
-  const user = `Week beginning ${monday}. Per-day data:
+  }, required: ["verdict"] };
+  const system = "You reconstruct a UK field engineer's working day from van tracker trips and check the hours they booked PER JOB. Rules: (1) A job's time = travel TO that site + time ON site. Count the drive to a site as part of that site's job. The final drive HOME from the last job counts toward that last job. (2) IGNORE incidental stops \u2014 petrol/fuel stations, shops, supermarkets, cafes, builders' merchants/suppliers, and any brief stop (under ~15 min) that isn't a booked job \u2014 these are NOT jobs; don't create jobs for them or add their time to a job. (3) Match tracker stop locations to the engineer's booked jobs by town/road/postcode; a booked job is usually the longest stop(s) near that place. On-site time is the stopped time at the job location between arriving and leaving. (4) For each booked job estimate the hours it actually took (travel-to + on-site + drive-home for the last job) to the nearest 0.25h. Compare to what they entered. Only add a `note` when your `suggested` differs from `entered` by more than ~0.75h, saying briefly why. (5) Telematics is approximate and on-site work doesn't always move the van \u2014 be conservative; small differences are fine. Verdict: ok (matches well), check (minor differences worth a glance), flag (clear discrepancy or hours with no matching van activity). Use the booked job refs EXACTLY as given.";
+  const user = `Engineer ${e.name} (${e.username}), week beginning ${monday}, assigned van ${e.reg || "none"}. They entered ${e.total}h total; van door-to-door ${e.weekSpanH}h.
+
+Days:
 ${blocks}${pool}
 
-Return byUser keyed by username.`;
-  const r = await anthropicToolLocal(env, { system, user, toolName: "verify", schema, maxTokens: 2500 });
-  if (!r.ok) return { error: r.error, byUser: {} };
-  return { byUser: r.input.byUser || {} };
+Return your per-job suggested hours and any flags.`;
+  const r = await anthropicToolLocal(env, { system, user, toolName: "verify_engineer", schema, maxTokens: 2e3 });
+  if (!r.ok) return { error: r.error };
+  return r.input || {};
 }
 async function hasEngTimesheet(env, tid, username) {
   try {
@@ -5924,12 +5931,20 @@ async function handle7(request, env, ctx, url, sess) {
       const rk = normReg(reg);
       const van = vanByReg[rk] || null;
       const { days } = await loadWeek(env, tid, u.username, monday);
+      const meta = await jobMetaFor(env, tid, days);
       let total = 0, weekSpan = 0;
       const dayLog = week.map((dt) => {
         const d = days[dt] || {};
         const jh = d.jobHours || {};
         let h = 0;
-        for (const v of Object.values(jh)) h += parseFloat(v) || 0;
+        const jobs = [];
+        for (const [jid, hv] of Object.entries(jh)) {
+          const hh = parseFloat(hv) || 0;
+          if (hh > 0) {
+            h += hh;
+            jobs.push({ ref: meta[jid] && meta[jid].ref || jid, site: meta[jid] && meta[jid].site || "", entered: Math.round(hh * 100) / 100 });
+          }
+        }
         if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
         h = Math.round(h * 100) / 100;
         total += h;
@@ -5940,11 +5955,13 @@ async function handle7(request, env, ctx, url, sess) {
           date: dt,
           entered: h,
           moved,
+          jobs,
           vanStart: vd ? vd.s || "" : "",
           vanEnd: vd ? vd.e || "" : "",
           spanH: moved ? r1(vd.span / 60) : null,
           driveH: vd && vd.drive ? r1(vd.drive / 60) : null,
-          locs: vd && Array.isArray(vd.locs) ? vd.locs.slice(0, 6) : []
+          locs: vd && Array.isArray(vd.locs) ? vd.locs.slice(0, 6) : [],
+          trips: vd && Array.isArray(vd.trips_detail) ? vd.trips_detail : []
         };
       });
       total = Math.round(total * 100) / 100;
@@ -5968,10 +5985,23 @@ async function handle7(request, env, ctx, url, sess) {
       score: scoreByReg[normReg(v.reg)] ?? null,
       days: Object.fromEntries(week.filter((dt) => v.days[dt] && (v.days[dt].span > 0 || (v.days[dt].drive || 0) > 0)).map((dt) => [dt, { s: v.days[dt].s, e: v.days[dt].e, locs: (v.days[dt].locs || []).slice(0, 4) }]))
     }));
-    const ai = await tsVerifyAI(env, engineers, monday, poolVans);
+    let aiErr = null;
     const byUser = {};
-    for (const e of engineers) {
-      const v = ai.byUser && ai.byUser[e.username] || {};
+    const aiResults = await Promise.all(engineers.slice(0, 30).map(async (e) => ({ e, ai: await tsVerifyEngineerAI(env, e, monday, poolVans) })));
+    for (const { e, ai } of aiResults) {
+      if (ai.error) aiErr = ai.error;
+      const byDate = {};
+      for (const dd of ai.days || []) if (dd && dd.date) byDate[dd.date] = dd;
+      const dayLog = e.dayLog.map((d) => {
+        const ad = byDate[d.date] || {};
+        const sByRef = {};
+        for (const j of ad.jobs || []) if (j && j.ref) sByRef[String(j.ref).toLowerCase()] = j;
+        const jobs = d.jobs.map((j) => {
+          const s = sByRef[String(j.ref).toLowerCase()] || {};
+          return { ref: j.ref, site: j.site, entered: j.entered, suggested: s.suggested != null ? Math.round(s.suggested * 100) / 100 : null, note: s.note || "" };
+        });
+        return { date: d.date, entered: d.entered, moved: d.moved, vanStart: d.vanStart, vanEnd: d.vanEnd, spanH: d.spanH, driveH: d.driveH, locs: d.locs, jobs };
+      });
       byUser[e.username] = {
         name: e.name,
         reg: e.reg,
@@ -5979,14 +6009,14 @@ async function handle7(request, env, ctx, url, sess) {
         weekSpanH: e.weekSpanH,
         score: e.score,
         total: e.total,
-        dayLog: e.dayLog,
-        verdict: v.verdict || "ok",
-        summary: v.summary || "",
-        flags: Array.isArray(v.flags) ? v.flags : []
+        dayLog,
+        verdict: ai.verdict || "ok",
+        summary: ai.summary || "",
+        flags: Array.isArray(ai.flags) ? ai.flags : []
       };
     }
     const unassignedVans = poolVans.map((v) => ({ reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: v.score }));
-    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, poolVans, aiError: ai.error || null };
+    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, poolVans, aiError: aiErr };
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VERIFY_KEY(tid, monday), JSON.stringify(rec)).run();
     return json({ ok: true, ...rec }, {}, env, request);
   }
