@@ -4246,9 +4246,19 @@ var DEFAULTS = {
   overtimeThresholdH: 8,
   dueDow: 3,
   dueTime: "12:00",
+  remindersOn: true,
   basePostcode: "PO15 5RQ",
   company: "Mostlane"
 };
+var remindersEnabled = (cfg) => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+async function hasEngTimesheet(env, tid, username) {
+  try {
+    const p = await permissionsFor(env, tid, username);
+    return p.EngTimesheet === "Yes";
+  } catch {
+    return false;
+  }
+}
 var DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
@@ -4972,6 +4982,7 @@ async function timesheetGaps(env, tid, username, monday, cfg) {
 async function sweepTimesheetReminders(env, tid = 1) {
   try {
     const cfg = await getCfg(env, tid);
+    if (!remindersEnabled(cfg)) return;
     const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
     pm.setUTCDate(pm.getUTCDate() - 7);
@@ -4989,6 +5000,7 @@ async function sweepTimesheetReminders(env, tid = 1) {
     if (sent.includes(prevMon)) return;
     const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
     for (const u of users || []) {
+      if (!await hasEngTimesheet(env, tid, u.username)) continue;
       const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
       if (g.count > 0) await sendToUser(env, tid, u.username, {
         title: "Timesheet due",
@@ -5246,6 +5258,8 @@ async function handle7(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
   if (sub === "/outstanding" && method === "GET") {
+    if (!remindersEnabled(cfg) || !await hasEngTimesheet(env, tid, me))
+      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
     const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
     pm.setUTCDate(pm.getUTCDate() - 7);
@@ -5286,6 +5300,7 @@ async function handle7(request, env, ctx, url, sess) {
       approval,
       locked: !!approval,
       viewingUser: who !== me ? who : null,
+      remindersOn: remindersEnabled(cfg),
       due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue },
       missingHours: gaps.missing,
       totals: weekTotals(am.days, eff),

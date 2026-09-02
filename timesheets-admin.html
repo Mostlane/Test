@@ -355,6 +355,8 @@ g("cfgBtn").onclick=async()=>{
     <label title="The deadline for engineers to complete a week's hours — the day/time in the week AFTER the timesheet week (like van checks).">Timesheet due by
       <select id="d-duedow" style="width:120px">${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((n,i)=>`<option value="${i}" ${(r.defaults.dueDow!=null?+r.defaults.dueDow:3)===i?"selected":""}>${n}</option>`).join("")}</select>
       <input type="time" id="d-duetime" value="${esc(r.defaults.dueTime||"12:00")}" step="300" style="width:110px"></label>
+    <label style="display:flex;align-items:center;gap:8px" title="Turn off to stop chasing engineers to complete their hours (reminders, home-screen alerts and pushes). Only engineers with the Engineer Timesheet permission are ever alerted.">
+      <input type="checkbox" id="d-remind" ${r.defaults.remindersOn===false?"":"checked"}> Send timesheet reminders to engineers</label>
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
@@ -457,6 +459,7 @@ function collectCfg(){
     lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,
     radiusMiles:+g("d-radius").value||10,overtimeThresholdH:+g("d-otthresh").value||8,
     dueDow:+g("d-duedow").value,dueTime:g("d-duetime").value||"12:00",
+    remindersOn:g("d-remind").checked,
     basePostcode:g("d-base").value.trim().toUpperCase()||"PO15 5RQ",
     company:g("d-company").value};
   return {defaults,byUser};
