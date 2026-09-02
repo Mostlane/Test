@@ -332,7 +332,7 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   audited), change/forgot/reset password, login_history (utcify'd on read).
 - `users.js` — users CRUD (+Password w/ ForceChange), PERMISSION_KEYS (incl.
   AssetAdmin, OfficeClock, OfficeTimesheet, ThemeColour, ThemeBackground,
-  StoryMode, HSPlan, SiteLog), welcome/reset emails, /users N+1-fixed,
+  StoryMode, HSPlan, SiteLog, **EicrCheck**, **Chapplins**), welcome/reset emails, /users N+1-fixed,
   /users/reorder (StaffType/SortOrder), /hs-plan-config, /po-config. **GET /users
   is ACTIVE-ONLY by default** — `isActiveStatus` keeps blank/"Active", drops
   "Disabled" (and any other status), so a disabled account disappears from every
@@ -2531,6 +2531,31 @@ it straight onto the compliance chart (rolling the next-due date).
   navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
+## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
+Re-attending a finished job is a NEW linked job, never a re-open of the old one
+(re-opening a completed job in place breaks the engineer completion gate). Office
+/admin **🔁 Re-visit** button on a Complete/Closed job (job-view header) → modal
+(date · time · hours) → **POST /sla/jobs/{id}/revisit** clones it at the same site
+(same engineer + requirements + job type) with a FRESH id, so signature/RA/photos/
+history start fresh, but the original visit's FILES + evidence (photos, signature,
+notes, RA, audit/remedial photos) are COPIED across + re-pathed to the new id so the
+re-visit is a full continuation. An optional **re-visit note** (the
+snag) becomes the PRIMARY description with the original kept below (`revisitNote` →
+composed server-side); no note = original description as-is. Links: `revisitOf` (parent id) +
+`visitGroupId` (the ROOT job id shared by the whole chain), threaded through
+createOrUpdateJobFromPayload + patchJob. **GET /sla/jobs/{id}/visits** returns the
+whole group; job-view "🔁 Visits" card lists every visit (status · date · open) with
+each visit's individual cost (/costing/job-full-cost per job) + a combined total
+(shown once ≥2 visits; costs admin-only). NB job-view still loads via the legacy
+mostlane-sla host, so the new endpoints are called on MOSTLANE_API (mApi helper).
+**Multi-visit badge (Sep 2026):** every job in a chain carries **`job.visitCount`**
+(the group size, re-stamped on all members whenever a re-visit is created — threaded
+through createOrUpdateJobFromPayload + patchJob). When `>1` a small **🔁N** pill shows
+on the SLA board (sla-main.html row + mobile card, `.visit-tag`, next to `groupTag`),
+the scheduler **day-view block** (`.day-job-ref`) and **week-view chip** — so a job with
+multiple visits is obvious at a glance; open it and the "🔁 Visits" card lists/opens
+them all.
+
 ## Electrical test → remedials → one-tap works job (sla.js + remedials-form.js — Sep 2026)
 An **electrical-test job** (add-job.html **⚡ Electrical test** tick → `job.elecTest`;
 sends requiresRA/Sig/Photo/Note=false) lets the engineer record a **remedial-works
@@ -2546,7 +2571,23 @@ GET job returns `remedials` with `photoUrls` via `decorateRemedials`. Completion
 **site-audit** job at the same site — each remedial → an audit item (`text` =
 `[code] description`, the engineer's photos COPIED into `jobs/<newId>/audit/<item>/…`
 as the item's refPhotos), **duration + material cost NOT carried** (pricing stays off
-the works job). **Which remedials to include is a PICKER (Sep 2026):** "Create works
+the works job). **Gates suited to an audit job (Sep 2026):** `requiresRA:true` (the
+engineer IS prompted for the RA before starting — electrical remedials), but
+`requiresSignature/Photo/Note:false` — completion is the CHECKLIST (each item
+photographed), NOT a separate signature/note/After-photo. `completionMissing`
+short-circuits to `auditMissing` on BOTH client + server, so the audit checklist is
+the only completion gate. The site name is **resolved from the store code**
+(`resolveSiteMeta`) so the job never reads "0657 - 0657" off an empty siteName, and
+the reference defaults to the source ref. (An audit job's RA lock DIMS the status grid
+until the RA is done — so a stuck RA looks like "no status boxes".) **RA work-area photo
+on audit/cert/firestop/elec jobs (Sep 2026 — the real "photo upload unclickable" bug):**
+the RA modal's photo button always does `$("fileInput").click()`, but `#fileInput` AND
+its `change→uploadPhotos` handler were only rendered/wired inside the STANDARD-job branch
+(`if(!fs&&!au&&!cert&&!elec)`), so on an audit/remedial job the button hit a NULL element
+and did nothing — the RA could never be finished. Fixed: `#fileInput` is now rendered
+unconditionally and its change handler wired for every job type (`uploadPhotos` no-ops
+safely when there's no `#photos` grid). This, not the `shrinkImage` hang, was the remedial
+RA blocker. **Which remedials to include is a PICKER (Sep 2026):** "Create works
 job" opens a modal listing every remedial with a checkbox — **C1/C2/FI pre-ticked,
 C3 + un-coded off but addable**; the chosen ids go up as **`itemIds`** on the POST
 (absent = all). Idempotent (`job.remedialsWorksJobId` links both ways;
@@ -2616,12 +2657,26 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   companies[]}, contractValue, links{programmeId,ramsIds[],cppRef,costingKey},
   doneOverride{}. **costingKey = normName(project name)** — the SAME key costing
   uses, so PO/labour/valuations roll up automatically.
-- **Wizard (project-new.html)** — 4 steps: **1** site (existing → search+copy
-  coords, or new) + **always creates its own Pxxxx project-site** via `/add-site?
-  category=projects` (auto P-number, pushes the SiteLog geofence, PO picks it up
-  via its add-only mirror) + confirm/drop coords (Leaflet, postcodes.io geocode) +
-  **round-trip mileage** computed client-side (haversine ×1.25×2 from HQ PO15 5RQ,
-  saved to site_miles) + name/number; **2** required-docs tick-box; **3** SiteLog
+- **Wizard (project-new.html)** — 4 steps: **1** SITE + PROJECT.
+  **Site = the PLACE, project = the works on it (Sep 2026 rework — "site should be
+  Goodwood Farm, project Goodwood Farm VPU").** Two site modes:
+  - **Existing site** → search + pick ANY saved site (a store, a place, another
+    project's site); the project **LINKS** to it (`site_number` = the picked site,
+    `site_client` = its client). **No new site is created** — it reuses that site's
+    geofence, address, history + costing. The project still gets its OWN P-number
+    (`number`, from /next-project-job-number) so it has its own valuations +
+    projects-compliance entry.
+  - **New site** → enter a **site/location (place) name** (`#newSiteName`, separate
+    from the project name) → creates a place-named Pxxxx site via `/add-site?
+    category=projects` (auto P-number = the project number, pushes the SiteLog
+    geofence). The SITE is named the place, the PROJECT the works.
+  (Was: ALWAYS cloned a project-site named after the PROJECT even when you picked an
+  existing site — which is what split Goodwood into "Goodwood Farm" + "Goodwood Farm
+  VPU". `collect().linkExisting` drives the finalize branch; `/project/create`'s
+  compliance row now uses `siteNumber` for its `site_number` so a linked project's
+  docs surface under the real site.) Plus confirm/drop coords (Leaflet,
+  postcodes.io geocode) + **round-trip mileage** (haversine ×1.25×2 from HQ PO15 5RQ,
+  saved to site_miles — new sites only); **2** required-docs tick-box; **3** SiteLog
   message (→ site_rules) + companies-on-site (pick from PO `/po/api/subcontractors`
   + free add); **4** review → POST **/project/create** → project-hub.
 - **project-hub.html** — the everything-page: summary, **To-Do** (auto-ticks off
@@ -2650,7 +2705,18 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   documents, not stored files, so only their attached-file form appears there.
   **Valuations**: sets proj_fin value),
   **Project Documents** (drag-drop upload, hide/show, delete; engineers with
-  Projects perm see non-hidden), **SiteLog** (edit rules+companies, re-applied to
+  Projects perm see non-hidden). **Naming (Sep 2026):** every upload now PROMPTS
+  for a document name (`askDocName` modal in project-hub.html) — required, used as
+  the doc `title` (the display name) instead of the raw file name (camera photos
+  arrived as UUIDs). Pre-fills the file's base name unless it looks auto-generated
+  (UUID / IMG_ / long digits) → then blank so a name must be typed. Both upload
+  paths (the Project Documents drop-zone `upload()` + the required-doc picker
+  `uploadDocFile()`) use it. **Multi-file (Sep 2026):** the Project Documents
+  drop-zone now accepts MANY files at once (`uploadMany` loops, naming each) — it
+  was `files[0]` only, so a multi-select silently uploaded just the FIRST file
+  (why a batch upload showed only one or two saved). Existing docs get a **✏️ Rename** button →
+  `askDocName` → POST /project/doc-update `{fileId,title}` (server already accepts
+  `title`). **SiteLog** (edit rules+companies, re-applied to
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
   valuations for FullAccess/costing perm; silently omitted otherwise), and
   **Required-docs editor** (add/remove later).
@@ -2726,7 +2792,11 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   **engineer-job.html** — whose "Site documents" button navigates to
   site-folder — surfaces them too. A `projectDoc:true` marker on each row makes
   site-folder show a "· from project" hint and HIDE the Delete button (project
-  docs are managed on the project hub). Also: **project-hub.html's doc opener
+  docs are managed on the project hub). **Admin RENAME from the site folder (Sep
+  2026):** the /site/docs project-doc rows now also carry `fileId`+`projectId`, so
+  site-folder.html shows an admin **✏️** button on a project doc → `askDocRename`
+  prompt → POST /project/doc-update `{fileId,title}` → refresh (same rename as the
+  project hub, in-context). Also: **project-hub.html's doc opener
   was fixed** — it was calling `MLDocViewer.open(url, name)` (positional)
   instead of the object form docviewer expects, so the modal never sniffed the
   PDF; now passes `{url,fetchUrl,name,downloadUrl}` so PDFs render inline.
@@ -3453,6 +3523,15 @@ MAP object: KEY = element id, list = permission names (any-of; FullAccess
 sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
 Story users: STORY_ALLOWED set only + pinned "Back to My Day". Personalise
 tile gated by ThemeColour/ThemeBackground.
+- **Dedicated per-tile toggles (Sep 2026):** **EICR Check** (`EicrCheck: ["EicrCheck"]`)
+  and **Chapplins** (`Chapplins: ["Chapplins"]`) each have their OWN permission key
+  now — they used to ride the blanket `Compliance` perm, so a Co-op-only compliance
+  user saw both. Toggles live in Users Admin (Compliance & docs group). eicr-check.html
+  gates on `EicrCheck`; chapplins.html on `Chapplins` (CAN_VIEW/CAN_MANAGE) + the
+  worker `chapplins.js canManage` = FullAccess|Chapplins; sidebar NAV perms updated.
+  Existing non-FullAccess users need the new toggle granted. **Van Check** now shows to
+  a field engineer ONLY when they have a **vehicle assigned** (`user.VehicleAssigned`) —
+  an engineer with no van has nothing to check.
 - **Drag-to-reorder tiles (mobile, Aug 2026)** — iOS-home-screen style: a
   **long-press** (~2.5s — deliberately long so slow taps never trigger it)
   on any visible tile enters "arrange" mode (tiles wobble
@@ -4026,6 +4105,18 @@ files to this public repo.
 - Site images: sites.data JSON carries imageURL/_svAt/_noImagery flags.
 - Worker delivery: always give commit + line count + expected tail so a
   truncated paste is detectable. Chat-pasting the worker truncates — never.
+- **engineer-job.html `shrinkImage` must NEVER hang (Sep 2026).** The engineer
+  photo re-encoder returned a Promise that only resolved from `img.onload`/
+  `img.onerror` + `canvas.toBlob`. On iOS an `<img>` can silently stall decoding a
+  HEIC (neither `onload` nor `onerror` ever fires) and `toBlob` can fail to call
+  back under memory pressure — so the Promise never settled, `uploadPhotos`
+  awaited it forever, the photo never attached, and the RA's work-area shot was
+  never marked → **engineers reported "can't add a photo, can't complete the RA".**
+  Fix: `shrinkImage` now has a hard **8s timeout** that resolves(null) (caller
+  falls back to the original full-size file — uploads bigger but goes through), and
+  `uploadPhotos` fires **`ml-rapic` up-front the instant a file is chosen** (not
+  after the shrink), so the RA is satisfiable immediately regardless of encode
+  speed or signal. Any image-shrink Promise in the portal must always resolve.
 - **van-check.html answer buttons must read CFG LIVE, never a captured array.**
   The driver form's answer handlers were bound as `onPick(CFG.checklist||[], …)`
   at load — but `CFG` is fetched async, so at bind time it was null → an empty

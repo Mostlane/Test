@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=27"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <meta charset="UTF-8">
@@ -112,7 +112,8 @@ function authFetch(path, opts){
 }
 function perms(){ try { return JSON.parse(localStorage.getItem('mostlanePermissions')||'{}')||{}; } catch(e){ return {}; } }
 const P = perms();
-const CAN_MANAGE = P.FullAccess==='Yes' || P.Compliance==='Yes' || P.SLAAdmin==='Yes';
+const CAN_VIEW   = P.FullAccess==='Yes' || P.Chapplins==='Yes';   // the Chapplins area is its own permission toggle
+const CAN_MANAGE = P.FullAccess==='Yes' || P.Chapplins==='Yes';
 
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const TYPE_LABEL = { fiveYear:'EICR', gas:'Gas Safety', epc:'EPC', alarms:'Smoke/CO', fire:'Fire/EM Lighting', legionella:'Legionella' };
@@ -122,6 +123,10 @@ let SITES = [];   // directory
 const OPEN = {};  // siteNumber -> loaded detail
 
 async function load(){
+  if (!CAN_VIEW){
+    document.getElementById('list').innerHTML = '<div class="empty">You don’t have access to the Chapplins area.</div>';
+    return;
+  }
   try {
     const r = await authFetch('/chapplins/sites');
     if (r.status===401){ location.href='login.html'; return; }

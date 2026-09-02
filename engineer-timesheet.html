@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1, viewport-fit=cover">
 <title>My Timesheet — Mostlane</title>
-<script src="/portal-config.js?v=26"></script>
+<script src="/portal-config.js?v=27"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
 <script src="auth.js"></script>
 <style>
@@ -70,6 +70,7 @@
   .jh-sub{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .jh-in{flex:none;display:inline-flex;align-items:center;gap:4px}
   .jh-in input.jh-hrs{width:78px;text-align:center;padding:10px 8px;font-weight:700}
+  .jh-in input.jh-hrs.needhrs{border:1.5px solid #f59e0b;background:#fffbeb;box-shadow:0 0 0 2px #fde68a}
   .jh-in .jh-unit{color:var(--muted);font-size:13px;font-weight:600}
   .jh-in .jh-x{border:none;background:none;color:#c0c9d6;font-size:15px;cursor:pointer;padding:0 2px;line-height:1}
   .jh-in .jh-x:hover{color:#dc2626}
@@ -164,6 +165,10 @@
 <script>
 const API=(window.MOSTLANE_API||"https://mostlane-api.jamie-def.workers.dev");
 function tok(){return localStorage.getItem("mostlaneToken")||"";}
+// Admin "view an engineer's timesheet" mode (?user=…): read-only, their view.
+const VIEW_USER=new URLSearchParams(location.search).get("user")||"";
+const VIEWONLY=!!VIEW_USER;
+const VU=VIEW_USER?("&user="+encodeURIComponent(VIEW_USER)):"";
 function authFetch(p,o={}){o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{});if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json";return fetch(API+p,o);}
 // Weak-signal guard: never let a hung fetch freeze the page (see CLAUDE quirks).
 function authFetchTO(p,o={},ms=9000){return Promise.race([authFetch(p,o),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);}
@@ -176,7 +181,24 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null;
+// Honour a ?week=YYYY-MM-DD deep link (from the "complete last week's timesheet"
+// notification) so it opens THAT week, not the current one.
+const WEEK_PARAM=new URLSearchParams(location.search).get("week")||"";
+let ME=null, WEEK=(/^\d{4}-\d{2}-\d{2}$/.test(WEEK_PARAM)?mondayOf(new Date(WEEK_PARAM+"T12:00:00")):mondayOf(new Date())), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null, DUE=null, REMIND=true;
+// Booked jobs (data-booked=1) with no hours = still to complete before the deadline.
+function countEmptyBooked(){ let n=0; document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const v=parseFloat(r.querySelector('.jh-hrs').value); if(!(v>0))n++;}); return n; }
+function markGaps(){ document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); inp.classList.toggle('needhrs', REMIND&&!(parseFloat(inp.value)>0)); }); }
+// Persist any prefilled-but-unsaved job hours (captured from status/day) so a job
+// isn't counted "blank" just because the engineer hasn't touched the box.
+function maybeSavePrefill(){
+  if(INVOICE||APPROVAL||VIEWONLY)return;
+  let dirty=false;
+  document.querySelectorAll('.card[data-date]').forEach(card=>{const date=card.dataset.date;
+    card.querySelectorAll('.jhrow').forEach(r=>{const jid=r.dataset.jobid,v=parseFloat(r.querySelector('.jh-hrs').value);
+      const saved=DAYS[date]&&DAYS[date].jobHours&&DAYS[date].jobHours[jid];
+      if(v>0&&!(parseFloat(saved)>0))dirty=true;});});
+  if(dirty){clearTimeout(saveTimer);doSave();}
+}
 // Door-to-door fuel mileage is computed + locked server-side for self-employed
 // fuel-paid engineers — this helper reads the day's figure for the totals/card.
 function autoDayMiles(date){ if(!(AUTOMI&&AUTOMI.applies))return null; const b=AUTOMI.byDate&&AUTOMI.byDate[date]; return b?(b.miles||0):0; }
@@ -331,7 +353,7 @@ function render(){
   const sun=new Date(addDays(WEEK,6)+"T12:00:00Z"),mon=new Date(WEEK+"T12:00:00Z");
   g("wkLabel").innerHTML=`<b>${mon.toLocaleDateString("en-GB",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</b><span>${WEEK===mondayOf(new Date())?"This week":sun.getFullYear()}</span>`;
   const host=g("dayCards");host.innerHTML="";
-  const locked=!!INVOICE||!!APPROVAL;
+  const locked=!!INVOICE||!!APPROVAL||VIEWONLY;
   const today=new Date().toISOString().slice(0,10);
   let autoChanged=false;
   for(let i=0;i<7;i++){
@@ -390,7 +412,7 @@ function render(){
           const capH = b.capturedMins ? Math.round(b.capturedMins/60*4)/4 : 0;
           const val = (saved != null ? saved : (capH || ""));
           const lab0 = b.label || b.ref || "Job"; const lab = lab0.length>40 ? lab0.slice(0,39)+"…" : lab0;
-          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref||"")}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}">
+          return `<div class="jhrow" data-jobid="${esc(b.jobId)}" data-ref="${esc(b.ref||"")}" data-site="${esc(b.site||"")}" data-pc="${esc(b.postcode||"")}" data-booked="${b.extra?"":"1"}">
             <span class="jh-main"><b>${esc(lab)}</b><span class="jh-sub">${b.time?esc(b.time)+" · ":""}${esc(b.site||"")}${b.capturedMins?` · ⏱ ${capH}h captured`:(b.extra?" · added":"")}</span></span>
             <span class="jh-in"><input type="number" class="jh-hrs" step="0.25" min="0" max="24" inputmode="decimal" placeholder="hrs" value="${val}"><span class="jh-unit">h</span>${b.extra?`<button type="button" class="jh-x" title="Remove this job">✕</button>`:""}</span>
           </div>`;
@@ -423,7 +445,14 @@ function render(){
   if(INVOICE){
     banner+=`<div class="banner">🧾 Invoice <b>${INVOICE.number}</b> generated (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>.</div>`;
   }
+  const emptyBooked=countEmptyBooked();
+  if(REMIND&&DUE&&!APPROVAL&&!INVOICE&&emptyBooked>0){
+    const od=DUE.overdue;
+    banner+=`<div class="banner" style="background:${od?"#fef2f2":"#fffbeb"};border-color:${od?"#fecaca":"#fde68a"};color:${od?"#991b1b":"#92400e"}">⏱ <b>${emptyBooked} job${emptyBooked>1?"s":""} still ${od?"":"to "}need${od?"":" "} hours</b> — please enter the hours you worked on every job. ${od?"This was due":"Due"} <b>${esc(DUE.label||"")}</b>${od?" — please complete it now.":"."}</div>`;
+  }
   g("invBanner").innerHTML=banner;
+  markGaps();
+  if(!locked)setTimeout(maybeSavePrefill,0);
   document.querySelectorAll(".card[data-date] input,.card[data-date] .btn,.card[data-date] .bk,.card[data-date] .addjob,.card[data-date] .jh-x").forEach(el=>{if(locked)el.disabled=true;});
   g("saveState").textContent=APPROVAL?"Week approved & locked by the office":(INVOICE?"Week locked (invoiced)":"All changes save automatically");
   renderInvoiceCard();
@@ -489,14 +518,14 @@ function renderInvoiceCard(){
 
 async function loadInvoiceList(){
   const el=g("invList"),btn=g("viewAllInv");if(!el)return;
-  const r=await authFetchTO("/ts/invoices").then(r=>r.json()).catch(()=>null);
+  const r=await authFetchTO("/ts/invoices"+(VIEWONLY?"?u="+encodeURIComponent(VIEW_USER):"")).then(r=>r.json()).catch(()=>null);
   const invs=(r&&r.invoices)||[];
   if(!invs.length){el.innerHTML="";el.hidden=true;if(btn)btn.style.display="none";return;}
-  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)</div>`+invs.map(i=>
+  el.innerHTML=`<div class="muted" style="font-size:12.5px;margin:8px 0 2px">${VIEWONLY?"Invoices (read-only)":"All invoices — open to check, then delete if it's wrong (frees the week &amp; number to redo)"}</div>`+invs.map(i=>
     `<div class="li"><b>#${i.number}</b><span>wk ${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</span><span>${money(i.total||0)}</span>`
     +`<a href="${esc(i.url)}" target="_blank" style="margin-left:auto">Open / print</a>`
-    +`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button></div>`).join("");
-  el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
+    +(VIEWONLY?"":`<button class="btn del invDel" data-id="${i.id}" data-no="${i.number}" data-url="${esc(i.url)}" title="Delete this invoice" style="padding:6px 10px">🗑</button>`)+`</div>`).join("");
+  if(!VIEWONLY)el.querySelectorAll(".invDel").forEach(b=>b.onclick=()=>deleteInvoice(b.dataset.id,b.dataset.no,b.dataset.url));
   if(btn){
     btn.style.display="";
     const setLbl=()=>btn.textContent=(el.hidden?"📋 View all invoices":"▲ Hide invoices")+" ("+invs.length+")";
@@ -514,6 +543,7 @@ async function deleteInvoice(id,no,url){
 }
 
 async function generateInvoice(){
+  if(VIEWONLY)return;
   clearTimeout(saveTimer);saveDirty=false;   // our own save below covers anything pending
   const days=collect();
   // Save first so the invoice matches exactly what's on screen.
@@ -545,7 +575,7 @@ function queueSave(){
   saveTimer=setTimeout(()=>doSave(),900);
 }
 async function doSave(opts={}){
-  if(INVOICE||APPROVAL)return;
+  if(INVOICE||APPROVAL||VIEWONLY)return;
   clearTimeout(saveTimer);clearTimeout(retryTimer);
   if(saveBusy){saveDirty=true;return;}
   saveBusy=true;saveDirty=false;
@@ -728,7 +758,7 @@ document.addEventListener("keydown",e=>{
   const card=e.target.closest(".card[data-date]");
   if(addJobPill(card,e.target.value)){e.target.value="";hideAllSug();refreshTotals();clearTimeout(saveTimer);doSave();}
 });
-document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();queueSave();}});
+document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();markGaps();queueSave();}});
 
 // ── Add-a-known-job picker (per day) — real portal jobs only, no free text ──
 function makeJhRow(job){
@@ -779,9 +809,9 @@ async function load(){
   g("saveState").textContent="";
   try{
     const [meR,wkR,asR]=await Promise.all([
-      authFetchTO("/ts/me").then(r=>r.json()),
-      authFetchTO("/ts/my?week="+WEEK).then(r=>r.json()),
-      authFetchTO("/ts/assigned?week="+WEEK).then(r=>r.json()).catch(()=>null)
+      authFetchTO("/ts/me"+(VIEW_USER?"?user="+encodeURIComponent(VIEW_USER):"")).then(r=>r.json()),
+      authFetchTO("/ts/my?week="+WEEK+VU).then(r=>r.json()),
+      authFetchTO("/ts/assigned?week="+WEEK+VU).then(r=>r.json()).catch(()=>null)
     ]);
     if(meR&&meR.ok)ME=meR;
     DAYS=(wkR&&wkR.days)||{};
@@ -792,12 +822,37 @@ async function load(){
     AUTOMI=(wkR&&wkR.autoMileage)||null;
     HOL=(wkR&&wkR.holidays)||{};
     BANK=(wkR&&wkR.bank)||{};
+    DUE=(wkR&&wkR.due)||null;
+    REMIND=!(wkR&&wkR.remindersOn===false);
     JOBMETA=(wkR&&wkR.jobMeta)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
     return;
   }
+  if(VIEWONLY)viewChrome();
   render();
+  if(VIEWONLY)applyViewOnly();
+}
+// Admin viewing an engineer's timesheet: title/back/banner + lock everything down.
+function viewChrome(){
+  const nm=(ME&&ME.name)||VIEW_USER;
+  const h1=document.querySelector("header.page h1"); if(h1)h1.textContent="⏱️ "+nm+" — Timesheet";
+  const back=document.querySelector("header.page .ml-back"); if(back){back.setAttribute("href","timesheets-admin.html");}
+  if(!g("viewBanner")){
+    const d=document.createElement("div");d.id="viewBanner";
+    d.style.cssText="background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;margin:0 0 10px";
+    const bar=document.querySelector(".wrap .bar"); if(bar)bar.parentNode.insertBefore(d,bar.nextSibling);
+  }
+  g("viewBanner").innerHTML="👁 Viewing <b>"+esc(nm)+"</b>’s timesheet — read-only. <a href=\"timesheets-admin.html\" style=\"color:#3730a3\">‹ Back to Engineer Timesheets</a>";
+}
+function applyViewOnly(){
+  // Day INPUTS are already disabled by render()'s locked pass. Here we only lock
+  // the invoice card — and crucially DON'T touch the day-header toggle (.dhead)
+  // or the "View all invoices" toggle, so the office can still expand each day to
+  // read what the engineer entered.
+  document.querySelectorAll("#invCard input,#invCard textarea").forEach(el=>{el.disabled=true;});
+  const gb=g("genBtn"); if(gb)gb.disabled=true;
+  g("saveState").textContent="Read-only — viewing "+((ME&&ME.name)||VIEW_USER)+"’s timesheet";
 }
 g("prevWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,-7);load();};
 g("nextWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,7);load();};

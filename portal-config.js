@@ -649,14 +649,30 @@
     // attaches a small format toolbar (B · colours · ⚠🚨🔴 emojis) above it.
     var RICH_COLS = { red: "#c1121f", amber: "#b45309", green: "#1f7a44", blue: "#1e40af" };
     function richEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    // Italic: _text_ (underscores; won't touch **bold** which uses asterisks, and
+    // only fires at word boundaries so file_names etc. are left alone).
+    var ITAL = /(^|[\s(>])_([^_\n][^_\n]*?)_(?=$|[\s.,;:)!?<])/g;
     window.MLUI.rich = function (s) {
       var e = richEsc(s);
       e = e.replace(/\*\*([^*][\s\S]*?)\*\*/g, "<strong>$1</strong>");
+      e = e.replace(ITAL, function (_m, pre, t) { return pre + "<em>" + t + "</em>"; });
       e = e.replace(/\{(red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, function (_m, c, t) { return '<span style="color:' + RICH_COLS[c] + ';font-weight:600;">' + t + "</span>"; });
-      return e.replace(/\n/g, "<br>");
+      // Bullet lists: consecutive lines starting with "- " become a real <ul>.
+      var lines = e.split("\n"), out = [], i = 0;
+      while (i < lines.length) {
+        if (/^\s*-\s+\S/.test(lines[i])) {
+          var items = [];
+          while (i < lines.length && /^\s*-\s+\S/.test(lines[i])) { items.push("<li>" + lines[i].replace(/^\s*-\s+/, "") + "</li>"); i++; }
+          out.push("<ul style='margin:4px 0;padding-left:20px;'>" + items.join("") + "</ul>");
+        } else { out.push(lines[i]); i++; }
+      }
+      return out.join("<br>").replace(/<br>\s*(<ul)/g, "$1").replace(/(<\/ul>)\s*<br>/g, "$1");
     };
     window.MLUI.richStrip = function (s) {
-      return richEsc(s).replace(/\*\*([^*][\s\S]*?)\*\*/g, "$1").replace(/\{(?:red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, "$1");
+      return richEsc(s).replace(/\*\*([^*][\s\S]*?)\*\*/g, "$1")
+        .replace(ITAL, "$1$2")
+        .replace(/\{(?:red|amber|green|blue)\}([\s\S]*?)\{\/\}/g, "$1")
+        .replace(/^\s*-\s+/gm, "• ");
     };
     window.MLUI.richBar = function (ta) {
       if (typeof ta === "string") ta = document.getElementById(ta);
@@ -681,6 +697,17 @@
         });
         fire(); updatePrev();
       }
+      // Prefix the start of each selected line (used for bullet points).
+      function linePrefix(prefix) {
+        withScroll(function () {
+          var v = ta.value, s = ta.selectionStart || 0, en = ta.selectionEnd || s;
+          var ls = v.lastIndexOf("\n", s - 1) + 1;
+          var block = v.slice(ls, en), prefixed = block.replace(/^/gm, prefix);
+          ta.value = v.slice(0, ls) + prefixed + v.slice(en);
+          ta.focus(); ta.selectionStart = ls + prefix.length; ta.selectionEnd = ls + prefixed.length;
+        });
+        fire(); updatePrev();
+      }
       var bar = document.createElement("div");
       bar.style.cssText = "display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:5px;";
       function mkBtn(html, title, fn, extra) {
@@ -693,6 +720,8 @@
         bar.appendChild(b);
       }
       mkBtn("<b>B</b>", "Bold", function () { wrap("**", "**"); });
+      mkBtn("<i>I</i>", "Italic", function () { wrap("_", "_"); });
+      mkBtn("• List", "Bullet points", function () { linePrefix("- "); });
       Object.keys(RICH_COLS).forEach(function (c) { mkBtn("A", c + " text", function () { wrap("{" + c + "}", "{/}"); }, "color:" + RICH_COLS[c] + ";font-weight:700;"); });
       var sep = document.createElement("span"); sep.style.cssText = "width:1px;height:18px;background:#e2e8f0;margin:0 3px;"; bar.appendChild(sep);
       ["⚠️", "🚨", "🔴", "🟠", "✅", "🔧", "📍", "🕒"].forEach(function (em) { mkBtn(em, "Insert " + em, function () { ins(em + " "); }); });
@@ -703,7 +732,7 @@
       var PREV_LBL = "<div style='font-size:10.5px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;'>Preview — how the engineer sees it</div>";
       function updatePrev() {
         var v = ta.value || "";
-        if (/\*\*|\{(?:red|amber|green|blue)\}/.test(v)) { prev.style.display = "block"; prev.innerHTML = PREV_LBL + window.MLUI.rich(v); }
+        if (/\*\*|_[^_\n]|\{(?:red|amber|green|blue)\}|(?:^|\n)\s*-\s+\S/.test(v)) { prev.style.display = "block"; prev.innerHTML = PREV_LBL + window.MLUI.rich(v); }
         else { prev.style.display = "none"; }
       }
       ta.addEventListener("input", updatePrev);
@@ -959,8 +988,8 @@
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
-          { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Compliance", "SLAAdmin"], match: ["chapplins.html", "chapplins-compliance.html"] },
-          { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["Compliance"], match: ["eicr-check.html"] },
+          { label: "Chapplins", href: "chapplins.html", icon: "compliance", perms: ["Chapplins"], match: ["chapplins.html", "chapplins-compliance.html"] },
+          { label: "EICR Check", href: "eicr-check.html", icon: "compliance", perms: ["EicrCheck"], match: ["eicr-check.html"] },
           { label: "Programmes", href: "programmes.html", icon: "chart", perms: ["Programmes"], match: ["programmes.html", "programme-edit.html"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
           { label: "My Documents", href: "my-documents.html", icon: "forms", always: true, match: ["my-documents.html"] },

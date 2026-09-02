@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>New Project</title>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=27"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <script src="auth.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -378,11 +378,17 @@
 
     // ── Step 4: review + create ────────────────────────────────────────────────
     function collect() {
+      const linkExisting = state.mode === "existing" && !!state.existing;
       return {
         name: g("projName").value.trim(),
-        number: g("projNumber").value.trim(),
-        siteClient: "projects",
-        siteNumber: g("projNumber").value.trim(),
+        number: g("projNumber").value.trim(),   // the project's own P-number (always)
+        // Existing → link to the picked site (any type). New → a place-named site
+        // is created with the project's P-number. This is the "site = place,
+        // project = the works on it" model.
+        linkExisting,
+        siteName: linkExisting ? (state.existing.name || "") : g("newSiteName").value.trim(),
+        siteClient: linkExisting ? (state.existing.client || "projects") : "projects",
+        siteNumber: linkExisting ? (state.existing.siteNumber || "") : g("projNumber").value.trim(),
         postcode: g("postcode").value.trim(),
         lat: state.lat, lon: state.lon,
         mileageRoundTrip: state.mileRound ?? null, mileageOneWay: state.mileOneWay ?? null,
@@ -401,7 +407,7 @@
       const reqList = Object.entries(d.required).filter(([, v]) => v).map(([k]) => ({ programme:"Programme", rams:"Risk Assessment", cpp:"Construction Phase Plan", valuations:"Valuations", projectDocs:"Project Documents" }[k])).join(", ") || "None yet";
       g("review").innerHTML = `
         <div class="kv"><b>Project:</b> ${esc(d.name)} (${esc(d.number)})</div>
-        <div class="kv"><b>Site:</b> ${d.fromExisting ? "copied from " + esc(d.fromExisting.name) : "new site"} · own project-site ${esc(d.number)}</div>
+        <div class="kv"><b>Site:</b> ${d.linkExisting ? "on existing site <b>" + esc(d.siteName) + "</b> (" + esc(d.siteNumber) + ")" : "new site <b>" + esc(d.siteName || d.name) + "</b>"} · project ${esc(d.number)}</div>
         <div class="kv"><b>Postcode:</b> ${esc(d.postcode) || "—"} · <b>Location:</b> ${d.lat}, ${d.lon}</div>
         <div class="kv"><b>Mileage:</b> ${d.mileageRoundTrip != null ? d.mileageRoundTrip + " mi round trip" : "—"}</div>
         <div class="kv"><b>To build:</b> ${esc(reqList)}</div>
@@ -413,20 +419,28 @@
 
     g("createBtn").onclick = async () => {
       const d = collect();
-      const btn = g("createBtn"); btn.disabled = true; flash("msg4", "Creating the project-site…", false);
+      const btn = g("createBtn"); btn.disabled = true;
       try {
-        // 1) Create the project's OWN Pxxxx site (auto-numbered; pushes the SiteLog geofence; PO picks it up).
-        const siteBody = { siteName: d.name, client: "projects", siteNumber: d.number, jobNumber: d.number,
-          active: true, postcode: d.postcode, lat: d.lat, lon: d.lon,
-          mileageFromHQ: d.mileageOneWay, addedVia: "project-wizard" };
-        const sr = await authFetch("/add-site?category=projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(siteBody) }).then(r => r.json());
-        if (!sr.success) throw new Error(sr.error || "Couldn't create the project-site");
-        // The worker may assign a different number if one already existed — use what came back.
-        const assigned = (sr.site && (sr.site.jobNumber || sr.site.siteNumber)) || d.number;
-        d.number = assigned; d.siteNumber = assigned;
-        // Save the round-trip mileage into the mileage register (keyed by the project-site name).
-        if (d.mileageRoundTrip != null) {
-          try { await authFetch("/ts/miles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [{ name: d.name, postcode: d.postcode, miles: d.mileageRoundTrip }] }) }); } catch {}
+        if (d.linkExisting) {
+          // LINK to the existing site — create nothing. The project keeps its own
+          // P-number and sits on the picked site (its geofence/history/costing).
+          flash("msg4", "Linking to the site…", false);
+        } else {
+          // Create a NEW site named after the PLACE (not the project) and link the
+          // project to it. Auto-numbered; pushes the SiteLog geofence; PO picks it up.
+          flash("msg4", "Creating the site…", false);
+          const siteBody = { siteName: d.siteName || d.name, client: "projects", siteNumber: d.number, jobNumber: d.number,
+            active: true, postcode: d.postcode, lat: d.lat, lon: d.lon,
+            mileageFromHQ: d.mileageOneWay, addedVia: "project-wizard" };
+          const sr = await authFetch("/add-site?category=projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(siteBody) }).then(r => r.json());
+          if (!sr.success) throw new Error(sr.error || "Couldn't create the site");
+          // The worker may assign a different number if one already existed — use what came back.
+          const assigned = (sr.site && (sr.site.jobNumber || sr.site.siteNumber)) || d.number;
+          d.number = assigned; d.siteNumber = assigned;
+          // Save the round-trip mileage into the mileage register (keyed by the site name).
+          if (d.mileageRoundTrip != null) {
+            try { await authFetch("/ts/miles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entries: [{ name: d.siteName || d.name, postcode: d.postcode, miles: d.mileageRoundTrip }] }) }); } catch {}
+          }
         }
         flash("msg4", "Saving the project…", false);
         // 2) Create the project record (spine).

@@ -1835,16 +1835,24 @@ export async function handle(request, env, ctx, url, sess) {
         }
         auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
       }
-      const baseRef = src.siteName || src.helpdeskRef || src.siteCode || "Remedial works";
+      // Resolve the real site name (the source test job can carry an empty siteName,
+      // which made the works job read "0657 - 0657"); the reference defaults to the
+      // source ref else the site name.
+      let siteName = (src.siteName || "").trim();
+      try { const meta = await resolveSiteMeta(env, tenantId, src); if (meta && meta.siteName) siteName = meta.siteName; } catch {}
       const payload = {
         id: newId,
-        reference: baseRef,
-        description: `Remedial works from electrical test${src.helpdeskRef ? " (" + src.helpdeskRef + ")" : ""}.`,
-        siteCode: src.siteCode, siteName: src.siteName,
+        reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
+        description: `Remedial works from electrical test${src.helpdeskRef ? " " + src.helpdeskRef : ""} — see checklist.`,
+        siteCode: src.siteCode, siteName,
         address: src.address, postcode: src.postcode, telephone: src.telephone,
         storeType: src.storeType, client: src.client,
         lat: src.lat, lon: src.lon,
-        auditItems,
+        auditItems,                      // a SITE-AUDIT job — one checklist item per remedial
+        // Gates suited to an audit job: prompt the RA before work starts (electrical
+        // remedials), but completion is the CHECKLIST — each item photographed — NOT a
+        // separate signature/note/After-photo (auditMissing enforces that both sides).
+        requiresRA: true, requiresSignature: false, requiresPhoto: false, requiresNote: false,
         assignedEngineers: [],           // unassigned — the office allocates it
         priority: src.priority || "",
         changedBy: (sess.user && sess.user.username) || "system",
@@ -1856,6 +1864,111 @@ export async function handle(request, env, ctx, url, sess) {
       await saveJob(env, tenantId, src);
       try { const nj = await getJob(env, tenantId, job.id); if (nj) { nj.fromRemedialsOf = id; await saveJob(env, tenantId, nj); } } catch {}
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+    }
+
+    // POST /sla/jobs/{id}/revisit — clone a completed/closed job into a NEW job for a
+    // re-visit: fresh date/time + engineer(s), CARRYING the original visit's evidence
+    // across (photos, signature, notes, risk assessment — files copied + re-pathed to
+    // the new id), linked to the original so all visits are grouped (and cost
+    // individually + combined). The status history starts fresh (Scheduled). Admin.
+    if (parts[2] === "revisit" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const rb = await readJson(request).catch(() => ({}));
+      const scheduledAt = rb.scheduledAt && Number.isFinite(Date.parse(rb.scheduledAt)) ? new Date(rb.scheduledAt).toISOString() : undefined;
+      const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : (src.durationMinutes || undefined);
+      const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean)
+        : (Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : []);
+      const groupId = src.visitGroupId || src.id;   // the whole chain shares the root's id
+      // Optional re-visit note (e.g. the snag): when given it becomes the PRIMARY
+      // description, with the original visit's description kept below as secondary.
+      const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4000);
+      const oldDesc = String(src.description || "").trim();
+      const description = rvNote
+        ? (rvNote + (oldDesc ? "\n\n— Original job —\n" + oldDesc : ""))
+        : oldDesc;
+      const payload = {
+        id: crypto.randomUUID(),
+        reference: src.helpdeskRef || src.siteName || src.siteCode,
+        description,
+        siteCode: src.siteCode, siteName: src.siteName,
+        address: src.address, postcode: src.postcode, telephone: src.telephone,
+        storeType: src.storeType, client: src.client, lat: src.lat, lon: src.lon,
+        priority: src.priority || "",
+        requiresRA: src.requiresRA, requiresSignature: src.requiresSignature,
+        requiresPhoto: src.requiresPhoto, requiresNote: src.requiresNote,
+        firestopping: src.firestopping, emTest: src.emTest, emKind: src.emKind, pat: src.pat, elecTest: src.elecTest,
+        workArea: src.workArea || undefined, projectId: src.projectId || undefined,
+        assignedEngineers: engineers,
+        scheduledAt, durationMinutes,
+        revisitOf: src.id, visitGroupId: groupId,
+        changedBy: (sess.user && sess.user.username) || "system",
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      // Carry the original visit's FILES across (all photos, signatures, audit +
+      // remedial photos) by copying the whole R2 prefix to the new job id.
+      const repath = k => (typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k);
+      if (env.JOB_FILES) {
+        try {
+          let cursor;
+          do {
+            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+            for (const o of (listed.objects || [])) {
+              try { const obj = await env.JOB_FILES.get(o.key); if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata }); } catch {}
+            }
+            cursor = listed.truncated ? listed.cursor : null;
+          } while (cursor);
+        } catch {}
+      }
+      // Carry the evidence FIELDS onto the new job (notes, RA, signature, photo tags,
+      // audit/remedial items) with their file keys re-pathed to the new id.
+      try {
+        const nj = await getJob(env, tenantId, job.id);
+        if (nj) {
+          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+          if (src.photoStages) nj.photoStages = { ...src.photoStages };
+          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+          }
+          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map(it => ({ ...it,
+            refPhotos: (it.refPhotos || []).map(repath), donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto, extraPhotos: (it.extraPhotos || []).map(repath) }));
+          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map(r => ({ ...r, photos: (r.photos || []).map(repath) }));
+          nj.updatedAt = new Date().toISOString();
+          await saveJob(env, tenantId, nj);
+        }
+      } catch {}
+      // Stamp the ROOT job with the group id too, so the whole chain shares one key.
+      if (!src.visitGroupId) { try { src.visitGroupId = groupId; src.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, src); } catch {} }
+      // Stamp every job in the group with the current visit count (for the board /
+      // scheduler "×N" badge) — accurate regardless of which are filtered per view.
+      try {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const members = all.filter(j => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+        const cnt = members.length;
+        for (const m of members) { if (m.visitCount !== cnt) { m.visitCount = cnt; m.updatedAt = new Date().toISOString(); await saveJob(env, tenantId, m); } }
+      } catch {}
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {}));
+      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
+    }
+
+    // GET /sla/jobs/{id}/visits — every job in this job's re-visit group (original +
+    // all re-visits), oldest first, for the office "Visits" panel.
+    if (parts[2] === "visits" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const groupId = src.visitGroupId || src.id;
+      const all = await listJobs(env, tenantId);
+      const visits = all.filter(j => j && (((j.visitGroupId || j.id) === groupId) || j.revisitOf === groupId))
+        .map(j => ({ id: j.id, ref: j.helpdeskRef || j.id, status: j.status || "",
+          scheduledAt: j.scheduledAt || null, raisedAt: j.raisedAt || null, closedAt: j.closedAt || null,
+          isRoot: j.id === groupId, current: j.id === src.id,
+          engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : [] }))
+        .sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
+      return jsonResponse({ ok: true, groupId, visits }, headers);
     }
 
     // POST /sla/jobs/{id}/photo-stage  -> admin recategorises a photo's stage
@@ -2328,6 +2441,7 @@ export async function handle(request, env, ctx, url, sess) {
               name: f.title || f.name || f.r2_key.split("/").pop(),
               at: f.uploaded_at, by: f.uploaded_by, size: 0,
               projectDoc: true,   // marker: engineers/office see it but can't delete via /site/doc-delete
+              fileId: f.id, projectId: proj.id,   // so an admin can rename it via /project/doc-update
             })));
           }
         }
@@ -3392,6 +3506,14 @@ export async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Portal-project link: set when this job was raised from a project hub, so
     // the project can list its jobs + roll up per-engineer visits. Preserved.
     projectId: body.projectId !== undefined ? (String(body.projectId || "") || null) : (existing?.projectId || null),
+    // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
+    // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
+    // the chain, so all visits against one job are easy to find + cost together.
+    revisitOf: body.revisitOf !== undefined ? (String(body.revisitOf || "") || null) : (existing?.revisitOf || null),
+    visitGroupId: body.visitGroupId !== undefined ? (String(body.visitGroupId || "") || null) : (existing?.visitGroupId || null),
+    // How many jobs are in this visit chain (for the board/scheduler "×N" badge);
+    // stamped on every group member when a re-visit is created.
+    visitCount: body.visitCount !== undefined ? (Number(body.visitCount) || null) : (existing?.visitCount || null),
     scheduledAt,
     scheduledEnd,
     durationMinutes,
@@ -3576,6 +3698,9 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.remedials !== undefined) job.remedials = normRemedials(patch.remedials, job);
   if (patch.investigateOnly !== undefined) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== undefined) job.projectId = String(patch.projectId || "") || null;
+  if (patch.revisitOf !== undefined) job.revisitOf = String(patch.revisitOf || "") || null;
+  if (patch.visitGroupId !== undefined) job.visitGroupId = String(patch.visitGroupId || "") || null;
+  if (patch.visitCount !== undefined) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== undefined) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== undefined) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== undefined) job.seriesSkipped = !!patch.seriesSkipped;

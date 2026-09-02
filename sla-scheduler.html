@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=27"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Scheduler</title>
@@ -391,7 +391,7 @@
 
       <div class="buttons" style="justify-content:space-between;">
         <span style="display:flex;gap:8px;">
-          <button type="button" class="btn" id="jobCardBtn" title="Open the full job card">🗂 Job card</button>
+          <button type="button" class="btn" id="jobCardBtn" title="Open the full job (job card / photos / status)">🗂 Open job</button>
           <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
         </span>
         <span style="display:flex;gap:8px;">
@@ -1111,7 +1111,7 @@ function renderDayView(container){
       const timeLabel = pad2(Math.floor(startMins/60)) + ":" + pad2(startMins%60);
       el.innerHTML = '<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
       el.querySelector(".day-job-time").textContent = timeLabel;
-      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "");
+      el.querySelector(".day-job-ref").textContent = (done ? "✓ " : "") + (job.ref || "") + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
       el.querySelector(".day-job-label").textContent = job.title;
       const schedLabel = pad2(Math.floor(schedStartMins/60)) + ":" + pad2(schedStartMins%60);
       el.title = (done ? "✓ Complete" + (shifted ? " (worked " + timeLabel + ")" : "") + "  " : "") +
@@ -1203,7 +1203,7 @@ function renderWeekView(container){
           chip.className = "week-job-chip" + (done ? " done" : "");
           const colour = STATUS_COLOUR[job.status] || "#60a5fa";
           chip.style.borderColor = colour;
-          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title;
+          chip.textContent = (done ? "✓ " : "") + (job.ref ? job.ref + " " : "") + job.title + (job.visitCount > 1 ? " 🔁" + job.visitCount : "");
           chip.addEventListener("click", () => openJobModal(job.id));
           dayCell.appendChild(chip);
         });
@@ -2117,7 +2117,10 @@ $("jcClose").addEventListener("click", () => { $("jobCardBackdrop").style.displa
 $("jobCardBackdrop").addEventListener("click", e => { if(e.target === $("jobCardBackdrop")) $("jobCardBackdrop").style.display = "none"; });
 
 // ── Fallback jobs config (pick a standby OR existing loose job per engineer) ──
-function fbNorm(s){ return String(s||"").toLowerCase().trim(); }
+// MUST match the worker's normId (sla.js): lowercase + spaces→dots. The server
+// stores byEngineer/exclude keyed this way ("Ryan Diggens" → "ryan.diggens"), so
+// reading back with a space-keyed variant showed everything as "no fallback set".
+function fbNorm(s){ return String(s||"").toLowerCase().replace(/\s+/g,".").trim(); }
 let FB_TEMPLATES = [], FB_ALLJOBS = [], FB_POOL = [], FB_CFG = { byEngineer:{} };
 function fbTmplLabel(t){
   const bits = [t.ref || t.id];
@@ -2223,10 +2226,11 @@ function refreshFbRows(){
   }
   $("fbRows").innerHTML = fields.map(function(e){
     const fb = (FB_CFG.byEngineer||{})[fbNorm(e.username)] || {};
+    // One control per engineer: the dropdown. Pick a job = fallback on; "No
+    // fallback set" = off; use the Omit list below to leave someone out entirely.
     return '<div class="fb-row" data-user="'+escapeHtml(e.username)+'" style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-bottom:8px;">'
-      + '<b style="flex:0 0 130px;">'+escapeHtml(e.name)+'</b>'
-      + '<select class="fb-job" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
-      + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" class="fb-active" '+(fb.active===false?"":"checked")+'> on</label>'
+      + '<b style="flex:0 0 120px;">'+escapeHtml(e.name)+'</b>'
+      + '<select class="fb-job" style="flex:1;min-width:0;padding:8px;border:1px solid var(--border);border-radius:8px;">'+fbJobOptions(fb.jobId||"")+'</select>'
       + '</div>';
   }).join("") || '<p style="color:#5b6b78;">No field engineers found.</p>';
 }
@@ -2236,10 +2240,16 @@ function renderFbOmit(){
   const fields = (engineers||[]).filter(isFieldEng);
   const ex = new Set((FB_CFG.exclude||[]).map(fbNorm));
   if(!fields.length){ host.innerHTML = '<p style="color:#5b6b78;font-size:13px;">No field engineers found.</p>'; return; }
+  // A clean auto-fill grid; each checkbox is EXPLICITLY sized (some pages force
+  // input{width:100%}, which stretched these boxes and scattered the names).
+  host.style.display = "grid";
+  host.style.gridTemplateColumns = "repeat(auto-fill, minmax(150px, 1fr))";
+  host.style.gap = "6px 12px";
   host.innerHTML = fields.map(function(e){
     const on = ex.has(fbNorm(e.username));
-    return '<label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;font-size:13.5px;cursor:pointer;">'
-      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")+'> '+escapeHtml(e.name)+'</label>';
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;">'
+      + '<input type="checkbox" class="fb-omit" data-user="'+escapeHtml(e.username)+'" '+(on?"checked":"")
+      + ' style="flex:0 0 auto;width:18px;height:18px;margin:0;"> <span>'+escapeHtml(e.name)+'</span></label>';
   }).join("");
 }
 async function openFallbacks(){
@@ -2258,7 +2268,7 @@ async function saveFallbacks(){
     const sel = row.querySelector(".fb-job");
     const jobId = sel ? sel.value : "";
     if(!jobId) return;
-    byEngineer[row.dataset.user] = { jobId, active: row.querySelector(".fb-active").checked };
+    byEngineer[row.dataset.user] = { jobId, active: true };   // a picked job = fallback on
   });
   const sh = Number(($("fbStart").value||"08:00").split(":")[0]);
   const exclude = [];

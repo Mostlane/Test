@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=27"></script>
   <meta charset="UTF-8">
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -498,6 +498,7 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="engineer-jobs.html" class="btn" id="backBtn">← Back</a>
         <button id="editJobBtn" class="btn" style="display:none;">✏️ Edit details</button>
+        <button id="revisitBtn" class="btn" style="display:none;" title="Raise a linked re-visit of this job on a new date">🔁 Re-visit</button>
         <a id="headerMapBtn" class="btn" target="_blank" rel="noopener" style="display:none;">🧭 Directions</a>
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
       </div>
@@ -572,6 +573,12 @@
   <div class="card" id="jobCostCard" style="display:none;">
     <h2 class="section-title">💷 Total cost to us</h2>
     <div id="jobCostBody"><div class="sub">Loading…</div></div>
+  </div>
+
+  <!-- RE-VISITS — every job raised against this original, individual + combined cost -->
+  <div class="card" id="visitsCard" style="display:none;">
+    <h2 class="section-title">🔁 Visits <span class="sub" id="visitsCount" style="font-weight:400;"></span></h2>
+    <div id="visitsBody"><div class="sub">Loading…</div></div>
   </div>
 
   <!-- MATERIALS (POs raised against this job) — office/admin only -->
@@ -999,6 +1006,8 @@ function renderJob(){
   renderAuditView();
   mountCertView();
   mountRemedialsView();
+  setupRevisit();
+  loadVisits();
 
   startCountdownLoop();
 }
@@ -1138,6 +1147,86 @@ function mountCertView(){
 /* Total cost to us: labour (on-site + travel) + fuel (round trips @ £0.50/mi) +
    materials (priced POs). Office/admin only. Unpriced POs are flagged, never
    silently counted as £0. */
+// ── Re-visit: clone a completed/closed job to a new date, linked as a chain ──
+// New endpoints live on the central worker (MOSTLANE_API), not the legacy SLA host.
+function mApi(path, init){ init = init || {}; init.headers = init.headers || {}; const t = localStorage.getItem("mostlaneToken"); if(t) init.headers.Authorization = "Bearer " + t; return fetch(window.MOSTLANE_API + path, init); }
+function isAdminView(){ try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); return p.FullAccess==="Yes" || p.SLAAdmin==="Yes"; }catch(e){ return false; } }
+function setupRevisit(){
+  const btn = $("revisitBtn"); if(!btn || !job) return;
+  const done = ["Complete","Closed Jobs","Invoiced","Cancelled"].includes(job.status);
+  if(isAdminView() && done){ btn.style.display=""; btn.onclick = openRevisitModal; } else btn.style.display="none";
+}
+function openRevisitModal(){
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:100000;padding:16px;";
+  const pad = n => String(n).padStart(2,"0"); const now = new Date();
+  const dstr = now.getFullYear()+"-"+pad(now.getMonth()+1)+"-"+pad(now.getDate());
+  const dur = job.durationMinutes ? (job.durationMinutes/60) : 1;
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:410px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.3);">'
+    + '<div style="font-weight:700;font-size:17px;color:#003468;margin-bottom:2px;">🔁 Re-visit this job</div>'
+    + '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Creates a new, linked job at the same site on a fresh date. It carries the original visit\'s notes, photos, signature and risk assessment across, and links back here so all visits show together.</div>'
+    + '<div style="display:flex;gap:10px;">'
+    + '<label style="flex:1;font-size:12px;color:#64748b;">Date<br><input type="date" id="rvDate" value="'+dstr+'" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>'
+    + '<label style="flex:1;font-size:12px;color:#64748b;">Start time<br><input type="time" id="rvTime" value="08:00" step="300" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label>'
+    + '<label style="width:82px;font-size:12px;color:#64748b;">Hours<br><input type="number" id="rvDur" min="0.25" step="0.25" value="'+dur+'" style="width:100%;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;"></label></div>'
+    + '<label style="display:block;font-size:12px;color:#64748b;margin-top:10px;">Re-visit note <span style="opacity:.7;">(e.g. the snag — optional)</span><br>'
+    + '<textarea id="rvNote" rows="2" placeholder="What is the re-visit for? Becomes the main description; the original is kept below it." style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccd5dd;border-radius:8px;font:inherit;resize:vertical;"></textarea></label>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">'
+    + '<button type="button" class="rv-cancel" style="padding:9px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:9px;font:inherit;cursor:pointer;">Cancel</button>'
+    + '<button type="button" class="rv-go" style="padding:9px 16px;border:0;background:#003468;color:#fff;border-radius:9px;font:inherit;font-weight:700;cursor:pointer;">Create re-visit</button></div></div>';
+  document.body.appendChild(ov);
+  const close = () => { try{ document.body.removeChild(ov); }catch(e){} };
+  ov.querySelector(".rv-cancel").onclick = close;
+  ov.addEventListener("click", e => { if(e.target===ov) close(); });
+  ov.querySelector(".rv-go").onclick = () => {
+    const d = ov.querySelector("#rvDate").value, t = ov.querySelector("#rvTime").value || "08:00";
+    if(!d){ alert("Pick a date."); return; }
+    const [Y,Mo,Da] = d.split("-").map(Number); const [h,m] = t.split(":").map(Number);
+    const dt = new Date(); dt.setFullYear(Y, (Mo||1)-1, Da||1); dt.setHours(h||8, m||0, 0, 0);   // LOCAL wall-clock
+    const hours = Math.max(0.25, Number(ov.querySelector("#rvDur").value)||1);
+    const note = (ov.querySelector("#rvNote").value || "").trim();
+    const go = ov.querySelector(".rv-go"); go.disabled=true; go.textContent="Creating…";
+    submitRevisit(dt.toISOString(), Math.round(hours*60), note, close, () => { go.disabled=false; go.textContent="Create re-visit"; });
+  };
+}
+async function submitRevisit(scheduledAt, durationMinutes, revisitNote, onDone, onFail){
+  try{
+    const r = await mApi("/sla/jobs/" + encodeURIComponent(job.id) + "/revisit", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ scheduledAt, durationMinutes, revisitNote: revisitNote || "" }) }).then(r => r.json());
+    if(r && r.ok && r.id){ if(onDone) onDone(); location.href = "job-view.html?jobId=" + encodeURIComponent(r.id); }
+    else { alert((r && r.error) || "Couldn't create the re-visit."); if(onFail) onFail(); }
+  }catch(e){ alert("Couldn't create the re-visit."); if(onFail) onFail(); }
+}
+async function loadVisits(){
+  const card = $("visitsCard"); if(!card || !job) return;
+  try{
+    const d = await mApi("/sla/jobs/" + encodeURIComponent(job.id) + "/visits", { cache:"no-store" }).then(r => r.json());
+    const visits = (d && d.visits) || [];
+    if(visits.length < 2){ card.style.display="none"; return; }   // only show once there's a chain
+    card.style.display = "";
+    renderVisits(visits);
+  }catch(e){ card.style.display="none"; }
+}
+async function renderVisits(visits){
+  const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const money = n => "£" + (Number(n)||0).toLocaleString("en-GB",{ minimumFractionDigits:2, maximumFractionDigits:2 });
+  const fmtD = iso => { if(!iso) return "—"; const dt=new Date(iso); return isNaN(dt)?"—":dt.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}); };
+  $("visitsCount").textContent = "· " + visits.length + " jobs raised against this";
+  const admin = isAdminView();
+  const costs = {};
+  if(admin){ await Promise.all(visits.map(async v => { try{ const c = await mApi("/costing/job-full-cost?jobId=" + encodeURIComponent(v.id)).then(r=>r.json()); costs[v.id] = (c && c.ok) ? (Number(c.total)||0) : null; }catch(e){ costs[v.id]=null; } })); }
+  let total = 0, anyCost = false;
+  const rows = visits.map((v, i) => {
+    const here = v.current, cost = costs[v.id];
+    if(admin && cost != null){ total += cost; anyCost = true; }
+    return '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eef1f5;">'
+      + '<div>' + (here ? '<strong>' : '') + 'Visit ' + (i+1) + (here ? ' (this job)</strong>' : '')
+      + ' <span class="sub">· ' + esc(v.status||"") + ' · ' + fmtD(v.scheduledAt || v.raisedAt) + '</span>'
+      + (here ? '' : ' <a href="job-view.html?jobId=' + encodeURIComponent(v.id) + '" style="font-size:13px;">open →</a>') + '</div>'
+      + '<div style="text-align:right;white-space:nowrap;font-weight:600;">' + (admin ? (cost==null ? '<span class="sub">—</span>' : money(cost)) : '') + '</div></div>';
+  }).join("");
+  const totalRow = (admin && anyCost) ? '<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:2px solid #cbd5e1;font-weight:800;"><div>Combined across all visits</div><div>' + money(total) + '</div></div>' : "";
+  $("visitsBody").innerHTML = rows + totalRow;
+}
 async function loadJobCost(){
   const card = $("jobCostCard"); if(!card || !job) return;
   const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1248,6 +1337,8 @@ async function loadExistingPhotos(){
       url: f.publicURL,
       name: f.name
     }));
+    if(data.signature) sigMeta = data.signature;   // signed/public signature URLs, when provided
+    renderSignatureImage();                        // now a URL can be derived from a photo's base
 
     renderPhotoGrid();
     $("photoUploadStatus").textContent =
@@ -2171,12 +2262,52 @@ function sigLocalKey(id){ return "mlSig:" + id; }
 function readSigLocal(id){ try{ return JSON.parse(localStorage.getItem(sigLocalKey(id)) || "null"); }catch(e){ return null; } }
 function writeSigLocal(id, rec){ try{ localStorage.setItem(sigLocalKey(id), JSON.stringify(rec)); }catch(e){} }
 function sigEsc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+let sigMeta = null;   // signature URLs from /files, when the host provides them
 function showSignedStatus(rec){
   const note = rec.pending ? `<div class="muted" id="sigSyncNote" style="font-size:12px;margin-top:2px;">saved on this device — syncing…</div>`
                            : `<div class="muted" id="sigSyncNote" style="font-size:12px;margin-top:2px;">saved ✓</div>`;
   $("signatureStatus").innerHTML =
     `✔ Signed by <strong>${sigEsc(rec.signedBy)}</strong>` +
-    (rec.signedAt ? ` on ${fmtDateTimeLong(new Date(rec.signedAt))}` : "") + note;
+    (rec.signedAt ? ` on ${fmtDateTimeLong(new Date(rec.signedAt))}` : "") + note +
+    `<div id="sigImgWrap" style="margin-top:8px;"></div>`;
+  renderSignatureImage();
+}
+// The best available source for the drawn signature image: a device-local copy
+// (same-origin data URL), a signed URL from /files, or the public URL derived from
+// how the photos load (same bucket base). `cors` says whether we can re-ink it.
+function bestSigSrc(){
+  const loc = readSigLocal(job && job.id);
+  if(loc && loc.img) return { src: loc.img, cors: true };
+  if(sigMeta && sigMeta.url) return { src: sigMeta.url, cors: true };
+  const fk = job && job.signature && job.signature.fileKey;
+  if(fk && fk !== "local" && photoGallery && photoGallery.length){
+    const base = String(photoGallery[0].url || "").split("/jobs/")[0];
+    if(base) return { src: base + "/" + fk.split("/").map(encodeURIComponent).join("/"), cors: false };
+  }
+  if(sigMeta && sigMeta.publicURL) return { src: sigMeta.publicURL, cors: false };
+  return null;
+}
+// Show the signature image. Where we can read the pixels (same-origin/CORS), re-ink
+// it dark by its alpha so a pale/white pen colour still shows; otherwise show raw.
+function renderSignatureImage(){
+  const wrap = document.getElementById("sigImgWrap"); if(!wrap) return;
+  const s = bestSigSrc(); if(!s){ wrap.innerHTML = ""; return; }
+  const style = 'max-width:260px;max-height:120px;border:1px solid #e5e9ef;border-radius:8px;background:#fff;padding:4px;';
+  const show = url => { wrap.innerHTML = '<img src="' + sigEsc(url) + '" alt="Customer signature" style="' + style + '">'; };
+  if(!s.cors){ const t = new Image(); t.onload = () => show(s.src); t.onerror = () => { wrap.innerHTML = ""; }; t.src = s.src; return; }
+  const img = new Image(); img.crossOrigin = "anonymous";
+  img.onload = function(){
+    try{
+      const c = document.createElement("canvas"); c.width = img.naturalWidth || 300; c.height = img.naturalHeight || 120;
+      const x = c.getContext("2d"); x.drawImage(img, 0, 0);
+      const d = x.getImageData(0, 0, c.width, c.height), p = d.data, n = c.width * c.height;
+      let tr = 0; for(let i = 3; i < p.length; i += 4){ if(p[i] < 250) tr++; }
+      if(tr > n * 0.02){ for(let i = 0; i < p.length; i += 4){ p[i] = 15; p[i+1] = 36; p[i+2] = 56; } x.putImageData(d, 0, 0); }
+      show(c.toDataURL("image/png"));
+    }catch(e){ show(s.src); }
+  };
+  img.onerror = function(){ wrap.innerHTML = ""; };
+  img.src = s.src;
 }
 let sigFlushTimer = null;
 async function flushSignature(id){

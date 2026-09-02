@@ -2210,8 +2210,12 @@ var PERMISSION_KEYS = [
   // job programmes: build/issue/share programmes of works
   "YardGate",
   // trigger the yard gate (Tuya) + see its open/closed state
-  "YardGateAnywhere"
+  "YardGateAnywhere",
   // exempt from the yard-gate geofence (operate from anywhere)
+  "EicrCheck",
+  // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
+  "Chapplins"
+  // the Chapplins customer area (directory + compliance chart)
 ];
 function isActiveStatus2(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -4243,9 +4247,87 @@ var DEFAULTS = {
   pencePerMile: 45,
   radiusMiles: 10,
   overtimeThresholdH: 8,
+  dueDow: 3,
+  dueTime: "12:00",
+  remindersOn: true,
   basePostcode: "PO15 5RQ",
   company: "Mostlane"
 };
+var VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
+var normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+var remindersEnabled = (cfg) => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+async function anthropicToolLocal(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1500, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] })
+    });
+    if (!resp.ok) {
+      let d = "";
+      try {
+        d = (await resp.json())?.error?.message || "";
+      } catch {
+      }
+      return { ok: false, error: "AI error" + (d ? " (" + d + ")" : "") };
+    }
+    const payload = await resp.json();
+    const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+    if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+    return { ok: true, input: block.input };
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+}
+var DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+async function tsVerifyEngineerAI(env, e, monday, poolVans) {
+  const dlab = (dt) => {
+    const d = /* @__PURE__ */ new Date(dt + "T12:00:00Z");
+    return DOW3[d.getUTCDay()] + " " + dt.slice(8);
+  };
+  const blocks = e.dayLog.filter((d) => d.entered > 0 || d.moved).map((d) => {
+    const jobs = (d.jobs || []).length ? d.jobs.map((j) => `[${j.ref}] ${j.site || "?"} \u2014 entered ${j.entered}h`).join("; ") : "(none booked)";
+    const trips = (d.trips || []).length ? d.trips.map((t) => `${t.s}\u2013${t.e} \u2192 ${t.to || "?"} (drive ${t.drive}m, stop ${t.stop}m)`).join("\n      ") : d.moved ? `van out ${d.vanStart}\u2013${d.vanEnd}` : "van did not move";
+    return `  ${dlab(d.date)} (${d.date}) \u2014 booked: ${jobs}
+      Trips: ${trips}`;
+  }).join("\n");
+  const pool = (poolVans || []).length ? "\n\nPool/unassigned vans that moved (they may have collected one \u2014 use to explain a day their own van didn't move):\n" + poolVans.map((v) => `  ${v.reg} "${v.driver || "?"}": ` + Object.entries(v.days || {}).map(([dt, x]) => `${dlab(dt)} ${x.s}\u2013${x.e}${(x.locs || []).length ? " [" + x.locs.join("; ") + "]" : ""}`).join("; ")).join("\n") : "";
+  const schema = { type: "object", properties: {
+    verdict: { type: "string", enum: ["ok", "check", "flag"] },
+    summary: { type: "string", description: "One short sentence overall." },
+    days: { type: "array", items: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD" },
+      jobs: { type: "array", items: { type: "object", properties: {
+        ref: { type: "string", description: "the booked job ref exactly as given" },
+        suggested: { type: "number", description: "hours you think this job actually took, 0.25 steps" },
+        note: { type: "string", description: "short reason, only if it differs from entered" }
+      }, required: ["ref", "suggested"] } }
+    }, required: ["date"] } },
+    flags: { type: "array", items: { type: "object", properties: { date: { type: "string" }, severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
+  }, required: ["verdict"] };
+  const system = "You reconstruct a UK field engineer's working day from van tracker trips and check the hours they booked PER JOB. Rules: (1) A job's time = travel TO that site + time ON site. Count the drive to a site as part of that site's job. The final drive HOME from the last job counts toward that last job. (2) IGNORE incidental stops \u2014 petrol/fuel stations, shops, supermarkets, cafes, builders' merchants/suppliers, and any brief stop (under ~15 min) that isn't a booked job \u2014 these are NOT jobs; don't create jobs for them or add their time to a job. (3) Match tracker stop locations to the engineer's booked jobs by town/road/postcode; a booked job is usually the longest stop(s) near that place. On-site time is the stopped time at the job location between arriving and leaving. (4) For each booked job estimate the hours it actually took (travel-to + on-site + drive-home for the last job) to the nearest 0.25h. Compare to what they entered. Only add a `note` when your `suggested` differs from `entered` by more than ~0.75h, saying briefly why. (5) Telematics is approximate and on-site work doesn't always move the van \u2014 be conservative; small differences are fine. Verdict: ok (matches well), check (minor differences worth a glance), flag (clear discrepancy or hours with no matching van activity). Use the booked job refs EXACTLY as given.";
+  const user = `Engineer ${e.name} (${e.username}), week beginning ${monday}, assigned van ${e.reg || "none"}. They entered ${e.total}h total; van door-to-door ${e.weekSpanH}h.
+
+Days:
+${blocks}${pool}
+
+Return your per-job suggested hours and any flags.`;
+  const r = await anthropicToolLocal(env, { system, user, toolName: "verify_engineer", schema, maxTokens: 2e3 });
+  if (!r.ok) return { error: r.error };
+  return r.input || {};
+}
+async function hasEngTimesheet(env, tid, username) {
+  try {
+    const p = await permissionsFor(env, tid, username);
+    return p.EngTimesheet === "Yes";
+  } catch {
+    return false;
+  }
+}
+var DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
   try {
@@ -4880,6 +4962,127 @@ async function scheduledSitesForWeek(env, tid, username, monday) {
   }
   return byDate;
 }
+function londonOffsetMinutes(ms) {
+  try {
+    const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(ms)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+    return Math.round((asUTC - ms) / 6e4);
+  } catch {
+    return 0;
+  }
+}
+function tsDeadlineFor(monday, cfg) {
+  const dow = Number((cfg.defaults && cfg.defaults.dueDow) ?? 3);
+  const [hh, mm] = String(cfg.defaults && cfg.defaults.dueTime || "12:00").split(":").map((n) => parseInt(n, 10) || 0);
+  const nextMon = /* @__PURE__ */ new Date(monday + "T00:00:00Z");
+  nextMon.setUTCDate(nextMon.getUTCDate() + 7);
+  const day = new Date(nextMon);
+  day.setUTCDate(day.getUTCDate() + (dow + 6) % 7);
+  const ds = day.toISOString().slice(0, 10);
+  const naive = Date.parse(ds + "T" + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":00Z");
+  const ms = naive - londonOffsetMinutes(naive) * 6e4;
+  return { ms, iso: new Date(ms).toISOString(), dow, hh, mm, label: DOW_NAME[dow] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
+}
+async function assignedJobsByDay(env, tid, username, monday) {
+  const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+  endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const byDay = {};
+  try {
+    const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const map = {};
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of users || []) {
+      map[normId2(u.username)] = u.username;
+      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      if (full) map[normId2(full)] = u.username;
+    }
+    const meN = norm(username);
+    const isMe = (e) => {
+      const r = map[normId2(e)];
+      if (r != null) return r === username;
+      const n = norm(e);
+      return !!n && (n === meN || n.includes(meN) || meN.includes(n));
+    };
+    const lDate = (iso) => {
+      try {
+        return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+      } catch {
+        return String(iso).slice(0, 10);
+      }
+    };
+    const { results } = await env.DB.prepare(
+      "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+    ).bind(tid, monday, end).all();
+    for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data);
+      } catch {
+        continue;
+      }
+      const engs = Array.isArray(d.assignedEngineers) && d.assignedEngineers.length ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+      if (!engs.some(isMe)) continue;
+      const date = lDate(r.scheduled_at);
+      (byDay[date] = byDay[date] || []).push({ jobId: r.id, ref: r.helpdesk_ref || d.siteName || r.id, site: d.siteName || "" });
+    }
+  } catch {
+  }
+  return byDay;
+}
+async function timesheetGaps(env, tid, username, monday, cfg) {
+  const byDay = await assignedJobsByDay(env, tid, username, monday);
+  const { days } = await loadWeek(env, tid, username, monday);
+  const missing = [];
+  for (const [date, jobs] of Object.entries(byDay)) {
+    const jh = days[date] && days[date].jobHours || {};
+    const seen = /* @__PURE__ */ new Set();
+    for (const j of jobs) {
+      if (seen.has(j.jobId)) continue;
+      seen.add(j.jobId);
+      if (!(parseFloat(jh[j.jobId]) > 0)) missing.push({ date, ref: j.ref, jobId: j.jobId });
+    }
+  }
+  const dl = tsDeadlineFor(monday, cfg);
+  return { week: monday, missing, count: missing.length, dueAt: dl.iso, dueLabel: dl.label, overdue: Date.now() > dl.ms };
+}
+async function sweepTimesheetReminders(env, tid = 1) {
+  try {
+    const cfg = await getCfg(env, tid);
+    if (!remindersEnabled(cfg)) return;
+    const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
+    pm.setUTCDate(pm.getUTCDate() - 7);
+    const prevMon = pm.toISOString().slice(0, 10);
+    const dl = tsDeadlineFor(prevMon, cfg);
+    const nowMs = Date.now();
+    if (nowMs < dl.ms - 3 * 36e5 || nowMs > dl.ms) return;
+    const key = "ts:reminded:" + tid;
+    let sent = [];
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first();
+      if (row && row.value) sent = JSON.parse(row.value) || [];
+    } catch {
+    }
+    if (sent.includes(prevMon)) return;
+    const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    for (const u of users || []) {
+      if (!await hasEngTimesheet(env, tid, u.username)) continue;
+      const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
+      if (g.count > 0) await sendToUser(env, tid, u.username, {
+        title: "Timesheet due",
+        body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours \u2014 complete last week's timesheet by " + dl.label + ".",
+        url: "/engineer-timesheet.html?week=" + prevMon,
+        tag: "ts-due:" + prevMon
+      });
+    }
+    sent.push(prevMon);
+    sent = sent.slice(-8);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(sent)).run();
+  } catch {
+  }
+}
 async function applyAutoMileage(env, tid, username, monday, days, eff, basePostcode) {
   if (!(eff.selfEmployed && eff.mileage)) return { days, auto: { applies: false } };
   const basePc = normPc(basePostcode || "PO15 5RQ");
@@ -5086,13 +5289,21 @@ async function handle7(request, env, ctx, url, sess) {
   const me = sess.user.username;
   await ensureTables(env);
   const cfg = await getCfg(env, tid);
+  let _adminView = null;
+  const viewUser = async () => {
+    const w = q.get("user");
+    if (!w || w === me) return me;
+    if (_adminView === null) _adminView = await isTsAdmin(env, tid, sess);
+    return _adminView ? w : me;
+  };
   if (sub === "/me" && method === "GET") {
-    const u = await userRow(env, tid, me);
+    const who = await viewUser();
+    const u = await userRow(env, tid, who);
     if (!u) return error("User not found", 404, env, request);
     const eff = effectiveCfg(cfg, u);
-    const next = await nextInvoiceNumber(env, tid, me, eff);
+    const next = await nextInvoiceNumber(env, tid, who, eff);
     const admin = await isTsAdmin(env, tid, sess);
-    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, who).first();
     return json({
       ok: true,
       name: displayName(u),
@@ -5101,7 +5312,8 @@ async function handle7(request, env, ctx, url, sess) {
       nextInvoice: next,
       basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
       canSetNumber: !invCount || Number(invCount.n) === 0,
-      admin
+      admin,
+      viewingUser: who !== me ? who : null
     }, {}, env, request);
   }
   if (sub === "/me" && method === "POST") {
@@ -5117,17 +5329,37 @@ async function handle7(request, env, ctx, url, sess) {
     await saveCfg(env, tid, cfg);
     return json({ ok: true }, {}, env, request);
   }
+  if (sub === "/outstanding" && method === "GET") {
+    if (!remindersEnabled(cfg) || !await hasEngTimesheet(env, tid, me))
+      return json({ ok: true, count: 0, missing: [] }, {}, env, request);
+    const curMon = mondayOf((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const pm = /* @__PURE__ */ new Date(curMon + "T12:00:00Z");
+    pm.setUTCDate(pm.getUTCDate() - 7);
+    const prevMon = pm.toISOString().slice(0, 10);
+    const prev = await timesheetGaps(env, tid, me, prevMon, cfg);
+    return json({
+      ok: true,
+      week: prevMon,
+      dueAt: prev.dueAt,
+      dueLabel: prev.dueLabel,
+      overdue: prev.overdue,
+      count: prev.count,
+      missing: prev.missing
+    }, {}, env, request);
+  }
   if (sub === "/my" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    const u = await userRow(env, tid, me);
+    const u = await userRow(env, tid, who);
     const eff = effectiveCfg(cfg, u);
-    const { days, savedAt, approval } = await loadWeek(env, tid, me, monday);
-    const inv = await invoiceFor(env, tid, me, monday);
-    const auto = await jobTimeAuto(env, tid, me, monday, { homePostcode: eff.homePostcode });
-    const holidays = await holidayDaysFor(env, tid, me, monday);
+    const { days, savedAt, approval } = await loadWeek(env, tid, who, monday);
+    const inv = await invoiceFor(env, tid, who, monday);
+    const auto = await jobTimeAuto(env, tid, who, monday, { homePostcode: eff.homePostcode });
+    const holidays = await holidayDaysFor(env, tid, who, monday);
     const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
-    const am = await applyAutoMileage(env, tid, me, monday, days, eff, cfg.defaults.basePostcode);
+    const am = await applyAutoMileage(env, tid, who, monday, days, eff, cfg.defaults.basePostcode);
+    const gaps = await timesheetGaps(env, tid, who, monday, cfg);
     return json({
       ok: true,
       week: monday,
@@ -5139,6 +5371,10 @@ async function handle7(request, env, ctx, url, sess) {
       jobMeta,
       approval,
       locked: !!approval,
+      viewingUser: who !== me ? who : null,
+      remindersOn: remindersEnabled(cfg),
+      due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue },
+      missingHours: gaps.missing,
       totals: weekTotals(am.days, eff),
       autoMileage: am.auto,
       invoice: inv ? {
@@ -5192,12 +5428,13 @@ async function handle7(request, env, ctx, url, sess) {
     return json({ ok: true, week: monday, days, totals: weekTotals(amSave.days, eff), autoMileage: amSave.auto }, {}, env, request);
   }
   if (sub === "/assigned" && method === "GET") {
+    const who = await viewUser();
     const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
     const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
     endD.setUTCDate(endD.getUTCDate() + 7);
     const end = endD.toISOString().slice(0, 10);
     const byDay = {};
-    const debug = { me, matchedAs: [], candidates: [] };
+    const debug = { me: who, matchedAs: [], candidates: [] };
     try {
       const { results } = await env.DB.prepare(
         "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
@@ -5214,11 +5451,11 @@ async function handle7(request, env, ctx, url, sess) {
         }
       } catch {
       }
-      const meN = norm(me);
-      const cap2 = await capturedMinsWeek(env, tid, me, monday);
+      const meN = norm(who);
+      const cap2 = await capturedMinsWeek(env, tid, who, monday);
       const isMe = (e) => {
         const resolved = map[normId2(e)];
-        if (resolved != null) return resolved === me;
+        if (resolved != null) return resolved === who;
         const n = norm(e);
         return !!n && (n === meN || n.includes(meN) || meN.includes(n));
       };
@@ -5672,6 +5909,135 @@ async function handle7(request, env, ctx, url, sess) {
     }
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
   }
+  if (sub === "/verify" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.week)) return error("week required", 400, env, request);
+    const monday = mondayOf(b.week);
+    const vans = Array.isArray(b.vans) ? b.vans : [];
+    const scores = b.scores && typeof b.scores === "object" ? b.scores : {};
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const vanByReg = {};
+    for (const v of vans) {
+      const k = normReg(v && v.reg);
+      if (!k) continue;
+      const days = v && v.days && typeof v.days === "object" ? v.days : {};
+      vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), trips: Math.round(parseFloat(v && v.trips) || 0), days };
+    }
+    const scoreByReg = {};
+    for (const [r, s] of Object.entries(scores)) {
+      const k = normReg(r);
+      if (k && s != null && s !== "") scoreByReg[k] = Math.round(parseFloat(s));
+    }
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    const week = weekDays(monday);
+    const engineers = [];
+    for (const u of users || []) {
+      if (!await hasEngTimesheet(env, tid, u.username)) continue;
+      const reg = u.vehicle_assigned || "";
+      const rk = normReg(reg);
+      const van = vanByReg[rk] || null;
+      const { days } = await loadWeek(env, tid, u.username, monday);
+      const meta = await jobMetaFor(env, tid, days);
+      let total = 0, weekSpan = 0;
+      const dayLog = week.map((dt) => {
+        const d = days[dt] || {};
+        const jh = d.jobHours || {};
+        let h = 0;
+        const jobs = [];
+        for (const [jid, hv] of Object.entries(jh)) {
+          const hh = parseFloat(hv) || 0;
+          if (hh > 0) {
+            h += hh;
+            jobs.push({ ref: meta[jid] && meta[jid].ref || jid, site: meta[jid] && meta[jid].site || "", entered: Math.round(hh * 100) / 100 });
+          }
+        }
+        if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
+        h = Math.round(h * 100) / 100;
+        total += h;
+        const vd = van && van.days ? van.days[dt] : null;
+        const moved = !!(vd && (vd.span > 0 || (vd.drive || 0) > 0));
+        if (moved) weekSpan += vd.span || 0;
+        return {
+          date: dt,
+          entered: h,
+          moved,
+          jobs,
+          vanStart: vd ? vd.s || "" : "",
+          vanEnd: vd ? vd.e || "" : "",
+          spanH: moved ? r1(vd.span / 60) : null,
+          driveH: vd && vd.drive ? r1(vd.drive / 60) : null,
+          locs: vd && Array.isArray(vd.locs) ? vd.locs.slice(0, 6) : [],
+          trips: vd && Array.isArray(vd.trips_detail) ? vd.trips_detail : []
+        };
+      });
+      total = Math.round(total * 100) / 100;
+      if (total === 0 && !van) continue;
+      engineers.push({
+        username: u.username,
+        name: displayName(u),
+        reg,
+        driveMins: van ? van.driveMins : null,
+        weekSpanH: r1(weekSpan / 60),
+        score: scoreByReg[rk] != null ? scoreByReg[rk] : null,
+        total,
+        dayLog
+      });
+    }
+    const usedRegs = new Set(engineers.map((e) => normReg(e.reg)).filter(Boolean));
+    const poolVans = Object.values(vanByReg).filter((v) => !usedRegs.has(normReg(v.reg)) && v.driveMins > 0).map((v) => ({
+      reg: v.reg,
+      driver: v.driver,
+      driveMins: v.driveMins,
+      score: scoreByReg[normReg(v.reg)] ?? null,
+      days: Object.fromEntries(week.filter((dt) => v.days[dt] && (v.days[dt].span > 0 || (v.days[dt].drive || 0) > 0)).map((dt) => [dt, { s: v.days[dt].s, e: v.days[dt].e, locs: (v.days[dt].locs || []).slice(0, 4) }]))
+    }));
+    let aiErr = null;
+    const byUser = {};
+    const aiResults = await Promise.all(engineers.slice(0, 30).map(async (e) => ({ e, ai: await tsVerifyEngineerAI(env, e, monday, poolVans) })));
+    for (const { e, ai } of aiResults) {
+      if (ai.error) aiErr = ai.error;
+      const byDate = {};
+      for (const dd of ai.days || []) if (dd && dd.date) byDate[dd.date] = dd;
+      const dayLog = e.dayLog.map((d) => {
+        const ad = byDate[d.date] || {};
+        const sByRef = {};
+        for (const j of ad.jobs || []) if (j && j.ref) sByRef[String(j.ref).toLowerCase()] = j;
+        const jobs = d.jobs.map((j) => {
+          const s = sByRef[String(j.ref).toLowerCase()] || {};
+          return { ref: j.ref, site: j.site, entered: j.entered, suggested: s.suggested != null ? Math.round(s.suggested * 100) / 100 : null, note: s.note || "" };
+        });
+        return { date: d.date, entered: d.entered, moved: d.moved, vanStart: d.vanStart, vanEnd: d.vanEnd, spanH: d.spanH, driveH: d.driveH, locs: d.locs, jobs };
+      });
+      byUser[e.username] = {
+        name: e.name,
+        reg: e.reg,
+        driveMins: e.driveMins,
+        weekSpanH: e.weekSpanH,
+        score: e.score,
+        total: e.total,
+        dayLog,
+        verdict: ai.verdict || "ok",
+        summary: ai.summary || "",
+        flags: Array.isArray(ai.flags) ? ai.flags : []
+      };
+    }
+    const unassignedVans = poolVans.map((v) => ({ reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: v.score }));
+    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, poolVans, aiError: aiErr };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VERIFY_KEY(tid, monday), JSON.stringify(rec)).run();
+    return json({ ok: true, ...rec }, {}, env, request);
+  }
+  if (sub === "/verify" && method === "GET") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VERIFY_KEY(tid, monday)).first();
+    let rec = null;
+    try {
+      rec = row && row.value ? JSON.parse(row.value) : null;
+    } catch {
+    }
+    return json({ ok: true, week: monday, verify: rec }, {}, env, request);
+  }
   if (sub.startsWith("/admin/")) {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
     if (sub === "/admin/overview" && method === "GET") {
@@ -5713,6 +6079,7 @@ async function handle7(request, env, ctx, url, sess) {
         const daysEff = am.days;
         const perDay = {};
         for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
+        const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
         out.push({
           username: u.username,
           name: displayName(u),
@@ -5724,6 +6091,9 @@ async function handle7(request, env, ctx, url, sess) {
           savedAt: d.at,
           totals: weekTotals(daysEff, eff),
           autoMileage: am.auto,
+          gapCount: gaps.count,
+          gapMissing: gaps.missing,
+          due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue },
           approval: apprBy[u.username] || null,
           holidays: leaveAll[u.username] || {},
           invoice: inv ? {
@@ -8604,13 +8974,18 @@ async function handle8(request, env, ctx, url, sess) {
         }
         auditItems.push({ id: itemId, text: (r.code ? `[${r.code}] ` : "") + (r.description || "").trim(), refPhotos });
       }
-      const baseRef = src.siteName || src.helpdeskRef || src.siteCode || "Remedial works";
+      let siteName = (src.siteName || "").trim();
+      try {
+        const meta = await resolveSiteMeta(env, tenantId, src);
+        if (meta && meta.siteName) siteName = meta.siteName;
+      } catch {
+      }
       const payload = {
         id: newId4,
-        reference: baseRef,
-        description: `Remedial works from electrical test${src.helpdeskRef ? " (" + src.helpdeskRef + ")" : ""}.`,
+        reference: src.helpdeskRef || siteName || src.siteCode || "Remedial works",
+        description: `Remedial works from electrical test${src.helpdeskRef ? " " + src.helpdeskRef : ""} \u2014 see checklist.`,
         siteCode: src.siteCode,
-        siteName: src.siteName,
+        siteName,
         address: src.address,
         postcode: src.postcode,
         telephone: src.telephone,
@@ -8619,6 +8994,14 @@ async function handle8(request, env, ctx, url, sess) {
         lat: src.lat,
         lon: src.lon,
         auditItems,
+        // a SITE-AUDIT job — one checklist item per remedial
+        // Gates suited to an audit job: prompt the RA before work starts (electrical
+        // remedials), but completion is the CHECKLIST — each item photographed — NOT a
+        // separate signature/note/After-photo (auditMissing enforces that both sides).
+        requiresRA: true,
+        requiresSignature: false,
+        requiresPhoto: false,
+        requiresNote: false,
         assignedEngineers: [],
         // unassigned — the office allocates it
         priority: src.priority || "",
@@ -8637,6 +9020,135 @@ async function handle8(request, env, ctx, url, sess) {
       } catch {
       }
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
+    }
+    if (parts[2] === "revisit" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const rb = await readJson2(request).catch(() => ({}));
+      const scheduledAt = rb.scheduledAt && Number.isFinite(Date.parse(rb.scheduledAt)) ? new Date(rb.scheduledAt).toISOString() : void 0;
+      const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : src.durationMinutes || void 0;
+      const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean) : Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : [];
+      const groupId = src.visitGroupId || src.id;
+      const rvNote = String(rb.revisitNote || rb.note || "").trim().slice(0, 4e3);
+      const oldDesc = String(src.description || "").trim();
+      const description = rvNote ? rvNote + (oldDesc ? "\n\n\u2014 Original job \u2014\n" + oldDesc : "") : oldDesc;
+      const payload = {
+        id: crypto.randomUUID(),
+        reference: src.helpdeskRef || src.siteName || src.siteCode,
+        description,
+        siteCode: src.siteCode,
+        siteName: src.siteName,
+        address: src.address,
+        postcode: src.postcode,
+        telephone: src.telephone,
+        storeType: src.storeType,
+        client: src.client,
+        lat: src.lat,
+        lon: src.lon,
+        priority: src.priority || "",
+        requiresRA: src.requiresRA,
+        requiresSignature: src.requiresSignature,
+        requiresPhoto: src.requiresPhoto,
+        requiresNote: src.requiresNote,
+        firestopping: src.firestopping,
+        emTest: src.emTest,
+        emKind: src.emKind,
+        pat: src.pat,
+        elecTest: src.elecTest,
+        workArea: src.workArea || void 0,
+        projectId: src.projectId || void 0,
+        assignedEngineers: engineers,
+        scheduledAt,
+        durationMinutes,
+        revisitOf: src.id,
+        visitGroupId: groupId,
+        changedBy: sess.user && sess.user.username || "system"
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      const repath = (k) => typeof k === "string" ? k.replace(`jobs/${src.id}/`, `jobs/${job.id}/`) : k;
+      if (env.JOB_FILES) {
+        try {
+          let cursor;
+          do {
+            const listed = await env.JOB_FILES.list({ prefix: `jobs/${src.id}/`, cursor });
+            for (const o of listed.objects || []) {
+              try {
+                const obj = await env.JOB_FILES.get(o.key);
+                if (obj) await env.JOB_FILES.put(repath(o.key), obj.body, { httpMetadata: obj.httpMetadata, customMetadata: obj.customMetadata });
+              } catch {
+              }
+            }
+            cursor = listed.truncated ? listed.cursor : null;
+          } while (cursor);
+        } catch {
+        }
+      }
+      try {
+        const nj = await getJob(env, tenantId, job.id);
+        if (nj) {
+          if (Array.isArray(src.events)) nj.events = JSON.parse(JSON.stringify(src.events));
+          if (src.riskAssessment) nj.riskAssessment = JSON.parse(JSON.stringify(src.riskAssessment));
+          if (src.photoStages) nj.photoStages = { ...src.photoStages };
+          if (src.signature && src.signature.fileKey && src.signature.fileKey !== "local") {
+            nj.signature = { signedBy: src.signature.signedBy, signedAt: src.signature.signedAt, fileKey: repath(src.signature.fileKey) };
+          }
+          if (Array.isArray(src.auditItems)) nj.auditItems = src.auditItems.map((it) => ({
+            ...it,
+            refPhotos: (it.refPhotos || []).map(repath),
+            donePhoto: it.donePhoto ? repath(it.donePhoto) : it.donePhoto,
+            extraPhotos: (it.extraPhotos || []).map(repath)
+          }));
+          if (Array.isArray(src.remedials)) nj.remedials = src.remedials.map((r) => ({ ...r, photos: (r.photos || []).map(repath) }));
+          nj.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          await saveJob(env, tenantId, nj);
+        }
+      } catch {
+      }
+      if (!src.visitGroupId) {
+        try {
+          src.visitGroupId = groupId;
+          src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          await saveJob(env, tenantId, src);
+        } catch {
+        }
+      }
+      try {
+        const all = await listJobs(env, tenantId, { includeDormant: true });
+        const members = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId));
+        const cnt = members.length;
+        for (const m of members) {
+          if (m.visitCount !== cnt) {
+            m.visitCount = cnt;
+            m.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+            await saveJob(env, tenantId, m);
+          }
+        }
+      } catch {
+      }
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+      }));
+      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
+    }
+    if (parts[2] === "visits" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const groupId = src.visitGroupId || src.id;
+      const all = await listJobs(env, tenantId);
+      const visits = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId)).map((j) => ({
+        id: j.id,
+        ref: j.helpdeskRef || j.id,
+        status: j.status || "",
+        scheduledAt: j.scheduledAt || null,
+        raisedAt: j.raisedAt || null,
+        closedAt: j.closedAt || null,
+        isRoot: j.id === groupId,
+        current: j.id === src.id,
+        engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
+      })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
+      return jsonResponse({ ok: true, groupId, visits }, headers);
     }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
@@ -9076,8 +9588,11 @@ async function handle8(request, env, ctx, url, sess) {
               at: f.uploaded_at,
               by: f.uploaded_by,
               size: 0,
-              projectDoc: true
+              projectDoc: true,
               // marker: engineers/office see it but can't delete via /site/doc-delete
+              fileId: f.id,
+              projectId: proj.id
+              // so an admin can rename it via /project/doc-update
             })));
           }
         }
@@ -9923,6 +10438,14 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Portal-project link: set when this job was raised from a project hub, so
     // the project can list its jobs + roll up per-engineer visits. Preserved.
     projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
+    // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
+    // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
+    // the chain, so all visits against one job are easy to find + cost together.
+    revisitOf: body.revisitOf !== void 0 ? String(body.revisitOf || "") || null : existing?.revisitOf || null,
+    visitGroupId: body.visitGroupId !== void 0 ? String(body.visitGroupId || "") || null : existing?.visitGroupId || null,
+    // How many jobs are in this visit chain (for the board/scheduler "×N" badge);
+    // stamped on every group member when a re-visit is created.
+    visitCount: body.visitCount !== void 0 ? Number(body.visitCount) || null : existing?.visitCount || null,
     scheduledAt,
     scheduledEnd,
     durationMinutes,
@@ -10079,6 +10602,9 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.remedials !== void 0) job.remedials = normRemedials(patch.remedials, job);
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
+  if (patch.revisitOf !== void 0) job.revisitOf = String(patch.revisitOf || "") || null;
+  if (patch.visitGroupId !== void 0) job.visitGroupId = String(patch.visitGroupId || "") || null;
+  if (patch.visitCount !== void 0) job.visitCount = Number(patch.visitCount) || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;
@@ -25604,7 +26130,7 @@ async function canManage(env, tid, sess) {
   if (!sess) return false;
   try {
     const p = await permissionsFor(env, tid, sess.user.username);
-    return p.FullAccess === "Yes" || p.Compliance === "Yes" || p.SLAAdmin === "Yes";
+    return p.FullAccess === "Yes" || p.Chapplins === "Yes";
   } catch {
     return false;
   }
@@ -26437,6 +26963,756 @@ function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+// src/routes/aiassist.js
+init_http();
+init_auth();
+var RULES_KEY = (tid) => `ai:jobrules:${tid}`;
+var HQ_POSTCODE2 = "PO15 5RQ";
+async function getRules2(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(RULES_KEY(tid)).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {
+  }
+  return { rules: "", log: [], chatModes: "" };
+}
+async function saveRules2(env, tid, obj) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, RULES_KEY(tid), JSON.stringify(obj)).run();
+}
+async function isOfficeUser(env, tid, username) {
+  try {
+    const u = await env.DB.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
+    let p = {};
+    try {
+      p = u && u.profile ? JSON.parse(u.profile) : {};
+    } catch {
+    }
+    return String(p.staffType || "").toLowerCase() !== "field";
+  } catch {
+    return false;
+  }
+}
+var londonToday = () => (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+function resolveDate(s) {
+  const t = String(s || "").trim().toLowerCase();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const base = /* @__PURE__ */ new Date(londonToday() + "T12:00:00Z");
+  if (t === "today") return londonToday();
+  if (t === "tomorrow") {
+    base.setUTCDate(base.getUTCDate() + 1);
+    return base.toISOString().slice(0, 10);
+  }
+  const dows = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const di = dows.findIndex((d) => t.includes(d));
+  if (di >= 0) {
+    for (let i = 1; i <= 7; i++) {
+      base.setUTCDate(base.getUTCDate() + 1);
+      if (base.getUTCDay() === di) return base.toISOString().slice(0, 10);
+    }
+  }
+  return null;
+}
+function londonISO(date, hhmm) {
+  const [hh, mm] = String(hhmm || "09:00").split(":").map((n) => parseInt(n, 10) || 0);
+  const naive = Date.parse(date + "T" + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":00Z");
+  let offMin = 0;
+  try {
+    const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(naive)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    offMin = Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - naive) / 6e4);
+  } catch {
+  }
+  return new Date(naive - offMin * 6e4).toISOString();
+}
+async function resolveSite2(env, tid, query) {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false };
+  const num2 = q.replace(/\D/g, "");
+  try {
+    if (num2) {
+      const cands = [num2, num2.padStart(4, "0"), String(Number(num2))];
+      for (const c of [...new Set(cands)]) {
+        const r = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND site_number=? AND active=1 LIMIT 1").bind(tid, c).first();
+        if (r) return siteOut(r);
+      }
+    }
+  } catch {
+  }
+  try {
+    const like = "%" + q.replace(/[%_]/g, "") + "%";
+    const { results } = await env.DB.prepare("SELECT site_number, site_name, postcode, client, data FROM sites WHERE tenant_id=? AND active=1 AND site_name LIKE ? ORDER BY length(site_name) LIMIT 6").bind(tid, like).all();
+    if (results && results.length === 1) return siteOut(results[0]);
+    if (results && results.length > 1) return { ok: false, ambiguous: results.map((r) => `${r.site_number} ${r.site_name}`) };
+  } catch {
+  }
+  return { ok: false };
+}
+function siteOut(r) {
+  let d = {};
+  try {
+    d = JSON.parse(r.data || "{}");
+  } catch {
+  }
+  const addr = [d.address1 || d.street, d.town, d.county, r.postcode].filter(Boolean).join(", ");
+  return {
+    ok: true,
+    code: r.site_number,
+    name: r.site_name,
+    postcode: r.postcode || d.postcode || "",
+    address: addr,
+    lat: d.lat,
+    lon: d.lon || d.lng,
+    telephone: d.telephone || "",
+    storeType: d.storeType || r.client || "",
+    sharepointURL: d.sharepointURL || ""
+  };
+}
+async function resolveEngineer(env, tid, name) {
+  const q = String(name || "").trim().toLowerCase();
+  if (!q) return { ok: false, none: true };
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+    const norm = (s) => String(s || "").toLowerCase().trim();
+    const matches = (results || []).filter((u) => {
+      const full = norm(u.first_name + " " + u.last_name), fn = norm(u.first_name), un = norm(u.username);
+      return un === q || full === q || fn === q || full.startsWith(q) || q.length >= 3 && full.includes(q);
+    });
+    if (matches.length === 1) return { ok: true, username: matches[0].username, name: (matches[0].first_name + " " + matches[0].last_name).trim() };
+    if (matches.length > 1) return { ok: false, ambiguous: matches.map((m) => (m.first_name + " " + m.last_name).trim()) };
+  } catch {
+  }
+  return { ok: false };
+}
+async function anthropicChat(env, { system, messages, tools, forceTool }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured on the server (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: 1500, system, tools, tool_choice: forceTool ? { type: "any" } : { type: "auto" }, messages })
+    });
+    if (!r.ok) {
+      let d = "";
+      try {
+        d = (await r.json())?.error?.message || "";
+      } catch {
+      }
+      return { ok: false, error: "AI error" + (d ? " (" + d + ")" : "") };
+    }
+    const p = await r.json();
+    const tool = Array.isArray(p.content) ? p.content.find((c) => c.type === "tool_use") : null;
+    const text = Array.isArray(p.content) ? p.content.filter((c) => c.type === "text").map((c) => c.text).join("\n").trim() : "";
+    return { ok: true, tool, text, content: Array.isArray(p.content) ? p.content : [] };
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+}
+function jobRow(r) {
+  let d = {};
+  try {
+    d = JSON.parse(r.data || "{}");
+  } catch {
+  }
+  const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+  return {
+    id: r.id,
+    ref: d.helpdeskRef || r.helpdesk_ref || r.id,
+    siteName: d.siteName || "",
+    siteCode: d.siteCode || r.site_code || "",
+    status: d.status || r.status || "",
+    priority: d.priority || "",
+    scheduledAt: d.scheduledAt || r.scheduled_at || null,
+    engineers: engs,
+    durationMinutes: d.durationMinutes || null,
+    description: String(d.description || r.description || "").slice(0, 220),
+    _dormant: !!d.fallbackTemplate
+  };
+}
+var FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
+async function searchJobs2(env, tid, query) {
+  const q = String(query || "").trim();
+  if (!q) return [];
+  const like = "%" + q.replace(/[%_]/g, "") + "%";
+  const numRun = (q.match(/\d{3,}/) || [])[0];
+  const likeNum = numRun ? "%" + numRun + "%" : like;
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, helpdesk_ref, description, status, site_code, scheduled_at, updated_at, data FROM sla_jobs WHERE tenant_id=? AND (helpdesk_ref LIKE ? OR helpdesk_ref LIKE ? OR description LIKE ? OR site_code LIKE ? OR lower(status) LIKE lower(?) OR lower(data) LIKE lower(?)) ORDER BY (CASE WHEN lower(status) LIKE lower(?) THEN 0 ELSE 1 END), (CASE WHEN status IN ('Complete','Closed','Closed Jobs','Invoiced','Cancelled') THEN 1 ELSE 0 END), updated_at DESC LIMIT 60"
+    ).bind(tid, like, likeNum, like, like, like, like, like).all();
+    return (results || []).map(jobRow).filter((j) => !j._dormant).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+async function jobById(env, tid, id) {
+  try {
+    const r = await env.DB.prepare("SELECT id, helpdesk_ref, description, status, site_code, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    return r ? jobRow(r) : null;
+  } catch {
+    return null;
+  }
+}
+async function resolveJobTarget(env, tid, a) {
+  if (a.jobId) {
+    const j = await jobById(env, tid, a.jobId);
+    if (j) return { ok: true, job: j };
+  }
+  const ref = String(a.jobRef || a.ref || a.jobId || "").trim();
+  if (!ref) return { ok: false, notfound: true };
+  const rows = await searchJobs2(env, tid, ref);
+  const norm = (s) => String(s || "").toLowerCase();
+  const numRun = (ref.match(/\d{3,}/) || [])[0];
+  let hits = rows.filter((r) => norm(r.ref).includes(norm(ref)) || numRun && String(r.ref).includes(numRun));
+  if (!hits.length) hits = rows;
+  const open = hits.filter((r) => !FINISHED.test(r.status));
+  const pool = open.length ? open : hits;
+  if (pool.length === 1) return { ok: true, job: pool[0] };
+  if (pool.length > 1) return { ok: false, ambiguous: pool.slice(0, 6).map((r) => `${r.ref} (${r.siteName || r.siteCode}${r.status ? ", " + r.status : ""})`) };
+  return { ok: false, notfound: true };
+}
+var JOB_TYPES = {
+  empat: "EM light + PAT test (combined)",
+  reactive: "reactive / maintenance",
+  electrical: "electrical test",
+  firestop: "firestopping"
+};
+var HQ_COORD = { lat: 50.8607, lon: -1.261 };
+function haversineMi2(a, b) {
+  if (!a || !b) return null;
+  const R2 = 3958.8, tr = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * tr, dLon = (b.lon - a.lon) * tr;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * tr) * Math.cos(b.lat * tr) * Math.sin(dLon / 2) ** 2;
+  return 2 * R2 * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+var travelMin = (a, b) => {
+  const mi = haversineMi2(a, b);
+  return mi == null ? 30 : Math.max(10, Math.round(mi * 1.25 / 30 * 60 / 5) * 5);
+};
+var hmToMin = (s) => {
+  const [h, m] = String(s || "08:00").split(":").map((n) => parseInt(n, 10) || 0);
+  return h * 60 + m;
+};
+var minToHm = (t) => {
+  t = Math.max(0, Math.min(23 * 60 + 55, Math.round(t)));
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+};
+var _geoCache = /* @__PURE__ */ new Map();
+async function geocodePostcode2(pc) {
+  const key = String(pc || "").toUpperCase().replace(/\s+/g, "");
+  if (!key) return null;
+  if (_geoCache.has(key)) return _geoCache.get(key);
+  let c = null;
+  try {
+    const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(key));
+    if (r.ok) {
+      const j = await r.json();
+      const res = j && j.result;
+      if (res && Number.isFinite(res.latitude) && Number.isFinite(res.longitude)) c = { lat: res.latitude, lon: res.longitude };
+    }
+  } catch {
+  }
+  _geoCache.set(key, c);
+  return c;
+}
+async function coordsForJob(env, tid, j) {
+  const lat = Number(j.lat), lon = Number(j.lon != null ? j.lon : j.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+  let pc = j.postcode || "";
+  if (j.siteCode) {
+    try {
+      const code = String(j.siteCode);
+      const cands = [...new Set([code, code.padStart(4, "0"), String(Number(code) || "")].filter(Boolean))];
+      let r = null;
+      for (const c of cands) {
+        r = await env.DB.prepare("SELECT postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, c).first();
+        if (r) break;
+      }
+      if (r) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const la = Number(d.lat), lo = Number(d.lon != null ? d.lon : d.lng);
+        if (Number.isFinite(la) && Number.isFinite(lo)) return { lat: la, lon: lo };
+        pc = pc || r.postcode || d.postcode || "";
+      }
+    } catch {
+    }
+  }
+  return pc ? await geocodePostcode2(pc) : null;
+}
+async function sequenceDay(env, tid, jobs) {
+  const groups = {};
+  for (const j of jobs) {
+    if (!(j.date && /^\d{4}-\d{2}-\d{2}$/.test(j.date))) continue;
+    const key = j.engineer + "|" + j.date;
+    (groups[key] = groups[key] || []).push(j);
+  }
+  for (const key of Object.keys(groups)) {
+    const grp = groups[key];
+    if (grp.length < 2) continue;
+    for (const j of grp) j._c = await coordsForJob(env, tid, j);
+    const startMins = grp.map((j) => j.startTime).filter(Boolean).map(hmToMin).sort((a, b) => a - b);
+    let cur = startMins.length ? startMins[0] : 8 * 60;
+    const ordered = [], pool = grp.slice();
+    let from = HQ_COORD;
+    while (pool.length) {
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const d = pool[i]._c ? haversineMi2(from, pool[i]._c) : 1e6 + i;
+        if (d < bd) {
+          bd = d;
+          bi = i;
+        }
+      }
+      const nx = pool.splice(bi, 1)[0];
+      ordered.push(nx);
+      if (nx._c) from = nx._c;
+    }
+    let prev = null, prevC = HQ_COORD;
+    for (const j of ordered) {
+      if (prev) cur = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + travelMin(prevC, j._c || prevC)) / 5) * 5;
+      j.startTime = minToHm(cur);
+      prev = j;
+      prevC = j._c || prevC;
+    }
+    grp.forEach((j) => {
+      delete j._c;
+    });
+  }
+}
+function dueSummary(dueJson) {
+  let due = {};
+  try {
+    due = JSON.parse(dueJson || "{}");
+  } catch {
+  }
+  const t0 = Date.parse(londonToday() + "T12:00:00Z");
+  const out = [];
+  for (const [type, date] of Object.entries(due || {})) {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) continue;
+    const days = Math.round((Date.parse(date + "T12:00:00Z") - t0) / 864e5);
+    out.push({ type, date, daysUntil: days, state: days < 0 ? "OVERDUE" : days <= 30 ? "due soon" : "ok" });
+  }
+  return out;
+}
+async function toolFindSite(env, tid, query) {
+  const q = String(query || "").trim();
+  if (!q) return { count: 0, sites: [] };
+  const like = "%" + q.replace(/[%_]/g, "") + "%";
+  const num2 = q.replace(/\D/g, "");
+  const binds = [tid, like, like];
+  let sql = "SELECT client, site_number, site_name, postcode, data FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ?";
+  if (num2) {
+    sql += " OR site_number IN (?,?,?)";
+    binds.push(num2, num2.padStart(4, "0"), String(Number(num2) || ""));
+  }
+  sql += ") ORDER BY length(site_name) LIMIT 10";
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  const sites = (results || []).map((r) => {
+    let d = {};
+    try {
+      d = JSON.parse(r.data || "{}");
+    } catch {
+    }
+    return { number: r.site_number, name: r.site_name, type: r.client, postcode: r.postcode || d.postcode || "", lat: d.lat, lon: d.lon != null ? d.lon : d.lng, telephone: d.telephone || "" };
+  });
+  return { count: sites.length, sites };
+}
+async function toolFindCompliance(env, tid, caps2, query, scheme) {
+  if (!caps2.compliance) return { denied: true, message: "You don't have Compliance access." };
+  const term = String(query || "").trim().toLowerCase();
+  const wantDue = /overdue|expired|outstanding|due/.test(term);
+  const binds = [tid];
+  let sql = "SELECT scheme, code, category, name, postcode, due, site_number FROM compliance_stores WHERE tenant_id=? AND active=1";
+  if (scheme) {
+    sql += " AND scheme=?";
+    binds.push(String(scheme).toLowerCase());
+  }
+  const bare = term.replace(/overdue|expired|outstanding|due|for|the|at|store|site/g, "").trim();
+  if (bare) {
+    const like = "%" + bare.replace(/[%_]/g, "") + "%";
+    const num2 = bare.replace(/\D/g, "");
+    sql += " AND (lower(code) LIKE ? OR lower(name) LIKE ?";
+    binds.push(like, like);
+    if (num2) {
+      sql += " OR code IN (?,?,?)";
+      binds.push(num2, num2.padStart(4, "0"), String(Number(num2) || ""));
+    }
+    sql += ")";
+  }
+  sql += " LIMIT 500";
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  const stores = [];
+  for (const r of results || []) {
+    const items = dueSummary(r.due);
+    if (wantDue && !items.some((i) => i.state !== "ok")) continue;
+    let nm = r.name;
+    if (!nm && r.site_number) {
+      try {
+        const s = await env.DB.prepare("SELECT site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, r.site_number).first();
+        if (s) nm = s.site_name;
+      } catch {
+      }
+    }
+    stores.push({ scheme: r.scheme, code: r.code, name: nm || r.code, category: r.category || "", postcode: r.postcode || "", due: items });
+    if (stores.length >= 25) break;
+  }
+  return { count: stores.length, stores };
+}
+async function toolListEngineers(env, tid) {
+  const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+  const engineers = (results || []).filter((u) => {
+    let p = {};
+    try {
+      p = JSON.parse(u.profile || "{}");
+    } catch {
+    }
+    return String(p.staffType || "").toLowerCase() === "field";
+  }).map((u) => ({ name: (u.first_name + " " + u.last_name).trim(), username: u.username }));
+  return { count: engineers.length, engineers };
+}
+async function toolFindVehicle(env, tid, caps2, query) {
+  if (!caps2.vehicles) return { denied: true, message: "You don't have Vehicles access." };
+  const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
+  try {
+    const { results } = await env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND (reg LIKE ? OR make LIKE ? OR model LIKE ?) LIMIT 12").bind(tid, like, like, like).all().catch(() => env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=? AND reg LIKE ? LIMIT 12").bind(tid, like).all());
+    const vehicles = (results || []).map((r) => ({ reg: r.reg, make: r.make, model: r.model, motDue: r.mot_due, taxDue: r.tax_due, nextService: r.next_service }));
+    return { count: vehicles.length, vehicles };
+  } catch {
+    return { error: "vehicle lookup failed" };
+  }
+}
+async function handle29(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
+  const headers = corsHeaders(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId, me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  const fullAccess = perms.FullAccess === "Yes";
+  const office = fullAccess || await isOfficeUser(env, tid, me);
+  if (!office) return error("The job assistant is for office staff.", 403, env, request);
+  const caps2 = {
+    sla: fullAccess || perms.SLA === "Yes" || perms.SLAAdmin === "Yes",
+    compliance: fullAccess || perms.Compliance === "Yes",
+    vehicles: fullAccess || perms.Vehicles === "Yes"
+  };
+  if (sub === "/jobrules" && method === "GET") {
+    const g = await getRules2(env, tid);
+    return json({ ok: true, rules: g.rules || "", chatModes: g.chatModes || "", log: g.log || [], canEdit: fullAccess }, {}, env, request);
+  }
+  if (sub === "/jobrules" && method === "POST") {
+    if (!fullAccess) return error("Only Full-Access users can edit the rules.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const g = await getRules2(env, tid);
+    g.rules = String(b.rules || "").slice(0, 2e4);
+    g.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (b.logNote) {
+      g.log = g.log || [];
+      g.log.push({ q: "Rule edit", a: String(b.logNote).slice(0, 300), at: g.updatedAt, by: me });
+      g.log = g.log.slice(-200);
+    }
+    await saveRules2(env, tid, g);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/assistant" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const message = String(b.message || "").slice(0, 4e3);
+    if (!message) return error("Say what you'd like me to do.", 400, env, request);
+    const g = await getRules2(env, tid);
+    let engNames = [];
+    try {
+      const { results } = await env.DB.prepare("SELECT first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+      engNames = (results || []).filter((u) => {
+        let p = {};
+        try {
+          p = JSON.parse(u.profile || "{}");
+        } catch {
+        }
+        return String(p.staffType || "").toLowerCase() === "field";
+      }).map((u) => (u.first_name + " " + u.last_name).trim()).filter(Boolean);
+    } catch {
+    }
+    let cats = [];
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first();
+      if (row && row.value) cats = (JSON.parse(row.value) || []).map((c) => c && c.name).filter(Boolean);
+    } catch {
+    }
+    const tools = [
+      { name: "find_jobs", description: "Search the LIVE job board for existing jobs \u2014 by reference/incident number, site name or store number, words from the description, an engineer's name, or a status/category. ALWAYS use this when the office refers to jobs that already exist. Returns matching jobs with id, ref, site, status, current engineer and scheduled time.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "find_site", description: "Look up a SITE / store in the register \u2014 by name, store number or postcode. Returns number, name, type/customer, postcode and coordinates. Use it to answer questions about a site or to get a site's details.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "find_compliance", description: "Look up COMPLIANCE certificate due dates for a store (EICR/5-year, EM, PAT, gas, etc.) or list what's overdue/due-soon. Query a store number/name, or words like 'overdue'. Optionally set scheme (coop/fareham/chapplins/projects). Returns per-type due dates with OVERDUE/due-soon flags.", input_schema: { type: "object", properties: { query: { type: "string" }, scheme: { type: "string" } }, required: ["query"] } },
+      { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
+      { name: "find_vehicle", description: "Look up a fleet VEHICLE by registration, make or model. Returns reg, make/model and MOT/tax/service due dates.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "ask", description: "Ask the office ONE clarifying question \u2014 only when something genuinely can't be found or is truly ambiguous. Never ask for details you can look up with a find_ tool first.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
+      { name: "reply", description: "Answer the office in plain text \u2014 use this to ANSWER a question after looking things up (e.g. compliance due dates, a site's details, what's on the board). Also for Full-Access general chat.", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }
+    ];
+    if (caps2.sla) {
+      tools.push({ name: "assign_jobs", description: "Assign and/or schedule one or more EXISTING jobs to an engineer (found with find_jobs). Use for 'assign X to Y', 'give these to Z tomorrow', 'move to Thursday'.", input_schema: { type: "object", properties: {
+        summary: { type: "string" },
+        assignments: { type: "array", items: { type: "object", properties: {
+          jobId: { type: "string", description: "the job id from find_jobs (preferred)" },
+          jobRef: { type: "string", description: "the reference the office typed, if you don't have the id" },
+          engineer: { type: "string", description: "engineer name" },
+          date: { type: "string", description: "today / tomorrow / a weekday / YYYY-MM-DD, or empty to leave the date as-is" },
+          startTime: { type: "string", description: "HH:MM 24h, or empty" },
+          durationMinutes: { type: "number" }
+        }, required: [] } }
+      }, required: ["assignments"] } });
+      tools.push({ name: "draft_jobs", description: "Propose brand-NEW jobs to create (only for work not already on the board). A preview the office confirms.", input_schema: { type: "object", properties: {
+        summary: { type: "string", description: "one short sentence describing what you're proposing" },
+        jobs: { type: "array", items: { type: "object", properties: {
+          jobType: { type: "string", enum: Object.keys(JOB_TYPES), description: "best guess; use reactive if unsure" },
+          site: { type: "string", description: "store number or site name" },
+          engineer: { type: "string", description: "engineer name, or empty if not given" },
+          date: { type: "string", description: "today / tomorrow / a weekday / YYYY-MM-DD, or empty" },
+          startTime: { type: "string", description: "HH:MM 24h, or empty" },
+          durationMinutes: { type: "number" },
+          priority: { type: "string", description: "e.g. Priority 1..4, or empty" },
+          title: { type: "string", description: "short reference/title, or empty to use the site" },
+          description: { type: "string" }
+        }, required: ["site", "description"] } }
+      }, required: ["jobs"] } });
+    }
+    if (fullAccess) {
+      tools.push({ name: "set_rules", description: "Propose a full replacement of the house rules (Full-Access only). Return the COMPLETE new rules text.", input_schema: { type: "object", properties: { rules: { type: "string" }, summary: { type: "string" } }, required: ["rules", "summary"] } });
+    }
+    const canDo = [];
+    if (caps2.sla) canDo.push("raise, assign and schedule jobs");
+    else canDo.push("look up jobs (read-only \u2014 you don't have permission to raise or change jobs)");
+    canDo.push("look up sites");
+    canDo.push(caps2.compliance ? "look up compliance due dates" : "compliance is NOT available to you (no permission)");
+    canDo.push(caps2.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
+    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
+    const messages = [];
+    for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
+      if (h && h.role && h.text) messages.push({ role: h.role === "user" ? "user" : "assistant", content: String(h.text).slice(0, 2e3) });
+    }
+    messages.push({ role: "user", content: message });
+    let t = null, ai = null;
+    for (let round = 0; round < 5; round++) {
+      ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
+      if (!ai.ok) return json({ ok: true, kind: "reply", text: "\u26A0\uFE0F " + ai.error }, {}, env, request);
+      const uses = (ai.content || []).filter((c) => c.type === "tool_use");
+      const READ = /* @__PURE__ */ new Set(["find_jobs", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+      const reads = uses.filter((c) => READ.has(c.name));
+      if (reads.length) {
+        messages.push({ role: "assistant", content: ai.content });
+        const out = [];
+        for (const u of uses) {
+          let data;
+          try {
+            if (u.name === "find_jobs") {
+              const f = await searchJobs2(env, tid, u.input.query || "");
+              data = { count: f.length, jobs: f };
+            } else if (u.name === "find_site") data = await toolFindSite(env, tid, u.input.query || "");
+            else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps2, u.input.query || "", u.input.scheme);
+            else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
+            else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps2, u.input.query || "");
+            else data = { note: "Use the lookup results above, then answer or propose." };
+          } catch (e) {
+            data = { error: String(e && e.message || e) };
+          }
+          out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(data).slice(0, 12e3) });
+        }
+        messages.push({ role: "user", content: out });
+        continue;
+      }
+      t = uses[0] || null;
+      break;
+    }
+    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "I didn't catch that \u2014 try again." }, {}, env, request);
+    if (t.name === "ask") return json({ ok: true, kind: "ask", question: t.input.question || "Could you clarify?" }, {}, env, request);
+    if (t.name === "reply") return json({ ok: true, kind: "reply", text: t.input.text || "" }, {}, env, request);
+    if (t.name === "set_rules") return json({ ok: true, kind: "rules", proposed: String(t.input.rules || "").slice(0, 2e4), summary: t.input.summary || "Updated rules" }, {}, env, request);
+    if (t.name === "assign_jobs") {
+      const list = Array.isArray(t.input.assignments) ? t.input.assignments.slice(0, 12) : [];
+      const jobs = [], problems = [];
+      for (const a of list) {
+        const jt = await resolveJobTarget(env, tid, a);
+        if (!jt.ok) {
+          problems.push(jt.ambiguous ? `Which job did you mean for "${a.jobRef || a.jobId}"? (${jt.ambiguous.join("; ")})` : `I couldn't find a job matching "${a.jobRef || a.jobId || "(blank)"}".`);
+          continue;
+        }
+        const job = jt.job;
+        let engUser = null, engName = "";
+        if (a.engineer && String(a.engineer).trim()) {
+          const en = await resolveEngineer(env, tid, a.engineer);
+          if (!en.ok) {
+            problems.push(en.ambiguous ? `Which "${a.engineer}"? (${en.ambiguous.join(", ")})` : `I couldn't find an engineer called "${a.engineer}".`);
+            continue;
+          }
+          engUser = en.username;
+          engName = en.name;
+        } else {
+          problems.push(`Who should ${job.ref} go to?`);
+          continue;
+        }
+        const date = resolveDate(a.date);
+        const warns = [];
+        if (job.engineers && job.engineers.length && !job.engineers.map(String).map((s) => s.toLowerCase()).includes(engUser.toLowerCase()))
+          warns.push(`currently ${job.engineers.join(", ")}`);
+        if (FINISHED.test(job.status)) warns.push(`this job is ${job.status}`);
+        jobs.push({
+          action: "assign",
+          jobId: job.id,
+          siteCode: job.siteCode,
+          siteName: job.siteName,
+          engineer: engUser,
+          engineerName: engName,
+          date,
+          startTime: date ? a.startTime || "08:00" : "",
+          durationMinutes: Number(a.durationMinutes) > 0 ? Math.round(Number(a.durationMinutes)) : job.durationMinutes,
+          priority: job.priority,
+          title: job.ref,
+          description: job.description,
+          currentStatus: job.status,
+          currentEngineers: job.engineers,
+          typeLabel: "Assign job",
+          warn: warns
+        });
+      }
+      if (problems.length && !jobs.length) return json({ ok: true, kind: "ask", question: problems.join("\n") }, {}, env, request);
+      await sequenceDay(env, tid, jobs);
+      return json({ ok: true, kind: "preview", summary: t.input.summary || "", jobs, warnings: problems }, {}, env, request);
+    }
+    if (t.name === "draft_jobs") {
+      const drafts = Array.isArray(t.input.jobs) ? t.input.jobs.slice(0, 12) : [];
+      const jobs = [], problems = [];
+      for (const d of drafts) {
+        const site = await resolveSite2(env, tid, d.site);
+        if (!site.ok) {
+          problems.push(site.ambiguous ? `Which site did you mean for "${d.site}"? (${site.ambiguous.slice(0, 5).join("; ")})` : `I couldn't find a site matching "${d.site}".`);
+          continue;
+        }
+        const jobType = d.jobType || "reactive";
+        let engUser = null, engName = "";
+        if (d.engineer && String(d.engineer).trim()) {
+          const en = await resolveEngineer(env, tid, d.engineer);
+          if (!en.ok) {
+            problems.push(en.ambiguous ? `Which "${d.engineer}"? (${en.ambiguous.join(", ")})` : `I couldn't find an engineer called "${d.engineer}".`);
+            continue;
+          }
+          engUser = en.username;
+          engName = en.name;
+        } else {
+          problems.push(`Who should do the ${JOB_TYPES[jobType] || "job"} at ${site.name}?`);
+          continue;
+        }
+        const date = resolveDate(d.date);
+        const empat = jobType === "empat";
+        const dur = Number(d.durationMinutes) > 0 ? Math.round(Number(d.durationMinutes)) : empat ? 180 : jobType === "reactive" ? 90 : 120;
+        const desc = String(d.description || (empat ? "Carry out 3-hour EM drain-down test and PAT testing." : "")).slice(0, 2e3);
+        jobs.push({
+          action: "create",
+          jobType,
+          siteCode: site.code,
+          siteName: site.name,
+          postcode: site.postcode,
+          address: site.address,
+          lat: site.lat,
+          lon: site.lon,
+          storeType: site.storeType,
+          sharepointURL: site.sharepointURL,
+          telephone: site.telephone,
+          engineer: engUser,
+          engineerName: engName,
+          date,
+          startTime: date ? d.startTime || "09:00" : "",
+          durationMinutes: dur,
+          priority: empat || jobType === "electrical" ? d.priority || "Priority 4" : d.priority || "",
+          title: d.title || site.name,
+          description: desc,
+          emTest: empat,
+          pat: empat,
+          electrical: jobType === "electrical",
+          firestopping: jobType === "firestop",
+          typeLabel: JOB_TYPES[jobType] || jobType
+        });
+      }
+      if (problems.length && !jobs.length) return json({ ok: true, kind: "ask", question: problems.join("\n") }, {}, env, request);
+      await sequenceDay(env, tid, jobs);
+      return json({ ok: true, kind: "preview", summary: t.input.summary || "", jobs, warnings: problems }, {}, env, request);
+    }
+    return json({ ok: true, kind: "reply", text: ai.text || "" }, {}, env, request);
+  }
+  if (sub === "/assistant/create" && method === "POST") {
+    if (!caps2.sla) return error("You don't have permission to raise or change jobs.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const jobs = Array.isArray(b.jobs) ? b.jobs.slice(0, 12) : [];
+    if (!jobs.length) return error("No jobs to create.", 400, env, request);
+    const today = londonToday();
+    const created = [];
+    for (const j of jobs) {
+      if (!j || !j.engineer) continue;
+      const date = j.date && /^\d{4}-\d{2}-\d{2}$/.test(j.date) ? j.date : null;
+      const scheduledAt = date ? londonISO(date, j.startTime || (j.action === "assign" ? "08:00" : "09:00")) : null;
+      const release = !date || date <= today ? { mode: "now" } : { mode: "dayBefore", hour: 17 };
+      let payload;
+      if (j.action === "assign") {
+        if (!j.jobId) continue;
+        payload = {
+          id: String(j.jobId),
+          assignedEngineers: [j.engineer],
+          scheduledAt: scheduledAt || void 0,
+          durationMinutes: Number(j.durationMinutes) || void 0,
+          release,
+          changedBy: me + " (assistant)"
+        };
+      } else {
+        if (!j.siteCode) continue;
+        payload = {
+          reference: crypto.randomUUID(),
+          helpdeskRef: String(j.title || j.siteName || j.siteCode),
+          description: String(j.description || ""),
+          siteCode: String(j.siteCode),
+          siteName: String(j.siteName || ""),
+          address: String(j.address || ""),
+          postcode: String(j.postcode || ""),
+          telephone: String(j.telephone || ""),
+          lat: j.lat,
+          lon: j.lon,
+          storeType: String(j.storeType || ""),
+          sharepointURL: String(j.sharepointURL || ""),
+          assignedEngineers: [j.engineer],
+          status: "Scheduled",
+          priority: String(j.priority || ""),
+          scheduledAt,
+          durationMinutes: Number(j.durationMinutes) || void 0,
+          emTest: !!j.emTest,
+          pat: !!j.pat,
+          electrical: !!j.electrical,
+          firestopping: !!j.firestopping,
+          workArea: j.emTest || j.electrical ? "electrical" : void 0,
+          release,
+          changedBy: me + " (assistant)"
+        };
+      }
+      try {
+        const job = await createOrUpdateJobFromPayload(env, tid, payload);
+        ctx?.waitUntil(reconcileRelease(env, tid, job).catch(() => {
+        }));
+        created.push({ id: job.id, ref: job.helpdeskRef, site: job.siteName, engineer: j.engineerName || j.engineer, date, action: j.action || "create" });
+      } catch (e) {
+        created.push({ error: String(e && e.message || e), site: j.siteName || j.title });
+      }
+    }
+    const okc = created.filter((c) => !c.error);
+    const res = json({ ok: true, created }, {}, env, request);
+    try {
+      res.headers.set("X-Audit-Note", encodeURIComponent(`AI assistant: ` + okc.map((c) => `${c.action === "assign" ? "assigned" : "created"} ${c.ref} \u2192 ${c.engineer}`).join(", ")));
+    } catch {
+    }
+    return res;
+  }
+  return error("Unknown assistant route: " + sub, 404, env, request);
+}
+
 // src/routes/cctv.js
 init_http();
 init_auth();
@@ -26496,7 +27772,7 @@ function publicSite(s) {
     cameras: (s.cameras || []).map((c) => ({ id: c.id, name: c.name, ch: c.ch }))
   };
 }
-async function handle29(request, env, ctx, url, sess) {
+async function handle30(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -27013,7 +28289,7 @@ function shapeTask(t) {
     createdBy: t.created_by || ""
   };
 }
-async function handle30(request, env, ctx, url, sess) {
+async function handle31(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tid = sess.tenantId;
   const me = sess.user.username;
@@ -28122,8 +29398,33 @@ function monthYY(date) {
   const x = isNaN(d) ? /* @__PURE__ */ new Date() : d;
   return String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getFullYear()).slice(-2);
 }
+async function prevCertNumberForStore(env, tid, code, type) {
+  const c4 = padCode(code);
+  try {
+    const row = await env.DB.prepare(
+      "SELECT cert_number FROM certificates WHERE tenant_id=? AND site_code=? AND type=? AND cert_number IS NOT NULL AND cert_number!='' ORDER BY COALESCE(finalised_at,updated_at) DESC LIMIT 1"
+    ).bind(tid, c4, type).first();
+    if (row && row.cert_number) {
+      const m = String(row.cert_number).match(/(\d{3,5})/);
+      if (m) return m[1];
+    }
+  } catch {
+  }
+  try {
+    const key = await latestCertR2Key(env, tid, c4, type);
+    if (key) {
+      const name = key.split("/").pop() || "";
+      const m = name.match(/_(\d{3,5})[-.](?:DEC|JAN)?\d{2}[A-Za-z]?_?\.pdf$/i);
+      if (m) return m[1];
+    }
+  } catch {
+  }
+  return "";
+}
 async function suggestNumber(env, tid, code, type, opts = {}) {
   if (type === "pat") {
+    const prev = await prevCertNumberForStore(env, tid, code, "pat");
+    if (prev) return String(prev).padStart(4, "0") + "-" + yy();
     const n = await nextPatNumber(env, tid);
     return String(n).padStart(4, "0") + "-" + yy();
   }
@@ -28153,7 +29454,7 @@ function shapeRow(cert) {
     ...d
   };
 }
-async function handle31(request, env, ctx, url, sess) {
+async function handle32(request, env, ctx, url, sess) {
   if (request.method === "GET" && url.pathname === "/certs/photo") {
     const key = url.searchParams.get("key") || "";
     if (!key.startsWith("certremedial/")) return new Response("Bad key", { status: 400 });
@@ -29453,7 +30754,7 @@ async function anthropicStructured(env, { system, userContent, schema, toolName,
   if (!block?.input) return { ok: false, code: 422, error: "The AI didn't return a usable result." };
   return { ok: true, input: block.input };
 }
-async function handle32(request, env, ctx, url) {
+async function handle33(request, env, ctx, url) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -30223,7 +31524,7 @@ function sanitiseVisible(v) {
   }
   return out;
 }
-async function handle33(request, env, ctx, url, sess) {
+async function handle34(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   const path = url.pathname;
@@ -30333,7 +31634,7 @@ async function handle33(request, env, ctx, url, sess) {
         `INSERT OR IGNORE INTO compliance_stores
           (tenant_id, scheme, code, name, site_number, active, due, meta, updated_at)
           VALUES (?, 'projects', ?, ?, ?, 1, '{}', '{}', ?)`
-      ).bind(tenantId, number, name, number, now).run();
+      ).bind(tenantId, number, name, siteNumber, now).run();
     } catch {
     }
     const row = await getRow(id);
@@ -31272,7 +32573,7 @@ async function maybeAlert(env, tid, snapshot2) {
     console.error("health alert:", e && e.message);
   }
 }
-async function handle34(request, env, ctx, url, sess) {
+async function handle35(request, env, ctx, url, sess) {
   if (url.pathname === "/health/notify" && request.method.toUpperCase() === "POST") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return json3({ ok: false, error: "not configured" }, 503, env, request);
@@ -31524,7 +32825,7 @@ function sanitiseWindows(arr) {
     to: toMin2(w.to) != null ? w.to : "23:59"
   })).slice(0, 14);
 }
-async function handle35(request, env, ctx, url, sess) {
+async function handle36(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -31796,7 +33097,7 @@ async function loadMap(db) {
 async function saveMap(db, m) {
   await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, KEY2(db.tenantId), JSON.stringify(m)).run();
 }
-async function handle36(request, env, ctx, url, sess) {
+async function handle37(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -31983,7 +33284,7 @@ function mapStatus(map, name) {
   const done = /complete|closed|done|invoic|finish/i.test(name || "");
   return { portal: done ? "Complete" : "Pending", done };
 }
-async function handle37(request, env, ctx, url, sess) {
+async function handle38(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -32285,7 +33586,7 @@ init_http();
 init_auth();
 init_tenantdb();
 init_push();
-async function jobById(env, tid, id) {
+async function jobById2(env, tid, id) {
   try {
     const row = await tenantDB(env, tid).prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first();
     return row && row.data ? JSON.parse(row.data) : null;
@@ -32301,7 +33602,7 @@ async function requireCommsAdmin(env, request) {
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle38(request, env, ctx, url, sess) {
+async function handle39(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -32325,7 +33626,7 @@ async function handle38(request, env, ctx, url, sess) {
     const statusKey = b.status || "Scheduled";
     const tpl = { ...cfg.statuses[statusKey] || defaultConfig().statuses.Scheduled, companyTel: cfg.companyTel };
     const statusDef = STATUS_DEFS.find((s) => s.key === statusKey) || { key: statusKey };
-    const job = b.jobId && await jobById(env, tid, b.jobId) || {
+    const job = b.jobId && await jobById2(env, tid, b.jobId) || {
       id: "PREVIEW",
       helpdeskRef: "0331 Camberley, Frimley Road",
       siteName: "Camberley, Frimley Road",
@@ -32366,7 +33667,7 @@ async function handle38(request, env, ctx, url, sess) {
     const { jobId, exp, sig } = b;
     if (!jobId || !await verifyResched(env, jobId, exp, sig))
       return error("This link has expired or is invalid.", 403, env, request);
-    const job = await jobById(env, tid, jobId);
+    const job = await jobById2(env, tid, jobId);
     if (!job) return error("Job not found.", 404, env, request);
     const cfg = await getStatusEmailConfig(env, tid);
     return json({
@@ -32386,7 +33687,7 @@ async function handle38(request, env, ctx, url, sess) {
     const { jobId, exp, sig } = b;
     if (!jobId || !await verifyResched(env, jobId, exp, sig))
       return error("This link has expired or is invalid.", 403, env, request);
-    const job = await jobById(env, tid, jobId);
+    const job = await jobById2(env, tid, jobId);
     if (!job) return error("Job not found.", 404, env, request);
     await ensureReschedTable(env);
     const note = String(b.note || "").slice(0, 2e3);
@@ -32440,7 +33741,7 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle6],
   ["*", "/upload-asset-thumb", handle6],
   ["*", "/delete-asset-image", handle6],
-  ["*", "/sla/workever", handle37],
+  ["*", "/sla/workever", handle38],
   // Workever sync (longest prefix wins over /sla)
   ["*", "/sla", handle8],
   ["*", "/stats", handle18],
@@ -32460,6 +33761,8 @@ var ROUTES = [
   // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
+  ["*", "/ai", handle29],
+  // AI job assistant (draft → preview → create)
   ["*", "/get-sites", handle10],
   ["*", "/add-site", handle10],
   ["*", "/update-site", handle10],
@@ -32507,27 +33810,27 @@ var ROUTES = [
   // weekly van checks (form, grid, deadline badges)
   ["*", "/po", handle28],
   // Purchase Orders (in-portal; reads/writes PO_DB). NB /po-config above wins by longest-prefix.
-  ["*", "/cctv", handle29],
+  ["*", "/cctv", handle30],
   // CCTV Wall: DVR site config + snapshot proxy
-  ["*", "/tasks", handle30],
+  ["*", "/tasks", handle31],
   // recurring admin task list (deadlines, auto-complete, per-user stat)
-  ["*", "/certs", handle31],
+  ["*", "/certs", handle32],
   // portal-native EM/PAT certificates (draft → office review → file to compliance)
-  ["*", "/prog", handle32],
+  ["*", "/prog", handle33],
   // job programmes (builder, revisions, client share links)
-  ["*", "/projects", handle33],
+  ["*", "/projects", handle34],
   // Projects: list (longest prefix wins over /project)
-  ["*", "/project", handle33],
+  ["*", "/project", handle34],
   // Projects: create/get/update/link/todo/docs
-  ["*", "/health/", handle34],
+  ["*", "/health/", handle35],
   // self-monitoring watchdog (/health/status, /health/events, /health/run). NB bare /health is the liveness check above.
-  ["*", "/comms", handle38],
+  ["*", "/comms", handle39],
   // customer status-email config + reschedule inbox (admin)
-  ["*", "/customer", handle38],
+  ["*", "/customer", handle39],
   // public: customer reschedule flow (token-verified)
-  ["*", "/tuya", handle35],
+  ["*", "/tuya", handle36],
   // yard gate: Tuya Cloud open command + gate-open state
-  ["*", "/fra", handle36]
+  ["*", "/fra", handle37]
   // FRA works tracker: office follow-up disposition + quote copy
   // Excluded for now (separate / later systems):
   // Hours/Timesheets, Labour Planning, Check-in/out, Projects.
@@ -32629,6 +33932,7 @@ var worker = {
       ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
       ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
       ctx.waitUntil(sweepTaskReminders(env).catch((e) => console.error("scheduled task reminder:", e)));
+      ctx.waitUntil(sweepTimesheetReminders(env).catch((e) => console.error("scheduled timesheet reminder:", e)));
       if (env.SITELOG_DB) ctx.waitUntil(sweepAutoClose(env).catch((e) => console.error("scheduled sitelog auto-close:", e)));
     }
   },

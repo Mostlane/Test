@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="/portal-config.js?v=26"></script>
+  <script src="/portal-config.js?v=27"></script>
   <link rel="stylesheet" href="/portal.css?v=1">
   <meta charset="UTF-8">
   <title>Mostlane • SLA Jobs</title>
@@ -128,6 +128,7 @@
     .noalloc{color:#dc2626;font-weight:600;}
     .cam{font-size:13px;} /* 📷 badge for jobs with photos */
     .rel-badge{display:inline-block;margin-left:6px;font-size:11px;font-weight:700;color:#8a5a00;background:#fff6e5;border:1px solid #f0d9a6;border-radius:999px;padding:1px 8px;vertical-align:middle;}
+    .visit-tag{display:inline-block;margin-left:4px;font-size:11px;font-weight:700;color:#003466;background:#eef4fb;border:1px solid #cfe0f3;border-radius:999px;padding:1px 7px;vertical-align:middle;}
     .em-chip{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#003468;background:#eaf1fb;border:1px solid #c9dcf3;border-radius:999px;padding:1px 8px;vertical-align:middle;font-variant-numeric:tabular-nums;}
     .em-chip.em-done{color:#0a7d33;background:#e9f8ef;border-color:#b7e3c6;}
     .arch-tag{display:inline-block;font-size:10px;font-weight:700;color:#475569;background:#eef2f7;border:1px solid #d7dee7;border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;}
@@ -241,6 +242,7 @@
       </div>
       <div class="header-right">
         <a href="sla-scheduler.html" class="btn">🗓️ Scheduler</a>
+        <button type="button" id="askAiBtn" class="btn" style="background:#0b5cab;color:#fff;border-color:#0b5cab" title="Ask the AI assistant to raise a job">⚡ Ask AI</button>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
         <div class="toolwrap">
           <button type="button" id="toolsBtn" class="btn" aria-haspopup="true" aria-expanded="false">🛠 Tools ▾</button>
@@ -751,6 +753,10 @@ function render(){
   const groupTag = j => (j.groupId && groupCounts[j.groupId] > 1)
     ? ` <span class="grp-tag" title="Multi-engineer job — each engineer works their own day independently">👥 ${esc(j.groupLabel||"")}/${groupCounts[j.groupId]}</span>`
     : "";
+  // Re-visit chain badge: this job is one of N visits raised against the same original.
+  const visitTag = j => (j.visitCount > 1)
+    ? ` <span class="visit-tag" title="One of ${j.visitCount} visits to this job — open the job to see them all">🔁 ${j.visitCount}</span>`
+    : "";
 
   for(const j of list){
     // The "Job" title should read "<ticket number> - <site>" (e.g.
@@ -785,7 +791,7 @@ function render(){
     tr.innerHTML = `
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
+        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`}${groupTag(j)}${visitTag(j)} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="statuspick" data-action="status" title="Click to change status"><span class="dot" style="background:${colour}"></span>${esc(j.status)} <span class="caret">▾</span></span>${j.releaseView ? ` <span class="rel-badge" title="Not yet visible to the engineer">${esc(j.releaseView.mode==="afterPrev"?"⛓ queued":("🕒 "+j.releaseView.label))}</span>` : ""}${emTimerChip(j)}</div>
       </td>
       <td class="nowrap">${isProjectJob(j) ? "<span class='muted'>—</span>" : prShort(j.priority)}</td>
@@ -813,7 +819,7 @@ function render(){
     card.dataset.jobId = j.id;
     card.innerHTML = `
       <div class="mjob-top">
-        ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
+        ${ref ? `<span class="ref">${ref}</span> ` : ""}${groupTag(j)}${visitTag(j)}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap">${isProjectJob(j) ? "" : prShort(j.priority)}</span>
       </div>
       <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
@@ -1486,6 +1492,192 @@ window.addEventListener("DOMContentLoaded", async () => {
 window.addEventListener("pageshow", e => {
   if(e.persisted && restoreFilters()) render();
 });
+</script>
+
+<!-- ⚡ AI job assistant ─────────────────────────────────────────────────── -->
+<style>
+#aiAsk{position:fixed;inset:0;background:rgba(0,20,40,.45);display:none;z-index:9000;align-items:flex-end;justify-content:center;}
+#aiAsk.on{display:flex;}
+#aiPanel{background:#fff;width:100%;max-width:640px;height:88vh;max-height:88vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -6px 30px rgba(0,0,0,.3);}
+@media(min-width:700px){#aiAsk{align-items:center;} #aiPanel{border-radius:16px;height:80vh;}}
+#aiHead{background:#0b3d68;color:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px;}
+#aiHead h3{margin:0;font-size:16px;flex:1;}
+#aiHead .sub{font-size:11px;opacity:.8;font-weight:400;display:block;margin-top:2px;}
+#aiHead button{background:transparent;border:0;color:#fff;font-size:20px;cursor:pointer;padding:2px 6px;}
+#aiLog{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;background:#f4f7fa;}
+.aibub{max-width:88%;margin:0 0 10px;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.4;white-space:pre-wrap;word-break:break-word;}
+.aibub.me{background:#0b5cab;color:#fff;margin-left:auto;border-bottom-right-radius:4px;}
+.aibub.ai{background:#fff;color:#12324e;border:1px solid #dbe6ef;border-bottom-left-radius:4px;}
+.aibub.sys{background:#fff3cd;color:#7a5b00;border:1px solid #ffe08a;font-size:13px;}
+.aijob{background:#fff;border:1px solid #cfe0ee;border-left:4px solid #0b5cab;border-radius:10px;padding:10px 12px;margin:0 0 8px;font-size:13px;}
+.aijob b{color:#0b3d68;}
+.aijob .row{margin:2px 0;color:#33556e;}
+.aiwarn{color:#b45309;font-size:12.5px;margin:4px 0;}
+.aiacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.aiacts button{border:0;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
+.aiacts .go{background:#1a8f4c;color:#fff;} .aiacts .no{background:#e6edf3;color:#33556e;}
+#aiInputRow{display:flex;gap:8px;padding:10px;border-top:1px solid #e2ecf3;background:#fff;align-items:flex-end;}
+#aiInput{flex:1;border:1px solid #cfd9e2;border-radius:10px;padding:10px;font:inherit;font-size:14px;resize:none;max-height:120px;}
+#aiSend{background:#0b5cab;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;}
+#aiSend:disabled{opacity:.5;}
+#aiRulesBtn{font-size:11px;background:rgba(255,255,255,.18);border-radius:8px;padding:4px 8px;}
+</style>
+<div id="aiAsk">
+  <div id="aiPanel">
+    <div id="aiHead">
+      <div style="flex:1"><h3>⚡ Job assistant</h3><span class="sub" id="aiTier"></span></div>
+      <button type="button" id="aiRulesBtn" style="display:none">✎ Rules</button>
+      <button type="button" id="aiClose" aria-label="Close">✕</button>
+    </div>
+    <div id="aiLog"></div>
+    <div id="aiInputRow">
+      <textarea id="aiInput" rows="1" placeholder="Ask anything — jobs, sites, compliance, vehicles — or raise/assign a job"></textarea>
+      <button type="button" id="aiSend">Send</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var box=$("aiAsk"), log=$("aiLog"), input=$("aiInput"), sendBtn=$("aiSend"), openBtn=$("askAiBtn"),
+      rulesBtn=$("aiRulesBtn"), tierEl=$("aiTier");
+  if(!openBtn) return;
+  var hist=[], full=false, greeted=false;
+  function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
+  function isFull(){ return String(perms().FullAccess||"").toLowerCase()==="yes"; }
+  function rich(t){ try{ return (window.MLUI&&MLUI.rich)?MLUI.rich(String(t)):esc(t); }catch(e){ return esc(t); } }
+  function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
+  function scroll(){ log.scrollTop=log.scrollHeight; }
+  function bubble(cls,html){ var d=document.createElement("div"); d.className="aibub "+cls; d.innerHTML=html; log.appendChild(d); scroll(); return d; }
+  function fmtDate(d){ if(!d) return "no date yet (set on the board)"; try{ return new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}); }catch(e){ return d; } }
+
+  function open(){
+    full=isFull();
+    tierEl.textContent = full ? "Full Access · relaxed chat — you can also tweak the rules"
+                              : "Ask me to raise or manage a job";
+    rulesBtn.style.display = full ? "" : "none";
+    box.classList.add("on");
+    if(!greeted){ greeted=true; bubble("ai", rich(full
+      ? "Hi — ask me anything across the portal (jobs, sites, compliance due dates, vehicles, engineers) or tell me a job to raise, assign or reschedule. I'll look it up and confirm before anything changes. You can also ask me to adjust the house rules."
+      : "Hi — ask me about jobs, sites, compliance or vehicles, or tell me a job to raise/assign. For example: **Raise an EM & PAT test for Ryan at Banwell 0372 tomorrow**, or **when is the EICR due at store 649?**")); }
+    setTimeout(function(){ input.focus(); }, 50);
+  }
+  function close(){ box.classList.remove("on"); }
+  openBtn.addEventListener("click", open);
+  $("aiClose").addEventListener("click", close);
+  box.addEventListener("click", function(e){ if(e.target===box) close(); });
+  input.addEventListener("input", function(){ input.style.height="auto"; input.style.height=Math.min(120,input.scrollHeight)+"px"; });
+  input.addEventListener("keydown", function(e){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); } });
+  sendBtn.addEventListener("click", send);
+
+  function busy(on){ sendBtn.disabled=on; sendBtn.textContent=on?"…":"Send"; }
+
+  async function send(){
+    var msg=input.value.trim(); if(!msg) return;
+    input.value=""; input.style.height="auto";
+    bubble("me", esc(msg));
+    var thinking=bubble("ai","<i style='opacity:.6'>thinking…</i>");
+    busy(true);
+    try{
+      var r=await authFetch("/ai/assistant",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:hist})});
+      var j=await r.json();
+      thinking.remove();
+      hist.push({role:"user",text:msg});
+      render(j);
+    }catch(e){ thinking.remove(); bubble("sys","⚠️ Couldn't reach the assistant. Try again."); }
+    busy(false);
+  }
+
+  function render(j){
+    if(!j||!j.ok){ bubble("sys","⚠️ "+((j&&j.error)||"Something went wrong.")); return; }
+    if(j.kind==="reply"||j.kind==="ask"){
+      var txt=j.kind==="ask"?j.question:j.text;
+      bubble("ai", rich(txt)); hist.push({role:"assistant",text:txt}); return;
+    }
+    if(j.kind==="rules"){
+      bubble("ai", rich("**Proposed rule change:** "+(j.summary||"")));
+      var d=bubble("ai","<pre style='white-space:pre-wrap;font:inherit;font-size:12.5px;max-height:200px;overflow:auto;margin:0'>"+esc(j.proposed)+"</pre>");
+      var acts=document.createElement("div"); acts.className="aiacts";
+      acts.innerHTML="<button class='go'>💾 Save these rules</button><button class='no'>Cancel</button>";
+      d.appendChild(acts);
+      acts.querySelector(".go").onclick=async function(){
+        acts.querySelector(".go").disabled=true;
+        try{ var r=await authFetch("/ai/jobrules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rules:j.proposed,logNote:j.summary})}); var res=await r.json();
+          if(res.ok){ acts.innerHTML="<span style='color:#1a8f4c;font-weight:600'>✓ Rules updated</span>"; } else acts.innerHTML="<span class='aiwarn'>Couldn't save.</span>";
+        }catch(e){ acts.innerHTML="<span class='aiwarn'>Couldn't save.</span>"; }
+      };
+      acts.querySelector(".no").onclick=function(){ acts.remove(); };
+      hist.push({role:"assistant",text:"(proposed a rule change)"}); return;
+    }
+    if(j.kind==="preview"){
+      var jobs=j.jobs||[];
+      if(!jobs.length){ bubble("sys","No jobs to create."); return; }
+      if(j.summary) bubble("ai", rich(j.summary));
+      var wrap=document.createElement("div"); wrap.className="aibub ai"; wrap.style.maxWidth="100%";
+      var htmlp="";
+      jobs.forEach(function(x){
+        var assign = x.action==="assign";
+        var head = assign ? ("🔁 <b>Assign</b> · "+esc(x.title||x.siteName||x.siteCode))
+                          : ("<b>"+esc(x.typeLabel||x.jobType)+"</b> · "+esc(x.siteCode)+" "+esc(x.siteName));
+        htmlp+="<div class='aijob'>"+head+
+          "<div class='row'>👷 "+esc(x.engineerName||x.engineer)+" &nbsp; 📅 "+esc(fmtDate(x.date))+(x.date?(" "+esc(x.startTime||"")):"")+
+          (x.durationMinutes?(" &nbsp; ⏱ "+esc(x.durationMinutes)+" min"):"")+(x.priority?(" &nbsp; 🏷 "+esc(x.priority)):"")+"</div>"+
+          (assign?("<div class='row' style='font-size:11.5px;color:#8593a0'>was: "+esc((x.currentEngineers&&x.currentEngineers.length?x.currentEngineers.join(", "):"unassigned"))+(x.currentStatus?(" · "+esc(x.currentStatus)):"")+"</div>"):"")+
+          (x.description?("<div class='row' style='font-size:12.5px;color:#55707f'>"+rich(x.description)+"</div>"):"")+
+          ((x.warn&&x.warn.length)?("<div class='aiwarn'>⚠️ "+x.warn.map(esc).join(" · ")+"</div>"):"")+
+          "</div>";
+      });
+      if((j.warnings||[]).length) htmlp+="<div class='aiwarn'>⚠️ "+j.warnings.map(esc).join("<br>")+"</div>";
+      wrap.innerHTML=htmlp;
+      var allAssign=jobs.every(function(x){return x.action==="assign";});
+      var verb=allAssign?"Assign":(jobs.some(function(x){return x.action==="assign";})?"Apply":"Create");
+      var acts=document.createElement("div"); acts.className="aiacts";
+      acts.innerHTML="<button class='go'>✓ "+verb+" "+jobs.length+" job"+(jobs.length>1?"s":"")+"</button><button class='no'>Discard</button>";
+      wrap.appendChild(acts); log.appendChild(wrap); scroll();
+      acts.querySelector(".go").onclick=async function(){
+        acts.querySelector(".go").disabled=true; acts.querySelector(".go").textContent="Creating…";
+        try{ var r=await authFetch("/ai/assistant/create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobs:jobs})}); var res=await r.json();
+          if(res.ok){
+            var okc=(res.created||[]).filter(function(c){return !c.error;});
+            var errc=(res.created||[]).filter(function(c){return c.error;});
+            acts.innerHTML="";
+            var done=document.createElement("div");
+            var vb=okc.every(function(c){return c.action==="assign";})?"Assigned":"Done —";
+            done.innerHTML="<span style='color:#1a8f4c;font-weight:600'>✓ "+vb+" "+okc.length+" job"+(okc.length!==1?"s":"")+".</span> "+
+              okc.map(function(c){return "<a href='job-view.html?jobId="+encodeURIComponent(c.id)+"' style='color:#0b5cab'>"+esc(c.ref)+"</a>";}).join(" · ")+
+              (errc.length?("<div class='aiwarn'>"+errc.length+" failed: "+errc.map(function(c){return esc(c.site+": "+c.error);}).join("; ")+"</div>"):"");
+            wrap.appendChild(done);
+            hist.push({role:"assistant",text:"(created "+okc.length+" job(s))"});
+            try{ if(typeof load==="function") load(); }catch(e){}
+          } else acts.innerHTML="<span class='aiwarn'>Couldn't create the jobs.</span>";
+        }catch(e){ acts.innerHTML="<span class='aiwarn'>Couldn't create the jobs.</span>"; }
+      };
+      acts.querySelector(".no").onclick=function(){ acts.remove(); bubble("ai","Okay, discarded. Tell me what to change."); hist.push({role:"assistant",text:"(draft discarded)"}); };
+      hist.push({role:"assistant",text:"(proposed "+jobs.length+" job draft(s) for confirmation)"});
+      return;
+    }
+    bubble("sys","Unexpected reply.");
+  }
+
+  // Rules editor (Full Access)
+  rulesBtn.addEventListener("click", async function(){
+    var r=await authFetch("/ai/jobrules"); var j=await r.json();
+    if(!j.ok||!j.canEdit){ bubble("sys","Rules are read-only for you."); return; }
+    var ov=document.createElement("div"); ov.style.cssText="position:fixed;inset:0;background:rgba(0,20,40,.5);z-index:9100;display:flex;align-items:center;justify-content:center;padding:14px;";
+    ov.innerHTML="<div style='background:#fff;border-radius:14px;max-width:680px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden'>"+
+      "<div style='background:#0b3d68;color:#fff;padding:12px 14px;font-weight:600'>House rules — the assistant follows these</div>"+
+      "<textarea id='aiRulesTA' style='flex:1;min-height:340px;border:0;padding:14px;font:inherit;font-size:13px;resize:none'></textarea>"+
+      "<div style='display:flex;gap:8px;padding:10px;border-top:1px solid #e2ecf3'><button id='aiRulesSave' style='background:#1a8f4c;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:600'>💾 Save</button><button id='aiRulesCancel' style='background:#e6edf3;border:0;border-radius:8px;padding:9px 16px'>Cancel</button></div></div>";
+    document.body.appendChild(ov);
+    ov.querySelector("#aiRulesTA").value=j.rules||"";
+    ov.querySelector("#aiRulesCancel").onclick=function(){ ov.remove(); };
+    ov.querySelector("#aiRulesSave").onclick=async function(){
+      var v=ov.querySelector("#aiRulesTA").value;
+      try{ var rr=await authFetch("/ai/jobrules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rules:v,logNote:"Manual edit"})}); var res=await rr.json();
+        if(res.ok){ ov.remove(); bubble("sys","✓ Rules saved."); } else alert("Couldn't save.");
+      }catch(e){ alert("Couldn't save."); }
+    };
+  });
+})();
 </script>
 </body>
 </html>

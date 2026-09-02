@@ -47,6 +47,7 @@ import * as costing from "./routes/costing.js";    // DONE  (site register, labo
 import * as compliance from "./routes/compliance.js"; // DONE (Southern Co-op compliance certs: R2 + D1, per store+type)
 import * as chapplins from "./routes/chapplins.js";   // DONE (Chapplins customer: site tenants current/previous + directory)
 import * as po from "./routes/po.js";              // DONE  (Purchase Orders — migrated in-portal; data still in PO_DB)
+import * as aiassist from "./routes/aiassist.js";  // DONE  (AI job assistant: plain-English → job draft preview → create)
 import * as cctv from "./routes/cctv.js";          // DONE  (CCTV Wall — DVR snapshot proxy)
 import * as tasks from "./routes/tasks.js";        // DONE  (recurring admin task list + auto-complete)
 import * as certs from "./routes/certs.js";        // DONE  (portal-native EM/PAT certificates: draft → office review → file to compliance)
@@ -59,6 +60,7 @@ import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reco
 import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
+import { sweepTimesheetReminders } from "./routes/timesheets.js"; // cron: timesheet deadline reminder
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -87,6 +89,7 @@ const ROUTES = [
   ["*", "/memos",      memos.handle],     // company memos (draft/send/sign)
   ["*", "/documents",  documents.handle], // signable documents (library → send → sign → filed to My Documents)
   ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
+  ["*", "/ai",         aiassist.handle],  // AI job assistant (draft → preview → create)
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
@@ -287,6 +290,8 @@ const worker = {
       ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
       // Daily task reminder — self-gates to ~08:00 London, deduped per day.
       ctx.waitUntil(sweepTaskReminders(env).catch(e => console.error("scheduled task reminder:", e)));
+      // Timesheet deadline reminder — self-gates to the ~3h before the deadline.
+      ctx.waitUntil(sweepTimesheetReminders(env).catch(e => console.error("scheduled timesheet reminder:", e)));
       // SiteLog auto-close of open visits (was the standalone worker's daily
       // cron). Idempotent — only closes prior-day still-open visits — so it's
       // safe running hourly and safe alongside the old worker's cron until the
