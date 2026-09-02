@@ -2211,8 +2211,12 @@ var PERMISSION_KEYS = [
   // job programmes: build/issue/share programmes of works
   "YardGate",
   // trigger the yard gate (Tuya) + see its open/closed state
-  "YardGateAnywhere"
+  "YardGateAnywhere",
   // exempt from the yard-gate geofence (operate from anywhere)
+  "EicrCheck",
+  // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
+  "Chapplins"
+  // the Chapplins customer area (directory + compliance chart)
 ];
 function isActiveStatus(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
@@ -26078,7 +26082,7 @@ async function canManage(env, tid, sess) {
   if (!sess) return false;
   try {
     const p = await permissionsFor(env, tid, sess.user.username);
-    return p.FullAccess === "Yes" || p.Compliance === "Yes" || p.SLAAdmin === "Yes";
+    return p.FullAccess === "Yes" || p.Chapplins === "Yes";
   } catch {
     return false;
   }

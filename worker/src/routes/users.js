@@ -458,6 +458,8 @@ const PERMISSION_KEYS = [
   "Programmes",      // job programmes: build/issue/share programmes of works
   "YardGate",        // trigger the yard gate (Tuya) + see its open/closed state
   "YardGateAnywhere",// exempt from the yard-gate geofence (operate from anywhere)
+  "EicrCheck",       // the standalone BS 7671 / EICR PDF-checking tool (independent of Compliance)
+  "Chapplins",       // the Chapplins customer area (directory + compliance chart)
 ];
 
 // A user counts as "active" (visible in pickers/lists) unless explicitly

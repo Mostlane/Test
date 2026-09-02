@@ -207,7 +207,7 @@
     // Gate: Compliance or Full Access.
     var perms = {};
     try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
-    var ok = perms.FullAccess === "Yes" || perms.Compliance === "Yes";
+    var ok = perms.FullAccess === "Yes" || perms.EicrCheck === "Yes";
     document.getElementById(ok ? "app" : "gate").classList.remove("hide");
     if (!ok) return;
 
