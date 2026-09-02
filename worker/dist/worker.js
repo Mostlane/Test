@@ -27133,6 +27133,112 @@ var JOB_TYPES = {
   electrical: "electrical test",
   firestop: "firestopping"
 };
+var HQ_COORD = { lat: 50.8607, lon: -1.261 };
+function haversineMi2(a, b) {
+  if (!a || !b) return null;
+  const R2 = 3958.8, tr = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * tr, dLon = (b.lon - a.lon) * tr;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * tr) * Math.cos(b.lat * tr) * Math.sin(dLon / 2) ** 2;
+  return 2 * R2 * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+var travelMin = (a, b) => {
+  const mi = haversineMi2(a, b);
+  return mi == null ? 30 : Math.max(10, Math.round(mi * 1.25 / 30 * 60 / 5) * 5);
+};
+var hmToMin = (s) => {
+  const [h, m] = String(s || "08:00").split(":").map((n) => parseInt(n, 10) || 0);
+  return h * 60 + m;
+};
+var minToHm = (t) => {
+  t = Math.max(0, Math.min(23 * 60 + 55, Math.round(t)));
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+};
+var _geoCache = /* @__PURE__ */ new Map();
+async function geocodePostcode2(pc) {
+  const key = String(pc || "").toUpperCase().replace(/\s+/g, "");
+  if (!key) return null;
+  if (_geoCache.has(key)) return _geoCache.get(key);
+  let c = null;
+  try {
+    const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(key));
+    if (r.ok) {
+      const j = await r.json();
+      const res = j && j.result;
+      if (res && Number.isFinite(res.latitude) && Number.isFinite(res.longitude)) c = { lat: res.latitude, lon: res.longitude };
+    }
+  } catch {
+  }
+  _geoCache.set(key, c);
+  return c;
+}
+async function coordsForJob(env, tid, j) {
+  const lat = Number(j.lat), lon = Number(j.lon != null ? j.lon : j.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+  let pc = j.postcode || "";
+  if (j.siteCode) {
+    try {
+      const code = String(j.siteCode);
+      const cands = [...new Set([code, code.padStart(4, "0"), String(Number(code) || "")].filter(Boolean))];
+      let r = null;
+      for (const c of cands) {
+        r = await env.DB.prepare("SELECT postcode, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, c).first();
+        if (r) break;
+      }
+      if (r) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        const la = Number(d.lat), lo = Number(d.lon != null ? d.lon : d.lng);
+        if (Number.isFinite(la) && Number.isFinite(lo)) return { lat: la, lon: lo };
+        pc = pc || r.postcode || d.postcode || "";
+      }
+    } catch {
+    }
+  }
+  return pc ? await geocodePostcode2(pc) : null;
+}
+async function sequenceDay(env, tid, jobs) {
+  const groups = {};
+  for (const j of jobs) {
+    if (!(j.date && /^\d{4}-\d{2}-\d{2}$/.test(j.date))) continue;
+    const key = j.engineer + "|" + j.date;
+    (groups[key] = groups[key] || []).push(j);
+  }
+  for (const key of Object.keys(groups)) {
+    const grp = groups[key];
+    if (grp.length < 2) continue;
+    for (const j of grp) j._c = await coordsForJob(env, tid, j);
+    const startMins = grp.map((j) => j.startTime).filter(Boolean).map(hmToMin).sort((a, b) => a - b);
+    let cur = startMins.length ? startMins[0] : 8 * 60;
+    const ordered = [], pool = grp.slice();
+    let from = HQ_COORD;
+    while (pool.length) {
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const d = pool[i]._c ? haversineMi2(from, pool[i]._c) : 1e6 + i;
+        if (d < bd) {
+          bd = d;
+          bi = i;
+        }
+      }
+      const nx = pool.splice(bi, 1)[0];
+      ordered.push(nx);
+      if (nx._c) from = nx._c;
+    }
+    let prev = null, prevC = HQ_COORD;
+    for (const j of ordered) {
+      if (prev) cur = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + travelMin(prevC, j._c || prevC)) / 5) * 5;
+      j.startTime = minToHm(cur);
+      prev = j;
+      prevC = j._c || prevC;
+    }
+    grp.forEach((j) => {
+      delete j._c;
+    });
+  }
+}
 async function handle29(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/ai(?=\/|$)/, "") || "/";
@@ -27293,6 +27399,7 @@ async function handle29(request, env, ctx, url, sess) {
         });
       }
       if (problems.length && !jobs.length) return json({ ok: true, kind: "ask", question: problems.join("\n") }, {}, env, request);
+      await sequenceDay(env, tid, jobs);
       return json({ ok: true, kind: "preview", summary: t.input.summary || "", jobs, warnings: problems }, {}, env, request);
     }
     if (t.name === "draft_jobs") {
@@ -27350,6 +27457,7 @@ async function handle29(request, env, ctx, url, sess) {
         });
       }
       if (problems.length && !jobs.length) return json({ ok: true, kind: "ask", question: problems.join("\n") }, {}, env, request);
+      await sequenceDay(env, tid, jobs);
       return json({ ok: true, kind: "preview", summary: t.input.summary || "", jobs, warnings: problems }, {}, env, request);
     }
     return json({ ok: true, kind: "reply", text: ai.text || "" }, {}, env, request);
