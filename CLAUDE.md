@@ -2540,18 +2540,19 @@ GET job returns `remedials` with `photoUrls` via `decorateRemedials`. Completion
 (multipart file+thumb+itemId → R2 `jobs/<id>/remedial/<itemId>/…`, returns the key)
 + **DELETE /sla/jobs/{id}/remedial-photo?key=**. **One-tap works job:** **POST
 /sla/jobs/{id}/create-works-job** (FullAccess|SLAAdmin) builds a NEW UNASSIGNED
-job at the same site. **It is a STANDARD reactive SLA job (Sep 2026 rework — NOT a
-site-audit job):** the chosen remedials are folded into a NUMBERED **description**
-(`1. [code] description …`), the engineer's fault photos are COPIED into
-`jobs/<newId>/photos/…` tagged **stage "Before"** (so they show in the normal photo
-grid), the site name is **resolved from the store code** (`resolveSiteMeta`, so it
-never reads "0657 - 0657" off an empty siteName), the reference defaults to the
-source ref, and **all four gates are ON** (`requiresRA/Signature/Photo/Note=true`).
-So it follows the exact same process + gates as any reactive job — full status set,
-RA prompt, completion photo/note/signature — with NO audit checklist. (Jamie: a
-remedial job "must follow the same process and gates".) `isAuditJob` is now only for
-deliberate site-audit jobs. **duration + material cost NOT carried** (pricing stays off
-the works job). **Which remedials to include is a PICKER (Sep 2026):** "Create works
+**site-audit** job at the same site — each remedial → an audit item (`text` =
+`[code] description`, the engineer's photos COPIED into `jobs/<newId>/audit/<item>/…`
+as the item's refPhotos), **duration + material cost NOT carried** (pricing stays off
+the works job). **Gates suited to an audit job (Sep 2026):** `requiresRA:true` (the
+engineer IS prompted for the RA before starting — electrical remedials), but
+`requiresSignature/Photo/Note:false` — completion is the CHECKLIST (each item
+photographed), NOT a separate signature/note/After-photo. `completionMissing`
+short-circuits to `auditMissing` on BOTH client + server, so the audit checklist is
+the only completion gate. The site name is **resolved from the store code**
+(`resolveSiteMeta`) so the job never reads "0657 - 0657" off an empty siteName, and
+the reference defaults to the source ref. (An audit job's RA lock DIMS the status grid
+until the RA is done — so a stuck RA looks like "no status boxes"; the real culprit was
+the `shrinkImage` photo hang, now fixed, which blocked adding the RA work-area photo.) **Which remedials to include is a PICKER (Sep 2026):** "Create works
 job" opens a modal listing every remedial with a checkbox — **C1/C2/FI pre-ticked,
 C3 + un-coded off but addable**; the chosen ids go up as **`itemIds`** on the POST
 (absent = all). Idempotent (`job.remedialsWorksJobId` links both ways;
