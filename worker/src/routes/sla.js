@@ -2407,6 +2407,7 @@ export async function handle(request, env, ctx, url, sess) {
               name: f.title || f.name || f.r2_key.split("/").pop(),
               at: f.uploaded_at, by: f.uploaded_by, size: 0,
               projectDoc: true,   // marker: engineers/office see it but can't delete via /site/doc-delete
+              fileId: f.id, projectId: proj.id,   // so an admin can rename it via /project/doc-update
             })));
           }
         }

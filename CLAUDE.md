@@ -2747,7 +2747,11 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   **engineer-job.html** — whose "Site documents" button navigates to
   site-folder — surfaces them too. A `projectDoc:true` marker on each row makes
   site-folder show a "· from project" hint and HIDE the Delete button (project
-  docs are managed on the project hub). Also: **project-hub.html's doc opener
+  docs are managed on the project hub). **Admin RENAME from the site folder (Sep
+  2026):** the /site/docs project-doc rows now also carry `fileId`+`projectId`, so
+  site-folder.html shows an admin **✏️** button on a project doc → `askDocRename`
+  prompt → POST /project/doc-update `{fileId,title}` → refresh (same rename as the
+  project hub, in-context). Also: **project-hub.html's doc opener
   was fixed** — it was calling `MLDocViewer.open(url, name)` (positional)
   instead of the object form docviewer expects, so the modal never sniffed the
   PDF; now passes `{url,fetchUrl,name,downloadUrl}` so PDFs render inline.
