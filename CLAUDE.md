@@ -4023,6 +4023,18 @@ files to this public repo.
 - Site images: sites.data JSON carries imageURL/_svAt/_noImagery flags.
 - Worker delivery: always give commit + line count + expected tail so a
   truncated paste is detectable. Chat-pasting the worker truncates — never.
+- **engineer-job.html `shrinkImage` must NEVER hang (Sep 2026).** The engineer
+  photo re-encoder returned a Promise that only resolved from `img.onload`/
+  `img.onerror` + `canvas.toBlob`. On iOS an `<img>` can silently stall decoding a
+  HEIC (neither `onload` nor `onerror` ever fires) and `toBlob` can fail to call
+  back under memory pressure — so the Promise never settled, `uploadPhotos`
+  awaited it forever, the photo never attached, and the RA's work-area shot was
+  never marked → **engineers reported "can't add a photo, can't complete the RA".**
+  Fix: `shrinkImage` now has a hard **8s timeout** that resolves(null) (caller
+  falls back to the original full-size file — uploads bigger but goes through), and
+  `uploadPhotos` fires **`ml-rapic` up-front the instant a file is chosen** (not
+  after the shrink), so the RA is satisfiable immediately regardless of encode
+  speed or signal. Any image-shrink Promise in the portal must always resolve.
 - **van-check.html answer buttons must read CFG LIVE, never a captured array.**
   The driver form's answer handlers were bound as `onPick(CFG.checklist||[], …)`
   at load — but `CFG` is fetched async, so at bind time it was null → an empty
