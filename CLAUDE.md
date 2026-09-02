@@ -2551,8 +2551,15 @@ short-circuits to `auditMissing` on BOTH client + server, so the audit checklist
 the only completion gate. The site name is **resolved from the store code**
 (`resolveSiteMeta`) so the job never reads "0657 - 0657" off an empty siteName, and
 the reference defaults to the source ref. (An audit job's RA lock DIMS the status grid
-until the RA is done — so a stuck RA looks like "no status boxes"; the real culprit was
-the `shrinkImage` photo hang, now fixed, which blocked adding the RA work-area photo.) **Which remedials to include is a PICKER (Sep 2026):** "Create works
+until the RA is done — so a stuck RA looks like "no status boxes".) **RA work-area photo
+on audit/cert/firestop/elec jobs (Sep 2026 — the real "photo upload unclickable" bug):**
+the RA modal's photo button always does `$("fileInput").click()`, but `#fileInput` AND
+its `change→uploadPhotos` handler were only rendered/wired inside the STANDARD-job branch
+(`if(!fs&&!au&&!cert&&!elec)`), so on an audit/remedial job the button hit a NULL element
+and did nothing — the RA could never be finished. Fixed: `#fileInput` is now rendered
+unconditionally and its change handler wired for every job type (`uploadPhotos` no-ops
+safely when there's no `#photos` grid). This, not the `shrinkImage` hang, was the remedial
+RA blocker. **Which remedials to include is a PICKER (Sep 2026):** "Create works
 job" opens a modal listing every remedial with a checkbox — **C1/C2/FI pre-ticked,
 C3 + un-coded off but addable**; the chosen ids go up as **`itemIds`** on the POST
 (absent = all). Idempotent (`job.remedialsWorksJobId` links both ways;
