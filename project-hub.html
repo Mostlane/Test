@@ -883,11 +883,18 @@
     }
     function wireDrop() {
       const dz = g("dropZone"); if (!dz) return;
-      const pick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.onchange = () => inp.files[0] && upload(inp.files[0]); inp.click(); };
+      // MULTI-file: pick or drop several at once — each is named + uploaded in turn.
+      // (Was files[0] only, so a multi-select silently uploaded just the first one.)
+      const pick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.multiple = true; inp.onchange = () => uploadMany(inp.files); inp.click(); };
       dz.onclick = pick;
       dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); };
       dz.ondragleave = () => dz.classList.remove("over");
-      dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); };
+      dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); uploadMany(e.dataTransfer.files); };
+    }
+    async function uploadMany(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      for (const f of files) { await upload(f); }   // each prompts for its own name (Cancel skips just that one)
     }
     // Ask for a friendly document name before saving. Pre-fills the file's own
     // base name UNLESS it looks auto-generated (a UUID / camera name), in which

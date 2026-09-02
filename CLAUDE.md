@@ -2669,7 +2669,10 @@ redirect stubs to projects-live; existing external docs were NOT migrated).
   arrived as UUIDs). Pre-fills the file's base name unless it looks auto-generated
   (UUID / IMG_ / long digits) → then blank so a name must be typed. Both upload
   paths (the Project Documents drop-zone `upload()` + the required-doc picker
-  `uploadDocFile()`) use it. Existing docs get a **✏️ Rename** button →
+  `uploadDocFile()`) use it. **Multi-file (Sep 2026):** the Project Documents
+  drop-zone now accepts MANY files at once (`uploadMany` loops, naming each) — it
+  was `files[0]` only, so a multi-select silently uploaded just the FIRST file
+  (why a batch upload showed only one or two saved). Existing docs get a **✏️ Rename** button →
   `askDocName` → POST /project/doc-update `{fileId,title}` (server already accepts
   `title`). **SiteLog** (edit rules+companies, re-applied to
   the geofence), **Job costing** (GET /costing/summary?site=<name> → labour+PO+
