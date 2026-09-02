@@ -260,18 +260,30 @@
   // grid never decodes full-res camera photos).
   function shrinkImage(file, maxDim, quality){
     return new Promise(function(resolve){
+      // ALWAYS resolve — never hang. On iOS an <img> can silently stall decoding a
+      // HEIC (onload/onerror never fire) and canvas.toBlob can fail to call back
+      // under memory pressure. Either would leave uploadPhotos awaiting forever, so
+      // the photo never attaches and the RA's work-area shot is never marked — the
+      // engineer is stuck. A hard timeout resolves(null) so the caller falls back to
+      // the original file (uploads bigger, but it goes through).
+      var done=false, u=null;
+      function finish(b){ if(done) return; done=true; if(u){ try{ URL.revokeObjectURL(u); }catch(e){} } resolve(b||null); }
       if(!file || !/^image\//.test(file.type)){ resolve(null); return; }
-      var img=new Image(), u=URL.createObjectURL(file);
-      img.onload=function(){
-        URL.revokeObjectURL(u);
-        var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
-        w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
-        var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
-        cv.getContext("2d").drawImage(img,0,0,w,h);
-        cv.toBlob(function(b){ resolve(b); },"image/jpeg",quality||0.7);
-      };
-      img.onerror=function(){ URL.revokeObjectURL(u); resolve(null); };
-      img.src=u;
+      var t=setTimeout(function(){ finish(null); }, 8000);
+      try{
+        var img=new Image(); u=URL.createObjectURL(file);
+        img.onload=function(){
+          try{
+            var w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,maxDim/Math.max(w,h));
+            w=Math.max(1,Math.round(w*s)); h=Math.max(1,Math.round(h*s));
+            var cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+            cv.getContext("2d").drawImage(img,0,0,w,h);
+            cv.toBlob(function(b){ clearTimeout(t); finish(b); },"image/jpeg",quality||0.7);
+          }catch(e){ clearTimeout(t); finish(null); }
+        };
+        img.onerror=function(){ clearTimeout(t); finish(null); };
+        img.src=u;
+      }catch(e){ clearTimeout(t); finish(null); }
     });
   }
   // Self-healing for older photos with no stored thumbnail: fetch the full image
@@ -940,6 +952,11 @@
     var files=e.target.files; if(!files||!files.length){ raPicPending=false; return; }
     var wasRA = raPicPending;
     var useStage = raPicPending ? "Before" : stage;
+    // Mark the RA's work-area photo satisfied THE MOMENT a file is chosen — never
+    // wait on the shrink/upload. The photo is captured; the durable save + upload
+    // happen below. This guarantees the RA can be completed even if the phone is
+    // slow to re-encode the image or has no signal.
+    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo saved"); }
     var added=0;
     for(var i=0;i<files.length;i++){
       var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
@@ -967,10 +984,8 @@
     }
     raPicPending=false; e.target.value="";
     await loadPending(); drawPhotos(); refresh();
-    // The RA "work-area photo" is satisfied the instant it's captured (durable),
-    // not only once it uploads.
-    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo saved"); }
-    else if(added){ toast(pendingCount()? ("Photo saved ("+useStage+") — uploading…") : ("Photo added — tagged "+useStage)); }
+    // (ml-rapic already fired up-front, the instant the file was chosen.)
+    if(!wasRA && added){ toast(pendingCount()? ("Photo saved ("+useStage+") — uploading…") : ("Photo added — tagged "+useStage)); }
     flushPhotoQueue();   // kick the uploader (non-blocking)
   }
   // ── Completion-note draft: saved to the device as it's typed, restored on
