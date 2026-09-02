@@ -825,7 +825,6 @@ function applyViewOnly(){
   // read what the engineer entered.
   document.querySelectorAll("#invCard input,#invCard textarea").forEach(el=>{el.disabled=true;});
   const gb=g("genBtn"); if(gb)gb.disabled=true;
-  document.querySelectorAll("#dayCards .card[data-date]").forEach(c=>c.classList.add("open"));   // auto-expand all days
   g("saveState").textContent="Read-only — viewing "+((ME&&ME.name)||VIEW_USER)+"’s timesheet";
 }
 g("prevWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,-7);load();};
