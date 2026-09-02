@@ -661,19 +661,20 @@ async function parseTripXls(file){
   const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"}); const acc={};
   for(const sn of wb.SheetNames){
     const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,blankrows:false});
-    let hdr=-1,cReg=-1,cDrv=-1,cDur=-1;
+    let hdr=-1,cReg=-1,cDrv=-1,cDur=-1,cTrp=-1;
     for(let i=0;i<rows.length;i++){
       const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());
       const ri=low.findIndex(c=>c.includes("registration")||c.includes("reg no")||c==="reg"||c==="vrm");
-      if(ri>=0){ hdr=i;cReg=ri; cDrv=low.findIndex(c=>c.includes("driver")); cDur=low.findIndex(c=>c.includes("duration")||c.includes("driving")||(c.includes("time")&&!c.includes("date"))); break; }
+      if(ri>=0){ hdr=i;cReg=ri; cDrv=low.findIndex(c=>c.includes("driver")); cDur=low.findIndex(c=>c.includes("duration")||c.includes("driving")||(c.includes("time")&&!c.includes("date"))); cTrp=low.findIndex(c=>c.includes("trip")); break; }
     }
     if(hdr<0)continue;
     for(let i=hdr+1;i<rows.length;i++){
       const row=rows[i]; if(!row)continue; const regRaw=row[cReg]; const reg=normRegC(regRaw);
       if(!reg||reg.length<5||String(regRaw).toLowerCase().includes("total"))continue;
       const dur=cDur>=0?parseDur(row[cDur]):0; const drv=cDrv>=0?String(row[cDrv]||"").trim():"";
-      if(!acc[reg])acc[reg]={reg:String(regRaw).trim(),driver:drv,driveMins:0};
-      acc[reg].driveMins+=dur; if(drv&&!acc[reg].driver)acc[reg].driver=drv;
+      const trp=cTrp>=0?(parseInt(row[cTrp],10)||0):0;
+      if(!acc[reg])acc[reg]={reg:String(regRaw).trim(),driver:drv,driveMins:0,trips:0};
+      acc[reg].driveMins+=dur; acc[reg].trips+=trp; if(drv&&!acc[reg].driver)acc[reg].driver=drv;
     }
   }
   return Object.values(acc);
