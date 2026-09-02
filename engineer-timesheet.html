@@ -181,7 +181,10 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null, DUE=null, REMIND=true;
+// Honour a ?week=YYYY-MM-DD deep link (from the "complete last week's timesheet"
+// notification) so it opens THAT week, not the current one.
+const WEEK_PARAM=new URLSearchParams(location.search).get("week")||"";
+let ME=null, WEEK=(/^\d{4}-\d{2}-\d{2}$/.test(WEEK_PARAM)?mondayOf(new Date(WEEK_PARAM+"T12:00:00")):mondayOf(new Date())), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, HOL={}, BANK={}, SITES=[], JOBMETA={}, APPROVAL=null, AUTOMI=null, DUE=null, REMIND=true;
 // Booked jobs (data-booked=1) with no hours = still to complete before the deadline.
 function countEmptyBooked(){ let n=0; document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const v=parseFloat(r.querySelector('.jh-hrs').value); if(!(v>0))n++;}); return n; }
 function markGaps(){ document.querySelectorAll('.card[data-date] .jhrow[data-booked="1"]').forEach(r=>{const inp=r.querySelector('.jh-hrs'); inp.classList.toggle('needhrs', REMIND&&!(parseFloat(inp.value)>0)); }); }
