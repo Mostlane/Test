@@ -272,18 +272,30 @@ export async function handle(request, env, ctx, url, sess) {
     }
     messages.push({ role: "user", content: message });
 
-    // Agentic loop: let the model call find_jobs (and re-search) before proposing.
+    // Agentic loop: let the model call find_jobs (possibly several in one turn,
+    // and re-search) before proposing. Every tool_use in an assistant message
+    // MUST get a matching tool_result, or the next call is rejected.
     let t = null, ai = null;
     for (let round = 0; round < 5; round++) {
       ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "⚠️ " + ai.error }, {}, env, request);
-      t = ai.tool;
-      if (t && t.name === "find_jobs") {
-        const found = await searchJobs(env, tid, t.input.query || "");
+      const uses = (ai.content || []).filter(c => c.type === "tool_use");
+      const finds = uses.filter(c => c.name === "find_jobs");
+      if (finds.length) {
         messages.push({ role: "assistant", content: ai.content });
-        messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: t.id, content: JSON.stringify({ count: found.length, jobs: found }) }] });
-        t = null; continue;   // let the model use the results
+        const out = [];
+        for (const u of uses) {
+          if (u.name === "find_jobs") {
+            const found = await searchJobs(env, tid, u.input.query || "");
+            out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ count: found.length, jobs: found }) });
+          } else {
+            out.push({ type: "tool_result", tool_use_id: u.id, content: "Use the find_jobs results above, then propose again." });
+          }
+        }
+        messages.push({ role: "user", content: out });
+        continue;   // let the model use the results
       }
+      t = uses[0] || null;
       break;
     }
     if (!t) return json({ ok: true, kind: "reply", text: ai.text || "I didn't catch that — try again." }, {}, env, request);
