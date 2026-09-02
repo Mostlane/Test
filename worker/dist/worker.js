@@ -27559,13 +27559,16 @@ async function handle29(request, env, ctx, url, sess) {
       if (h && h.role && h.text) messages.push({ role: h.role === "user" ? "user" : "assistant", content: String(h.text).slice(0, 2e3) });
     }
     messages.push({ role: "user", content: message });
+    const READ = /* @__PURE__ */ new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+    const termTools = tools.filter((x) => !READ.has(x.name));
+    const MAXR = 8;
     let t = null, ai = null;
-    for (let round = 0; round < 5; round++) {
-      ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
+    for (let round = 0; round < MAXR; round++) {
+      const last = round === MAXR - 1;
+      ai = await anthropicChat(env, { system, messages, tools: last ? termTools : tools, forceTool: !fullAccess || last });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "\u26A0\uFE0F " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter((c) => c.type === "tool_use");
-      const READ = /* @__PURE__ */ new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
-      const reads = uses.filter((c) => READ.has(c.name));
+      const reads = last ? [] : uses.filter((c) => READ.has(c.name));
       if (reads.length) {
         messages.push({ role: "assistant", content: ai.content });
         const out = [];
@@ -27589,10 +27592,10 @@ async function handle29(request, env, ctx, url, sess) {
         messages.push({ role: "user", content: out });
         continue;
       }
-      t = uses[0] || null;
+      t = uses.find((u) => !READ.has(u.name)) || null;
       break;
     }
-    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "I didn't catch that \u2014 try again." }, {}, env, request);
+    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "Sorry \u2014 I couldn't pull that together. Try rephrasing, or ask for a specific site or engineer." }, {}, env, request);
     if (t.name === "ask") return json({ ok: true, kind: "ask", question: t.input.question || "Could you clarify?" }, {}, env, request);
     if (t.name === "reply") return json({ ok: true, kind: "reply", text: t.input.text || "" }, {}, env, request);
     if (t.name === "set_rules") return json({ ok: true, kind: "rules", proposed: String(t.input.rules || "").slice(0, 2e4), summary: t.input.summary || "Updated rules" }, {}, env, request);
