@@ -819,7 +819,13 @@ function viewChrome(){
   g("viewBanner").innerHTML="👁 Viewing <b>"+esc(nm)+"</b>’s timesheet — read-only. <a href=\"timesheets-admin.html\" style=\"color:#3730a3\">‹ Back to Engineer Timesheets</a>";
 }
 function applyViewOnly(){
-  document.querySelectorAll("#dayCards input,#dayCards textarea,#dayCards button,#dayCards .addjob,#invCard input,#invCard textarea,#invCard button").forEach(el=>{el.disabled=true;});
+  // Day INPUTS are already disabled by render()'s locked pass. Here we only lock
+  // the invoice card — and crucially DON'T touch the day-header toggle (.dhead)
+  // or the "View all invoices" toggle, so the office can still expand each day to
+  // read what the engineer entered.
+  document.querySelectorAll("#invCard input,#invCard textarea").forEach(el=>{el.disabled=true;});
+  const gb=g("genBtn"); if(gb)gb.disabled=true;
+  document.querySelectorAll("#dayCards .card[data-date]").forEach(c=>c.classList.add("open"));   // auto-expand all days
   g("saveState").textContent="Read-only — viewing "+((ME&&ME.name)||VIEW_USER)+"’s timesheet";
 }
 g("prevWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,-7);load();};
