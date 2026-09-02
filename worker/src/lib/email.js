@@ -83,6 +83,7 @@ export async function sendEmail(env, { to, subject, html, text, replyTo, attachm
 // ── Templates ───────────────────────────────────────────────────────────────
 
 export function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
+  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
   return {
     subject: `Welcome to ${BRAND} — set your password`,
     html: shell(`
@@ -98,8 +99,41 @@ export function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
       ${button(setUrl, "Set your password")}
       <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
       &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
+      ${installSection(base)}
     `, appUrl),
   };
+}
+
+// "Add to your phone" install guide — email-safe (tables + inline styles). Text
+// steps work even with images off; the "picture guide" button opens install.html.
+function installSection(base) {
+  const steps = (title, sub, rows) => `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 12px;background:#f7f9fc;border:1px solid #e4ebf4;border-radius:10px;">
+      <tr><td style="padding:13px 16px;">
+        <div style="font-size:14.5px;font-weight:700;color:#0f2a52;">${title} <span style="font-weight:500;color:#8a94a3;">— ${sub}</span></div>
+        <div style="margin-top:8px;color:#41505f;font-size:14px;line-height:1.85;">${rows}</div>
+      </td></tr>
+    </table>`;
+  const n = i => `<span style="display:inline-block;width:19px;height:19px;background:#003468;color:#fff;border-radius:50%;font-size:11px;font-weight:700;text-align:center;line-height:19px;margin-right:8px;">${i}</span>`;
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0 0;border-top:1px solid #e8edf3;">
+      <tr><td style="padding:20px 0 0;">
+        <h2 style="margin:0 0 6px;font-size:18px;font-weight:700;color:#003b82;">📲 Add Mostlane to your phone</h2>
+        <p style="margin:0 0 14px;color:#41505f;font-size:14.5px;">Takes about 20 seconds — then it opens like a proper app: full screen, one tap, and it can send you notifications for jobs and messages.</p>
+        ${steps("iPhone &amp; iPad", "in Safari", `
+          ${n(1)}Open <b>mostlane-portal.com</b> in <b>Safari</b><br>
+          ${n(2)}Tap the <b>Share</b> button in the bottom bar<br>
+          ${n(3)}Choose <b>Add to Home Screen</b><br>
+          ${n(4)}Tap <b>Add</b> — the blue &ldquo;M&rdquo; is now on your home screen`)}
+        ${steps("Android", "in Chrome", `
+          ${n(1)}Open <b>mostlane-portal.com</b> in <b>Chrome</b><br>
+          ${n(2)}Tap the <b>&#8942; menu</b> at the top-right<br>
+          ${n(3)}Tap <b>Install app</b> (or &ldquo;Add to Home screen&rdquo;)<br>
+          ${n(4)}Tap <b>Install</b> — done`)}
+        <p style="margin:4px 0 8px;color:#41505f;font-size:14px;">Prefer pictures? The step-by-step guide shows every tap:</p>
+        ${button(base + "/install.html", "📲 Open the picture guide")}
+      </td></tr>
+    </table>`;
 }
 
 export function resetEmail({ name, resetUrl, appUrl }) {
