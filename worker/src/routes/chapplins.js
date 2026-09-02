@@ -57,7 +57,7 @@ function tenantId2(client, siteNumber, ref, name) {
 }
 async function canManage(env, tid, sess) {
   if (!sess) return false;
-  try { const p = await permissionsFor(env, tid, sess.user.username); return p.FullAccess === "Yes" || p.Compliance === "Yes" || p.SLAAdmin === "Yes"; } catch { return false; }
+  try { const p = await permissionsFor(env, tid, sess.user.username); return p.FullAccess === "Yes" || p.Chapplins === "Yes"; } catch { return false; }
 }
 
 // Shape a DB row into the client tenant object.

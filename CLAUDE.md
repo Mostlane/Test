@@ -304,7 +304,7 @@ as binary — use `grep -a` or it drops out of every sweep. Provides:
   audited), change/forgot/reset password, login_history (utcify'd on read).
 - `users.js` — users CRUD (+Password w/ ForceChange), PERMISSION_KEYS (incl.
   AssetAdmin, OfficeClock, OfficeTimesheet, ThemeColour, ThemeBackground,
-  StoryMode, HSPlan, SiteLog), welcome/reset emails, /users N+1-fixed,
+  StoryMode, HSPlan, SiteLog, **EicrCheck**, **Chapplins**), welcome/reset emails, /users N+1-fixed,
   /users/reorder (StaffType/SortOrder), /hs-plan-config, /po-config. **GET /users
   is ACTIVE-ONLY by default** — `isActiveStatus` keeps blank/"Active", drops
   "Disabled" (and any other status), so a disabled account disappears from every
@@ -3459,6 +3459,15 @@ MAP object: KEY = element id, list = permission names (any-of; FullAccess
 sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
 Story users: STORY_ALLOWED set only + pinned "Back to My Day". Personalise
 tile gated by ThemeColour/ThemeBackground.
+- **Dedicated per-tile toggles (Sep 2026):** **EICR Check** (`EicrCheck: ["EicrCheck"]`)
+  and **Chapplins** (`Chapplins: ["Chapplins"]`) each have their OWN permission key
+  now — they used to ride the blanket `Compliance` perm, so a Co-op-only compliance
+  user saw both. Toggles live in Users Admin (Compliance & docs group). eicr-check.html
+  gates on `EicrCheck`; chapplins.html on `Chapplins` (CAN_VIEW/CAN_MANAGE) + the
+  worker `chapplins.js canManage` = FullAccess|Chapplins; sidebar NAV perms updated.
+  Existing non-FullAccess users need the new toggle granted. **Van Check** now shows to
+  a field engineer ONLY when they have a **vehicle assigned** (`user.VehicleAssigned`) —
+  an engineer with no van has nothing to check.
 - **Drag-to-reorder tiles (mobile, Aug 2026)** — iOS-home-screen style: a
   **long-press** (~2.5s — deliberately long so slow taps never trigger it)
   on any visible tile enters "arrange" mode (tiles wobble

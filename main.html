@@ -432,8 +432,8 @@ const MAP = window.ML_PERM_MAP || {
   Weekly: ["Weekly"],
   Forms: ["Forms", "formsBtn"],
   Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
-  Chapplins: ["Compliance", "SLAAdmin"],
-  EicrCheck: ["Compliance", "complianceBtn"],
+  Chapplins: ["Chapplins"],
+  EicrCheck: ["EicrCheck"],
   Programmes: ["Programmes"],
   Users: ["Users", "usersAdmin", "usersAdminBtn", "DeviceAdmin", "deviceAdmin", "deviceAdminAccess", "deviceadmin"],
   TimesheetAdmin: [
@@ -520,12 +520,14 @@ const MAP = window.ML_PERM_MAP || {
         // tile. Persist it so the field-app pages' own guards can read it too.
         const stx = String(user.StaffType || localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
         if (user.StaffType) { try { localStorage.setItem("mostlaneStaffType", user.StaffType); sessionStorage.setItem("mostlaneStaffType", user.StaffType); } catch (e) {} }
-        // Van Check tile: EVERY field user (engineer) gets it — they can do a
-        // check any time. Office/admin/Full-Access users don't (it's not in MAP).
+        // Van Check tile: shown to a field user (engineer) ONLY when they have a
+        // vehicle assigned — a van check is against their van, so an engineer with
+        // no van has nothing to check. Office/admin/Full-Access users never see it.
         const isFieldUser = !fullAccess && (stx === "field"
           || (stx !== "office" && (String(user.SLA || "").toLowerCase() === "yes" || isStory)));
+        const hasVan = !!String(user.VehicleAssigned || "").trim();
         const vc = document.getElementById("VanCheck");
-        if (vc) vc.classList.toggle("visible", isFieldUser);
+        if (vc) vc.classList.toggle("visible", isFieldUser && hasVan);
         // My Tasks is an OFFICE feature — hide the tile from field engineers
         // (it's hardcoded "visible", so switch it off for them here).
         const mt = document.getElementById("MyTasks");
