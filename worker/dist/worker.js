@@ -4250,7 +4250,72 @@ var DEFAULTS = {
   basePostcode: "PO15 5RQ",
   company: "Mostlane"
 };
+var VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
+var normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 var remindersEnabled = (cfg) => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+async function anthropicToolLocal(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1500, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] })
+    });
+    if (!resp.ok) {
+      let d = "";
+      try {
+        d = (await resp.json())?.error?.message || "";
+      } catch {
+      }
+      return { ok: false, error: "AI error" + (d ? " (" + d + ")" : "") };
+    }
+    const payload = await resp.json();
+    const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+    if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+    return { ok: true, input: block.input };
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+}
+var DOW3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+async function tsVerifyEngineerAI(env, e, monday, poolVans) {
+  const dlab = (dt) => {
+    const d = /* @__PURE__ */ new Date(dt + "T12:00:00Z");
+    return DOW3[d.getUTCDay()] + " " + dt.slice(8);
+  };
+  const blocks = e.dayLog.filter((d) => d.entered > 0 || d.moved).map((d) => {
+    const jobs = (d.jobs || []).length ? d.jobs.map((j) => `[${j.ref}] ${j.site || "?"} \u2014 entered ${j.entered}h`).join("; ") : "(none booked)";
+    const trips = (d.trips || []).length ? d.trips.map((t) => `${t.s}\u2013${t.e} \u2192 ${t.to || "?"} (drive ${t.drive}m, stop ${t.stop}m)`).join("\n      ") : d.moved ? `van out ${d.vanStart}\u2013${d.vanEnd}` : "van did not move";
+    return `  ${dlab(d.date)} (${d.date}) \u2014 booked: ${jobs}
+      Trips: ${trips}`;
+  }).join("\n");
+  const pool = (poolVans || []).length ? "\n\nPool/unassigned vans that moved (they may have collected one \u2014 use to explain a day their own van didn't move):\n" + poolVans.map((v) => `  ${v.reg} "${v.driver || "?"}": ` + Object.entries(v.days || {}).map(([dt, x]) => `${dlab(dt)} ${x.s}\u2013${x.e}${(x.locs || []).length ? " [" + x.locs.join("; ") + "]" : ""}`).join("; ")).join("\n") : "";
+  const schema = { type: "object", properties: {
+    verdict: { type: "string", enum: ["ok", "check", "flag"] },
+    summary: { type: "string", description: "One short sentence overall." },
+    days: { type: "array", items: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD" },
+      jobs: { type: "array", items: { type: "object", properties: {
+        ref: { type: "string", description: "the booked job ref exactly as given" },
+        suggested: { type: "number", description: "hours you think this job actually took, 0.25 steps" },
+        note: { type: "string", description: "short reason, only if it differs from entered" }
+      }, required: ["ref", "suggested"] } }
+    }, required: ["date"] } },
+    flags: { type: "array", items: { type: "object", properties: { date: { type: "string" }, severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
+  }, required: ["verdict"] };
+  const system = "You reconstruct a UK field engineer's working day from van tracker trips and check the hours they booked PER JOB. Rules: (1) A job's time = travel TO that site + time ON site. Count the drive to a site as part of that site's job. The final drive HOME from the last job counts toward that last job. (2) IGNORE incidental stops \u2014 petrol/fuel stations, shops, supermarkets, cafes, builders' merchants/suppliers, and any brief stop (under ~15 min) that isn't a booked job \u2014 these are NOT jobs; don't create jobs for them or add their time to a job. (3) Match tracker stop locations to the engineer's booked jobs by town/road/postcode; a booked job is usually the longest stop(s) near that place. On-site time is the stopped time at the job location between arriving and leaving. (4) For each booked job estimate the hours it actually took (travel-to + on-site + drive-home for the last job) to the nearest 0.25h. Compare to what they entered. Only add a `note` when your `suggested` differs from `entered` by more than ~0.75h, saying briefly why. (5) Telematics is approximate and on-site work doesn't always move the van \u2014 be conservative; small differences are fine. Verdict: ok (matches well), check (minor differences worth a glance), flag (clear discrepancy or hours with no matching van activity). Use the booked job refs EXACTLY as given.";
+  const user = `Engineer ${e.name} (${e.username}), week beginning ${monday}, assigned van ${e.reg || "none"}. They entered ${e.total}h total; van door-to-door ${e.weekSpanH}h.
+
+Days:
+${blocks}${pool}
+
+Return your per-job suggested hours and any flags.`;
+  const r = await anthropicToolLocal(env, { system, user, toolName: "verify_engineer", schema, maxTokens: 2e3 });
+  if (!r.ok) return { error: r.error };
+  return r.input || {};
+}
 async function hasEngTimesheet(env, tid, username) {
   try {
     const p = await permissionsFor(env, tid, username);
@@ -5836,6 +5901,135 @@ async function handle7(request, env, ctx, url, sess) {
     } catch {
     }
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+  if (sub === "/verify" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.week)) return error("week required", 400, env, request);
+    const monday = mondayOf(b.week);
+    const vans = Array.isArray(b.vans) ? b.vans : [];
+    const scores = b.scores && typeof b.scores === "object" ? b.scores : {};
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const vanByReg = {};
+    for (const v of vans) {
+      const k = normReg(v && v.reg);
+      if (!k) continue;
+      const days = v && v.days && typeof v.days === "object" ? v.days : {};
+      vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), trips: Math.round(parseFloat(v && v.trips) || 0), days };
+    }
+    const scoreByReg = {};
+    for (const [r, s] of Object.entries(scores)) {
+      const k = normReg(r);
+      if (k && s != null && s !== "") scoreByReg[k] = Math.round(parseFloat(s));
+    }
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    const week = weekDays(monday);
+    const engineers = [];
+    for (const u of users || []) {
+      if (!await hasEngTimesheet(env, tid, u.username)) continue;
+      const reg = u.vehicle_assigned || "";
+      const rk = normReg(reg);
+      const van = vanByReg[rk] || null;
+      const { days } = await loadWeek(env, tid, u.username, monday);
+      const meta = await jobMetaFor(env, tid, days);
+      let total = 0, weekSpan = 0;
+      const dayLog = week.map((dt) => {
+        const d = days[dt] || {};
+        const jh = d.jobHours || {};
+        let h = 0;
+        const jobs = [];
+        for (const [jid, hv] of Object.entries(jh)) {
+          const hh = parseFloat(hv) || 0;
+          if (hh > 0) {
+            h += hh;
+            jobs.push({ ref: meta[jid] && meta[jid].ref || jid, site: meta[jid] && meta[jid].site || "", entered: Math.round(hh * 100) / 100 });
+          }
+        }
+        if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
+        h = Math.round(h * 100) / 100;
+        total += h;
+        const vd = van && van.days ? van.days[dt] : null;
+        const moved = !!(vd && (vd.span > 0 || (vd.drive || 0) > 0));
+        if (moved) weekSpan += vd.span || 0;
+        return {
+          date: dt,
+          entered: h,
+          moved,
+          jobs,
+          vanStart: vd ? vd.s || "" : "",
+          vanEnd: vd ? vd.e || "" : "",
+          spanH: moved ? r1(vd.span / 60) : null,
+          driveH: vd && vd.drive ? r1(vd.drive / 60) : null,
+          locs: vd && Array.isArray(vd.locs) ? vd.locs.slice(0, 6) : [],
+          trips: vd && Array.isArray(vd.trips_detail) ? vd.trips_detail : []
+        };
+      });
+      total = Math.round(total * 100) / 100;
+      if (total === 0 && !van) continue;
+      engineers.push({
+        username: u.username,
+        name: displayName(u),
+        reg,
+        driveMins: van ? van.driveMins : null,
+        weekSpanH: r1(weekSpan / 60),
+        score: scoreByReg[rk] != null ? scoreByReg[rk] : null,
+        total,
+        dayLog
+      });
+    }
+    const usedRegs = new Set(engineers.map((e) => normReg(e.reg)).filter(Boolean));
+    const poolVans = Object.values(vanByReg).filter((v) => !usedRegs.has(normReg(v.reg)) && v.driveMins > 0).map((v) => ({
+      reg: v.reg,
+      driver: v.driver,
+      driveMins: v.driveMins,
+      score: scoreByReg[normReg(v.reg)] ?? null,
+      days: Object.fromEntries(week.filter((dt) => v.days[dt] && (v.days[dt].span > 0 || (v.days[dt].drive || 0) > 0)).map((dt) => [dt, { s: v.days[dt].s, e: v.days[dt].e, locs: (v.days[dt].locs || []).slice(0, 4) }]))
+    }));
+    let aiErr = null;
+    const byUser = {};
+    const aiResults = await Promise.all(engineers.slice(0, 30).map(async (e) => ({ e, ai: await tsVerifyEngineerAI(env, e, monday, poolVans) })));
+    for (const { e, ai } of aiResults) {
+      if (ai.error) aiErr = ai.error;
+      const byDate = {};
+      for (const dd of ai.days || []) if (dd && dd.date) byDate[dd.date] = dd;
+      const dayLog = e.dayLog.map((d) => {
+        const ad = byDate[d.date] || {};
+        const sByRef = {};
+        for (const j of ad.jobs || []) if (j && j.ref) sByRef[String(j.ref).toLowerCase()] = j;
+        const jobs = d.jobs.map((j) => {
+          const s = sByRef[String(j.ref).toLowerCase()] || {};
+          return { ref: j.ref, site: j.site, entered: j.entered, suggested: s.suggested != null ? Math.round(s.suggested * 100) / 100 : null, note: s.note || "" };
+        });
+        return { date: d.date, entered: d.entered, moved: d.moved, vanStart: d.vanStart, vanEnd: d.vanEnd, spanH: d.spanH, driveH: d.driveH, locs: d.locs, jobs };
+      });
+      byUser[e.username] = {
+        name: e.name,
+        reg: e.reg,
+        driveMins: e.driveMins,
+        weekSpanH: e.weekSpanH,
+        score: e.score,
+        total: e.total,
+        dayLog,
+        verdict: ai.verdict || "ok",
+        summary: ai.summary || "",
+        flags: Array.isArray(ai.flags) ? ai.flags : []
+      };
+    }
+    const unassignedVans = poolVans.map((v) => ({ reg: v.reg, driver: v.driver, driveMins: v.driveMins, score: v.score }));
+    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, poolVans, aiError: aiErr };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VERIFY_KEY(tid, monday), JSON.stringify(rec)).run();
+    return json({ ok: true, ...rec }, {}, env, request);
+  }
+  if (sub === "/verify" && method === "GET") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VERIFY_KEY(tid, monday)).first();
+    let rec = null;
+    try {
+      rec = row && row.value ? JSON.parse(row.value) : null;
+    } catch {
+    }
+    return json({ ok: true, week: monday, verify: rec }, {}, env, request);
   }
   if (sub.startsWith("/admin/")) {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
