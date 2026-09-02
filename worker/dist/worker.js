@@ -8630,6 +8630,80 @@ async function handle8(request, env, ctx, url, sess) {
       }
       return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, items: auditItems.length }, headers, 201);
     }
+    if (parts[2] === "revisit" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const rb = await readJson2(request).catch(() => ({}));
+      const scheduledAt = rb.scheduledAt && Number.isFinite(Date.parse(rb.scheduledAt)) ? new Date(rb.scheduledAt).toISOString() : void 0;
+      const durationMinutes = rb.durationMinutes ? Math.max(15, Number(rb.durationMinutes)) : src.durationMinutes || void 0;
+      const engineers = Array.isArray(rb.assignedEngineers) ? rb.assignedEngineers.filter(Boolean) : Array.isArray(src.assignedEngineers) ? src.assignedEngineers.slice() : [];
+      const groupId = src.visitGroupId || src.id;
+      const payload = {
+        id: crypto.randomUUID(),
+        reference: src.helpdeskRef || src.siteName || src.siteCode,
+        description: src.description || "",
+        siteCode: src.siteCode,
+        siteName: src.siteName,
+        address: src.address,
+        postcode: src.postcode,
+        telephone: src.telephone,
+        storeType: src.storeType,
+        client: src.client,
+        lat: src.lat,
+        lon: src.lon,
+        priority: src.priority || "",
+        requiresRA: src.requiresRA,
+        requiresSignature: src.requiresSignature,
+        requiresPhoto: src.requiresPhoto,
+        requiresNote: src.requiresNote,
+        firestopping: src.firestopping,
+        emTest: src.emTest,
+        emKind: src.emKind,
+        pat: src.pat,
+        elecTest: src.elecTest,
+        workArea: src.workArea || void 0,
+        projectId: src.projectId || void 0,
+        assignedEngineers: engineers,
+        scheduledAt,
+        durationMinutes,
+        revisitOf: src.id,
+        visitGroupId: groupId,
+        changedBy: sess.user && sess.user.username || "system"
+      };
+      const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+      if (!src.visitGroupId) {
+        try {
+          src.visitGroupId = groupId;
+          src.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          await saveJob(env, tenantId, src);
+        } catch {
+        }
+      }
+      ctx?.waitUntil(reconcileRelease(env, tenantId, job).catch(() => {
+      }));
+      return jsonResponse({ ok: true, id: job.id, ref: job.helpdeskRef, status: job.status, visitGroupId: groupId }, headers, 201);
+    }
+    if (parts[2] === "visits" && method === "GET") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const src = await getJob(env, tenantId, id);
+      if (!src) return jsonResponse({ error: "Not found" }, headers, 404);
+      const groupId = src.visitGroupId || src.id;
+      const all = await listJobs(env, tenantId);
+      const visits = all.filter((j) => j && ((j.visitGroupId || j.id) === groupId || j.revisitOf === groupId)).map((j) => ({
+        id: j.id,
+        ref: j.helpdeskRef || j.id,
+        status: j.status || "",
+        scheduledAt: j.scheduledAt || null,
+        raisedAt: j.raisedAt || null,
+        closedAt: j.closedAt || null,
+        isRoot: j.id === groupId,
+        current: j.id === src.id,
+        engineers: Array.isArray(j.assignedEngineers) ? j.assignedEngineers : []
+      })).sort((a, b) => new Date(a.scheduledAt || a.raisedAt || 0) - new Date(b.scheduledAt || b.raisedAt || 0));
+      return jsonResponse({ ok: true, groupId, visits }, headers);
+    }
     if (parts[2] === "photo-stage" && method === "POST") {
       if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
       if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
@@ -9883,6 +9957,11 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     // Portal-project link: set when this job was raised from a project hub, so
     // the project can list its jobs + roll up per-engineer visits. Preserved.
     projectId: body.projectId !== void 0 ? String(body.projectId || "") || null : existing?.projectId || null,
+    // Re-visit links: `revisitOf` = the job this was cloned from (its immediate
+    // parent); `visitGroupId` = the ORIGINAL/root job id shared by every visit in
+    // the chain, so all visits against one job are easy to find + cost together.
+    revisitOf: body.revisitOf !== void 0 ? String(body.revisitOf || "") || null : existing?.revisitOf || null,
+    visitGroupId: body.visitGroupId !== void 0 ? String(body.visitGroupId || "") || null : existing?.visitGroupId || null,
     scheduledAt,
     scheduledEnd,
     durationMinutes,
@@ -10039,6 +10118,8 @@ async function patchJob(env, tenantId, id, patch, ctx) {
   if (patch.remedials !== void 0) job.remedials = normRemedials(patch.remedials, job);
   if (patch.investigateOnly !== void 0) job.investigateOnly = !!patch.investigateOnly;
   if (patch.projectId !== void 0) job.projectId = String(patch.projectId || "") || null;
+  if (patch.revisitOf !== void 0) job.revisitOf = String(patch.revisitOf || "") || null;
+  if (patch.visitGroupId !== void 0) job.visitGroupId = String(patch.visitGroupId || "") || null;
   if (patch.workArea !== void 0) job.workArea = String(patch.workArea || "") || null;
   if (patch.seriesId !== void 0) job.seriesId = String(patch.seriesId || "") || null;
   if (patch.seriesSkipped !== void 0) job.seriesSkipped = !!patch.seriesSkipped;

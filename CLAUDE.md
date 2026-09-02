@@ -2503,6 +2503,20 @@ it straight onto the compliance chart (rolling the next-due date).
   navy). **TODO/next:** optional hub widget for the pending-review count; Help guide;
   PAT remedials/charging if wanted; fold EM remedial £ into job costing.
 
+## Job re-visits (sla.js `/sla/jobs/{id}/revisit` + `/visits` + job-view.html — Sep 2026)
+Re-attending a finished job is a NEW linked job, never a re-open of the old one
+(re-opening a completed job in place breaks the engineer completion gate). Office
+/admin **🔁 Re-visit** button on a Complete/Closed job (job-view header) → modal
+(date · time · hours) → **POST /sla/jobs/{id}/revisit** clones it at the same site
+(same engineer + requirements + job type) with a FRESH id, so signature/RA/photos/
+history reset and the engineer completes cleanly. Links: `revisitOf` (parent id) +
+`visitGroupId` (the ROOT job id shared by the whole chain), threaded through
+createOrUpdateJobFromPayload + patchJob. **GET /sla/jobs/{id}/visits** returns the
+whole group; job-view "🔁 Visits" card lists every visit (status · date · open) with
+each visit's individual cost (/costing/job-full-cost per job) + a combined total
+(shown once ≥2 visits; costs admin-only). NB job-view still loads via the legacy
+mostlane-sla host, so the new endpoints are called on MOSTLANE_API (mApi helper).
+
 ## Electrical test → remedials → one-tap works job (sla.js + remedials-form.js — Sep 2026)
 An **electrical-test job** (add-job.html **⚡ Electrical test** tick → `job.elecTest`;
 sends requiresRA/Sig/Photo/Note=false) lets the engineer record a **remedial-works
