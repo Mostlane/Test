@@ -59,6 +59,7 @@ import * as workever from "./routes/workever.js";  // DONE  (Workever sync: reco
 import * as statuscomms from "./routes/statuscomms.js"; // DONE  (customer status-change emails + public reschedule flow)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 import { sweepTaskReminders } from "./routes/tasks.js";     // cron: daily task reminders
+import { sweepTimesheetReminders } from "./routes/timesheets.js"; // cron: timesheet deadline reminder
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -287,6 +288,8 @@ const worker = {
       ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
       // Daily task reminder — self-gates to ~08:00 London, deduped per day.
       ctx.waitUntil(sweepTaskReminders(env).catch(e => console.error("scheduled task reminder:", e)));
+      // Timesheet deadline reminder — self-gates to the ~3h before the deadline.
+      ctx.waitUntil(sweepTimesheetReminders(env).catch(e => console.error("scheduled timesheet reminder:", e)));
       // SiteLog auto-close of open visits (was the standalone worker's daily
       // cron). Idempotent — only closes prior-day still-open visits — so it's
       // safe running hourly and safe alongside the old worker's cron until the

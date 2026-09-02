@@ -1100,6 +1100,25 @@ const MAP = window.ML_PERM_MAP || {
           });
         }).catch(function () {}));
 
+      // Timesheet: last week's hours must be completed by the deadline (day/time
+      // set in Engineer Timesheets settings, default midday Wednesday). Snoozeable
+      // up to 2h before the deadline, then enforced — like the weekly van check.
+      jobs.push(fetch(window.MOSTLANE_API + "/ts/outstanding", H)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok || !(d.count > 0)) return;
+          var dueMs = d.dueAt ? new Date(d.dueAt).getTime() : 0;
+          var dueTxt = d.dueAt ? new Date(d.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" }) : (d.dueLabel || "");
+          notes.push({
+            n: d.count, icon: "⏱", href: "engineer-timesheet.html?week=" + encodeURIComponent(d.week),
+            title: d.overdue ? "Timesheet OVERDUE" : "Complete last week's timesheet",
+            text: (d.overdue ? "Enter hours for every job — was due " + dueTxt + "." : "Enter the hours you worked on every job by " + dueTxt + ".") + " " + d.count + " job" + (d.count === 1 ? "" : "s") + " still need hours.",
+            timeGated: true,
+            snoozeUntil: (dueMs && !d.overdue) ? (dueMs - 2 * 3600 * 1000) : 0,
+            dueMs: dueMs
+          });
+        }).catch(function () {}));
+
       // Van handover: a newly-assigned driver must complete a full handover
       // check before using the van. Blocking + required, but only ONE 4-hour
       // snooze (maxSnooze:1) — stricter than the weekly check. Clears on submit.
@@ -1115,7 +1134,7 @@ const MAP = window.ML_PERM_MAP || {
           });
         }).catch(function () {}));
 
-      var ORDER = { "van-handover.html": -1, "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
+      var ORDER = { "van-handover.html": -1, "van-check.html": 0, "engineer-timesheet.html": 0.5, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));

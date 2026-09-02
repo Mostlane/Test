@@ -377,7 +377,9 @@ async function materialiseTimesheet(env, tid, username, monday, days) {
 
 // ── Settings (app_config JSON, per-user overrides on shared defaults) ────────
 const DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45,
-  radiusMiles: 10, overtimeThresholdH: 8, basePostcode: "PO15 5RQ", company: "Mostlane" };
+  radiusMiles: 10, overtimeThresholdH: 8, dueDow: 3, dueTime: "12:00",
+  basePostcode: "PO15 5RQ", company: "Mostlane" };
+const DOW_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
   try {
@@ -955,6 +957,99 @@ async function scheduledSitesForWeek(env, tid, username, monday) {
   return byDate;
 }
 
+// ── Timesheet deadline + completeness ────────────────────────────────────────
+// London tz offset (minutes ahead of UTC) at a given instant.
+function londonOffsetMinutes(ms) {
+  try {
+    const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+      .formatToParts(new Date(ms)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+    return Math.round((asUTC - ms) / 60000);
+  } catch { return 0; }
+}
+// The completion deadline for a Mon-anchored week: the configured day-of-week +
+// time in the FOLLOWING week (e.g. midday Wednesday after the week ends).
+function tsDeadlineFor(monday, cfg) {
+  const dow = Number((cfg.defaults && cfg.defaults.dueDow) ?? 3);           // 0 Sun..6 Sat
+  const [hh, mm] = String((cfg.defaults && cfg.defaults.dueTime) || "12:00").split(":").map(n => parseInt(n, 10) || 0);
+  const nextMon = new Date(monday + "T00:00:00Z"); nextMon.setUTCDate(nextMon.getUTCDate() + 7);
+  const day = new Date(nextMon); day.setUTCDate(day.getUTCDate() + ((dow + 6) % 7));   // Mon=0..Sun=6
+  const ds = day.toISOString().slice(0, 10);
+  const naive = Date.parse(ds + "T" + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":00Z");
+  const ms = naive - londonOffsetMinutes(naive) * 60000;
+  return { ms, iso: new Date(ms).toISOString(), dow, hh, mm, label: DOW_NAME[dow] + " " + String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") };
+}
+// Jobs the engineer was scheduled on, per London day: { date: [{jobId, ref, site}] }.
+async function assignedJobsByDay(env, tid, username, monday) {
+  const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const byDay = {};
+  try {
+    const normId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const norm = s => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+    const map = {};
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of users || []) { map[normId(u.username)] = u.username; const full = ((u.first_name || "") + " " + (u.last_name || "")).trim(); if (full) map[normId(full)] = u.username; }
+    const meN = norm(username);
+    const isMe = e => { const r = map[normId(e)]; if (r != null) return r === username; const n = norm(e); return !!n && (n === meN || n.includes(meN) || meN.includes(n)); };
+    const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
+    const { results } = await env.DB.prepare(
+      "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+    ).bind(tid, monday, end).all();
+    for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data); } catch { continue; }
+      const engs = (Array.isArray(d.assignedEngineers) && d.assignedEngineers.length) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
+      if (!engs.some(isMe)) continue;
+      const date = lDate(r.scheduled_at);
+      (byDay[date] = byDay[date] || []).push({ jobId: r.id, ref: r.helpdesk_ref || d.siteName || r.id, site: d.siteName || "" });
+    }
+  } catch {}
+  return byDay;
+}
+// Which booked jobs still have NO hours entered for a week + the deadline state.
+async function timesheetGaps(env, tid, username, monday, cfg) {
+  const byDay = await assignedJobsByDay(env, tid, username, monday);
+  const { days } = await loadWeek(env, tid, username, monday);
+  const missing = [];
+  for (const [date, jobs] of Object.entries(byDay)) {
+    const jh = (days[date] && days[date].jobHours) || {};
+    const seen = new Set();
+    for (const j of jobs) {
+      if (seen.has(j.jobId)) continue; seen.add(j.jobId);
+      if (!(parseFloat(jh[j.jobId]) > 0)) missing.push({ date, ref: j.ref, jobId: j.jobId });
+    }
+  }
+  const dl = tsDeadlineFor(monday, cfg);
+  return { week: monday, missing, count: missing.length, dueAt: dl.iso, dueLabel: dl.label, overdue: Date.now() > dl.ms };
+}
+// Cron: push engineers with unfinished hours for last week, once, in the ~3h
+// before the deadline (deduped per week in app_config ts:reminded:<tid>).
+export async function sweepTimesheetReminders(env, tid = 1) {
+  try {
+    const cfg = await getCfg(env, tid);
+    const curMon = mondayOf(new Date().toISOString().slice(0, 10));
+    const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
+    const prevMon = pm.toISOString().slice(0, 10);
+    const dl = tsDeadlineFor(prevMon, cfg);
+    const nowMs = Date.now();
+    if (nowMs < dl.ms - 3 * 3600e3 || nowMs > dl.ms) return;   // only the 3h run-up to the deadline
+    const key = "ts:reminded:" + tid;
+    let sent = [];
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(key).first(); if (row && row.value) sent = JSON.parse(row.value) || []; } catch {}
+    if (sent.includes(prevMon)) return;
+    const { results: users } = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    for (const u of users || []) {
+      const g = await timesheetGaps(env, tid, u.username, prevMon, cfg);
+      if (g.count > 0) await sendToUser(env, tid, u.username, {
+        title: "Timesheet due", body: g.count + " job" + (g.count === 1 ? "" : "s") + " still need hours — complete last week's timesheet by " + dl.label + ".",
+        url: "/engineer-timesheet.html?week=" + prevMon, tag: "ts-due:" + prevMon
+      });
+    }
+    sent.push(prevMon); sent = sent.slice(-8);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, key, JSON.stringify(sent)).run();
+  } catch {}
+}
+
 // For fuel-paid SELF-EMPLOYED engineers, replace each worked day's mileage with a
 // single LOCKED door-to-door figure: office(base) → each site visited (in order)
 // → home. Returns a working copy of `days` (manual mileage ignored) + a per-date
@@ -1172,6 +1267,17 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
 
+  // ── GET /ts/outstanding — the caller's last completed week's missing hours ──
+  // Drives the "complete your timesheet" reminder (attention gate + push).
+  if (sub === "/outstanding" && method === "GET") {
+    const curMon = mondayOf(new Date().toISOString().slice(0, 10));
+    const pm = new Date(curMon + "T12:00:00Z"); pm.setUTCDate(pm.getUTCDate() - 7);
+    const prevMon = pm.toISOString().slice(0, 10);
+    const prev = await timesheetGaps(env, tid, me, prevMon, cfg);
+    return json({ ok: true, week: prevMon, dueAt: prev.dueAt, dueLabel: prev.dueLabel,
+      overdue: prev.overdue, count: prev.count, missing: prev.missing }, {}, env, request);
+  }
+
   // ── GET /ts/my — own week (or a viewed engineer's, for an admin) ──────────
   if (sub === "/my" && method === "GET") {
     const who = await viewUser();
@@ -1185,8 +1291,10 @@ export async function handle(request, env, ctx, url, sess) {
     const bank = await bankHolidaysInRange(env, tid, monday, weekDays(monday)[6]);
     const jobMeta = await jobMetaFor(env, tid, days);
     const am = await applyAutoMileage(env, tid, who, monday, days, eff, cfg.defaults.basePostcode);
+    const gaps = await timesheetGaps(env, tid, who, monday, cfg);
     return json({ ok: true, week: monday, days, savedAt, auto, holidays, bank, jobMeta, approval, locked: !!approval,
       viewingUser: who !== me ? who : null,
+      due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue }, missingHours: gaps.missing,
       totals: weekTotals(am.days, eff), autoMileage: am.auto,
       invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
@@ -1704,9 +1812,11 @@ export async function handle(request, env, ctx, url, sess) {
         const daysEff = am.days;
         const perDay = {};
         for (const [date, day] of Object.entries(daysEff)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, jobHours: day.jobHours || {}, mileage: day.mileage || [], leaveHours: day.leaveHours != null ? day.leaveHours : null };
+        const gaps = await timesheetGaps(env, tid, u.username, monday, cfg);
         out.push({ username: u.username, name: displayName(u), employment: u.employment_type || "Employed",
           selfEmployed: isSelfEmployed(u), cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
           days: d.days, perDay, savedAt: d.at, totals: weekTotals(daysEff, eff), autoMileage: am.auto,
+          gapCount: gaps.count, gapMissing: gaps.missing, due: { at: gaps.dueAt, label: gaps.dueLabel, overdue: gaps.overdue },
           approval: apprBy[u.username] || null,
           holidays: leaveAll[u.username] || {},
           invoice: inv ? { id: inv.id, number: inv.number, total: inv.total, at: inv.at,
