@@ -410,8 +410,13 @@
       h+='<div id="hqRow" style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px;">'
         +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"><input type="checkbox" id="hqToggle" style="width:16px;height:16px;"> <span>📷 High-quality upload</span></label>'
         +'<span id="hqStatus" style="font-size:12px;color:#8a97a6;"></span></div>';
-      h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none"></div>';
+      h+='</div>';
     }
+    // The RA "photo of the work area" ALWAYS uses #fileInput — so it must exist on
+    // EVERY job type (audit / cert / firestop / elec included), not just standard
+    // jobs. Rendering it only inside the photos card left the RA photo button dead
+    // (a null-element .click()) on a remedial/audit job, so the RA couldn't finish.
+    h+='<input type="file" id="fileInput" accept="image/*" multiple style="display:none">';
     h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">'+((fs||au||cert||elec)?"Start the job":"Set status")+'</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
     if(fs){
       // Firestopping jobs complete via the RIA form (per-seal photos + products +
@@ -609,9 +614,12 @@
     // revolving cycle. backTo is only the cold-start fallback.
     $("backBtn").onclick=function(){ if(window.mlBack) window.mlBack(backTo); else location.href=backTo; };
     var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
+    // #fileInput is present on EVERY job type (it backs the RA work-area photo),
+    // so wire its change handler unconditionally — otherwise the RA photo does
+    // nothing on an audit/remedial/cert job.
+    var _fi=$("fileInput"); if(_fi) _fi.addEventListener("change",uploadPhotos);
     if(!fs && !au && !cert && !elec){
       $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
-      $("fileInput").addEventListener("change",uploadPhotos);
       wireHqToggle();
       restoreNoteDraft();   // bring back a note typed before an app kill / bounce
       $("note").addEventListener("input",function(){ saveNoteDraft(); refresh(); });
