@@ -202,7 +202,8 @@ function renderTable(){
     const pay=u.selfEmployed&&u.totals.total!=null?`<br><span class="muted" style="font-size:11px">${money(u.totals.total)}</span>`:"";
     const ot=u.totals.otHours>0?`<br><span style="font-size:11px;color:#b45309">OT ${u.totals.otHours}h${u.totals.otPay?` · ${money(u.totals.otPay)}`:""}</span>`:"";
     const lv=u.totals.leaveHours>0?`<br><span style="font-size:11px;color:#4f46e5">Leave ${u.totals.leaveHours}h${u.totals.leavePay?` · ${money(u.totals.leavePay)}`:""}</span>`:"";
-    return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
+    const gap=u.gapCount>0?` <span title="${u.gapCount} job(s) still need hours${u.due&&u.due.label?' — due '+esc(u.due.label):''}" style="display:inline-block;background:${u.due&&u.due.overdue?'#dc2626':'#f59e0b'};color:#fff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700">⚠ ${u.gapCount} no hrs</span>`:"";
+    return `<tr><td class="name"><a href="engineer-timesheet.html?user=${encodeURIComponent(u.username)}" title="Open ${esc(u.name)}’s timesheet (their view)" style="color:var(--brand);font-weight:600;text-decoration:none">${esc(u.name)}</a>${u.selfEmployed?'<span class="se">S/E</span>':""}${gap}</td>${cells}
       <td class="tot">${hmS(u.totals.paidMins)}${ot}${lv}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
       <td>${inv}</td><td style="white-space:nowrap">${u.approval?'<span title="Approved &amp; locked" style="color:#16a34a;font-size:15px">✅</span> ':''}<button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="${u.approval?'Approved — open to view or re-open':'Edit / approve this week'}">✎</button></td></tr>`;
   }).join("");
@@ -351,6 +352,9 @@ g("cfgBtn").onclick=async()=>{
     <label>Default mileage (p/mile) <input type="number" id="d-ppm" value="${r.defaults.pencePerMile}" style="width:80px"></label>
     <label>Radius (miles, first/last) <input type="number" id="d-radius" value="${r.defaults.radiusMiles!=null?r.defaults.radiusMiles:10}" style="width:80px"></label>
     <label title="Hours in a day after which overtime is paid, for anyone with an OT × set">Overtime after (hours/day) <input type="number" id="d-otthresh" value="${r.defaults.overtimeThresholdH!=null?r.defaults.overtimeThresholdH:8}" style="width:80px"></label>
+    <label title="The deadline for engineers to complete a week's hours — the day/time in the week AFTER the timesheet week (like van checks).">Timesheet due by
+      <select id="d-duedow" style="width:120px">${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((n,i)=>`<option value="${i}" ${(r.defaults.dueDow!=null?+r.defaults.dueDow:3)===i?"selected":""}>${n}</option>`).join("")}</select>
+      <input type="time" id="d-duetime" value="${esc(r.defaults.dueTime||"12:00")}" step="300" style="width:110px"></label>
     <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
@@ -452,6 +456,7 @@ function collectCfg(){
   const defaults={commuteMins:+g("d-commute").value||30,lunchMins:+g("d-lunch").value||30,
     lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,
     radiusMiles:+g("d-radius").value||10,overtimeThresholdH:+g("d-otthresh").value||8,
+    dueDow:+g("d-duedow").value,dueTime:g("d-duetime").value||"12:00",
     basePostcode:g("d-base").value.trim().toUpperCase()||"PO15 5RQ",
     company:g("d-company").value};
   return {defaults,byUser};
