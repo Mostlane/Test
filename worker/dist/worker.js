@@ -4250,7 +4250,55 @@ var DEFAULTS = {
   basePostcode: "PO15 5RQ",
   company: "Mostlane"
 };
+var VERIFY_KEY = (tid, week) => `ts:verify:${tid}:${week}`;
+var normReg = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 var remindersEnabled = (cfg) => !(cfg && cfg.defaults && cfg.defaults.remindersOn === false);
+async function anthropicToolLocal(env, { system, user, toolName, schema, maxTokens }) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) return { ok: false, error: "AI isn't configured (no API key)." };
+  const model = env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model, max_tokens: maxTokens || 1500, system, tools: [{ name: toolName, description: "Return the result.", input_schema: schema }], tool_choice: { type: "tool", name: toolName }, messages: [{ role: "user", content: user }] })
+    });
+    if (!resp.ok) {
+      let d = "";
+      try {
+        d = (await resp.json())?.error?.message || "";
+      } catch {
+      }
+      return { ok: false, error: "AI error" + (d ? " (" + d + ")" : "") };
+    }
+    const payload = await resp.json();
+    const block = Array.isArray(payload.content) ? payload.content.find((c) => c.type === "tool_use" && c.name === toolName) : null;
+    if (!block?.input) return { ok: false, error: "AI returned nothing usable." };
+    return { ok: true, input: block.input };
+  } catch {
+    return { ok: false, error: "Couldn't reach the AI service." };
+  }
+}
+async function tsVerifyAI(env, engineers, monday) {
+  if (!engineers.length) return { byUser: {} };
+  const lines = engineers.map((e) => {
+    const dl = e.days.filter((d) => d.hours > 0).map((d) => d.date.slice(5) + ":" + d.hours + "h").join(", ") || "none";
+    return `- ${e.username} | van ${e.reg || "(none assigned)"} | entered ${e.total}h (${dl}) | van driving this week ${e.driveMins != null ? Math.round(e.driveMins / 6) / 10 + "h" : "NO VAN DATA"}`;
+  }).join("\n");
+  const schema = { type: "object", properties: { byUser: { type: "object", additionalProperties: { type: "object", properties: {
+    verdict: { type: "string", enum: ["ok", "check", "flag"] },
+    summary: { type: "string" },
+    flags: { type: "array", items: { type: "object", properties: { severity: { type: "string", enum: ["low", "medium", "high"] }, reason: { type: "string" } }, required: ["reason"] } }
+  }, required: ["verdict"] } } }, required: ["byUser"] };
+  const system = "You help UK office staff sanity-check weekly timesheets before payroll against telematics van data. Driving time is a SUBSET of the paid day \u2014 on-site work, office/yard visits, collecting a tipper are NOT driving \u2014 so entered hours are normally somewhat MORE than the van's driving time, which is expected and fine. Only raise a flag when something looks genuinely wrong: (a) entered hours are LESS than the van's driving time (impossible); (b) sizeable entered hours but the assigned van barely moved or shows no data (a likely vehicle switch \u2014 note it, usually low/medium); (c) an implausibly long day or week. Allow generously for on-site time and swapping to a pool/tipper. Give each engineer a one-sentence plain-English summary and a verdict: ok (fine), check (worth a glance), flag (needs attention). Only add flags[] entries for real concerns. Key the object by the EXACT username given.";
+  const user = `Week beginning ${monday}. Only weekly van DRIVING totals are available (not per-day). Engineers:
+${lines}
+
+Return byUser keyed by username.`;
+  const r = await anthropicToolLocal(env, { system, user, toolName: "verify", schema, maxTokens: 1800 });
+  if (!r.ok) return { error: r.error, byUser: {} };
+  return { byUser: r.input.byUser || {} };
+}
 async function hasEngTimesheet(env, tid, username) {
   try {
     const p = await permissionsFor(env, tid, username);
@@ -5836,6 +5884,83 @@ async function handle7(request, env, ctx, url, sess) {
     } catch {
     }
     return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+  if (sub === "/verify" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.week)) return error("week required", 400, env, request);
+    const monday = mondayOf(b.week);
+    const vans = Array.isArray(b.vans) ? b.vans : [];
+    const scores = b.scores && typeof b.scores === "object" ? b.scores : {};
+    const vanByReg = {};
+    for (const v of vans) {
+      const k = normReg(v && v.reg);
+      if (k) vanByReg[k] = { reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0) };
+    }
+    const scoreByReg = {};
+    for (const [r, s] of Object.entries(scores)) {
+      const k = normReg(r);
+      if (k && s != null && s !== "") scoreByReg[k] = Math.round(parseFloat(s));
+    }
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active'").bind(tid).all();
+    const engineers = [];
+    for (const u of users || []) {
+      if (!await hasEngTimesheet(env, tid, u.username)) continue;
+      const reg = u.vehicle_assigned || "";
+      const rk = normReg(reg);
+      const { days } = await loadWeek(env, tid, u.username, monday);
+      const dayList = weekDays(monday).map((dt) => {
+        const d = days[dt] || {};
+        const jh = d.jobHours || {};
+        let h = 0;
+        for (const v of Object.values(jh)) h += parseFloat(v) || 0;
+        if (d.leaveHours) h += parseFloat(d.leaveHours) || 0;
+        return { date: dt, hours: Math.round(h * 100) / 100 };
+      });
+      const total = Math.round(dayList.reduce((a, x) => a + x.hours, 0) * 100) / 100;
+      if (total === 0) continue;
+      engineers.push({
+        username: u.username,
+        name: displayName(u),
+        reg,
+        driveMins: vanByReg[rk] ? vanByReg[rk].driveMins : null,
+        score: scoreByReg[rk] != null ? scoreByReg[rk] : null,
+        days: dayList,
+        total
+      });
+    }
+    const ai = await tsVerifyAI(env, engineers, monday);
+    const byUser = {};
+    for (const e of engineers) {
+      const v = ai.byUser && ai.byUser[e.username] || {};
+      byUser[e.username] = {
+        name: e.name,
+        reg: e.reg,
+        driveMins: e.driveMins,
+        score: e.score,
+        total: e.total,
+        days: e.days,
+        verdict: v.verdict || "ok",
+        summary: v.summary || "",
+        flags: Array.isArray(v.flags) ? v.flags : []
+      };
+    }
+    const usedRegs = new Set(engineers.map((e) => normReg(e.reg)).filter(Boolean));
+    const unassignedVans = vans.filter((v) => !usedRegs.has(normReg(v && v.reg))).map((v) => ({ reg: v.reg, driver: v && v.driver || "", driveMins: Math.round(parseFloat(v && v.driveMins) || 0), score: scoreByReg[normReg(v && v.reg)] ?? null })).filter((v) => v.driveMins > 0 || v.score != null);
+    const rec = { at: (/* @__PURE__ */ new Date()).toISOString(), by: sess.user.username, week: monday, byUser, unassignedVans, aiError: ai.error || null };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, VERIFY_KEY(tid, monday), JSON.stringify(rec)).run();
+    return json({ ok: true, ...rec }, {}, env, request);
+  }
+  if (sub === "/verify" && method === "GET") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(VERIFY_KEY(tid, monday)).first();
+    let rec = null;
+    try {
+      rec = row && row.value ? JSON.parse(row.value) : null;
+    } catch {
+    }
+    return json({ ok: true, week: monday, verify: rec }, {}, env, request);
   }
   if (sub.startsWith("/admin/")) {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
