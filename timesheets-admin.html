@@ -161,7 +161,7 @@
   <div id="vfSteps">
     <div class="vfstep" style="border:1px solid #e5e9f0;border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="font-weight:700;margin-bottom:4px">1. VelocityFleet trip export (.xls)</div>
-      <div class="muted" style="font-size:12.5px;margin-bottom:8px">Trip History export. The detailed (per-trip) export gives the best check; the weekly Summary works for a lighter total check.</div>
+      <div class="muted" style="font-size:12.5px;margin-bottom:8px">The VelocityFleet Trip History export (the workbook with a “Detailed View” tab + a tab per van). It checks each engineer's entered hours against their van's per-day door-to-door movement.</div>
       <input type="file" id="vfXls" accept=".xls,.xlsx"><div id="vfXlsInfo" class="muted" style="font-size:12.5px;margin-top:6px"></div>
     </div>
     <div class="vfstep" style="border:1px solid #e5e9f0;border-radius:10px;padding:12px;margin-bottom:10px">
@@ -260,15 +260,22 @@ function openEdit(username){
   const autoMi=!!(u.autoMileage&&u.autoMileage.applies);   // door-to-door, locked
   const vf=vfFor(username); let vfHtml="";
   if(vf){
-    const dr=vf.driveMins!=null?(Math.round(vf.driveMins/6)/10)+"h van driving this week":"no van data for their assigned van";
     const col=vf.verdict==="flag"?"#fef2f2":vf.verdict==="check"?"#fffbeb":"#f0fdf4";
     const bc=vf.verdict==="flag"?"#fecaca":vf.verdict==="check"?"#fde68a":"#bbf7d0";
+    const rows=(vf.dayLog||[]).filter(d=>d.entered>0||d.moved).map(d=>{
+      const dd=new Date(d.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric"});
+      const over=d.moved&&d.spanH!=null&&d.entered>d.spanH+1, noMove=d.entered>0&&!d.moved;
+      const c=(over||noMove)?"#b91c1c":"#334155";
+      return `<tr style="color:${c}"><td style="padding:2px 6px 2px 0">${dd}</td><td style="padding:2px 6px">${d.moved?esc(d.vanStart+"–"+d.vanEnd):'<span style="color:#b91c1c">van didn\'t move</span>'}</td><td style="text-align:right;padding:2px 6px">${d.moved?d.spanH+"h":"—"}</td><td style="text-align:right;padding:2px 6px">${d.driveH!=null?d.driveH+"h":"—"}</td><td style="text-align:right;padding:2px 6px;font-weight:700">${d.entered?d.entered+"h":"—"}</td><td style="padding:2px 0;font-size:11px;color:#64748b">${esc((d.locs||[]).slice(0,3).join(", "))}</td></tr>`;
+    }).join("");
+    const table=rows?`<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px"><tr style="color:#64748b;text-align:left"><th style="padding:0 6px 2px 0">Day</th><th style="padding:0 6px">Van out</th><th style="text-align:right;padding:0 6px" title="Door-to-door: first move to last stop">D2D</th><th style="text-align:right;padding:0 6px">Drive</th><th style="text-align:right;padding:0 6px">Entered</th><th style="padding:0">Sites</th></tr>${rows}</table>`:"";
     vfHtml=`<div style="background:${col};border:1px solid ${bc};border-radius:10px;padding:10px 12px;margin-bottom:12px">
       <div style="font-weight:700">🚚 Fleet cross-check${vf.score!=null?` · van score <span style="color:${scoreColour(vf.score)}">${vf.score}</span>`:""}</div>
-      <div style="font-size:13px;margin-top:3px">Van <b>${esc(vf.reg||"—")}</b> · ${dr} · entered <b>${vf.total}h</b></div>
+      <div style="font-size:13px;margin-top:3px">Van <b>${esc(vf.reg||"—")}</b> · door-to-door <b>${vf.weekSpanH!=null?vf.weekSpanH+"h":"—"}</b> this week · entered <b>${vf.total}h</b></div>
       ${vf.summary?`<div style="font-size:13px;margin-top:4px">${esc(vf.summary)}</div>`:""}
-      ${(vf.flags||[]).map(f=>`<div style="font-size:12.5px;margin-top:3px;color:#991b1b">• ${esc(f.reason)}${f.severity?` <i>(${esc(f.severity)})</i>`:""}</div>`).join("")}
-      <div class="muted" style="font-size:11px;margin-top:5px">Driving time is only part of the paid day — on-site work, office/yard visits and tipper swaps aren't driving. Adjust the day times below if needed, or leave as-is.</div>
+      ${(vf.flags||[]).map(f=>`<div style="font-size:12.5px;margin-top:3px;color:#991b1b">• ${f.date?esc(new Date(f.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric"}))+": ":""}${esc(f.reason)}${f.severity?` <i>(${esc(f.severity)})</i>`:""}</div>`).join("")}
+      ${table}
+      <div class="muted" style="font-size:11px;margin-top:6px">“Door-to-door” = the van’s first move to last stop — the outer bound of the paid day (it includes driving + waiting, so entered on-site hours are normally a bit less). Red = entered more than the van was out, or hours on a day the van didn’t move (check for a pool/tipper swap). Adjust the days below or leave as-is.</div>
     </div>`;
   }
   g("editBody").innerHTML=vfHtml+DATA.days.map((date,i)=>{
@@ -655,29 +662,48 @@ g("nextWk").onclick=()=>{WEEK=addDays(WEEK,7);load();};
 
 // ── Verify timesheets against fleet telematics data ──────────────────────────
 const normRegC=s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+const toMinC=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(t||"").trim());return m?(+m[1])*60+(+m[2]):null;};
+const xlDate=v=>{ if(v instanceof Date)return v.toISOString().slice(0,10); if(typeof v==="number")return new Date(Date.UTC(1899,11,30)+v*86400000).toISOString().slice(0,10); const m=String(v||"").match(/\d{4}-\d{2}-\d{2}/); return m?m[0]:""; };
+const hmC=m=>m==null?"":String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
 function parseDur(v){ if(v==null)return 0; if(typeof v==="number"){ if(v>0&&v<1)return Math.round(v*1440); return Math.round(v*60);} const s=String(v); let m=s.match(/(\d+)\s*h\s*(\d+)?/i); if(m)return (+m[1])*60+(+(m[2]||0)); m=s.match(/^(\d+):(\d{2})/); if(m)return (+m[1])*60+(+m[2]); const f=parseFloat(s); return isFinite(f)?Math.round(f*60):0; }
+// Parse a VelocityFleet Trip History workbook. The "Summary" tab gives driver
+// name + weekly totals per van; the "Detailed View" tab (every trip) gives the
+// per-DAY door-to-door span (first move → last stop) + sites visited.
 async function parseTripXls(file){
   if(!window.XLSX)throw new Error("spreadsheet reader didn't load");
-  const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"}); const acc={};
-  for(const sn of wb.SheetNames){
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,blankrows:false});
-    let hdr=-1,cReg=-1,cDrv=-1,cDur=-1,cTrp=-1;
-    for(let i=0;i<rows.length;i++){
-      const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());
-      const ri=low.findIndex(c=>c.includes("registration")||c.includes("reg no")||c==="reg"||c==="vrm");
-      if(ri>=0){ hdr=i;cReg=ri; cDrv=low.findIndex(c=>c.includes("driver")); cDur=low.findIndex(c=>c.includes("duration")||c.includes("driving")||(c.includes("time")&&!c.includes("date"))); cTrp=low.findIndex(c=>c.includes("trip")); break; }
-    }
-    if(hdr<0)continue;
-    for(let i=hdr+1;i<rows.length;i++){
-      const row=rows[i]; if(!row)continue; const regRaw=row[cReg]; const reg=normRegC(regRaw);
-      if(!reg||reg.length<5||String(regRaw).toLowerCase().includes("total"))continue;
-      const dur=cDur>=0?parseDur(row[cDur]):0; const drv=cDrv>=0?String(row[cDrv]||"").trim():"";
-      const trp=cTrp>=0?(parseInt(row[cTrp],10)||0):0;
-      if(!acc[reg])acc[reg]={reg:String(regRaw).trim(),driver:drv,driveMins:0,trips:0};
-      acc[reg].driveMins+=dur; acc[reg].trips+=trp; if(drv&&!acc[reg].driver)acc[reg].driver=drv;
+  const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:"array"});
+  const nameByReg={}, sumByReg={};
+  const sumSheet=wb.Sheets["Summary"];
+  if(sumSheet){
+    const rows=XLSX.utils.sheet_to_json(sumSheet,{header:1,blankrows:false});
+    let h=-1,cReg=-1,cDrv=-1,cDur=-1,cTrp=-1;
+    for(let i=0;i<rows.length;i++){const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());const ri=low.findIndex(c=>c.includes("registration"));if(ri>=0){h=i;cReg=ri;cDrv=low.findIndex(c=>c.includes("driver"));cDur=low.findIndex(c=>c.includes("duration"));cTrp=low.findIndex(c=>c.includes("trip"));break;}}
+    if(h>=0)for(let i=h+1;i<rows.length;i++){const row=rows[i];if(!row)continue;const rr=row[cReg];const reg=normRegC(rr);if(!reg||reg.length<5||String(rr).toLowerCase().includes("total"))continue;nameByReg[reg]=cDrv>=0?String(row[cDrv]||"").trim():"";sumByReg[reg]={driveMins:cDur>=0?parseDur(row[cDur]):0,trips:cTrp>=0?(parseInt(row[cTrp],10)||0):0,regRaw:String(rr).trim()};}
+  }
+  const vanMap={};
+  const van=(reg,rr)=>{ if(!vanMap[reg])vanMap[reg]={reg:(sumByReg[reg]&&sumByReg[reg].regRaw)||rr||reg,driver:nameByReg[reg]||"",driveMins:(sumByReg[reg]&&sumByReg[reg].driveMins)||0,trips:(sumByReg[reg]&&sumByReg[reg].trips)||0,days:{}}; return vanMap[reg]; };
+  const det=wb.Sheets["Detailed View"];
+  if(det){
+    const rows=XLSX.utils.sheet_to_json(det,{header:1,blankrows:false});
+    let h=-1,cDrv=-1,cReg=-1,cDate=-1,cS=-1,cE=-1,cEL=-1,cDrive=-1;
+    for(let i=0;i<rows.length;i++){const low=(rows[i]||[]).map(c=>String(c||"").toLowerCase());if(low.some(c=>c.includes("start time"))){h=i;cDrv=low.findIndex(c=>c.includes("driver"));cReg=low.findIndex(c=>c.includes("registration"));cDate=low.findIndex(c=>c.includes("date"));cS=low.findIndex(c=>c.includes("start time"));cE=low.findIndex(c=>c.includes("end time"));cEL=low.findIndex(c=>c.includes("end location"));cDrive=low.findIndex(c=>c.includes("drive time"));break;}}
+    if(h>=0)for(let i=h+1;i<rows.length;i++){
+      const row=rows[i];if(!row)continue; const rr=row[cReg]; const reg=normRegC(rr); if(!reg||reg.length<5)continue;
+      const st=String(row[cS]||"").trim(); if(!st||st==="-")continue;
+      const date=xlDate(row[cDate]); if(!/^\d{4}-\d{2}-\d{2}$/.test(date))continue;
+      const sM=toMinC(st), eM=toMinC(row[cE]);
+      const v=van(reg,rr); if(!v.driver&&cDrv>=0)v.driver=String(row[cDrv]||"").trim();
+      const d=v.days[date]||(v.days[date]={firstM:null,lastM:null,driveMins:0,trips:0,locs:[]});
+      if(sM!=null&&(d.firstM==null||sM<d.firstM))d.firstM=sM;
+      if(eM!=null&&(d.lastM==null||eM>d.lastM))d.lastM=eM;
+      d.driveMins+=cDrive>=0?parseDur(row[cDrive]):0; d.trips++;
+      const el=String((cEL>=0?row[cEL]:"")||"").trim();
+      if(el&&!/^office$|^yard$/i.test(el)){ const short=el.split(",")[0].trim(); if(short&&!d.locs.includes(short)&&d.locs.length<6)d.locs.push(short); }
     }
   }
-  return Object.values(acc);
+  const out=Object.keys(vanMap).length?Object.values(vanMap):Object.keys(nameByReg).map(reg=>van(reg));
+  return out.map(v=>({reg:v.reg,driver:v.driver,driveMins:v.driveMins,trips:v.trips,
+    days:Object.fromEntries(Object.entries(v.days).map(([dt,d])=>[dt,{s:hmC(d.firstM),e:hmC(d.lastM),span:(d.firstM!=null&&d.lastM!=null)?Math.max(0,d.lastM-d.firstM):0,drive:Math.round(d.driveMins),trips:d.trips,locs:d.locs}]))}));
 }
 async function parseScores(file){
   if(!window.pdfjsLib)return {};
