@@ -127,8 +127,9 @@ a{color:inherit}
 .hero-stats .stat strong{display:block;font-family:var(--display);font-weight:400;font-size:26px;color:var(--accent);letter-spacing:.02em}
 .hero-stats .stat span{font-size:13px;color:rgba(238,244,239,.7)}
 @media(max-width:720px){
+  .hero{justify-content:flex-start}
   .hero-stats{grid-template-columns:repeat(2,1fr);margin-top:40px}
-  .hero-content{padding-top:100px}
+  .hero-content{padding-top:calc(96px + env(safe-area-inset-top,0px))}
 }
 
 /* ---------- Section headings ---------- */
