@@ -97,23 +97,27 @@
       loadList();
     })();
 
+    var SHOW_ISSUED = false;
     async function loadList() {
       g("wrap").innerHTML = '<p class="muted" style="padding:20px;">Loading certificates…</p>';
       let certs = [];
-      try { const d = await authFetch("/certs/review").then(r=>r.json()); certs = (d && d.certs) || []; }
+      try { const d = await authFetch("/certs/review" + (SHOW_ISSUED ? "?all=1" : "")).then(r=>r.json()); certs = (d && d.certs) || []; }
       catch { g("wrap").innerHTML = '<p class="msg err" style="padding:20px;">Couldn\'t load the review queue.</p>'; return; }
-      if (!certs.length) { g("wrap").innerHTML = '<div class="card"><p class="muted">Nothing waiting for review. Certificates engineers complete on EM/PAT jobs land here.</p></div>'; return; }
-      let h = '<div class="card"><div class="muted" style="margin-bottom:6px">'+certs.length+' certificate'+(certs.length===1?"":"s")+' — tap to review, edit and issue.</div>';
+      var toggle = '<div style="margin-bottom:8px"><button class="btn ghost sm" id="toggleIssued">'+(SHOW_ISSUED?"Show pending only":"Show issued certs too")+'</button></div>';
+      if (!certs.length) { g("wrap").innerHTML = toggle + '<div class="card"><p class="muted">'+(SHOW_ISSUED?"No certificates found.":"Nothing waiting for review. Certificates engineers complete on EM/PAT jobs land here.")+'</p></div>'; g("toggleIssued").onclick=function(){ SHOW_ISSUED=!SHOW_ISSUED; loadList(); }; return; }
+      let h = toggle + '<div class="card"><div class="muted" style="margin-bottom:6px">'+certs.length+' certificate'+(certs.length===1?"":"s")+' — tap to review, edit'+(SHOW_ISSUED?", issue or re-issue.":" and issue.")+'</div>';
       certs.forEach(c => {
         const em = c.type==="pat" ? "🔌" : "💡";
         const site = (c.installation && c.installation.name) || c.siteCode || "—";
+        var badge = c.status==="final" ? '<span class="badge" style="background:#d8f0e0;color:#0e7a3b">Issued'+(c.certNumber?" "+esc(c.certNumber):"")+'</span>' : '<span class="badge '+(c.status==="review"?"review":"draft")+'">'+(c.status==="review"?"Ready":"Draft")+'</span>';
         h += '<div class="item" data-id="'+esc(c.id)+'"><div class="em">'+em+'</div><div class="m">'
           + '<div class="t">'+esc(site)+' <span class="muted">· '+(c.type==="pat"?"PAT":"EM")+'</span></div>'
           + '<div class="s">'+esc(c.engineer||"")+' · '+fmt(c.submittedAt||c.updatedAt)+' · '+(c.rows?c.rows.length:0)+' item'+((c.rows&&c.rows.length===1)?"":"s")+'</div></div>'
-          + '<span class="badge '+(c.status==="review"?"review":"draft")+'">'+(c.status==="review"?"Ready":"Draft")+'</span></div>';
+          + badge+'</div>';
       });
       h += '</div>';
       g("wrap").innerHTML = h;
+      g("toggleIssued").onclick = function(){ SHOW_ISSUED=!SHOW_ISSUED; loadList(); };
       [].forEach.call(document.querySelectorAll(".item"), el => el.onclick = () => openCert(el.dataset.id));
     }
 
@@ -130,16 +134,20 @@
         '<div style="margin-bottom:10px"><button class="btn ghost sm" id="backList">‹ All certificates</button></div>'
         + (hasBattery ? '<div class="card" style="border-color:#f0c98a;background:#fffaf0"><h2 style="margin:0 0 6px;font-size:15px;color:#8a4b0a">🔋 '+battCount+' fitting'+(battCount===1?"":"s")+' need batteries</h2><p class="muted" style="margin:0 0 8px">Get a price from the supplier before quoting. £50/light does not apply to batteries.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="battPdf">📄 Preview enquiry PDF</button><button class="btn green sm" id="battEmail">📧 Email supplier</button></div><div class="msg" id="battMsg"></div></div>' : '')
         + '<div class="card"><div id="certHost"></div></div>'
-        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">Issue this certificate</h2>'
+        + '<div class="card"><h2 style="margin:0 0 8px;font-size:16px">'+(cert.status==="final"?"Re-issue this certificate":"Issue this certificate")+'</h2>'
         + '<div class="finbar">'
         + '<div><label>Certificate number</label><input type="text" id="finNum" value="'+esc(suggestion)+'" style="width:150px"></div>'
         + '<div><label>Certificate date</label><input type="text" id="finDate" value="'+esc(cert.contractor && cert.contractor.date ? cert.contractor.date : today)+'" placeholder="yyyy-mm-dd" style="width:150px"></div>'
-        + '<button class="btn green" id="finBtn">🏁 Finalise &amp; file to compliance</button>'
+        + (cert.status==="final"
+            ? '<button class="btn green" id="reissueBtn">♻ Re-issue PDF</button>'
+            : '<button class="btn green" id="finBtn">🏁 Finalise &amp; file to compliance</button>')
         + '<button class="btn ghost sm" id="upBtn">⬆ Upload replacement PDF</button>'
         + '<button class="btn red sm" id="delBtn">🗑 Delete</button>'
         + '<input type="file" id="upFile" accept="application/pdf" style="display:none">'
         + '</div><div class="msg" id="finMsg"></div>'
-        + '<div class="muted" style="margin-top:8px">Finalising draws the Mostlane PDF, files it under this store on the compliance chart and rolls the next-due date.</div></div>';
+        + '<div class="muted" style="margin-top:8px">'+(cert.status==="final"
+            ? "Already issued as "+esc(cert.certNumber||"")+". Re-issue rebuilds the PDF from the current details and replaces the filed copy on the compliance chart — the number and due date stay the same."
+            : "Finalising draws the Mostlane PDF, files it under this store on the compliance chart and rolls the next-due date.")+'</div></div>';
       g("backList").onclick = loadList;
       window.MLCert.mount(g("certHost"), { certId: id, type: cert.type, mode: "office", api: API, token: localStorage.getItem("mostlaneToken") });
 
@@ -164,7 +172,7 @@
         };
       }
 
-      g("finBtn").onclick = async function(){
+      if (g("finBtn")) g("finBtn").onclick = async function(){
         const num = g("finNum").value.trim(); if (!num) { setMsg("Enter a certificate number.", true); return; }
         this.disabled = true; setMsg("Finalising…");
         try {
@@ -177,6 +185,14 @@
           }
           else { setMsg((d && d.error) || "Couldn't finalise.", true); this.disabled = false; }
         } catch { setMsg("Couldn't finalise.", true); this.disabled = false; }
+      };
+      if (g("reissueBtn")) g("reissueBtn").onclick = async function(){
+        this.disabled = true; setMsg("Re-issuing…");
+        try {
+          const d = await authFetch("/certs/reissue", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ id, docDate:g("finDate").value.trim() }) }).then(r=>r.json());
+          if (d && d.ok) { setMsg("Re-issued "+d.number+" — PDF replaced on the compliance chart ✓"); setTimeout(loadList, 1300); }
+          else { setMsg((d && d.error) || "Couldn't re-issue.", true); this.disabled = false; }
+        } catch { setMsg("Couldn't re-issue.", true); this.disabled = false; }
       };
       g("upBtn").onclick = () => g("upFile").click();
       g("upFile").onchange = async function(){
