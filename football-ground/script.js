@@ -57,11 +57,32 @@ document.querySelectorAll(".nav-links a").forEach(a =>
   })
 );
 
-/* ---------- Reveal on scroll ---------- */
-const io = new IntersectionObserver((entries) => {
-  entries.forEach(e => { if (e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } });
-}, { threshold:0.12, rootMargin:"0px 0px -40px 0px" });
-document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+/* ---------- Reveal on scroll (fail-safe) ---------- */
+(function setupReveal(){
+  const reveals = document.querySelectorAll(".reveal");
+  const show = (el) => el.classList.add("in");
+
+  // Enable the hidden-until-revealed state only now that JS is running.
+  document.body.classList.add("reveal-on");
+
+  if ("IntersectionObserver" in window){
+    const io = new IntersectionObserver((entries, obs) => {
+      entries.forEach(e => { if (e.isIntersecting){ show(e.target); obs.unobserve(e.target); } });
+    }, { threshold:0.08, rootMargin:"0px 0px -30px 0px" });
+
+    reveals.forEach(el => {
+      const r = el.getBoundingClientRect();
+      // Anything already on screen (e.g. the hero) shows immediately.
+      if (r.top < window.innerHeight && r.bottom > 0) show(el);
+      else io.observe(el);
+    });
+  } else {
+    reveals.forEach(show);
+  }
+
+  // Absolute backstop: nothing may ever stay hidden.
+  setTimeout(() => reveals.forEach(show), 1000);
+})();
 
 /* ---------- Enquiry form ---------- */
 const form = document.getElementById("enquiryForm");

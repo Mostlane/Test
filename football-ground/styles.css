@@ -255,10 +255,13 @@ h3{font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:.01em}
 .footer-links a{color:rgba(238,244,239,.6);text-decoration:none;font-size:14px}
 .footer-links a:hover{color:var(--accent)}
 
-/* ---------- Reveal on scroll ---------- */
-.reveal{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
-.reveal.in{opacity:1;transform:none}
+/* ---------- Reveal on scroll ----------
+   Content is VISIBLE by default. The hidden state is only applied once JS
+   adds .reveal-on to <body>, so if JS never runs (or a preview doesn't
+   scroll) nothing can get stuck invisible. */
+body.reveal-on .reveal{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
+body.reveal-on .reveal.in{opacity:1;transform:none}
 @media(prefers-reduced-motion:reduce){
-  .reveal{opacity:1;transform:none;transition:none}
+  body.reveal-on .reveal{opacity:1;transform:none;transition:none}
   html{scroll-behavior:auto}
 }
