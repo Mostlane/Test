@@ -132,12 +132,20 @@ async function anthropicChat(env, { system, messages, tools, forceTool }) {
 }
 
 // ── Live SLA job lookup (so the assistant can find + assign EXISTING jobs) ─────
+const WORKED_RE = /in progress|complete|closed|travel|on hold|quote|order|resumed|safety/i;
 function jobRow(r) {
   let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
   const engs = Array.isArray(d.assignedEngineers) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
+  const hist = Array.isArray(d.statusHistory) ? d.statusHistory : [];
+  const last = hist.length ? hist[hist.length - 1] : null;
   return { id: r.id, ref: d.helpdeskRef || r.helpdesk_ref || r.id, siteName: d.siteName || "", siteCode: d.siteCode || r.site_code || "",
     status: d.status || r.status || "", priority: d.priority || "", scheduledAt: d.scheduledAt || r.scheduled_at || null,
-    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 220), _dormant: !!d.fallbackTemplate };
+    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 400),
+    // Cheap activity signals (from the job JSON already loaded — no extra reads):
+    visited: hist.some(h => WORKED_RE.test(String(h && h.status || ""))),
+    lastActivity: last ? { status: last.status, at: last.at, by: last.by } : null,
+    _histBy: hist.map(h => String(h && h.by || "").toLowerCase()).filter(Boolean),
+    _dormant: !!d.fallbackTemplate };
 }
 const FINISHED = /^(complete|closed|closed jobs|invoiced|cancelled)$/i;
 async function searchJobs(env, tid, query) {
@@ -312,6 +320,81 @@ async function toolListEngineers(env, tid) {
     .map(u => ({ name: (u.first_name + " " + u.last_name).trim(), username: u.username }));
   return { count: engineers.length, engineers };
 }
+// Full detail for ONE job — full description + office/site notes + status
+// history + whether photos/signature are attached, so the assistant can tell
+// if a site has already been surveyed/quoted. (It can't SEE image contents,
+// but it can see how many photos exist and the visit history.)
+async function toolGetJob(env, tid, ref, engSet) {
+  engSet = engSet || new Set();
+  const jt = await resolveJobTarget(env, tid, { jobRef: ref, jobId: ref });
+  if (!jt.ok) return jt.ambiguous ? { ambiguous: jt.ambiguous } : { notfound: true, message: "No job found for \"" + ref + "\"." };
+  const id = jt.job.id;
+  let d = {};
+  try { const r = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tid, id).first(); if (r) d = JSON.parse(r.data || "{}"); } catch {}
+  let photoCount = 0; const stages = {}; let hasSignature = !!d.signature;
+  try {
+    let cursor;
+    do {
+      const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/`, cursor, include: ["customMetadata"] });
+      for (const o of l.objects || []) {
+        const k = String(o.key || "");
+        if (/\.thumb$/i.test(k)) continue;
+        if (/signature/i.test(k)) { hasSignature = true; continue; }
+        photoCount++;
+        const st = (o.customMetadata && (o.customMetadata.stage || o.customMetadata.Stage)) || "";
+        if (st) stages[st] = (stages[st] || 0) + 1;
+      }
+      cursor = l.truncated ? l.cursor : null;
+    } while (cursor);
+  } catch {}
+  const hist = (Array.isArray(d.statusHistory) ? d.statusHistory : []).slice(-12).map(h => ({ status: h.status, at: h.at, by: h.by, byEngineer: engSet.has(String(h.by || "").toLowerCase()) }));
+  const attendedByEngineer = photoCount > 0 || hist.some(h => h.byEngineer && WORKED_RE.test(String(h.status || "")));
+  const visited = attendedByEngineer || hist.some(h => WORKED_RE.test(String(h.status || "")));
+  return {
+    id, ref: d.helpdeskRef || id, site: d.siteName || "", siteCode: d.siteCode || "", status: d.status || "",
+    priority: d.priority || "", engineers: Array.isArray(d.assignedEngineers) ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []),
+    scheduledAt: d.scheduledAt || null, durationMinutes: d.durationMinutes || null,
+    description: String(d.description || "").slice(0, 1800),
+    notes: String(d.notes || d.note || d.officeNote || "").slice(0, 1800),
+    photoCount, photoStages: stages, hasSignature, statusHistory: hist,
+    likelyVisited: visited, attendedByEngineer,
+  };
+}
+// EM set number + previous PAT/EM certificate numbers for a store, from the
+// compliance certificates (sla:emsets config + compliance_files). So the
+// assistant can fill an EM/PAT job's numbers instead of asking the office.
+async function toolCertNumbers(env, tid, store) {
+  const digits = String(store || "").replace(/\D/g, "");
+  if (!digits) return { notfound: true, message: "Give a store number." };
+  const cands = [...new Set([digits.padStart(4, "0"), digits, String(Number(digits) || "")].filter(Boolean))];
+  let emSet = "";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
+    if (row) { const m = JSON.parse(row.value || "{}"); for (const c of cands) { if (m[c]) { emSet = String(m[c]); break; } } }
+  } catch {}
+  const lastNum = async type => {
+    try {
+      const ph = cands.map(() => "?").join(",");
+      const { results } = await env.DB.prepare("SELECT r2_key FROM compliance_files WHERE tenant_id=? AND type=? AND code IN (" + ph + ")").bind(tid, type, ...cands).all();
+      let best = "", bestY = -1;
+      for (const r of results || []) {
+        const name = String(r.r2_key || "").split("/").pop() || "";
+        const m = name.replace(/^\d+-/, "").match(/(\d{3,5})[-.](?:DEC|JAN|NOV)?(\d{2})/i);
+        if (m) { const y = Number(m[2]); if (y > bestY) { bestY = y; best = m[1]; } }
+      }
+      return best;
+    } catch { return ""; }
+  };
+  const lastEm = emSet || await lastNum("em");
+  const lastPat = await lastNum("pat");
+  const yy = new Date().toLocaleDateString("en-GB", { timeZone: "Europe/London", year: "2-digit" });
+  return {
+    store: cands[0],
+    emSetNumber: lastEm || "", emCertSuggested: lastEm ? (lastEm + "-" + yy) : "",
+    lastPatNumber: lastPat || "", patCertSuggested: lastPat ? (lastPat + "-" + yy) : "",
+    note: (lastEm || lastPat) ? "" : "No previous EM/PAT certificate on file for this store — the numbers are confirmed at cert time anyway.",
+  };
+}
 async function toolFindVehicle(env, tid, caps, query) {
   if (!caps.vehicles) return { denied: true, message: "You don't have Vehicles access." };
   const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
@@ -363,23 +446,36 @@ export async function handle(request, env, ctx, url, sess) {
     const message = String(b.message || "").slice(0, 4000);
     if (!message) return error("Say what you'd like me to do.", 400, env, request);
     const g = await getRules(env, tid);
-    // Field engineers list (names) for context.
-    let engNames = [];
+    // Field engineers (names + a lookup set for engineer-vs-office attribution).
+    let engNames = []; const engSet = new Set();
     try {
-      const { results } = await env.DB.prepare("SELECT first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
-      engNames = (results || []).filter(u => { let p = {}; try { p = JSON.parse(u.profile || "{}"); } catch {} return String(p.staffType || "").toLowerCase() === "field"; })
-        .map(u => (u.first_name + " " + u.last_name).trim()).filter(Boolean);
+      const { results } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id=? AND (status IS NULL OR status='' OR status='Active')").bind(tid).all();
+      for (const u of results || []) {
+        let p = {}; try { p = JSON.parse(u.profile || "{}"); } catch {}
+        if (String(p.staffType || "").toLowerCase() !== "field") continue;
+        const full = (u.first_name + " " + u.last_name).trim();
+        if (full) engNames.push(full);
+        [u.username, full, u.first_name].forEach(x => { const s = String(x || "").toLowerCase().trim(); if (s) engSet.add(s); });
+      }
     } catch {}
+    // Flag which of a job's activity signals were an ENGINEER (not the office).
+    const markEngActivity = jobs => { for (const j of jobs || []) {
+      j.attendedByEngineer = !!(j._histBy && j._histBy.some(b => engSet.has(b)));
+      j.lastByEngineer = !!(j.lastActivity && engSet.has(String(j.lastActivity.by || "").toLowerCase()));
+      delete j._histBy;
+    } return jobs; };
     // Custom job categories — a job's STATUS can be one of these to mark a
     // workstream (e.g. "FRA Works"). The assistant must recognise these.
     let cats = [];
     try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='sla_categories'").bind(tid).first(); if (row && row.value) cats = (JSON.parse(row.value) || []).map(c => c && c.name).filter(Boolean); } catch {}
     const tools = [
       { name: "find_jobs", description: "Search the LIVE job board for existing jobs — by reference/incident number, site name or store number, words from the description, an engineer's name, or a status/category. ALWAYS use this when the office refers to jobs that already exist. Returns matching jobs with id, ref, site, status, current engineer and scheduled time.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "get_job", description: "Get FULL detail for ONE job by its id (from find_jobs) or reference: the full description, office/site notes, status history (who did what, when), how many PHOTOS are attached and whether a signature exists. Use this to judge whether a job has already been surveyed/visited/quoted (photos present or an In Progress/Quote/Complete in its history = it's been attended). NB you cannot see image contents, only that they exist.", input_schema: { type: "object", properties: { job: { type: "string", description: "job id (preferred) or reference/number" } }, required: ["job"] } },
       { name: "find_site", description: "Look up a SITE / store in the register — by name, store number or postcode. Returns number, name, type/customer, postcode and coordinates. Use it to answer questions about a site or to get a site's details.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
       { name: "find_compliance", description: "Look up COMPLIANCE certificate due dates for a store (EICR/5-year, EM, PAT, gas, etc.) or list what's overdue/due-soon. Query a store number/name, or words like 'overdue'. Optionally set scheme (coop/fareham/chapplins/projects). Returns per-type due dates with OVERDUE/due-soon flags.", input_schema: { type: "object", properties: { query: { type: "string" }, scheme: { type: "string" } }, required: ["query"] } },
       { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
       { name: "find_vehicle", description: "Look up a fleet VEHICLE by registration, make or model. Returns reg, make/model and MOT/tax/service due dates.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "cert_numbers", description: "Get a store's EM set number and previous PAT/EM certificate numbers (from the compliance certificates on file), for raising an EM/PAT test job. Pass the store number.", input_schema: { type: "object", properties: { store: { type: "string" } }, required: ["store"] } },
       { name: "ask", description: "Ask the office ONE clarifying question — only when something genuinely can't be found or is truly ambiguous. Never ask for details you can look up with a find_ tool first.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
       { name: "reply", description: "Answer the office in plain text — use this to ANSWER a question after looking things up (e.g. compliance due dates, a site's details, what's on the board). Also for Full-Access general chat.", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
     ];
@@ -420,12 +516,15 @@ export async function handle(request, env, ctx, url, sess) {
     canDo.push(caps.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
     const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal — jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles — and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES — never claim a job was created or assigned. "
       + "Be smart and proactive: look things up rather than asking the user to re-type details. "
+      + "You CAN inspect a job's detail with get_job — its full description, office/site notes, status history and whether PHOTOS/signature are attached — so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs — don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). "
+      + "BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER — not the office — moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit — e.g. '🔧 attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. "
       + "THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them — never invent it. "
       + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ")
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
       + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
-      + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). "
+      + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers — use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '⚠️ No previous PAT number on file for this store — it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
+      + "FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings — they don't render here. Bold a label with **like this**. Keep it tight. "
       + "\n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
     const messages = [];
     for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
@@ -433,27 +532,37 @@ export async function handle(request, env, ctx, url, sess) {
     }
     messages.push({ role: "user", content: message });
 
-    // Agentic loop: let the model call find_jobs (possibly several in one turn,
-    // and re-search) before proposing. Every tool_use in an assistant message
-    // MUST get a matching tool_result, or the next call is rejected.
+    // Agentic loop: let the model call the find_/get_ read tools (possibly
+    // several per turn, and re-search) before it concludes. Every tool_use in an
+    // assistant message MUST get a matching tool_result, or the next call is
+    // rejected. On the LAST round the read tools are withdrawn and a tool is
+    // forced, so it always concludes with an answer/proposal from what it gathered.
+    const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle", "cert_numbers"]);
+    const termTools = tools.filter(x => !READ.has(x.name));
+    const MAXR = 8;
     let t = null, ai = null;
-    for (let round = 0; round < 5; round++) {
-      ai = await anthropicChat(env, { system, messages, tools, forceTool: !fullAccess });
+    for (let round = 0; round < MAXR; round++) {
+      const last = round === MAXR - 1;
+      ai = await anthropicChat(env, { system, messages, tools: last ? termTools : tools, forceTool: !fullAccess || last });
       if (!ai.ok) return json({ ok: true, kind: "reply", text: "⚠️ " + ai.error }, {}, env, request);
       const uses = (ai.content || []).filter(c => c.type === "tool_use");
-      const READ = new Set(["find_jobs", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
-      const reads = uses.filter(c => READ.has(c.name));
+      // A terminal tool ends the loop immediately.
+      const term = uses.find(u => !READ.has(u.name));
+      if (term) { t = term; break; }
+      const reads = last ? [] : uses.filter(c => READ.has(c.name));
       if (reads.length) {
         messages.push({ role: "assistant", content: ai.content });
         const out = [];
         for (const u of uses) {
           let data;
           try {
-            if (u.name === "find_jobs") { const f = await searchJobs(env, tid, u.input.query || ""); data = { count: f.length, jobs: f }; }
+            if (u.name === "find_jobs") { const f = markEngActivity(await searchJobs(env, tid, u.input.query || "")); data = { count: f.length, jobs: f }; }
+            else if (u.name === "get_job") data = await toolGetJob(env, tid, u.input.job || u.input.query || "", engSet);
             else if (u.name === "find_site") data = await toolFindSite(env, tid, u.input.query || "");
             else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps, u.input.query || "", u.input.scheme);
             else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
             else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps, u.input.query || "");
+            else if (u.name === "cert_numbers") data = await toolCertNumbers(env, tid, u.input.store || u.input.query || "");
             else data = { note: "Use the lookup results above, then answer or propose." };
           } catch (e) { data = { error: String(e && e.message || e) }; }
           out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(data).slice(0, 12000) });
@@ -461,10 +570,14 @@ export async function handle(request, env, ctx, url, sess) {
         messages.push({ role: "user", content: out });
         continue;   // let the model use the results
       }
-      t = uses[0] || null;
-      break;
+      // No terminal tool and no reads — the model answered in PROSE. Use it.
+      if (ai.text) return json({ ok: true, kind: "reply", text: ai.text }, {}, env, request);
+      if (last) break;
+      // Empty turn: nudge it to conclude, then loop.
+      messages.push({ role: "assistant", content: (ai.content && ai.content.length) ? ai.content : [{ type: "text", text: "(thinking)" }] });
+      messages.push({ role: "user", content: "Give your answer or proposal now, using the information above." });
     }
-    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "I didn't catch that — try again." }, {}, env, request);
+    if (!t) return json({ ok: true, kind: "reply", text: ai.text || "Sorry — I couldn't pull that together. Try rephrasing, or ask for a specific site or engineer." }, {}, env, request);
     if (t.name === "ask") return json({ ok: true, kind: "ask", question: t.input.question || "Could you clarify?" }, {}, env, request);
     if (t.name === "reply") return json({ ok: true, kind: "reply", text: t.input.text || "" }, {}, env, request);
     if (t.name === "set_rules") return json({ ok: true, kind: "rules", proposed: String(t.input.rules || "").slice(0, 20000), summary: t.input.summary || "Updated rules" }, {}, env, request);

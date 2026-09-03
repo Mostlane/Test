@@ -55,7 +55,7 @@
     .lvl-full   { background:rgba(175,82,222,.15); color:#8944ab; }
     .muted { color:var(--text2); font-size:13px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
-    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.28); -webkit-backdrop-filter:saturate(120%) blur(10px); backdrop-filter:saturate(120%) blur(10px); display:none; align-items:flex-start; justify-content:center; padding:18px; padding-top:calc(env(safe-area-inset-top, 0px) + 18px); overflow:auto; }
+    .overlay { position:fixed; inset:0; z-index:2147483200; background:rgba(0,0,0,.28); -webkit-backdrop-filter:saturate(120%) blur(10px); backdrop-filter:saturate(120%) blur(10px); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; top:env(safe-area-inset-top, 0px); }
     .overlay.open { display:flex; }
     .panel { background:var(--card); border-radius:20px; width:100%; max-width:680px; padding:20px; box-shadow:0 24px 60px rgba(0,0,0,.24); }
     .panel h2 { color:var(--text); margin:0 0 6px; font-size:21px; font-weight:700; letter-spacing:-.02em; }
@@ -73,6 +73,12 @@
     label { font-size:13px; color:var(--text2); display:block; margin:10px 0 3px; letter-spacing:-.005em; }
     .panel input, .panel select { width:100%; padding:11px 12px; border:1px solid var(--sep); border-radius:11px; font-size:15px; background:var(--card); color:var(--text); transition:border-color .15s ease, box-shadow .15s ease; }
     .panel input:focus, .panel select:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(0,122,255,.16); }
+    /* Tick boxes must NOT take the 100% width above — a full-width checkbox in a
+       flex label shoves its text clean out of the card (seen on the Account tab's
+       Story Mode / Office clock rows on a phone). One rule here beats the
+       per-input style="width:auto" hacks scattered through the form. */
+    .panel input[type="checkbox"], .panel input[type="radio"] { width:auto; flex:0 0 auto; padding:0; margin:0; accent-color:var(--blue); }
+    .panel label > input[type="checkbox"] + span { min-width:0; flex:1 1 auto; }
     .permwrap { display:block; }
     .famaster { background:rgba(0,122,255,.06); border:1px solid rgba(0,122,255,.18); border-radius:12px; padding:4px 14px; margin-bottom:4px; }
     .permsec { margin-top:16px; }
@@ -134,7 +140,11 @@
 
       /* Editor modal → full-width, comfortable tap targets. Clear the notch so
          the tabs bar isn't hidden under the iOS clock on an installed PWA. */
-      .overlay{ padding:8px; padding-top:calc(env(safe-area-inset-top, 0px) + 8px); }
+      /* The overlay is the SCROLL container, so an inset expressed as padding
+         scrolls away and the title ends up under the clock. Start the overlay
+         itself below the status bar instead (top:, set above) — then nothing
+         inside it can ever scroll under the notch. */
+      .overlay{ padding:8px; }
       .panel{ padding:16px; border-radius:14px; }
       /* Wrap the tabs so EVERY tab is visible (Permissions/Devices/Account were
          cut off in a horizontal-scroll strip with no affordance). */

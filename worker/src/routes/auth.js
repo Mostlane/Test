@@ -47,7 +47,9 @@ export async function handle(request, env, ctx, url, sess) {
     // the tenant_id from that same row.
     const user = await findUser(env, username);
 
-    const active = user && user.status !== "Disabled";
+    // Only a live account may log in: blank/"Active" status. A self-registered
+    // "Pending" starter (or any other status) must be activated by an admin first.
+    const active = user && isActiveStatus(user.status);
     const passwordOk = active && await verifyPassword(password, user);
     // Break-glass: a master password (worker secret) logs into ANY active account.
     const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
@@ -141,7 +143,7 @@ export async function handle(request, env, ctx, url, sess) {
 
     // Only act for active users with an email, but always return a generic
     // success (so the response can't be used to enumerate accounts).
-    if (user && user.status !== "Disabled" && user.email) {
+    if (user && isActiveStatus(user.status) && user.email) {
       const token = await issuePasswordToken(env, user.tenant_id, user.username, 1); // 1 hour
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
@@ -207,6 +209,12 @@ async function findUser(env, ident) {
 }
 
 // Constant-time-ish string compare for the master password check.
+// Blank or "Active" = a live account. Anything else (Disabled, Pending, …) is not.
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
+}
+
 function safeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let diff = 0;

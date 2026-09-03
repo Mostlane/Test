@@ -974,7 +974,6 @@
           { label: "My Hours", href: "office-my-hours.html", icon: "clock", perms: ["OfficeClock", "OfficeTimesheet"] },
           { label: "Holiday", href: "holiday.html", icon: "holiday", perms: ["Holiday"] },
           { label: "Holiday Admin", href: "holiday-admin.html", icon: "holidayAdmin", perms: ["HolidayAdmin"], match: ["holiday-admin.html", "holiday-config.html"] },
-          { label: "Weekly Summary", href: "weekly.html", icon: "weekly", perms: ["Weekly"] },
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
           { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"], match: ["vehicles.html", "fleet-report.html", "van-checks.html", "van-timesheet.html"] },

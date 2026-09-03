@@ -1544,6 +1544,26 @@ window.addEventListener("pageshow", e => {
   var hist=[], full=false, greeted=false;
   function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
   function isFull(){ return String(perms().FullAccess||"").toLowerCase()==="yes"; }
+  // Degrade Markdown the phone chat can't render: pipe tables → " · " lines,
+  // #/## headings → bold. MLUI.rich then handles **bold** / _italic_ / "- " bullets.
+  function fmtReply(t){
+    var lines=String(t==null?"":t).split("\n"), hdrDone=false, out=[];
+    for(var i=0;i<lines.length;i++){
+      var ln=lines[i], m=ln.match(/^\s*\|(.+)\|\s*$/);
+      if(m){
+        var cells=m[1].split("|").map(function(c){return c.trim();});
+        if(cells.every(function(c){return c===""||/^:?-{2,}:?$/.test(c);})) continue; // separator row
+        cells=cells.filter(function(c){return c!=="";});
+        if(!hdrDone){ hdrDone=true; out.push("**"+cells.join(" · ")+"**"); }
+        else out.push("- "+cells.join(" · "));
+        continue;
+      }
+      hdrDone=false;
+      var h=ln.match(/^\s*#{1,6}\s+(.*)$/);
+      out.push(h?("**"+h[1].trim()+"**"):ln);
+    }
+    return out.join("\n");
+  }
   function rich(t){ try{ return (window.MLUI&&MLUI.rich)?MLUI.rich(String(t)):esc(t); }catch(e){ return esc(t); } }
   function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
   function scroll(){ log.scrollTop=log.scrollHeight; }
@@ -1591,7 +1611,7 @@ window.addEventListener("pageshow", e => {
     if(!j||!j.ok){ bubble("sys","⚠️ "+((j&&j.error)||"Something went wrong.")); return; }
     if(j.kind==="reply"||j.kind==="ask"){
       var txt=j.kind==="ask"?j.question:j.text;
-      bubble("ai", rich(txt)); hist.push({role:"assistant",text:txt}); return;
+      bubble("ai", rich(fmtReply(txt))); hist.push({role:"assistant",text:txt}); return;
     }
     if(j.kind==="rules"){
       bubble("ai", rich("**Proposed rule change:** "+(j.summary||"")));
@@ -1611,7 +1631,7 @@ window.addEventListener("pageshow", e => {
     if(j.kind==="preview"){
       var jobs=j.jobs||[];
       if(!jobs.length){ bubble("sys","No jobs to create."); return; }
-      if(j.summary) bubble("ai", rich(j.summary));
+      if(j.summary) bubble("ai", rich(fmtReply(j.summary)));
       var wrap=document.createElement("div"); wrap.className="aibub ai"; wrap.style.maxWidth="100%";
       var htmlp="";
       jobs.forEach(function(x){
