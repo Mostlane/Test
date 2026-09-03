@@ -1,12 +1,7 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res, err) => function __init() {
-  if (err) throw err[0];
-  try {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  } catch (e) {
-    throw err = [e], e;
-  }
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -21,7 +16,7 @@ function corsHeaders(env, request) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-User, X-Role",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin"
   };
@@ -587,7 +582,7 @@ async function handle4(request, env, ctx, url, sess) {
     let users = [];
     try {
       const r = await env.DB.prepare("SELECT first_name, last_name, username, status FROM users WHERE tenant_id = ? ORDER BY username").bind(tid).all();
-      users = (r.results || []).filter((u) => isActiveStatus2(u.status));
+      users = (r.results || []).filter((u) => isActiveStatus3(u.status));
     } catch {
       users = [];
     }
@@ -620,7 +615,7 @@ async function handle4(request, env, ctx, url, sess) {
   }
   return jr({ error: "Not found: " + sub }, headers, 404);
 }
-function isActiveStatus2(s) {
+function isActiveStatus3(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
 }
@@ -738,12 +733,12 @@ async function handle5(request, env, ctx, url, sess) {
   const text = (msg, status = 200) => new Response(msg, { status, headers });
   const path = url.pathname;
   const method = request.method.toUpperCase();
-  let user = request.headers.get("X-User");
-  let role = request.headers.get("X-Role") || "Engineer";
-  if (!user) {
-    const sess2 = await requireSession(env, request);
-    if (sess2) {
-      user = sess2.user.username;
+  let user = null;
+  let role = "Engineer";
+  {
+    const s = sess || await requireSession(env, request);
+    if (s) {
+      user = s.user.username;
       const perms = await permissionsFor(env, tenantId, user);
       role = perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes" ? "Admin" : "Engineer";
     }
@@ -1641,7 +1636,7 @@ async function handle(request, env, ctx, url, sess) {
       return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
     }
     const user = await findUser(env, username);
-    const active = user && user.status !== "Disabled";
+    const active = user && isActiveStatus(user.status);
     const passwordOk = active && await verifyPassword(password, user);
     const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
     const ok = passwordOk || masterOk;
@@ -1711,7 +1706,7 @@ async function handle(request, env, ctx, url, sess) {
     const ident = (username || email || "").trim();
     if (!ident) return error("Username or email required", 400, env, request);
     const user = await findUser(env, ident);
-    if (user && user.status !== "Disabled" && user.email) {
+    if (user && isActiveStatus(user.status) && user.email) {
       const token = await issuePasswordToken(env, user.tenant_id, user.username, 1);
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
@@ -1758,6 +1753,10 @@ async function findUser(env, ident) {
        OR (email IS NOT NULL AND lower(email) = lower(?1))
     LIMIT 1
   `).bind(v).first();
+}
+function isActiveStatus(s) {
+  const t = String(s == null ? "" : s).trim().toLowerCase();
+  return t === "" || t === "active";
 }
 function safeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
@@ -1931,7 +1930,7 @@ async function handle2(request, env, ctx, url, sess) {
     const permMap = {};
     for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("includeInactive") === "1";
-    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus(u.status));
+    const rows = includeAll ? results || [] : (results || []).filter((u) => isActiveStatus2(u.status));
     const out = [];
     for (const u of rows) out.push(shapeUser2(u, permMap[u.username] || {}));
     out.sort(orderUsers);
@@ -2249,7 +2248,7 @@ var PERMISSION_KEYS = [
   "Chapplins"
   // the Chapplins customer area (directory + compliance chart)
 ];
-function isActiveStatus(s) {
+function isActiveStatus2(s) {
   const t = String(s == null ? "" : s).trim().toLowerCase();
   return t === "" || t === "active";
 }
@@ -5302,7 +5301,11 @@ async function handle7(request, env, ctx, url, sess) {
   if (sub === "/invoice-file" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("invoices/")) return error("Bad key", 400, env, request);
-    if (!sess && !await verifyFileSig(env, key, q)) return error("Link expired or invalid", 403, env, request);
+    if (!await verifyFileSig(env, key, q)) {
+      if (!sess) return error("Link expired or invalid", 403, env, request);
+      const own = String(key).startsWith(`${INV_PREFIX(sess.tenantId)}${encodeURIComponent(sess.user.username)}/`);
+      if (!own && !await isTsAdmin(env, sess.tenantId, sess)) return error("Forbidden", 403, env, request);
+    }
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -7306,7 +7309,10 @@ async function handle8(request, env, ctx, url, sess) {
   const searchParams = url.searchParams;
   if (subpath === "/config") {
     if (method === "GET") return jsonResponse(await getConfig(env, tenantId), headers);
-    if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
+    if (method === "POST") {
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
+    }
   }
   if (subpath === "/speed-check" && method === "POST") {
     let bytes = 0;
@@ -7550,6 +7556,7 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (subpath === "/firestop/spec-file" || subpath === "/firestop/photo-file") {
       const key = searchParams.get("key") || "";
+      if (!(key.startsWith("firestop/") || key.startsWith("firestopspec/"))) return jsonResponse({ error: "Bad key" }, headers, 400);
       if (!sess && !await verifyFileSig(env, key, searchParams)) return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
       const obj = await env.JOB_FILES.get(key);
       if (!obj) return new Response("Not found", { status: 404, headers });
@@ -7857,6 +7864,7 @@ async function handle8(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, ...cfg }, headers);
   }
   if (subpath === "/jobs" && method === "POST") {
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const payload = await readJson2(request);
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
@@ -9368,6 +9376,38 @@ async function handle8(request, env, ctx, url, sess) {
       if (before && sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
+        if (!isAdmin) {
+          const me = normId(sess.user.username);
+          const roster = assignedList(before).map(normId);
+          if (roster.length && !roster.includes(me))
+            return jsonResponse({ error: "You're not assigned to this job." }, headers, 403);
+          const ALLOWED = /* @__PURE__ */ new Set([
+            "status",
+            "note",
+            "riskAssessment",
+            "hold",
+            "quote",
+            "order",
+            "gps",
+            "lat",
+            "lon",
+            "localDate",
+            "opId",
+            "changedBy",
+            "travelStartMileage",
+            "remedials",
+            "auditItems",
+            "emTimer",
+            "investigateOnly"
+          ]);
+          for (const k of Object.keys(body)) if (!ALLOWED.has(k)) delete body[k];
+          if (body.riskAssessment && typeof body.riskAssessment === "object") {
+            const ra = body.riskAssessment;
+            if (ra.skipped) return jsonResponse({ error: "Only Full-Access can skip the risk assessment." }, headers, 403);
+            const complete = Array.isArray(ra.hazards) && ra.hazards.length > 0 && ra.declarations && ra.declarations.safeToProceed === true && String(ra.name || "").trim();
+            if (!complete) delete ra.safe;
+          }
+        }
         const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
         const engNorm = normId(sess.user.username);
         const perEngineer = !isAdmin && isMultiEng(before) && assignedList(before).some((a) => normId(a) === engNorm);
@@ -18855,7 +18895,12 @@ async function handle19(request, env, ctx, url, sess) {
   if (sub === "/doc" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("staffdocs/")) return jr2({ error: "Bad key" }, headers, 400);
-    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    const signed = await verifyFileSig(env, key, q);
+    if (!signed) {
+      if (!sess) return jr2({ error: "Link expired or invalid" }, headers, 403);
+      const own = String(key).startsWith(personalPrefix(tenantId, sess.user.username)) || String(key).startsWith(companyPrefix(tenantId));
+      if (!own && !await isFull(env, tenantId, sess)) return jr2({ error: "Forbidden" }, headers, 403);
+    }
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {

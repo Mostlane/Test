@@ -43,7 +43,10 @@ export async function handle(request, env, ctx, url, sess) {
   /* GET/POST /sla/config */
   if (subpath === "/config") {
     if (method === "GET")  return jsonResponse(await getConfig(env, tenantId), headers);
-    if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
+    if (method === "POST") {
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
+    }
   }
 
   // POST /sla/speed-check — read the body, discard it, return 200 with the
@@ -309,6 +312,8 @@ export async function handle(request, env, ctx, url, sess) {
     // Stream a spec doc / a seal photo (session OR signed link).
     if (subpath === "/firestop/spec-file" || subpath === "/firestop/photo-file") {
       const key = searchParams.get("key") || "";
+      // Only ever serve firestop files — never an arbitrary bucket key.
+      if (!(key.startsWith("firestop/") || key.startsWith("firestopspec/"))) return jsonResponse({ error: "Bad key" }, headers, 400);
       if (!sess && !(await verifyFileSig(env, key, searchParams))) return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
       const obj = await env.JOB_FILES.get(key);
       if (!obj) return new Response("Not found", { status: 404, headers });
@@ -634,6 +639,10 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* POST /sla/jobs */
   if (subpath === "/jobs" && method === "POST") {
+    // Office only: this upserts by id/reference, so an engineer session could
+    // otherwise overwrite any job. Engineers change jobs via PATCH (scoped
+    // below); machine intake uses /sla/inbound.
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const payload = await readJson(request);
     const beforeId = payload.id || payload.reference;
     const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
@@ -2191,6 +2200,31 @@ export async function handle(request, env, ctx, url, sess) {
       if (before && sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
+        if (!isAdmin) {
+          // ── Engineer scope (server is the authority) ──────────────────────
+          // (a) Only an engineer ON the job may change it.
+          const me = normId(sess.user.username);
+          const roster = assignedList(before).map(normId);
+          if (roster.length && !roster.includes(me))
+            return jsonResponse({ error: "You're not assigned to this job." }, headers, 403);
+          // (b) Engineers may only send the fields the field app uses. Office
+          //     fields (engineers, schedule, site, ref, priority, release, the
+          //     requiresRA/Photo/Signature/Note gates …) are dropped, so the
+          //     completion gates can't be switched off from the job page.
+          const ALLOWED = new Set(["status", "note", "riskAssessment", "hold", "quote", "order",
+            "gps", "lat", "lon", "localDate", "opId", "changedBy", "travelStartMileage",
+            "remedials", "auditItems", "emTimer", "investigateOnly"]);
+          for (const k of Object.keys(body)) if (!ALLOWED.has(k)) delete body[k];
+          // (c) A risk assessment from an engineer must be a real one: the
+          //     Full-Access "skip" and a bare {safe:true} are not accepted.
+          if (body.riskAssessment && typeof body.riskAssessment === "object") {
+            const ra = body.riskAssessment;
+            if (ra.skipped) return jsonResponse({ error: "Only Full-Access can skip the risk assessment." }, headers, 403);
+            const complete = Array.isArray(ra.hazards) && ra.hazards.length > 0
+              && ra.declarations && ra.declarations.safeToProceed === true && String(ra.name || "").trim();
+            if (!complete) delete ra.safe;   // → raMissing() reports it as outstanding
+          }
+        }
         const catNames = (await getCategories(env, tenantId)).map(c => c.name);
         // On a shared (2+ engineer) job, a NON-admin engineer changes only their
         // OWN status slice — so judge everything against THEIR status, and tell
