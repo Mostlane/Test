@@ -1648,7 +1648,7 @@ window.addEventListener("pageshow", e => {
     }
     if(j.kind==="preview"){
       var jobs=j.jobs||[];
-      if(!jobs.length){ bubble("sys","No jobs to create."); return; }
+      if(!jobs.length){ bubble("sys","I didn't have the job details to show cards. Tell me the sites/engineer/day (e.g. \"raise EM & PAT for 0247, 0014, 0019, 0008 for Ryan tomorrow\") and I'll show cards with a Create button."); return; }
       if(j.summary) bubble("ai", rich(fmtReply(j.summary)));
       var wrap=document.createElement("div"); wrap.className="aibub ai"; wrap.style.maxWidth="100%";
       var htmlp="";
