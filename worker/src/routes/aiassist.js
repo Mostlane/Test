@@ -269,6 +269,31 @@ async function siteWindow(env, tid, code, dateISO, clientHint) {
 }
 function fmtLondonHM(ms) { try { return new Date(ms).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" }); } catch { return ""; } }
 
+// Real driving-time matrix via Google Distance Matrix (env.GOOGLE_MAPS_KEY), so
+// jobs cluster by ACTUAL road time between sites. pts = [{lat,lon}]; returns a
+// minutes matrix. Falls back to haversine when the key/coords are unavailable.
+async function driveMatrixG(env, pts) {
+  const n = pts.length;
+  const mins = Array.from({ length: n }, () => Array(n).fill(0));
+  const est = (i, j) => { mins[i][j] = travelMin(pts[i], pts[j]); };
+  const key = env.GOOGLE_MAPS_KEY || "";
+  const fb = () => { for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) est(i, j); return { mins, source: "estimate" }; };
+  if (!key || pts.some(p => !p)) return fb();
+  try {
+    const ll = pts.map(p => p.lat + "," + p.lon);
+    const per = Math.max(1, Math.floor(100 / n));   // origins×dests ≤ 100 per request
+    let anyOk = false;
+    for (let o = 0; o < n; o += per) {
+      const idx = []; for (let k = o; k < Math.min(o + per, n); k++) idx.push(k);
+      const url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(idx.map(i => ll[i]).join("|")) + "&destinations=" + encodeURIComponent(ll.join("|")) + "&mode=driving&units=imperial&key=" + encodeURIComponent(key);
+      const res = await fetch(url); const data = await res.json();
+      if (!data || data.status !== "OK") { for (const i of idx) for (let j = 0; j < n; j++) if (i !== j) est(i, j); continue; }
+      (data.rows || []).forEach((row, ri) => { const i = idx[ri]; (row.elements || []).forEach((el, j) => { if (i === j) return; if (el && el.status === "OK") { mins[i][j] = Math.max(1, Math.round(el.duration.value / 60)); anyOk = true; } else est(i, j); }); });
+    }
+    return { mins, source: anyOk ? "google" : "estimate" };
+  } catch { return fb(); }
+}
+
 // Lay out each engineer's dated jobs: nearest-neighbour order from HQ, start
 // within each SITE's opening window, spaced by on-site + travel; flag anything
 // that won't fit the window, and any clash with a job the engineer already has.
@@ -279,19 +304,24 @@ async function planDay(env, tid, jobs) {
   for (const j of dated) { const k = j.engineer + "|" + j.date; (groups[k] = groups[k] || []).push(j); }
   for (const key of Object.keys(groups)) {
     const grp = groups[key];
-    // nearest-neighbour route from HQ; coord-less jobs sink to the end (stable).
-    const ordered = [], pool = grp.slice(); let from = HQ_COORD;
-    while (pool.length) {
-      let bi = 0, bd = Infinity;
-      for (let i = 0; i < pool.length; i++) { const d = pool[i]._c ? haversineMi(from, pool[i]._c) : 1e6 + i; if (d < bd) { bd = d; bi = i; } }
-      const nx = pool.splice(bi, 1)[0]; ordered.push(nx); if (nx._c) from = nx._c;
+    // Real drive-time matrix (Google) over [HQ, ...job coords] when 2+ jobs share
+    // a day — so nearby sites cluster by ACTUAL road time, not straight-line.
+    let mins = null;
+    if (grp.length >= 2) { const r = await driveMatrixG(env, [HQ_COORD, ...grp.map(j => j._c || HQ_COORD)]); mins = r.mins; }
+    const tv = (a, b) => mins ? mins[a][b] : travelMin(a === 0 ? HQ_COORD : grp[a - 1]._c, b === 0 ? HQ_COORD : grp[b - 1]._c);
+    // nearest-neighbour route from HQ (index 0) using real drive minutes.
+    const remaining = grp.map((_, i) => i + 1); const orderIdx = []; let cur0 = 0;
+    while (remaining.length) {
+      let bk = 0, bd = Infinity;
+      for (let k = 0; k < remaining.length; k++) { const d = tv(cur0, remaining[k]); if (d < bd) { bd = d; bk = k; } }
+      const nx = remaining.splice(bk, 1)[0]; orderIdx.push(nx); cur0 = nx;
     }
-    let prev = null, prevC = HQ_COORD, cur = null;
-    for (const j of ordered) {
-      const w = j._win, dur = Number(j.durationMinutes) || 60;
+    let prevIdx = 0, prev = null, cur = null;
+    for (let oi = 0; oi < orderIdx.length; oi++) {
+      const idx = orderIdx[oi], j = grp[idx - 1], w = j._win, dur = Number(j.durationMinutes) || 60;
       let start;
       if (j._explicitTime && j.startTime) start = hmToMin(j.startTime);         // office named a time
-      else if (prev) start = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + travelMin(prevC, j._c || prevC)) / 5) * 5;
+      else if (prev) start = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + tv(prevIdx, idx)) / 5) * 5;
       else start = Math.max((w && w.from != null) ? w.from : 480, 480);         // first job: at opening, but not before 08:00
       if (w && w.closed) j.warn.push("⚠ site appears CLOSED " + j.date);
       if (w && w.from != null) {
@@ -305,7 +335,7 @@ async function planDay(env, tid, jobs) {
         else j.windowNote = w.label;
       }
       j.startTime = minToHm(start);
-      cur = start; prev = j; prevC = j._c || prevC;
+      cur = start; prev = j; prevIdx = idx;
     }
   }
   await clashCheck(env, tid, dated);
@@ -603,7 +633,7 @@ export async function handle(request, env, ctx, url, sess) {
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
       + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers — use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '⚠️ No previous PAT number on file for this store — it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. "
-      + "SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private ≈ 10:00–15:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered by route and spaced, and any clash with a job the engineer already has — or a job that won't fit the opening window or the day — is flagged with ⚠. Do NOT invent or override these times; present the suggested time and pass on any ⚠ flags in your summary so the office sees them. "
+      + "SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private ≈ 10:00–15:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered into an efficient route and spaced by REAL driving time between sites (Google), so nearby sites cluster together, and any clash with a job the engineer already has — or a job that won't fit the opening window or the day — is flagged with ⚠. Do NOT invent or override these times; present the suggested time and pass on any ⚠ flags in your summary so the office sees them. "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
       + "FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings — they don't render here. Bold a label with **like this**. Keep it tight. "
       + "\n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");

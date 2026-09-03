@@ -27347,6 +27347,48 @@ function fmtLondonHM(ms) {
     return "";
   }
 }
+async function driveMatrixG(env, pts) {
+  const n = pts.length;
+  const mins = Array.from({ length: n }, () => Array(n).fill(0));
+  const est = (i, j) => {
+    mins[i][j] = travelMin(pts[i], pts[j]);
+  };
+  const key = env.GOOGLE_MAPS_KEY || "";
+  const fb = () => {
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) est(i, j);
+    return { mins, source: "estimate" };
+  };
+  if (!key || pts.some((p) => !p)) return fb();
+  try {
+    const ll = pts.map((p) => p.lat + "," + p.lon);
+    const per = Math.max(1, Math.floor(100 / n));
+    let anyOk = false;
+    for (let o = 0; o < n; o += per) {
+      const idx = [];
+      for (let k = o; k < Math.min(o + per, n); k++) idx.push(k);
+      const url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins=" + encodeURIComponent(idx.map((i) => ll[i]).join("|")) + "&destinations=" + encodeURIComponent(ll.join("|")) + "&mode=driving&units=imperial&key=" + encodeURIComponent(key);
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data || data.status !== "OK") {
+        for (const i of idx) for (let j = 0; j < n; j++) if (i !== j) est(i, j);
+        continue;
+      }
+      (data.rows || []).forEach((row, ri) => {
+        const i = idx[ri];
+        (row.elements || []).forEach((el, j) => {
+          if (i === j) return;
+          if (el && el.status === "OK") {
+            mins[i][j] = Math.max(1, Math.round(el.duration.value / 60));
+            anyOk = true;
+          } else est(i, j);
+        });
+      });
+    }
+    return { mins, source: anyOk ? "google" : "estimate" };
+  } catch {
+    return fb();
+  }
+}
 async function planDay(env, tid, jobs) {
   const dated = jobs.filter((j) => j.date && /^\d{4}-\d{2}-\d{2}$/.test(j.date));
   for (const j of dated) {
@@ -27361,27 +27403,34 @@ async function planDay(env, tid, jobs) {
   }
   for (const key of Object.keys(groups)) {
     const grp = groups[key];
-    const ordered = [], pool = grp.slice();
-    let from = HQ_COORD;
-    while (pool.length) {
-      let bi = 0, bd = Infinity;
-      for (let i = 0; i < pool.length; i++) {
-        const d = pool[i]._c ? haversineMi2(from, pool[i]._c) : 1e6 + i;
+    let mins = null;
+    if (grp.length >= 2) {
+      const r = await driveMatrixG(env, [HQ_COORD, ...grp.map((j) => j._c || HQ_COORD)]);
+      mins = r.mins;
+    }
+    const tv = (a, b) => mins ? mins[a][b] : travelMin(a === 0 ? HQ_COORD : grp[a - 1]._c, b === 0 ? HQ_COORD : grp[b - 1]._c);
+    const remaining = grp.map((_, i) => i + 1);
+    const orderIdx = [];
+    let cur0 = 0;
+    while (remaining.length) {
+      let bk = 0, bd = Infinity;
+      for (let k = 0; k < remaining.length; k++) {
+        const d = tv(cur0, remaining[k]);
         if (d < bd) {
           bd = d;
-          bi = i;
+          bk = k;
         }
       }
-      const nx = pool.splice(bi, 1)[0];
-      ordered.push(nx);
-      if (nx._c) from = nx._c;
+      const nx = remaining.splice(bk, 1)[0];
+      orderIdx.push(nx);
+      cur0 = nx;
     }
-    let prev = null, prevC = HQ_COORD, cur = null;
-    for (const j of ordered) {
-      const w = j._win, dur = Number(j.durationMinutes) || 60;
+    let prevIdx = 0, prev = null, cur = null;
+    for (let oi = 0; oi < orderIdx.length; oi++) {
+      const idx = orderIdx[oi], j = grp[idx - 1], w = j._win, dur = Number(j.durationMinutes) || 60;
       let start;
       if (j._explicitTime && j.startTime) start = hmToMin(j.startTime);
-      else if (prev) start = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + travelMin(prevC, j._c || prevC)) / 5) * 5;
+      else if (prev) start = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + tv(prevIdx, idx)) / 5) * 5;
       else start = Math.max(w && w.from != null ? w.from : 480, 480);
       if (w && w.closed) j.warn.push("\u26A0 site appears CLOSED " + j.date);
       if (w && w.from != null) {
@@ -27397,7 +27446,7 @@ async function planDay(env, tid, jobs) {
       j.startTime = minToHm(start);
       cur = start;
       prev = j;
-      prevC = j._c || prevC;
+      prevIdx = idx;
     }
   }
   await clashCheck(env, tid, dated);
@@ -27774,7 +27823,7 @@ async function handle29(request, env, ctx, url, sess) {
     canDo.push("look up sites");
     canDo.push(caps2.compliance ? "look up compliance due dates" : "compliance is NOT available to you (no permission)");
     canDo.push(caps2.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
-    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs \u2014 don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER \u2014 not the office \u2014 moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit \u2014 e.g. '\u{1F527} attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers \u2014 use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '\u26A0\uFE0F No previous PAT number on file for this store \u2014 it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private \u2248 10:00\u201315:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered by route and spaced, and any clash with a job the engineer already has \u2014 or a job that won't fit the opening window or the day \u2014 is flagged with \u26A0. Do NOT invent or override these times; present the suggested time and pass on any \u26A0 flags in your summary so the office sees them. If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
+    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs \u2014 don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER \u2014 not the office \u2014 moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit \u2014 e.g. '\u{1F527} attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers \u2014 use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '\u26A0\uFE0F No previous PAT number on file for this store \u2014 it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private \u2248 10:00\u201315:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered into an efficient route and spaced by REAL driving time between sites (Google), so nearby sites cluster together, and any clash with a job the engineer already has \u2014 or a job that won't fit the opening window or the day \u2014 is flagged with \u26A0. Do NOT invent or override these times; present the suggested time and pass on any \u26A0 flags in your summary so the office sees them. If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
     const messages = [];
     for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
       if (h && h.role && h.text) messages.push({ role: h.role === "user" ? "user" : "assistant", content: String(h.text).slice(0, 2e3) });
