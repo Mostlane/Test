@@ -1574,7 +1574,17 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   everything up to its time, but **an explicit per-defect status ALWAYS wins over
   it** (so one fault can be reopened/marked pending after a bulk resolve). Item
   labels come from `vancheck:settings` (checklist+equipment) or `items.custom` for
-  one-off checks. `defectSummary(list)` → per-reg `{open,pending,notSafe,since}`
+  one-off checks. **Recurring-issue grouping (Sep 2026):** because a defect key
+  includes the check timestamp, the SAME fault reported on the next week's check
+  is a new key that would default to OPEN and re-flag. Now `collectDefects` runs a
+  per-`(reg+itemId)` pass (oldest→newest): a default-open repeat whose earlier
+  report is **pending** INHERITS "pending" (`grouped:true`) instead of counting as
+  a new open defect — so an in-hand issue isn't re-highlighted every week. A fault
+  reported again AFTER it was resolved stays OPEN (a genuine recurrence); an
+  explicit office status always wins. `defectSummary(list)` then COLLAPSES weekly
+  repeats — one entry per `(reg+itemId)`, its latest instance decides open vs
+  pending — so the card counts an ongoing issue once (`since` = oldest unresolved).
+  `defectSummary(list)` → per-reg `{open,pending,notSafe,since}`
   drives the cards. Endpoints (any Vehicles user): **GET /fleet/defects?reg=&status=&includeResolved=1**
   (flat list + summary — powers the panel + central table), **POST /fleet/defect-status**
   `{key,status?,note?}` (set one), **POST /fleet/defects-resolve** `{reg}` (bulk:

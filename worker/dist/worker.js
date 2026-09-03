@@ -21295,7 +21295,9 @@ async function collectDefects(env, tid, opts = {}) {
           status: e.status,
           officeNote: e.note,
           statusBy: e.by,
-          statusAt: e.at
+          statusAt: e.at,
+          explicit: !!(statusMap[key] && statusMap[key].status),
+          grouped: false
         });
       };
       for (const id of Object.keys(answers)) {
@@ -21313,17 +21315,37 @@ async function collectDefects(env, tid, opts = {}) {
     }
   } catch {
   }
+  const groups = {};
+  for (const d of out) (groups[d.regNorm + "::" + d.itemId] || (groups[d.regNorm + "::" + d.itemId] = [])).push(d);
+  for (const g of Object.values(groups)) {
+    g.sort((a, b) => new Date(a.checkedAt || 0) - new Date(b.checkedAt || 0));
+    let last = null;
+    for (const d of g) {
+      if (!d.explicit && d.status === "open" && last === "pending") {
+        d.status = "pending";
+        d.grouped = true;
+        if (!d.officeNote) d.officeNote = "Same issue as an earlier check \u2014 being dealt with";
+      }
+      last = d.status;
+    }
+  }
   return out;
 }
 function defectSummary(list) {
   const out = {};
+  const latest = {};
   for (const d of list) {
     if (d.status === "resolved") continue;
     const c = out[d.regNorm] || (out[d.regNorm] = { open: 0, pending: 0, notSafe: false, since: "" });
-    if (d.status === "pending") c.pending++;
-    else c.open++;
     if (d.kind === "notsafe") c.notSafe = true;
     if (d.checkedAt && (!c.since || new Date(d.checkedAt) < new Date(c.since))) c.since = d.checkedAt;
+    const gk = d.regNorm + "::" + d.itemId;
+    if (!latest[gk] || new Date(d.checkedAt || 0) > new Date(latest[gk].checkedAt || 0)) latest[gk] = d;
+  }
+  for (const gk in latest) {
+    const d = latest[gk];
+    if (d.status === "pending") out[d.regNorm].pending++;
+    else out[d.regNorm].open++;
   }
   return out;
 }
