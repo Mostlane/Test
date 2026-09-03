@@ -360,6 +360,41 @@ async function toolGetJob(env, tid, ref, engSet) {
     likelyVisited: visited, attendedByEngineer,
   };
 }
+// EM set number + previous PAT/EM certificate numbers for a store, from the
+// compliance certificates (sla:emsets config + compliance_files). So the
+// assistant can fill an EM/PAT job's numbers instead of asking the office.
+async function toolCertNumbers(env, tid, store) {
+  const digits = String(store || "").replace(/\D/g, "");
+  if (!digits) return { notfound: true, message: "Give a store number." };
+  const cands = [...new Set([digits.padStart(4, "0"), digits, String(Number(digits) || "")].filter(Boolean))];
+  let emSet = "";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
+    if (row) { const m = JSON.parse(row.value || "{}"); for (const c of cands) { if (m[c]) { emSet = String(m[c]); break; } } }
+  } catch {}
+  const lastNum = async type => {
+    try {
+      const ph = cands.map(() => "?").join(",");
+      const { results } = await env.DB.prepare("SELECT r2_key FROM compliance_files WHERE tenant_id=? AND type=? AND code IN (" + ph + ")").bind(tid, type, ...cands).all();
+      let best = "", bestY = -1;
+      for (const r of results || []) {
+        const name = String(r.r2_key || "").split("/").pop() || "";
+        const m = name.replace(/^\d+-/, "").match(/(\d{3,5})[-.](?:DEC|JAN|NOV)?(\d{2})/i);
+        if (m) { const y = Number(m[2]); if (y > bestY) { bestY = y; best = m[1]; } }
+      }
+      return best;
+    } catch { return ""; }
+  };
+  const lastEm = emSet || await lastNum("em");
+  const lastPat = await lastNum("pat");
+  const yy = new Date().toLocaleDateString("en-GB", { timeZone: "Europe/London", year: "2-digit" });
+  return {
+    store: cands[0],
+    emSetNumber: lastEm || "", emCertSuggested: lastEm ? (lastEm + "-" + yy) : "",
+    lastPatNumber: lastPat || "", patCertSuggested: lastPat ? (lastPat + "-" + yy) : "",
+    note: (lastEm || lastPat) ? "" : "No previous EM/PAT certificate on file for this store — the numbers are confirmed at cert time anyway.",
+  };
+}
 async function toolFindVehicle(env, tid, caps, query) {
   if (!caps.vehicles) return { denied: true, message: "You don't have Vehicles access." };
   const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
@@ -440,6 +475,7 @@ export async function handle(request, env, ctx, url, sess) {
       { name: "find_compliance", description: "Look up COMPLIANCE certificate due dates for a store (EICR/5-year, EM, PAT, gas, etc.) or list what's overdue/due-soon. Query a store number/name, or words like 'overdue'. Optionally set scheme (coop/fareham/chapplins/projects). Returns per-type due dates with OVERDUE/due-soon flags.", input_schema: { type: "object", properties: { query: { type: "string" }, scheme: { type: "string" } }, required: ["query"] } },
       { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
       { name: "find_vehicle", description: "Look up a fleet VEHICLE by registration, make or model. Returns reg, make/model and MOT/tax/service due dates.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "cert_numbers", description: "Get a store's EM set number and previous PAT/EM certificate numbers (from the compliance certificates on file), for raising an EM/PAT test job. Pass the store number.", input_schema: { type: "object", properties: { store: { type: "string" } }, required: ["store"] } },
       { name: "ask", description: "Ask the office ONE clarifying question — only when something genuinely can't be found or is truly ambiguous. Never ask for details you can look up with a find_ tool first.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
       { name: "reply", description: "Answer the office in plain text — use this to ANSWER a question after looking things up (e.g. compliance due dates, a site's details, what's on the board). Also for Full-Access general chat.", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
     ];
@@ -486,7 +522,7 @@ export async function handle(request, env, ctx, url, sess) {
       + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ")
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
       + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
-      + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). "
+      + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers — use cert_numbers to look them up from the store's previous certificates, and just mention them in your preview for reference. If none are on file, raise the job anyway (the numbers are confirmed automatically at cert time). "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
       + "FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings — they don't render here. Bold a label with **like this**. Keep it tight. "
       + "\n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
@@ -501,7 +537,7 @@ export async function handle(request, env, ctx, url, sess) {
     // assistant message MUST get a matching tool_result, or the next call is
     // rejected. On the LAST round the read tools are withdrawn and a tool is
     // forced, so it always concludes with an answer/proposal from what it gathered.
-    const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+    const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle", "cert_numbers"]);
     const termTools = tools.filter(x => !READ.has(x.name));
     const MAXR = 8;
     let t = null, ai = null;
@@ -526,6 +562,7 @@ export async function handle(request, env, ctx, url, sess) {
             else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps, u.input.query || "", u.input.scheme);
             else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
             else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps, u.input.query || "");
+            else if (u.name === "cert_numbers") data = await toolCertNumbers(env, tid, u.input.store || u.input.query || "");
             else data = { note: "Use the lookup results above, then answer or propose." };
           } catch (e) { data = { error: String(e && e.message || e) }; }
           out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(data).slice(0, 12000) });
