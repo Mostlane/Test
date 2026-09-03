@@ -62,7 +62,7 @@ a{color:inherit}
 .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ---------- Nav ---------- */
-.nav{position:sticky;top:0;z-index:100;transition:background .3s ease,box-shadow .3s ease;
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;transition:background .3s ease,box-shadow .3s ease;
   padding-top:env(safe-area-inset-top,0px);background:transparent}
 .nav.scrolled{background:rgba(11,15,13,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(255,255,255,.06)}
 .nav-inner{max-width:var(--maxw);margin:0 auto;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
@@ -94,7 +94,7 @@ a{color:inherit}
 
 /* ---------- Hero ---------- */
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;justify-content:center;
-  color:var(--text-on-dark);overflow:hidden;margin-top:calc(-72px - env(safe-area-inset-top,0px))}
+  color:var(--text-on-dark);overflow:hidden}
 .hero-bg{position:absolute;inset:0;z-index:0}
 .hero-grad{position:absolute;inset:0;background:
   radial-gradient(1200px 700px at 50% -10%, rgba(14,122,71,.55), transparent 60%),
