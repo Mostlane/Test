@@ -1,11 +1,11 @@
 /* =========================================================
-   Parkside Football Ground — site script
+   Coal Park Lane (CPL) — site script
    ---------------------------------------------------------
    EDIT THIS BLOCK to make the site yours. It fills in your
    ground name, location, and contact details in one place.
    ========================================================= */
 const CONFIG = {
-  siteName:  "Coal Park",              // working name — change to your real trading name
+  siteName:  "Coal Park Lane",         // trading name (CPL)
   location:  "Coal Park Lane",
   address:   "Coal Park Lane, [town, postcode]",   // add the full address
   email:     "bookings@example.com",   // where enquiries are sent — set this before go-live

@@ -1,4 +1,4 @@
-# Parkside Football Ground — website
+# Coal Park Lane — website
 
 A self-contained marketing + enquiry website for a football ground available to hire.
 Everything lives in this one folder — you can move it into its own repository and
@@ -21,7 +21,7 @@ Open **`script.js`** and edit the block at the very top:
 
 ```js
 const CONFIG = {
-  siteName:  "Parkside Football Ground",
+  siteName:  "Coal Park Lane",
   location:  "Your Town",
   address:   "…",
   email:     "bookings@example.com",   // where enquiries go
@@ -33,7 +33,7 @@ const CONFIG = {
 
 Then edit the wording directly in **`index.html`** — it's plain English, and every
 placeholder (facilities, "who it's for", FAQ) is there to be changed to match your
-actual ground. Search the file for `Parkside` to find the name in a few headings.
+actual ground. Search the file for `Coal Park Lane` to find the name in a few headings.
 
 **The single biggest upgrade: real photos.** Drop good photos of the pitch,
 floodlights, changing rooms and clubhouse into `assets/`, then replace the grey

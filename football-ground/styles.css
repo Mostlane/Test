@@ -1,5 +1,5 @@
 /* =========================================================
-   Parkside Football Ground — stylesheet
+   Coal Park Lane (CPL) — stylesheet
    Design language: floodlit night · deep pitch green ·
    charcoal · electric-lime accent · bold display type.
    ========================================================= */
@@ -67,7 +67,7 @@ a{color:inherit}
 .nav-inner{max-width:var(--maxw);margin:0 auto;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:800}
 .brand-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;
-  background:var(--green-700);color:var(--accent);font-family:var(--display);font-size:24px;line-height:1}
+  background:var(--green-700);color:var(--accent);font-family:var(--display);font-size:16px;line-height:1;letter-spacing:.02em}
 .brand-text{display:flex;flex-direction:column;color:#fff;font-size:18px;line-height:1.05;letter-spacing:.01em}
 .brand-text em{font-style:normal;font-weight:600;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.6)}
 .nav-links{display:flex;align-items:center;gap:28px}
