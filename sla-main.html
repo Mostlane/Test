@@ -1641,6 +1641,7 @@ window.addEventListener("pageshow", e => {
         htmlp+="<div class='aijob'>"+head+
           "<div class='row'>👷 "+esc(x.engineerName||x.engineer)+" &nbsp; 📅 "+esc(fmtDate(x.date))+(x.date?(" "+esc(x.startTime||"")):"")+
           (x.durationMinutes?(" &nbsp; ⏱ "+esc(x.durationMinutes)+" min"):"")+(x.priority?(" &nbsp; 🏷 "+esc(x.priority)):"")+"</div>"+
+          (x.windowNote?("<div class='row' style='font-size:11.5px;color:#8593a0'>🕒 "+esc(x.windowNote)+"</div>"):"")+
           (assign?("<div class='row' style='font-size:11.5px;color:#8593a0'>was: "+esc((x.currentEngineers&&x.currentEngineers.length?x.currentEngineers.join(", "):"unassigned"))+(x.currentStatus?(" · "+esc(x.currentStatus)):"")+"</div>"):"")+
           (x.description?("<div class='row' style='font-size:12.5px;color:#55707f'>"+rich(x.description)+"</div>"):"")+
           ((x.warn&&x.warn.length)?("<div class='aiwarn'>⚠️ "+x.warn.map(esc).join(" · ")+"</div>"):"")+

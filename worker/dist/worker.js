@@ -27287,19 +27287,80 @@ async function coordsForJob(env, tid, j) {
   }
   return pc ? await geocodePostcode2(pc) : null;
 }
-async function sequenceDay(env, tid, jobs) {
+var DAY_KEYS = ["sundayHours", "mondayHours", "tuesdayHours", "wednesdayHours", "thursdayHours", "fridayHours", "saturdayHours"];
+function parseHours(s) {
+  const m = String(s || "").match(/(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})/);
+  return m ? { from: +m[1] * 60 + +m[2], to: +m[3] * 60 + +m[4] } : null;
+}
+function categoryWindow(client) {
+  const c = String(client || "").toLowerCase();
+  if (c === "els" || c === "els_private") return { from: 600, to: 900, label: "10:00\u201315:00 (ELS)" };
+  if (c === "cobra") return { from: 420, to: 1140, label: "07:00\u201319:00 (Cobra)" };
+  if (c === "retail") return { from: 480, to: 1080, label: "08:00\u201318:00 (retail)" };
+  return { from: 480, to: 1020, label: "08:00\u201317:00" };
+}
+async function siteWindow(env, tid, code, dateISO, clientHint) {
+  let client = clientHint || "", data = null;
+  try {
+    const cands = [...new Set([String(code), String(code).padStart(4, "0"), String(Number(code) || "")].filter(Boolean))];
+    let r = null;
+    for (const c of cands) {
+      r = await env.DB.prepare("SELECT client, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, c).first();
+      if (r) break;
+    }
+    if (r) {
+      client = client || r.client || "";
+      try {
+        data = JSON.parse(r.data || "{}");
+      } catch {
+      }
+    }
+  } catch {
+  }
+  const dow = (/* @__PURE__ */ new Date(dateISO + "T12:00:00Z")).getUTCDay();
+  let win = null, source = "default", closed = false;
+  const raw = data ? data[DAY_KEYS[dow]] : "";
+  if (raw != null && String(raw).trim() !== "") {
+    if (/closed/i.test(String(raw))) closed = true;
+    else {
+      const p = parseHours(raw);
+      if (p) {
+        win = p;
+        source = "site";
+      }
+    }
+  }
+  const cl = String(client).toLowerCase();
+  if ((cl === "els" || cl === "els_private") && !closed) {
+    const d = categoryWindow(cl);
+    win = win ? { from: Math.max(win.from, d.from), to: Math.min(win.to, d.to) } : d;
+    source = source === "site" ? "site+ELS" : "default";
+  }
+  if (!win && !closed) win = categoryWindow(client);
+  const label = win ? minToHm(win.from) + "\u2013" + minToHm(win.to) + (source.includes("ELS") || source === "default" ? "" : "") : "";
+  return { from: win ? win.from : null, to: win ? win.to : null, label, source, closed, client };
+}
+function fmtLondonHM(ms) {
+  try {
+    return new Date(ms).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+async function planDay(env, tid, jobs) {
+  const dated = jobs.filter((j) => j.date && /^\d{4}-\d{2}-\d{2}$/.test(j.date));
+  for (const j of dated) {
+    j._c = await coordsForJob(env, tid, j);
+    j._win = await siteWindow(env, tid, j.siteCode, j.date, j.storeType || j.client);
+    j.warn = j.warn || [];
+  }
   const groups = {};
-  for (const j of jobs) {
-    if (!(j.date && /^\d{4}-\d{2}-\d{2}$/.test(j.date))) continue;
-    const key = j.engineer + "|" + j.date;
-    (groups[key] = groups[key] || []).push(j);
+  for (const j of dated) {
+    const k = j.engineer + "|" + j.date;
+    (groups[k] = groups[k] || []).push(j);
   }
   for (const key of Object.keys(groups)) {
     const grp = groups[key];
-    if (grp.length < 2) continue;
-    for (const j of grp) j._c = await coordsForJob(env, tid, j);
-    const startMins = grp.map((j) => j.startTime).filter(Boolean).map(hmToMin).sort((a, b) => a - b);
-    let cur = startMins.length ? startMins[0] : 8 * 60;
     const ordered = [], pool = grp.slice();
     let from = HQ_COORD;
     while (pool.length) {
@@ -27315,16 +27376,74 @@ async function sequenceDay(env, tid, jobs) {
       ordered.push(nx);
       if (nx._c) from = nx._c;
     }
-    let prev = null, prevC = HQ_COORD;
+    let prev = null, prevC = HQ_COORD, cur = null;
     for (const j of ordered) {
-      if (prev) cur = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + travelMin(prevC, j._c || prevC)) / 5) * 5;
-      j.startTime = minToHm(cur);
+      const w = j._win, dur = Number(j.durationMinutes) || 60;
+      let start;
+      if (j._explicitTime && j.startTime) start = hmToMin(j.startTime);
+      else if (prev) start = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + travelMin(prevC, j._c || prevC)) / 5) * 5;
+      else start = Math.max(w && w.from != null ? w.from : 480, 480);
+      if (w && w.closed) j.warn.push("\u26A0 site appears CLOSED " + j.date);
+      if (w && w.from != null) {
+        if (start < w.from) start = w.from;
+        if (start + dur > w.to) {
+          if (dur > w.to - w.from) j.warn.push("\u26A0 " + Math.round(dur / 6) / 10 + "h won't fit the site's " + w.label + " opening window");
+          else j.warn.push("\u26A0 would finish after the site closes (" + w.label + ")");
+          start = Math.max(w.from, w.to - dur);
+        }
+        if (!j.warn.length || j._explicitTime) j.windowNote = "within " + w.label;
+        else j.windowNote = w.label;
+      }
+      j.startTime = minToHm(start);
+      cur = start;
       prev = j;
       prevC = j._c || prevC;
     }
-    grp.forEach((j) => {
-      delete j._c;
-    });
+  }
+  await clashCheck(env, tid, dated);
+  for (const j of dated) {
+    delete j._c;
+    delete j._win;
+  }
+}
+async function clashCheck(env, tid, dated) {
+  const groups = {};
+  for (const j of dated) {
+    const k = j.engineer + "|" + j.date;
+    (groups[k] = groups[k] || []).push(j);
+  }
+  for (const key of Object.keys(groups)) {
+    const [eng, date] = key.split("|");
+    const grp = groups[key];
+    const mine = new Set(grp.map((j) => String(j.jobId || "")).filter(Boolean));
+    let existing = [];
+    try {
+      const { results } = await env.DB.prepare("SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at LIKE ?").bind(tid, date + "%").all();
+      for (const r of results || []) {
+        if (mine.has(r.id)) continue;
+        let d = {};
+        try {
+          d = JSON.parse(r.data || "{}");
+        } catch {
+        }
+        if (FINISHED.test(d.status || "")) continue;
+        const engs = (Array.isArray(d.assignedEngineers) ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : []).map((x) => String(x).toLowerCase());
+        if (!engs.includes(String(eng).toLowerCase())) continue;
+        const st = Date.parse(d.scheduledAt || r.scheduled_at);
+        if (!Number.isFinite(st)) continue;
+        const en = d.scheduledEnd ? Date.parse(d.scheduledEnd) : st + (Number(d.durationMinutes) || 60) * 6e4;
+        existing.push({ ref: d.helpdeskRef || r.id, start: st, end: en });
+      }
+    } catch {
+    }
+    let busy = existing.reduce((a, e) => a + (e.end - e.start), 0);
+    for (const j of grp) {
+      const s = Date.parse(londonISO(date, j.startTime || "09:00")), e = s + (Number(j.durationMinutes) || 60) * 6e4;
+      j.warn = j.warn || [];
+      for (const ex of existing) if (s < ex.end && e > ex.start) j.warn.push("\u26A0 clashes with " + ex.ref + " at " + fmtLondonHM(ex.start));
+      busy += e - s;
+    }
+    if (existing.length && busy > 9 * 36e5) grp.forEach((j) => j.warn.push("\u26A0 " + eng.split(" ")[0] + "'s day is very full (" + existing.length + " job(s) already booked) \u2014 may not fit in one day"));
   }
 }
 function dueSummary(dueJson) {
@@ -27655,7 +27774,7 @@ async function handle29(request, env, ctx, url, sess) {
     canDo.push("look up sites");
     canDo.push(caps2.compliance ? "look up compliance due dates" : "compliance is NOT available to you (no permission)");
     canDo.push(caps2.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
-    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs \u2014 don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER \u2014 not the office \u2014 moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit \u2014 e.g. '\u{1F527} attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers \u2014 use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '\u26A0\uFE0F No previous PAT number on file for this store \u2014 it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
+    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs \u2014 don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER \u2014 not the office \u2014 moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit \u2014 e.g. '\u{1F527} attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers \u2014 use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '\u26A0\uFE0F No previous PAT number on file for this store \u2014 it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private \u2248 10:00\u201315:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered by route and spaced, and any clash with a job the engineer already has \u2014 or a job that won't fit the opening window or the day \u2014 is flagged with \u26A0. Do NOT invent or override these times; present the suggested time and pass on any \u26A0 flags in your summary so the office sees them. If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
     const messages = [];
     for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
       if (h && h.role && h.text) messages.push({ role: h.role === "user" ? "user" : "assistant", content: String(h.text).slice(0, 2e3) });
@@ -27745,7 +27864,8 @@ async function handle29(request, env, ctx, url, sess) {
           engineer: engUser,
           engineerName: engName,
           date,
-          startTime: date ? a.startTime || "08:00" : "",
+          startTime: date ? a.startTime || "" : "",
+          _explicitTime: !!(date && a.startTime),
           durationMinutes: Number(a.durationMinutes) > 0 ? Math.round(Number(a.durationMinutes)) : job.durationMinutes,
           priority: job.priority,
           title: job.ref,
@@ -27757,7 +27877,7 @@ async function handle29(request, env, ctx, url, sess) {
         });
       }
       if (problems.length && !jobs.length) return json({ ok: true, kind: "ask", question: problems.join("\n") }, {}, env, request);
-      await sequenceDay(env, tid, jobs);
+      await planDay(env, tid, jobs);
       return json({ ok: true, kind: "preview", summary: t.input.summary || "", jobs, warnings: problems }, {}, env, request);
     }
     if (t.name === "draft_jobs") {
@@ -27802,7 +27922,8 @@ async function handle29(request, env, ctx, url, sess) {
           engineer: engUser,
           engineerName: engName,
           date,
-          startTime: date ? d.startTime || "09:00" : "",
+          startTime: date ? d.startTime || "" : "",
+          _explicitTime: !!(date && d.startTime),
           durationMinutes: dur,
           priority: empat || jobType === "electrical" ? d.priority || "Priority 4" : d.priority || "",
           title: d.title || site.name,
@@ -27815,7 +27936,7 @@ async function handle29(request, env, ctx, url, sess) {
         });
       }
       if (problems.length && !jobs.length) return json({ ok: true, kind: "ask", question: problems.join("\n") }, {}, env, request);
-      await sequenceDay(env, tid, jobs);
+      await planDay(env, tid, jobs);
       return json({ ok: true, kind: "preview", summary: t.input.summary || "", jobs, warnings: problems }, {}, env, request);
     }
     return json({ ok: true, kind: "reply", text: ai.text || "" }, {}, env, request);
