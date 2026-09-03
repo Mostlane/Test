@@ -356,14 +356,30 @@ function parsePatRowsTokens(toks) {
   return rows;
 }
 
+// PAT class rule (Mostlane standard): everything is Class II (double-insulated)
+// EXCEPT earthed metal-cased items — kettles, microwaves, fridges/freezers,
+// desktop PCs, printers, photocopiers, extension leads, and anything metal-cased.
+// Old certificates often mis-recorded this, so we RE-DERIVE the class from the
+// appliance description on every import/carry rather than trusting the old value.
+const PAT_CLASS_I = /kettle|microwav|fridge|freezer|refriger|dishwash|washing\s*machine|tumble|dryer|toaster|\burn\b|water\s*heater|boiler|oven|cooker|\bhob\b|desktop|\bpc\b|pc\s*tower|tower\s*pc|printer|photocopier|copier|\bmfp\b|extension\s*(lead|reel)|\d+\s*[- ]?gang|multi[- ]?(gang|socket)|gang\s*(lead|extension)|metal/i;
+function patClassFor(desc) { return PAT_CLASS_I.test(String(desc || "")) ? "I" : "II"; }
+// Standard default test results by class (the engineer confirms / edits on site).
+function patDefaults(cls) {
+  return cls === "I"
+    ? { earth: "0.08 Ω", insulation: ">200 MΩ", visual: "Pass", result: "Pass" }
+    : { earth: "N/A", insulation: ">200 MΩ", visual: "Pass", result: "Pass" };
+}
+
 // Carry an item list forward for a NEW visit: keep each item's IDENTITY
-// (position/description/appliance/location/class) and default every result to
-// Pass — the engineer just taps any that failed. Measurements (earth/insulation)
-// are blanked so they're re-read on site.
+// (position/description/appliance/location) and default every result to the
+// class standard — the engineer just taps any that differ / failed.
 function carryRows(rows, type) {
-  return (rows || []).map((r, i) => type === "pat"
-    ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: r.comments || "" }
-    : { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 });
+  return (rows || []).map((r, i) => {
+    if (type !== "pat") return { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 };
+    const cls = patClassFor(r.appliance);        // re-derive (old certs were often wrong)
+    const def = patDefaults(cls);
+    return { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls, visual: def.visual, earth: def.earth, insulation: def.insulation, result: def.result, comments: r.comments || "" };
+  });
 }
 async function latestCertR2Key(env, tid, code, type) {
   try {
