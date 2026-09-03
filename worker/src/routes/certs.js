@@ -924,8 +924,11 @@ export async function handle(request, env, ctx, url, sess) {
   // ── Office review queue ──────────────────────────────────────────────────────
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
+    // Default = the queue (draft + submitted). ?all=1 also returns recently
+    // ISSUED (final) certs so the office can open one and re-issue its PDF.
+    const statuses = q.get("all") === "1" ? "('draft','review','final')" : "('draft','review')";
     const rows = (await env.DB.prepare(
-      "SELECT * FROM certificates WHERE tenant_id=? AND status IN ('draft','review') ORDER BY COALESCE(submitted_at,updated_at) DESC LIMIT 300"
+      "SELECT * FROM certificates WHERE tenant_id=? AND status IN " + statuses + " ORDER BY COALESCE(submitted_at,finalised_at,updated_at) DESC LIMIT 300"
     ).bind(tid).all()).results || [];
     return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
   }
@@ -991,6 +994,43 @@ export async function handle(request, env, ctx, url, sess) {
       ctx?.waitUntil?.(sendToPermission(env, tid, ["FullAccess", "SLAAdmin", "Compliance"], { title: "EM remedial to quote", body, url: "/cert-review.html", tag: "em-remedial:" + cert.id }).catch(() => {}));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
+  }
+
+  // ── Re-issue: rebuild the PDF from the cert's CURRENT data and replace the filed
+  //    copy on the compliance chart, WITHOUT moving the due date (bump:false) and
+  //    keeping the same number. Use after editing an already-issued cert. Office only.
+  if (sub === "/reissue" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const cert = await loadCert(String(b.id || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow(cert); await backfillClient(env, tid, rec);
+    const code = padCode(cert.site_code || rec.siteCode);
+    if (!code) return error("This certificate has no store code.", 400, env, request);
+    const number = String(cert.cert_number || b.certNumber || "").trim();
+    if (!number) return error("This certificate hasn't been issued yet — finalise it first.", 400, env, request);
+    const docDate = String(b.docDate || (rec.contractor && rec.contractor.date) || cert.finalised_at || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+    let emKind = (cert.type === "em") ? (rec.emKind || "") : "";
+    if (cert.type === "em" && !emKind) { try { const jb = cert.job_id ? await getJob(env, tid, cert.job_id) : null; emKind = (jb && jb.emKind) || ""; } catch {} }
+    rec.certNumber = number; rec.status = "final";
+    const sig = dataUrlToBytes(rec.signature);
+    let logo = null; try { logo = logoBytes(); } catch {}
+    const bytes = buildCertPdf(rec, { logo, signature: sig });
+    let fileScheme = "coop", fileType = cert.type;
+    try {
+      const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
+      if (String((srow && srow.client) || "").toLowerCase() === "fbc") { fileScheme = "fareham"; if (cert.type === "em") fileType = emKind === "monthly" ? "emMonthly" : "emYearly"; }
+    } catch {}
+    const filed = await fileCertificatePdf(env, tid, {
+      scheme: fileScheme, code, type: fileType, bytes,
+      filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
+      docDate: /^\d{4}-\d{2}-\d{2}/.test(docDate) ? docDate : new Date().toISOString().slice(0, 10),
+      bump: false, source: "cert:" + cert.id, label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`,
+    });
+    const now = new Date().toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='final', r2_final_key=?, finalised_at=COALESCE(finalised_at,?), finalised_by=COALESCE(finalised_by,?), updated_at=? WHERE tenant_id=? AND id=?")
+      .bind(filed.key, now, me, now, tid, cert.id).run();
+    return json({ ok: true, number, key: filed.key, reissued: true }, {}, env, request);
   }
 
   // GET /certs/remedials?status=&code= — the remedial charge log (office).

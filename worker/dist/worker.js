@@ -30466,8 +30466,9 @@ PAT: Import certificate number ${num2}-${yr}`;
   }
   if (sub === "/review" && method === "GET") {
     if (!isOffice) return error("Office access required", 403, env, request);
+    const statuses = q.get("all") === "1" ? "('draft','review','final')" : "('draft','review')";
     const rows = (await env.DB.prepare(
-      "SELECT * FROM certificates WHERE tenant_id=? AND status IN ('draft','review') ORDER BY COALESCE(submitted_at,updated_at) DESC LIMIT 300"
+      "SELECT * FROM certificates WHERE tenant_id=? AND status IN " + statuses + " ORDER BY COALESCE(submitted_at,finalised_at,updated_at) DESC LIMIT 300"
     ).bind(tid).all()).results || [];
     return json({ ok: true, certs: rows.map(shapeRow) }, {}, env, request);
   }
@@ -30546,6 +30547,59 @@ PAT: Import certificate number ${num2}-${yr}`;
       }));
     }
     return json({ ok: true, number, key: filed.key, remedial }, {}, env, request);
+  }
+  if (sub === "/reissue" && method === "POST") {
+    if (!isOffice) return error("Office access required", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const cert = await loadCert(String(b.id || ""));
+    if (!cert) return error("Certificate not found", 404, env, request);
+    const rec = shapeRow(cert);
+    await backfillClient(env, tid, rec);
+    const code = padCode(cert.site_code || rec.siteCode);
+    if (!code) return error("This certificate has no store code.", 400, env, request);
+    const number = String(cert.cert_number || b.certNumber || "").trim();
+    if (!number) return error("This certificate hasn't been issued yet \u2014 finalise it first.", 400, env, request);
+    const docDate = String(b.docDate || rec.contractor && rec.contractor.date || cert.finalised_at || "").slice(0, 10) || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    let emKind = cert.type === "em" ? rec.emKind || "" : "";
+    if (cert.type === "em" && !emKind) {
+      try {
+        const jb = cert.job_id ? await getJob2(env, tid, cert.job_id) : null;
+        emKind = jb && jb.emKind || "";
+      } catch {
+      }
+    }
+    rec.certNumber = number;
+    rec.status = "final";
+    const sig = dataUrlToBytes(rec.signature);
+    let logo = null;
+    try {
+      logo = logoBytes();
+    } catch {
+    }
+    const bytes = buildCertPdf(rec, { logo, signature: sig });
+    let fileScheme = "coop", fileType = cert.type;
+    try {
+      const srow = await env.DB.prepare("SELECT client FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, String(rec.siteCode || code)).first();
+      if (String(srow && srow.client || "").toLowerCase() === "fbc") {
+        fileScheme = "fareham";
+        if (cert.type === "em") fileType = emKind === "monthly" ? "emMonthly" : "emYearly";
+      }
+    } catch {
+    }
+    const filed = await fileCertificatePdf(env, tid, {
+      scheme: fileScheme,
+      code,
+      type: fileType,
+      bytes,
+      filename: `${code}_${cert.type.toUpperCase()}_${number}.pdf`,
+      docDate: /^\d{4}-\d{2}-\d{2}/.test(docDate) ? docDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+      bump: false,
+      source: "cert:" + cert.id,
+      label: `${cert.type === "pat" ? "PAT" : "EM"} certificate ${number}`
+    });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE certificates SET status='final', r2_final_key=?, finalised_at=COALESCE(finalised_at,?), finalised_by=COALESCE(finalised_by,?), updated_at=? WHERE tenant_id=? AND id=?").bind(filed.key, now, me, now, tid, cert.id).run();
+    return json({ ok: true, number, key: filed.key, reissued: true }, {}, env, request);
   }
   if (sub === "/remedials" && method === "GET") {
     const st = String(q.get("status") || "").toLowerCase();
