@@ -241,6 +241,8 @@ h3{font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:.01em}
 .contact-list li span{font-size:22px}
 .contact-list a{color:var(--accent);text-decoration:none}
 .contact-list a:hover{text-decoration:underline}
+.contact-map iframe{width:100%;aspect-ratio:4/3;border:0;border-radius:var(--radius-lg);
+  box-shadow:0 20px 50px -20px rgba(0,0,0,.6);display:block}
 .map-ph{aspect-ratio:4/3;border-radius:var(--radius-lg);border:1px solid rgba(255,255,255,.14);
   background:linear-gradient(135deg,var(--green-800),var(--ink-800));display:grid;place-content:center;gap:6px;text-align:center;padding:24px}
 .map-ph span{font-weight:700;color:rgba(255,255,255,.7)}
