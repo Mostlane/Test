@@ -425,6 +425,16 @@ function simEmpat(sites, m, opts) {
   const back = tv(loc, 0); if (back > 0) { steps.push({ t: now, kind: "travel", mins: back }); now += back; }
   return { steps, startMin: dayStart, endMin: now, per, warnings };
 }
+// Is this store a "Closed Site" on the compliance chart? (active=0 everywhere).
+async function complianceClosed(env, tid, code) {
+  try {
+    const cands = [...new Set([String(code), String(code).padStart(4, "0"), String(Number(code) || "")].filter(Boolean))];
+    const ph = cands.map(() => "?").join(",");
+    const { results } = await env.DB.prepare("SELECT active FROM compliance_stores WHERE tenant_id=? AND code IN (" + ph + ")").bind(tid, ...cands).all();
+    if (!results || !results.length) return false;   // not a compliance store — don't block
+    return !results.some(r => Number(r.active) === 1); // closed only if NO active row
+  } catch { return false; }
+}
 async function toolPlanEmpat(env, tid, caps, args) {
   if (!caps.sla) return { denied: true, message: "You need SLA access to plan jobs." };
   const date = resolveDate(args.date) || null;
@@ -434,6 +444,7 @@ async function toolPlanEmpat(env, tid, caps, args) {
   for (const code of codes.slice(0, 12)) {
     const s = await resolveSite(env, tid, code);
     if (!s.ok) { bad.push(String(code)); continue; }
+    if (await complianceClosed(env, tid, s.code)) { bad.push(s.code + " (Closed Site — skipped)"); continue; }
     const coord = await coordsForJob(env, tid, { siteCode: s.code, lat: s.lat, lon: s.lon });
     if (!coord) { bad.push(s.code + " (no location)"); continue; }
     const win = date ? await siteWindow(env, tid, s.code, date, s.storeType) : { from: 480, to: 1080, label: "" };
@@ -726,6 +737,8 @@ export async function handle(request, env, ctx, url, sess) {
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers — use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '⚠️ No previous PAT number on file for this store — it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. "
       + "EM/PAT INTERLEAVING: an EM/PAT visit is 1h active (15m flick the emergency lights on + 45m PAT), then the lights drain ~2h45 before a 15m walk-round to check they lasted. That drain gap is dead time you can fill at NEARBY sites — drive to another, flick its lights on and do its PAT, then loop back for the first site's check. When the office wants to plan a day of EM/PAT tests, or asks which sites could be OVERLAPPED, call plan_empat_day with the store numbers to get a real drive-time interleaved timeline; present it clearly and say how many hours it saves vs doing them one-by-one. Suggest overlapping nearby due sites to compress the day. Then, so the office can CALL ROUND and tick each store off, present the day as a draft_jobs PREVIEW (one EM/PAT job per site, engineer set, each site's startTime = its lights-on time from the plan) — the preview cards carry the phone number and a Yes/No tick per site, and the office creates only the ones they tick. Set EACH interleaved job's DESCRIPTION to the normal 'Carry out 3-hour EM drain-down test and PAT testing.' line, THEN a blank line, THEN the plan's `briefing` text (the whole interleaved timeline) — so the engineer sees on every job when to leave each site and when to come back to check the lights. The RA/photo/signature/note gates are relaxed automatically for EM/PAT so the overlapping jobs never block each other. "
       + "DUE DATES: the EM & PAT due dates ARE the compliance chart's `em` and `pat` dates — use find_compliance (scheme coop) to see what's due; every EM/PAT site needs BOTH. Due within the due MONTH is fine, and up to about a WEEK into the next month is acceptable; try not to slip much beyond. Cluster geographically-close due sites into the same day. "
+      + "CLOSED SITES: only ever suggest EM/PAT sites that are DUE and ACTIVE — take candidates from find_compliance (Co-op), which already excludes Closed Sites. NEVER suggest a store that is a Closed Site on compliance, and never invent sites. "
+      + "ALWAYS A PLANNED DAY: when the office asks for site suggestions or 'other sites to overlap', do NOT reply with a loose list of random sites — build a PLANNED interleaved day with plan_empat_day (real drive times, opening hours, the drain-gap overlaps) and present THAT (timeline + tickable cards). Pick geographically-close DUE sites that actually route together; a suggestion is only useful if it forms a workable day. "
       + "CALL AHEAD: whenever you SUGGEST sites (from the schedule / compliance dues), ALWAYS show each site's PHONE NUMBER in your reply — the office rings the store to confirm the day works before approving the jobs. Site records also hold an email (for a booking email later). "
       + "IF A SITE DECLINES A DAY: don't scrap the whole plan. Remove ONLY that site, re-run plan_empat_day on the REMAINING sites (the route + times will shift), and — to keep the day full — offer the next-nearest still-DUE site as a replacement (find_compliance for a nearby due store, show its phone to call ahead). Keep the confirmed sites intact; present the updated plan for approval. Only start a genuinely new area if the office asks. "
       + "SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private ≈ 10:00–15:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered into an efficient route and spaced by REAL driving time between sites (Google), so nearby sites cluster together, and any clash with a job the engineer already has — or a job that won't fit the opening window or the day — is flagged with ⚠. Do NOT invent or override these times; present the suggested time and pass on any ⚠ flags in your summary so the office sees them. "
@@ -827,6 +840,7 @@ export async function handle(request, env, ctx, url, sess) {
         const site = await resolveSite(env, tid, d.site);
         if (!site.ok) { problems.push(site.ambiguous ? `Which site did you mean for "${d.site}"? (${site.ambiguous.slice(0, 5).join("; ")})` : `I couldn't find a site matching "${d.site}".`); continue; }
         const jobType = d.jobType || "reactive";
+        if ((jobType === "empat") && await complianceClosed(env, tid, site.code)) { problems.push(`${site.code} ${site.name} is a Closed Site on compliance — not scheduling it.`); continue; }
         let engUser = null, engName = "";
         if (d.engineer && String(d.engineer).trim()) {
           const en = await resolveEngineer(env, tid, d.engineer);
