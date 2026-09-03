@@ -231,11 +231,26 @@ export async function fileCertificatePdf(env, tid, { scheme = "coop", code, type
   const key = `compliance/${sc}/${cd}/${ty}/${year || "_"}/${Date.now()}-${fn}`;
   await env.JOB_FILES.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
   const at = new Date().toISOString();
-  const res = await env.DB.prepare(
-    "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-  ).bind(tid, sc, cd, ty, year, key, fn, label, bytes.length || bytes.byteLength || null, docDate || null, source, at).run();
+  const size = bytes.length || bytes.byteLength || null;
+  // A given `source` (e.g. a portal cert) files ONE row. Re-issuing / replacing
+  // it UPDATES that row to point at the new PDF (source is UNIQUE-indexed), and
+  // the superseded R2 object is removed. A null source (ad-hoc upload) always inserts.
+  const existing = source ? await env.DB.prepare("SELECT id, r2_key FROM compliance_files WHERE tenant_id=? AND source=?").bind(tid, source).first() : null;
+  let rowId = null;
+  if (existing) {
+    await env.DB.prepare(
+      "UPDATE compliance_files SET scheme=?, code=?, type=?, year=?, r2_key=?, filename=?, label=?, size=?, doc_date=?, uploaded_at=? WHERE id=?"
+    ).bind(sc, cd, ty, year, key, fn, label, size, docDate || null, at, existing.id).run();
+    rowId = existing.id;
+    if (existing.r2_key && existing.r2_key !== key) { try { await env.JOB_FILES.delete(existing.r2_key); } catch {} }
+  } else {
+    const res = await env.DB.prepare(
+      "INSERT INTO compliance_files (tenant_id, scheme, code, type, year, r2_key, filename, label, size, doc_date, source, uploaded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, sc, cd, ty, year, key, fn, label, size, docDate || null, source, at).run();
+    rowId = res.meta ? res.meta.last_row_id : null;
+  }
   if (bump && docDate) { try { await bumpDue(env, tid, sc, cd, ty, docDate); } catch {} }
-  return { id: res.meta ? res.meta.last_row_id : null, key };
+  return { id: rowId, key };
 }
 // A store's compliance code is a numeric store number (4-digit, zero-padded).
 // A code carrying a LETTER (e.g. a project "P0002") is NOT a Co-op store — return
