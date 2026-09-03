@@ -27502,15 +27502,17 @@ function simEmpat(sites, m, opts) {
   const { active: A, checkAfter: DUE, check: CHK, hardLate: LATE, slack: SLACK } = EMPAT;
   const idx = (i) => i + 1;
   const tv = (a, b) => m && m[a] && Number.isFinite(m[a][b]) ? m[a][b] : 30;
+  const latestOn = sites.map((s) => s.win && s.win.to != null ? s.win.to - (EMPAT.checkAfter + EMPAT.check) : 1e6);
   const order = [];
   const rem = sites.map((_, i) => i);
   let cur = 0;
   while (rem.length) {
     let bk = 0, bd = Infinity;
     for (let k = 0; k < rem.length; k++) {
-      const d = tv(cur, idx(rem[k]));
-      if (d < bd) {
-        bd = d;
+      const c = rem[k];
+      const score = latestOn[c] + 0.5 * tv(cur, idx(c));
+      if (score < bd) {
+        bd = score;
         bk = k;
       }
     }
@@ -27519,8 +27521,8 @@ function simEmpat(sites, m, opts) {
     cur = idx(nx);
   }
   const DAY_START = 420, DAY_END = 990;
-  const opens = sites.map((s) => s.win && s.win.from != null ? s.win.from : DAY_START);
-  const dayStart = Math.max(DAY_START, Math.min(...opens));
+  const firstOpen = sites[order[0]].win && sites[order[0]].win.from != null ? sites[order[0]].win.from : DAY_START;
+  const dayStart = Math.max(DAY_START, firstOpen - tv(0, idx(order[0])));
   let now = dayStart, loc = 0;
   const started = {}, per = {}, pending = [], steps = [], warnings = [];
   let ni = 0;
@@ -27574,7 +27576,8 @@ function simEmpat(sites, m, opts) {
       started[ns] = { onTime: now, due: now + DUE };
       per[ns] = { emOn: now };
       pending.push(ns);
-      if (w && w.to != null && now + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
+      if (now > latestOn[ns] + SLACK) warnings.push(sites[ns].code + ": lights on at " + minToHm(now) + " \u2014 too late to check before it closes (" + (w ? w.label : "") + "); needs lights on by " + minToHm(latestOn[ns]) + ", so move it to another day");
+      else if (w && w.to != null && now + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
       now += A;
       ni++;
     } else break;
