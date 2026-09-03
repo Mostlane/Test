@@ -1582,6 +1582,34 @@ const MAP = window.ML_PERM_MAP || {
       }
     });
 
+    // ── Widget: Certificates to review — EM/PAT submitted by engineers, awaiting
+    //    the office to approve + file to compliance. Sits near the top (used a lot).
+    HUB.register({
+      id: "certs", emoji: "📄", title: "Certificates to review", area: "compliance",
+      can: function (p) { return yes(p.FullAccess) || yes(p.SLAAdmin) || yes(p.Compliance); },
+      load: function (card) {
+        return jget("/certs/review").then(function (d) {
+          if (!d || !d.ok) throw new Error("bad");
+          var certs = d.certs || [];
+          var review = certs.filter(function (c) { return c.status === "review"; });
+          var drafts = certs.filter(function (c) { return c.status === "draft"; });
+          var em = review.filter(function (c) { return c.type === "em"; }).length;
+          var pat = review.filter(function (c) { return c.type === "pat"; }).length;
+          var rows = "";
+          if (em) rows += metric("EM awaiting approval", em, "warn");
+          if (pat) rows += metric("PAT awaiting approval", pat, "warn");
+          if (drafts.length) rows += metric("Started (not yet submitted)", drafts.length, "");
+          card.innerHTML = cardHtml({
+            emoji: "📄", title: "Certificates to review",
+            big: review.length, sub: "submitted, awaiting your approval",
+            tone: review.length ? "warn" : "",
+            ok: review.length ? "" : "Nothing waiting to approve.",
+            rows: rows, actions: act("cert-review.html", "Open certificates", true)
+          });
+        });
+      }
+    });
+
     // ── Widget: Fleet — MOT / tax / service due + pending handovers ──────────
     HUB.register({
       id: "fleet", emoji: "🚗", title: "Fleet", area: "vehicles",
