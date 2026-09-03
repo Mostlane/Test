@@ -27861,11 +27861,7 @@ async function handle29(request, env, ctx, url, sess) {
   const fullAccess = perms.FullAccess === "Yes";
   const office = fullAccess || await isOfficeUser(env, tid, me);
   if (!office) return error("The job assistant is for office staff.", 403, env, request);
-  const caps2 = {
-    sla: fullAccess || perms.SLA === "Yes" || perms.SLAAdmin === "Yes",
-    compliance: fullAccess || perms.Compliance === "Yes",
-    vehicles: fullAccess || perms.Vehicles === "Yes"
-  };
+  const caps2 = { sla: true, compliance: true, vehicles: true };
   if (sub === "/jobrules" && method === "GET") {
     const g = await getRules2(env, tid);
     return json({ ok: true, rules: g.rules || "", chatModes: g.chatModes || "", log: g.log || [], canEdit: fullAccess }, {}, env, request);
