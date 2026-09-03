@@ -386,12 +386,18 @@ function simEmpat(sites, m, opts) {
   const { active: A, checkAfter: DUE, check: CHK, hardLate: LATE, slack: SLACK } = EMPAT;
   const idx = i => i + 1;
   const tv = (a, b) => (m && m[a] && Number.isFinite(m[a][b])) ? m[a][b] : 30;
-  // nearest-neighbour visiting order from HQ (index 0) by real drive time.
+  // Latest a site's lights can go on and STILL have the drain-down + check finish
+  // before it closes. For ELS/ELS Private (10:00–15:00) that's 12:00.
+  const latestOn = sites.map(s => (s.win && s.win.to != null) ? (s.win.to - (EMPAT.checkAfter + EMPAT.check)) : 1e6);
+  // Visiting order: tight-closing sites (ELS) FIRST so their checks fit, then
+  // nearest by real drive time (the 0.5× keeps geographic clustering among peers).
   const order = []; const rem = sites.map((_, i) => i); let cur = 0;
-  while (rem.length) { let bk = 0, bd = Infinity; for (let k = 0; k < rem.length; k++) { const d = tv(cur, idx(rem[k])); if (d < bd) { bd = d; bk = k; } } const nx = rem.splice(bk, 1)[0]; order.push(nx); cur = idx(nx); }
+  while (rem.length) { let bk = 0, bd = Infinity; for (let k = 0; k < rem.length; k++) { const c = rem[k]; const score = latestOn[c] + 0.5 * tv(cur, idx(c)); if (score < bd) { bd = score; bk = k; } } const nx = rem.splice(bk, 1)[0]; order.push(nx); cur = idx(nx); }
   const DAY_START = 420, DAY_END = 990;   // aim for a ~07:00–16:30 day
-  const opens = sites.map(s => (s.win && s.win.from != null) ? s.win.from : DAY_START);
-  const dayStart = Math.max(DAY_START, Math.min(...opens));   // start ~07:00, or when the first needed site opens
+  // Leave HQ so we ARRIVE at the first site as it opens (no idle wait) — but not
+  // before ~07:00. First site is the tightest-window one (usually ELS at 10:00).
+  const firstOpen = (sites[order[0]].win && sites[order[0]].win.from != null) ? sites[order[0]].win.from : DAY_START;
+  const dayStart = Math.max(DAY_START, firstOpen - tv(0, idx(order[0])));
   let now = dayStart, loc = 0;
   const started = {}, per = {}, pending = [], steps = [], warnings = [];
   let ni = 0;
@@ -418,7 +424,8 @@ function simEmpat(sites, m, opts) {
       const w = sites[ns].win; if (w && w.from != null && now < w.from) { const wait = w.from - now; steps.push({ t: now, kind: "wait", mins: wait }); now += wait; }
       steps.push({ t: now, kind: "onsite", site: ns, mins: A });
       started[ns] = { onTime: now, due: now + DUE }; per[ns] = { emOn: now }; pending.push(ns);
-      if (w && w.to != null && now + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
+      if (now > latestOn[ns] + SLACK) warnings.push(sites[ns].code + ": lights on at " + minToHm(now) + " — too late to check before it closes (" + (w ? w.label : "") + "); needs lights on by " + minToHm(latestOn[ns]) + ", so move it to another day");
+      else if (w && w.to != null && now + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
       now += A; ni++;
     } else break;
   }
