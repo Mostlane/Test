@@ -5,10 +5,10 @@
    ground name, location, and contact details in one place.
    ========================================================= */
 const CONFIG = {
-  siteName:  "Parkside Football Ground",
-  location:  "Your Town",
-  address:   "Parkside Football Ground, Ground Lane, Your Town, AB1 2CD",
-  email:     "bookings@example.com",   // where enquiries are sent
+  siteName:  "Coal Park",              // working name — change to your real trading name
+  location:  "Coal Park Lane",
+  address:   "Coal Park Lane, [town, postcode]",   // add the full address
+  email:     "bookings@example.com",   // where enquiries are sent — set this before go-live
   phone:     "01234 567 890",
   phoneLink: "+440000000000",          // tel: format, no spaces
 
