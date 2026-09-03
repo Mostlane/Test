@@ -536,7 +536,7 @@
       const cm = container.querySelector("#mlcComplete"); if (cm) cm.addEventListener("click", complete);
     }
     function addRows(n) {
-      const def = type === "em" ? { normal: "Pass", led: "Pass", emergency: "Pass", battery: 180, comments: "" } : { appliance: "", location: "", cls: "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: "" };
+      const def = type === "em" ? { normal: "Pass", led: "Pass", emergency: "Pass", battery: 180, comments: "" } : { appliance: "", location: "", cls: "II", visual: "Pass", earth: "N/A", insulation: ">200 MΩ", result: "Pass", comments: "" };
       for (let k = 0; k < n; k++) rec.rows.push({ ...def });
       renderRows(); queueSave();
     }

@@ -47,6 +47,8 @@ const ASCIIFY = {
   "\u2264": "<=", "\u2265": ">=", "\u2260": "!=", "\u2248": "~",
   "\u2713": "v", "\u2714": "v", "\u2715": "x", "\u2717": "x", "\u221A": "v",
   "\u00A0": " ", "\u2009": " ", "\u202F": " ", "\u200B": "",
+  "\u03A9": "ohm", "\u2126": "ohm",       // Greek omega / ohm sign -> "ohm" (no base-14 glyph)
+  "\u00B5": "u", "\u03BC": "u",           // micro sign / Greek mu -> u
 };
 // Fold a string to what the base-14 WinAnsi fonts can actually draw. Anything
 // still unrepresentable (emoji, CJK…) is DROPPED rather than turned into "?" —

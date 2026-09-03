@@ -3609,7 +3609,13 @@ var ASCIIFY = {
   "\xA0": " ",
   "\u2009": " ",
   "\u202F": " ",
-  "\u200B": ""
+  "\u200B": "",
+  "\u03A9": "ohm",
+  "\u2126": "ohm",
+  // Greek omega / ohm sign -> "ohm" (no base-14 glyph)
+  "\xB5": "u",
+  "\u03BC": "u"
+  // micro sign / Greek mu -> u
 };
 function toWinAnsi(s) {
   let out = "";
@@ -29855,8 +29861,20 @@ function parsePatRowsTokens(toks) {
   }
   return rows;
 }
+var PAT_CLASS_I = /kettle|microwav|fridge|freezer|refriger|dishwash|washing\s*machine|tumble|dryer|toaster|\burn\b|water\s*heater|boiler|oven|cooker|\bhob\b|desktop|\bpc\b|pc\s*tower|tower\s*pc|printer|photocopier|copier|\bmfp\b|extension\s*(lead|reel)|\d+\s*[- ]?gang|multi[- ]?(gang|socket)|gang\s*(lead|extension)|metal/i;
+function patClassFor(desc) {
+  return PAT_CLASS_I.test(String(desc || "")) ? "I" : "II";
+}
+function patDefaults(cls) {
+  return cls === "I" ? { earth: "0.08 \u03A9", insulation: ">200 M\u03A9", visual: "Pass", result: "Pass" } : { earth: "N/A", insulation: ">200 M\u03A9", visual: "Pass", result: "Pass" };
+}
 function carryRows(rows, type) {
-  return (rows || []).map((r, i) => type === "pat" ? { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls: r.cls || "I", visual: "Pass", earth: "", insulation: "", result: "Pass", comments: r.comments || "" } : { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 });
+  return (rows || []).map((r, i) => {
+    if (type !== "pat") return { no: i + 1, comments: r.comments || "", normal: "Pass", led: "Pass", emergency: "Pass", battery: r.battery || 180 };
+    const cls = patClassFor(r.appliance);
+    const def = patDefaults(cls);
+    return { no: i + 1, appliance: r.appliance || "", location: r.location || "", cls, visual: def.visual, earth: def.earth, insulation: def.insulation, result: def.result, comments: r.comments || "" };
+  });
 }
 async function latestCertR2Key(env, tid, code, type) {
   try {
