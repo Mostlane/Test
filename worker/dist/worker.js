@@ -30019,6 +30019,19 @@ async function handle32(request, env, ctx, url, sess) {
   const perms = await permissionsFor(env, tid, me);
   const isOffice = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.Compliance === "Yes";
   const loadCert = async (id) => env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, id).first();
+  const canWriteCert = async (cert) => {
+    if (isOffice) return true;
+    if (!cert) return true;
+    const m = String(me || "").toLowerCase().trim();
+    if (String(cert.engineer || "").toLowerCase().trim() === m) return true;
+    try {
+      const job = cert.job_id ? await getJob2(env, tid, String(cert.job_id)) : null;
+      const engs = job ? Array.isArray(job.assignedEngineers) ? job.assignedEngineers : job.assignedTo ? [job.assignedTo] : [] : [];
+      return engs.some((e) => String(e || "").toLowerCase().trim() === m);
+    } catch {
+      return false;
+    }
+  };
   if (sub === "/config") {
     if (method === "GET") return json({ ok: true, config: await getConfig3(env, tid) }, {}, env, request);
     if (method === "POST") {
@@ -30346,7 +30359,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     let id = b.id ? String(b.id) : "";
     const now = (/* @__PURE__ */ new Date()).toISOString();
     let existing = id ? await loadCert(id) : null;
-    if (existing && !isOffice && existing.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (existing && !await canWriteCert(existing)) return error("Not your certificate", 403, env, request);
     if (existing && existing.status === "final" && !isOffice) return error("This certificate is finalised", 409, env, request);
     let prevData = {};
     try {
@@ -30389,7 +30402,7 @@ PAT: Import certificate number ${num2}-${yr}`;
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!await canWriteCert(cert)) return error("Not your certificate", 403, env, request);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
     const payload = {

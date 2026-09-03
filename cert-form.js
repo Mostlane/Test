@@ -147,9 +147,13 @@
     rec.rows = Array.isArray(rec.rows) ? rec.rows : [];
     if (!rec.contractor.date) rec.contractor.date = new Date().toISOString().slice(0, 10);
 
-    // "view" = a live READ-ONLY reflection (job-view / office job card). Engineer
-    // can edit a non-final cert; office (review) can always edit.
-    const editable = mode === "view" ? false : (mode === "engineer" ? (rec.status !== "final") : true);
+    // "view" = a live READ-ONLY reflection (job-view / office job card). An
+    // engineer can edit a DRAFT; once it's submitted (review) or issued (final)
+    // it's with the office and read-only for them. Office can always edit.
+    const editable = mode === "view" ? false : (mode === "engineer" ? (rec.status !== "final" && rec.status !== "review") : true);
+    // Tell the host this cert's current status (so a combined job can mark the
+    // tab done + not prompt to resubmit an already-submitted cert on reload).
+    if (opts.onStatus) { try { opts.onStatus(rec.status || "draft"); } catch (e) {} }
 
     function render() {
       const titleType = type === "pat" ? "Portable Appliance Test" : "Emergency Lighting Test";
@@ -221,7 +225,11 @@
       if (mode === "engineer" && editable && !opts.hideComplete) h += '<button class="btn green" id="mlcComplete">✅ Complete &amp; submit</button>';
       h += '<button class="btn ghost sm" id="mlcPdf">⬇ Preview PDF</button>';
       h += '<span class="save" id="mlcSave"></span></div>';
-      if (mode === "engineer" && !opts.hideComplete) h += '<div class="muted" style="margin-top:6px">Completing sends this to the office to check and issue.</div>';
+      if (mode === "engineer" && !opts.hideComplete) {
+        if (rec.status === "review") h += '<div class="muted" style="margin-top:6px;color:#1a8f4c;font-weight:600">✓ Submitted — with the office to check and issue.</div>';
+        else if (rec.status === "final") h += '<div class="muted" style="margin-top:6px;color:#1a8f4c;font-weight:600">✓ Issued.</div>';
+        else h += '<div class="muted" style="margin-top:6px">Completing sends this to the office to check and issue.</div>';
+      }
       h += '</div>';
 
       container.innerHTML = h;
@@ -385,10 +393,11 @@
           declaration: rec.declaration || "", contractor: rec.contractor, rows: rec.rows, signature: rec.signature || "",
           emKind: rec.emKind || "",
         };
-        const d = await authFetch("/certs/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
-        if (d && d.ok) { rec.id = d.id; setSave("Saved ✓"); if (opts.onChange) opts.onChange(rec.id); }
-        else setSave("Save failed", true);
-      } catch (e) { setSave("Save failed", true); }
+        const res = await authFetch("/certs/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json().catch(() => null);
+        if (res.ok && d && d.ok) { rec.id = d.id; setSave("Saved ✓"); if (opts.onChange) opts.onChange(rec.id); return true; }
+        setSave((d && d.error) ? d.error : "Save failed", true); return false;
+      } catch (e) { setSave("Save failed", true); return false; }
     }
 
     // Row-level handlers — re-bound every time the rows re-render (renderRows
@@ -618,10 +627,14 @@
         if (!silent) alert("Please complete before submitting:\n\n• " + v.missing.join("\n• "));
         return false;
       }
-      await doSave();
-      if (!rec.id) return false;
-      try { await authFetch("/certs/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) }); rec.status = "review"; return true; }
-      catch (e) { return false; }
+      const saved = await doSave();
+      if (!saved || !rec.id) { if (!silent) alert("Couldn't save the certificate — make sure you're the assigned engineer, then try again."); return false; }
+      try {
+        const res = await authFetch("/certs/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rec.id }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || (d && d.ok === false)) { if (!silent) alert("Couldn't submit: " + ((d && d.error) || "please try again")); return false; }
+        rec.status = "review"; return true;
+      } catch (e) { if (!silent) alert("Couldn't submit — check your connection and try again."); return false; }
     }
     async function complete() {
       const btn = container.querySelector("#mlcComplete"); if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }

@@ -10,7 +10,7 @@
   <script src="/pwa.js?v=2"></script>
   <script src="sla-jobedit.js?v=28"></script>
   <script src="firestop-form.js?v=1"></script>
-  <script src="cert-form.js?v=15"></script>
+  <script src="cert-form.js?v=16"></script>
   <script src="remedials-form.js?v=2"></script>
   <style>
     :root{
@@ -716,6 +716,9 @@
     }
     ["em","pat"].forEach(function(t){
       certInstances[t]=window.MLCert.mount($("certPane_"+t), { jobId:jobId, type:t, mode:"engineer", api:api, token:token,
+        // On (re)load, reflect a cert that's ALREADY submitted/issued as done so
+        // the tab shows ✓ and the engineer isn't prompted to resubmit it.
+        onStatus: function(st){ if(st==="review"||st==="final"){ done[t]=true; markTabs(); if(done.em&&done.pat){ $("certHint").textContent="✓ Both certificates submitted — with the office."; } } },
         // Only patch the JOB to Complete once BOTH certs are in.
         patchComplete: function(){ done[t]=true; return (done.em && done.pat) ? patchJob({status:"Complete"}) : Promise.resolve(); },
         onComplete: function(){ afterOne(t); } });
