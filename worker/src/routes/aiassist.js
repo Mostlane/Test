@@ -617,13 +617,11 @@ export async function handle(request, env, ctx, url, sess) {
   const fullAccess = perms.FullAccess === "Yes";
   const office = fullAccess || await isOfficeUser(env, tid, me);
   if (!office) return error("The job assistant is for office staff.", 403, env, request);
-  // What this user is allowed to reach — the assistant can look up ANY area, but
-  // only surfaces what the user's own permissions permit.
-  const caps = {
-    sla: fullAccess || perms.SLA === "Yes" || perms.SLAAdmin === "Yes",
-    compliance: fullAccess || perms.Compliance === "Yes",
-    vehicles: fullAccess || perms.Vehicles === "Yes",
-  };
+  // Any OFFICE user gets full operational access to the assistant (raise/assign/
+  // plan jobs, look up sites/compliance/fleet). We've already excluded field
+  // engineers above, so being office is enough — office staff shouldn't need a
+  // specific SLA/Compliance/Vehicles permission just to use the assistant.
+  const caps = { sla: true, compliance: true, vehicles: true };
 
   // ── Rulebook ──────────────────────────────────────────────────────────────
   if (sub === "/jobrules" && method === "GET") {
