@@ -477,6 +477,7 @@ async function collectDefects(env, tid, opts = {}) {
           driverName: names ? (names[r.username] || r.username) : r.username,
           itemId, kind, label, answer: answerWord, driverNote: driverNote || "",
           status: e.status, officeNote: e.note, statusBy: e.by, statusAt: e.at,
+          explicit: !!(statusMap[key] && statusMap[key].status), grouped: false,
         });
       };
       for (const id of Object.keys(answers)) {
@@ -492,17 +493,45 @@ async function collectDefects(env, tid, opts = {}) {
       }
     }
   } catch {}
+  // Recurring-issue grouping: if the SAME fault (reg + item) is already being
+  // dealt with (an earlier check marked it PENDING), a later re-report of it
+  // inherits "pending" instead of counting as a brand-new OPEN defect — so an
+  // in-hand issue isn't re-flagged every week. A fault reported again AFTER it
+  // was RESOLVED stays open (that's a genuine recurrence). Only the default-open
+  // repeats are touched; an explicit office status always wins.
+  const groups = {};
+  for (const d of out) (groups[d.regNorm + "::" + d.itemId] || (groups[d.regNorm + "::" + d.itemId] = [])).push(d);
+  for (const g of Object.values(groups)) {
+    g.sort((a, b) => new Date(a.checkedAt || 0) - new Date(b.checkedAt || 0));
+    let last = null;   // effective status of the most recent earlier report
+    for (const d of g) {
+      if (!d.explicit && d.status === "open" && last === "pending") {
+        d.status = "pending"; d.grouped = true;
+        if (!d.officeNote) d.officeNote = "Same issue as an earlier check — being dealt with";
+      }
+      last = d.status;
+    }
+  }
   return out;
 }
-// Per-reg summary of UNRESOLVED defects (for the vehicle cards).
+// Per-reg summary of UNRESOLVED defects (for the vehicle cards). Weekly repeats
+// of the SAME fault (reg + item) are COLLAPSED to one — its latest instance
+// decides open vs pending — so an ongoing issue counts once, not every week.
+// `since` still reflects the oldest unresolved report on the van.
 function defectSummary(list) {
   const out = {};
+  const latest = {};   // regNorm::itemId -> latest unresolved instance
   for (const d of list) {
     if (d.status === "resolved") continue;
     const c = out[d.regNorm] || (out[d.regNorm] = { open: 0, pending: 0, notSafe: false, since: "" });
-    if (d.status === "pending") c.pending++; else c.open++;
     if (d.kind === "notsafe") c.notSafe = true;
     if (d.checkedAt && (!c.since || new Date(d.checkedAt) < new Date(c.since))) c.since = d.checkedAt;
+    const gk = d.regNorm + "::" + d.itemId;
+    if (!latest[gk] || new Date(d.checkedAt || 0) > new Date(latest[gk].checkedAt || 0)) latest[gk] = d;
+  }
+  for (const gk in latest) {
+    const d = latest[gk];
+    if (d.status === "pending") out[d.regNorm].pending++; else out[d.regNorm].open++;
   }
   return out;
 }
