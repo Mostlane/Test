@@ -92,8 +92,8 @@ function siteOut(r) {
   let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
   const addr = [d.address1 || d.street, d.town, d.county, r.postcode].filter(Boolean).join(", ");
   return { ok: true, code: r.site_number, name: r.site_name, postcode: r.postcode || d.postcode || "",
-    address: addr, lat: d.lat, lon: d.lon || d.lng, telephone: d.telephone || "", storeType: d.storeType || r.client || "",
-    sharepointURL: d.sharepointURL || "" };
+    address: addr, lat: d.lat, lon: d.lon || d.lng, telephone: d.telephone || d.phone || "", email: d.email || d.managerEmail || "",
+    storeType: d.storeType || r.client || "", sharepointURL: d.sharepointURL || "" };
 }
 
 async function resolveEngineer(env, tid, name) {
@@ -140,7 +140,7 @@ function jobRow(r) {
   const last = hist.length ? hist[hist.length - 1] : null;
   return { id: r.id, ref: d.helpdeskRef || r.helpdesk_ref || r.id, siteName: d.siteName || "", siteCode: d.siteCode || r.site_code || "",
     status: d.status || r.status || "", priority: d.priority || "", scheduledAt: d.scheduledAt || r.scheduled_at || null,
-    engineers: engs, durationMinutes: d.durationMinutes || null, description: String(d.description || r.description || "").slice(0, 400),
+    engineers: engs, durationMinutes: d.durationMinutes || null, telephone: d.telephone || d.phone || "", description: String(d.description || r.description || "").slice(0, 400),
     // Cheap activity signals (from the job JSON already loaded — no extra reads):
     visited: hist.some(h => WORKED_RE.test(String(h && h.status || ""))),
     lastActivity: last ? { status: last.status, at: last.at, by: last.by } : null,
@@ -437,7 +437,7 @@ async function toolPlanEmpat(env, tid, caps, args) {
     const coord = await coordsForJob(env, tid, { siteCode: s.code, lat: s.lat, lon: s.lon });
     if (!coord) { bad.push(s.code + " (no location)"); continue; }
     const win = date ? await siteWindow(env, tid, s.code, date, s.storeType) : { from: 480, to: 1080, label: "" };
-    sites.push({ code: s.code, name: s.name, coord, win });
+    sites.push({ code: s.code, name: s.name, coord, win, telephone: s.telephone, email: s.email });
   }
   if (sites.length < 1) return { message: "Couldn't resolve any of those sites' locations.", unresolved: bad };
   const m = (await driveMatrixG(env, [HQ_COORD, ...sites.map(s => s.coord)])).mins;
@@ -456,7 +456,7 @@ async function toolPlanEmpat(env, tid, caps, args) {
     date, count: sites.length,
     dayStart: hm(plan.startMin), dayEnd: hm(plan.endMin),
     durationHrs: (dur / 60).toFixed(1), sequentialHrs: (sequential / 60).toFixed(1), savedHrs: Math.max(0, (sequential - dur) / 60).toFixed(1),
-    sites: sites.map((s, i) => ({ code: s.code, name: s.name, emOn: plan.per[i] ? hm(plan.per[i].emOn) : null, check: (plan.per[i] && plan.per[i].check != null) ? hm(plan.per[i].check) : null })),
+    sites: sites.map((s, i) => ({ code: s.code, name: s.name, telephone: s.telephone || "", email: s.email || "", emOn: plan.per[i] ? hm(plan.per[i].emOn) : null, check: (plan.per[i] && plan.per[i].check != null) ? hm(plan.per[i].check) : null })),
     timeline, warnings: plan.warnings, unresolved: bad,
   };
 }
@@ -481,7 +481,7 @@ async function toolFindSite(env, tid, query) {
   if (num) { sql += " OR site_number IN (?,?,?)"; binds.push(num, num.padStart(4, "0"), String(Number(num) || "")); }
   sql += ") ORDER BY length(site_name) LIMIT 10";
   const { results } = await env.DB.prepare(sql).bind(...binds).all();
-  const sites = (results || []).map(r => { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} return { number: r.site_number, name: r.site_name, type: r.client, postcode: r.postcode || d.postcode || "", lat: d.lat, lon: d.lon != null ? d.lon : d.lng, telephone: d.telephone || "" }; });
+  const sites = (results || []).map(r => { let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {} return { number: r.site_number, name: r.site_name, type: r.client, postcode: r.postcode || d.postcode || "", lat: d.lat, lon: d.lon != null ? d.lon : d.lng, telephone: d.telephone || d.phone || "", email: d.email || d.managerEmail || "" }; });
   return { count: sites.length, sites };
 }
 async function toolFindCompliance(env, tid, caps, query, scheme) {
@@ -503,10 +503,13 @@ async function toolFindCompliance(env, tid, caps, query, scheme) {
   for (const r of results || []) {
     const items = dueSummary(r.due);
     if (wantDue && !items.some(i => i.state !== "ok")) continue;
-    let nm = r.name;
-    if (!nm && r.site_number) { try { const s = await env.DB.prepare("SELECT site_name FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, r.site_number).first(); if (s) nm = s.site_name; } catch {} }
-    stores.push({ scheme: r.scheme, code: r.code, name: nm || r.code, category: r.category || "", postcode: r.postcode || "", due: items });
-    if (stores.length >= 25) break;
+    let nm = r.name, tel = "", email = "";
+    try {
+      const s = await env.DB.prepare("SELECT site_name, data FROM sites WHERE tenant_id=? AND site_number=? LIMIT 1").bind(tid, r.site_number || r.code).first();
+      if (s) { nm = nm || s.site_name; let d = {}; try { d = JSON.parse(s.data || "{}"); } catch {} tel = d.telephone || d.phone || ""; email = d.email || d.managerEmail || ""; }
+    } catch {}
+    stores.push({ scheme: r.scheme, code: r.code, name: nm || r.code, category: r.category || "", postcode: r.postcode || "", telephone: tel, email, due: items });
+    if (stores.length >= 40) break;
   }
   return { count: stores.length, stores };
 }
@@ -721,7 +724,8 @@ export async function handle(request, env, ctx, url, sess) {
       + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers — use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '⚠️ No previous PAT number on file for this store — it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. "
       + "EM/PAT INTERLEAVING: an EM/PAT visit is 1h active (15m flick the emergency lights on + 45m PAT), then the lights drain ~2h45 before a 15m walk-round to check they lasted. That drain gap is dead time you can fill at NEARBY sites — drive to another, flick its lights on and do its PAT, then loop back for the first site's check. When the office wants to plan a day of EM/PAT tests, or asks which sites could be OVERLAPPED, call plan_empat_day with the store numbers to get a real drive-time interleaved timeline; present it clearly and say how many hours it saves vs doing them one-by-one. Suggest overlapping nearby due sites to compress the day. "
-      + "DUE DATES: EM/PAT are due in a month — doing the test any time within the due MONTH is fine, and up to about a WEEK into the following month is still acceptable; try not to slip much beyond that. Prefer clustering geographically-close due sites into the same day. "
+      + "DUE DATES: the EM & PAT due dates ARE the compliance chart's `em` and `pat` dates — use find_compliance (scheme coop) to see what's due; every EM/PAT site needs BOTH. Due within the due MONTH is fine, and up to about a WEEK into the next month is acceptable; try not to slip much beyond. Cluster geographically-close due sites into the same day. "
+      + "CALL AHEAD: whenever you SUGGEST sites (from the schedule / compliance dues), ALWAYS show each site's PHONE NUMBER in your reply — the office rings the store to confirm the day works before approving the jobs. Site records also hold an email (for a booking email later). "
       + "SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private ≈ 10:00–15:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered into an efficient route and spaced by REAL driving time between sites (Google), so nearby sites cluster together, and any clash with a job the engineer already has — or a job that won't fit the opening window or the day — is flagged with ⚠. Do NOT invent or override these times; present the suggested time and pass on any ⚠ flags in your summary so the office sees them. "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
       + "FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings — they don't render here. Bold a label with **like this**. Keep it tight. "
@@ -833,7 +837,7 @@ export async function handle(request, env, ctx, url, sess) {
         const desc = String(d.description || (empat ? "Carry out 3-hour EM drain-down test and PAT testing." : "")).slice(0, 2000);
         jobs.push({
           action: "create", jobType, siteCode: site.code, siteName: site.name, postcode: site.postcode, address: site.address,
-          lat: site.lat, lon: site.lon, storeType: site.storeType, sharepointURL: site.sharepointURL, telephone: site.telephone,
+          lat: site.lat, lon: site.lon, storeType: site.storeType, sharepointURL: site.sharepointURL, telephone: site.telephone, email: site.email,
           engineer: engUser, engineerName: engName, date, startTime: date ? (d.startTime || "") : "", _explicitTime: !!(date && d.startTime),
           durationMinutes: dur, priority: (empat || jobType === "electrical") ? (d.priority || "Priority 4") : (d.priority || ""),
           title: d.title || site.name, description: desc,
