@@ -322,7 +322,7 @@ async function planDay(env, tid, jobs) {
       let start;
       if (j._explicitTime && j.startTime) start = hmToMin(j.startTime);         // office named a time
       else if (prev) start = Math.ceil((cur + (Number(prev.durationMinutes) || 60) + tv(prevIdx, idx)) / 5) * 5;
-      else start = Math.max((w && w.from != null) ? w.from : 480, 480);         // first job: at opening, but not before 08:00
+      else start = Math.max((w && w.from != null) ? w.from : 420, 420);         // first job: at opening, but not before 07:00 (aim ~07:00–16:30 day)
       if (w && w.closed) j.warn.push("⚠ site appears CLOSED " + j.date);
       if (w && w.from != null) {
         if (start < w.from) start = w.from;
@@ -389,9 +389,9 @@ function simEmpat(sites, m, opts) {
   // nearest-neighbour visiting order from HQ (index 0) by real drive time.
   const order = []; const rem = sites.map((_, i) => i); let cur = 0;
   while (rem.length) { let bk = 0, bd = Infinity; for (let k = 0; k < rem.length; k++) { const d = tv(cur, idx(rem[k])); if (d < bd) { bd = d; bk = k; } } const nx = rem.splice(bk, 1)[0]; order.push(nx); cur = idx(nx); }
-  let dayStart = 480;   // 08:00 floor
-  const opens = sites.map(s => (s.win && s.win.from != null) ? s.win.from : 480);
-  dayStart = Math.max(480, Math.min(...opens));   // start when the first needed site opens
+  const DAY_START = 420, DAY_END = 990;   // aim for a ~07:00–16:30 day
+  const opens = sites.map(s => (s.win && s.win.from != null) ? s.win.from : DAY_START);
+  const dayStart = Math.max(DAY_START, Math.min(...opens));   // start ~07:00, or when the first needed site opens
   let now = dayStart, loc = 0;
   const started = {}, per = {}, pending = [], steps = [], warnings = [];
   let ni = 0;
@@ -422,6 +422,8 @@ function simEmpat(sites, m, opts) {
       now += A; ni++;
     } else break;
   }
+  const lastWork = now;   // last on-site/check finishes here (before the drive home)
+  if (lastWork > DAY_END) warnings.push("day runs to " + (function(t){return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0");})(lastWork) + " — past the ~16:30 target; consider dropping a site to another day");
   const back = tv(loc, 0); if (back > 0) { steps.push({ t: now, kind: "travel", mins: back }); now += back; }
   return { steps, startMin: dayStart, endMin: now, per, warnings };
 }
@@ -738,6 +740,7 @@ export async function handle(request, env, ctx, url, sess) {
       + "EM/PAT INTERLEAVING: an EM/PAT visit is 1h active (15m flick the emergency lights on + 45m PAT), then the lights drain ~2h45 before a 15m walk-round to check they lasted. That drain gap is dead time you can fill at NEARBY sites — drive to another, flick its lights on and do its PAT, then loop back for the first site's check. When the office wants to plan a day of EM/PAT tests, or asks which sites could be OVERLAPPED, call plan_empat_day with the store numbers to get a real drive-time interleaved timeline; present it clearly and say how many hours it saves vs doing them one-by-one. Suggest overlapping nearby due sites to compress the day. Then, so the office can CALL ROUND and tick each store off, present the day as a draft_jobs PREVIEW (one EM/PAT job per site, engineer set, each site's startTime = its lights-on time from the plan) — the preview cards carry the phone number and a Yes/No tick per site, and the office creates only the ones they tick. Set EACH interleaved job's DESCRIPTION to the normal 'Carry out 3-hour EM drain-down test and PAT testing.' line, THEN a blank line, THEN the plan's `briefing` text (the whole interleaved timeline) — so the engineer sees on every job when to leave each site and when to come back to check the lights. The RA/photo/signature/note gates are relaxed automatically for EM/PAT so the overlapping jobs never block each other. "
       + "DUE DATES: the EM & PAT due dates ARE the compliance chart's `em` and `pat` dates — use find_compliance (scheme coop) to see what's due; every EM/PAT site needs BOTH. Due within the due MONTH is fine, and up to about a WEEK into the next month is acceptable; try not to slip much beyond. Cluster geographically-close due sites into the same day. "
       + "CLOSED SITES: only ever suggest EM/PAT sites that are DUE and ACTIVE — take candidates from find_compliance (Co-op), which already excludes Closed Sites. NEVER suggest a store that is a Closed Site on compliance, and never invent sites. "
+      + "DAY LENGTH: aim each suggested day at roughly 07:00 start to about 16:30 finish (sites still can't start before they open — ELS/ELS Private ~10:00). If a planned day would run much past ~16:30, drop a site to another day. "
       + "ALWAYS A PLANNED DAY: when the office asks for site suggestions or 'other sites to overlap', do NOT reply with a loose list of random sites — build a PLANNED interleaved day with plan_empat_day (real drive times, opening hours, the drain-gap overlaps) and present THAT (timeline + tickable cards). Pick geographically-close DUE sites that actually route together; a suggestion is only useful if it forms a workable day. "
       + "CALL AHEAD: whenever you SUGGEST sites (from the schedule / compliance dues), ALWAYS show each site's PHONE NUMBER in your reply — the office rings the store to confirm the day works before approving the jobs. Site records also hold an email (for a booking email later). "
       + "IF A SITE DECLINES A DAY: don't scrap the whole plan. Remove ONLY that site, re-run plan_empat_day on the REMAINING sites (the route + times will shift), and — to keep the day full — offer the next-nearest still-DUE site as a replacement (find_compliance for a nearby due store, show its phone to call ahead). Keep the confirmed sites intact; present the updated plan for approval. Only start a genuinely new area if the office asks. "
