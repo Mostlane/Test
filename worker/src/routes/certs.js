@@ -509,6 +509,22 @@ export async function handle(request, env, ctx, url, sess) {
 
   const loadCert = async (id) => env.DB.prepare("SELECT * FROM certificates WHERE tenant_id=? AND id=?").bind(tid, id).first();
 
+  // May `me` write/submit this cert? The office always can; otherwise the creator
+  // OR any engineer assigned to the cert's job (so a cert seeded by one person —
+  // office preview, the AI, a colleague — can still be completed by whoever
+  // actually does the job). Names/usernames matched case-insensitively.
+  const canWriteCert = async (cert) => {
+    if (isOffice) return true;
+    if (!cert) return true;   // brand-new cert (no existing row) — creation allowed
+    const m = String(me || "").toLowerCase().trim();
+    if (String(cert.engineer || "").toLowerCase().trim() === m) return true;
+    try {
+      const job = cert.job_id ? await getJob(env, tid, String(cert.job_id)) : null;
+      const engs = job ? (Array.isArray(job.assignedEngineers) ? job.assignedEngineers : (job.assignedTo ? [job.assignedTo] : [])) : [];
+      return engs.some(e => String(e || "").toLowerCase().trim() === m);
+    } catch { return false; }
+  };
+
   // ── Config (office) ─────────────────────────────────────────────────────────
   if (sub === "/config") {
     if (method === "GET") return json({ ok: true, config: await getConfig(env, tid) }, {}, env, request);
@@ -811,8 +827,8 @@ export async function handle(request, env, ctx, url, sess) {
     let id = b.id ? String(b.id) : "";
     const now = new Date().toISOString();
     let existing = id ? await loadCert(id) : null;
-    // only the office or the engineer who owns the draft may write it
-    if (existing && !isOffice && existing.engineer !== me) return error("Not your certificate", 403, env, request);
+    // the office, the cert's creator, OR the job's assigned engineer may write it
+    if (existing && !(await canWriteCert(existing))) return error("Not your certificate", 403, env, request);
     if (existing && existing.status === "final" && !isOffice) return error("This certificate is finalised", 409, env, request);
 
     let prevData = {}; try { prevData = existing ? JSON.parse(existing.data) : {}; } catch {}
@@ -846,7 +862,7 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const cert = await loadCert(String(b.id || ""));
     if (!cert) return error("Certificate not found", 404, env, request);
-    if (!isOffice && cert.engineer !== me) return error("Not your certificate", 403, env, request);
+    if (!(await canWriteCert(cert))) return error("Not your certificate", 403, env, request);
     const now = new Date().toISOString();
     await env.DB.prepare("UPDATE certificates SET status='review', submitted_at=?, updated_at=? WHERE tenant_id=? AND id=?").bind(now, now, tid, cert.id).run();
     // Notify the office review queue. If specific reviewers are configured
