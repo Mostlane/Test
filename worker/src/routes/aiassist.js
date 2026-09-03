@@ -375,6 +375,92 @@ async function clashCheck(env, tid, dated) {
   }
 }
 
+// ── EM/PAT interleave planner ────────────────────────────────────────────────
+// The EM/PAT day: 1h active on site (15m flick the emergency lights on + 45m PAT),
+// then a ~1h45 drain gap, then a 15m walk-round to check the lights lasted (≈2h45
+// after they were switched on). While one site drains you can drive to another,
+// flick its lights on and do its PAT — interleaving several sites to compress the
+// day. This simulates that, using real drive times, and returns a timeline.
+const EMPAT = { active: 60, checkAfter: 165, check: 15, hardLate: 180, slack: 20 };
+function simEmpat(sites, m, opts) {
+  const { active: A, checkAfter: DUE, check: CHK, hardLate: LATE, slack: SLACK } = EMPAT;
+  const idx = i => i + 1;
+  const tv = (a, b) => (m && m[a] && Number.isFinite(m[a][b])) ? m[a][b] : 30;
+  // nearest-neighbour visiting order from HQ (index 0) by real drive time.
+  const order = []; const rem = sites.map((_, i) => i); let cur = 0;
+  while (rem.length) { let bk = 0, bd = Infinity; for (let k = 0; k < rem.length; k++) { const d = tv(cur, idx(rem[k])); if (d < bd) { bd = d; bk = k; } } const nx = rem.splice(bk, 1)[0]; order.push(nx); cur = idx(nx); }
+  let dayStart = 480;   // 08:00 floor
+  const opens = sites.map(s => (s.win && s.win.from != null) ? s.win.from : 480);
+  dayStart = Math.max(480, Math.min(...opens));   // start when the first needed site opens
+  let now = dayStart, loc = 0;
+  const started = {}, per = {}, pending = [], steps = [], warnings = [];
+  let ni = 0;
+  while (ni < order.length || pending.length) {
+    pending.sort((a, b) => started[a].due - started[b].due);
+    const chk = pending.length ? pending[0] : null;
+    const ns = ni < order.length ? order[ni] : null;
+    let doCheck = false;
+    if (chk != null) {
+      if (ns == null) doCheck = true;
+      else { const tNs = tv(loc, idx(ns)); const back = tv(idx(ns), idx(chk)); if (now + tNs + A + back > started[chk].due + SLACK) doCheck = true; }
+    }
+    if (doCheck && chk != null) {
+      const t = tv(loc, idx(chk)); if (t > 0) { steps.push({ t: now, kind: "travel", mins: t }); now += t; loc = idx(chk); }
+      if (now < started[chk].due) { const w = started[chk].due - now; steps.push({ t: now, kind: "wait", mins: w }); now += w; }
+      steps.push({ t: now, kind: "check", site: chk, mins: CHK });
+      per[chk].check = now;
+      const lateBy = now - started[chk].onTime;
+      if (lateBy > LATE) warnings.push(sites[chk].code + ": light check " + (lateBy - LATE) + "m past the 3-hour limit — lights may have dropped");
+      const w = sites[chk].win; if (w && w.to != null && now + CHK > w.to) warnings.push(sites[chk].code + ": light check after the site closes (" + w.label + ")");
+      now += CHK; pending.splice(pending.indexOf(chk), 1);
+    } else if (ns != null) {
+      const t = tv(loc, idx(ns)); if (t > 0) { steps.push({ t: now, kind: "travel", mins: t }); now += t; loc = idx(ns); }
+      const w = sites[ns].win; if (w && w.from != null && now < w.from) { const wait = w.from - now; steps.push({ t: now, kind: "wait", mins: wait }); now += wait; }
+      steps.push({ t: now, kind: "onsite", site: ns, mins: A });
+      started[ns] = { onTime: now, due: now + DUE }; per[ns] = { emOn: now }; pending.push(ns);
+      if (w && w.to != null && now + A > w.to) warnings.push(sites[ns].code + ": EM/PAT active runs past closing (" + w.label + ")");
+      now += A; ni++;
+    } else break;
+  }
+  const back = tv(loc, 0); if (back > 0) { steps.push({ t: now, kind: "travel", mins: back }); now += back; }
+  return { steps, startMin: dayStart, endMin: now, per, warnings };
+}
+async function toolPlanEmpat(env, tid, caps, args) {
+  if (!caps.sla) return { denied: true, message: "You need SLA access to plan jobs." };
+  const date = resolveDate(args.date) || null;
+  const codes = Array.isArray(args.stores) ? args.stores : String(args.stores || "").split(/[,\s]+/).filter(Boolean);
+  if (!codes.length) return { message: "Give me the store numbers to plan (EM/PAT sites)." };
+  const sites = [], bad = [];
+  for (const code of codes.slice(0, 12)) {
+    const s = await resolveSite(env, tid, code);
+    if (!s.ok) { bad.push(String(code)); continue; }
+    const coord = await coordsForJob(env, tid, { siteCode: s.code, lat: s.lat, lon: s.lon });
+    if (!coord) { bad.push(s.code + " (no location)"); continue; }
+    const win = date ? await siteWindow(env, tid, s.code, date, s.storeType) : { from: 480, to: 1080, label: "" };
+    sites.push({ code: s.code, name: s.name, coord, win });
+  }
+  if (sites.length < 1) return { message: "Couldn't resolve any of those sites' locations.", unresolved: bad };
+  const m = (await driveMatrixG(env, [HQ_COORD, ...sites.map(s => s.coord)])).mins;
+  const plan = simEmpat(sites, m);
+  const hm = minToHm;
+  const timeline = plan.steps.map(s => {
+    if (s.kind === "travel") return hm(s.t) + " · drive " + s.mins + "m";
+    if (s.kind === "wait") return hm(s.t) + " · wait " + s.mins + "m (lights draining)";
+    if (s.kind === "onsite") return hm(s.t) + " · " + sites[s.site].code + " " + sites[s.site].name + " — flick EM lights on + PAT (1h)";
+    if (s.kind === "check") return hm(s.t) + " · " + sites[s.site].code + " " + sites[s.site].name + " — walk-round light check (15m)";
+    return "";
+  }).filter(Boolean);
+  const dur = plan.endMin - plan.startMin;
+  const sequential = sites.length * 180;   // each site done alone ≈ 3h door-to-check
+  return {
+    date, count: sites.length,
+    dayStart: hm(plan.startMin), dayEnd: hm(plan.endMin),
+    durationHrs: (dur / 60).toFixed(1), sequentialHrs: (sequential / 60).toFixed(1), savedHrs: Math.max(0, (sequential - dur) / 60).toFixed(1),
+    sites: sites.map((s, i) => ({ code: s.code, name: s.name, emOn: plan.per[i] ? hm(plan.per[i].emOn) : null, check: (plan.per[i] && plan.per[i].check != null) ? hm(plan.per[i].check) : null })),
+    timeline, warnings: plan.warnings, unresolved: bad,
+  };
+}
+
 // ── Read tools: the assistant can look up any portal area, gated per user ─────
 function dueSummary(dueJson) {
   let due = {}; try { due = JSON.parse(dueJson || "{}"); } catch {}
@@ -586,6 +672,7 @@ export async function handle(request, env, ctx, url, sess) {
       { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
       { name: "find_vehicle", description: "Look up a fleet VEHICLE by registration, make or model. Returns reg, make/model and MOT/tax/service due dates.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
       { name: "cert_numbers", description: "Get a store's EM set number and previous PAT/EM certificate numbers (from the compliance certificates on file), for raising an EM/PAT test job. Pass the store number.", input_schema: { type: "object", properties: { store: { type: "string" } }, required: ["store"] } },
+      { name: "plan_empat_day", description: "Plan an INTERLEAVED EM/PAT day across several stores using real drive times. An EM/PAT visit is 1h active (flick emergency lights on + PAT), then the lights must drain ~2h45 before a 15-min walk-round light check — so while one site drains you drive to another and start it, compressing the day. Give the store numbers (and optionally the engineer + date). Returns a full timeline (who's on/checking where and when), each site's lights-on + check times, hours vs doing them one-by-one, and any warnings.", input_schema: { type: "object", properties: { stores: { type: "array", items: { type: "string" } }, engineer: { type: "string" }, date: { type: "string" } }, required: ["stores"] } },
       { name: "ask", description: "Ask the office ONE clarifying question — only when something genuinely can't be found or is truly ambiguous. Never ask for details you can look up with a find_ tool first.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
       { name: "reply", description: "Answer the office in plain text — use this to ANSWER a question after looking things up (e.g. compliance due dates, a site's details, what's on the board). Also for Full-Access general chat.", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
     ];
@@ -633,6 +720,8 @@ export async function handle(request, env, ctx, url, sess) {
       + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". "
       + (cats.length ? ("Custom job categories on this board: " + cats.join(", ") + ". A job's STATUS can be one of these to mark a workstream — e.g. jobs with status \"FRA Works\" ARE the Fire Risk Assessment remedial jobs (\"the FRA tracker\" / \"FRA works\"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream — do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. \"Send <engineer> in\" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs — keep the engineer, set the date. ") : "")
       + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers — use cert_numbers to look them up from the store's previous certificates, and mention them in your preview for reference. If a number CAN'T be found, do NOT hide it: FLAG it clearly in the preview (e.g. '⚠️ No previous PAT number on file for this store — it'll be set when the cert is finalised') and still raise the job. Always show what you found AND what was missing, per type. "
+      + "EM/PAT INTERLEAVING: an EM/PAT visit is 1h active (15m flick the emergency lights on + 45m PAT), then the lights drain ~2h45 before a 15m walk-round to check they lasted. That drain gap is dead time you can fill at NEARBY sites — drive to another, flick its lights on and do its PAT, then loop back for the first site's check. When the office wants to plan a day of EM/PAT tests, or asks which sites could be OVERLAPPED, call plan_empat_day with the store numbers to get a real drive-time interleaved timeline; present it clearly and say how many hours it saves vs doing them one-by-one. Suggest overlapping nearby due sites to compress the day. "
+      + "DUE DATES: EM/PAT are due in a month — doing the test any time within the due MONTH is fine, and up to about a WEEK into the following month is still acceptable; try not to slip much beyond that. Prefer clustering geographically-close due sites into the same day. "
       + "SCHEDULING: when you propose a dated job, a sensible start time is set automatically from the SITE'S OPENING HOURS (ELS / ELS Private ≈ 10:00–15:00; retail & Cobra use their saved trading hours), jobs for the same engineer/day are ordered into an efficient route and spaced by REAL driving time between sites (Google), so nearby sites cluster together, and any clash with a job the engineer already has — or a job that won't fit the opening window or the day — is flagged with ⚠. Do NOT invent or override these times; present the suggested time and pass on any ⚠ flags in your summary so the office sees them. "
       + "If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. "
       + "FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings — they don't render here. Bold a label with **like this**. Keep it tight. "
@@ -648,7 +737,7 @@ export async function handle(request, env, ctx, url, sess) {
     // assistant message MUST get a matching tool_result, or the next call is
     // rejected. On the LAST round the read tools are withdrawn and a tool is
     // forced, so it always concludes with an answer/proposal from what it gathered.
-    const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle", "cert_numbers"]);
+    const READ = new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle", "cert_numbers", "plan_empat_day"]);
     const termTools = tools.filter(x => !READ.has(x.name));
     const MAXR = 8;
     let t = null, ai = null;
@@ -674,6 +763,7 @@ export async function handle(request, env, ctx, url, sess) {
             else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
             else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps, u.input.query || "");
             else if (u.name === "cert_numbers") data = await toolCertNumbers(env, tid, u.input.store || u.input.query || "");
+            else if (u.name === "plan_empat_day") data = await toolPlanEmpat(env, tid, caps, u.input || {});
             else data = { note: "Use the lookup results above, then answer or propose." };
           } catch (e) { data = { error: String(e && e.message || e) }; }
           out.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify(data).slice(0, 12000) });
