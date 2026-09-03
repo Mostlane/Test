@@ -27424,6 +27424,57 @@ async function toolGetJob(env, tid, ref, engSet) {
     attendedByEngineer
   };
 }
+async function toolCertNumbers(env, tid, store) {
+  const digits = String(store || "").replace(/\D/g, "");
+  if (!digits) return { notfound: true, message: "Give a store number." };
+  const cands = [...new Set([digits.padStart(4, "0"), digits, String(Number(digits) || "")].filter(Boolean))];
+  let emSet = "";
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, "sla:emsets:" + tid).first();
+    if (row) {
+      const m = JSON.parse(row.value || "{}");
+      for (const c of cands) {
+        if (m[c]) {
+          emSet = String(m[c]);
+          break;
+        }
+      }
+    }
+  } catch {
+  }
+  const lastNum = async (type) => {
+    try {
+      const ph = cands.map(() => "?").join(",");
+      const { results } = await env.DB.prepare("SELECT r2_key FROM compliance_files WHERE tenant_id=? AND type=? AND code IN (" + ph + ")").bind(tid, type, ...cands).all();
+      let best = "", bestY = -1;
+      for (const r of results || []) {
+        const name = String(r.r2_key || "").split("/").pop() || "";
+        const m = name.replace(/^\d+-/, "").match(/(\d{3,5})[-.](?:DEC|JAN|NOV)?(\d{2})/i);
+        if (m) {
+          const y = Number(m[2]);
+          if (y > bestY) {
+            bestY = y;
+            best = m[1];
+          }
+        }
+      }
+      return best;
+    } catch {
+      return "";
+    }
+  };
+  const lastEm = emSet || await lastNum("em");
+  const lastPat = await lastNum("pat");
+  const yy2 = (/* @__PURE__ */ new Date()).toLocaleDateString("en-GB", { timeZone: "Europe/London", year: "2-digit" });
+  return {
+    store: cands[0],
+    emSetNumber: lastEm || "",
+    emCertSuggested: lastEm ? lastEm + "-" + yy2 : "",
+    lastPatNumber: lastPat || "",
+    patCertSuggested: lastPat ? lastPat + "-" + yy2 : "",
+    note: lastEm || lastPat ? "" : "No previous EM/PAT certificate on file for this store \u2014 the numbers are confirmed at cert time anyway."
+  };
+}
 async function toolFindVehicle(env, tid, caps2, query) {
   if (!caps2.vehicles) return { denied: true, message: "You don't have Vehicles access." };
   const like = "%" + String(query || "").replace(/[%_]/g, "") + "%";
@@ -27514,6 +27565,7 @@ async function handle29(request, env, ctx, url, sess) {
       { name: "find_compliance", description: "Look up COMPLIANCE certificate due dates for a store (EICR/5-year, EM, PAT, gas, etc.) or list what's overdue/due-soon. Query a store number/name, or words like 'overdue'. Optionally set scheme (coop/fareham/chapplins/projects). Returns per-type due dates with OVERDUE/due-soon flags.", input_schema: { type: "object", properties: { query: { type: "string" }, scheme: { type: "string" } }, required: ["query"] } },
       { name: "list_engineers", description: "List the field engineers (names). Use it to know who can be assigned.", input_schema: { type: "object", properties: {} } },
       { name: "find_vehicle", description: "Look up a fleet VEHICLE by registration, make or model. Returns reg, make/model and MOT/tax/service due dates.", input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "cert_numbers", description: "Get a store's EM set number and previous PAT/EM certificate numbers (from the compliance certificates on file), for raising an EM/PAT test job. Pass the store number.", input_schema: { type: "object", properties: { store: { type: "string" } }, required: ["store"] } },
       { name: "ask", description: "Ask the office ONE clarifying question \u2014 only when something genuinely can't be found or is truly ambiguous. Never ask for details you can look up with a find_ tool first.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
       { name: "reply", description: "Answer the office in plain text \u2014 use this to ANSWER a question after looking things up (e.g. compliance due dates, a site's details, what's on the board). Also for Full-Access general chat.", input_schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } }
     ];
@@ -27553,13 +27605,13 @@ async function handle29(request, env, ctx, url, sess) {
     canDo.push("look up sites");
     canDo.push(caps2.compliance ? "look up compliance due dates" : "compliance is NOT available to you (no permission)");
     canDo.push(caps2.vehicles ? "look up fleet vehicles" : "fleet is NOT available to you (no permission)");
-    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs \u2014 don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER \u2014 not the office \u2014 moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit \u2014 e.g. '\u{1F527} attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
+    const system = "You are the Mostlane portal assistant for the office. You can look things up across the portal \u2014 jobs, the site register, compliance certificate due dates, field engineers and fleet vehicles \u2014 and, when the user is allowed, raise/assign/schedule jobs. Use the find_ tools to get real data, then either ANSWER with `reply` or propose an action. A person always confirms before anything CHANGES \u2014 never claim a job was created or assigned. Be smart and proactive: look things up rather than asking the user to re-type details. You CAN inspect a job's detail with get_job \u2014 its full description, office/site notes, status history and whether PHOTOS/signature are attached \u2014 so when asked whether a job has been surveyed/visited/quoted, CHECK it (photos present, or an In Progress/Quote/On Hold/Complete in its history, means it's been attended) instead of saying you can't see. You can't view image CONTENTS, only that they exist and how many. find_jobs ALREADY returns each job's description, so to FILTER jobs by what the work is (e.g. only fire-stopping / penetrations / compartmentation, not door/threshold work) just read the descriptions from find_jobs \u2014 don't call get_job for that. Reserve get_job for confirming photos/notes/history on a few specific jobs (never more than ~8 in one go). BE PROACTIVE about activity: every find_jobs result already carries `visited`, `lastActivity` (status/when/by) and `attendedByEngineer` / `lastByEngineer` (true when a FIELD ENGINEER \u2014 not the office \u2014 moved it or added to it). Whenever you list or discuss jobs, flag on your own initiative which have already been ATTENDED BY AN ENGINEER (a likely survey/quote visit \u2014 e.g. '\u{1F527} attended by Connor') versus UNTOUCHED, so the office doesn't send someone twice. Use get_job to confirm photos/notes on the ones that matter. Treat engineer activity as the meaningful signal; office status changes are just admin. THIS USER'S ACCESS: " + canDo.join("; ") + ". Only surface data from areas they can access; if they ask about an area they lack permission for, say it's not available to them \u2014 never invent it. " + (fullAccess ? "This user is FULL ACCESS: chat freely and adjust the rules with `set_rules` when they ask. " : "This user is TASK-ONLY: keep to portal/work topics (looking things up and managing jobs). Decline unrelated chit-chat politely and steer back. Only Full-Access users can change the rules. ") + "Today is " + londonToday() + " (Europe/London). HQ is " + HQ_POSTCODE2 + ". Field engineers: " + (engNames.join(", ") || "(none listed)") + ". " + (cats.length ? "Custom job categories on this board: " + cats.join(", ") + `. A job's STATUS can be one of these to mark a workstream \u2014 e.g. jobs with status "FRA Works" ARE the Fire Risk Assessment remedial jobs ("the FRA tracker" / "FRA works"). When the office names a workstream, find_jobs for that category name and treat jobs whose STATUS equals it as that workstream \u2014 do NOT dismiss them as unrelated text. A job is OUTSTANDING unless its status is Complete/Closed/Closed Jobs/Invoiced/Cancelled. "Send <engineer> in" for a workstream means SCHEDULE those outstanding jobs onto the given day via assign_jobs \u2014 keep the engineer, set the date. ` : "") + "For a NEW EM/PAT compliance test the description should simply read like 'Carry out 3-hour EM drain-down test and PAT testing' (duration 180). NEVER ask the office for the EM set / PAT certificate numbers \u2014 use cert_numbers to look them up from the store's previous certificates, and just mention them in your preview for reference. If none are on file, raise the job anyway (the numbers are confirmed automatically at cert time). If a NEW job doesn't name an engineer, ASK who. Only ask about things you cannot resolve with a lookup. FORMAT every reply for a NARROW PHONE CHAT: short lines and simple bullet lists using '- '. NEVER use Markdown tables (pipes) or #/## headings \u2014 they don't render here. Bold a label with **like this**. Keep it tight. \n\nHOUSE RULES:\n" + (g.rules || "(none set yet)");
     const messages = [];
     for (const h of (Array.isArray(b.history) ? b.history : []).slice(-8)) {
       if (h && h.role && h.text) messages.push({ role: h.role === "user" ? "user" : "assistant", content: String(h.text).slice(0, 2e3) });
     }
     messages.push({ role: "user", content: message });
-    const READ = /* @__PURE__ */ new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle"]);
+    const READ = /* @__PURE__ */ new Set(["find_jobs", "get_job", "find_site", "find_compliance", "list_engineers", "find_vehicle", "cert_numbers"]);
     const termTools = tools.filter((x) => !READ.has(x.name));
     const MAXR = 8;
     let t = null, ai = null;
@@ -27588,6 +27640,7 @@ async function handle29(request, env, ctx, url, sess) {
             else if (u.name === "find_compliance") data = await toolFindCompliance(env, tid, caps2, u.input.query || "", u.input.scheme);
             else if (u.name === "list_engineers") data = await toolListEngineers(env, tid);
             else if (u.name === "find_vehicle") data = await toolFindVehicle(env, tid, caps2, u.input.query || "");
+            else if (u.name === "cert_numbers") data = await toolCertNumbers(env, tid, u.input.store || u.input.query || "");
             else data = { note: "Use the lookup results above, then answer or propose." };
           } catch (e) {
             data = { error: String(e && e.message || e) };
