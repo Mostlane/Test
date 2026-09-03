@@ -67,7 +67,7 @@ a{color:inherit}
 .nav.scrolled{background:rgba(11,15,13,.92);backdrop-filter:blur(12px);box-shadow:0 1px 0 rgba(255,255,255,.06)}
 .nav-inner{max-width:var(--maxw);margin:0 auto;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;font-weight:800}
-.brand-logo{height:52px;width:auto;display:block;border-radius:8px}
+.brand-logo{height:56px;width:auto;display:block}
 .brand-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;
   background:var(--green-700);color:var(--accent);font-family:var(--display);font-size:16px;line-height:1;letter-spacing:.02em}
 .brand-text{display:flex;flex-direction:column;color:#fff;font-size:18px;line-height:1.05;letter-spacing:.01em}
@@ -112,8 +112,8 @@ a{color:inherit}
 .hero-flood-l{left:16%}
 .hero-flood-r{right:16%}
 .hero-content{position:relative;z-index:2;max-width:var(--maxw);margin:0 auto;padding:120px 24px 0;width:100%}
-.hero-crest{height:132px;width:auto;margin:0 0 22px;border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
-@media(max-width:640px){.hero-crest{height:104px}}
+.hero-crest{height:150px;width:auto;margin:0 0 24px;filter:drop-shadow(0 12px 26px rgba(0,0,0,.45))}
+@media(max-width:640px){.hero-crest{height:118px}}
 .eyebrow{font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--accent);margin:0 0 18px}
 .hero h1{font-family:var(--display);font-weight:400;font-size:clamp(52px,9vw,120px);line-height:.92;
   letter-spacing:.01em;margin:0;text-transform:uppercase;text-shadow:0 20px 60px rgba(0,0,0,.4)}
