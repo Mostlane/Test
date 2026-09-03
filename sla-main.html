@@ -1510,6 +1510,14 @@ window.addEventListener("pageshow", e => {
 .aibub.ai{background:#fff;color:#12324e;border:1px solid #dbe6ef;border-bottom-left-radius:4px;}
 .aibub.sys{background:#fff3cd;color:#7a5b00;border:1px solid #ffe08a;font-size:13px;}
 .aijob{background:#fff;border:1px solid #cfe0ee;border-left:4px solid #0b5cab;border-radius:10px;padding:10px 12px;margin:0 0 8px;font-size:13px;}
+.aijob.cardyes{border-left-color:#1a8f4c;background:#f2fbf5;}
+.aijob.cardno{opacity:.55;border-left-color:#b0b8c0;}
+.callbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #e2ecf3;flex-wrap:wrap;}
+.callnum{font-size:13px;font-weight:600;color:#0b5cab;text-decoration:none;}
+.calltogs{display:flex;gap:6px;}
+.ctog{border:1px solid #cfd9e2;background:#fff;border-radius:8px;padding:5px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#55707f;}
+.cardyes .cyes{background:#1a8f4c;color:#fff;border-color:#1a8f4c;}
+.cardno .cno{background:#c53434;color:#fff;border-color:#c53434;}
 .aijob b{color:#0b3d68;}
 .aijob .row{margin:2px 0;color:#33556e;}
 .aiwarn{color:#b45309;font-size:12.5px;margin:4px 0;}
@@ -1569,6 +1577,16 @@ window.addEventListener("pageshow", e => {
   function scroll(){ log.scrollTop=log.scrollHeight; }
   function bubble(cls,html){ var d=document.createElement("div"); d.className="aibub "+cls; d.innerHTML=html; log.appendChild(d); scroll(); return d; }
   function fmtDate(d){ if(!d) return "no date yet (set on the board)"; try{ return new Date(d+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}); }catch(e){ return d; } }
+  function fmtDur(m){ m=+m||0; var h=Math.floor(m/60),mm=m%60; return h?(mm?h+"h "+mm+"m":h+"h"):(mm+"m"); }
+  function addMins(hm,mins){ if(!hm) return ""; var p=String(hm).split(":"); var t=(+p[0])*60+(+p[1])+(+mins); t=((t%1440)+1440)%1440; return String(Math.floor(t/60)).padStart(2,"0")+":"+String(t%60).padStart(2,"0"); }
+  function fmtJobTime(x){
+    if(!x.date) return "📅 No date yet — set on the board";
+    if(!x.startTime) return "📅 "+fmtDate(x.date);
+    var end = x.durationMinutes? addMins(x.startTime,x.durationMinutes):"";
+    var s = "📅 "+fmtDate(x.date)+" · 🕘 "+x.startTime+(end?"–"+end:"");
+    if(x.emTest) s += " · 🔦 lights check ~"+addMins(x.startTime,165);
+    return s;
+  }
 
   function open(){
     full=isFull();
@@ -1634,18 +1652,23 @@ window.addEventListener("pageshow", e => {
       if(j.summary) bubble("ai", rich(fmtReply(j.summary)));
       var wrap=document.createElement("div"); wrap.className="aibub ai"; wrap.style.maxWidth="100%";
       var htmlp="";
-      jobs.forEach(function(x){
+      jobs.forEach(function(x,i){
         var assign = x.action==="assign";
         var head = assign ? ("🔁 <b>Assign</b> · "+esc(x.title||x.siteName||x.siteCode))
                           : ("<b>"+esc(x.typeLabel||x.jobType)+"</b> · "+esc(x.siteCode)+" "+esc(x.siteName));
-        htmlp+="<div class='aijob'>"+head+
-          "<div class='row'>👷 "+esc(x.engineerName||x.engineer)+" &nbsp; 📅 "+esc(fmtDate(x.date))+(x.date?(" "+esc(x.startTime||"")):"")+
-          (x.durationMinutes?(" &nbsp; ⏱ "+esc(x.durationMinutes)+" min"):"")+(x.priority?(" &nbsp; 🏷 "+esc(x.priority)):"")+"</div>"+
+        var tel = x.telephone?String(x.telephone):"";
+        htmlp+="<div class='aijob' data-idx='"+i+"'>"+head+
+          "<div class='row'>👷 "+esc(x.engineerName||x.engineer)+"</div>"+
+          "<div class='row'>"+esc(fmtJobTime(x))+(x.durationMinutes?(" · ⏱ "+esc(fmtDur(x.durationMinutes))):"")+(x.priority?(" · 🏷 "+esc(x.priority)):"")+"</div>"+
           (x.windowNote?("<div class='row' style='font-size:11.5px;color:#8593a0'>🕒 "+esc(x.windowNote)+"</div>"):"")+
-          (x.telephone?("<div class='row' style='font-size:12px;color:#0b5cab'>📞 <a href='tel:"+esc(String(x.telephone).replace(/\\s/g,''))+"' style='color:#0b5cab'>"+esc(x.telephone)+"</a> <span style='color:#8593a0'>— call ahead</span></div>"):"")+
           (assign?("<div class='row' style='font-size:11.5px;color:#8593a0'>was: "+esc((x.currentEngineers&&x.currentEngineers.length?x.currentEngineers.join(", "):"unassigned"))+(x.currentStatus?(" · "+esc(x.currentStatus)):"")+"</div>"):"")+
           (x.description?("<div class='row' style='font-size:12.5px;color:#55707f'>"+rich(x.description)+"</div>"):"")+
           ((x.warn&&x.warn.length)?("<div class='aiwarn'>⚠️ "+x.warn.map(esc).join(" · ")+"</div>"):"")+
+          // Call-ahead checklist row
+          "<div class='callbar'>"+
+            (tel?("<a class='callnum' href='tel:"+esc(tel.replace(/\s/g,''))+"'>📞 "+esc(tel)+"</a>"):"<span class='callnum' style='color:#b0b8c0'>no number</span>")+
+            "<span class='calltogs'><button type='button' class='ctog cyes' data-idx='"+i+"' data-call='yes'>✓ Yes</button><button type='button' class='ctog cno' data-idx='"+i+"' data-call='no'>✗ No</button></span>"+
+          "</div>"+
           "</div>";
       });
       if((j.warnings||[]).length) htmlp+="<div class='aiwarn'>⚠️ "+j.warnings.map(esc).join("<br>")+"</div>";
@@ -1653,11 +1676,18 @@ window.addEventListener("pageshow", e => {
       var allAssign=jobs.every(function(x){return x.action==="assign";});
       var verb=allAssign?"Assign":(jobs.some(function(x){return x.action==="assign";})?"Apply":"Create");
       var acts=document.createElement("div"); acts.className="aiacts";
-      acts.innerHTML="<button class='go'>✓ "+verb+" "+jobs.length+" job"+(jobs.length>1?"s":"")+"</button><button class='no'>Discard</button>";
+      acts.innerHTML="<button class='go'></button><button class='no'>Discard</button>";
       wrap.appendChild(acts); log.appendChild(wrap); scroll();
-      acts.querySelector(".go").onclick=async function(){
-        acts.querySelector(".go").disabled=true; acts.querySelector(".go").textContent="Creating…";
-        try{ var r=await authFetch("/ai/assistant/create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobs:jobs})}); var res=await r.json();
+      var goBtn=acts.querySelector(".go");
+      function included(){ var anyYes=jobs.some(function(x){return x._call==="yes";}); return jobs.filter(function(x){ return anyYes? x._call==="yes" : x._call!=="no"; }); }
+      function updateGo(){ var inc=included(); var anyYes=jobs.some(function(x){return x._call==="yes";}); goBtn.textContent="✓ "+verb+" "+inc.length+(anyYes?" confirmed":"")+" job"+(inc.length!==1?"s":""); goBtn.disabled=inc.length===0; }
+      updateGo();
+      // Tick Yes/No per site as you call round.
+      wrap.addEventListener("click", function(e){ var b=e.target.closest(".ctog"); if(!b) return; var i=+b.dataset.idx, v=b.dataset.call; jobs[i]._call = (jobs[i]._call===v?null:v); var card=wrap.querySelector(".aijob[data-idx='"+i+"']"); if(card){ card.classList.toggle("cardyes", jobs[i]._call==="yes"); card.classList.toggle("cardno", jobs[i]._call==="no"); } updateGo(); });
+      goBtn.onclick=async function(){
+        var toCreate=included(); if(!toCreate.length) return;
+        goBtn.disabled=true; goBtn.textContent="Creating…";
+        try{ var r=await authFetch("/ai/assistant/create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jobs:toCreate})}); var res=await r.json();
           if(res.ok){
             var okc=(res.created||[]).filter(function(c){return !c.error;});
             var errc=(res.created||[]).filter(function(c){return c.error;});
