@@ -18,7 +18,7 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { sendToUser } from "./push.js";
 import { PdfDoc, jpegInfo } from "../lib/pdf.js";
 
-const PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
+const PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC", cpp: "CPP" };
 
 // Self-migrating extra columns on hs_documents: file attachments (appended to
 // the PDF) and remote sign-off requests (sent to a portal user to view+sign).
@@ -447,6 +447,84 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, result: res.input }, {}, env, request);
   }
 
+  // ── AI autofill for the Construction Phase Plan wizard ──────────────────────
+  // The office drops the tender/scope documents (their extracted TEXT, and/or a
+  // scanned PDF as base64 for OCR) + a free-text description; Claude reads them
+  // and returns structured CPP fields to PRE-FILL the wizard (nothing is saved).
+  // Fails soft with a clear message when the key is unset. Mirrors /hs/ai-rams.
+  if (path === "/hs/ai-cpp" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!env.ANTHROPIC_API_KEY) return error("AI autofill isn't set up — ask an admin to add the ANTHROPIC_API_KEY secret to the worker.", 400, env, request);
+    const notes = String(b.notes || "").slice(0, 8000);
+    const docText = String(b.text || "").slice(0, 160000);
+    if (!notes.trim() && !docText.trim() && !b.pdfBase64) return error("Add a description or drop a document first.", 400, env, request);
+    const str = d => ({ type: "string", description: d });
+    const schema = {
+      type: "object",
+      properties: {
+        projectName: str("Project / site name"),
+        siteAddress: str("Full site address (multi-line ok)"),
+        projectNo: str("Project number, if stated"),
+        projectRef: str("Project reference/quote number, if stated"),
+        scheme: str("Short scheme description (e.g. 'Demolition, extension & refurbishment')"),
+        duration: str("Project duration (e.g. '16 Weeks')"),
+        workingHours: str("Working hours (e.g. '08:00 – 16:30 Mon – Fri')"),
+        asbestos: { type: "string", enum: ["Yes", "No"], description: "Is asbestos likely present (pre-2000 build or survey shows ACMs)?" },
+        projectDirector: str("Project director name, if stated"),
+        contractsManager: str("Contracts manager name(s), if stated"),
+        siteManager: str("Site manager name, if stated"),
+        welfare: str("Welfare facilities & first-aid arrangements"),
+        accessEgress: str("Access & egress incl. deliveries"),
+        stability: str("Stability of the existing structure"),
+        fallPrevention: str("Fall prevention / working-at-height arrangements"),
+        lifting: str("Lifting operations"),
+        traffic: str("Traffic routes & segregation"),
+        storage: str("Storage of materials & compound"),
+        ramsTitle: str("Risk assessment title / main activity"),
+        ramsDanger: { type: "string", enum: ["Low Risk Activity", "Medium Risk Activity", "High Risk Activity"], description: "Overall risk level of the works" },
+        ramsLocation: str("Location of the main activity on site"),
+        ramsDesc: str("Concise description of the activity/works"),
+        ramsEquipment: str("Equipment used"),
+        ramsPersons: str("Persons affected (comma-separated)"),
+        msSummary: str("Summary of the project for the method statement"),
+        msStartDate: str("Start date, if stated"),
+        msFinishDate: str("Finish date, if stated"),
+        msTraining: str("Staff training requirements"),
+        msEquipment: str("Equipment needed"),
+        msWaste: str("Waste disposal arrangements"),
+        msOrderOps: str("Order of operations / sequence of works"),
+        hospitalName: str("Nearest A&E hospital name, if stated"),
+        hospitalAddress: str("Nearest A&E hospital address, if stated"),
+        compoundText: str("Compound / site set-up notes"),
+        directory: {
+          type: "array",
+          description: "Project directory contacts stated in the documents (client, architect, structural engineer, PD, services etc.) — leave empty if none stated",
+          items: {
+            type: "object",
+            properties: {
+              service: str("Role / service (e.g. Client, Architect, Structural Engineer)"),
+              name: str("Contact name(s)"), company: str("Company"), address: str("Address"),
+              phone: str("Telephone"), mobile: str("Mobile"), email: str("Email"),
+            },
+            required: ["service"],
+          },
+        },
+      },
+      required: [],
+    };
+    const system = "You help a UK construction company (Mostlane) prepare a Construction Phase Health & Safety Plan (CDM 2015). Read the supplied tender/scope document(s) and notes and extract as much as you accurately can into the fields. Only fill a field if the source genuinely supports it — leave anything unknown blank rather than inventing it. Keep descriptions concise and professional. The office will verify everything before issuing.";
+    const userContent = [];
+    if (b.pdfBase64 && typeof b.pdfBase64 === "string" && b.pdfBase64.length < 8000000) {
+      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: b.pdfBase64 } });
+    }
+    userContent.push({ type: "text", text:
+      "--- OFFICE NOTES ---\n" + (notes || "(none)") +
+      "\n\n--- DOCUMENT TEXT ---\n" + (docText || "(none — see attached PDF)") });
+    const res = await hsAnthropicTool(env, { system, userContent, schema, toolName: "build_cpp", maxTokens: 4000 });
+    if (!res.ok) return error(res.error, res.code || 502, env, request);
+    return json({ ok: true, result: res.input }, {}, env, request);
+  }
+
   // ── Attention: open hot-works permits past their "valid until" time ─────────
   // Drives the red badge / attention gate. Office (FullAccess) sees ALL of the
   // tenant's overdue permits (the next-morning backstop); everyone else sees
@@ -488,6 +566,7 @@ const SEQ = {
   rams:      { prefix: "RA",  sep: "", pad: 5, floor: 1280 },
   induction: { prefix: "IND", sep: "-", pad: 4, floor: 1 },
   incident:  { prefix: "INC", sep: "-", pad: 4, floor: 1 },
+  cpp:       { prefix: "CPP", sep: "-", pad: 4, floor: 1 },
 };
 // Build a human reference number, per tenant.
 //   induction / rams / incident : IND-0001, RA01280, INC-0001 (sequential)

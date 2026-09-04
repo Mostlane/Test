@@ -31,6 +31,8 @@
   Cache-Control: no-cache
 /hs-docs.html
   Cache-Control: no-cache
+/cpp-builder.html
+  Cache-Control: no-cache
 /hs-rams-library.js
   Cache-Control: no-cache
 /hs-rams-admin.html

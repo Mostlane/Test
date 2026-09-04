@@ -4013,9 +4013,32 @@ signs Tuya Cloud v1.0 HMAC requests server-side so a portal button drives it.
    returns raw visits (portal dates SiteLog labour + P4 reconcile from these).
    Worker last pasted ≈ the /update-engineer-portal_username build (3,184 lines,
    tail `};`); before that the /job-costing build. Confirm with Jamie what's live.
-3. **H&S planner** — static app IN THIS REPO at /hs-plan/; worker
-   `mostlane-hs-jobs` (own D1 + APP_TOKEN secret). Menu 🦺 builds
-   `hs-plan/#worker=...&token=` via /hs-plan-config.
+3. **H&S planner** — Menu 🦺 → **hs-docs.html** (the H&S hub: inductions,
+   hot-works permits, RAMS, incidents + the Construction Phase Plan tile).
+   - **Construction Phase Plan is now PORTAL-NATIVE (Sep 2026)** —
+     **cpp-builder.html** (a faithful port of the old /hs-plan app so the OUTPUT
+     document is byte-for-byte the same 18-page CDN 2015 plan) rebuilt as a
+     **stepped wizard** saved to the portal DB. Storage = the generic
+     `hs_documents` store, **`doc_type="cpp"`** (ref `CPP-0001…`, hs.js PREFIX+SEQ);
+     the whole form `state` object rides in `data`. Endpoints reuse hs.js:
+     GET /hs/docs?type=cpp (library), GET/POST /hs/doc, POST /hs/doc/delete.
+     **Wizard** = 🤖 AI step + the 9 form groups (Branding·Project·Team·
+     Arrangements·Directory·RAMS·Compound·Hospital·Method) + Review; tap-to-jump
+     progress chips; debounced autosave to the DB; resumable (open a part-filled
+     plan from the library). **🤖 AI step** (**POST /hs/ai-cpp**, mirrors
+     /hs/ai-rams — drop PDF/Word/text or a scanned PDF for OCR + a description →
+     Claude pre-fills the plan's fields, gap-fill only, nothing saved; fails soft
+     without ANTHROPIC_API_KEY). **Project link:** the builder links itself to a
+     project via /project/link kind `cpp` (→ `links.cppRef` = the `HSD-…` doc id);
+     project-hub.html "Build in the portal" opens **cpp-builder.html?project=<PID>**
+     (opens the existing linked CPP if `cppRef` is an HSD id, else a fresh plan
+     seeded with the project name/number), and "link an existing" lists
+     /hs/docs?type=cpp. Compound map (Google Maps draw/route) + A&E route planner
+     carried over unchanged (the DrawingManager draw/save fix is in). Mobile: the
+     doc pane is hidden until the Review step. _headers + SW `mostlane-v114`.
+   - **Old standalone app** (static /hs-plan/, worker `mostlane-hs-jobs` own D1 +
+     APP_TOKEN, /hs-plan-config launch token) is now UNLINKED but kept as a
+     fallback — do not delete /hs-plan/.
 
 ## FUTURE PLANS / NEXT UP (agreed with Jamie)
 0. **Job costing & SiteLog↔Portal — DONE (Aug 2026)**, see the dedicated
